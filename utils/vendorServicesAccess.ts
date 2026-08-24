@@ -1,10 +1,6 @@
 import { getSupabase } from '@/lib/supabase';
 import { toFriendlyError } from '@/lib/supabaseErrors';
-import type {
-  VendorService,
-  VendorServiceFormData,
-  VendorServiceWithUsage,
-} from '@/types/vendorService';
+import type { VendorService, VendorServiceFormData } from '@/types/vendorService';
 
 /**
  * Access layer for vendor services — the processes an outside vendor performs on
@@ -151,67 +147,13 @@ export async function getVendorService(
   return (data as VendorService | null) ?? null;
 }
 
-/**
- * Services for a vendor, each with the two counts the detail card shows.
- *
- * "Used on" counts LIVE routing steps; "Out now" counts distinct jobs with an
- * open (pending or sent) op. Two extra queries over a handful of ids, then
- * counted in the browser — PostgREST cannot GROUP BY, and the alternative is an
- * RPC per surface.
+/*
+ * `getVendorServicesWithUsage` lived here: it decorated each service with a
+ * routing-step count and an open-job count for two extra columns on the vendor
+ * page. Both columns are gone, and with them two queries per vendor page load
+ * to describe a list of three rows. What a service IS — its name and its price
+ * — is what the card shows.
  */
-export async function getVendorServicesWithUsage(
-  vendorId: string,
-): Promise<VendorServiceWithUsage[]> {
-  const supabase = getSupabase();
-  const services = await getVendorServicesForVendor(vendorId);
-  if (services.length === 0) return [];
-
-  const ids = services.map((s) => s.id);
-
-  const [{ data: routingRows, error: routingError }, { data: jobRows, error: jobError }] =
-    await Promise.all([
-      supabase
-        .from('routing_operations')
-        .select('vendor_service_id')
-        .in('vendor_service_id', ids),
-      supabase
-        .from('job_operations')
-        .select('vendor_service_id, job_id')
-        .in('vendor_service_id', ids)
-        .in('status', ['pending', 'sent']),
-    ]);
-
-  if (routingError) {
-    console.error('Error counting routing steps per service:', routingError);
-    throw routingError;
-  }
-  if (jobError) {
-    console.error('Error counting open jobs per service:', jobError);
-    throw jobError;
-  }
-
-  const routingCounts = new Map<string, number>();
-  for (const row of routingRows || []) {
-    const id = row.vendor_service_id;
-    if (id) routingCounts.set(id, (routingCounts.get(id) || 0) + 1);
-  }
-
-  // Distinct JOBS, not ops: two anodize steps on one job is one box going out.
-  const jobsPerService = new Map<string, Set<string>>();
-  for (const row of jobRows || []) {
-    const id = row.vendor_service_id;
-    if (!id) continue;
-    const set = jobsPerService.get(id) ?? new Set<string>();
-    set.add(row.job_id);
-    jobsPerService.set(id, set);
-  }
-
-  return services.map((s) => ({
-    ...s,
-    routing_operations_count: routingCounts.get(s.id) || 0,
-    open_job_count: jobsPerService.get(s.id)?.size || 0,
-  }));
-}
 
 /**
  * Does this VENDOR already list a live service by this name?

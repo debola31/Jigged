@@ -31,17 +31,14 @@ export interface VendorService {
   updated_at: string;
 }
 
-/** A service plus the counts the vendor page shows beside it. */
-export interface VendorServiceWithUsage extends VendorService {
-  /** Live routing steps pointing at this service. */
-  routing_operations_count: number;
-  /** Distinct jobs with an open (pending or sent) op at this service. */
-  open_job_count: number;
-}
-
 export interface VendorServiceFormData {
   name: string;
   unit_price: string;
+  /**
+   * Carried, not edited. The vendor page has no notes field — a service is a
+   * name and a price — but ten shops wrote notes on one before that was true,
+   * so an edit passes the existing value through rather than blanking it.
+   */
   description: string;
 }
 

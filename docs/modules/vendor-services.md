@@ -139,9 +139,9 @@ this entity. Archive is universal: `deleted_at` is stamped, never a SQL `DELETE`
 routing or job reference. Every list/picker/count filters `deleted_at IS NULL`; `getVendorService`
 (by id) does not, so a routing holding an archived service keeps resolving.
 
-- `getVendorServicesForVendor` / `getVendorServicesWithUsage` — the vendor detail page. Usage counts
-  come from two small queries counted in the browser (PostgREST cannot `GROUP BY`), scoped to a
-  handful of ids.
+- `getVendorServicesForVendor` — the vendor detail page. Just the services; the usage and open-job
+  counts that once decorated them are gone, and with them two queries per page load to describe a
+  list of three rows.
 - `getVendorServicesForCompany` — the Vendors list's Services column. One small query grouped
   client-side, deliberately **not** an RPC: the per-row aggregate shape is what timed out on
   2026-08-19.

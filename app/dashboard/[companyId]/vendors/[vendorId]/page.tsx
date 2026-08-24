@@ -2,18 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import posthog from 'posthog-js';
 import { useLoad } from '@/hooks/useLoad';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
@@ -41,13 +34,11 @@ import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
-import {
-  getVendorServicesWithUsage,
-  deleteVendorService,
-} from '@/utils/vendorServicesAccess';
+import { getVendorServicesForVendor } from '@/utils/vendorServicesAccess';
 import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
+import VendorServicesCard from '@/components/vendors/VendorServicesCard';
 import type { OutsideOperation } from '@/types/operator';
-import type { VendorServiceWithUsage } from '@/types/vendorService';
+import type { VendorService } from '@/types/vendorService';
 import {
   getVendor,
   deleteVendor,
@@ -72,7 +63,7 @@ interface LinkedPart {
 // the first load is in flight (and on a vendor with no linked records).
 const EMPTY_CONTACTS: VendorContact[] = [];
 const EMPTY_PARTS: LinkedPart[] = [];
-const EMPTY_SERVICES: VendorServiceWithUsage[] = [];
+const EMPTY_SERVICES: VendorService[] = [];
 const EMPTY_OUTSIDE: OutsideOperation[] = [];
 
 /**
@@ -173,9 +164,6 @@ export default function VendorDetailPage() {
   // wording can include the contact's name without needing extra state.
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
 
-  // Per-service archive confirmation, keyed by id so the prompt can name it.
-  const [deleteServiceId, setDeleteServiceId] = useState<string | null>(null);
-
   // Load the vendor, then (only if it exists) its linked parts, work centers,
   // and contacts in parallel. useLoad keeps every setState inside the async
   // callback, so the load effect can't trip set-state-in-effect.
@@ -199,7 +187,7 @@ export default function VendorDetailPage() {
       }
       const [parts, services, contacts, allOutside] = await Promise.all([
         getPartsByPreferredVendor(vendorId),
-        getVendorServicesWithUsage(vendorId),
+        getVendorServicesForVendor(vendorId),
         getContactsForVendor(vendorId),
         // One company-wide read, filtered here. It returns only OPEN outside ops
         // (pending + sent) — tens of rows for a shop, cheaper than a per-vendor
@@ -281,21 +269,6 @@ export default function VendorDetailPage() {
     }
   };
 
-  const handleArchiveService = async () => {
-    if (!deleteServiceId) return;
-    setActionLoading(true);
-    try {
-      await deleteVendorService(deleteServiceId);
-      posthog.capture('vendor service archived');
-      setDeleteServiceId(null);
-      await fetchAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to archive service');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const handleSetPrimary = async (contactId: string) => {
     setActionLoading(true);
     try {
@@ -359,9 +332,6 @@ export default function VendorDetailPage() {
 
   const contactBeingDeleted = deleteContactId
     ? contacts.find((c) => c.id === deleteContactId)
-    : undefined;
-  const serviceBeingDeleted = deleteServiceId
-    ? services.find((svc) => svc.id === deleteServiceId)
     : undefined;
 
   return (
@@ -646,134 +616,19 @@ export default function VendorDetailPage() {
           </Card>
         </Grid>
 
-        {/* Services — the processes this vendor performs. This card is the
-            rehome: it stands where "Work centers performing outside ops at this
-            vendor" used to, saying the same thing in the shop's own words.
-            A dense Table, not AG Grid — a vendor has a handful of services and
-            AG Grid would be bundle weight for nothing. */}
+        {/* Services — the processes this vendor performs, edited IN PLACE.
+            The columns that were here (Used on, Out now) are gone: each was a
+            second query per vendor to decorate a list of three rows, and
+            neither answered a question the user had while standing on this
+            card. What a service IS — its name and its price — is what stays. */}
         <Grid size={{ xs: 12 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 2,
-                  flexWrap: 'wrap',
-                  mb: 1,
-                }}
-              >
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Services ({services.length})
-                </Typography>
-                <Button
-                  size="small"
-                  startIcon={<AddIcon />}
-                  onClick={() =>
-                    router.push(`/dashboard/${companyId}/vendors/${vendorId}/services/new`)
-                  }
-                >
-                  Add service
-                </Button>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-
-              {services.length === 0 ? (
-                <Box sx={{ py: 3, textAlign: 'center' }}>
-                  <LocalShippingIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                  <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                    No outside processes yet.
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    Add what you send {vendor.name} — anodize, heat treat, wire EDM — and what
-                    they charge.
-                  </Typography>
-                  {/* The line that stops a material-only supplier reading this
-                      empty card as a chore they have not done. */}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                    If {vendor.name} only supplies material, there is nothing to add here.
-                  </Typography>
-                </Box>
-              ) : (
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Service</TableCell>
-                      <TableCell>Price</TableCell>
-                      <TableCell>Used on</TableCell>
-                      <TableCell>Out now</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {services.map((svc) => (
-                      <TableRow key={svc.id} hover>
-                        <TableCell sx={{ fontWeight: 500 }}>{svc.name}</TableCell>
-                        <TableCell>
-                          {svc.unit_price !== null ? (
-                            `$${Number(svc.unit_price).toFixed(2)} / pc`
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              Not set
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {svc.routing_operations_count > 0 ? (
-                            `${svc.routing_operations_count} routing step${
-                              svc.routing_operations_count === 1 ? '' : 's'
-                            }`
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              Not used yet
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {svc.open_job_count > 0 ? (
-                            <Chip
-                              size="small"
-                              color="warning"
-                              variant="outlined"
-                              label={`${svc.open_job_count} job${
-                                svc.open_job_count === 1 ? '' : 's'
-                              }`}
-                            />
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Tooltip title="Edit service">
-                            <IconButton
-                              size="small"
-                              onClick={() =>
-                                router.push(
-                                  `/dashboard/${companyId}/vendors/${vendorId}/services/${svc.id}/edit`,
-                                )
-                              }
-                            >
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Archive service">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => setDeleteServiceId(svc.id)}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <VendorServicesCard
+            companyId={companyId}
+            vendorId={vendorId}
+            vendorName={vendor.name}
+            services={services}
+            onChanged={fetchAll}
+          />
         </Grid>
 
         {/* Parts supplied — today's "Linked Parts" accordion, promoted to a
@@ -878,46 +733,6 @@ export default function VendorDetailPage() {
       />
 
       {/* Per-contact delete confirmation */}
-      {/* Archive a service. NEVER blocked, even at routing_operations_count > 0:
-          every routing and job already using it keeps working, and it simply
-          leaves the pickers. That is the universal archive rule, and the copy
-          says so rather than warning about a consequence that does not happen. */}
-      <Dialog
-        open={deleteServiceId !== null}
-        onClose={() => !actionLoading && setDeleteServiceId(null)}
-      >
-        <DialogTitle>Archive service?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            {serviceBeingDeleted ? (
-              <>
-                <strong>{serviceBeingDeleted.name}</strong> will be archived — removed from{' '}
-                {vendor.name}&apos;s services and from the routing picker, but every routing and
-                job that already uses it keeps working. Reusing the name later revives it.
-              </>
-            ) : (
-              'Archive this service?'
-            )}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteServiceId(null)} disabled={actionLoading}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleArchiveService}
-            color="error"
-            variant="contained"
-            disabled={actionLoading}
-            startIcon={
-              actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
-            }
-          >
-            Archive
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog
         open={deleteContactId !== null}
         onClose={() => !actionLoading && setDeleteContactId(null)}

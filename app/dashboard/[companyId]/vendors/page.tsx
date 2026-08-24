@@ -39,26 +39,25 @@ import {
   bulkDeleteVendors,
 } from '@/utils/vendorsAccess';
 import { getVendorServicesForCompany } from '@/utils/vendorServicesAccess';
-import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
-import type { ICellRendererParams } from 'ag-grid-community';
-import Chip from '@mui/material/Chip';
 import type { VendorWithPrimaryContact } from '@/types/vendor';
 
 /**
- * A vendor row plus the three read-only signals the grid shows beside it.
+ * A vendor row plus the one read-only signal the grid shows beside it.
  *
- * All three come from two small company-wide queries joined in the browser:
- * live services, and the OPEN outside ops the Jobs list already fetches for its
- * At-vendor chip. Deliberately NOT per-row aggregates — that shape is what
- * timed out on 2026-08-19, and a shop has tens of services, not thousands.
+ * `service_names` comes from a single small company-wide query joined in the
+ * browser — deliberately not a per-row aggregate, which is the shape that timed
+ * out on 2026-08-19, and a shop has tens of services rather than thousands.
+ *
+ * There were two more columns here, Out now and Oldest out, derived from the
+ * open outside ops. They are gone: the vendor DETAIL page answers "what is out
+ * at this vendor" properly, and the Jobs list already flags a job whose parts
+ * are at one. Two columns of mostly em-dashes on a directory is not the place
+ * for it.
  */
 interface VendorRow extends VendorWithPrimaryContact {
   service_names: string[];
-  out_now: number;
-  /** Days since the earliest still-out sent_at, or null when nothing is out. */
-  oldest_out_days: number | null;
 }
 
 // Stable empty fallback so derived data doesn't churn the memo identity while
@@ -100,7 +99,7 @@ export default function VendorsPage() {
     reload: fetchRows,
   } = useLoad<VendorRow[]>(
     async () => {
-      const [vendors, services, outside] = await Promise.all([
+      const [vendors, services] = await Promise.all([
         getAllVendorsWithPrimaryContact(
           companyId,
           searchDebounced,
@@ -108,7 +107,6 @@ export default function VendorsPage() {
           sortModel.sort,
         ),
         getVendorServicesForCompany(companyId),
-        getOutsideOpsForCompany(companyId),
       ]);
 
       const servicesByVendor = new Map<string, string[]>();
@@ -118,32 +116,10 @@ export default function VendorsPage() {
         servicesByVendor.set(svc.vendor_id, list);
       }
 
-      // Only ops actually AT the vendor count as "out now" — a pending op is
-      // still on your bench. Same reason `oldest_out` reads sent_at and nothing
-      // else: it answers "who has had my parts longest", which is a question
-      // about shipped work.
-      const outNow = new Map<string, number>();
-      const oldestSent = new Map<string, string>();
-      for (const op of outside) {
-        if (op.status !== 'sent' || !op.vendor_id) continue;
-        outNow.set(op.vendor_id, (outNow.get(op.vendor_id) ?? 0) + 1);
-        if (op.sent_at) {
-          const current = oldestSent.get(op.vendor_id);
-          if (!current || op.sent_at < current) oldestSent.set(op.vendor_id, op.sent_at);
-        }
-      }
-
-      return vendors.map((v) => {
-        const sentAt = oldestSent.get(v.id);
-        return {
-          ...v,
-          service_names: servicesByVendor.get(v.id) ?? [],
-          out_now: outNow.get(v.id) ?? 0,
-          oldest_out_days: sentAt
-            ? Math.floor((Date.now() - new Date(sentAt).getTime()) / 86_400_000)
-            : null,
-        };
-      });
+      return vendors.map((v) => ({
+        ...v,
+        service_names: servicesByVendor.get(v.id) ?? [],
+      }));
     },
     [companyId, searchDebounced, sortModel],
     {
@@ -259,10 +235,9 @@ export default function VendorsPage() {
       minWidth: 200,
       pinned: 'left' as const,
     },
-    // ── The three read-only signals ────────────────────────────────────────
-    // Read-only on purpose: this page answers "what is happening with my
-    // vendors"; the job page is where you act. Every one of these is derived,
-    // so none can drift from the truth the way a stored flag would.
+    // Read-only and DERIVED, so it cannot drift from the truth the way a
+    // stored capability flag would — the standing decision this page has always
+    // followed.
     {
       colId: 'services',
       headerName: 'Services',
@@ -277,41 +252,6 @@ export default function VendorsPage() {
         return names.length <= 2
           ? names.join(', ')
           : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
-      },
-    },
-    {
-      colId: 'out_now',
-      headerName: 'Out now',
-      width: 130,
-      comparator: (a, b) => (a ?? 0) - (b ?? 0),
-      valueGetter: (params) => params.data?.out_now ?? 0,
-      cellRenderer: (params: ICellRendererParams<VendorRow>) => {
-        const n = params.data?.out_now ?? 0;
-        if (n === 0) return '—';
-        return (
-          <Chip size="small" color="warning" variant="outlined" label={`${n} out`} />
-        );
-      },
-    },
-    {
-      colId: 'oldest_out',
-      headerName: 'Oldest out',
-      width: 140,
-      comparator: (a, b) => (a ?? -1) - (b ?? -1),
-      valueGetter: (params) => params.data?.oldest_out_days ?? null,
-      cellRenderer: (params: ICellRendererParams<VendorRow>) => {
-        const days = params.data?.oldest_out_days;
-        if (days === null || days === undefined) return '—';
-        // Red past three weeks. A number that only counts up is not an alarm;
-        // the threshold is what makes it one.
-        return (
-          <Box
-            component="span"
-            sx={{ color: days > 21 ? 'error.main' : 'inherit', fontWeight: days > 21 ? 600 : 400 }}
-          >
-            {`${days} day${days === 1 ? '' : 's'}`}
-          </Box>
-        );
       },
     },
     {

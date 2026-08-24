@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import LoadFailedState from '@/components/common/LoadFailedState';
@@ -20,9 +20,6 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
@@ -31,18 +28,33 @@ import Stack from '@mui/material/Stack';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
 import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
+import { getVendorServicesForVendor } from '@/utils/vendorServicesAccess';
+import {
+  getAddressesForVendor,
+  deleteVendorAddress,
+  setDefaultVendorAddress,
+} from '@/utils/vendorAddressesAccess';
+import VendorAddressForm from '@/components/vendors/VendorAddressForm';
+import type { VendorAddress } from '@/types/vendor';
+import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
+import VendorServicesCard from '@/components/vendors/VendorServicesCard';
+import type { OutsideOperation } from '@/types/operator';
+import type { VendorService } from '@/types/vendorService';
+import InlineNameEditor from '@/components/common/InlineNameEditor';
+import type { SaveState } from '@/components/common/SaveStatus';
 import {
   getVendor,
+  updateVendor,
+  checkVendorNameExists,
   deleteVendor,
   getPartsByPreferredVendor,
-  getWorkCentersByVendor,
 } from '@/utils/vendorsAccess';
 import {
   getContactsForVendor,
@@ -59,17 +71,102 @@ interface LinkedPart {
   primary_unit: string | null;
 }
 
-interface LinkedWorkCenter {
-  id: string;
-  name: string;
-  kind: 'internal' | 'external';
-}
-
 // Stable empty fallbacks so the derived lists keep a constant identity while
 // the first load is in flight (and on a vendor with no linked records).
 const EMPTY_CONTACTS: VendorContact[] = [];
 const EMPTY_PARTS: LinkedPart[] = [];
-const EMPTY_WORK_CENTERS: LinkedWorkCenter[] = [];
+const EMPTY_SERVICES: VendorService[] = [];
+const EMPTY_OUTSIDE: OutsideOperation[] = [];
+const EMPTY_ADDRESSES: VendorAddress[] = [];
+
+/**
+ * One read-only row in the vendor's Open jobs card.
+ *
+ * The whole row is a link, and it carries a visible "Open job →" affordance
+ * beside it: a bare clickable row is weak signal for a mouse user on a desktop
+ * screen, and this audience should not have to discover that the row is a
+ * target. `?op=` lands on the operation card itself rather than the top of the
+ * job, so the control is under the cursor when the page settles.
+ */
+function OutsideJobRow({
+  op,
+  companyId,
+  sentDays,
+}: {
+  op: OutsideOperation;
+  companyId: string;
+  /** Days at the vendor, computed in the loader — `Date.now()` in render is
+   *  impure and produces a number that shifts on any incidental re-render. */
+  sentDays: number | null;
+}) {
+  return (
+    <ListItem
+      disablePadding
+      secondaryAction={
+        <MuiLink
+          component={NextLink}
+          href={`/dashboard/${companyId}/jobs/${op.job_id}?op=${op.id}`}
+          variant="body2"
+          sx={{ whiteSpace: 'nowrap', pr: 1 }}
+        >
+          Open job →
+        </MuiLink>
+      }
+    >
+      <ListItemButton
+        component={NextLink}
+        href={`/dashboard/${companyId}/jobs/${op.job_id}?op=${op.id}`}
+      >
+        <ListItemText
+          primary={
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Typography variant="body2" fontWeight={600}>
+                {op.job_number}
+              </Typography>
+              {op.is_hot && <Chip size="small" color="error" label="HOT" />}
+              <Typography variant="body2" color="text.secondary">
+                {op.part_name ?? 'Part'}
+              </Typography>
+            </Box>
+          }
+          secondary={
+            <>
+              {op.operation_name}
+              {' · '}
+              {sentDays !== null ? (
+                <Box
+                  component="span"
+                  // Red past three weeks. A number that only ever counts up is
+                  // not an alarm; the threshold is what makes it one.
+                  sx={{ color: sentDays > 21 ? 'error.main' : 'inherit', fontWeight: sentDays > 21 ? 600 : 400 }}
+                >
+                  {`sent ${sentDays} day${sentDays === 1 ? '' : 's'} ago`}
+                  {op.sent_by_name ? ` by ${op.sent_by_name}` : ''}
+                </Box>
+              ) : op.due_date ? (
+                `job due ${new Date(op.due_date).toLocaleDateString()}`
+              ) : (
+                'no due date'
+              )}
+            </>
+          }
+        />
+      </ListItemButton>
+    </ListItem>
+  );
+}
+
+function formatAddressLines(a: VendorAddress): string {
+  const parts = [
+    a.address_line1,
+    a.address_line2,
+    [a.city, a.state, a.postal_code].filter(Boolean).join(', ').trim(),
+    // The country line is noise on a domestic address, and every row defaults
+    // to USA — so it prints only when it is NOT the default.
+    a.country && a.country.toUpperCase() !== 'USA' ? a.country : null,
+  ].filter((p) => p && p.toString().trim().length > 0);
+  return parts.length > 0 ? parts.join('\n') : '—';
+}
 
 export default function VendorDetailPage() {
   const params = useParams();
@@ -92,6 +189,17 @@ export default function VendorDetailPage() {
   // wording can include the contact's name without needing extra state.
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
 
+  // Address card: the inline form's open/edit state, and a per-row delete
+  // confirmation keyed by id so the prompt can name what it is removing.
+  const [addressFormOpen, setAddressFormOpen] = useState(false);
+  const [editingAddress, setEditingAddress] = useState<VendorAddress | undefined>(undefined);
+  const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null);
+
+  // Inline rename. The DRAFT lives in the editor, seeded from the saved name
+  // each time it opens — the page only needs the error and the save state.
+  const [nameError, setNameError] = useState<string | undefined>(undefined);
+  const [nameSaveState, setNameSaveState] = useState<SaveState>('idle');
+
   // Load the vendor, then (only if it exists) its linked parts, work centers,
   // and contacts in parallel. useLoad keeps every setState inside the async
   // callback, so the load effect can't trip set-state-in-effect.
@@ -104,14 +212,39 @@ export default function VendorDetailPage() {
     async () => {
       const v = await getVendor(vendorId);
       if (!v) {
-        return { vendor: null, parts: EMPTY_PARTS, wcs: EMPTY_WORK_CENTERS, contacts: EMPTY_CONTACTS };
+        return {
+          vendor: null,
+          parts: EMPTY_PARTS,
+          services: EMPTY_SERVICES,
+          contacts: EMPTY_CONTACTS,
+          addresses: EMPTY_ADDRESSES,
+          outside: EMPTY_OUTSIDE,
+          daysOut: [] as (readonly [string, number])[],
+        };
       }
-      const [parts, wcs, contacts] = await Promise.all([
+      const [parts, services, contacts, addresses, allOutside] = await Promise.all([
         getPartsByPreferredVendor(vendorId),
-        getWorkCentersByVendor(vendorId),
+        getVendorServicesForVendor(vendorId),
         getContactsForVendor(vendorId),
+        getAddressesForVendor(vendorId),
+        // One company-wide read, filtered here. It returns only OPEN outside ops
+        // (pending + sent) — tens of rows for a shop, cheaper than a per-vendor
+        // aggregate, and the same call the Jobs list already makes for its
+        // At-vendor chip.
+        getOutsideOpsForCompany(v.company_id),
       ]);
-      return { vendor: v, parts, wcs, contacts };
+      const outside = allOutside.filter((o) => o.vendor_id === vendorId);
+      // Days-at-vendor is stamped HERE, once, not derived in render: a clock
+      // read during render is impure and gives a number that moves on any
+      // incidental re-render.
+      const now = Date.now();
+      const daysOut = outside
+        .filter((o) => o.sent_at !== null)
+        .map(
+          (o) =>
+            [o.id, Math.floor((now - new Date(o.sent_at as string).getTime()) / 86_400_000)] as const,
+        );
+      return { vendor: v, parts, services, contacts, addresses, outside, daysOut };
     },
     [vendorId],
     {
@@ -122,7 +255,18 @@ export default function VendorDetailPage() {
   const vendor = data?.vendor ?? null;
   const contacts = data?.contacts ?? EMPTY_CONTACTS;
   const linkedParts = data?.parts ?? EMPTY_PARTS;
-  const linkedWorkCenters = data?.wcs ?? EMPTY_WORK_CENTERS;
+  const services = data?.services ?? EMPTY_SERVICES;
+  const addresses = data?.addresses ?? EMPTY_ADDRESSES;
+  const outsideOps = data?.outside ?? EMPTY_OUTSIDE;
+  const daysOutById = useMemo(() => new Map(data?.daysOut ?? []), [data?.daysOut]);
+
+  // Oldest sent first — chase order. The company-wide queue sorts hot-then-due,
+  // which answers "what goes out today"; standing on ONE vendor the question is
+  // "what has this vendor had longest", and that is a different sort.
+  const atVendor = outsideOps
+    .filter((o) => o.status === 'sent')
+    .sort((a, b) => (a.sent_at ?? '').localeCompare(b.sent_at ?? ''));
+  const notSent = outsideOps.filter((o) => o.status === 'pending');
 
   // Contact mutations re-run the full loader (reload). Cheap at vendor scale and
   // keeps a single read path rather than a separate contacts-only fetch.
@@ -164,6 +308,84 @@ export default function VendorDetailPage() {
     }
   };
 
+  /**
+   * Commit a rename.
+   *
+   * Uniqueness is checked BEFORE the write, and the three outcomes are
+   * deliberately different — matching the customer header:
+   *   unique      -> write
+   *   duplicate   -> field error, no write, the typed value stays put
+   *   check THREW -> "couldn't check", no write
+   * That last one is the CLAUDE.md rule: a failed check is never a definitive
+   * negative, so a dropped request must not be reported as "that name is taken".
+   */
+  const persistName = async (next: string): Promise<boolean> => {
+    if (!vendor) return false;
+
+    // Unchanged is a successful no-op: the editor should close, and writing
+    // would bump updated_at for nothing.
+    if (next === vendor.name) {
+      setNameSaveState('idle');
+      return true;
+    }
+    if (!next) {
+      setNameError('Vendor name is required');
+      setNameSaveState('error');
+      return false;
+    }
+
+    try {
+      if (await checkVendorNameExists(companyId, next, vendor.id)) {
+        setNameError('A vendor with this name already exists');
+        setNameSaveState('error');
+        return false;
+      }
+    } catch {
+      setNameError('Could not check the name — try again');
+      setNameSaveState('error');
+      return false;
+    }
+
+    setNameSaveState('saving');
+    try {
+      await updateVendor(vendor.id, { name: next });
+      setNameError(undefined);
+      setNameSaveState('saved');
+      await fetchAll();
+      return true;
+    } catch (err) {
+      setNameSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to rename the vendor');
+      return false;
+    }
+  };
+
+  const handleSetDefaultAddress = async (addressId: string) => {
+    setActionLoading(true);
+    try {
+      await setDefaultVendorAddress(addressId, vendorId);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set the default address');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAddress = async () => {
+    if (!deleteAddressId) return;
+    setActionLoading(true);
+    try {
+      await deleteVendorAddress(deleteAddressId, vendorId);
+      setDeleteAddressId(null);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete the address');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleSetPrimary = async (contactId: string) => {
     setActionLoading(true);
     try {
@@ -181,17 +403,6 @@ export default function VendorDetailPage() {
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleString();
-  };
-
-  const formatAddress = (): string => {
-    if (!vendor) return '—';
-    const parts = [
-      vendor.address_line1,
-      vendor.address_line2,
-      [vendor.city, vendor.state, vendor.postal_code].filter(Boolean).join(', '),
-      vendor.country && vendor.country !== 'USA' ? vendor.country : null,
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join('\n') : '—';
   };
 
   if (loading) {
@@ -222,7 +433,7 @@ export default function VendorDetailPage() {
   }
 
   const supplies = linkedParts.length > 0;
-  const outside = linkedWorkCenters.length > 0;
+  const outside = services.length > 0;
   const hasReferences = supplies || outside;
 
   const contactBeingDeleted = deleteContactId
@@ -248,15 +459,10 @@ export default function VendorDetailPage() {
         </Button>
 
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            variant="outlined"
-            startIcon={<EditIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/vendors/${vendorId}/edit`)}
-            disabled={actionLoading}
-          >
-            Edit
-          </Button>
-
+          {/* The Edit button and the /edit route are gone. Once addresses moved
+              to their own table, VendorForm in edit mode held exactly one field
+              — the name — so the route was a whole page for a text box. The
+              header edits it in place instead. */}
           <Tooltip title="Delete Vendor">
             <span>
               <IconButton
@@ -292,9 +498,20 @@ export default function VendorDetailPage() {
               flexWrap: 'wrap',
             }}
           >
-            <Typography variant="h5" sx={{ fontWeight: 600 }}>
-              {vendor.name}
-            </Typography>
+            <Box sx={{ flex: 1, minWidth: 280 }}>
+              <InlineNameEditor
+                displayName={vendor.name}
+                label="Vendor name"
+                editTooltip="Rename this vendor"
+                error={nameError}
+                saveState={nameSaveState}
+                onChange={() => {
+                  if (nameError) setNameError(undefined);
+                }}
+                onCommit={persistName}
+                onCancel={() => setNameError(undefined)}
+              />
+            </Box>
             <Box sx={{ textAlign: 'right' }}>
               <Typography variant="caption" color="text.secondary" display="block">
                 Created {formatDate(vendor.created_at)}
@@ -497,93 +714,241 @@ export default function VendorDetailPage() {
         </Grid>
 
         {/* Address card */}
+        {/* Addresses, plural. A vendor used to carry exactly one, in six
+            columns on its own row — so a plater with two plants, or a remit-to
+            that differs from the dock you ship parts to, had nowhere to say so.
+            Mirrors the Customers card, including the inline form. */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Address
-              </Typography>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 2,
+                  flexWrap: 'wrap',
+                  mb: 1,
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Addresses ({addresses.length})
+                </Typography>
+                {!addressFormOpen && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      setEditingAddress(undefined);
+                      setAddressFormOpen(true);
+                    }}
+                  >
+                    Add Address
+                  </Button>
+                )}
+              </Box>
               <Divider sx={{ mb: 2 }} />
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                {formatAddress()}
-              </Typography>
+
+              {addressFormOpen ? (
+                <VendorAddressForm
+                  vendorId={vendorId}
+                  existing={editingAddress}
+                  isFirst={addresses.length === 0}
+                  onSaved={async () => {
+                    setAddressFormOpen(false);
+                    setEditingAddress(undefined);
+                    await fetchAll();
+                  }}
+                  onCancel={() => {
+                    setAddressFormOpen(false);
+                    setEditingAddress(undefined);
+                  }}
+                />
+              ) : addresses.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No addresses yet.
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {addresses.map((addr) => (
+                    <ListItem
+                      key={addr.id}
+                      disableGutters
+                      alignItems="flex-start"
+                      secondaryAction={
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                          {!addr.is_default && (
+                            <Tooltip title="Make default">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleSetDefaultAddress(addr.id)}
+                                  disabled={actionLoading}
+                                >
+                                  <StarBorderIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                          <Tooltip title="Edit address">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setEditingAddress(addr);
+                                  setAddressFormOpen(true);
+                                }}
+                                disabled={actionLoading}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Delete address">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => setDeleteAddressId(addr.id)}
+                                disabled={actionLoading}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Box>
+                      }
+                    >
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {addr.is_default && (
+                              <StarIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                            )}
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {addr.attention_to || (addr.is_default ? 'Default' : 'Address')}
+                            </Typography>
+                          </Box>
+                        }
+                        secondary={
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ whiteSpace: 'pre-line' }}
+                          >
+                            {formatAddressLines(addr)}
+                          </Typography>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Linked items — collapsible per role. Empty cases say so explicitly
-            so the user can tell "no parts" from "didn't load." */}
+        {/* Services — the processes this vendor performs, edited IN PLACE.
+            The columns that were here (Used on, Out now) are gone: each was a
+            second query per vendor to decorate a list of three rows, and
+            neither answered a question the user had while standing on this
+            card. What a service IS — its name and its price — is what stays. */}
         <Grid size={{ xs: 12 }}>
-          <Card elevation={2}>
+          <VendorServicesCard
+            companyId={companyId}
+            vendorId={vendorId}
+            vendorName={vendor.name}
+            services={services}
+            onChanged={fetchAll}
+          />
+        </Grid>
+
+        {/* Parts supplied — today's "Linked Parts" accordion, promoted to a
+            plain card with an honest name. */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Linked Items
+                Parts supplied ({linkedParts.length})
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {linkedParts.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No parts list {vendor.name} as their preferred supplier.
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {linkedParts.map((p) => (
+                    <ListItem key={p.id} disablePadding>
+                      <ListItemButton
+                        component={NextLink}
+                        href={`/dashboard/${companyId}/parts/${p.id}`}
+                      >
+                        <ListItemText
+                          primary={p.part_name}
+                          secondary={p.primary_unit ? `Unit: ${p.primary_unit}` : null}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Open jobs — READ-ONLY, per the founder's ask. Nothing here sends or
+            receives; the job page owns that. Every row deep-links to the exact
+            operation card so "see it here, act there" is one click, not a hunt.
+            "At {vendor} now" sorts OLDEST SENT FIRST — chase order, not due-date
+            order, because the question this section answers is "who is sitting
+            on my parts?". */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={2} sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                Open jobs ({outsideOps.length})
               </Typography>
               <Divider sx={{ mb: 2 }} />
 
-              <Accordion disableGutters elevation={0} defaultExpanded={supplies}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="subtitle1" fontWeight={500}>
-                    Parts using this vendor as preferred supplier (
-                    {linkedParts.length})
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails sx={{ pt: 0 }}>
-                  {linkedParts.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">
-                      No parts list this vendor as their preferred supplier.
-                    </Typography>
-                  ) : (
-                    <List dense disablePadding>
-                      {linkedParts.map((p) => (
-                        <ListItem key={p.id} disablePadding>
-                          <ListItemButton
-                            component={NextLink}
-                            href={`/dashboard/${companyId}/parts/${p.id}`}
-                          >
-                            <ListItemText
-                              primary={p.part_name}
-                              secondary={p.primary_unit ? `Unit: ${p.primary_unit}` : null}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  )}
-                </AccordionDetails>
-              </Accordion>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                At {vendor.name} now ({atVendor.length})
+              </Typography>
+              {atVendor.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Nothing is out at {vendor.name} right now.
+                </Typography>
+              ) : (
+                <List dense disablePadding sx={{ mb: 2 }}>
+                  {atVendor.map((op) => (
+                    <OutsideJobRow
+                      key={op.id}
+                      op={op}
+                      companyId={companyId}
+                      sentDays={daysOutById.get(op.id) ?? null}
+                    />
+                  ))}
+                </List>
+              )}
 
-              <Accordion disableGutters elevation={0} defaultExpanded={outside}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="subtitle1" fontWeight={500}>
-                    Work centers performing outside ops at this vendor (
-                    {linkedWorkCenters.length})
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails sx={{ pt: 0 }}>
-                  {linkedWorkCenters.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">
-                      No work centers reference this vendor.
-                    </Typography>
-                  ) : (
-                    <List dense disablePadding>
-                      {linkedWorkCenters.map((wc) => (
-                        <ListItem key={wc.id} disablePadding>
-                          <ListItemButton
-                            component={NextLink}
-                            href={`/dashboard/${companyId}/work-centers/${wc.id}`}
-                          >
-                            <ListItemText
-                              primary={wc.name}
-                              secondary={wc.kind === 'external' ? 'External' : 'Internal'}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  )}
-                </AccordionDetails>
-              </Accordion>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                Waiting to go out ({notSent.length})
+              </Typography>
+              {notSent.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  Nothing is queued for {vendor.name}.
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {notSent.map((op) => (
+                    <OutsideJobRow key={op.id} op={op} companyId={companyId} sentDays={null} />
+                  ))}
+                </List>
+              )}
+
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                Send and receive parts on the job.
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -600,6 +965,38 @@ export default function VendorDetailPage() {
       />
 
       {/* Per-contact delete confirmation */}
+      {/* Addresses are HARD-deleted, not archived, and the copy says "cannot be
+          undone" honestly. Nothing stores a vendor_address_id, so there is no
+          historical document to keep resolving — the same reasoning that has
+          customer_addresses and vendor_contacts deleted rather than archived. */}
+      <Dialog
+        open={deleteAddressId !== null}
+        onClose={() => !actionLoading && setDeleteAddressId(null)}
+      >
+        <DialogTitle>Delete Address?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This address will be removed from {vendor.name}. This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAddressId(null)} disabled={actionLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteAddress}
+            color="error"
+            variant="contained"
+            disabled={actionLoading}
+            startIcon={
+              actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
+            }
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog
         open={deleteContactId !== null}
         onClose={() => !actionLoading && setDeleteContactId(null)}
@@ -655,7 +1052,7 @@ export default function VendorDetailPage() {
                 : null}
               {supplies && outside ? ' and ' : ''}
               {outside
-                ? `${linkedWorkCenters.length} work center${linkedWorkCenters.length === 1 ? '' : 's'}`
+                ? `${services.length} service${services.length === 1 ? '' : 's'}`
                 : null}
               {' '}— kept for history.
             </Alert>

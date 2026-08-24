@@ -15,35 +15,40 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { formatTime } from '@/types/routings';
-import type { WorkCenterKind } from '@/types/workCenter';
 
 /**
  * One row in the linear routing builder. Mirrors a `routing_operations`
  * record but holds form-builder state — `tempId` is a synthetic id for
  * unsaved rows; existing rows reuse their real DB uuid.
  *
- * The display branches on `workCenterKind`:
- *   - 'internal' → setup minutes + cycle minutes/unit
- *   - 'external' → vendor name + flat per-unit price + setup cost
+ * The display branches on which target the step points at:
+ *   - a station → setup minutes + cycle minutes/unit
+ *   - a service → vendor name + price per piece (outside work has no setup)
  */
 export interface OperationRowData {
   tempId: string;
-  workCenterId: string;
+  /** Exactly one of these is set; `vendorServiceId` non-null means outside work. */
+  workCenterId: string | null;
+  vendorServiceId: string | null;
+  /** The station's or the service's name. */
   workCenterName: string;
-  workCenterKind: WorkCenterKind;
+  /** Who performs it, when this step is outside work. */
   vendorName: string | null;
-  /** Internal: minutes of one-time setup per batch. */
+  /** Station: minutes of one-time setup per batch. */
   setupMinutes: number | null;
-  /** Internal: minutes of cycle time per unit produced. */
+  /** Station: minutes of cycle time per unit produced. */
   cycleMinutesPerUnit: number | null;
-  /** Internal: optional override for the work center's labor_rate. */
+  /** Station: optional override for the work center's labor_rate. */
   laborRateOverride: number | null;
-  /** Internal: the work center's own default labor_rate. Together with
+  /** Station: the work center's own default labor_rate. Together with
    *  `laborRateOverride` this flags a missing rate (neither set → the
    *  operation can't be priced), highlighted inline on the row. */
   workCenterLaborRate: number | null;
-  /** External: per-unit price the vendor charges (external work has no setup). */
+  /** Service: per-piece override for this step. Null inherits the service's. */
   externalUnitPrice: number | null;
+  /** Service: the service's own price, which the step inherits when it has
+   *  no override. Both null is what makes the step unpriceable. */
+  vendorServiceUnitPrice: number | null;
   instructions: string | null;
 }
 
@@ -71,8 +76,12 @@ export default function RoutingOperationRow({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const placeholder = !row.workCenterId;
-  const isExternal = row.workCenterKind === 'external';
+  const placeholder = !row.workCenterId && !row.vendorServiceId;
+  const isExternal = Boolean(row.vendorServiceId);
+
+  // The price this step actually costs at: its own override, else the service's.
+  // Reading only the override would flag every inheriting step as unpriced.
+  const effectiveUnitPrice = row.externalUnitPrice ?? row.vendorServiceUnitPrice;
 
   // Localized validation: surface the exact blocker on the offending row
   // (instead of only a top-of-card "Heads up" banner). An internal op with no
@@ -86,11 +95,11 @@ export default function RoutingOperationRow({
   const missingExternalPricing =
     !placeholder &&
     isExternal &&
-    !(row.externalUnitPrice && row.externalUnitPrice > 0);
+    !(effectiveUnitPrice && effectiveUnitPrice > 0);
   const errorMessage = missingLaborRate
     ? 'Missing labor rate — set a rate on this operation, or a default on its work center.'
     : missingExternalPricing
-      ? 'Missing pricing — add a unit price for this external step.'
+      ? 'Missing pricing — set a price on this step, or on the service itself.'
       : null;
 
   // Build the per-row caption based on kind.
@@ -98,11 +107,11 @@ export default function RoutingOperationRow({
   let captionRight: string;
   let captionRightWarning = false;
   if (isExternal) {
-    captionLeft = 'External';
-    captionRight = row.externalUnitPrice && row.externalUnitPrice > 0
-      ? `$${row.externalUnitPrice.toFixed(2)}/unit`
-      : 'No unit price';
-    captionRightWarning = !(row.externalUnitPrice && row.externalUnitPrice > 0);
+    captionLeft = 'Outside';
+    captionRight = effectiveUnitPrice && effectiveUnitPrice > 0
+      ? `$${effectiveUnitPrice.toFixed(2)}/pc`
+      : 'No price';
+    captionRightWarning = !(effectiveUnitPrice && effectiveUnitPrice > 0);
   } else {
     const setupSet = (row.setupMinutes ?? 0) > 0;
     const cycleSet = row.cycleMinutesPerUnit !== null && row.cycleMinutesPerUnit > 0;
@@ -167,7 +176,7 @@ export default function RoutingOperationRow({
           </Typography>
           {!placeholder && (
             <Chip
-              label={isExternal ? 'External' : 'Internal'}
+              label={isExternal ? 'Outside' : 'In-house'}
               size="small"
               variant="outlined"
               color={isExternal ? 'secondary' : 'default'}

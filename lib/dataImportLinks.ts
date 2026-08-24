@@ -22,15 +22,14 @@ export interface ReferentialLink {
   parentEntity: EntityType;
   parentField: string;
   /** Work centers are internal or outsourced, and an outsourced one implies a vendor. */
-  kindable?: boolean;
 }
 
 /** Every cross-file reference we check. The analyzer reads this to find orphans; the
  *  create-missing action reads it to fix them — one registry, so they can't disagree. */
 export const REFERENTIAL_LINKS: ReferentialLink[] = [
   { childEntity: 'parts', childField: 'preferred_vendor_name', parentEntity: 'vendors', parentField: 'name' },
-  { childEntity: 'work_centers', childField: 'vendor_name', parentEntity: 'vendors', parentField: 'name' },
-  { childEntity: 'routings', childField: 'work_center_name', parentEntity: 'work_centers', parentField: 'name', kindable: true },
+  { childEntity: 'vendor_services', childField: 'vendor_name', parentEntity: 'vendors', parentField: 'name' },
+  { childEntity: 'routings', childField: 'work_center_name', parentEntity: 'work_centers', parentField: 'name' },
   { childEntity: 'routings', childField: 'part_name', parentEntity: 'parts', parentField: 'part_name' },
   { childEntity: 'bom', childField: 'parent_part_name', parentEntity: 'parts', parentField: 'part_name' },
   { childEntity: 'bom', childField: 'child_part_name', parentEntity: 'parts', parentField: 'part_name' },
@@ -51,21 +50,26 @@ export function autoCreateLinkFor(findingId: string): AutoCreateLink | undefined
   return AUTO_CREATE_LINKS.find((l) => findingId === `orphan.${l.childEntity}.${l.childField}`);
 }
 
-export type WorkCenterKind = 'internal' | 'external';
+
 
 export interface MissingParent {
   name: string; // first-seen spelling, shown back to the owner
   refCount: number; // how many child rows point at it — the "why this matters" number
-  kind?: WorkCenterKind; // suggested, for kindable links
 }
 
 /** Names that read like an outside shop rather than a machine on the floor. A SUGGESTION the
  *  owner can flip per row — never applied silently (they know their shop; we're guessing). */
-const OUTSIDE_HINT = /(\binc\b|\bllc\b|\bltd\b|\bcorp\b|\bco\b|coat|plating|anodiz|heat.?treat|galvaniz|powder|finish)/i;
-
-export function guessKind(name: string): WorkCenterKind {
-  return OUTSIDE_HINT.test(name) ? 'external' : 'internal';
-}
+/*
+ * `OUTSIDE_HINT` / `guessKind` lived here: a regex over the NAME (inc, llc,
+ * coat, anodiz, heat treat…) that guessed whether a work centre was really an
+ * outside shop, and then created a vendor of the same name to hang it on.
+ *
+ * That heuristic is what produced production's defining symptom — 32 of 38
+ * outsourced rows named after their own vendor, character for character. It was
+ * guessing an entity from a string and then materialising both halves from it.
+ * Vendor services are imported as themselves now, naming their vendor
+ * explicitly, so there is nothing left to guess.
+ */
 
 const filesFor = (working: WorkingFile[], entity: EntityType) => working.filter((wf) => wf.entityType === entity);
 
@@ -92,7 +96,7 @@ export function findMissingParents(working: WorkingFile[], link: AutoCreateLink)
       if (!key || known.has(key)) continue;
       const seen = missing.get(key);
       if (seen) seen.refCount += 1;
-      else missing.set(key, { name: raw, refCount: 1, kind: link.kindable ? guessKind(raw) : undefined });
+      else missing.set(key, { name: raw, refCount: 1 });
     }
   }
 
@@ -149,58 +153,28 @@ function addRecords(
 
 export interface CreateEntry {
   name: string;
-  kind?: WorkCenterKind;
 }
 
 /**
  * Create the parent records the owner confirmed. Returns an {@link EditOp} so it lands on the
  * undo journal and re-analyzes like any other fix — one action layer.
  *
- * The outsourced-work-center cascade is why this returns up to two AddRecordsOps: the importer
- * rejects `kind=external` without a vendor that exists, so marking a work center "outside"
- * also creates the vendor of the same name (if one isn't already there).
+ * This used to return up to TWO AddRecordsOps: marking a work centre "outside"
+ * also minted a vendor of the same name to satisfy the old
+ * `kind=external requires a vendor` rule. That cascade is deleted along with the
+ * concept — one confirmation now creates one kind of thing.
  */
 export function createMissingParents(working: WorkingFile[], link: AutoCreateLink, entries: CreateEntry[]): EditOp {
   const chosen = entries.filter((e) => e.name.trim());
   const parentLabel = ENTITY_LABELS[link.parentEntity].toLowerCase();
   if (!chosen.length) return { label: `Create ${parentLabel}`, edits: [] };
 
-  const parentValues = chosen.map((e) => {
-    const v: Record<string, string> = { [link.parentField]: e.name };
-    if (link.kindable) {
-      const kind = e.kind ?? 'internal';
-      v.kind = kind;
-      // internal must have an EMPTY vendor; external is vendored by the shop of the same name.
-      if (kind === 'external') v.vendor_name = e.name;
-    }
-    return v;
-  });
+  const parentValues = chosen.map((e) => ({ [link.parentField]: e.name }));
 
   const ops: AddRecordsOp[] = [];
   const parentOp = addRecords(working, link.parentEntity, link.parentField, parentValues);
   if (parentOp) ops.push(parentOp);
 
-  if (link.kindable) {
-    const known = new Set<string>();
-    for (const wf of filesFor(working, 'vendors')) {
-      const col = wf.columnRoles.name;
-      if (!col) continue;
-      for (const row of wf.rows) {
-        const v = norm(row[col]);
-        if (v) known.add(v);
-      }
-    }
-    const vendorNames = chosen.filter((e) => e.kind === 'external' && !known.has(norm(e.name)));
-    const vendorOp = addRecords(
-      working,
-      'vendors',
-      'name',
-      vendorNames.map((e) => ({ name: e.name })),
-    );
-    if (vendorOp) ops.push(vendorOp);
-  }
-
   const created = ops.reduce((n, o) => n + o.rows.length, 0);
-  const extra = ops.length > 1 ? ` (plus ${ops[1].rows.length} vendor(s) for the outside work)` : '';
-  return { label: `Created ${created} ${parentLabel}${extra}`, edits: [], addRecords: ops };
+  return { label: `Created ${created} ${parentLabel}`, edits: [], addRecords: ops };
 }

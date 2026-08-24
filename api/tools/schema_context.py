@@ -52,16 +52,26 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- contact_name: TEXT, contact_email: TEXT, contact_phone: TEXT
+- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: a vendor row is IDENTITY ONLY. There are no contact_* columns (dropped
+  20260504), no notes column, and no address columns (dropped 20260824).
+  Contacts are vendor_contacts, addresses are vendor_addresses, services are
+  vendor_services -- each 1-to-many, so a vendor is not limited to one of any.
+
+### vendor_addresses (a vendor's postal addresses, 1-to-many)
+- id: UUID (PK)
+- vendor_id: UUID (FK -> vendors.id) -- NO company_id; scope through the vendor
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT
-- notes: TEXT
+- attention_to: TEXT (the ATTN: line)
+- is_default: BOOLEAN -- at most one true per vendor. ONE flag, not the
+  default_billing/default_shipping pair customer_addresses carries.
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: vendors do NOT carry capability flags. Whether a vendor supplies
   materials vs. performs outside ops is derived from references:
     * "supplies materials" = some part has parts.preferred_vendor_id = vendor.id
-    * "performs outside ops" = some work_centers row has kind='external' AND
-      vendor_id = vendor.id
+    * "performs outside ops" = some vendor_services row has vendor_id = vendor.id
 
 ### parts (UNIFIED — absorbs the old `inventory_items` table)
 - id: UUID (PK)
@@ -196,7 +206,6 @@ SCHEMA_CONTEXT = """
 - routing_operation_id: UUID (FK -> routing_operations.id, nullable; the source row)
 - estimated_setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES, not hours
 - estimated_run_minutes_per_unit: NUMERIC(8,4) (default 0) -- MINUTES per unit
-- work_center_kind_snapshot: TEXT ('internal'|'external', nullable) -- the kind as of cloning
 - labor_rate_snapshot: NUMERIC(10,2) (nullable) -- internal ops: the per-hour rate FROZEN at
   cloning. Use this, not work_centers.labor_rate, for anything historical.
 - external_unit_price_snapshot: NUMERIC(12,4) (nullable) -- external ops: price per unit, frozen
@@ -245,14 +254,26 @@ SCHEMA_CONTEXT = """
 - unit: TEXT
 -- Consumption is no longer tracked here; the part BOM (parts_bom) is the source of truth.
 
-### work_centers (REPLACES operation_types; e.g. 'CNC Mill #1', 'Outside Plating')
+### work_centers (IN-HOUSE capacity only; e.g. 'CNC Mill #1', 'Deburr Bench')
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- kind: TEXT -- one of: 'internal', 'external'
-- vendor_id: UUID (FK -> vendors.id; required when kind='external', null when internal)
-- labor_rate: NUMERIC(10,2) (per-hour rate; meaningful only for kind='internal')
+- labor_rate: NUMERIC(10,2) (per-hour rate)
 - description: TEXT, metadata: JSONB
+- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: there is NO `kind` and NO `vendor_id` here. Outsourced processes are
+  NOT work centres -- they are vendor_services (below). A query looking for
+  outside work in this table will find nothing.
+
+### vendor_services (a process an outside vendor performs, e.g. 'Anodize')
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- vendor_id: UUID (FK -> vendors.id) -- the vendor performing it
+- name: TEXT -- the PROCESS, unique per vendor (two vendors may both offer 'Anodize')
+- unit_price: NUMERIC(12,4) -- price per piece; INHERITED by routing operations
+- description: TEXT
+- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### routings (1:1 with manufacturable parts)
@@ -265,7 +286,11 @@ SCHEMA_CONTEXT = """
 ### routing_operations (REPLACES routing_nodes; ordered by `sequence`; NO company_id, join via routings)
 - id: UUID (PK)
 - routing_id: UUID (FK -> routings.id)
-- work_center_id: UUID (FK -> work_centers.id) -- was operation_type_id
+- work_center_id: UUID (FK -> work_centers.id) -- NULL when this step is outside work
+- vendor_service_id: UUID (FK -> vendor_services.id) -- NULL when this step runs in-house
+  -- EXACTLY ONE of work_center_id / vendor_service_id is set on every row
+  --   (CHECK routing_operations_exactly_one_target). `vendor_service_id IS NOT NULL`
+  --   is how you ask "is this outside work?" -- there is no kind column any more.
 - sequence: INTEGER (unique per routing; lower runs first)
 - setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES; one-time per batch (internal only)
 - cycle_minutes_per_unit: NUMERIC(8,4) -- MINUTES per unit (internal only)
@@ -317,7 +342,10 @@ SCHEMA_CONTEXT = """
 - routings.part_id -> parts.id (1:1)
 - routing_operations.routing_id -> routings.id
 - routing_operations.work_center_id -> work_centers.id
-- work_centers.vendor_id -> vendors.id (when kind='external')
+- vendor_services.vendor_id -> vendors.id
+- vendor_addresses.vendor_id -> vendors.id
+- routing_operations.vendor_service_id -> vendor_services.id
+- job_operations.vendor_service_id -> vendor_services.id
 - parts.preferred_vendor_id -> vendors.id
 - parts_bom.parent_part_id -> parts.id, .child_part_id -> parts.id
 - parts_unit_conversions.part_id -> parts.id
@@ -433,6 +461,8 @@ ALLOWED_TABLES = frozenset({
     "job_operations",
     "job_materials",
     "work_centers",
+    "vendor_services",
+    "vendor_addresses",
     "routings",
     "routing_operations",
     "inventory_transactions",

@@ -699,7 +699,7 @@ export async function getOperatorOperationDetail(
 
   const { data: op, error } = await supabase
     .from('job_operations')
-    .select('id, job_part_id, operation_name, status, instructions, sent_at, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name, kind, vendor:vendors(name))')
+    .select('id, job_part_id, operation_name, status, instructions, sent_at, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, vendor_service_id, work_center:work_centers(name), vendor_service:vendor_services(name, vendor:vendors(name))')
     .eq('id', jobOperationId)
     .single();
 
@@ -708,14 +708,12 @@ export async function getOperatorOperationDetail(
   const header = await loadPartHeader(op.job_part_id, companyId);
   if (!header) return null; // not this company's job
 
-  type WcJoin = {
-    name: string;
-    kind: 'internal' | 'external';
-    vendor: { name: string } | { name: string }[] | null;
-  };
+  type WcJoin = { name: string };
+  type VsJoin = { name: string; vendor: { name: string } | { name: string }[] | null };
   const wcJoin = (Array.isArray(op.work_center) ? op.work_center[0] : op.work_center) as WcJoin | null;
-  const vendorJoin = wcJoin
-    ? Array.isArray(wcJoin.vendor) ? wcJoin.vendor[0] : wcJoin.vendor
+  const vsJoin = (Array.isArray(op.vendor_service) ? op.vendor_service[0] : op.vendor_service) as VsJoin | null;
+  const vendorJoin = vsJoin
+    ? Array.isArray(vsJoin.vendor) ? vsJoin.vendor[0] : vsJoin.vendor
     : null;
   const currentOp: CurrentOpForDetail = {
     id: op.id,
@@ -725,8 +723,12 @@ export async function getOperatorOperationDetail(
     estimated_setup_minutes: op.estimated_setup_minutes,
     estimated_run_minutes_per_unit: op.estimated_run_minutes_per_unit,
     work_center_id: op.work_center_id,
-    work_center_name: wcJoin?.name ?? null,
-    work_center_kind: wcJoin?.kind ?? null,
+    // The service's name when this is outside work — so the phone shows
+    // "Anodize", not the plater's legal name.
+    work_center_name: vsJoin?.name ?? wcJoin?.name ?? null,
+    // Kept as the 'external' | 'internal' string the operator pages already
+    // branch on, but derived from the column rather than a joinable kind.
+    work_center_kind: op.vendor_service_id ? 'external' : 'internal',
     vendor_name: vendorJoin?.name ?? null,
     sent_at: op.sent_at,
   };
@@ -763,27 +765,26 @@ async function loadOpOutsideContext(jobOperationId: string): Promise<OpOutsideCo
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('job_operations')
-    .select('id, job_id, job_part_id, status, sent_at, jobs!inner(company_id), work_center:work_centers(kind, vendor:vendors(name))')
+    .select('id, job_id, job_part_id, status, sent_at, vendor_service_id, jobs!inner(company_id), vendor_service:vendor_services(vendor:vendors(name))')
     .eq('id', jobOperationId)
     .single();
   if (error || !data) throw new Error('Operation not found.');
 
+  type VendorRel = { name: string } | { name: string }[] | null;
   type Row = {
     id: string;
     job_id: string;
     job_part_id: string;
     status: string;
     sent_at: string | null;
+    vendor_service_id: string | null;
     jobs: { company_id: string } | { company_id: string }[] | null;
-    work_center:
-      | { kind: 'internal' | 'external'; vendor: { name: string } | { name: string }[] | null }
-      | { kind: 'internal' | 'external'; vendor: { name: string } | { name: string }[] | null }[]
-      | null;
+    vendor_service: { vendor: VendorRel } | { vendor: VendorRel }[] | null;
   };
   const row = data as unknown as Row;
   const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs;
-  const wc = Array.isArray(row.work_center) ? row.work_center[0] : row.work_center;
-  const vendor = wc ? (Array.isArray(wc.vendor) ? wc.vendor[0] : wc.vendor) : null;
+  const vs = Array.isArray(row.vendor_service) ? row.vendor_service[0] : row.vendor_service;
+  const vendor = vs ? (Array.isArray(vs.vendor) ? vs.vendor[0] : vs.vendor) : null;
 
   return {
     id: row.id,
@@ -792,7 +793,9 @@ async function loadOpOutsideContext(jobOperationId: string): Promise<OpOutsideCo
     company_id: job?.company_id ?? '',
     status: row.status,
     sent_at: row.sent_at,
-    is_external: wc?.kind === 'external',
+    // The column, not a joined kind: an op is outside work iff it targets a
+    // service. Unlike the old join this cannot read NULL for a row that is.
+    is_external: Boolean(row.vendor_service_id),
     vendor_name: vendor?.name ?? null,
   };
 }
@@ -1081,14 +1084,16 @@ export async function getOutsideOpsForCompany(
     .from('job_operations')
     .select(`
       id, job_id, job_part_id, operation_name, status, sent_at, sent_by,
-      work_center:work_centers!inner(kind, vendor:vendors(name)),
+      vendor_service:vendor_services!inner(name, vendor:vendors(id, name)),
       job_part:job_parts!inner(parts(part_name)),
       jobs!inner(job_number, due_date, is_hot, company_id, production_status, deleted_at)
     `)
     .eq('jobs.company_id', companyId)
     .is('jobs.deleted_at', null)
     .neq('jobs.production_status', 'cancelled')
-    .eq('work_center.kind', 'external')
+    // The !inner join on vendor_services IS the "outside op" filter — only an
+    // outside op has one. The .eq('work_center.kind','external') it replaces is
+    // gone with the column.
     .in('status', ['pending', 'sent']);
 
   if (error || !data) return [];
@@ -1102,7 +1107,7 @@ export async function getOutsideOpsForCompany(
     status: string;
     sent_at: string | null;
     sent_by: string | null;
-    work_center: OneOrMany<{ kind: string; vendor: OneOrMany<{ name: string }> }>;
+    vendor_service: OneOrMany<{ name: string; vendor: OneOrMany<{ id: string; name: string }> }>;
     job_part: OneOrMany<{ parts: OneOrMany<{ part_name: string }> }>;
     jobs: OneOrMany<{ job_number: string; due_date: string | null; is_hot: boolean }>;
   };
@@ -1126,8 +1131,8 @@ export async function getOutsideOpsForCompany(
   }
 
   const ops: OutsideOperation[] = rows.map((r) => {
-    const wc = first(r.work_center);
-    const vendor = wc ? first(wc.vendor) : null;
+    const vs = first(r.vendor_service);
+    const vendor = vs ? first(vs.vendor) : null;
     const part = first(first(r.job_part)?.parts ?? null);
     const job = first(r.jobs);
     return {
@@ -1137,6 +1142,7 @@ export async function getOutsideOpsForCompany(
       job_number: job?.job_number ?? '',
       part_name: part?.part_name ?? null,
       operation_name: r.operation_name,
+      vendor_id: vendor?.id ?? null,
       vendor_name: vendor?.name ?? null,
       status: r.status === 'sent' ? 'sent' : 'pending',
       sent_at: r.sent_at,
@@ -1171,9 +1177,11 @@ export async function getStationOperationTypes(
     .from('work_centers')
     .select('id, name')
     .eq('company_id', companyId)
-    // Operators only run internal stations; external/vendor work centers are
-    // handled through the routing/job workflow, not picked at the station.
-    .eq('kind', 'internal')
+    // No kind filter any more, and none is possible: every work_centers row is
+    // an in-house station now. Outsourced processes are vendor_services, a
+    // different table an operator can never be standing at. This also closes an
+    // old leak — getStationName never had the kind filter this query did, so a
+    // stale external id in localStorage used to resolve to a usable station.
     // Archived machines are gone from the shop's point of view. Without this the
     // picker offers a machine nobody can be standing at, and selecting one is
     // unrecoverable from the floor.
@@ -1285,15 +1293,12 @@ export async function getJobPartTraveler(
 
   const { data: ops } = await supabase
     .from('job_operations')
-    .select('id, sequence, operation_name, instructions, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name, kind, vendor:vendors(name))')
+    .select('id, sequence, operation_name, instructions, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, vendor_service_id, work_center:work_centers(name), vendor_service:vendor_services(name, vendor:vendors(name))')
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
 
-  type WcJoin = {
-    name: string;
-    kind: 'internal' | 'external';
-    vendor: { name: string } | { name: string }[] | null;
-  };
+  type WcJoin = { name: string };
+  type VsJoin = { name: string; vendor: { name: string } | { name: string }[] | null };
   type OpRow = {
     id: string;
     sequence: number;
@@ -1303,14 +1308,17 @@ export async function getJobPartTraveler(
     estimated_setup_minutes: number | null;
     estimated_run_minutes_per_unit: number | null;
     work_center_id: string | null;
+    vendor_service_id: string | null;
     work_center: WcJoin | WcJoin[] | null;
+    vendor_service: VsJoin | VsJoin[] | null;
   };
   const opRows = (ops ?? []) as OpRow[];
 
   const operations: JobTravelerOperation[] = opRows.map((op) => {
     const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
-    const vendorJoin = wcJoin
-      ? Array.isArray(wcJoin.vendor) ? wcJoin.vendor[0] : wcJoin.vendor
+    const vsJoin = Array.isArray(op.vendor_service) ? op.vendor_service[0] : op.vendor_service;
+    const vendorJoin = vsJoin
+      ? Array.isArray(vsJoin.vendor) ? vsJoin.vendor[0] : vsJoin.vendor
       : null;
     return {
       id: op.id,
@@ -1318,9 +1326,12 @@ export async function getJobPartTraveler(
       operation_name: op.operation_name,
       instructions: op.instructions,
       work_center_id: op.work_center_id,
-      work_center_name: wcJoin?.name ?? null,
-      // Null kind (deleted work center, FK ON DELETE SET NULL) reads as non-external.
-      work_center_kind: wcJoin?.kind ?? null,
+      // The SERVICE's name for outside steps. This is what the printed
+      // traveler puts in the Work Center column, and it is the fix for a
+      // traveler that used to read 'PerformCoat of Michigan LLC' where it
+      // should say 'Anodize'.
+      work_center_name: vsJoin?.name ?? wcJoin?.name ?? null,
+      work_center_kind: op.vendor_service_id ? 'external' : 'internal',
       vendor_name: vendorJoin?.name ?? null,
       status: op.status,
       setup_minutes: Number(op.estimated_setup_minutes) || 0,

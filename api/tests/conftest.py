@@ -313,7 +313,6 @@ def seeded_company_b_graph(
             {
                 "company_id": company_b_id,
                 "name": "RLS-3d Internal WC",
-                "kind": "internal",
                 "labor_rate": 75.0,
             }
         )

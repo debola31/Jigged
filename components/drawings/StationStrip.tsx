@@ -43,14 +43,17 @@ import SearchIcon from '@mui/icons-material/Search';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
+import { getVendorServicesForRouting } from '@/utils/vendorServicesAccess';
 import { getWorkCenterUsage } from '@/utils/workCenterUsageAccess';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 
+/** A tappable target for the route: an in-house station, or an outside service. */
 interface Station {
   id: string;
   name: string;
-  kind: 'internal' | 'external';
+  isService: boolean;
   laborRate: number | null;
+  unitPrice: number | null;
   vendorName: string | null;
   uses: number;
 }
@@ -86,22 +89,41 @@ export default function StationStrip({
     let cancelled = false;
     (async () => {
       try {
-        // Two reads, not N: the catalogue and how often each has been used.
-        const [centres, usage] = await Promise.all([
+        // Three reads, not N: both catalogues and how often each station has
+        // been used. Outside services stay offerable here — routing a drawing
+        // through anodize is a normal thing to do — they simply carry a vendor
+        // instead of a rate.
+        const [centres, services, usage] = await Promise.all([
           getWorkCentersForRouting(companyId),
+          getVendorServicesForRouting(companyId),
           getWorkCenterUsage(companyId),
         ]);
         if (cancelled) return;
         setStations(
-          centres
-            .map((c) => ({
+          [
+            ...centres.map((c) => ({
               id: c.id,
               name: c.name,
-              kind: c.kind === 'internal' ? ('internal' as const) : ('external' as const),
+              isService: false as const,
               laborRate: c.labor_rate,
-              vendorName: c.vendor_name,
+              unitPrice: null,
+              vendorName: null,
               uses: usage.get(c.id) ?? 0,
-            }))
+            })),
+            ...services.map((vs) => ({
+              id: vs.id,
+              name: vs.name,
+              isService: true as const,
+              laborRate: null,
+              unitPrice: vs.unit_price,
+              vendorName: vs.vendor_name,
+              // work_center_usage counts routing_operations.work_center_id, so
+              // it has nothing to say about a service. Ranking them at 0 keeps
+              // them after the stations the shop actually leans on, which is
+              // the right default for a strip whose job is a short common list.
+              uses: 0,
+            })),
+          ]
             // Most used first — the whole reason the strip stays short in practice.
             // Name breaks ties so a new shop, where everything is 0, is still
             // ordered rather than arbitrary.
@@ -149,15 +171,16 @@ export default function StationStrip({
       ...value,
       {
         tempId: newTempId(),
-        workCenterId: s.id,
+        workCenterId: s.isService ? null : s.id,
+        vendorServiceId: s.isService ? s.id : null,
         workCenterName: s.name,
-        workCenterKind: s.kind,
         vendorName: s.vendorName,
         // The whole point: no times, no rate override, no instructions.
         setupMinutes: null,
         cycleMinutesPerUnit: null,
         laborRateOverride: null,
         workCenterLaborRate: s.laborRate,
+        vendorServiceUnitPrice: s.unitPrice,
         externalUnitPrice: null,
         instructions: null,
       } as OperationRowData,
@@ -371,7 +394,7 @@ export default function StationStrip({
                 pr: 0.25,
                 py: 0.4,
                 border: 1,
-                borderColor: op.workCenterKind === 'internal' ? 'primary.main' : 'secondary.main',
+                borderColor: op.vendorServiceId ? 'secondary.main' : 'primary.main',
                 borderRadius: 1,
                 backgroundColor: 'action.hover',
               }}
@@ -387,7 +410,7 @@ export default function StationStrip({
                   fontSize: '0.7rem',
                   fontWeight: 700,
                   backgroundColor:
-                    op.workCenterKind === 'internal' ? 'primary.main' : 'secondary.main',
+                    op.vendorServiceId ? 'secondary.main' : 'primary.main',
                   color: 'primary.contrastText',
                 }}
               >

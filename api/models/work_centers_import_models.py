@@ -1,8 +1,8 @@
 """Pydantic models for Work Centers CSV import API.
 
-Replaces the old operations_import_models — work_centers is the renamed
-capacity-bucket table (Mazak Lathe, PerformCoat). A work center is either
-internal (runs in the shop) or external (vendor-performed outside operation).
+A work center is IN-HOUSE capacity (Mazak Lathe, Deburr Bench). It used to be
+either internal or external; the external half is now vendor_services and
+imports through vendor_services_import_models.
 """
 
 from typing import Optional
@@ -21,7 +21,7 @@ class WorkCenterConflictInfo(BaseModel):
     conflict_type values:
       - "duplicate_name": work_center with this name already exists in DB
       - "csv_duplicate": same name appears multiple times in CSV
-      - "unknown_vendor": kind='external' row references vendor not in DB
+      - "unknown_vendor": retired with kind; kept so old payloads still parse
     """
 
     row_number: int
@@ -35,9 +35,10 @@ class WorkCenterValidationError(BaseModel):
     """A validation error discovered during validation phase.
 
     error_type values:
-      - "missing_name", "invalid_rate", "invalid_kind"
-      - "vendor_required_for_external": kind='external' but vendor_name is empty
-      - "vendor_forbidden_for_internal": kind='internal' but vendor_name set
+      - "missing_name", "invalid_rate"
+      - "kind_no_longer_supported" / "vendor_no_longer_supported": the file was
+        written for the old two-kind model; the row names an outsourced process,
+        which imports as a vendor service instead
     """
 
     row_number: int
@@ -102,22 +103,12 @@ WORK_CENTER_SCHEMA = {
     "name": {
         "type": "string",
         "required": True,
-        "description": "Work center name (e.g., 'HURCO Mill', 'PerformCoat')",
-    },
-    "kind": {
-        "type": "string",
-        "required": False,
-        "description": "internal = work center inside the shop; external = vendor-performed outside operation. Defaults to 'internal'.",
-    },
-    "vendor_name": {
-        "type": "string",
-        "required": False,
-        "description": "Vendor name (required when kind='external'; resolved against existing vendors).",
+        "description": "Work center name — a machine or station in YOUR shop (e.g., 'HURCO Mill', 'Deburr Bench'). NOT an outside vendor's process.",
     },
     "labor_rate": {
         "type": "number",
         "required": False,
-        "description": "Hourly labor rate in dollars (e.g., 135.00). Used when kind='internal'.",
+        "description": "Hourly labor rate in dollars (e.g., 135.00).",
     },
     "description": {
         "type": "string",

@@ -451,8 +451,13 @@ def _job_part_labor_cost(jp: dict, quantity: float) -> float:
     estimated_run_minutes_per_unit); migration 20260811233748 froze the rates
     beside them, so nothing here reads a live work_centers.labor_rate.
 
-      internal: (setup + run × qty) / 60 × labor_rate_snapshot
-      external: external_unit_price_snapshot × qty
+      in-house: (setup + run × qty) / 60 × labor_rate_snapshot
+      outside:  external_unit_price_snapshot × qty
+
+    Which arm applies is read from `vendor_service_id` — the column that says
+    what the op targets. It used to be read from `work_center_kind_snapshot`,
+    which was a frozen copy of a discriminator that has since been dropped:
+    derivable from the target, so keeping it was vestigial.
 
     An operation missing its rate contributes 0. That is safe rather than
     silent: the job_part's authoritative cost is job_parts.true_cost_per_unit,
@@ -468,7 +473,7 @@ def _job_part_labor_cost(jp: dict, quantity: float) -> float:
         if not isinstance(op, dict):
             continue
 
-        if op.get("work_center_kind_snapshot") == "external":
+        if op.get("vendor_service_id") is not None:
             price = op.get("external_unit_price_snapshot")
             if price is not None:
                 total += float(price) * quantity
@@ -532,7 +537,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
             "true_cost_per_unit, "
             "parts!job_parts_part_id_fkey(part_name, description), "
             "job_operations(estimated_setup_minutes, estimated_run_minutes_per_unit, "
-            "work_center_kind_snapshot, labor_rate_snapshot, "
+            "vendor_service_id, labor_rate_snapshot, "
             "external_unit_price_snapshot))"
         )
         .eq("company_id", company_id)

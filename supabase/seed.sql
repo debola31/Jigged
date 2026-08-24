@@ -186,14 +186,27 @@ insert into public.system_admins (id, user_id, created_by) values
    '11111111-1111-1111-1111-111111111117')
 on conflict do nothing;
 
--- ── Vendors (+ one contact each) ─────────────────────────────────────────────
-insert into public.vendors (id, company_id, name, city, state, country) values
-  ('30000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Atlas Metals Supply','Cleveland','OH','USA'),
-  ('30000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','FastenRight Hardware','Rockford','IL','USA'),
-  ('30000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','ProFinish Coatings','Detroit','MI','USA'),
-  ('30000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Precision Bearings Co','Charlotte','NC','USA'),
-  ('30000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','VoltEdge Electronics','Austin','TX','USA')
+-- ── Vendors (+ one address and one contact each) ─────────────────────────────
+insert into public.vendors (id, company_id, name) values
+  ('30000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Atlas Metals Supply'),
+  ('30000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','FastenRight Hardware'),
+  ('30000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','ProFinish Coatings'),
+  ('30000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Precision Bearings Co'),
+  ('30000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','VoltEdge Electronics')
 on conflict (id) do nothing;
+
+-- Addresses live in their own table now, so a vendor is not limited to one.
+-- ProFinish gets TWO on purpose: the multi-address case is the whole reason the
+-- table exists, and a seed where every vendor has exactly one would never
+-- exercise it.
+insert into public.vendor_addresses (vendor_id, address_line1, city, state, country, attention_to, is_default) values
+  ('30000000-0000-0000-0000-000000000001','1400 Foundry Rd','Cleveland','OH','USA',null,true),
+  ('30000000-0000-0000-0000-000000000002','88 Fastener Way','Rockford','IL','USA',null,true),
+  ('30000000-0000-0000-0000-000000000003','2200 Anodize Dr','Detroit','MI','USA','Receiving',true),
+  ('30000000-0000-0000-0000-000000000003','515 Remit Center','Southfield','MI','USA','Accounts Receivable',false),
+  ('30000000-0000-0000-0000-000000000004','9 Bearing Ct','Charlotte','NC','USA',null,true),
+  ('30000000-0000-0000-0000-000000000005','77 Voltage Blvd','Austin','TX','USA',null,true)
+on conflict do nothing;
 
 insert into public.vendor_contacts (vendor_id, name, role, email, phone, is_primary) values
   ('30000000-0000-0000-0000-000000000001','Atlas Sales','sales','sales@atlas.example','555-0100',true),
@@ -203,15 +216,27 @@ insert into public.vendor_contacts (vendor_id, name, role, email, phone, is_prim
   ('30000000-0000-0000-0000-000000000005','VoltEdge Sales','sales','sales@voltedge.example','555-0100',true)
 on conflict do nothing;
 
--- ── Work centers (6 internal + 1 external anodize → ProFinish) ────────────────
-insert into public.work_centers (id, company_id, name, kind, vendor_id, labor_rate, description) values
-  ('40000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Bandsaw','internal',null,75,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','CNC Mill (Haas VF-2)','internal',null,120,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','CNC Lathe (Okuma)','internal',null,110,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Manual Deburr','internal',null,65,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','Assembly Bench','internal',null,70,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Final Inspection','internal',null,85,'In-house work center'),
-  ('40000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','Anodizing (ProFinish)','external','30000000-0000-0000-0000-000000000003',null,'Outside process')
+-- ── Work centers (6 in-house stations) ───────────────────────────────────────
+-- Every row here is a place in THIS shop with an hourly rate. Outsourced
+-- processes are not work centers and live below, on the vendor that performs
+-- them.
+insert into public.work_centers (id, company_id, name, labor_rate, description) values
+  ('40000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Bandsaw',75,'In-house work center'),
+  ('40000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','CNC Mill (Haas VF-2)',120,'In-house work center'),
+  ('40000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','CNC Lathe (Okuma)',110,'In-house work center'),
+  ('40000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Manual Deburr',65,'In-house work center'),
+  ('40000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','Assembly Bench',70,'In-house work center'),
+  ('40000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Final Inspection',85,'In-house work center')
+on conflict (id) do nothing;
+
+-- ── Vendor services (1 anodize, performed by ProFinish) ──────────────────────
+-- Named for the PROCESS, not the supplier — the vendor is the parent row, so
+-- "Anodize" is the whole name. The price lives here and the routing step below
+-- inherits it, which is the case worth showing: one price, set once, used by
+-- every step that has not deliberately overridden it.
+insert into public.vendor_services (id, company_id, vendor_id, name, unit_price, description) values
+  ('41000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',
+   '30000000-0000-0000-0000-000000000003','Anodize',4.5,'Type II clear, racked')
 on conflict (id) do nothing;
 
 -- ── Customers (+ billing/shipping addresses + primary contact) ───────────────
@@ -437,10 +462,9 @@ insert into public.routing_operations (routing_id, work_center_id, sequence, set
   ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000001',10,15,3,null,null,null),
   ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000003',20,15,3,null,null,null),
   ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000004',30,15,3,null,null,null),
-  -- cover: mill, deburr, anodize(external)
+  -- cover: mill, deburr (its anodize step is outside work — separate insert below)
   ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000002',10,15,3,null,null,null),
   ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null),
-  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000007',30,0,0,null,4.5,'Mask the bore before it goes out. ProFinish will not mask it for us.'),
   -- bracket: mill, deburr
   ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000002',10,15,3,null,null,null),
   ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null),
@@ -463,6 +487,15 @@ insert into public.routing_operations (routing_id, work_center_id, sequence, set
   -- rail: saw, deburr
   ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000001',10,15,3,null,null,null),
   ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null)
+on conflict do nothing;
+
+-- The one outside step: cover → anodize at ProFinish. A separate statement
+-- because it targets vendor_service_id instead of work_center_id (the CHECK
+-- routing_operations_exactly_one_target allows exactly one of the two), and
+-- because it carries NO external_unit_price — the price is inherited from
+-- vendor_services.unit_price, which is the path worth exercising in the seed.
+insert into public.routing_operations (routing_id, vendor_service_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, instructions) values
+  ('70000000-0000-0000-0000-000000000011','41000000-0000-0000-0000-000000000001',30,0,0,null,null,'Mask the bore before it goes out. ProFinish will not mask it for us.')
 on conflict do nothing;
 
 -- Pricing tiers for sellable products (sequence 1/2/3…; markup %).
@@ -582,19 +615,18 @@ begin
   return v_jp;
 end $$;
 
--- Record the completion event behind an advanced operation. Outside
--- (external-vendor) ops are skipped: compute_job_operation_status() returns their
--- stored status untouched because they move through the send/receive lifecycle,
--- so a quantity event there would be meaningless noise. (The seeded routings are
--- all-internal today; the guard keeps this correct if an outside step is added.)
+-- Record the completion event behind an advanced operation. Outside ops are
+-- skipped: compute_job_operation_status() returns their stored status untouched
+-- because they move through the send/receive lifecycle, so a quantity event
+-- there would be meaningless noise. The cover routing now HAS an outside step,
+-- so this guard is load-bearing rather than defensive.
 create function pg_temp.record_completion(
   p_op uuid, p_jp uuid, p_qty numeric, p_at timestamptz, p_note text)
 returns void language plpgsql as $$
 begin
   if exists (
     select 1 from public.job_operations o
-    join public.work_centers wc on wc.id = o.work_center_id
-    where o.id = p_op and wc.kind = 'external'
+    where o.id = p_op and o.vendor_service_id is not null
   ) then
     return;
   end if;

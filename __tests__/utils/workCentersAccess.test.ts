@@ -24,7 +24,6 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   getAllWorkCenters,
-  getWorkCentersByKind,
   getWorkCenter,
   checkWorkCenterNameExists,
   createWorkCenter,
@@ -77,15 +76,6 @@ describe('workCentersAccess', () => {
     });
   });
 
-  describe('getWorkCentersByKind', () => {
-    it('filters by kind in addition to company', async () => {
-      mockQueryBuilder.data = [];
-      await getWorkCentersByKind('co-1', 'external');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('kind', 'external');
-    });
-  });
-
   describe('getWorkCenter', () => {
     it('returns the row when found', async () => {
       mockQueryBuilder.data = { id: 'wc1', name: 'Mill' };
@@ -117,22 +107,22 @@ describe('workCentersAccess', () => {
   });
 
   describe('createWorkCenter', () => {
-    it('inserts a work center with parsed labor_rate and nulled vendor_id for internal kind', async () => {
-      mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
+    it('inserts a work center with a parsed labor_rate and a trimmed description', async () => {
+      mockQueryBuilder.data = { id: 'new', name: 'Mill' };
       await createWorkCenter('co-1', {
         ...EMPTY_WORK_CENTER_FORM,
         name: 'Mill',
-        kind: 'internal',
-        vendor_id: null,
         labor_rate: '85.50',
         description: '  big lathe ',
       });
       const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(insertCall.company_id).toBe('co-1');
-      expect(insertCall.kind).toBe('internal');
-      expect(insertCall.vendor_id).toBeNull();
       expect(insertCall.labor_rate).toBe(85.5);
       expect(insertCall.description).toBe('big lathe');
+      // There is no kind and no vendor on a work centre any more; writing
+      // either would be writing a column that no longer exists.
+      expect(insertCall).not.toHaveProperty('kind');
+      expect(insertCall).not.toHaveProperty('vendor_id');
     });
   });
 
@@ -170,11 +160,10 @@ describe('workCentersAccess', () => {
   // refuses, arrived at by accident.
   describe('workCentersAccess machine details', () => {
     it('writes blank machine details as null', async () => {
-      mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
+      mockQueryBuilder.data = { id: 'new', name: 'Mill' };
       await createWorkCenter('co-1', {
         ...EMPTY_WORK_CENTER_FORM,
         name: 'Mill',
-        kind: 'internal',
         labor_rate: '85.50',
       });
 
@@ -187,11 +176,10 @@ describe('workCentersAccess', () => {
     });
 
     it('trims and parses the details that were filled in', async () => {
-      mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
+      mockQueryBuilder.data = { id: 'new', name: 'Mill' };
       await createWorkCenter('co-1', {
         ...EMPTY_WORK_CENTER_FORM,
         name: 'Mill',
-        kind: 'internal',
         labor_rate: '85.50',
         make: '  Haas ',
         model: 'VF-2',

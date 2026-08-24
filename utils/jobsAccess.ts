@@ -332,7 +332,8 @@ export async function getJobWithRelations(
         parts(id, part_name, description),
         job_operations(
           *,
-          work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
+          work_center:work_centers!left(id, name, labor_rate),
+      vendor_service:vendor_services!left(id, name, unit_price, vendor:vendors(id, name))
         )
       )
     `)
@@ -1292,7 +1293,8 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
+      work_center:work_centers!left(id, name, labor_rate),
+      vendor_service:vendor_services!left(id, name, unit_price, vendor:vendors(id, name))
     `)
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
@@ -1328,24 +1330,22 @@ export async function completeJobOperation(
   void jobId;
 
   // Context: ids + company + ordered qty (target) + before-statuses (to detect
-  // the trigger-driven part/job transitions this completion causes) + work-center
-  // kind (to reject outside ops).
+  // the trigger-driven part/job transitions this completion causes) +
+  // vendor_service_id (to reject outside ops).
   const { data: opCtx, error: ctxErr } = await supabase
     .from('job_operations')
     .select(
-      'id, job_id, job_part_id, job_parts!inner(company_id, quantity, production_status), jobs!inner(production_status), work_center:work_centers(kind)',
+      'id, job_id, job_part_id, vendor_service_id, job_parts!inner(company_id, quantity, production_status), jobs!inner(production_status)',
     )
     .eq('id', operationId)
     .single();
   if (ctxErr || !opCtx) throw ctxErr || new Error('operation not found');
 
-  // Outside (external-vendor) ops can NEVER be completed through this internal
-  // path — they go through the send/receive lifecycle
-  // (operatorAccess.markOperationReceived). See docs/modules/jobs.md.
-  const opWc = firstRelation(
-    (opCtx as unknown as { work_center: { kind: string } | { kind: string }[] | null }).work_center ?? { kind: 'internal' },
-  );
-  if (opWc?.kind === 'external') {
+  // Outside ops can NEVER be completed through this internal path — they go
+  // through the send/receive lifecycle (operatorAccess.markOperationReceived).
+  // See docs/modules/jobs.md. Reading the column directly also drops an
+  // `as unknown as` cast that the typed-client rule exists to prevent.
+  if (opCtx.vendor_service_id) {
     throw new Error(
       'This is an outside (vendor) operation — use Mark Received, not Complete.',
     );
@@ -1404,7 +1404,8 @@ export async function completeJobOperation(
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
+      work_center:work_centers!left(id, name, labor_rate),
+      vendor_service:vendor_services!left(id, name, unit_price, vendor:vendors(id, name))
     `)
     .eq('id', operationId)
     .single();
@@ -1444,19 +1445,15 @@ export async function completeJobOperation(
 export async function undoJobOperation(operationId: string): Promise<JobOperation> {
   const supabase = getSupabase();
 
-  // Outside (external-vendor) ops step back through their own lifecycle
+  // Outside ops step back through their own lifecycle
   // (operatorAccess.revertOperationCompletion: received → sent → pending), never
   // this internal completion-void path. The UI routes them there; guard anyway.
-  const { data: wcRow } = await supabase
+  const { data: outsideRow } = await supabase
     .from('job_operations')
-    .select('work_center:work_centers(kind)')
+    .select('vendor_service_id')
     .eq('id', operationId)
     .single();
-  const undoWc = firstRelation(
-    (wcRow as unknown as { work_center: { kind: string } | { kind: string }[] | null } | null)
-      ?.work_center ?? { kind: 'internal' },
-  );
-  if (undoWc?.kind === 'external') {
+  if (outsideRow?.vendor_service_id) {
     throw new Error(
       'This is an outside (vendor) operation — undo it from its send/receive controls.',
     );
@@ -1468,7 +1465,8 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
+      work_center:work_centers!left(id, name, labor_rate),
+      vendor_service:vendor_services!left(id, name, unit_price, vendor:vendors(id, name))
     `)
     .eq('id', operationId)
     .single();

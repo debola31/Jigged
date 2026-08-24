@@ -7,7 +7,6 @@
  * (`parts_bom`), not on the routing.
  */
 
-import type { WorkCenterKind } from './workCenter';
 
 // ============================================
 // Core Database Entities
@@ -34,16 +33,24 @@ export interface Routing {
 /**
  * A single operation in the routing, ordered by `sequence`.
  *
- * The cost-relevant fields split by the work_center's kind:
- * - kind='internal' uses `setup_minutes` + `cycle_minutes_per_unit` priced at
+ * A step targets EXACTLY ONE of `work_center_id` (an in-house station) or
+ * `vendor_service_id` (an outside process), enforced by the DB CHECK
+ * `routing_operations_exactly_one_target`. Which one is set decides how it is
+ * priced:
+ * - a station uses `setup_minutes` + `cycle_minutes_per_unit` at
  *   `COALESCE(labor_rate_override, work_center.labor_rate)`.
- * - kind='external' uses `external_unit_price` only (external work bills once
- *   per part, so there is no setup cost) and ignores the time/rate fields.
+ * - a service uses `COALESCE(external_unit_price, vendor_service.unit_price)`
+ *   only — outside work bills once per part, so there is no setup cost — and
+ *   ignores the time/rate fields.
+ *
+ * Both money fields are OVERRIDES that inherit when null, which is why neither
+ * is read on its own anywhere.
  */
 export interface RoutingOperation {
   id: string;
   routing_id: string;
-  work_center_id: string;
+  work_center_id: string | null;
+  vendor_service_id: string | null;
   sequence: number;
   setup_minutes: number | null;
   cycle_minutes_per_unit: number | null;
@@ -79,14 +86,21 @@ export interface RoutingWithStats extends RoutingWithPart {
 }
 
 /**
- * Routing operation joined with its work center for display.
+ * Routing operation joined with whichever target it points at.
+ *
+ * Exactly one of the two is non-null on a well-formed row; the UI reads
+ * `vendor_service` first, and its presence IS the "this is outside work" test.
  */
 export interface RoutingOperationWithWorkCenter extends RoutingOperation {
   work_center: {
     id: string;
     name: string;
-    kind: WorkCenterKind;
     labor_rate: number | null;
+  } | null;
+  vendor_service: {
+    id: string;
+    name: string;
+    unit_price: number | null;
     vendor: { id: string; name: string } | null;
   } | null;
 }
@@ -112,7 +126,10 @@ export interface RoutingWithGraph extends Routing {
  * Form data for creating/editing a routing operation.
  */
 export interface RoutingOperationFormData {
+  /** Set for an in-house station; empty when the step targets a service. */
   work_center_id: string;
+  /** Set for an outside process; empty when the step targets a station. */
+  vendor_service_id: string;
   setup_minutes: string;
   cycle_minutes_per_unit: string;
   labor_rate_override: string;
@@ -122,6 +139,7 @@ export interface RoutingOperationFormData {
 
 export const EMPTY_OPERATION_FORM: RoutingOperationFormData = {
   work_center_id: '',
+  vendor_service_id: '',
   setup_minutes: '',
   cycle_minutes_per_unit: '',
   labor_rate_override: '',
@@ -135,7 +153,8 @@ export const EMPTY_OPERATION_FORM: RoutingOperationFormData = {
 
 export function routingOperationToFormData(op: RoutingOperation): RoutingOperationFormData {
   return {
-    work_center_id: op.work_center_id,
+    work_center_id: op.work_center_id ?? '',
+    vendor_service_id: op.vendor_service_id ?? '',
     setup_minutes: op.setup_minutes !== null ? String(op.setup_minutes) : '',
     cycle_minutes_per_unit:
       op.cycle_minutes_per_unit !== null ? String(op.cycle_minutes_per_unit) : '',
@@ -147,9 +166,9 @@ export function routingOperationToFormData(op: RoutingOperation): RoutingOperati
 
 /**
  * Sum setup + per-unit cycle time across all internal operations in a
- * routing. External ops contribute zero minutes (they price by unit, not time)
- * — caller should fold in their flat costs separately if a duration estimate
- * is needed.
+ * routing. Outside steps contribute zero minutes (they price by the piece, not
+ * by time) — caller should fold in their flat costs separately if a duration
+ * estimate is needed.
  */
 export function calculateRoutingTime(
   operations: RoutingOperationWithWorkCenter[],
@@ -159,7 +178,7 @@ export function calculateRoutingTime(
   let setupTime = 0;
 
   for (const op of operations) {
-    if (op.work_center?.kind === 'external') continue;
+    if (op.vendor_service_id) continue;
     runTime += (op.cycle_minutes_per_unit || 0) * quantity;
     setupTime += op.setup_minutes || 0;
   }

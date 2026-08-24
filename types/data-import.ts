@@ -9,6 +9,7 @@ export type Severity = 'info' | 'warning' | 'critical';
 export type EntityType =
   | 'parts'
   | 'vendors'
+  | 'vendor_services'
   | 'work_centers'
   | 'routings'
   | 'bom'

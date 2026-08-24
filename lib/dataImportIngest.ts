@@ -15,15 +15,23 @@ import type { WorkingFile } from '@/lib/dataImportEditing';
 export const ENTITY_ENDPOINT: Partial<Record<EntityType, string>> = {
   vendors: '/api/vendors/import/execute',
   work_centers: '/api/work-centers/import/execute',
+  vendor_services: '/api/vendor-services/import/execute',
   customers: '/api/customers/import/execute',
   parts: '/api/parts/import/execute',
   bom: '/api/bom/import/execute',
   routings: '/api/routings/import/execute',
 };
 
-/** Parents before children: vendors/work-centers/customers → parts → bom/routings. */
+/**
+ * Parents before children: vendors/work-centers/customers → vendor services →
+ * parts → bom/routings.
+ *
+ * Vendor services sit in their OWN tier rather than beside work centres,
+ * because every one of them names a vendor that must already exist.
+ */
 export const WRITE_TIERS: EntityType[][] = [
   ['vendors', 'work_centers', 'customers'],
+  ['vendor_services'],
   ['parts'],
   ['bom', 'routings'],
 ];

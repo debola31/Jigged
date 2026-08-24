@@ -17,9 +17,10 @@ import BuildIcon from '@mui/icons-material/Build';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
 import RoutingOperationRowEditor, {
   type OperationEditorValue,
-  type WorkCenterOption,
+  type StepTargetOption,
 } from './RoutingOperationRowEditor';
 import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
+import { getVendorServicesForRouting } from '@/utils/vendorServicesAccess';
 import { formatTime } from '@/types/routings';
 
 const generateTempId = () => `temp-op-${crypto.randomUUID()}`;
@@ -44,7 +45,7 @@ export default function RoutingOperationsList({
   companyId,
   disabled = false,
 }: RoutingOperationsListProps) {
-  const [workCenters, setWorkCenters] = useState<WorkCenterOption[]>([]);
+  const [workCenters, setWorkCenters] = useState<StepTargetOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorState, setEditorState] = useState<
@@ -59,12 +60,39 @@ export default function RoutingOperationsList({
   // unrecoverable removal. See docs/interaction-standards.md §1.
   const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
+  // One picker, two sources. They stay separate calls because a station and a
+  // service carry different money (an hourly rate vs a price per piece) and a
+  // union query would have to invent a shape that flattens that apart again.
+  // `target` is stamped here, from which call the row came — never inferred
+  // downstream from a null.
   useEffect(() => {
-    getWorkCentersForRouting(companyId)
-      .then(setWorkCenters)
+    Promise.all([
+      getWorkCentersForRouting(companyId),
+      getVendorServicesForRouting(companyId),
+    ])
+      .then(([stations, services]) => {
+        setWorkCenters([
+          ...stations.map((wc) => ({
+            id: wc.id,
+            name: wc.name,
+            target: 'station' as const,
+            labor_rate: wc.labor_rate,
+            unit_price: null,
+            vendor_name: null,
+          })),
+          ...services.map((vs) => ({
+            id: vs.id,
+            name: vs.name,
+            target: 'service' as const,
+            labor_rate: null,
+            unit_price: vs.unit_price,
+            vendor_name: vs.vendor_name,
+          })),
+        ]);
+      })
       .catch((err: unknown) => {
-        console.error('Failed to load work centers:', err);
-        setError('Failed to load work centers.');
+        console.error('Failed to load routing step targets:', err);
+        setError('Failed to load work centers and outside services.');
       })
       .finally(() => setLoading(false));
   }, [companyId]);
@@ -92,13 +120,15 @@ export default function RoutingOperationsList({
   const handleEditorSave = (value: OperationEditorValue) => {
     if (!value.workCenter) return;
     if (editorState.mode === 'add') {
+      const isService = value.workCenter.target === 'service';
       const newRow: OperationRowData = {
         tempId: generateTempId(),
-        workCenterId: value.workCenter.id,
+        workCenterId: isService ? null : value.workCenter.id,
+        vendorServiceId: isService ? value.workCenter.id : null,
         workCenterName: value.workCenter.name,
-        workCenterKind: value.workCenter.kind,
         vendorName: value.workCenter.vendor_name,
         workCenterLaborRate: value.workCenter.labor_rate,
+        vendorServiceUnitPrice: value.workCenter.unit_price,
         setupMinutes: value.setupMinutes,
         cycleMinutesPerUnit: value.cycleMinutesPerUnit,
         laborRateOverride: value.laborRateOverride,
@@ -126,13 +156,19 @@ export default function RoutingOperationsList({
   const editingInitial: OperationEditorValue | undefined = editingRow
     ? {
         workCenter:
-          workCenters.find((wc) => wc.id === editingRow.workCenterId) ||
-          (editingRow.workCenterId
+          workCenters.find(
+            (wc) => wc.id === (editingRow.vendorServiceId ?? editingRow.workCenterId),
+          ) ||
+          // Fallback for a target that has since been archived: it is gone from
+          // the picker but the step still points at it, and the editor must
+          // still render rather than blanking the row.
+          (editingRow.vendorServiceId || editingRow.workCenterId
             ? {
-                id: editingRow.workCenterId,
+                id: (editingRow.vendorServiceId ?? editingRow.workCenterId) as string,
                 name: editingRow.workCenterName,
-                kind: editingRow.workCenterKind,
-                labor_rate: null,
+                target: editingRow.vendorServiceId ? ('service' as const) : ('station' as const),
+                labor_rate: editingRow.workCenterLaborRate,
+                unit_price: editingRow.vendorServiceUnitPrice,
                 vendor_name: editingRow.vendorName,
               }
             : null),
@@ -147,12 +183,12 @@ export default function RoutingOperationsList({
   const isEditingExisting = editorState.mode === 'edit';
   const editorOpen = editorState.mode !== 'closed';
 
-  // Sum internal-only time across the routing for the header caption.
-  // External operations price by unit (not time) and contribute zero minutes.
+  // Sum in-house time across the routing for the header caption. Outside steps
+  // price by the piece (not by time) and contribute zero minutes.
   let setupMinutesTotal = 0;
   let cycleMinutesTotal = 0;
   for (const r of rows) {
-    if (r.workCenterKind === 'external') continue;
+    if (r.vendorServiceId) continue;
     setupMinutesTotal += r.setupMinutes ?? 0;
     cycleMinutesTotal += r.cycleMinutesPerUnit ?? 0;
   }
@@ -160,7 +196,8 @@ export default function RoutingOperationsList({
   // Placeholder rows have no chosen work center yet, so fall back to a
   // generic noun in the confirm copy.
   const pendingRow = pendingDeleteIndex !== null ? rows[pendingDeleteIndex] : null;
-  const pendingName = pendingRow?.workCenterId ? pendingRow.workCenterName : null;
+  const pendingName =
+    pendingRow?.workCenterId || pendingRow?.vendorServiceId ? pendingRow.workCenterName : null;
 
   return (
     <Box>

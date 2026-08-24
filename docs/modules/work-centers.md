@@ -17,15 +17,23 @@
 
 ## Overview
 
-A **work center** is a unit of production capacity: **internal** (a machine, station or in-house capability
-with an hourly labor rate) or **external** (an outsourced process performed by a vendor). Consumed by
-[Routings](routings.md) via `routing_operations.work_center_id`. Built, in production.
-**Depends on** [Vendors](vendors.md) — external centres point at one.
+> **⚠ Corrected 2026-08-23 — the external half of this module is gone.** A work centre is now
+> **in-house only**. `work_centers.kind` and `work_centers.vendor_id` were **dropped**, not
+> deprecated, and every `kind='external'` row moved to `vendor_services` under the same uuid. The
+> statements below about kinds, the kind toggle, the External tab, the vendor link and external
+> costing described the schema until that date and are retained only where they explain why
+> something is the shape it is. **Owner of the outsourced side: [vendor-services.md](vendor-services.md).**
+
+A **work center** is a unit of **in-house** production capacity — a machine, station or capability
+with an hourly labor rate. Consumed by [Routings](routings.md) via
+`routing_operations.work_center_id`, which is now nullable: a routing step targets either a work
+centre or a vendor service, never both. Built, in production. **No longer depends on**
+[Vendors](vendors.md).
 
 ## Stations (work centers)
 
 **A "station" in the operator view is a `work_centers` row** — the two words name the same entity. Either kind
-qualifies; `kind='external'` simply points at a vendor. [operator-view.md](operator-view.md#stations-work-centers)
+qualifies — and since the split there is only one kind. [operator-view.md](operator-view.md#stations-work-centers)
 covers how one is selected and remembered. A *machine* in
 [Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` row, with `kind='internal'`.
 
@@ -45,9 +53,9 @@ covers how one is selected and remembered. A *machine* in
 |---|---|
 | `id`, `company_id` | uuid |
 | `name` | required; UNIQUE `(company_id, name)` — `work_centers_unique_per_company` |
-| `kind` | `internal \| external` (`work_centers_kind_check`), default `internal` |
-| `vendor_id` | FK → `vendors`; required when external, NULL when internal — both directions are DB CHECKs (`work_centers_external_requires_vendor`, `work_centers_internal_no_vendor`) |
-| `labor_rate` | numeric(10,2); internal only, cleared to NULL when kind flips to external |
+| ~~`kind`~~ | **Dropped 2026-08-23** with its CHECK. Every row is in-house |
+| ~~`vendor_id`~~ | **Dropped 2026-08-23** with both CHECKs. A work centre has no vendor |
+| `labor_rate` | numeric(10,2); **required** — the form no longer has a kind to make it conditional |
 | `description` | optional multiline |
 | `metadata` | jsonb `{}` — reserved, unused |
 | `make`, `model`, `serial_number` | text — **machine details**: internal only, optional, unvalidated |
@@ -56,10 +64,10 @@ covers how one is selected and remembered. A *machine* in
 | `deleted_at` | archive marker |
 | `created_at`, `updated_at` | |
 
-**External work centres carry no `labor_rate`.** Their cost is one vendor unit price set *per routing
-operation* (`routing_operations.external_unit_price`) — per-operation, not per-vendor. External work **bills
-once per part, so there is no setup cost**; setup is internal-only, and `external_setup_cost` was dropped in
-June 2026. [routings.md](routings.md) defers here for this rule.
+**Outside work is priced elsewhere now.** A vendor service carries its own `unit_price` which the
+routing step inherits — see [vendor-services.md](vendor-services.md). Outside work still **bills once
+per part, so there is no setup cost**; setup is in-house-only, and `external_setup_cost` was dropped
+in June 2026.
 
 **Machine details are optional by design, with no completeness indicator** — asset data entry is a leading
 cause of CMMS abandonment, and the machines already exist as work centres, so maintenance starts with a
@@ -72,13 +80,13 @@ complete asset list and an empty asset detail. Full reasoning and the pilot kill
 
 ### List — `/dashboard/{companyId}/work-centers`
 
-Split by kind into **Internal** and **External** tabs; **there is no combined "All" view**. Switching tabs
-re-queries via `getWorkCentersByKind`, clears the search box and the selection, and moves the app-bar title.
-Internal shows a **Cost** column (`labor_rate` as `$X.XX/hr`); External shows **Vendor** plus the caption
-"External work centers are priced per routing operation, not by an hourly rate."
+**One grid, no tabs.** The Internal/External tab strip, `activeKind`, the per-tab column memo and the
+app-bar-title effect are all deleted; `getWorkCentersByKind` is gone with them. A permanent caption
+points at Vendors for outsourced processes, because someone will look for the External tab they used
+yesterday.
 
-**Withdrawn:** a cross-kind Cost cell and a comparator pinning external rows — wrong because the two kinds
-never share a grid, so neither device has anything to reconcile.
+**Withdrawn:** a cross-kind Cost cell and a comparator pinning external rows — wrong when the two
+kinds never shared a grid, and moot now that there is one kind.
 
 Search filters name (300ms debounce), default sort name asc, pagination 25/50/100. Toolbar: **New Work
 Center**, `ExportCsvButton`, and a `Delete (n)` bulk action once rows are selected; the empty state carries
@@ -87,7 +95,7 @@ until that wizard was retired in favour of the one guided importer.)*
 
 ### Detail — `/dashboard/{companyId}/work-centers/{workCenterId}`
 
-Header card (name, kind chip, "via {vendor}" for external); Details card (labor rate *or* vendor link +
+Header card (name — the kind chip and the "via {vendor}" line are gone); Details card (labor rate; the vendor link and
 "Pricing per routing operation"; description; "Used in routing operations" count; timestamps); and — when
 `machine_maintenance` is enabled **and** `kind='internal'` — a **Maintenance log** card holding
 `MachineManualsManager` above a **read-only** `MachineLogPanel`. Read-only because the pilot's bar counts
@@ -109,7 +117,9 @@ supplies `routing_operations_count`.
 - **Name** — required, case-insensitively unique per company (`checkWorkCenterNameExists`, excluding the
   current row on edit).
 - **Kind toggle** — Internal / External, **locked in edit mode when `routing_operations_count > 0`:** costing
-  reads `kind` live, so flipping internal↔external would orphan the pricing on every referencing operation. A
+  read `kind` live, so flipping internal↔external would have orphaned the pricing on every referencing
+  operation. **The toggle and the lock are both gone** — a shop that brings anodizing in-house archives
+  the service and creates a station. A
   caption explains the lock and shows the count.
 - **Internal:** `labor_rate` **required** and ≥ 0 — an internal routing op with no rate and no per-op override
   cannot be priced. Switching to External hides and clears it.

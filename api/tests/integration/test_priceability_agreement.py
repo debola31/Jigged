@@ -101,7 +101,7 @@ def env(admin: Client):
     wc = (
         admin.table("work_centers")
         .insert(
-            {"company_id": company_id, "name": "Mill", "kind": "internal", "labor_rate": 50}
+            {"company_id": company_id, "name": "Mill", "labor_rate": 50}
         )
         .execute()
     )

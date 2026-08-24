@@ -107,6 +107,7 @@ app.add_middleware(
 from routes.import_routes import router as import_router
 from routes.parts_import_routes import router as parts_import_router
 from routes.work_centers_import_routes import router as work_centers_import_router
+from routes.vendor_services_import_routes import router as vendor_services_import_router
 from routes.vendors_import_routes import router as vendors_import_router
 from routes.bom_import_routes import router as bom_import_router
 from routes.routings_import_routes import router as routings_import_router
@@ -122,6 +123,7 @@ from routes.stripe_routes import router as stripe_router
 app.include_router(import_router)
 app.include_router(parts_import_router)
 app.include_router(work_centers_import_router)
+app.include_router(vendor_services_import_router)
 app.include_router(vendors_import_router)
 app.include_router(bom_import_router)
 app.include_router(routings_import_router)

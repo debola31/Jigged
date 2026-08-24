@@ -132,13 +132,18 @@ function makeOp(overrides: OpOverrides = {}): RoutingOperationWithWorkCenter {
     metadata: {},
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
-    work_center: overrides.work_center ?? {
-      id: 'wc-1',
-      name: 'Mazak Lathe',
-      kind: 'internal',
-      labor_rate: 100,
-      vendor: null,
-    },
+    vendor_service_id: overrides.vendor_service_id ?? null,
+    // An op targets exactly one: default to an in-house station, and let a
+    // fixture pass `vendor_service` (plus a null work_center) for outside work.
+    work_center:
+      overrides.vendor_service !== undefined
+        ? (overrides.work_center ?? null)
+        : (overrides.work_center ?? {
+            id: 'wc-1',
+            name: 'Mazak Lathe',
+            labor_rate: 100,
+          }),
+    vendor_service: overrides.vendor_service ?? null,
   };
 }
 
@@ -357,19 +362,20 @@ describe('calculateRoutingCost', () => {
     });
   });
 
-  describe('external operations', () => {
-    const externalWc = {
-      id: 'wc-ext',
-      name: 'PerformCoat',
-      kind: 'external' as const,
-      labor_rate: null,
+  describe('outside operations', () => {
+    const anodize = {
+      id: 'vs-1',
+      name: 'Anodize',
+      unit_price: null as number | null,
       vendor: { id: 'v-1', name: 'PerformCoat Finishing' },
     };
 
-    it('prices external ops as per-unit unit_price with zero setup', async () => {
+    it('prices outside ops per piece with zero setup', async () => {
       const op = makeOp({
         external_unit_price: 4.5,
-        work_center: externalWc,
+        vendor_service_id: 'vs-1',
+        vendor_service: anodize,
+        work_center: null,
       });
       mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
 
@@ -378,20 +384,54 @@ describe('calculateRoutingCost', () => {
       expect(result!.warnings).toEqual([]);
       expect(result!.labor_items).toHaveLength(1);
       expect(result!.labor_items[0].cost).toBe(4.5);
-      // External work bills once per part — there is no setup cost.
+      // Outside work bills once per part — there is no setup cost.
       expect(result!.labor_items[0].setup_cost).toBe(0);
-      // External ops never carry time — those fields stay zero
+      // Outside ops never carry time — those fields stay zero
       expect(result!.labor_items[0].run_time_minutes).toBe(0);
       expect(result!.labor_items[0].setup_time_minutes).toBe(0);
       expect(result!.labor_items[0].labor_rate).toBe(0);
     });
 
-    it('emits missing_external_pricing when there is no unit price', async () => {
-      // Mirrors compute_part_cost_at_qty's SQL guard: an external op with no
-      // unit price is meaningless, so we refuse to price it as $0.
+    it('inherits the service price when the step sets no override', async () => {
+      // The mirror of how an internal op inherits its station's labor_rate.
+      // Reading only the step's own price would under-report the cost of every
+      // step that agreed with the vendor — 89% of them, in production.
       const op = makeOp({
         external_unit_price: null,
-        work_center: externalWc,
+        vendor_service_id: 'vs-1',
+        vendor_service: { ...anodize, unit_price: 6.25 },
+        work_center: null,
+      });
+      mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
+
+      const result = await calculateRoutingCost('part-1');
+
+      expect(result!.warnings).toEqual([]);
+      expect(result!.labor_items[0].cost).toBe(6.25);
+    });
+
+    it('prefers the step override over the service price', async () => {
+      const op = makeOp({
+        external_unit_price: 9,
+        vendor_service_id: 'vs-1',
+        vendor_service: { ...anodize, unit_price: 6.25 },
+        work_center: null,
+      });
+      mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
+
+      const result = await calculateRoutingCost('part-1');
+
+      expect(result!.labor_items[0].cost).toBe(9);
+    });
+
+    it('emits missing_external_pricing only when BOTH prices are absent', async () => {
+      // Mirrors part_rollup_at_qty's SQL guard: an outside op with no price
+      // anywhere is meaningless, so we refuse to price it as $0.
+      const op = makeOp({
+        external_unit_price: null,
+        vendor_service_id: 'vs-1',
+        vendor_service: anodize,
+        work_center: null,
       });
       mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
 
@@ -399,37 +439,32 @@ describe('calculateRoutingCost', () => {
 
       expect(result!.warnings).toHaveLength(1);
       expect(result!.warnings[0].type).toBe('missing_external_pricing');
-      expect(result!.warnings[0].message).toContain('PerformCoat');
+      expect(result!.warnings[0].message).toContain('Anodize');
       expect(result!.labor_items).toHaveLength(0);
     });
   });
 
-  describe('mixed internal + external routings', () => {
-    it('sums per-op contributions correctly across kinds', async () => {
+  describe('mixed in-house + outside routings', () => {
+    it('sums per-op contributions correctly across both targets', async () => {
       const internalOp = makeOp({
         id: 'op-int',
         setup_minutes: 30,
         cycle_minutes_per_unit: 6,
         // override 120 → run = 12.00, setup = 60.00
         labor_rate_override: 120,
-        work_center: {
-          id: 'wc-int',
-          name: 'HURCO Mill',
-          kind: 'internal',
-          labor_rate: 100,
-          vendor: null,
-        },
+        work_center: { id: 'wc-int', name: 'HURCO Mill', labor_rate: 100 },
       });
       const externalOp = makeOp({
         id: 'op-ext',
         external_unit_price: 4.5,
-        work_center: {
-          id: 'wc-ext',
-          name: 'PerformCoat',
-          kind: 'external',
-          labor_rate: null,
+        vendor_service_id: 'vs-1',
+        vendor_service: {
+          id: 'vs-1',
+          name: 'Anodize',
+          unit_price: null,
           vendor: { id: 'v-1', name: 'PerformCoat Finishing' },
         },
+        work_center: null,
       });
       mockGetRoutingForPart.mockResolvedValue(makeRouting([internalOp, externalOp]));
 
@@ -437,9 +472,9 @@ describe('calculateRoutingCost', () => {
 
       expect(result!.warnings).toEqual([]);
       expect(result!.labor_items).toHaveLength(2);
-      // labor (per-unit run + per-unit external unit_price)
+      // labor (per-unit run + per-piece outside price)
       expect(result!.total_labor_cost).toBeCloseTo(12 + 4.5, 2);
-      // setup (internal only — external work has no setup cost)
+      // setup (in-house only — outside work has no setup cost)
       expect(result!.total_setup_cost).toBeCloseTo(60, 2);
     });
   });

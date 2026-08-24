@@ -118,7 +118,7 @@ def env(admin: Client):
     wc_id = (
         admin.table("work_centers")
         .insert(
-            {"company_id": company_id, "name": "Mill", "kind": "internal", "labor_rate": 60}
+            {"company_id": company_id, "name": "Mill", "labor_rate": 60}
         )
         .execute()
         .data[0]["id"]
@@ -309,7 +309,6 @@ def test_an_uncostable_part_still_goes_on_a_job(admin: Client, env: JobEnv):
             {
                 "company_id": env.company_id,
                 "name": "Unrated",
-                "kind": "internal",
                 "labor_rate": None,
             }
         )
@@ -389,7 +388,7 @@ def test_operation_rates_are_frozen_beside_the_minutes(admin: Client, env: JobEn
         admin.table("job_operations")
         .select(
             "estimated_setup_minutes, estimated_run_minutes_per_unit, "
-            "work_center_kind_snapshot, labor_rate_snapshot, external_unit_price_snapshot"
+            "vendor_service_id, labor_rate_snapshot, external_unit_price_snapshot"
         )
         .eq("job_part_id", env.job_part_id)
         .execute()
@@ -398,7 +397,8 @@ def test_operation_rates_are_frozen_beside_the_minutes(admin: Client, env: JobEn
 
     assert len(ops) == 1
     op = ops[0]
-    assert op["work_center_kind_snapshot"] == "internal"
+    # An in-house op targets a work centre, so it carries no service.
+    assert op["vendor_service_id"] is None
     assert _num(op["labor_rate_snapshot"]) == Decimal("60.00")
     assert op["external_unit_price_snapshot"] is None
 

@@ -11,7 +11,6 @@ import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
-import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
@@ -21,13 +20,10 @@ import DialogActions from '@mui/material/DialogActions';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import FactoryIcon from '@mui/icons-material/Factory';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import NextLink from 'next/link';
-import MuiLink from '@mui/material/Link';
 
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
+import { getVendorService } from '@/utils/vendorServicesAccess';
 import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
 import MachineManualsManager from '@/components/maintenance/MachineManualsManager';
 
@@ -46,14 +42,28 @@ export default function WorkCenterDetailPage() {
 
   // useLoad keeps every setState inside the async callback, so the load effect
   // can't trip set-state-in-effect.
-  const { data: workCenter, loading } = useLoad(
-    () => getWorkCenterWithRelations(workCenterId),
+  //
+  // The second read is the migration affordance. Every outsourced process kept
+  // its uuid when it moved to vendor_services, so an old
+  // /work-centers/{id} bookmark, or a link in someone's email, still names a
+  // real thing — it is just no longer a work centre. Resolving that id against
+  // the new table lets the page forward rather than saying "not found", which
+  // for a shop owner reads as data loss.
+  const { data, loading } = useLoad(
+    async () => {
+      const wc = await getWorkCenterWithRelations(workCenterId);
+      if (wc) return { workCenter: wc, movedService: null };
+      const service = await getVendorService(workCenterId);
+      return { workCenter: null, movedService: service };
+    },
     [workCenterId],
     {
       onError: (err) =>
         setError(err instanceof Error ? err.message : 'Failed to load work center'),
     },
   );
+  const workCenter = data?.workCenter ?? null;
+  const movedService = data?.movedService ?? null;
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -80,6 +90,33 @@ export default function WorkCenterDetailPage() {
     );
   }
 
+  // This id is a vendor service now. Say so and hand over the link, rather than
+  // bouncing silently — someone who bookmarked "PerformCoat Anodize" as a work
+  // centre should learn where it went, not just arrive somewhere else.
+  if (!workCenter && movedService) {
+    return (
+      <Box>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            <strong>{movedService.name}</strong> is an outside process, not a work center. It
+            now lives on the vendor that performs it.
+          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() =>
+              router.push(
+                `/dashboard/${companyId}/vendors/${movedService.vendor_id}`,
+              )
+            }
+          >
+            Go to the vendor
+          </Button>
+        </Alert>
+      </Box>
+    );
+  }
+
   if (!workCenter) {
     return (
       <Box>
@@ -87,8 +124,6 @@ export default function WorkCenterDetailPage() {
       </Box>
     );
   }
-
-  const isInternal = workCenter.kind === 'internal';
 
   return (
     <Box>
@@ -149,28 +184,9 @@ export default function WorkCenterDetailPage() {
             <Typography variant="h5" sx={{ fontWeight: 600 }}>
               {workCenter.name}
             </Typography>
-            <Chip
-              icon={isInternal ? <FactoryIcon /> : <LocalShippingIcon />}
-              label={isInternal ? 'Internal' : 'External'}
-              sx={{
-                fontWeight: 600,
-                bgcolor: isInternal ? 'info.dark' : 'warning.dark',
-                color: 'common.white',
-                '& .MuiChip-icon': { color: 'common.white' },
-              }}
-            />
-            {!isInternal && workCenter.vendor && (
-              <Typography variant="body1" color="text.secondary">
-                via{' '}
-                <MuiLink
-                  component={NextLink}
-                  href={`/dashboard/${companyId}/vendors/${workCenter.vendor.id}`}
-                  sx={{ fontWeight: 500 }}
-                >
-                  {workCenter.vendor.name}
-                </MuiLink>
-              </Typography>
-            )}
+            {/* The Internal/External chip is gone with the kind column: every
+                row on this page is an in-house station now, so a badge saying so
+                on all of them carries no information. */}
           </Box>
         </CardContent>
       </Card>
@@ -182,57 +198,19 @@ export default function WorkCenterDetailPage() {
           </Typography>
           <Divider sx={{ mb: 2 }} />
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {/* Kind-conditional fields mirror the form so the displayed data is consistent.
-                Internal: labor rate. External: vendor link + a hint that pricing
-                lives on the routing operations, not on the work center. */}
-            {isInternal && (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Labor Rate
-                </Typography>
-                <Typography variant="body1" fontWeight={500}>
-                  {workCenter.labor_rate !== null
-                    ? `$${Number(workCenter.labor_rate).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}/hr`
-                    : '—'}
-                </Typography>
-              </Box>
-            )}
-            {!isInternal && (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Vendor
-                </Typography>
-                {workCenter.vendor ? (
-                  <MuiLink
-                    component={NextLink}
-                    href={`/dashboard/${companyId}/vendors/${workCenter.vendor.id}`}
-                    sx={{ fontWeight: 500 }}
-                  >
-                    {workCenter.vendor.name}
-                  </MuiLink>
-                ) : (
-                  <Typography variant="body1" color="text.secondary">
-                    —
-                  </Typography>
-                )}
-              </Box>
-            )}
-            {!isInternal && (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Pricing per routing operation
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 0.5 }}>
-                  External work centers price per routing operation. Each
-                  routing op sets its own{' '}
-                  <strong>vendor unit price</strong> for this vendor — external
-                  work bills once per part, so there is no setup cost.
-                </Typography>
-              </Box>
-            )}
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Labor Rate
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {workCenter.labor_rate !== null
+                  ? `$${Number(workCenter.labor_rate).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}/hr`
+                  : '—'}
+              </Typography>
+            </Box>
             <Box>
               <Typography variant="body2" color="text.secondary">
                 Description
@@ -276,7 +254,7 @@ export default function WorkCenterDetailPage() {
           the most convenient place to write must not be the one seat that would
           invalidate the result. Manuals and machine details are the office's job;
           the log is the floor's. */}
-      {maintenanceEnabled && workCenter.kind === 'internal' && (
+      {maintenanceEnabled && (
         <Card elevation={2} sx={{ mt: 3 }}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2 }}>

@@ -3,7 +3,6 @@ import { toFriendlyError } from '@/lib/supabaseErrors';
 import type {
   WorkCenter,
   WorkCenterFormData,
-  WorkCenterKind,
   WorkCenterWithRelations,
 } from '@/types/workCenter';
 import { orIlikeValue } from '@/utils/searchFilter';
@@ -14,7 +13,7 @@ import { orIlikeValue } from '@/utils/searchFilter';
 // machine attributes (make…purchased_on) are read everywhere a work center is
 // read, so the maintenance surfaces need no second query for them.
 const WORK_CENTER_COLUMNS =
-  'id, company_id, name, kind, vendor_id, labor_rate, description, make, model, serial_number, year_built, purchased_on, metadata, created_at, updated_at';
+  'id, company_id, name, labor_rate, description, make, model, serial_number, year_built, purchased_on, metadata, created_at, updated_at';
 
 /**
  * The optional machine attributes, normalised for a write.
@@ -69,43 +68,16 @@ export async function getAllWorkCenters(
 }
 
 /**
- * Filter by kind ('internal' | 'external'). Used by both the work-centers
- * list page (when the user filters) and by the routing operation picker.
- */
-export async function getWorkCentersByKind(
-  companyId: string,
-  kind: WorkCenterKind,
-  search?: string,
-): Promise<WorkCenter[]> {
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from('work_centers')
-    .select(WORK_CENTER_COLUMNS)
-    .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .eq('kind', kind)
-    .order('name', { ascending: true });
-
-  if (search?.trim()) {
-    query = query.or(`name.ilike.${orIlikeValue(search)}`);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching work centers by kind:', error);
-    throw error;
-  }
-  return (data || []) as WorkCenter[];
-}
-
-/**
- * Flat work-center list for dropdowns. Optional `kind` filter switches
- * between internal-only / external-only / both.
+ * Flat work-center list for dropdowns.
+ *
+ * (There was a `getWorkCentersByKind` here, and a `kind` option on this
+ * function. Both are gone: every row in this table is an in-house station now,
+ * so there is no kind left to filter on. Outsourced processes come from
+ * `vendorServicesAccess`.)
  */
 export async function getWorkCentersFlat(
   companyId: string,
-  options?: { search?: string; kind?: WorkCenterKind },
+  options?: { search?: string },
 ): Promise<WorkCenter[]> {
   const supabase = getSupabase();
 
@@ -116,9 +88,6 @@ export async function getWorkCentersFlat(
     .is('deleted_at', null)
     .order('name', { ascending: true });
 
-  if (options?.kind) {
-    query = query.eq('kind', options.kind);
-  }
   if (options?.search?.trim()) {
     query = query.or(`name.ilike.${orIlikeValue(options.search)}`);
   }
@@ -134,28 +103,27 @@ export async function getWorkCentersFlat(
 }
 
 /**
- * Routing operation picker shape — pulls vendor name for external work
- * centers so the UI can show "PerformCoat (PerformCoat of Michigan)" without
- * a second query.
+ * Routing operation picker shape — the in-house half.
+ *
+ * The routing editor offers stations AND vendor services in one picker; this
+ * supplies the stations and `getVendorServicesForRouting` supplies the rest.
+ * Kept as its own call rather than a union query because the two carry
+ * different money (an hourly rate vs a price per piece) and merging them here
+ * would mean inventing a shape that flattens that distinction.
  */
 export async function getWorkCentersForRouting(
   companyId: string,
-  kind?: WorkCenterKind,
 ): Promise<Array<{
   id: string;
   name: string;
-  kind: WorkCenterKind;
   labor_rate: number | null;
-  vendor_name: string | null;
 }>> {
   const supabase = getSupabase();
 
   type Row = {
     id: string;
     name: string;
-    kind: WorkCenterKind;
     labor_rate: number | null;
-    vendor: { name: string } | { name: string }[] | null;
   };
 
   const BATCH_SIZE = 1000;
@@ -164,19 +132,14 @@ export async function getWorkCentersForRouting(
   let hasMore = true;
 
   while (hasMore) {
-    let query = supabase
+    const { data, error } = await supabase
       .from('work_centers')
-      .select(`id, name, kind, labor_rate, vendor:vendors(name)`)
+      .select(`id, name, labor_rate`)
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .order('name', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    if (kind) {
-      query = query.eq('kind', kind);
-    }
-
-    const { data, error } = await query;
     if (error) {
       console.error('Error fetching work centers for routing:', error);
       throw error;
@@ -187,16 +150,11 @@ export async function getWorkCentersForRouting(
     offset += BATCH_SIZE;
   }
 
-  return allData.map((r) => {
-    const vendor = Array.isArray(r.vendor) ? r.vendor[0] : r.vendor;
-    return {
-      id: r.id,
-      name: r.name,
-      kind: r.kind,
-      labor_rate: r.labor_rate !== null ? Number(r.labor_rate) : null,
-      vendor_name: vendor?.name ?? null,
-    };
-  });
+  return allData.map((r) => ({
+    id: r.id,
+    name: r.name,
+    labor_rate: r.labor_rate !== null ? Number(r.labor_rate) : null,
+  }));
 }
 
 /**
@@ -230,7 +188,7 @@ export async function getWorkCenterWithRelations(
 
   const { data, error } = await supabase
     .from('work_centers')
-    .select(`${WORK_CENTER_COLUMNS}, vendor:vendors(id, name)`)
+    .select(WORK_CENTER_COLUMNS)
     .eq('id', workCenterId)
     .single();
 
@@ -251,14 +209,9 @@ export async function getWorkCenterWithRelations(
     throw opsError;
   }
 
-  type Row = WorkCenter & { vendor: { id: string; name: string } | { id: string; name: string }[] | null };
-  const row = data as Row;
-  const vendor = Array.isArray(row.vendor) ? row.vendor[0] : row.vendor;
-
   return {
-    ...row,
+    ...(data as WorkCenter),
     routing_operations_count: routingOpsCount || 0,
-    vendor: vendor ?? null,
   };
 }
 
@@ -315,8 +268,6 @@ export async function createWorkCenter(
     .insert({
       company_id: companyId,
       name: formData.name.trim(),
-      kind: formData.kind,
-      vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
       ...machineDetailFields(formData),
@@ -365,8 +316,6 @@ async function reviveArchivedWorkCenterByName(
     .from('work_centers')
     .update({
       name,
-      kind: formData.kind,
-      vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
       ...machineDetailFields(formData),
@@ -399,8 +348,6 @@ export async function updateWorkCenter(
     .from('work_centers')
     .update({
       name: formData.name.trim(),
-      kind: formData.kind,
-      vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
       ...machineDetailFields(formData),

@@ -32,16 +32,16 @@ export async function createOperationCompletion(
 ): Promise<{ id: string }> {
   const supabase = getSupabase();
 
-  // Outside (external-vendor) ops are done off-site and use the send/receive
-  // lifecycle (operatorAccess.markOperationReceived), never quantity completions —
-  // an external op can never be completed through this internal path.
+  // Outside ops are done off-site and use the send/receive lifecycle
+  // (operatorAccess.markOperationReceived), never quantity completions — an
+  // outside op can never be completed through this internal path. One column,
+  // no join: vendor_service_id IS the discriminator.
   const { data: opRow } = await supabase
     .from('job_operations')
-    .select('work_center:work_centers(kind)')
+    .select('vendor_service_id')
     .eq('id', input.jobOperationId)
     .single();
-  const wc = Array.isArray(opRow?.work_center) ? opRow?.work_center[0] : opRow?.work_center;
-  if (wc?.kind === 'external') {
+  if (opRow?.vendor_service_id) {
     throw new Error(
       'This is an outside (vendor) operation — use Mark Received, not a quantity completion.',
     );

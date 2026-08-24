@@ -215,16 +215,24 @@ export default function CustomerDetailPage() {
    * That last one matters: per CLAUDE.md a failed check is never a definitive
    * negative, so a dropped request must not be reported to the user as "that
    * name is taken".
+   *
+   * Returns whether the value is now saved, so the inline name editor knows
+   * whether to close. It used to return void and the editor guessed from the
+   * `saveState` prop immediately after calling this — which is stale, since
+   * this is async. A duplicate name therefore closed the editor and discarded
+   * its own error.
    */
-  const persist = async (next: CustomerFormData) => {
-    if (!customer || isArchived) return;
+  const persist = async (next: CustomerFormData): Promise<boolean> => {
+    if (!customer || isArchived) return false;
     const normalized = normalizeSnapshot(next);
-    if (!hasChanged(normalized, savedForm)) return;
+    // Unchanged is a successful no-op: nothing to write, and the editor should
+    // close rather than trapping the user in it.
+    if (!hasChanged(normalized, savedForm)) return true;
 
     if (!normalized.name) {
       setFieldErrors((p) => ({ ...p, name: 'Company name is required' }));
       setSaveState('error');
-      return;
+      return false;
     }
     if (normalized.name !== savedForm.name) {
       try {
@@ -232,12 +240,12 @@ export default function CustomerDetailPage() {
         if (exists) {
           setFieldErrors((p) => ({ ...p, name: 'A customer with this name already exists' }));
           setSaveState('error');
-          return;
+          return false;
         }
       } catch {
         setFieldErrors((p) => ({ ...p, name: 'Could not check the name — try again' }));
         setSaveState('error');
-        return;
+        return false;
       }
     }
 
@@ -253,13 +261,17 @@ export default function CustomerDetailPage() {
       // Refresh so the counts, chips and header reflect the new row without a
       // second source of truth for what the customer currently says.
       await fetchAll();
+      return true;
     } catch (err) {
       setSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save');
+      return false;
     }
   };
 
   const onTextBlur = () => void persist(form);
+  /** The name editor needs the OUTCOME, not fire-and-forget — see persist. */
+  const onCommitName = (name: string) => persist({ ...form, name });
   const onSelectChange = (patch: Partial<CustomerFormData>) => {
     const next = { ...form, ...patch };
     setForm(next);
@@ -474,7 +486,11 @@ export default function CustomerDetailPage() {
               flexWrap: 'wrap',
             }}
           >
-            <Box>
+            {/* flex:1 so the name editor can use the header's width. Without it
+                this column shrank to its content and the (wrapping) editor was
+                squeezed into a narrow column, wrapping a company name across
+                three lines when it fits on one. */}
+            <Box sx={{ flex: 1, minWidth: 280 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                 {/* Credit hold sits beside the name because it changes how you
                     treat everything else on the page. Informational only —
@@ -519,6 +535,7 @@ export default function CustomerDetailPage() {
                   fieldErrors={fieldErrors}
                   onTextChange={onTextChange}
                   onTextBlur={onTextBlur}
+                  onCommitName={onCommitName}
                   onSelectChange={onSelectChange}
                   readOnly={isArchived}
                   saveState={saveState}

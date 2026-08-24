@@ -325,6 +325,7 @@ async def execute_import(
         # contact_payload) pairs here, then resolve names → ids after the
         # vendor inserts return.
         pending_contacts: list[tuple[str, dict]] = []
+        pending_addresses: list[tuple[str, dict]] = []
 
         rows_to_write: list[dict] = []
         errors: list[VendorImportError] = []
@@ -378,24 +379,37 @@ async def execute_import(
                 "name": canonical_name,
             }
 
-            for db_field in (
-                "address_line1",
-                "address_line2",
-                "city",
-                "state",
-                "postal_code",
-                "country",
-            ):
-                csv_column = reverse_mappings.get(db_field)
-                if csv_column and csv_column in row:
-                    value = row[csv_column].strip()
-                    if value and value.lower() != "undefined":
-                        vendor_data[db_field] = value
-
-            if "country" not in vendor_data or not vendor_data.get("country"):
-                vendor_data["country"] = "USA"
-
             rows_to_write.append(vendor_data)
+
+            # The address no longer lives on the vendor row, so it is queued the
+            # same way a contact is and written after the upsert, once the row
+            # has an id. ONLY for a NEW vendor: a re-import updates the vendor in
+            # place, and re-inserting its address would give it a second copy of
+            # the one it already had — the duplicate the contact path already
+            # guards against for the same reason.
+            if canonical_name.lower() not in existing_vendor_names:
+                address_payload: dict = {}
+                for db_field in (
+                    "address_line1",
+                    "address_line2",
+                    "city",
+                    "state",
+                    "postal_code",
+                    "country",
+                ):
+                    csv_column = reverse_mappings.get(db_field)
+                    if csv_column and csv_column in row:
+                        value = row[csv_column].strip()
+                        if value and value.lower() != "undefined":
+                            address_payload[db_field] = value
+
+                # `country` alone is not an address. Every row would default to
+                # USA, so treating it as content would give every imported
+                # vendor an address consisting of one word.
+                if any(k != "country" for k in address_payload):
+                    address_payload.setdefault("country", "USA")
+                    address_payload["is_default"] = True
+                    pending_addresses.append((canonical_name, address_payload))
 
             # Queue a contact insert if the row has a contact name — but ONLY for a NEW vendor.
             # A re-imported (existing) vendor updates in place; re-inserting its contact would
@@ -453,6 +467,29 @@ async def execute_import(
         # non-fatal — the vendor row is already in place; surface the error
         # via the import response so the user can address it without losing
         # the vendor data.
+        # Addresses first: one per newly-created vendor, marked default. Failures
+        # are non-fatal for the same reason contacts' are — the vendor row is
+        # already in place, and losing an address should not lose the vendor.
+        if pending_addresses:
+            address_rows: list[dict] = []
+            for canonical_name, address_payload in pending_addresses:
+                vendor_id = name_to_vendor_id.get(canonical_name.lower())
+                if not vendor_id:
+                    continue
+                address_rows.append({"vendor_id": vendor_id, **address_payload})
+
+            if address_rows:
+                try:
+                    for batch_start in range(0, len(address_rows), BATCH_SIZE):
+                        batch = address_rows[batch_start : batch_start + BATCH_SIZE]
+                        supabase.table("vendor_addresses").insert(batch).execute()
+                except Exception as e:
+                    logger.error(
+                        f"Vendors import: address insert failed: {str(e)}",
+                        exc_info=True,
+                    )
+                    sentry_sdk.capture_exception(e)
+
         contacts_imported = 0
         if pending_contacts:
             contact_rows: list[dict] = []

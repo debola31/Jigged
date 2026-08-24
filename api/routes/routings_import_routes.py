@@ -14,7 +14,7 @@ Key rules:
     must import work_centers explicitly first.
   - Per-row cost field set is validated against the resolved work_center's kind:
     internal → setup_minutes, cycle_minutes_per_unit, labor_rate_override
-    external → external_unit_price, external_setup_cost
+    outside step → external_unit_price (optional; inherits the service's price)
 """
 
 import logging
@@ -89,10 +89,106 @@ def _load_lookups(supabase: Client, company_id: str) -> tuple[
         p["part_name"].lower(): p for p in parts if p.get("part_name")
     }
 
-    wcs = fetch_all_by_company(supabase, "work_centers", "id, name, kind", company_id)
-    wc_lookup = {wc["name"].lower(): wc for wc in wcs if wc.get("name")}
+    # In-house stations. `deleted_at IS NULL` matters here in a way it did not
+    # before: an archived station and a live one may now share a name with a
+    # service, and routing an import at an archived row is silent nonsense.
+    wcs = fetch_all_by_company(supabase, "work_centers", "id, name, deleted_at", company_id)
+    wc_lookup = {
+        wc["name"].lower(): wc
+        for wc in wcs
+        if wc.get("name") and wc.get("deleted_at") is None
+    }
 
-    return parts_lookup, wc_lookup
+    # Outside services, keyed BOTH by bare name and by "vendor::service".
+    #
+    # The bare-name key is a LIST, not a last-wins dict. Two vendors may both
+    # offer "Anodize", and the old dict silently kept whichever row PostgREST
+    # returned last — routing an import step into one vendor's price when the
+    # file meant the other's, with no error. A list lets the caller tell "one
+    # match" from "ambiguous" and say so.
+    services = fetch_all_by_company(
+        supabase,
+        "vendor_services",
+        "id, name, unit_price, deleted_at, vendors(name)",
+        company_id,
+    )
+    svc_by_name: dict[str, list[dict]] = {}
+    svc_by_vendor_and_name: dict[str, dict] = {}
+    for svc in services:
+        if not svc.get("name") or svc.get("deleted_at") is not None:
+            continue
+        rel = svc.get("vendors")
+        vendor = rel[0] if isinstance(rel, list) else rel
+        vendor_name = (vendor or {}).get("name") or ""
+        svc_by_name.setdefault(svc["name"].lower(), []).append(svc)
+        if vendor_name:
+            svc_by_vendor_and_name[f"{vendor_name.lower()}::{svc['name'].lower()}"] = svc
+
+    return parts_lookup, wc_lookup, svc_by_name, svc_by_vendor_and_name
+
+
+def _resolve_target(
+    wc_name: str,
+    vendor_name: str,
+    wc_lookup: dict,
+    svc_by_name: dict,
+    svc_by_vendor: dict,
+) -> tuple[dict | None, dict | None, str | None]:
+    """Resolve one step's name to an in-house station OR an outside service.
+
+    Returns `(work_center, vendor_service, error_message)`; exactly one of the
+    first two is non-None when there is no error.
+
+    Resolution order, and why:
+      1. `vendor_name` given -> look up (vendor, service) exactly. This is the
+         unambiguous path and the reason the column exists.
+      2. An in-house station of that name wins next. A shop's own station list
+         is the smaller, better-curated namespace, and a name collision between
+         a station and a service is far more likely to mean the station.
+      3. Exactly ONE service of that name -> use it.
+      4. SEVERAL services of that name -> an error naming the vendors, never a
+         guess. The old code kept whichever row came back last, which routed
+         cost-bearing steps into the wrong vendor's price with no warning.
+    """
+    key = wc_name.lower()
+
+    if vendor_name:
+        svc = svc_by_vendor.get(f"{vendor_name.lower()}::{key}")
+        if svc:
+            return None, svc, None
+        return (
+            None,
+            None,
+            f"'{wc_name}' is not a service offered by '{vendor_name}'.",
+        )
+
+    station = wc_lookup.get(key)
+    if station:
+        return station, None, None
+
+    matches = svc_by_name.get(key, [])
+    if len(matches) == 1:
+        return None, matches[0], None
+    if len(matches) > 1:
+        vendors = ", ".join(
+            sorted(
+                (
+                    (m.get("vendors") or [{}])[0]
+                    if isinstance(m.get("vendors"), list)
+                    else (m.get("vendors") or {})
+                ).get("name")
+                or "?"
+                for m in matches
+            )
+        )
+        return (
+            None,
+            None,
+            f"'{wc_name}' is offered by more than one vendor ({vendors}). "
+            f"Add a vendor_name column to say which.",
+        )
+
+    return None, None, None
 
 
 # No longer an HTTP route. The per-entity import wizards that called /validate are gone;
@@ -104,7 +200,9 @@ async def validate_import(
 ):
     """Validate routings CSV data before import."""
     try:
-        parts_lookup, wc_lookup = _load_lookups(supabase, request.company_id)
+        parts_lookup, wc_lookup, svc_by_name, svc_by_vendor = _load_lookups(
+            supabase, request.company_id
+        )
         miscellaneous = wc_lookup.get(MISCELLANEOUS_WC_NAME.lower())
 
         # Existing routing_operations for the company's parts
@@ -147,7 +245,7 @@ async def validate_import(
         cycle_column = reverse_mappings.get("cycle_minutes_per_unit")
         rate_column = reverse_mappings.get("labor_rate_override")
         ext_unit_column = reverse_mappings.get("external_unit_price")
-        ext_setup_column = reverse_mappings.get("external_setup_cost")
+        vendor_column = reverse_mappings.get("vendor_name")
 
         validation_errors: list[RoutingValidationError] = []
         conflicts: list[RoutingConflictInfo] = []
@@ -182,18 +280,31 @@ async def validate_import(
             wc_name_raw = (
                 row.get(wc_column, "").strip() if wc_column else ""
             )
+            vendor_name_raw = (
+                row.get(vendor_column, "").strip() if vendor_column else ""
+            )
             resolved_wc = None
+            resolved_svc = None
             if wc_name_raw:
-                resolved_wc = wc_lookup.get(wc_name_raw.lower())
-                if not resolved_wc:
+                resolved_wc, resolved_svc, resolve_error = _resolve_target(
+                    wc_name_raw, vendor_name_raw, wc_lookup, svc_by_name, svc_by_vendor
+                )
+                if resolve_error or (not resolved_wc and not resolved_svc):
                     conflicts.append(
                         RoutingConflictInfo(
                             row_number=row_number,
                             csv_part_name=part_name,
                             csv_work_center_name=wc_name_raw,
-                            conflict_type="unknown_work_center",
+                            conflict_type=(
+                                "ambiguous_work_center_name"
+                                if resolve_error
+                                else "unknown_work_center"
+                            ),
                             existing_id="",
-                            existing_value=f"Work center '{wc_name_raw}' not found. Import work_centers first.",
+                            existing_value=(
+                                resolve_error
+                                or f"'{wc_name_raw}' is neither a work center nor an outside service. Import those first."
+                            ),
                         )
                     )
                     conflict_rows.add(row_number)
@@ -225,9 +336,9 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            kind = resolved_wc.get("kind") or "internal"
+            kind = "external" if resolved_svc else "internal"
 
-            # Cost field validation against work_center.kind
+            # Cost field validation against which target the step resolved to
             internal_fields = (
                 ("setup_minutes", setup_column, "invalid_setup_minutes"),
                 ("cycle_minutes_per_unit", cycle_column, "invalid_cycle_minutes"),
@@ -235,7 +346,6 @@ async def validate_import(
             )
             external_fields = (
                 ("external_unit_price", ext_unit_column, "invalid_external_unit_price"),
-                ("external_setup_cost", ext_setup_column, "invalid_external_setup_cost"),
             )
 
             row_failed = False
@@ -450,7 +560,9 @@ async def execute_import(
         }
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        parts_lookup, wc_lookup = _load_lookups(supabase, request.company_id)
+        parts_lookup, wc_lookup, svc_by_name, svc_by_vendor = _load_lookups(
+            supabase, request.company_id
+        )
         miscellaneous = wc_lookup.get(MISCELLANEOUS_WC_NAME.lower())
 
         reverse_mappings = {v: k for k, v in request.mappings.items()}
@@ -461,7 +573,7 @@ async def execute_import(
         cycle_column = reverse_mappings.get("cycle_minutes_per_unit")
         rate_column = reverse_mappings.get("labor_rate_override")
         ext_unit_column = reverse_mappings.get("external_unit_price")
-        ext_setup_column = reverse_mappings.get("external_setup_cost")
+        vendor_column = reverse_mappings.get("vendor_name")
         instructions_column = reverse_mappings.get("instructions")
 
         # Group skipped-aware rows by part_name
@@ -494,15 +606,21 @@ async def execute_import(
             wc_name_raw = (
                 row.get(wc_column, "").strip() if wc_column else ""
             )
+            vendor_name_raw = (
+                row.get(vendor_column, "").strip() if vendor_column else ""
+            )
+            resolved_svc = None
             if wc_name_raw:
-                resolved_wc = wc_lookup.get(wc_name_raw.lower())
+                resolved_wc, resolved_svc, resolve_error = _resolve_target(
+                    wc_name_raw, vendor_name_raw, wc_lookup, svc_by_name, svc_by_vendor
+                )
             else:
-                resolved_wc = miscellaneous
-            if not resolved_wc:
+                resolved_wc, resolve_error = miscellaneous, None
+            if not resolved_wc and not resolved_svc:
                 errors.append(
                     RoutingImportError(
                         row_number=row_number,
-                        reason=f"Work center could not be resolved for row",
+                        reason=resolve_error or "Step target could not be resolved for row",
                         data={k: v for k, v in row.items() if v},
                     )
                 )
@@ -522,13 +640,15 @@ async def execute_import(
                 sequence = per_part_next_seq.get(part_name.lower(), 0) + 1
             per_part_next_seq[part_name.lower()] = sequence
 
+            # Exactly one target, per routing_operations_exactly_one_target.
             op_data: dict = {
-                "work_center_id": resolved_wc["id"],
+                "work_center_id": resolved_wc["id"] if resolved_wc else None,
+                "vendor_service_id": resolved_svc["id"] if resolved_svc else None,
                 "sequence": sequence,
                 "metadata": {},
             }
 
-            kind = resolved_wc.get("kind") or "internal"
+            kind = "external" if resolved_svc else "internal"
             if kind == "internal":
                 if setup_column:
                     v = row.get(setup_column, "").strip()
@@ -557,13 +677,6 @@ async def execute_import(
                     if v:
                         try:
                             op_data["external_unit_price"] = round(float(v), 4)
-                        except ValueError:
-                            pass
-                if ext_setup_column:
-                    v = row.get(ext_setup_column, "").strip()
-                    if v:
-                        try:
-                            op_data["external_setup_cost"] = round(float(v), 4)
                         except ValueError:
                             pass
 

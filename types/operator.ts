@@ -160,6 +160,8 @@ export interface OutsideOperation {
   job_number: string;
   part_name: string | null;
   operation_name: string;
+  /** The vendor performing it — used to group the queue per vendor. */
+  vendor_id: string | null;
   vendor_name: string | null;
   /** 'pending' (Not sent) | 'sent' (At vendor). */
   status: 'pending' | 'sent';

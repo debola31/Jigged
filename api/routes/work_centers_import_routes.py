@@ -40,20 +40,9 @@ router = APIRouter(prefix="/api/work-centers/import", tags=["work-centers-import
 
 
 
-def _normalize_kind(value: str) -> str:
-    """Normalize a CSV kind value to 'internal' or 'external'.
-
-    Falls back to 'internal' for empty values. Returns the raw lower-cased
-    value for unrecognized inputs so the validator can flag them.
-    """
-    v = (value or "").strip().lower()
-    if not v:
-        return "internal"
-    if v in ("internal", "in-house", "inhouse", "shop"):
-        return "internal"
-    if v in ("external", "outside", "outsource", "outsourced", "vendor"):
-        return "external"
-    return v
+# `_normalize_kind` lived here, mapping outside/outsource/vendor onto
+# kind='external'. Deleted with the column: a work centre is in-house, and an
+# outsourced process imports through /api/vendor-services/import.
 
 
 def get_supabase() -> Client:
@@ -126,60 +115,39 @@ async def validate_import(
                 validation_error_rows.add(row_number)
                 continue
 
-            kind_raw = row.get(kind_column, "").strip() if kind_column else ""
-            kind = _normalize_kind(kind_raw)
-            if kind not in ("internal", "external"):
+            # A file that still carries a kind/vendor column is a file written
+            # for the old model. Say so instead of silently dropping it — a
+            # dropped outsourced row would import as an in-house station with
+            # nobody's name on it, which is worse than a rejected row.
+            if kind_column and row.get(kind_column, "").strip():
                 validation_errors.append(
                     WorkCenterValidationError(
                         row_number=row_number,
-                        error_type="invalid_kind",
+                        error_type="kind_no_longer_supported",
                         field="kind",
-                        message=f"kind must be 'internal' or 'external' (got '{kind_raw}')",
+                        message=(
+                            "Work centers are in-house only. Import an outsourced "
+                            "process as a vendor service instead."
+                        ),
                     )
                 )
                 validation_error_rows.add(row_number)
                 continue
 
-            vendor_name = (
-                row.get(vendor_column, "").strip() if vendor_column else ""
-            )
-
-            if kind == "external":
-                if not vendor_name:
-                    validation_errors.append(
-                        WorkCenterValidationError(
-                            row_number=row_number,
-                            error_type="vendor_required_for_external",
-                            field="vendor_name",
-                            message="vendor_name is required when kind='external'",
-                        )
+            if vendor_column and row.get(vendor_column, "").strip():
+                validation_errors.append(
+                    WorkCenterValidationError(
+                        row_number=row_number,
+                        error_type="vendor_no_longer_supported",
+                        field="vendor_name",
+                        message=(
+                            "A work center has no vendor. Import this as a vendor "
+                            "service instead."
+                        ),
                     )
-                    validation_error_rows.add(row_number)
-                    continue
-                if vendor_name.lower() not in vendor_name_to_id:
-                    conflicts.append(
-                        WorkCenterConflictInfo(
-                            row_number=row_number,
-                            csv_name=name,
-                            conflict_type="unknown_vendor",
-                            existing_work_center_id="",
-                            existing_value=f"Vendor '{vendor_name}' not found. Import vendors first.",
-                        )
-                    )
-                    conflict_rows.add(row_number)
-                    continue
-            else:  # internal
-                if vendor_name:
-                    validation_errors.append(
-                        WorkCenterValidationError(
-                            row_number=row_number,
-                            error_type="vendor_forbidden_for_internal",
-                            field="vendor_name",
-                            message="vendor_name must be empty when kind='internal'",
-                        )
-                    )
-                    validation_error_rows.add(row_number)
-                    continue
+                )
+                validation_error_rows.add(row_number)
+                continue
 
             # Numeric validation: labor_rate
             if labor_rate_column:
@@ -269,16 +237,8 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Vendor lookup for execute-time resolution (paged past the 1000-row cap).
-        vendor_name_to_id = {
-            v["name"].lower(): v["id"]
-            for v in fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
-        }
-
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         name_column = reverse_mappings.get("name")
-        kind_column = reverse_mappings.get("kind")
-        vendor_column = reverse_mappings.get("vendor_name")
         labor_rate_column = reverse_mappings.get("labor_rate")
         description_column = reverse_mappings.get("description")
 
@@ -294,14 +254,10 @@ async def execute_import(
                 continue
 
             name = row.get(name_column, "").strip() if name_column else ""
-            kind = _normalize_kind(
-                row.get(kind_column, "").strip() if kind_column else ""
-            )
 
             wc_data: dict = {
                 "company_id": request.company_id,
                 "name": name,
-                "kind": kind,
                 "metadata": {},
             }
 
@@ -310,33 +266,13 @@ async def execute_import(
                 if value and value.lower() != "undefined":
                     wc_data["description"] = value
 
-            if kind == "external":
-                vendor_name = (
-                    row.get(vendor_column, "").strip() if vendor_column else ""
-                )
-                vendor_id = vendor_name_to_id.get(vendor_name.lower())
-                if not vendor_id:
-                    # Defense-in-depth — validate already filtered this case
-                    errors.append(
-                        WorkCenterImportError(
-                            row_number=row_number,
-                            reason=f"Vendor '{vendor_name}' not found at execute time",
-                            data={k: v for k, v in row.items() if v},
-                        )
-                    )
-                    skipped += 1
-                    continue
-                wc_data["vendor_id"] = vendor_id
-            else:
-                # External-only constraint — internal must have NULL vendor
-                wc_data["vendor_id"] = None
-                if labor_rate_column:
-                    rate_str = row.get(labor_rate_column, "").strip()
-                    if rate_str:
-                        try:
-                            wc_data["labor_rate"] = round(float(rate_str), 2)
-                        except ValueError:
-                            pass
+            if labor_rate_column:
+                rate_str = row.get(labor_rate_column, "").strip()
+                if rate_str:
+                    try:
+                        wc_data["labor_rate"] = round(float(rate_str), 2)
+                    except ValueError:
+                        pass
 
             rows_to_write.append(wc_data)
 

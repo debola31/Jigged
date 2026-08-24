@@ -27,9 +27,9 @@ import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
  * ── Why the input WRAPS ─────────────────────────────────────────────────────
  *
  * It is `multiline`, and that is the fix for a real bug rather than a
- * stylistic choice. The editor renders at heading size (1.5rem, semibold) so it
+ * stylistic choice. The editor renders at heading size (the theme's `h5`) so it
  * looks like the thing it replaced — but a single-line input at that size fits
- * only ~25 characters before it scrolls, and an input scrolled to the caret
+ * only ~30 characters before it scrolls, and an input scrolled to the caret
  * hides its own beginning. "BlueRidge Medical Devices" opened for editing and
  * showed "eRidge Medical Devices", with no indication anything was cut off.
  *
@@ -163,7 +163,16 @@ export default function InlineNameEditor({
         helperText={error || 'Enter to save, Escape to cancel'}
         required
         fullWidth
-        sx={{ '& .MuiInputBase-input': { fontSize: '1.5rem', fontWeight: 600 } }}
+        // Wear the heading's OWN typography rather than a hand-copied
+        // approximation of it. The `fontSize: '1.5rem'` this replaces was MUI's
+        // DEFAULT h5; this theme's h5 is 1.25rem, so the name grew 20% the
+        // moment you clicked the pencil. It also clipped: MUI gives the input
+        // `line-height: 1.4375em` resolved against the ROOT font size, i.e. a
+        // fixed 23px, and a 24px font in a 23px line box loses its descenders —
+        // "FastenRight Hardware" was missing the tail of its "g". Spreading the
+        // variant brings the right line-height with it, and keeps the editor in
+        // step with the heading if the theme ever moves.
+        sx={(theme) => ({ '& .MuiInputBase-input': theme.typography.h5 })}
       />
       <Box sx={{ pt: 2 }}>
         <SaveStatus state={saveState} />

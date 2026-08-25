@@ -34,6 +34,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_calls: {
+        Row: {
+          created_at: string
+          error: string | null
+          est_cost_usd: number
+          feature: string
+          id: string
+          latency_ms: number
+          model: string
+          provider: string
+          request_id: string
+          success: boolean
+          tokens_in: number
+          tokens_out: number
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          est_cost_usd: number
+          feature: string
+          id?: string
+          latency_ms: number
+          model: string
+          provider: string
+          request_id: string
+          success: boolean
+          tokens_in: number
+          tokens_out: number
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          est_cost_usd?: number
+          feature?: string
+          id?: string
+          latency_ms?: number
+          model?: string
+          provider?: string
+          request_id?: string
+          success?: boolean
+          tokens_in?: number
+          tokens_out?: number
+        }
+        Relationships: []
+      }
       ai_chat_queries: {
         Row: {
           chart_config: Json | null
@@ -124,6 +169,116 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ai_jobs: {
+        Row: {
+          attempt: number
+          batch_key: string | null
+          claimed_at: string | null
+          claimed_by: string | null
+          company_id: string
+          created_at: string
+          error: string | null
+          error_kind: string | null
+          executor: string
+          expires_at: string | null
+          feature: string
+          finished_at: string | null
+          id: string
+          lease_expires_at: string | null
+          model: string
+          payload: Json
+          priority: number
+          request_id: string
+          requested_by: string | null
+          result: Json | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempt?: number
+          batch_key?: string | null
+          claimed_at?: string | null
+          claimed_by?: string | null
+          company_id: string
+          created_at?: string
+          error?: string | null
+          error_kind?: string | null
+          executor: string
+          expires_at?: string | null
+          feature: string
+          finished_at?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          model: string
+          payload?: Json
+          priority?: number
+          request_id: string
+          requested_by?: string | null
+          result?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt?: number
+          batch_key?: string | null
+          claimed_at?: string | null
+          claimed_by?: string | null
+          company_id?: string
+          created_at?: string
+          error?: string | null
+          error_kind?: string | null
+          executor?: string
+          expires_at?: string | null
+          feature?: string
+          finished_at?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          model?: string
+          payload?: Json
+          priority?: number
+          request_id?: string
+          requested_by?: string | null
+          result?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_jobs_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_workers: {
+        Row: {
+          last_seen_at: string
+          models: string[]
+          resident_model: string | null
+          started_at: string
+          version: string | null
+          worker_id: string
+        }
+        Insert: {
+          last_seen_at?: string
+          models?: string[]
+          resident_model?: string | null
+          started_at?: string
+          version?: string | null
+          worker_id: string
+        }
+        Update: {
+          last_seen_at?: string
+          models?: string[]
+          resident_model?: string | null
+          started_at?: string
+          version?: string | null
+          worker_id?: string
+        }
+        Relationships: []
       }
       auth_audit_log: {
         Row: {
@@ -3907,6 +4062,20 @@ export type Database = {
         }
         Returns: Json
       }
+      ai_call_write_leaks: {
+        Args: never
+        Returns: {
+          detail: string
+          leak_kind: string
+        }[]
+      }
+      ai_job_write_leaks: {
+        Args: never
+        Returns: {
+          detail: string
+          leak_kind: string
+        }[]
+      }
       apply_billing_write_gate: {
         Args: { p_table: unknown }
         Returns: undefined
@@ -3959,6 +4128,24 @@ export type Database = {
           p_to_location_id: string
         }
         Returns: Json
+      }
+      claim_ai_jobs: {
+        Args: {
+          p_lease_seconds?: number
+          p_limit?: number
+          p_models: string[]
+          p_resident_model?: string
+          p_worker_id: string
+        }
+        Returns: {
+          attempt: number
+          company_id: string
+          feature: string
+          job_id: string
+          model: string
+          payload: Json
+          request_id: string
+        }[]
       }
       close_operation_interval: {
         Args: {
@@ -4363,6 +4550,7 @@ export type Database = {
           started_at: string
         }[]
       }
+      sweep_ai_jobs: { Args: never; Returns: number }
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined

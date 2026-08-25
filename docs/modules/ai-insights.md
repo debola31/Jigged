@@ -59,14 +59,18 @@ plays to what LLMs are good at.
 **These must match [`api/tools/schema_context.py`](../../api/tools/schema_context.py) exactly.**
 The code is the source of truth; this doc has been wrong about both before.
 
-**`ALLOWED_TABLES` — 19:** `companies`, `customers`, `vendors`, `parts`, `part_pricing_tiers`,
-`parts_bom`, `parts_unit_conversions`, `quotes`, `quote_line_items`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`,
-`routings`, `routing_operations`, `inventory_transactions`.
+**`ALLOWED_TABLES` — 19:** `companies`, `customers`, `inventory_transactions`, `job_materials`,
+`job_operations`, `job_parts`, `jobs`, `part_pricing_tiers`, `parts`, `parts_bom`,
+`parts_unit_conversions`, `quote_line_items`, `quotes`, `routing_operations`, `routings`,
+`vendor_addresses`, `vendor_services`, `vendors`, `work_centers`.
+(`vendor_services` and `vendor_addresses` were added in code by `20260823163931` and
+`20260824022226`; this list claimed 19 while enumerating 17 until 2026-08-25 — the second such
+drift, because the count and the names are both hand-maintained and only the count gets eyeballed.)
 
-**`SENSITIVE_TABLES` — 15:** `user_company_access`, `user_preferences`, `system_admins`,
-`auth_audit_log`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`,
-`quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`, `terms_acceptances`,
-**`customer_carrier_accounts`**, `note_views`, `operator_events`.
+**`SENSITIVE_TABLES` — 18:** `ai_calls`, `ai_chat_queries`, `ai_config`, `ai_jobs`, `ai_workers`,
+`auth_audit_log`, **`customer_carrier_accounts`**, `demo_data_templates`, `note_views`,
+`operator_events`, `quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`,
+`saved_insights`, `system_admins`, `terms_acceptances`, `user_company_access`, `user_preferences`.
 
 **`note_views` and `operator_events` are excluded for a product reason, not just privacy hygiene.**
 *"Which operators read the setup notes?"* is a natural question for an owner to type, and
@@ -81,15 +85,38 @@ are aggregate counts, never identities.)
 [customers.md](customers.md). It belongs on the denylist for the same reason as the QuickBooks
 tables: it is a credential, not business data.
 
+**`ai_calls`, `ai_jobs` and `ai_workers` are the AI layer's own plumbing.** *"How much are we
+spending on AI?"* is a natural thing for an owner to type, and `ai_calls` is the table that would
+answer it. `ai_jobs` is worse: its `payload` carries the questions **other companies** asked. Both
+are blocked the same three ways, with `ai_call_write_leaks()` and `ai_job_write_leaks()` asserting
+the grant and policy layers on every CI run.
+
 ### Adding a table to AI scope
 
 1. Add it to `ALLOWED_TABLES`
 2. Describe its columns, types and relationships in `SCHEMA_CONTEXT` in the same file
-3. Migration: `GRANT SELECT ON <table> TO jigged_ai_readonly` **and**
-   `CREATE POLICY ai_readonly_select ON <table> FOR SELECT TO jigged_ai_readonly USING (true)`
+3. Migration: `GRANT SELECT ON <table> TO jigged_ai_readonly` **and** an `ai_readonly_select` policy
+   **scoped to the company**, exactly as every existing one is:
+
+   ```sql
+   CREATE POLICY ai_readonly_select ON public.<table>
+       FOR SELECT TO jigged_ai_readonly
+       USING (company_id = (current_setting('jigged.company_id', true))::uuid);
+   ```
+
+   For a child table, scope through its parent — see `customer_contacts` in the baseline.
 
 Skip step 3 and the allowlist passes while the query fails at the database — which is the correct
 failure direction, but a confusing one.
+
+> **This step used to say `USING (true)`, and that was a cross-tenant read waiting to happen.**
+> Corrected 2026-08-25. All 29 real `ai_readonly_select` policies scope on
+> `current_setting('jigged.company_id', true)`, which [`api/tools/sql_executor.py`](../../api/tools/sql_executor.py)
+> sets per query — a `USING (true)` policy would have let one shop's question return another shop's
+> rows, because RLS is the layer that actually enforces tenancy here (the validator only checks that
+> `$1` is *present*, never that it filters anything). `20260728040701` had already flagged this
+> instruction by name as the reason `note_views` names `jigged_ai_readonly` in its RESTRICTIVE deny.
+> **If you followed the old wording, check your policy now.**
 
 ---
 

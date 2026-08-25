@@ -229,6 +229,11 @@ class TestSensitiveTableDenylist:
     @pytest.mark.parametrize("table", [
         "user_company_access", "system_admins", "ai_config",
         "ai_chat_queries", "user_preferences", "auth_audit_log",
+        # The AI layer's own tables. ai_calls answers "what are we spending on
+        # AI?" and ai_jobs.payload carries other companies' questions, so both
+        # are exactly the shape of thing an owner might reasonably ask about and
+        # must never be able to reach.
+        "ai_calls", "ai_jobs", "ai_workers",
     ])
     def test_sensitive_table_in_from_rejected(self, table):
         valid, msg = validate_query(

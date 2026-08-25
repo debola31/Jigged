@@ -117,7 +117,7 @@ jobs:
             api/requirements-test.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-test.txt
+        run: pip install -r requirements.txt -r requirements-test.txt -r ../worker/requirements.txt
 
       # Local Supabase via the CLI — replays supabase/migrations/ on a fresh
       # Postgres + Auth + Storage stack. Backend integration tests + RLS tests
@@ -190,6 +190,16 @@ jobs:
         # `BACKEND_COV_FLOOR` if a sweeping change needs to ratchet without
         # a workflow edit.
         run: pytest -v --cov=. --cov-report=term --cov-report=xml --cov-fail-under=${{ vars.BACKEND_COV_FLOOR || '65' }}
+
+      # The desktop worker lives outside api/, so api/pytest.ini's `testpaths =
+      # tests` cannot see it and the step above runs none of its tests. Its PDF
+      # ingestion stage is the only place in the product that opens a binary file
+      # server-side, and the 4096px cap it enforces is arithmetic that silently
+      # decides how legible a drawing is to the model -- exactly the thing that
+      # must not go unasserted.
+      - name: Run desktop worker tests
+        working-directory: ./
+        run: pytest worker/tests -v
 
       - name: Upload backend coverage
         if: always()

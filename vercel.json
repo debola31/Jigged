@@ -7,7 +7,7 @@
   },
   "functions": {
     "api/**": {
-      "excludeFiles": "{.next/**,.git/**,.vercel/**,node_modules/**,.claude/**,.agents/**,.github/**,docs/**,e2e/**,__tests__/**,supabase/**,api/tests/**,coverage/**,outputs/**,test-results/**,playwright-report/**,**/__pycache__/**,**/*.pyc}",
+      "excludeFiles": "{.next/**,.git/**,.vercel/**,node_modules/**,.claude/**,.agents/**,.github/**,docs/**,e2e/**,__tests__/**,supabase/**,api/tests/**,coverage/**,outputs/**,test-results/**,playwright-report/**,api/evals/**,api/pytest.ini,api/requirements-test.txt,worker/**,**/__pycache__/**,**/*.pyc}",
       "maxDuration": 60
     }
   },

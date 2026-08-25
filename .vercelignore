@@ -45,9 +45,33 @@
 /docs
 /.github            # workflows run on GitHub, never on Vercel
 /supabase           # migrations + seed; CLI and CI only. NOT utils/supabase.
+/worker             # the desktop AI worker. See below — it must never deploy.
+/api/evals          # measurement harnesses; run by hand, never imported by a route.
 
 # NOT ignored, deliberately:
 #   scripts/  — package.json's postinstall runs scripts/copy-scanner-wasm.mjs, which
 #               copies the zxing WASM into public/ and throws if it fails.
 #   public/   — app/(marketing)/privacy/page.tsx reads public/legal/privacy.html at
 #               build time, and Hero.tsx serves /wireframe-scene.mp4 + /screenshots.
+
+# --- /worker, and why it gets an entry in BOTH files ---
+#
+# The desktop AI worker is an outbound-only process that needs a GPU, a resident
+# Ollama model and a long-lived loop. On Vercel it would have nothing to reach and
+# a 60-second wall. It is not a thing that can deploy, and there is no arrangement
+# in which it should.
+#
+# Merging it also made Vercel email "1 new project available to import — worker
+# (python)". That is the Git integration's repo scan: `worker/requirements.txt` is
+# a Python project manifest, and `worker/` was an unclaimed top-level directory.
+# The offer is harmless, and accepting it would create a second billable project
+# that could never work. Neither of these files suppresses that email — only a
+# Vercel-side ignore setting does — but they are what stops the code shipping.
+#
+# The bundle half is the part that was actually wrong. `excludeFiles` in
+# vercel.json works by ENUMERATION, so anything unlisted is included: worker/ and
+# api/evals/ were both riding along inside every api/** function bundle. Nothing
+# broke — Vercel installs the requirements.txt beside the function, so
+# worker/requirements.txt was never read and pypdfium2 never reached the bundle —
+# but it is dead weight, and it contradicts the entire reason worker/requirements.txt
+# is a separate file from api/requirements.txt.

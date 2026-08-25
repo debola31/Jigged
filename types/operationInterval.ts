@@ -121,26 +121,6 @@ export interface OpenInterval {
   capture_source: IntervalCaptureSource;
 }
 
-/**
- * One person's interval, as the admin-gated, audited detail view returns it.
- *
- * Deliberately carries BOTH the raw pair and the effective pair: the audit
- * surface is the one place where "what was recorded" and "what it was corrected
- * to" are both the answer to the question being asked.
- */
-export interface OperatorTimeDetailRow {
-  interval_id: string;
-  job_operation_id: string;
-  operation_name: string;
-  job_number: string;
-  started_at: string;
-  ended_at: string | null;
-  effective_started_at: string;
-  effective_ended_at: string | null;
-  adjusted_at: string | null;
-  close_reason: IntervalCloseReason | null;
-}
-
 /** The adjustment an operator submits. Both ends optional — either can be corrected alone. */
 export interface IntervalAdjustment {
   adjustedStartedAt?: string | null;

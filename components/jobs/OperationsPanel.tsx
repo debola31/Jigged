@@ -79,9 +79,10 @@ export default function OperationsPanel({
 
   // Recorded time per op, keyed the same way. AGGREGATE AND WITHOUT OPERATOR
   // IDENTITY — `get_operation_actuals` cannot return it, because a row-returning
-  // SELECT policy exposing operator_id would BE a per-person report. Resolving
-  // time to a named person goes through get_operator_time_detail, which is
-  // admin-gated and writes an audit row.
+  // SELECT policy exposing operator_id would BE a per-person report. Nothing
+  // resolves time to a named person any more: `get_operator_time_detail`, the
+  // one path that did, is gone. Aggregate is not the default here, it is the
+  // only shape.
   //
   // Reloaded alongside the summaries: an operator's RECORD COMPLETION closes
   // their interval, so the two move together.

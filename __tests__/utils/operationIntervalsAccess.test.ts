@@ -54,7 +54,6 @@ import {
   adjustOperationInterval,
   closeOperationInterval,
   getOperationActuals,
-  getOperatorTimeDetail,
   startOperationInterval,
 } from '@/utils/operationIntervalsAccess';
 
@@ -230,23 +229,3 @@ describe('getOperationActuals', () => {
   });
 });
 
-describe('getOperatorTimeDetail', () => {
-  it('passes the reason through — the function refuses a blank one', async () => {
-    responses['get_operator_time_detail'] = { data: [], error: null };
-
-    await getOperatorTimeDetail('c1', 'acc1', 'payroll dispute');
-
-    expect(rpcCalls[0]).toEqual({
-      fn: 'get_operator_time_detail',
-      args: { p_company_id: 'c1', p_operator_id: 'acc1', p_reason: 'payroll dispute' },
-    });
-  });
-
-  it('surfaces the non-admin refusal rather than rendering as empty', async () => {
-    responses['get_operator_time_detail'] = {
-      data: null,
-      error: { code: 'P0001', message: 'Only an admin can view an individual’s recorded time' },
-    };
-    await expect(getOperatorTimeDetail('c1', 'acc1', 'curiosity')).rejects.toThrow();
-  });
-});

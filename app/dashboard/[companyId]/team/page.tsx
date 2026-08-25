@@ -25,7 +25,6 @@ import Tooltip from '@mui/material/Tooltip';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SendIcon from '@mui/icons-material/Send';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CloseIcon from '@mui/icons-material/Close';
 import GroupIcon from '@mui/icons-material/Group';
 import BadgeIcon from '@mui/icons-material/Badge';
@@ -51,7 +50,6 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import AdminGuard from '@/components/auth/AdminGuard';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import type { TeamMember, Invitation, TeamRow } from '@/types/team';
-import OperatorTimeDetailDialog from '@/components/team/OperatorTimeDetailDialog';
 
 /**
  * Get the Edge Function URL for unified team endpoint.
@@ -74,6 +72,42 @@ function TabPanel({ children, value, index, ...other }: TabPanelProps) {
   );
 }
 
+// Per-company persistence of the selected tab (device-local). Scoped by company
+// to match `jigged.jobs.statusFilter.${companyId}` and the companyId-keyed
+// operator station: one user can hold access to several shops, and the tab they
+// work from in one is not the tab they work from in another. localStorage
+// rather than sessionStorage -- "the tab I was on last time" includes tomorrow
+// morning, not just this browser session.
+const tabStorageKey = (companyId: string) => `jigged.team.activeTab.${companyId}`;
+
+/**
+ * The stored tab for this company, or 0 (Admins).
+ *
+ * Anything unrecognised falls back to Admins rather than rendering a tab that
+ * does not exist: an index left behind by a future tab set, a hand-edited
+ * value, or storage blocked outright (Safari private mode throws on access).
+ * An ABSENT key lands there too, via `Number(null) === 0` -- the same answer by
+ * a different route, which is why there is no separate null branch.
+ */
+function readStoredTab(companyId: string): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const n = Number(window.localStorage.getItem(tabStorageKey(companyId)));
+    return n === 0 || n === 1 || n === 2 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredTab(companyId: string, tab: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(tabStorageKey(companyId), String(tab));
+  } catch {
+    // ignore quota / privacy-mode write failures -- persistence is best-effort
+  }
+}
+
 /**
  * Team Module Page with Tabbed View.
  *
@@ -88,8 +122,23 @@ export default function TeamPage() {
   const companyId = params.companyId as string;
   const { isDemoMode } = useDemoMode();
 
-  // Tab state (0: Admins, 1: Users, 2: Operators)
-  const [activeTab, setActiveTab] = useState(0);
+  // Tab state (0: Admins, 1: Users, 2: Operators), seeded from the device-local
+  // memory of the last tab used in THIS company.
+  //
+  // A lazy initializer, and deliberately NOT the mount-effect shape the jobs
+  // list uses for its saved Status filter -- that page's SSR reasoning does not
+  // transfer here. Nothing in this component renders on the server or in the
+  // first client render: the dashboard layout wraps every page in AuthGuard,
+  // which returns a spinner while its access check runs, and AdminGuard is a
+  // second gate behind it. React never calls this function until after
+  // hydration, so there is no server render for a localStorage read to
+  // disagree with.
+  //
+  // Doing it in an effect instead would cost a real Edge Function round trip --
+  // the loader effect below would fire loadAdmins() on tab 0 and then
+  // loadOperators() once the effect corrected it -- plus a flash of the Admins
+  // tab on every visit.
+  const [activeTab, setActiveTab] = useState(() => readStoredTab(companyId));
 
   // Operators state
   const [operators, setOperators] = useState<TeamRow[]>([]);
@@ -128,10 +177,6 @@ export default function TeamPage() {
     message: string;
     severity: 'error' | 'success';
   }>({ open: false, message: '', severity: 'success' });
-
-  // The member whose recorded time is being looked at, or null. Every other
-  // reporting surface is aggregate; this one names a person and logs the ask.
-  const [timeDetailFor, setTimeDetailFor] = useState<{ id: string; name: string } | null>(null);
 
   // Invitations state
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -598,31 +643,12 @@ export default function TeamPage() {
     return <StatusChip label="Active" color="success" />;
   }, []);
 
-  // Actions cell renderer for pending invitation rows
+  // Actions cell renderer -- pending invitation rows only. A member row carries
+  // no per-row action: the row itself is the control, clicking through to the
+  // member page. It briefly carried an audited per-person recorded-time icon,
+  // which is gone along with the whole per-person reporting path.
   const ActionsCellRenderer = useCallback((params: { data: TeamRow }) => {
-    // An accepted member gets the audited time-detail door. Deliberately ONE
-    // quiet icon and not a column of figures: every other reporting surface is
-    // aggregate by default, and this is the exception that records itself. See
-    // OperatorTimeDetailDialog.
-    if (params.data?.type !== 'invitation') {
-      if (!params.data?.id) return null;
-      return (
-        <Tooltip title="View recorded time (this is logged)">
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setTimeDetailFor({
-                id: params.data.id!,
-                name: params.data.name || params.data.email || 'This person',
-              });
-            }}
-          >
-            <AccessTimeIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      );
-    }
+    if (params.data?.type !== 'invitation') return null;
     if (!params.data.invitation_id) return null;
     return (
       <Box sx={{ display: 'flex', gap: 0.5 }}>
@@ -652,8 +678,16 @@ export default function TeamPage() {
     );
   }, [handleResendInvitation, handleRevokeInvitation]);
 
-  // AG Grid column definitions for Operators
-  const operatorColumnDefs: ColDef<TeamRow>[] = useMemo(
+  // AG Grid column definitions -- ONE array, all three tabs.
+  //
+  // This was two arrays differing in a single column: Admins/Users showed
+  // `created_at` as "Joined", Operators showed `last_sign_in_at` as "Last
+  // Login". All three now show Last Login, because that is the question this
+  // screen actually gets asked -- who is still using this -- and a join date
+  // answered a question nobody had. The copies are merged rather than edited in
+  // parallel: keeping two identical-but-for-one-column arrays side by side is
+  // exactly how they silently diverged.
+  const teamColumnDefs: ColDef<TeamRow>[] = useMemo(
     () => [
       {
         field: 'name',
@@ -676,55 +710,23 @@ export default function TeamPage() {
         width: 120,
         cellRenderer: StatusCellRenderer,
       },
+      // 'Never' (formatRelativeTime's null case) is the honest reading for both
+      // rows that can carry no value: a pending invitation, which has no
+      // last_sign_in_at at all, and a member who has not signed in yet. The
+      // Operators tab has read this way since the column was added.
       {
         field: 'last_sign_in_at',
         headerName: 'Last Login',
         width: 130,
         valueFormatter: (params) => formatRelativeTime(params.value),
       },
+      // Invitation-row actions (Resend / Revoke). Invitation rows appear on all
+      // three tabs, so the column earns its place on all three. 100px is what
+      // two small IconButtons need: 2 x 30px + a 4px gap + the grid theme's
+      // 16px cell padding either side. `colId` is what ExportCsvButton filters
+      // on to keep this column out of the CSV.
       {
-        headerName: '',
-        width: 100,
-        sortable: false,
-        resizable: false,
-        cellRenderer: ActionsCellRenderer,
-        suppressHeaderMenuButton: true,
-      },
-    ],
-    [StatusCellRenderer, ActionsCellRenderer]
-  );
-
-  // AG Grid column definitions for Team Members (Admins/Users)
-  const teamMemberColumnDefs: ColDef<TeamRow>[] = useMemo(
-    () => [
-      {
-        field: 'name',
-        headerName: 'Name',
-        flex: 1,
-        minWidth: 150,
-        pinned: 'left' as const,
-        valueFormatter: (params) => params.value || '—',
-      },
-      {
-        field: 'email',
-        headerName: 'Email',
-        flex: 1,
-        minWidth: 200,
-        valueFormatter: (params) => params.value || '—',
-      },
-      {
-        field: 'status',
-        headerName: 'Status',
-        width: 120,
-        cellRenderer: StatusCellRenderer,
-      },
-      {
-        field: 'created_at',
-        headerName: 'Joined',
-        width: 130,
-        valueFormatter: (params) => formatRelativeTime(params.value),
-      },
-      {
+        colId: 'actions',
         headerName: '',
         width: 100,
         sortable: false,
@@ -758,6 +760,7 @@ export default function TeamPage() {
           value={activeTab}
           onChange={(_, v) => {
             setActiveTab(v);
+            writeStoredTab(companyId, v); // persist the deliberate choice
             clearSelection();
           }}
         >
@@ -874,7 +877,7 @@ export default function TeamPage() {
               <AgGridReact<TeamRow>
                 ref={adminsGridRef}
                 rowData={admins}
-                columnDefs={teamMemberColumnDefs}
+                columnDefs={teamColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
                 selectionColumnDef={{ pinned: 'left' }}
@@ -1013,7 +1016,7 @@ export default function TeamPage() {
               <AgGridReact<TeamRow>
                 ref={usersGridRef}
                 rowData={users}
-                columnDefs={teamMemberColumnDefs}
+                columnDefs={teamColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
                 selectionColumnDef={{ pinned: 'left' }}
@@ -1152,7 +1155,7 @@ export default function TeamPage() {
               <AgGridReact<TeamRow>
                 ref={operatorsGridRef}
                 rowData={operators}
-                columnDefs={operatorColumnDefs}
+                columnDefs={teamColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
                 selectionColumnDef={{ pinned: 'left' }}
@@ -1248,18 +1251,6 @@ export default function TeamPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-
-      {/* Mounted only while open, so its reason field is cleared between looks
-          — reusing a previous reason would understate the audit log. */}
-      {timeDetailFor && (
-        <OperatorTimeDetailDialog
-          open
-          onClose={() => setTimeDetailFor(null)}
-          companyId={companyId}
-          operatorId={timeDetailFor.id}
-          operatorName={timeDetailFor.name}
-        />
-      )}
     </Box>
     </AdminGuard>
   );

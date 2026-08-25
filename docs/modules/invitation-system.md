@@ -145,7 +145,7 @@ accept page collects the real name and PATCHes it in a separate step (§5).
 | `app/auth/confirm/route.ts` | First-party email-link handler → accept page (§5) |
 | `app/auth/callback/route.ts` | PKCE callback. **Second, undocumented entry path:** when `next` is the default `/`, it reads `user_metadata.invitation_id` and redirects to the accept page — a fallback for Supabase stripping query params from `redirect_to`. |
 | `app/accept-invite/[invitationId]/page.tsx` | Invitee-facing accept page (§5) |
-| `app/dashboard/[companyId]/team/page.tsx` | Tabbed grid (Admins / Users / Operators), wrapped in `AdminGuard message="You don't have permission to manage team members."` — a non-admin sees that message *instead of* the content, not an empty grid |
+| `app/dashboard/[companyId]/team/page.tsx` | Tabbed grid (Admins / Users / Operators), wrapped in `AdminGuard message="You don't have permission to manage team members."` — a non-admin sees that message *instead of* the content, not an empty grid. Remembers the last tab used, per company |
 | `app/dashboard/[companyId]/team/members/new/page.tsx` | Invite page — full page, reads `?role` into `defaultRole` |
 | `app/dashboard/[companyId]/team/members/[id]/page.tsx` | Member detail; member rows click through here, invitation rows are click-inert |
 
@@ -153,9 +153,24 @@ accept page collects the real name and PATCHes it in a separate step (§5).
 Edge Function) with that role's pending invitations (`invitationToRow`, id prefixed `inv-`,
 `status: 'pending'`); per-tab search filters client-side on name/email, **debounced 300 ms**;
 `Invite {Role}` buttons are hidden when `isDemoMode`; row actions Resend (send icon) and Revoke
-(✕) appear on invitation rows only; bulk delete splits the selection on the `inv-` prefix —
-members via `user_company_access` delete with `count:'exact'`, invitations via the Edge
-Function — and reports partial failures honestly.
+(✕) appear on **invitation rows only** — a member row briefly carried a per-person recorded-time
+icon as well, and no longer does, which is what makes that "only" true rather than aspirational;
+bulk delete splits the selection on the `inv-` prefix — members via `user_company_access` delete
+with `count:'exact'`, invitations via the Edge Function — and reports partial failures honestly.
+
+**All three tabs share one column set** — Name / Email / Status / **Last Login** / actions. They
+were two identical-but-for-one-column arrays (Admins and Users showed `created_at` as "Joined";
+only Operators showed `last_sign_in_at`) until that difference was noticed as a defect rather than
+a design, so the arrays are now merged. `Last Login` reads `Never` for a pending invitation and for
+a member who has not signed in yet, which is the honest reading of both.
+
+**The selected tab is remembered per company** — `jigged.team.activeTab.<companyId>` in
+`localStorage`, read in a lazy `useState` initializer. The initializer is safe here specifically
+because `AuthGuard` and `AdminGuard` both return a spinner before this component ever renders, so
+there is no server render for the stored value to disagree with; a mount effect would instead cost
+a wasted `team` Edge Function call and a flash of the Admins tab. Every navigation back from
+`members/new` and `members/[id]` pushes the bare `/team` path and relies on this — the older
+`?tab=<index>` link was removed, having never been read.
 
 `/signup` was **not** reworked for invitations. `/login` accepts `returnTo`; its
 `isValidReturnTo` allow-list (`components/auth/Login.tsx`) is `['/dashboard', '/operator',

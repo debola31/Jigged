@@ -517,4 +517,18 @@ SENSITIVE_TABLES = frozenset({
     # ever allowlisted is fine — those are aggregate counts, not identities.
     "note_views",
     "operator_events",
+    # The AI layer's own plumbing: the work queue, the per-attempt spend ledger,
+    # and the desktop worker registry. "How much are we spending on AI?" is a
+    # perfectly natural thing for an owner to type, and ai_calls is the table that
+    # would answer it -- which is exactly why it must not be reachable from
+    # generated SQL. ai_jobs is worse: its payload column carries the questions
+    # other companies asked. Triple-blocked like the rest -- absent from
+    # ALLOWED_TABLES, REVOKEd from jigged_ai_readonly in the migrations that create
+    # them (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new
+    # public table, so those revokes are load-bearing), and named here as the
+    # whole-word backstop. ai_call_write_leaks() and ai_job_write_leaks() assert
+    # the first two layers on every CI run.
+    "ai_calls",
+    "ai_jobs",
+    "ai_workers",
 })

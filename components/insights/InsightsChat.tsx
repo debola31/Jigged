@@ -1,6 +1,7 @@
 'use client';
 
 import * as Sentry from "@sentry/nextjs";
+import posthog from 'posthog-js';
 import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -14,12 +15,10 @@ import Stack from '@mui/material/Stack';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
 import InsightChart from './InsightChart';
-import {
-  submitChatQuery,
-  type ChatResponse,
-  type ChartConfig,
-} from '@/utils/insightsAccess';
+import { useAiJob } from '@/hooks/useAiJob';
+import { submitChatQuery, type ChartConfig } from '@/utils/insightsAccess';
 import { saveInsight } from '@/utils/savedInsightsAccess';
 
 const EXAMPLE_PROMPTS = [
@@ -28,10 +27,18 @@ const EXAMPLE_PROMPTS = [
   'What is my quote pipeline worth?',
 ];
 
+/**
+ * Rotating status while the answer is being worked out.
+ *
+ * interaction-standards.md §5 puts anything over ten seconds in a tier that must
+ * say WHERE the wait is, not just that there is one. A local model on shop
+ * hardware routinely takes tens of seconds, so the last line says so plainly
+ * rather than implying it is nearly done.
+ */
 const LOADING_MESSAGES = [
-  'Querying your data...',
-  'Analyzing results...',
-  'Building your answer...',
+  'Reading your shop data…',
+  'Working out the answer…',
+  'Still going — this can take up to a minute.',
 ];
 
 interface InsightsChatProps {
@@ -52,52 +59,110 @@ interface ChatResult {
  */
 export default function InsightsChat({ companyId, onInsightSaved }: InsightsChatProps) {
   const [question, setQuestion] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ChatResult | null>(null);
+  const [askedQuestion, setAskedQuestion] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
+  const [loadingTick, setLoadingTick] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
   const loadingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // The answer arrives on a job row, not on the POST. Keyed by company so two tabs
+  // on different shops do not re-attach to each other's question after a reload.
+  const job = useAiJob(`insights.${companyId}`);
+
+  const pending = asking || job.phase === 'pending';
+
+  // Fires once per settled job. `phase` is what a rollout is judged on: the ratio
+  // of offline to done is exactly the question "is the shop's box reliable
+  // enough", and no other signal answers it.
+  const settledRef = useRef<string | null>(null);
   useEffect(() => {
-    if (loading) {
-      setLoadingMsgIdx(0);
-      loadingIntervalRef.current = setInterval(() => {
-        setLoadingMsgIdx((prev) => (prev + 1) % LOADING_MESSAGES.length);
-      }, 2000);
-    } else if (loadingIntervalRef.current) {
-      clearInterval(loadingIntervalRef.current);
-      loadingIntervalRef.current = null;
+    const id = job.job?.id;
+    if (!id || job.phase === 'pending' || job.phase === 'idle') return;
+    if (settledRef.current === id) return;
+    settledRef.current = id;
+    posthog.capture('ai job settled', {
+      feature: 'insights',
+      phase: job.phase,
+      executor: job.job?.executor ?? 'unknown',
+      model: job.job?.model ?? 'unknown',
+      error_kind: job.job?.error_kind ?? null,
+      has_chart: !!job.result?.chart_config,
+      tool_call_count: job.result?.tool_calls?.length ?? 0,
+    });
+  }, [job.phase, job.job, job.result]);
+
+  /**
+   * DERIVED, not mirrored into state by an effect. Copying job.result into local
+   * state would mean a setState inside an effect body -- a cascading render, and
+   * the rule hooks/useLoad.ts documents -- for no benefit: the row IS the source of
+   * truth and `dismissed` is the only thing this component adds to it.
+   */
+  const result: ChatResult | null =
+    job.phase === 'done' && job.result && !dismissed
+      ? {
+          question: askedQuestion,
+          answer: job.result.answer,
+          chart_config: job.result.chart_config,
+        }
+      : null;
+
+  // Only the interval callback writes state; the effect body does not. Resetting
+  // the tick belongs to the submit handler, which is a real user action rather
+  // than a render side effect.
+  useEffect(() => {
+    if (!pending) {
+      if (loadingIntervalRef.current) {
+        clearInterval(loadingIntervalRef.current);
+        loadingIntervalRef.current = null;
+      }
+      return;
     }
+    loadingIntervalRef.current = setInterval(() => setLoadingTick((n) => n + 1), 4000);
     return () => {
       if (loadingIntervalRef.current) clearInterval(loadingIntervalRef.current);
+      loadingIntervalRef.current = null;
     };
-  }, [loading]);
+  }, [pending]);
 
   const handleSubmit = async (inputQuestion?: string) => {
     const q = (inputQuestion || question).trim();
-    if (!q || loading) return;
+    if (!q || pending) return;
 
-    setLoading(true);
+    setAsking(true);
     setError(null);
     setSaved(false);
+    setDismissed(false);
+    setLoadingTick(0);
+    setAskedQuestion(q);
     setQuestion('');
 
     try {
-      const response: ChatResponse = await submitChatQuery(companyId, q);
-      setResult({
-        question: q,
-        answer: response.answer,
-        chart_config: response.chart_config,
+      const enqueued = await submitChatQuery(companyId, q);
+      // Shape, never content: `executor` is the whole point of the rollout -- it
+      // says whether the local box or a hosted model served this shop, and the
+      // question itself never leaves the row it was stored in.
+      posthog.capture('ai job enqueued', {
+        feature: 'insights',
+        executor: enqueued.executor,
+        from_example: !!inputQuestion,
       });
+      job.watch(enqueued.job_id);
     } catch (err) {
-      Sentry.captureException(err);
-      const errorMessage =
-        err instanceof Error ? err.message : 'Failed to process your question. Please try again.';
-      setError(errorMessage);
+      // The enqueue response is the AUTHORITATIVE signal -- it carries the real
+      // rate-limit number on 429, the disabled text on 403, and the offline
+      // sentence on 503. Sentry only wants the ones that are ours: a shop hitting
+      // its own cap, or a box being off, is not an incident.
+      const message =
+        err instanceof Error ? err.message : 'Failed to send your question. Please try again.';
+      if (!/offline|rate limit|disabled/i.test(message)) {
+        Sentry.captureException(err);
+      }
+      setError(message);
     } finally {
-      setLoading(false);
+      setAsking(false);
     }
   };
 
@@ -123,7 +188,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       onInsightSaved?.();
       // Dismiss inline response after brief feedback — chart now lives in "Your Charts"
       setTimeout(() => {
-        setResult(null);
+        setDismissed(true);
         setSaved(false);
       }, 1500);
     } catch (err) {
@@ -146,7 +211,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={loading}
+          disabled={pending}
           slotProps={{
             input: {
               sx: { minHeight: 48 },
@@ -156,11 +221,12 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
         <Button
           variant="contained"
           onClick={() => handleSubmit()}
-          disabled={!question.trim() || loading}
+          disabled={!question.trim() || pending}
           sx={{ minWidth: 48, minHeight: 48, px: 2 }}
           aria-label="Send question"
+          aria-busy={pending}
         >
-          {loading ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+          {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
         </Button>
       </Box>
 
@@ -173,7 +239,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
             variant="outlined"
             size="small"
             onClick={() => handleChipClick(prompt)}
-            disabled={loading}
+            disabled={pending}
             sx={{
               cursor: 'pointer',
               '&:hover': { bgcolor: 'action.hover' },
@@ -182,17 +248,47 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
         ))}
       </Stack>
 
-      {/* Loading State */}
-      {loading && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2 }}>
+      {/* Working. aria-live so a screen reader is told the wait started and ended. */}
+      {pending && (
+        <Box
+          role="status"
+          aria-live="polite"
+          sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2 }}
+        >
           <CircularProgress size={16} />
           <Typography variant="body2" color="text.secondary">
-            {LOADING_MESSAGES[loadingMsgIdx]}
+            {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
           </Typography>
         </Box>
       )}
 
-      {/* Error State */}
+      {/* Offline. severity="info", not error, and it names what still works --
+          matching SuggestFixesPanel, which already had to say this sentence. The
+          shop's AI box being asleep is not the user's mistake and not a fault of
+          the page they are on. Distinct from the flag being off, which renders
+          nothing at all. */}
+      {!pending && job.phase === 'offline' && (
+        <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />} sx={{ mt: 2 }}>
+          {job.message}
+        </Alert>
+      )}
+
+      {/* Failed, including the poll wall -- which renders rather than stopping
+          silently, because a spinner that quietly gives up is worse than an error. */}
+      {!pending && job.phase === 'failed' && (
+        <Alert
+          severity="error"
+          sx={{ mt: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => handleSubmit(askedQuestion)}>
+              Try again
+            </Button>
+          }
+        >
+          {job.message}
+        </Alert>
+      )}
+
       {error && (
         <Alert severity="error" sx={{ mt: 2 }}>
           {error}
@@ -200,7 +296,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       )}
 
       {/* Inline Response */}
-      {result && !loading && (
+      {result && !pending && (
         <Card elevation={2} sx={{ mt: 2, p: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
             <AutoAwesomeIcon sx={{ fontSize: 16, color: 'primary.main' }} />

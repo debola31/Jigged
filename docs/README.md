@@ -58,6 +58,9 @@ legal document is frozen
   local-Supabase JWT fixtures, conventions and known holes
 - [runbooks/local-dev-and-testing.md](runbooks/local-dev-and-testing.md) — E2E setup, running from
   a git worktree, Vercel-preview verification, and the E2E gotchas
+- [runbooks/ai-worker.md](runbooks/ai-worker.md) — running the desktop AI worker: the two DSNs and
+  why they are two, the one-resident-model constraint the claim batching exists for, and what each
+  offline symptom actually means
 - [runbooks/vercel-build-cost.md](runbooks/vercel-build-cost.md) — the two billing arms, the measured
   build-phase breakdown, why the build cache is a net loss you cannot switch off, and how to measure
   a build without undercounting it 3×

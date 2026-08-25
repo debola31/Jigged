@@ -1,0 +1,24 @@
+# Desktop AI worker — runs on the shop's Windows box, NEVER on Vercel.
+#
+# THIS FILE IS SEPARATE FROM api/requirements.txt ON PURPOSE. That file carries two
+# written precedents for keeping weight out of the serverless bundle: python-multipart
+# was dropped when its only route went, and psycopg2-binary was moved to the test file
+# because it was "~11 MB of wheel shipped into every Vercel function bundle for an
+# import that never happens at runtime". pypdfium2 is ~10 MB and Pillow another ~4 MB,
+# and neither is ever imported by a request handler.
+#
+# Install:  conda run -n jigged pip install -r worker/requirements.txt
+# The worker also imports api/, so api/requirements.txt must be installed too.
+
+# The queue connection, as the least-privilege jigged_ai_worker role, and the
+# read-only SQL sandbox as jigged_ai_readonly. Two DSNs, two roles, one process.
+psycopg2-binary>=2.9.0
+
+# PDF -> PNG for the vision path. LICENCE CONSTRAINT, NOT A PREFERENCE:
+# no AGPL anywhere in this product. That rules out the three obvious choices --
+# PyMuPDF/fitz (AGPL-3.0), Ghostscript (AGPL-3.0) and pdf2image/poppler (GPL-2.0).
+# pypdfium2 is Apache-2.0 over BSD-3 PDFium; pdfplumber is MIT over MIT pdfminer.six;
+# Pillow is HPND. scripts/licenseCheck.ts enforces this rather than trusting it.
+pypdfium2>=4.30.0
+pdfplumber>=0.11.0
+Pillow>=10.0.0

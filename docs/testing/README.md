@@ -58,9 +58,17 @@ That shape is this repo's main defence against silent breakage, and it is the on
 | `note_counter_write_leaks()` | Only `notes.body` is browser-updatable; the view counters are not |
 | [`legalDocumentsCheck.ts`](../../scripts/legalDocumentsCheck.ts) | A published legal document's bytes AND its metadata are frozen; every file under `public/legal` is declared; the frozen text says the same words as the vendor export it came from |
 | `terms_acceptance_write_leaks()` | No browser role can write `terms_acceptances`, and only `authenticated` can read it |
+| `ai_call_write_leaks()` | Nothing but `service_role` and the AI worker can reach `ai_calls`; `service_role` cannot edit it; no permissive policy reaches a browser or AI-SQL role; **both append-only triggers actually exist**; RLS is on |
+| `ai_job_write_leaks()` | The browser can read `ai_jobs` and never write it; `anon` and `jigged_ai_readonly` reach none of the three AI tables; the worker role holds nothing beyond claim/report; the billing write-gate is still applied |
 | [`schemaEmbedCheck.ts`](../../scripts/schemaEmbedCheck.ts) | Every PostgREST `.select()` embed matches the real schema |
 | [`interactionStandardsCheck.ts`](../../scripts/interactionStandardsCheck.ts) | No value-like placeholders, grey delete icons, or off-theme contained buttons |
 | `types/database.ts` regen diff (in `test.yml`) | The committed types match what the migrations produce |
+
+`ai_call_write_leaks()` also checks `pg_trigger` directly, which its ancestor does not:
+`test_terms_acceptances_rls.py::test_the_append_only_trigger_exists_behind_the_grant` is named for
+its triggers but asserts a guard that only inspects grants and policies, so it stays green whether
+or not those triggers exist. A guard that cannot fail is worse than no guard, because it reads as
+coverage.
 
 Each keeps its allowlist **inside the guard**, so widening one is a reviewable diff rather than a
 comment edit. Two habits are worth copying with it: an allowlist keyed `path::snippet` rather than

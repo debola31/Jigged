@@ -9,11 +9,8 @@ via direct Supabase queries with RLS policies. Low-stock surfacing is
 client-side too — it's the shortage lens on the parts page, not an alert feed.
 """
 
-import json
 import logging
-import math
 import os
-import re
 import time
 
 import sentry_sdk
@@ -23,11 +20,18 @@ from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
 from models.insights_models import (
+    ChatEnqueued,
     ChatRequest,
     ChatResponse,
 )
-from services.insights_service import _build_chat_system_prompt
-from tools.metric_tools import CHAT_TOOLS
+from services import ai_jobs
+from services.ai_features import JobContext, handler_for
+from services.llm.errors import (
+    LLMChainExhausted,
+    LLMNotConfigured,
+    LLMRequestError,
+    LLMToolLoopExhausted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,337 +153,175 @@ def _check_chat_rate_limit(company_id: str, limit: int) -> None:
 # ============================================================
 
 
-@router.post("/{company_id}/chat", response_model=ChatResponse)
-async def chat(company_id: str, request: ChatRequest):
-    """
-    Submit a natural language question about company data.
-    Uses AI tool-use to query metrics and generate a response.
+def _map_llm_error(exc: Exception) -> HTTPException:
+    """Turn a typed AI failure into an HTTP response the ask bar can render.
 
-    Gated on the per-company ai_insights flag (403 when disabled) and rate
-    limited to the company's configured hourly cap.
+    `detail` IS ALWAYS A PLAIN STRING. utils/insightsAccess.ts does
+    `throw new Error(errorData.detail || ...)` and renders the message straight
+    into an Alert, so a {"code","message"} dict shows the user "[object Object]".
+    The repo's rule is structured detail only when the browser must BRANCH on the
+    failure, and here it must not -- it only has to say the sentence.
+
+    Status choices are deliberate against Sentry's 5xx-only capture:
+      503 offline   -- a desktop that is asleep is expected downtime, not an
+                       incident, and paging on it trains the alert away.
+      502 exhausted -- every configured provider failed, including a hosted one,
+                       on a request we accepted and rate-limited. That IS ours.
+    """
+    if isinstance(exc, ai_jobs.AiUnavailable):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, LLMRequestError):
+        return HTTPException(status_code=400, detail="That question couldn't be sent to the AI service.")
+    if isinstance(exc, LLMNotConfigured):
+        return HTTPException(status_code=503, detail="AI is not configured for this deployment.")
+    if isinstance(exc, LLMChainExhausted):
+        if exc.is_offline:
+            return HTTPException(
+                status_code=503,
+                detail="The AI box is offline right now. Everything else still works.",
+            )
+        return HTTPException(
+            status_code=502,
+            detail="The AI service is unavailable right now. Please try again in a moment.",
+        )
+    if isinstance(exc, LLMToolLoopExhausted):
+        return HTTPException(
+            status_code=502,
+            detail="That question needed more steps than the assistant could take. Try asking it more simply.",
+        )
+    return HTTPException(status_code=500, detail="Internal server error")
+
+
+def _error_kind(exc: Exception) -> str:
+    if isinstance(exc, LLMChainExhausted):
+        return "ai_offline" if exc.is_offline else "provider"
+    if isinstance(exc, LLMToolLoopExhausted):
+        return "provider"
+    if isinstance(exc, LLMNotConfigured):
+        return "ai_offline"
+    return "internal"
+
+
+@router.post("/{company_id}/chat", response_model=ChatEnqueued, status_code=202)
+async def chat(company_id: str, request: ChatRequest):
+    """Enqueue a question. The answer arrives on the job row.
+
+    THE ONLY THING THAT CREATES AN ai_jobs ROW. That is the carve-out the polling
+    design rests on: a poll may discover work and may never create it, so the
+    feature flag and the per-company rate limit sit in front of the only door.
+
+    Gated on the per-company ai_insights flag (403) and the company's hourly cap
+    (429). Returns 202 with a job id; the browser polls ai_jobs under RLS.
     """
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
     if not ai_enabled:
-        raise HTTPException(
-            status_code=403,
-            detail="AI Insights is disabled for this company.",
-        )
+        raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
     _check_chat_rate_limit(company_id, chat_limit)
 
-    start_time = time.time()
+    db = _get_supabase_service_role()
+    # Only path that can collect a stuck backend row: the worker's own sweep is
+    # scoped by RLS to executor='worker', and the person watching a spinner is by
+    # definition not enqueueing anything.
+    ai_jobs.sweep(db)
 
     try:
-        from services.ai.claude_provider import ClaudeProvider
-
-        provider = ClaudeProvider()
-
-        # Build messages with company context embedded
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f"company_id: {company_id}\n\n"
-                    f"Question: {request.question}"
-                ),
-            },
-        ]
-
-        # Execute the AI chat with tools
-        result = await provider.chat_with_tools(
-            messages=messages,
-            tools=CHAT_TOOLS,
-            system_prompt=_build_chat_system_prompt(),
-            max_tokens=4000,
+        rows = ai_jobs.enqueue(
+            db,
+            company_id=company_id,
+            feature="insights",
+            payload={"question": request.question},
         )
+    except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
+        raise _map_llm_error(exc) from exc
+    except Exception as exc:
+        logger.error("insights enqueue failed: %s", exc, exc_info=True)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
-        duration_ms = int((time.time() - start_time) * 1000)
+    job = rows[0]
+    if job["executor"] == "worker":
+        # The desktop claims it. Nothing else happens in this request.
+        return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
 
-        # Extract the chart_config the model proposed, then let deterministic
-        # code decide whether it's worth charting (validate + downgrade to text
-        # for degenerate/invalid data) and pick the chart type from the data
-        # shape. The prose answer is always kept; a dropped chart is never a
-        # blank card.
-        raw_content = result["content"]
-        chart_config = _select_chart_type(
-            _validate_chart_config(_extract_chart_config(raw_content)),
-            request.question,
-        )
-
-        # Clean the answer for the plain-text UI: drop fenced JSON, flatten any
-        # markdown tables, and neutralize inline markdown (**bold**, etc.).
-        clean_answer = _strip_inline_markdown(
-            _flatten_markdown_tables(_strip_code_blocks(raw_content))
-        )
-
-        # Log to ai_chat_queries
-        try:
-            supabase = _get_supabase_service_role()
-            supabase.table("ai_chat_queries").insert({
-                "company_id": company_id,
-                "question": request.question,
-                "tool_calls": result.get("tool_calls", []),
-                "response": result["content"],
-                "chart_config": chart_config,
-                "provider": "anthropic",
-                "model": result.get("model"),
-                "tokens_used": result.get("tokens_used"),
-                "duration_ms": duration_ms,
-            }).execute()
-        except Exception as e:
-            logger.warning(f"Failed to log chat query: {e}")
-
-        return ChatResponse(
-            answer=clean_answer,
-            chart_config=chart_config,
-            tool_calls=result.get("tool_calls", []),
-            provider="anthropic",
-            tokens_used=result.get("tokens_used"),
-        )
-
-    except HTTPException:
-        raise
-    except NotImplementedError as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=501, detail="Not implemented")
-    except Exception as e:
-        logger.error(f"Chat error: {e}", exc_info=True)
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
+    await _run_inline(db, job, question=request.question, company_id=company_id)
+    return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
 
 
-def _extract_chart_config(content: str) -> dict | None:
+async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
+    """Work a backend-executed job inside the enqueueing request.
+
+    EXACTLY ONE JOB PER REQUEST, ENFORCED BY A CHECK ON THE TABLE. N inline calls
+    inside one 60s Vercel wall is not slow, it is fatal, which is why fan-out is
+    worker-only.
+
+    The lease set by mark_running is what makes a platform kill recoverable: a
+    killed request leaves the row `running`, and both the sweep's lease branch and
+    the frontend's deadline rule collect it. Without the lease both match NULL and
+    the job spins until the poll wall.
     """
-    Try to extract a chart_config JSON block from the AI response.
-    The AI may include chart configuration as ```json blocks or inline JSON.
+    started = time.time()
+    ai_jobs.mark_running(db, job["id"])
+    try:
+        result = await handler_for(job["feature"])(
+            JobContext(
+                feature=job["feature"],
+                company_id=company_id,
+                request_id=job["request_id"],
+                payload=job["payload"],
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - every failure becomes a terminal row
+        kind = _error_kind(exc)
+        if kind not in ("ai_offline",):
+            # An exhausted LOCAL chain is a box being asleep. Everything else on a
+            # hosted chain is ours, and Sentry should hear about it.
+            logger.error("insights job %s failed: %s", job["id"], exc, exc_info=True)
+            sentry_sdk.capture_exception(exc)
+        ai_jobs.mark_failed(db, job["id"], error=str(exc), error_kind=kind)
+        return
+
+    ai_jobs.mark_succeeded(db, job["id"], result)
+    _log_chat_query(db, company_id, question, result, int((time.time() - started) * 1000))
+
+
+def _log_chat_query(db, company_id: str, question: str, result: dict, duration_ms: int) -> None:
+    """Keep ai_chat_queries current: it backs saved insights, the /admin view AND
+    the rate limiter, so dropping it would quietly disable the cap.
+
+    provider and model now carry whoever ACTUALLY answered rather than a hardcoded
+    "anthropic" -- the point of a chain is that the answer's origin varies.
     """
     try:
-        # Look for ```chart_config or ```json blocks
-        if "```" in content:
-            blocks = content.split("```")
-            for i, block in enumerate(blocks):
-                if i % 2 == 1:  # Inside code fence
-                    # Remove language identifier if present
-                    lines = block.strip().split("\n")
-                    if lines[0].strip().lower() in ("json", "chart_config", "chart"):
-                        json_text = "\n".join(lines[1:])
-                    else:
-                        json_text = block.strip()
-
-                    try:
-                        data = json.loads(json_text)
-                        if isinstance(data, dict) and "chart_type" in data:
-                            return data
-                    except json.JSONDecodeError:
-                        continue
-    except Exception:
-        pass
-
-    return None
+        db.table("ai_chat_queries").insert({
+            "company_id": company_id,
+            "question": question,
+            "tool_calls": result.get("tool_calls", []),
+            "response": result.get("answer", ""),
+            "chart_config": result.get("chart_config"),
+            "provider": result.get("provider", "unknown"),
+            "model": result.get("model"),
+            "tokens_used": result.get("tokens_used"),
+            "duration_ms": duration_ms,
+        }).execute()
+    except Exception as exc:  # noqa: BLE001 - telemetry never fails the request
+        logger.warning("Failed to log chat query: %s", exc)
 
 
-def _strip_code_blocks(content: str) -> str:
-    """Remove all fenced code blocks (```...```) from AI response text."""
-    if "```" not in content:
-        return content.strip()
-
-    parts = content.split("```")
-    # Keep only even-indexed parts (outside code fences)
-    clean_parts = [parts[i] for i in range(len(parts)) if i % 2 == 0]
-    return "\n".join(clean_parts).strip()
-
-
-# Markdown table separator row, e.g. |---|---| or | :--- | ---: |
-_MD_TABLE_SEPARATOR = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
-
-
-def _flatten_markdown_tables(content: str) -> str:
-    """Collapse any markdown tables in the text into plain readable lines.
-
-    The chat answer renders as plain text in the UI, so a raw markdown table
-    shows up as literal `| col | col |` / `|---|---|` ("fake column
-    demarcations"). This drops separator rows and rewrites table rows as
-    `cell — cell`, leaving non-table lines untouched. Defensive backstop — the
-    system prompt also instructs the model not to emit tables.
-    """
-    if "|" not in content:
-        return content
-
-    out: list[str] = []
-    for line in content.split("\n"):
-        stripped = line.strip()
-        # Drop separator rows like |---|---|
-        if "-" in stripped and _MD_TABLE_SEPARATOR.match(stripped):
-            continue
-        # Flatten table rows (start or end with a pipe) into "a — b — c"
-        if stripped.startswith("|") or stripped.endswith("|"):
-            cells = [c.strip() for c in stripped.strip("|").split("|")]
-            cells = [c for c in cells if c]
-            if cells:
-                out.append(" — ".join(cells))
-            continue
-        out.append(line)
-    return "\n".join(out).strip()
-
-
-# Inline markdown patterns to neutralize in the plain-text answer. We only touch
-# clearly-paired/anchored markup so shop data like a part number "PART_101" or an
-# expression "a * b" survives untouched. Underscore emphasis is intentionally NOT
-# handled (snake_case identifiers are common in shop data).
-_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")              # [label](url) -> label
-_MD_BOLD = re.compile(r"\*\*(\S(?:.*?\S)?)\*\*")            # **bold** -> bold
-_MD_ITALIC = re.compile(r"(?<![\w*])\*(\S(?:.*?\S)?)\*(?![\w*])")  # *italic* -> italic
-_MD_CODE = re.compile(r"`([^`]+)`")                         # `code` -> code
-_MD_HEADING = re.compile(r"(?m)^\s{0,3}#{1,6}\s+")          # leading ### -> remove
-
-
-def _strip_inline_markdown(content: str) -> str:
-    """Neutralize inline markdown so the plain-text UI shows clean prose.
-
-    Unwraps **bold**, *italic*, `code`, [label](url) -> label, and drops leading
-    `#` headings. Only paired/anchored asterisk/backtick patterns are touched, so
-    "PART_101" or a literal "a * b" is left intact. Defensive backstop to the
-    system prompt (which forbids markdown); runs after table flattening.
-    """
-    content = _MD_LINK.sub(r"\1", content)
-    content = _MD_BOLD.sub(r"\1", content)
-    content = _MD_ITALIC.sub(r"\1", content)
-    content = _MD_CODE.sub(r"\1", content)
-    content = _MD_HEADING.sub("", content)
-    return content.strip()
-
-
-# ---- chart_config validation + deterministic chart-type selection -----------
-
-_ALLOWED_CHART_TYPES = frozenset({"area", "pie", "bar", "bar_horizontal", "sparkline"})
-# A chart needs enough points to beat a one-line sentence; below this we downgrade
-# to the prose answer (single fact / 1-2 values -> text).
-_MIN_CHART_POINTS = 3
-# For an exactly-2-point chart, keep it only when the two values are a genuine
-# comparison — the smaller is at least this fraction of the larger. A dominant
-# top-1 (e.g. 7749 vs 36 -> 0.5%) is a single-fact answer, not a comparison.
-_COMPARABLE_RATIO = 0.05
-
-
-def _coerce_number(value) -> float | None:
-    """Best-effort parse of a numeric value; handles '1,234.5' / '$1234'."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value) if math.isfinite(value) else None
-    if isinstance(value, str):
-        try:
-            return float(value.replace(",", "").replace("$", "").strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _comparable(values: list[float]) -> bool:
-    """True when two values are close enough in magnitude to be a real comparison."""
-    a, b = abs(values[0]), abs(values[1])
-    hi = max(a, b)
-    if hi == 0:
-        return False
-    return (min(a, b) / hi) >= _COMPARABLE_RATIO
-
-
-def _validate_chart_config(config: dict | None) -> dict | None:
-    """Return the chart_config only if it will render an intelligible chart.
-
-    Otherwise return None so the chat answers in prose. The prose answer is
-    always kept — a dropped chart is an explicit downgrade, never a blank card
-    (honors the repo's "no silent fallbacks" rule). Validated against the
-    config's own embedded data:
-      - chart_type is supported; data is a non-empty list of objects
-      - every row contains x_key AND y_key; y parses as a finite number
-      - non-degenerate: >=2 distinct categories, not all-equal/all-zero, and
-        enough points (>=3, or exactly 2 only when the values are comparable)
-    """
-    if not isinstance(config, dict):
-        return None
-
-    chart_type = config.get("chart_type")
-    x_key = config.get("x_key")
-    y_key = config.get("y_key")
-    data = config.get("data")
-
-    if chart_type not in _ALLOWED_CHART_TYPES:
-        return None
-    if not isinstance(data, list) or not data:
-        return None
-    if not isinstance(x_key, str) or not isinstance(y_key, str):
-        return None
-
-    categories: list[str] = []
-    y_values: list[float] = []
-    for row in data:
-        if not isinstance(row, dict) or x_key not in row or y_key not in row:
-            return None  # key mismatch — the empty-render class
-        y = _coerce_number(row.get(y_key))
-        if y is None:
-            return None  # non-numeric y
-        categories.append(str(row.get(x_key)))
-        y_values.append(y)
-
-    if len(set(categories)) < 2:
-        return None  # single category — nothing to compare
-    if len(set(y_values)) == 1:
-        return None  # all-equal (covers all-zero) — flat, uninformative
-    if len(y_values) < _MIN_CHART_POINTS:
-        # 1 point -> text; 2 points only if a genuine comparison.
-        if len(y_values) != 2 or not _comparable(y_values):
-            return None
-
-    return config
-
-
-_DATE_RE = re.compile(r"^\d{4}-\d{2}")  # ISO-ish date detection for temporal x
-_CHART_TYPE_KEYWORDS = (
-    ("horizontal", "bar_horizontal"),
-    ("donut", "pie"),
-    ("doughnut", "pie"),
-    ("pie", "pie"),
-    ("column", "bar"),
-    ("bar", "bar"),
-    ("line", "area"),
-    ("area", "area"),
-    ("trend", "area"),
+# ---- presentation helpers -----------------------------------------------------
+# Moved to services/insights_presentation.py so the desktop worker can run them
+# without importing a route module. Re-exported here because two unit-test modules
+# and the route body itself resolve them from this namespace -- the same shape as
+# quickbooks_routes.py's `_service_client = company_auth.service_client`.
+from services.insights_presentation import (  # noqa: E402
+    _ALLOWED_CHART_TYPES,
+    _COMPARABLE_RATIO,
+    _MIN_CHART_POINTS,
+    _coerce_number,
+    _comparable,
+    _extract_chart_config,
+    _flatten_markdown_tables,
+    _select_chart_type,
+    _strip_code_blocks,
+    _strip_inline_markdown,
+    _validate_chart_config,
 )
-
-
-def _select_chart_type(config: dict | None, question: str = "") -> dict | None:
-    """Pick chart_type deterministically from the data shape, overriding the
-    model's choice — unless the user explicitly named a type in the question.
-
-    temporal x + numeric y          -> area
-    nominal x (few categories)      -> bar (bar_horizontal when labels are long
-                                       or there are many categories)
-    model-chosen pie with few slices -> kept as pie (part-of-whole)
-    """
-    if config is None:
-        return None
-
-    q = (question or "").lower()
-    for kw, ctype in _CHART_TYPE_KEYWORDS:
-        # Word-boundary match so "pipeline" doesn't trigger "line", etc.
-        if re.search(rf"\b{kw}\b", q):
-            return {**config, "chart_type": ctype}
-
-    data = config.get("data") or []
-    x_key = config.get("x_key")
-    cats = [str(r.get(x_key, "")) for r in data if isinstance(r, dict)]
-    n = len(cats)
-    is_temporal = bool(cats) and all(_DATE_RE.match(c) for c in cats)
-
-    if is_temporal:
-        chosen = "area"
-    elif config.get("chart_type") == "pie" and n <= 6:
-        chosen = "pie"  # plausible part-of-whole
-    else:
-        longest = max((len(c) for c in cats), default=0)
-        chosen = "bar_horizontal" if (longest > 14 or n > 8) else "bar"
-
-    return {**config, "chart_type": chosen}

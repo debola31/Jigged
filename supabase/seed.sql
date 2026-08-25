@@ -47,6 +47,23 @@
 
 create extension if not exists pgcrypto;
 
+-- ── AI worker role: LOGIN, here and only here ────────────────────────────────
+-- jigged_ai_worker is created NOLOGIN by its migration, matching jigged_ai_readonly:
+-- a password in a migration file would be a credential in git, so production gets
+-- LOGIN and a real secret by hand in the Supabase dashboard.
+--
+-- This file is local/preview only, so granting LOGIN here is safe and buys two
+-- things that matter. Integration tests can connect AS the worker and exercise its
+-- RLS for real -- `postgres` holds admin_option on the role but NOT set_option, so
+-- SET ROLE is refused and privilege assertions would otherwise be limited to
+-- has_table_privilege(). And a preview branch becomes somewhere the actual desktop
+-- worker can be pointed end-to-end before anything touches production.
+--
+-- The role reaches ai_jobs, ai_calls and ai_workers and nothing else -- no tenant
+-- table, no auth schema -- so this is a strictly smaller exposure than the seeded
+-- application logins listed at the top of this file.
+alter role jigged_ai_worker login password 'postgres';
+
 -- ── Auth user ────────────────────────────────────────────────────────────────
 -- Email/password sign-in needs a bcrypt encrypted_password, a confirmed email,
 -- empty-string (not NULL) token columns, and a companion auth.identities row.

@@ -10,9 +10,13 @@ email-validator>=2.0.0
 PyJWT>=2.8.0
 
 # AI providers (for CSV import mapping)
-# >=0.40.0 guarantees client.models.list() for the model deprecation check
-# (services/ai/model_config.py). Installed in prod/staging is newer (0.86.0).
-anthropic>=0.40.0
+# >=0.86.0 for output_config json_schema, the structured-output mechanism used by
+# routes/drawing_routes.py and services/llm/anthropic_provider.py. The floor was
+# >=0.40.0 (chosen for client.models.list(), the model-deprecation check in
+# services/ai/model_config.py) and had ALREADY been too low for the shipped
+# drawing_routes code -- prod happened to install 0.86.0, so nothing broke and
+# nothing said so. Raised 2026-08-25.
+anthropic>=0.86.0
 openai>=1.0.0
 google-genai>=0.3.0
 

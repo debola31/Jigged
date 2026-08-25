@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -47,6 +46,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env.local", override=False)
 from services.ai_features import JobContext, handler_for  # noqa: E402
 from services.insights_presentation import _validate_chart_config  # noqa: E402
 from services.llm.errors import LLMError  # noqa: E402
+from tools.sql_executor import describe_dsn  # noqa: E402
 
 # Stated BEFORE the run. Written here rather than in a report so it cannot drift
 # into whatever the numbers happened to be.
@@ -206,12 +206,6 @@ def summarise(outcomes: list[Outcome]) -> str:
     return "\n".join(lines)
 
 
-def _sandbox_target(dsn: str) -> str:
-    """host:port/dbname, credentials dropped. This gets printed and pasted around."""
-    parts = urlsplit(dsn)
-    return f"{parts.hostname or '?'}:{parts.port or 5432}{parts.path}"
-
-
 async def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--company", required=True, help="company_id to ask about")
@@ -238,7 +232,25 @@ async def main() -> int:
         print("AI_READONLY_DATABASE_URL is not set -- every arm would answer without "
               "SQL and the comparison would be meaningless. Set it and re-run.")
         return 2
-    print(f"company {args.company} via {_sandbox_target(dsn)}\n")
+
+    # SET IS NOT REACHABLE, and the difference cost real money. A run against a
+    # stopped local stack billed four questions of Claude before anyone read the
+    # output: each one generated SQL, handed the connection error back to the model,
+    # and let it try again, which is the self-correction loop working exactly as
+    # designed on a database that was never going to open. One second here.
+    import asyncpg
+
+    try:
+        conn = await asyncpg.connect(dsn, timeout=5)
+        await conn.execute("select 1")
+        await conn.close()
+    except Exception as exc:  # noqa: BLE001 - any failure to reach it is fatal here
+        print(f"cannot reach {describe_dsn(dsn)}: {type(exc).__name__}: {exc}")
+        print("AI_READONLY_DATABASE_URL is the LOCAL stack in .env.local; "
+              "WORKER_READONLY_DATABASE_URL is the remote one. Export whichever holds "
+              "this company and re-run.")
+        return 2
+    print(f"company {args.company} via {describe_dsn(dsn)}\n")
 
     outcomes: list[Outcome] = []
     for question in questions:

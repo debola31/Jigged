@@ -191,9 +191,14 @@ class Worker:
     async def run(self) -> None:
         self.db.connect()
         self._tick_heartbeat(force=True)
+        # The sandbox target is in the banner because "which database answered"
+        # is not something anyone should have to infer from a wrong number later.
+        from tools.sql_executor import describe_dsn
+
         logger.info(
-            "worker %s ready; models=%s ollama=%s",
+            "worker %s ready; models=%s ollama=%s sandbox=%s",
             self.cfg.worker_id, ", ".join(self.cfg.models), self.cfg.ollama_base_url,
+            describe_dsn(self.cfg.readonly_database_url),
         )
 
         while not self._stopping:
@@ -238,22 +243,39 @@ class Worker:
 
 
 def load_env(root: Path = _ROOT) -> None:
-    """Populate os.environ from the two dotenv files, shell winning over both.
+    """Populate os.environ from .env.local, the shell still winning over it.
 
     Nothing else does this: the worker is started from a shell rather than by Vercel,
     and api/index.py's load_dotenv covers the backend only -- so until this existed, a
     fully-populated .env.local still failed at startup.
 
-    THE ORDER IS THE POINT, AND IT IS WHY THIS IS A FUNCTION RATHER THAN TWO LINES IN
-    main(). override=False never clobbers a name already set, so the FIRST file to
-    define one wins: shell > worker/.env > .env.local. .env.local points
-    AI_READONLY_DATABASE_URL at the local postgres superuser, which is BYPASSRLS, and
-    the guard in config.load() deliberately exempts localhost -- so swapping these two
-    lines would hand the SQL sandbox an unscoped connection with nothing left to
-    object to it. Neither file existing is fine; the shell alone still works.
+    ONE FILE NOW, and that is the whole point of WORKER_READONLY_DATABASE_URL. This
+    used to read worker/.env first and .env.local second, because both defined
+    AI_READONLY_DATABASE_URL with different values and the LOAD ORDER decided which
+    database the SQL sandbox got. Naming the worker's copy apart deleted the
+    collision, and the ordering rule with it. override=False keeps the shell ahead of
+    the file, which is the only precedence left. A missing file is not an error --
+    the shell alone still works.
     """
-    load_dotenv(root / "worker" / ".env", override=False)
     load_dotenv(root / ".env.local", override=False)
+
+
+def export_sandbox_dsn(cfg: worker_config.Config) -> None:
+    """Point tools.sql_executor at the WORKER's read-only DSN.
+
+    That module reads AI_READONLY_DATABASE_URL at pool creation and the pool is lazy,
+    so this has to be in place before the first insights job -- not before the first
+    import.
+
+    ASSIGNMENT, NEVER setdefault. .env.local defines AI_READONLY_DATABASE_URL as the
+    local stack for the backend's own use, and load_env() has already put it in
+    os.environ by the time this runs. A setdefault would therefore find it present,
+    do nothing, and leave every query this worker runs pointed at 127.0.0.1 -- which
+    on a shop box is a refused connection, and on a developer box is the WRONG SHOP'S
+    DATABASE answering. It was a setdefault while worker/.env existed, where it was
+    right for the same reason it is wrong now.
+    """
+    os.environ["AI_READONLY_DATABASE_URL"] = cfg.readonly_database_url
 
 
 def main() -> int:
@@ -265,10 +287,7 @@ def main() -> int:
         logger.error("%s", exc)
         return 2
 
-    # sql_executor reads this from the environment at pool creation, and the pool is
-    # lazy -- so it has to be in place before the first insights job, not before the
-    # first import.
-    os.environ.setdefault("AI_READONLY_DATABASE_URL", cfg.readonly_database_url)
+    export_sandbox_dsn(cfg)
 
     worker = Worker(cfg)
     for sig in (signal.SIGINT, signal.SIGTERM):

@@ -129,6 +129,41 @@ class OpenAICompatProvider:
             wire.append(entry)
         return wire
 
+    @staticmethod
+    def _wire_tools(tools: list[dict]) -> list[dict]:
+        """Anthropic tool shape in, OpenAI tool shape out.
+
+        CHAT_TOOLS is written Anthropic-native -- {name, description, input_schema}
+        -- and anthropic_provider hands it to the SDK unchanged, which is correct
+        there. This layer used to hand it over unchanged too, and that is wrong
+        everywhere it is sent: an OpenAI-compatible endpoint wants the fields nested
+        under `function`, so what went out had no `function` key at all.
+
+        IT DID NOT FAIL THE SAME WAY TWICE, WHICH IS WHY IT SURVIVED. DeepInfra
+        validates the body and answers 422 "Field required", naming nothing. Ollama
+        accepts it and returns a tool call with no name, which _parse coerces to ""
+        and the insights handler rejects as an unknown tool. Neither reads as "the
+        tools were malformed"; both read as "the local model cannot use tools",
+        which is the exact conclusion evals/insights_ab.py exists to draw. Both
+        non-anthropic arms of that A/B had therefore never executed a query.
+
+        Already-OpenAI-shaped entries pass through, so a caller may hand over either.
+        """
+        wired: list[dict[str, Any]] = []
+        for tool in tools:
+            if "function" in tool:
+                wired.append(tool)
+                continue
+            wired.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema") or tool.get("parameters") or {},
+                },
+            })
+        return wired
+
     def _body(
         self,
         messages: list[Message],
@@ -144,7 +179,7 @@ class OpenAICompatProvider:
         }
         body.update(self._extra_body)
         if tools:
-            body["tools"] = tools
+            body["tools"] = self._wire_tools(tools)
         if json_schema is not None:
             body["response_format"] = {
                 "type": "json_schema",

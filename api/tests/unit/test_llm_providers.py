@@ -282,6 +282,53 @@ async def test_a_tool_result_turn_carries_its_call_id():
     assert msgs[2] == {"role": "tool", "tool_call_id": "call_1", "content": '{"rows":[]}'}
 
 
+async def test_an_anthropic_shaped_tool_is_translated_for_the_wire():
+    """CHAT_TOOLS is Anthropic-native. Handing it over unchanged is what broke both
+    non-anthropic arms of evals/insights_ab.py: DeepInfra answered 422 "Field
+    required" (no `function` key) and Ollama returned a nameless tool call, neither
+    of which reads as "the tool schema was wrong"."""
+    provider, seen = _compat()
+    await provider.complete(
+        [Message(role="user", content="q")],
+        tools=[{
+            "name": "execute_sql",
+            "description": "Run a read-only SELECT.",
+            "input_schema": {"type": "object", "properties": {"sql": {"type": "string"}}},
+        }],
+    )
+    tool = json.loads(seen[0].content)["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "execute_sql"
+    assert tool["function"]["description"] == "Run a read-only SELECT."
+    assert tool["function"]["parameters"]["properties"] == {"sql": {"type": "string"}}
+    assert "input_schema" not in tool
+
+
+async def test_the_real_chat_tools_reach_the_wire_openai_shaped():
+    """The object actually sent in production, not a stand-in. A tool added to
+    CHAT_TOOLS in Anthropic shape -- which is the shape that file is written in --
+    must keep arriving translated."""
+    from tools.metric_tools import CHAT_TOOLS
+
+    provider, seen = _compat()
+    await provider.complete([Message(role="user", content="q")], tools=CHAT_TOOLS)
+    tools = json.loads(seen[0].content)["tools"]
+    assert len(tools) == len(CHAT_TOOLS)
+    assert all(t["type"] == "function" and t["function"]["name"] for t in tools)
+    assert all(t["function"]["parameters"].get("properties") for t in tools)
+
+
+async def test_an_already_openai_shaped_tool_passes_through():
+    """Callers may hand over either dialect; only the Anthropic one is converted."""
+    already = {
+        "type": "function",
+        "function": {"name": "noop", "description": "", "parameters": {"type": "object"}},
+    }
+    provider, seen = _compat()
+    await provider.complete([Message(role="user", content="q")], tools=[already])
+    assert json.loads(seen[0].content)["tools"] == [already]
+
+
 # ------------------------------------------------ openai-compat: the response
 
 

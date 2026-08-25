@@ -29,6 +29,20 @@ MAX_ROWS = 200
 STATEMENT_TIMEOUT_MS = 5000
 
 
+def describe_dsn(dsn: str) -> str:
+    """host:port/dbname for a DSN, credentials dropped.
+
+    Lives here because this module owns the DSN, and every caller that wants to SAY
+    which database it is about needs the same guarantee that the password does not
+    come along. Startup banners and eval output both get pasted into issues.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(dsn)
+    user = f"{parts.username}@" if parts.username else ""
+    return f"{user}{parts.hostname or '?'}:{parts.port or 5432}{parts.path}"
+
+
 def _json_serializable(value: Any) -> Any:
     """Convert PostgreSQL types to JSON-serializable values."""
     if isinstance(value, Decimal):

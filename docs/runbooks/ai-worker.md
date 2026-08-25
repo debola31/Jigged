@@ -34,14 +34,22 @@ Two DSNs, two roles, one process. That split is the whole least-privilege story:
 | Variable | Role | Can do |
 |---|---|---|
 | `WORKER_DATABASE_URL` | `jigged_ai_worker` | claim/report `ai_jobs`, insert `ai_calls`, keep its heartbeat |
-| `AI_READONLY_DATABASE_URL` | `jigged_ai_readonly` | the insights `execute_sql` sandbox, per-company scoped by RLS |
+| `WORKER_READONLY_DATABASE_URL` | `jigged_ai_readonly` | the insights `execute_sql` sandbox, per-company scoped by RLS |
 
-**Where they go.** [`worker/__main__.py`](../../worker/__main__.py) loads `worker/.env`
-and then `.env.local`; `override=False` means the **first** definition of a name wins, so
-precedence is shell > `worker/.env` > `.env.local`. That ordering is load-bearing rather
-than cosmetic — `.env.local` is where the *local stack's* superuser
-`AI_READONLY_DATABASE_URL` lives and the guard below exempts localhost, so the reverse
-would unscope the SQL sandbox in silence. Put the box's real DSNs in `worker/.env`.
+**Where they go.** [`worker/__main__.py`](../../worker/__main__.py) loads the repo-root
+`.env.local`, and the shell wins over it. That is the entire precedence rule.
+
+**`WORKER_READONLY_DATABASE_URL` is named apart from the backend's
+`AI_READONLY_DATABASE_URL` on purpose.** The value differs by *process*, not by
+environment: one machine runs the backend against a local stack and the worker against a
+real shop at the same time, and `.env.local`'s `AI_READONLY_DATABASE_URL` is the local
+`postgres` superuser. **Withdrawn:** a two-file layout (`worker/.env` first, `.env.local`
+second) held the same two values under one name — wrong because load order was then the
+only thing between a shop's data and a `BYPASSRLS` connection, and nothing about a
+correct run looked different from a wrong one. `export_sandbox_dsn()` copies the worker's
+value onto the name [`api/tools/sql_executor.py`](../../api/tools/sql_executor.py) reads,
+**overwriting** rather than defaulting — `.env.local` has already set that name by then.
+The worker's startup line prints the role and host it resolved.
 
 `jigged_ai_worker` is created **NOLOGIN** by its migration, exactly as
 `jigged_ai_readonly` was: a password in a migration file would be a credential in
@@ -52,12 +60,12 @@ production. Locally and on preview branches `supabase/seed.sql` does it for you.
 > and the reason the queue can be polled safely is that RLS scopes this role to
 > `executor = 'worker'` rows.
 
-> **Never point `AI_READONLY_DATABASE_URL` at the `postgres` superuser.** That
+> **Never point `WORKER_READONLY_DATABASE_URL` at the `postgres` superuser.** That
 > role is `BYPASSRLS`, so the SQL sandbox's per-company scoping would silently do
-> nothing and one shop's question could return another shop's rows. `.env.local`
-> points it exactly there for the local stack, so this is one copy-paste away —
-> `worker/config.py` refuses to start if it sees that shape against a remote host,
-> but the check is a backstop, not permission to be careless.
+> nothing and one shop's question could return another shop's rows. The separate name
+> is what keeps `.env.local`'s local superuser DSN out of this variable;
+> `worker/config.py` refuses to start if it sees that shape against a remote host, but
+> the check is a backstop for a hand-pasted DSN, not permission to be careless.
 
 ## 3. Start it
 
@@ -107,7 +115,7 @@ offline state within one poll instead of after a two-minute silence.
 | UI says offline, worker is running | `select last_seen_at, models from ai_workers` — is the job's model in `models`? The sweep is model-aware, so a live worker that cannot serve `qwen3-vl:4b` does not keep a drawing job alive. |
 | Jobs queue and never start | `select status, model, count(*) from ai_jobs group by 1,2`. A model no worker advertises stays queued until the sweep. |
 | Every job times out at ~45 s | The model is being evicted between calls. Check `OLLAMA_KEEP_ALIVE=-1` and `ollama ps`. |
-| An insights job fails with a SQL error | That is fed back to the model for self-correction and is often not a bug. Persistent ones: `AI_READONLY_DATABASE_URL`, and the allowlist in `api/tools/schema_context.py`. |
+| An insights job fails with a SQL error | That is fed back to the model for self-correction and is often not a bug. Persistent ones: `WORKER_READONLY_DATABASE_URL`, and the allowlist in `api/tools/schema_context.py`. |
 | A job sits `running` forever | Only for `executor='backend'` rows — the worker's sweep cannot see them by design. The next enqueue reconciles it; the browser gives up on the lease regardless. |
 
 Cost, per attempt, joined to the job by `request_id`:

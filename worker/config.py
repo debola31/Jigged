@@ -45,19 +45,23 @@ def _require(name: str, purpose: str) -> str:
 
 def load() -> Config:
     readonly = _require(
-        "AI_READONLY_DATABASE_URL",
+        "WORKER_READONLY_DATABASE_URL",
         "the read-only connection the insights execute_sql sandbox runs on, as "
-        "jigged_ai_readonly",
+        "jigged_ai_readonly. Named apart from AI_READONLY_DATABASE_URL deliberately: "
+        "one .env.local holds both, and that one is the LOCAL stack",
     )
-    # .env.local points this at the local postgres SUPERUSER, which is BYPASSRLS --
-    # so every tenant-scoping guarantee in the SQL sandbox is off. Fine for a local
-    # stack, catastrophic for a worker serving real shops, and the failure would be
-    # completely silent: queries would just return other companies' rows.
+    # The separate NAME is the actual fix here. AI_READONLY_DATABASE_URL is the local
+    # postgres SUPERUSER, which is BYPASSRLS -- every tenant-scoping guarantee in the
+    # SQL sandbox off, queries silently returning other companies' rows. Fine on a
+    # local stack, catastrophic for a worker serving real shops. While both processes
+    # read one name, the only thing standing between them was load order. Now nothing
+    # the backend sets can reach this value, and the check below is a backstop for a
+    # hand-pasted DSN rather than the guarantee itself.
     if "://postgres:" in readonly and "127.0.0.1" not in readonly and "localhost" not in readonly:
         raise WorkerMisconfigured(
-            "AI_READONLY_DATABASE_URL points at the `postgres` superuser on a non-local "
-            "host. That role is BYPASSRLS, so the SQL sandbox's per-company scoping "
-            "would silently do nothing. Use the jigged_ai_readonly role."
+            "WORKER_READONLY_DATABASE_URL points at the `postgres` superuser on a "
+            "non-local host. That role is BYPASSRLS, so the SQL sandbox's per-company "
+            "scoping would silently do nothing. Use the jigged_ai_readonly role."
         )
 
     return Config(

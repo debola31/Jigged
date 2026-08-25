@@ -31,8 +31,18 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# Same reason api/index.py:29 does it, for the same .env.local. This module is a
+# THIRD entry point: neither the FastAPI app nor pytest's conftest is in the import
+# path under `python -m evals.insights_ab`, so nothing had populated os.environ and
+# the anthropic arm was skipped for a missing key -- chain_for() raising on a box
+# whose .env.local holds the key. override=False so an exported var still wins.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env.local", override=False)
 
 from services.ai_features import JobContext, handler_for  # noqa: E402
 from services.insights_presentation import _validate_chart_config  # noqa: E402
@@ -196,6 +206,12 @@ def summarise(outcomes: list[Outcome]) -> str:
     return "\n".join(lines)
 
 
+def _sandbox_target(dsn: str) -> str:
+    """host:port/dbname, credentials dropped. This gets printed and pasted around."""
+    parts = urlsplit(dsn)
+    return f"{parts.hostname or '?'}:{parts.port or 5432}{parts.path}"
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--company", required=True, help="company_id to ask about")
@@ -209,6 +225,20 @@ async def main() -> int:
         if args.questions
         else DEFAULT_QUESTIONS
     )
+
+    # WHICH DATABASE PRODUCED THESE NUMBERS IS PART OF THE RESULT, so it is printed
+    # rather than assumed. .env.local points AI_READONLY_DATABASE_URL at the LOCAL
+    # stack while the shop's data lives elsewhere, and an arm that scored badly
+    # because it queried an empty database looks exactly like an arm that scored
+    # badly. FLIP_CONDITION is worth nothing if those two are confusable.
+    dsn = os.getenv("AI_READONLY_DATABASE_URL")
+    if not dsn:
+        # Refuse rather than run: with no SQL tool every arm answers from nowhere,
+        # every grounded score collapses together, and the run still bills.
+        print("AI_READONLY_DATABASE_URL is not set -- every arm would answer without "
+              "SQL and the comparison would be meaningless. Set it and re-run.")
+        return 2
+    print(f"company {args.company} via {_sandbox_target(dsn)}\n")
 
     outcomes: list[Outcome] = []
     for question in questions:

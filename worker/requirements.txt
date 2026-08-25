@@ -14,6 +14,11 @@
 # read-only SQL sandbox as jigged_ai_readonly. Two DSNs, two roles, one process.
 psycopg2-binary>=2.9.0
 
+# __main__.py reads worker/.env and .env.local at startup -- the worker is started
+# from a shell, so nothing else populates its environment. api/requirements.txt
+# already pulls this in; declared here because this package imports it directly.
+python-dotenv>=1.0.0
+
 # PDF -> PNG for the vision path. LICENCE CONSTRAINT, NOT A PREFERENCE:
 # no AGPL anywhere in this product. That rules out the three obvious choices --
 # PyMuPDF/fitz (AGPL-3.0), Ghostscript (AGPL-3.0) and pdf2image/poppler (GPL-2.0).

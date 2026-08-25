@@ -25,10 +25,13 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 # The worker runs the SAME feature handlers and the SAME provider layer as the
 # backend, so a bug cannot diverge between them. api/ goes on the path the way
 # index.py does it, which is also why those modules import as `services.x`.
-_API_DIR = Path(__file__).resolve().parents[1] / "api"
+_ROOT = Path(__file__).resolve().parents[1]
+_API_DIR = _ROOT / "api"
 if str(_API_DIR) not in sys.path:
     sys.path.insert(0, str(_API_DIR))
 
@@ -234,7 +237,28 @@ class Worker:
         logger.info("worker %s stopped", self.cfg.worker_id)
 
 
+def load_env(root: Path = _ROOT) -> None:
+    """Populate os.environ from the two dotenv files, shell winning over both.
+
+    Nothing else does this: the worker is started from a shell rather than by Vercel,
+    and api/index.py's load_dotenv covers the backend only -- so until this existed, a
+    fully-populated .env.local still failed at startup.
+
+    THE ORDER IS THE POINT, AND IT IS WHY THIS IS A FUNCTION RATHER THAN TWO LINES IN
+    main(). override=False never clobbers a name already set, so the FIRST file to
+    define one wins: shell > worker/.env > .env.local. .env.local points
+    AI_READONLY_DATABASE_URL at the local postgres superuser, which is BYPASSRLS, and
+    the guard in config.load() deliberately exempts localhost -- so swapping these two
+    lines would hand the SQL sandbox an unscoped connection with nothing left to
+    object to it. Neither file existing is fine; the shell alone still works.
+    """
+    load_dotenv(root / "worker" / ".env", override=False)
+    load_dotenv(root / ".env.local", override=False)
+
+
 def main() -> int:
+    load_env()
+
     try:
         cfg = worker_config.load()
     except worker_config.WorkerMisconfigured as exc:

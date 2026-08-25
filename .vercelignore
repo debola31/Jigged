@@ -68,6 +68,16 @@
 # that could never work. Neither of these files suppresses that email — only a
 # Vercel-side ignore setting does — but they are what stops the code shipping.
 #
+# excludeFiles IS CAPPED AT 256 CHARACTERS, and Vercel enforces it as a schema
+# error that fails the deployment outright rather than a warning. That is not
+# visible from vercel.json and there is no room to say it there, JSON having no
+# comments — so it is recorded here. At the time of writing the value is 241, and
+# the first attempt at this change blew the cap by adding api/pytest.ini and
+# api/requirements-test.txt alongside the two entries that mattered. If a future
+# entry does not fit, compact the list rather than dropping something: a bare
+# `foo` and `foo/**` are not equivalent, and quietly losing node_modules/** would
+# be far worse than a tight budget.
+#
 # The bundle half is the part that was actually wrong. `excludeFiles` in
 # vercel.json works by ENUMERATION, so anything unlisted is included: worker/ and
 # api/evals/ were both riding along inside every api/** function bundle. Nothing

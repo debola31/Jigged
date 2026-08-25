@@ -26,7 +26,6 @@ import type {
   OperationActuals,
   OperationInterval,
   OperationIntervalWithContext,
-  OperatorTimeDetailRow,
   RunningInterval,
 } from '@/types/operationInterval';
 
@@ -346,43 +345,6 @@ export async function getOperationActuals(
       { ...row, actual_minutes: Number(row.actual_minutes) } as OperationActuals,
     ]),
   );
-}
-
-/**
- * One person's recorded time. **The only path in this file that returns operator
- * identity, and the only one that leaves a record of having been asked.**
- *
- * The function is admin-gated, refuses a blank reason, and writes an
- * `operator_time_access_log` row BEFORE it returns anything — so a failure
- * partway cannot yield an unlogged look. None of that is enforced here; it is
- * enforced in the function, because a client-side check is a suggestion.
- *
- * It exists at all because the alternative is worse. An owner who cannot get
- * this number by any route will ask for a permissive view of the underlying
- * table, and that request is far harder to refuse than to pre-empt. A narrow,
- * logged, reason-coded door is what keeps the wide one shut.
- */
-export async function getOperatorTimeDetail(
-  companyId: string,
-  operatorId: string,
-  reason: string,
-): Promise<OperatorTimeDetailRow[]> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase.rpc('get_operator_time_detail', {
-    p_company_id: companyId,
-    p_operator_id: operatorId,
-    p_reason: reason,
-  });
-
-  if (error) {
-    reportRpcError(error, 'load operator time detail');
-    throw toFriendlyError(error, {
-      entity: 'time entry',
-      fallback: 'Could not load that time record.',
-    });
-  }
-  return (data ?? []) as OperatorTimeDetailRow[];
 }
 
 /**

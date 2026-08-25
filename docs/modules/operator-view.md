@@ -368,9 +368,10 @@ claims production that was retracted, and once the row carries a quantity that i
 false statement.
 
 **The feed shows YOUR time entries and EVERYONE'S notes**, and the asymmetry is deliberate. A
-job-scoped feed naming when each person started would be a per-person time view available shop-wide
-— looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS
-enforces it.
+job-scoped feed naming when each person started would be a per-person time view available shop-wide.
+There is no admin path to that view either: `get_operator_time_detail` was removed, so **no role**
+can resolve recorded time to a named person. The feed's self-only scope is now the only per-person
+view of time in the product. RLS enforces it.
 
 **`Complete without timing` appends a Finished row too, marked `not timed`.** It records no
 interval — a remembered start is a recall estimate, and inventing one would corrupt the data this
@@ -737,14 +738,29 @@ operationally, which the first version undervalued: **an unmissable clock is the
 against the forgotten start and the forgotten stop**, which is the failure mode the whole model
 fights. What did not change: no estimate beside it, no total across jobs, no average.
 
-**Aggregate-by-default is enforced by RLS, not convention.** `job_operation_intervals` has **no
-admin-readable path**: a row-returning SELECT policy exposing `operator_id` would *be* a per-person
-report, because PostgREST supplies the grouping for free. Admins read
-`get_operation_actuals` / `get_open_intervals`, which return no operator identity at all.
-`get_operator_time_detail` is the only path that names a person; it is admin-gated, demands a
-reason, and writes an `operator_time_access_log` row **before** it returns anything. If a future
-change removes any one of those three, it does not belong on the `function_execute_leaks()`
-allowlist.
+**Aggregate-by-default is enforced by RLS, not convention — and as of 2026-08-25 there is no
+exception left to be default *from*.** `job_operation_intervals` has **no admin-readable path**: a
+row-returning SELECT policy exposing `operator_id` would *be* a per-person report, because PostgREST
+supplies the grouping for free. Admins read `get_operation_actuals` / `get_open_intervals`, which
+return no operator identity at all.
+
+`get_operator_time_detail` used to be the one path that named a person: admin-gated, reason-coded,
+writing an `operator_time_access_log` row **before** it returned anything. It is **gone**, together
+with that log table and the admin dialog that opened it
+([`20260825170421`](../../supabase/migrations/20260825170421_drop_per_person_time_reporting.sql)).
+The narrow-logged-door argument — that an owner who cannot get the number by any route will ask for
+a permissive view of the table, and that request is harder to refuse than to pre-empt — did not
+survive contact with use. The door was built; the demand it was meant to pre-empt never arrived; and
+between shipping on 2026-08-16 and being removed, production recorded **zero** rows in that log —
+and zero intervals for it to report on. Nothing in the repo ever read the log either, so the
+deterrent was a sentence of dialog copy rather than a trail anyone could review.
+
+**No path in this product resolves recorded time to a named person.** `operator_id` remains on the
+table, but as *structure* rather than reporting — it is the RLS key for the operator's own rows, the
+ownership assertion in `close_operation_interval`, and the ad-hoc chain key. A future per-person
+reader does not belong on the `function_execute_leaks()` allowlist, and does not belong at all.
+Where the office needs a denominator, the dimension is the **work centre**: `work_center_id` is
+already the chain key on every interval, and `get_open_intervals` already reports by machine.
 
 `operator_events` (funnel instrumentation: `app_opened`, `op_card_opened`, `prior_notes_opened`,
 `composer_focused`, `note_saved`, `note_saved_with_photo`, `station_selected`,

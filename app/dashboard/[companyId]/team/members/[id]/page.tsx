@@ -174,9 +174,12 @@ export default function EditTeamMemberPage() {
 
       if (deleteError) throw deleteError;
 
-      // Navigate back to team page with appropriate tab
-      const tabIndex = member?.role === 'admin' ? 0 : member?.role === 'user' ? 1 : 2;
-      router.push(`/dashboard/${companyId}/team?tab=${tabIndex}`);
+      // Back to the team list. That page restores the last tab used in this
+      // company, so the deleted member's role tab is already the one that comes
+      // up. This used to append `?tab=<index>`, which the team page never read --
+      // and every other navigation back there (the Back buttons below, the
+      // invite page's three) has always pushed the bare path.
+      router.push(`/dashboard/${companyId}/team`);
     } catch (err) {
       console.error('Error deleting team member:', err);
       setError('Failed to delete team member');

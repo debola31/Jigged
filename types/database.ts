@@ -2088,55 +2088,6 @@ export type Database = {
           },
         ]
       }
-      operator_time_access_log: {
-        Row: {
-          accessed_at: string
-          accessed_by: string
-          company_id: string
-          id: string
-          reason: string
-          subject_operator_id: string
-        }
-        Insert: {
-          accessed_at?: string
-          accessed_by: string
-          company_id: string
-          id?: string
-          reason: string
-          subject_operator_id: string
-        }
-        Update: {
-          accessed_at?: string
-          accessed_by?: string
-          company_id?: string
-          id?: string
-          reason?: string
-          subject_operator_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "operator_time_access_log_actor_fk"
-            columns: ["accessed_by"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_time_access_log_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_time_access_log_subject_fk"
-            columns: ["subject_operator_id"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       part_attachments: {
         Row: {
           company_id: string
@@ -4329,21 +4280,6 @@ export type Database = {
       get_operator_access_id: {
         Args: { check_company_id: string }
         Returns: string
-      }
-      get_operator_time_detail: {
-        Args: { p_company_id: string; p_operator_id: string; p_reason: string }
-        Returns: {
-          adjusted_at: string
-          close_reason: string
-          effective_ended_at: string
-          effective_started_at: string
-          ended_at: string
-          interval_id: string
-          job_number: string
-          job_operation_id: string
-          operation_name: string
-          started_at: string
-        }[]
       }
       get_priceable_part_ids: {
         Args: { p_company_id: string }

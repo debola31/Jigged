@@ -241,8 +241,9 @@ SCHEMA_CONTEXT = """
 - An interval with ended_at IS NULL has NO duration. Exclude it from any SUM and
   report it separately — do not clamp it to now(), which invents time nobody worked.
 - DO NOT aggregate by operator_id. Time is reported per job / operation / work
-  centre; per-person reporting goes through get_operator_time_detail(), which is
-  admin-gated and audited. See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
+  centre, and there is NO per-person reporting path at all: get_operator_time_detail(),
+  the one function that resolved recorded time to a named person, was dropped along
+  with its access log. See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
 
 ### job_materials (expected-BOM snapshot for a specific job_part — NO company_id, join via jobs)
 - id: UUID (PK)

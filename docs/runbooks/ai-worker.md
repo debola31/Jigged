@@ -36,6 +36,13 @@ Two DSNs, two roles, one process. That split is the whole least-privilege story:
 | `WORKER_DATABASE_URL` | `jigged_ai_worker` | claim/report `ai_jobs`, insert `ai_calls`, keep its heartbeat |
 | `AI_READONLY_DATABASE_URL` | `jigged_ai_readonly` | the insights `execute_sql` sandbox, per-company scoped by RLS |
 
+**Where they go.** [`worker/__main__.py`](../../worker/__main__.py) loads `worker/.env`
+and then `.env.local`; `override=False` means the **first** definition of a name wins, so
+precedence is shell > `worker/.env` > `.env.local`. That ordering is load-bearing rather
+than cosmetic — `.env.local` is where the *local stack's* superuser
+`AI_READONLY_DATABASE_URL` lives and the guard below exempts localhost, so the reverse
+would unscope the SQL sandbox in silence. Put the box's real DSNs in `worker/.env`.
+
 `jigged_ai_worker` is created **NOLOGIN** by its migration, exactly as
 `jigged_ai_readonly` was: a password in a migration file would be a credential in
 git. Grant `LOGIN` and a real password by hand in the Supabase dashboard for

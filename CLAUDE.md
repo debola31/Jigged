@@ -63,6 +63,21 @@ lifecycle hook. For passive UI (badges, dashboards) compute from Supabase withou
 table populated by a scheduled job. Unsure whether a path can fire on mount? Trace up from the call
 site through its `useEffect` callers. **Nothing enforces this** — it is prose and a code review.
 
+**The carve-out for the job queue (added 2026-08-25).** AI calls are now asynchronous: a request
+handler writes an `ai_jobs` row and the desktop worker polls for it. That is two polling loops, and
+the rule above forbids polling loops — so the boundary has to be stated rather than assumed:
+
+> **A poll may DISCOVER work. It may never CREATE it.** Exactly one thing creates an `ai_jobs` row:
+> an authenticated request handler acting on an explicit user action, after the feature flag and the
+> per-company rate limit. The worker's claim poll reads the queue and does nothing when it is empty
+> — `claim_ai_jobs()` returns no rows and no model is called. The browser's status poll is a
+> `SELECT` on one row it already owns. Neither path can reach a model without a row that a click
+> created.
+
+That is testable, and it is tested: `test_the_worker_makes_no_inference_call_when_the_queue_is_empty`,
+plus route tests asserting the flag and the cap cannot be bypassed. A new poller that can enqueue is
+the thing to refuse.
+
 ### No silent runtime fallbacks for data-at-rest issues
 
 If a schema change leaves existing rows inconsistent, **fix the data at rest** with a backfill

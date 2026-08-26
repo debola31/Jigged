@@ -37,10 +37,11 @@ thing that rots, and the one that used to sit here did:
 1. **SQL validation** — SELECT/WITH only, forbidden keywords, no non-`public` schema, `$1` required
 2. **Parameterised `company_id`** — the model writes `company_id = $1`; the backend binds the
    UUID. No string interpolation, ever
-3. **Read-only Postgres role** — `jigged_ai_readonly`, SELECT-only, and **its grants ARE the
-   allowlist**; there is no longer a second copy in Python
-4. **Per-company RLS** — an `ai_readonly_select` policy on every granted table, scoped to
-   `current_setting('jigged.company_id')`, which the executor sets per query
+3. **Read-only Postgres role** — `jigged_ai_readonly`, SELECT-only. There is no longer a second
+   copy of the table list in Python
+4. **Per-company RLS** — an `ai_readonly_select` policy scoped to
+   `current_setting('jigged.company_id')`, which the executor sets per query. **This is the layer
+   that decides**, not the grant — see below
 5. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
 6. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
 7. **Self-correction** — the model sees SQL errors as tool results and retries, up to 5 iterations
@@ -59,14 +60,24 @@ thing that rots, and the one that used to sit here did:
 
 ### What the AI may read
 
-**The `GRANT` to `jigged_ai_readonly` is the allowlist, and this doc deliberately does not copy
-it.** Ask the database:
+**Readable means a `SELECT` grant AND an `ai_readonly_select` policy — both.** This doc
+deliberately does not copy the list; ask the database:
 
 ```sql
 SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname = 'public' AND c.relkind = 'r'
-   AND has_table_privilege('jigged_ai_readonly', c.oid, 'SELECT') ORDER BY 1;
+   AND has_any_column_privilege('jigged_ai_readonly', c.oid, 'SELECT')
+   AND EXISTS (SELECT 1 FROM pg_policy p
+                WHERE p.polrelid = c.oid AND p.polname = 'ai_readonly_select')
+ ORDER BY 1;
 ```
+
+**The grant on its own decides nothing, which is easy to get wrong.** 55 of 65 public tables hold
+one, because the baseline's `ALTER DEFAULT PRIVILEGES` grants `SELECT` to this role on every new
+public table. Measured on a seeded stack, `auth_audit_log`, `user_company_access`, `company_billing`
+and the `quickbooks_*` tables all hold a grant and all return **zero rows** — their policies key on
+`auth.uid()`, which is NULL on the sandbox connection. That is real protection but incidental to
+those policies' purpose, so the guards below test for the **policy**.
 
 **Withdrawn:** a hand-maintained `ALLOWED_TABLES` in `schema_context.py`, enumerated here as well
 — wrong because four copies of one decision drift, and all four did. The Python list named 19

@@ -8,11 +8,15 @@ Validates that queries are safe to execute:
 - No dangerous patterns
 
 WHAT THIS FILE IS NOT. It is not the boundary on which tables are readable.
-That is the GRANT to jigged_ai_readonly, with the ai_readonly_select policies
-scoping each grant to one company -- both applied by
+That is a SELECT grant to jigged_ai_readonly AND an ai_readonly_select policy
+scoping it to one company -- BOTH, applied together by
 public.apply_ai_read_access() in migration 20260826010319, which also deleted
-the hand-written allowlist this file used to enforce. A table the role cannot
-read fails in Postgres, and that failure goes back to the model as tool output.
+the hand-written allowlist this file used to enforce. The grant alone decides
+nothing: the baseline's ALTER DEFAULT PRIVILEGES hands one to this role on
+nearly every public table, and it is the policy that makes rows visible. A table
+the role cannot read fails in Postgres -- as `permission denied` where the grant
+is missing, or as zero rows where the policy is -- and that goes back to the
+model as tool output either way.
 """
 
 import re

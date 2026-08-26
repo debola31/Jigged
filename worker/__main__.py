@@ -122,7 +122,7 @@ class Worker:
 
     async def _run_one(self, job: dict[str, Any]) -> None:
         from services.ai_features import JobContext, handler_for
-        from services.llm.errors import LLMChainExhausted, LLMError
+        from services.llm.errors import LLMChainExhausted, LLMError, LLMErrorEcho
 
         job_id = str(job["job_id"])
         feature, model = job["feature"], job["model"]
@@ -154,6 +154,13 @@ class Worker:
             kind = "ai_offline" if exc.is_offline else "provider"
             await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), kind)
             logger.warning("job %s failed (%s): %s", job_id, kind, exc)
+            return
+        except LLMErrorEcho as exc:
+            # Ahead of the generic LLMError branch: the provider answered fine,
+            # so filing this as 'provider' would hide the failure the gate exists
+            # to make countable.
+            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "error_echo")
+            logger.warning("job %s produced no answer: %s", job_id, exc)
             return
         except LLMError as exc:
             await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "provider")

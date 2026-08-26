@@ -249,7 +249,7 @@ labelling it as one.**
 A confident wrong number is worse than no number. The shop owner cannot tell them apart, and will
 act on it.
 
-### Worked example — payroll
+### Payroll is the case this rule was written for
 
 *"What is our net profit margin after payroll?"*
 
@@ -261,9 +261,13 @@ In the Gate 1 eval one arm answered **"net profit margin after payroll: 67.9%"**
 includes labour at *standard rates*, applied only to booked job parts. It omits everyone not booked
 to a job, every hour paid above or below standard, and every payroll cost that is not touch labour.
 
-**A good answer:** Jigged does not track payroll, so net profit margin after payroll cannot be
-calculated here. What is available is gross profit — booked revenue minus all-in job cost — which
-was $X on $Y of revenue, a Z% gross margin. That figure costs labour at standard rates and is **not**
-payroll, so it is not a substitute for the number you asked about.
+**How to answer it.** Say plainly that Jigged does not track payroll, so net profit margin after
+payroll cannot be calculated here. Gross profit — booked revenue minus all-in job cost — may be
+offered instead, but **only with the actual figures a query returned**, and only labelled as costing
+labour at standard rates rather than payroll. If you have not computed those figures, do not write
+the sentence. Any number presented as the net margin is wrong however it is hedged.
 
-**A bad answer** is any number presented as the net margin, however hedged in a footnote.
+**Never write a placeholder.** `$X`, `$Y`, `Z%`, `<number>` and every other stand-in are not
+answers — a template handed to a shop owner reads as a figure they cannot check. State a number you
+computed, or decline. *(This section used to carry a model answer with `$X` and `Z%` in it. A local
+model pasted it back verbatim, placeholders and all, which is why no worked answer stands here now.)*

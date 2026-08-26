@@ -143,6 +143,23 @@ class LLMToolLoopExhausted(LLMError):
     """
 
 
+class LLMErrorEcho(LLMError):
+    """The final turn was the tool's error text, or nothing -> HTTP 502.
+
+    A sibling of LLMToolLoopExhausted, and there for the same reason. That one
+    covers a model that never stopped asking for tools; this one covers a model
+    that stopped and had nothing to say, because every query it ran had failed.
+    Both used to arrive as an HTTP 200 with prose in it -- "I wasn't able to
+    complete the analysis" for the first, "The column total_price does not exist"
+    for the second -- and neither is something a shop owner can tell from an
+    answer.
+
+    Raised only when NO query succeeded. If one did, the answer belongs to the
+    user however it reads: a gate that could reject a grounded answer will
+    eventually reject a good one.
+    """
+
+
 class LLMChainExhausted(LLMError):
     """Every provider in the feature's chain failed -> HTTP 502, or 503 offline.
 
@@ -182,6 +199,7 @@ __all__ = [
     "LLMChainExhausted",
     "LLMEmptyResponse",
     "LLMError",
+    "LLMErrorEcho",
     "LLMNotConfigured",
     "LLMProtocolError",
     "LLMProviderError",

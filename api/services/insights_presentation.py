@@ -117,6 +117,55 @@ def _strip_inline_markdown(content: str) -> str:
     return content.strip()
 
 
+# ---- is this an answer at all? ----------------------------------------------
+
+# OUR OWN MACHINE STRINGS. Whatever else they are, they are not English a shop
+# owner can act on, so a final turn carrying one verbatim is a non-answer no
+# matter which tool produced it.
+_MACHINE_STRINGS = ("SQL_ERROR:", "NOT_PERMITTED:")
+
+# THE SHAPE OF A DATABASE ERROR, NOT THE WORD "ERROR". Anchoring matters in both
+# directions: "three jobs came back with an error code" is shop data and must
+# pass, and "Jigged has no table for payroll, so that data does not exist" is the
+# right answer to the payroll question and must pass too. What does not pass is
+# an object name sitting exactly where Postgres puts one.
+_ERROR_ECHO = (
+    re.compile(r"\bsyntax error\b", re.I),
+    re.compile(r"\bSQL[ _]error\b", re.I),
+    re.compile(r"\b(column|relation|table|view|function)\s+[\"'`]?[\w.$]+[\"'`]?\s+"
+               r"does\s*n[o']?t\s+exist", re.I),
+    re.compile(r"\bundefined\s+(column|table|relation|function)\b", re.I),
+    re.compile(r"\bquery\s+(execution\s+)?(failed|timed out)\b", re.I),
+    re.compile(r"\b(execution|executing) (of )?(the )?(SQL|query)\b[^.\n]{0,40}\bfailed\b", re.I),
+    re.compile(r"\bpermission denied\b", re.I),
+    re.compile(r"\b(I|the query|the SQL)\b[^.\n]{0,30}\bencountered an error\b", re.I),
+)
+
+
+def looks_like_error_echo(answer: str) -> bool:
+    """True when the text is the tool's failure read back, or nothing at all.
+
+    WHAT THIS IS FOR. In the insights A/B every local arm's last turn was the
+    error from a query that had failed -- "The column total_price does not
+    exist...", "The SQL query encountered a syntax error, please review..." --
+    and it was returned as the answer with the job marked succeeded. A shop owner
+    cannot tell that from a real answer, which is exactly the silent degradation
+    services/llm/errors.py refuses one layer down.
+
+    Two callers, and they weigh it differently ON PURPOSE. The handler gates on
+    it only when NO query succeeded, so a grounded answer is never rejected. The
+    A/B applies it alone, because scoring has no such duty and cannot see which
+    tool results succeeded. Sharing the predicate is what stops the two drifting
+    into disagreeing about what an answer is.
+    """
+    text = (answer or "").strip()
+    if not text:
+        return True
+    if any(marker in text for marker in _MACHINE_STRINGS):
+        return True
+    return any(pattern.search(text) for pattern in _ERROR_ECHO)
+
+
 # ---- chart_config validation + deterministic chart-type selection -----------
 
 _ALLOWED_CHART_TYPES = frozenset({"area", "pie", "bar", "bar_horizontal", "sparkline"})

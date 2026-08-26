@@ -188,6 +188,107 @@ async def test_schema_context_describes_only_real_readable_columns():
         pytest.fail("SCHEMA_CONTEXT does not match the database: " + "; ".join(problems))
 
 
+# Any valid uuid works. These tests assert the queries EXECUTE, not that they
+# return rows -- a company with no data is a fine answer, a syntax or privilege
+# error is not. Setting jigged.company_id is mandatory, not tidiness: the
+# ai_readonly_select policies cast current_setting(...)::uuid, which raises
+# `invalid input syntax for type uuid: ""` when it is unset, and that error looks
+# nothing like the permission problem it would be mistaken for.
+_PROBE_COMPANY = "00000000-0000-0000-0000-000000000000"
+
+
+@_needs_ro
+async def test_every_object_the_assembled_context_names_is_usable():
+    """The assembled prompt, not just SCHEMA_CONTEXT.
+
+    This is the guarantee behind Gate 1 defect 1. The context advertised
+    job_operation_intervals and pointed at user_company_access through an FK note,
+    and jigged_ai_readonly could read neither -- so every arm spent tool turns on
+    permission errors and four answers died at the iteration cap instead of being
+    answered. Naming an object the sandbox cannot use is now a build failure.
+    """
+    import re
+
+    from services.insights_service import _build_chat_system_prompt
+
+    prompt = _build_chat_system_prompt()
+    tables = re.findall(r"^###\s+([a-z_][a-z0-9_]*)", prompt, re.MULTILINE)
+    functions = sorted(set(re.findall(r"public\.([a-z_][a-z0-9_]*)\s*\(", prompt)))
+    assert tables, "parsed no tables out of the assembled prompt -- the format changed"
+
+    conn = await _connect_as_the_ai_role()
+    problems: list[str] = []
+    try:
+        await conn.execute(f"SET jigged.company_id = '{_PROBE_COMPANY}'")
+
+        for table in sorted(set(tables)):
+            try:
+                # SELECT 1, not SELECT * -- the question is whether the relation is
+                # reachable at all. `shipments` is granted by column (the carrier
+                # account snapshot is withheld), and demanding every column would
+                # fail a table the model can legitimately use.
+                async with conn.transaction():
+                    await conn.fetch(f'SELECT 1 FROM public."{table}" LIMIT 1')
+            except Exception as exc:  # noqa: BLE001
+                problems.append(f"{table}: {type(exc).__name__}: {str(exc).splitlines()[0]}")
+
+        for fn in functions:
+            row = await conn.fetchrow(
+                """SELECT p.oid,
+                          has_function_privilege('jigged_ai_readonly', p.oid, 'EXECUTE') AS ok
+                     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = 'public' AND p.proname = $1
+                    LIMIT 1""",
+                fn)
+            if row is None:
+                problems.append(f"public.{fn}(): named in the context, does not exist")
+            elif not row["ok"]:
+                problems.append(f"public.{fn}(): not executable by jigged_ai_readonly")
+    finally:
+        await conn.close()
+
+    if problems:
+        pytest.fail(
+            "the insights context names objects the sandbox cannot use: "
+            + "; ".join(problems))
+
+
+@_needs_ro
+async def test_every_reference_query_in_semantics_runs():
+    """docs/ai/semantics.md is rendered into the prompt verbatim, so a definition
+    that cites a column the sandbox cannot read is a wrong answer waiting to be
+    given. Each block runs under the real role with LIMIT 1.
+    """
+    import re
+
+    from services.insights_service import SEMANTICS_PATH
+
+    text = SEMANTICS_PATH.read_text(encoding="utf-8")
+    blocks = re.findall(r"```sql\n(.*?)```", text, re.DOTALL)
+    assert blocks, "no ```sql blocks found in semantics.md"
+
+    conn = await _connect_as_the_ai_role()
+    problems: list[str] = []
+    try:
+        await conn.execute(f"SET jigged.company_id = '{_PROBE_COMPANY}'")
+        for block in blocks:
+            sql = block.strip().rstrip(";")
+            try:
+                async with conn.transaction():
+                    await conn.fetch(f"{sql}\nLIMIT 1", _PROBE_COMPANY)
+            except Exception as exc:  # noqa: BLE001
+                first_line = sql.splitlines()[0][:60]
+                problems.append(
+                    f"[{first_line}...] {type(exc).__name__}: {str(exc).splitlines()[0]}")
+    finally:
+        await conn.close()
+
+    if problems:
+        pytest.fail(
+            f"{len(problems)} of {len(blocks)} reference queries in semantics.md failed: "
+            + "; ".join(problems))
+
+
 @_needs_ro
 async def test_an_ungranted_table_refuses_at_the_database():
     """The behaviour the deleted allowlist used to approximate in Python.

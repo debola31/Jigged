@@ -8,6 +8,7 @@ Validates queries before execution and enforces row limits.
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -27,6 +28,64 @@ MAX_ROWS = 200
 
 # Statement timeout in milliseconds
 STATEMENT_TIMEOUT_MS = 5000
+
+
+NOT_PERMITTED_KIND = "not_permitted"
+
+# Errors no rewrite of the query can fix. Privilege and existence are properties
+# of the database, not of the phrasing.
+_NOT_PERMITTED_ERRORS = (
+    asyncpg.exceptions.InsufficientPrivilegeError,
+    asyncpg.exceptions.UndefinedTableError,
+    asyncpg.exceptions.UndefinedFunctionError,
+    asyncpg.exceptions.UndefinedColumnError,
+)
+
+# The refused object, taken from POSTGRES'S message rather than from the SQL: a
+# query names several objects and only one of them was the problem, so parsing
+# the statement would routinely accuse a table the model was allowed to read.
+_REFUSED_OBJECT_PATTERNS = (
+    re.compile(r'permission denied for \w+ ([\w."]+)', re.IGNORECASE),
+    re.compile(r'relation "([^"]+)" does not exist', re.IGNORECASE),
+    re.compile(r"function ([\w.]+\([^)]*\)) does not exist", re.IGNORECASE),
+    re.compile(r'column "([^"]+)" does not exist', re.IGNORECASE),
+)
+
+
+def classify_not_permitted(exc: Exception) -> Optional[dict]:
+    """A TERMINAL tool result for a refused object, or None if the error is retryable.
+
+    Self-correction is one of the layers this feature rests on, and it is worth
+    keeping: a syntax error handed back to the model genuinely does get fixed on
+    the next turn. A privilege error does not. Before this existed the two were
+    phrased alike -- "Query execution failed: permission denied for table X" --
+    and in the Gate 1 eval every arm spent turns retrying objects it was never
+    going to be granted, until the 5-iteration cap ended the answer instead of
+    the model doing so. One turn spent, not five.
+
+    Naming the object is the other half: an answer that says WHICH figure is
+    unavailable is useful, where "something went wrong" is not.
+    """
+    if not isinstance(exc, _NOT_PERMITTED_ERRORS):
+        return None
+
+    message = getattr(exc, "message", None) or str(exc)
+    match = next(
+        (m for m in (p.search(message) for p in _REFUSED_OBJECT_PATTERNS) if m), None
+    )
+    # An unrecognised phrasing still terminates. A vague terminal answer beats a
+    # retry loop, and Postgres wording is not something we control.
+    refused = match.group(1).strip('"') if match else message
+
+    return {
+        "error": (
+            f"NOT_PERMITTED: {refused}. This object is unavailable. Do not retry "
+            f"this query; answer from the permitted objects or state the data is "
+            f"unavailable."
+        ),
+        "error_kind": NOT_PERMITTED_KIND,
+        "rows": [],
+    }
 
 
 def describe_dsn(dsn: str) -> str:
@@ -145,7 +204,6 @@ async def execute_sql_query(
     cleaned_sql = sql.strip().rstrip(";")
 
     # Check if query already has a LIMIT clause
-    import re
     has_limit = bool(re.search(r"\bLIMIT\b\s+\d+", cleaned_sql, re.IGNORECASE))
     if not has_limit:
         cleaned_sql = f"{cleaned_sql}\nLIMIT {MAX_ROWS}"
@@ -206,16 +264,14 @@ async def execute_sql_query(
             "error": f"SQL syntax error: {e.message}",
             "rows": [],
         }
-    except asyncpg.exceptions.UndefinedTableError as e:
-        return {
-            "error": f"Table not found: {e.message}",
-            "rows": [],
-        }
-    except asyncpg.exceptions.UndefinedColumnError as e:
-        return {
-            "error": f"Column not found: {e.message}",
-            "rows": [],
-        }
+    except _NOT_PERMITTED_ERRORS as e:
+        # Ahead of the generic handler on purpose: these used to fall through to
+        # "Query execution failed: <postgres text>", which reads as transient.
+        result = classify_not_permitted(e)
+        logger.warning(
+            "SQL refused as %s: %s", NOT_PERMITTED_KIND, result["error"]
+        )
+        return result
     except Exception as e:
         logger.error(f"SQL execution error: {e}", exc_info=True)
         return {

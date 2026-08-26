@@ -64,6 +64,20 @@ create extension if not exists pgcrypto;
 -- application logins listed at the top of this file.
 alter role jigged_ai_worker login password 'postgres';
 
+-- ── AI read-only role: LOGIN, for the same reasons ───────────────────────────
+-- jigged_ai_readonly is the role the insights execute_sql sandbox runs as, and
+-- until now it had no local login at all -- which is why .env.local pointed
+-- AI_READONLY_DATABASE_URL at the `postgres` SUPERUSER instead. That is a worse
+-- local exposure, not a smaller one: postgres is BYPASSRLS, so every per-company
+-- ai_readonly_select policy did nothing on a local stack and the one guarantee
+-- the sandbox rests on went untested everywhere except production.
+--
+-- With a login the sandbox runs locally as the role it runs as in production, RLS
+-- included, and api/tests/integration/test_ai_read_access.py can assert what this
+-- role may read by READING IT rather than by asking has_table_privilege() -- the
+-- same set_option limitation described above applies here.
+alter role jigged_ai_readonly login password 'postgres';
+
 -- ── Auth user ────────────────────────────────────────────────────────────────
 -- Email/password sign-in needs a bcrypt encrypted_password, a confirmed email,
 -- empty-string (not NULL) token columns, and a companion auth.identities row.

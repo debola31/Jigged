@@ -24,7 +24,6 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID (FK -> companies.id) -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- website: TEXT
 - deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
   any list, count or ranking; a by-id lookup deliberately does not)
 - default_payment_terms: TEXT
@@ -98,11 +97,11 @@ SCHEMA_CONTEXT = """
 - sequence: INTEGER (unique per part)
 - quantity: INTEGER (>0; tier breakpoint)
 - markup_percent: NUMERIC(5,2)
-- unit_price: NUMERIC(12,4) (computed at save time: live base × (1 + markup/100))
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- The base cost for a tier is recomputed live via
-  compute_part_cost_at_qty(part_id, tier.quantity) — no stored
-  base_cost_per_unit column.
+- NOTE: there is NO unit_price column and no base_cost_per_unit column, stored or
+  otherwise. A tier's price is markup_percent applied to a base recomputed live
+  via compute_part_cost_at_qty(part_id, tier.quantity). Selecting unit_price here
+  fails; derive it or answer from markup_percent.
 
 ### parts_bom (Bill-Of-Materials — REPLACES routing_materials; NO company_id, join via parts)
 - id: UUID (PK)
@@ -195,6 +194,31 @@ SCHEMA_CONTEXT = """
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: shipped_at column was dropped. Use public.job_part_last_ship_date(job_part_id)
   for the part's last ship date.
+
+### shipments (packing slips; a job ships via one or more of these)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- customer_id: UUID (FK -> customers.id)
+- job_id: UUID (FK -> jobs.id, nullable)
+- packing_slip_number: TEXT
+- ship_date: DATE
+- carrier: TEXT, shipping_method: TEXT, freight_terms: TEXT
+- customer_name: TEXT -- a snapshot of the name as printed on the slip. The
+  customer may have been renamed since, so for "who did we ship to" join
+  customers on customer_id; use this only when reproducing the slip as issued.
+- shipping_address_id: UUID (FK -> customer_addresses.id, nullable)
+- one_time_address: JSONB (nullable), bill_to_address: JSONB, ship_to_address: JSONB
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any
+  count, total, trend or ranking: a voided slip is a correction, not a shipment.
+- voided_by: UUID, created_by: UUID, created_at: TIMESTAMPTZ
+- NOTE: list the columns you need. `SELECT *` on this table is not available.
+
+### shipment_line_items (what went on a slip; NO company_id, join via shipments)
+- id: UUID (PK)
+- shipment_id: UUID (FK -> shipments.id)
+- job_part_id: UUID (FK -> job_parts.id)
+- quantity: NUMERIC -- units of that job_part on this slip
+- created_at: TIMESTAMPTZ
 
 ### job_operations (steps within a job — NO company_id, join via jobs)
 - id: UUID (PK)
@@ -357,9 +381,11 @@ SCHEMA_CONTEXT = """
   parts_bom, parts_unit_conversions. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
 - A "started" job means started_at IS NOT NULL or production_status = 'in_progress'.
-- A "shipped" job means fulfillment_status = 'fully_shipped'. The last ship
-  date comes from public.job_last_ship_date(job_id), which sums non-voided
-  shipments. There is no jobs.shipped_at column anymore.
+- A "shipped" job means fulfillment_status = 'fully_shipped'. There is no
+  jobs.shipped_at column anymore. For the last ship date OF A JOB, use
+  public.job_last_ship_date(job_id) — it already excludes voided slips. For
+  anything else about shipping (how many shipments, by carrier, to whom, what
+  was on them) query `shipments` directly and remember `voided_at IS NULL`.
 - Revenue per OPEN quote (pipeline / not yet converted) = SUM(quote_line_items.total_price) WHERE quote_id = ?.
 - Revenue per job (realized) = SUM(job_parts.total_price) for that job's parts.
   Use job_parts, NOT the source quote line — job_parts.quantity/unit_price are
@@ -444,38 +470,22 @@ WHERE p.company_id = $1
 ORDER BY b.sequence;
 """
 
-# Allowlist of tables the AI is permitted to query.
-# Mirrors the new schema — old names (operation_types, inventory_items,
-# routing_nodes, routing_materials, inventory_unit_conversions) are gone.
-ALLOWED_TABLES = frozenset({
-    "companies",
-    "customers",
-    "vendors",
-    "parts",
-    "part_pricing_tiers",
-    "parts_bom",
-    "parts_unit_conversions",
-    "quotes",
-    "quote_line_items",
-    "jobs",
-    "job_parts",
-    "job_operations",
-    "job_materials",
-    "work_centers",
-    "vendor_services",
-    "vendor_addresses",
-    "routings",
-    "routing_operations",
-    "inventory_transactions",
-})
-
-# Denylist of sensitive auth/system tables the AI must NEVER query. The
-# ALLOWED_TABLES allowlist above is the primary boundary; this is a
-# guaranteed-catch backstop: the validator rejects any query in which one of
-# these names appears as a whole word — comma-join, CTE, subquery, or alias —
-# regardless of how table extraction parses it. Database Row-Level Security is
-# the final backstop. Keep this in sync with the "Excluded Tables" section of
-# docs/modules/ai-insights.md.
+# Denylist of sensitive auth/system tables the AI must NEVER query.
+#
+# THE BOUNDARY IS THE GRANT, NOT THIS LIST, and it is not the hand-written
+# allowlist that used to sit above either — that was deleted in
+# 20260826010319 after four separate lists drifted apart and left `shipments`
+# carrying an RLS policy with no grant behind it. What jigged_ai_readonly may
+# read is now decided in exactly one place: `apply_ai_read_access()` in a
+# migration, with `tenant_tables_missing_ai_decision()` failing CI on a tenant
+# table nobody decided about.
+#
+# This list is a whole-word pre-refusal, and it earns its place for two reasons
+# rather than as a second boundary: it rejects a query naming one of these
+# before it reaches the database, however the name is referenced (comma-join,
+# CTE, subquery, alias), and it returns a sentence the model can act on instead
+# of a bare `permission denied`. Keep it in sync with the "Excluded Tables"
+# section of docs/modules/ai-insights.md.
 SENSITIVE_TABLES = frozenset({
     "user_company_access",
     "user_preferences",
@@ -490,12 +500,11 @@ SENSITIVE_TABLES = frozenset({
     # The customer's own carrier account number — their shared secret, not ours.
     # "Which customers ship on their own UPS account?" is a reasonable question
     # for an owner to type, and answering it from this table would put account
-    # numbers into an AI response and into ai_chat_queries. Triple-blocked, the
-    # same way the quickbooks_* tables are: absent from ALLOWED_TABLES (the
-    # primary boundary), REVOKEd from jigged_ai_readonly in the migration
-    # (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new public
-    # table, so that revoke is load-bearing, not decorative), and no
-    # ai_readonly_select policy. This entry is the whole-word backstop.
+    # numbers into an AI response and into ai_chat_queries. Blocked the same way
+    # the quickbooks_* tables are: no grant to jigged_ai_readonly and no
+    # ai_readonly_select policy (the baseline's ALTER DEFAULT PRIVILEGES grants
+    # SELECT on every new public table, so the migration's REVOKE is
+    # load-bearing rather than decorative), plus this whole-word entry.
     "customer_carrier_accounts",
     "quickbooks_invoice_links",
     # The clickwrap record: who accepted which legal document, from which IP.
@@ -503,19 +512,20 @@ SENSITIVE_TABLES = frozenset({
     # It carries IP addresses and user agents, which are personal data nobody
     # needs an AI summary of; and it is a legal audit trail, so putting it in
     # reach of generated SQL creates a path by which a question about it lands
-    # in ai_chat_queries. Triple-blocked: absent from ALLOWED_TABLES, REVOKEd
-    # from jigged_ai_readonly in 20260818142814, and named here as the
-    # whole-word backstop.
+    # in ai_chat_queries. REVOKEd from jigged_ai_readonly in 20260818142814,
+    # carries no ai_readonly_select policy, and is named here as the whole-word
+    # pre-refusal.
     "terms_acceptances",
     # Read-tracking and capture-funnel instrumentation. "Which operators read the
     # setup notes?" is a natural question for a shop owner to type, and answering
     # it is exactly what the product forbids: if an owner can audit who reads
     # notes, reading becomes an admission of ignorance and the read side dies.
-    # These are already triple-blocked (absent from ALLOWED_TABLES, no grant to
-    # jigged_ai_readonly, no ai_readonly_select policy); this is the whole-word
-    # backstop. Never grant these to jigged_ai_readonly and never add them to
-    # ALLOWED_TABLES. notes.viewer_count / usage_count riding along if `notes` is
-    # ever allowlisted is fine — those are aggregate counts, not identities.
+    # These hold no grant to jigged_ai_readonly and no ai_readonly_select
+    # policy; this is the whole-word pre-refusal. Never grant them, and note that
+    # they are named in the surveillance block of
+    # tenant_tables_missing_ai_decision()'s exempt list for the same reason.
+    # notes.viewer_count / usage_count riding along if `notes` is ever opened is
+    # fine — those are aggregate counts, not identities.
     "note_views",
     "operator_events",
     # The AI layer's own plumbing: the work queue, the per-attempt spend ledger,
@@ -523,12 +533,12 @@ SENSITIVE_TABLES = frozenset({
     # perfectly natural thing for an owner to type, and ai_calls is the table that
     # would answer it -- which is exactly why it must not be reachable from
     # generated SQL. ai_jobs is worse: its payload column carries the questions
-    # other companies asked. Triple-blocked like the rest -- absent from
-    # ALLOWED_TABLES, REVOKEd from jigged_ai_readonly in the migrations that create
-    # them (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new
-    # public table, so those revokes are load-bearing), and named here as the
-    # whole-word backstop. ai_call_write_leaks() and ai_job_write_leaks() assert
-    # the first two layers on every CI run.
+    # other companies asked. Blocked like the rest -- REVOKEd from
+    # jigged_ai_readonly in the migrations that create them (the baseline's ALTER
+    # DEFAULT PRIVILEGES grants SELECT on every new public table, so those
+    # revokes are load-bearing), and named here as the whole-word pre-refusal.
+    # ai_call_write_leaks() and ai_job_write_leaks() assert the grant layer on
+    # every CI run.
     "ai_calls",
     "ai_jobs",
     "ai_workers",

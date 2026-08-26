@@ -31,13 +31,16 @@ which could only answer a fixed set of query shapes. Text-to-SQL is flexible (an
 question, no new Python per question), extensible (a new table is a schema-context edit), and
 plays to what LLMs are good at.
 
-**Defence in depth — seven layers, each independently sufficient to stop the obvious attack:**
+**Defence in depth. Listed, not counted** — a hand-maintained count in a doc is exactly the
+thing that rots, and the one that used to sit here did:
 
-1. **SQL validation** — SELECT/WITH only, forbidden keywords, table allowlist, `$1` required
+1. **SQL validation** — SELECT/WITH only, forbidden keywords, no non-`public` schema, `$1` required
 2. **Parameterised `company_id`** — the model writes `company_id = $1`; the backend binds the
    UUID. No string interpolation, ever
-3. **Table allowlist** — 19 business tables; auth / system / AI tables are not among them
-4. **Read-only Postgres role** — `jigged_ai_readonly`, SELECT-only grants on allowed tables
+3. **Read-only Postgres role** — `jigged_ai_readonly`, SELECT-only, and **its grants ARE the
+   allowlist**; there is no longer a second copy in Python
+4. **Per-company RLS** — an `ai_readonly_select` policy on every granted table, scoped to
+   `current_setting('jigged.company_id')`, which the executor sets per query
 5. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
 6. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
 7. **Self-correction** — the model sees SQL errors as tool results and retries, up to 5 iterations
@@ -49,37 +52,66 @@ plays to what LLMs are good at.
 | Single statement | No `;` chaining |
 | SELECT/WITH only | Must start with `SELECT` or `WITH` |
 | Forbidden keywords | `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `INTO`, `pg_sleep`, `pg_catalog`, `information_schema` |
-| Table allowlist | `ALLOWED_TABLES`. References are extracted reliably, **including comma-joins (`FROM a, b`) and schema-qualified names (`public.tbl`)** |
-| Sensitive-table denylist | `SENSITIVE_TABLES` — rejected if referenced *anywhere* in the query, a guaranteed catch regardless of join syntax. **RLS is the final backstop** |
+| Non-`public` schemas | `auth`, `storage`, `vault`, `extensions`, `realtime`, `cron` … rejected whole. The one exclusion that does **not** grow as our schema does |
+| Sensitive-table denylist | `SENSITIVE_TABLES` — rejected if referenced *anywhere* in the query, regardless of join syntax. Not a boundary: it refuses before the round trip and returns a sentence the model can act on, where the database returns a bare `permission denied` |
 | Company scoping | Must contain `$1` at least once |
 | Nesting limit | Max 3 levels of subquery nesting |
 
-### The two lists
+### What the AI may read
 
-**These must match [`api/tools/schema_context.py`](../../api/tools/schema_context.py) exactly.**
-The code is the source of truth; this doc has been wrong about both before.
+**The `GRANT` to `jigged_ai_readonly` is the allowlist, and this doc deliberately does not copy
+it.** Ask the database:
 
-**`ALLOWED_TABLES` — 19:** `companies`, `customers`, `inventory_transactions`, `job_materials`,
-`job_operations`, `job_parts`, `jobs`, `part_pricing_tiers`, `parts`, `parts_bom`,
-`parts_unit_conversions`, `quote_line_items`, `quotes`, `routing_operations`, `routings`,
-`vendor_addresses`, `vendor_services`, `vendors`, `work_centers`.
-(`vendor_services` and `vendor_addresses` were added in code by `20260823163931` and
-`20260824022226`; this list claimed 19 while enumerating 17 until 2026-08-25 — the second such
-drift, because the count and the names are both hand-maintained and only the count gets eyeballed.)
+```sql
+SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public' AND c.relkind = 'r'
+   AND has_table_privilege('jigged_ai_readonly', c.oid, 'SELECT') ORDER BY 1;
+```
 
-**`SENSITIVE_TABLES` — 18:** `ai_calls`, `ai_chat_queries`, `ai_config`, `ai_jobs`, `ai_workers`,
-`auth_audit_log`, **`customer_carrier_accounts`**, `demo_data_templates`, `note_views`,
-`operator_events`, `quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`,
-`saved_insights`, `system_admins`, `terms_acceptances`, `user_company_access`, `user_preferences`.
+**Withdrawn:** a hand-maintained `ALLOWED_TABLES` in `schema_context.py`, enumerated here as well
+— wrong because four copies of one decision drift, and all four did. The Python list named 19
+tables where 21 were granted; this doc claimed 19 while enumerating 17; and production carried an
+`ai_readonly_select` policy on `shipments` with no grant behind it, so the helper this very doc
+recommends for ship dates failed on every call. `ALLOWED_TABLES` was deleted in
+[`20260826010319`](../../supabase/migrations/20260826010319_ai_read_access_and_guard.sql), which
+also added the two guards that make the remaining copy impossible to forget:
+
+| Guard | Fails CI when |
+|---|---|
+| `tenant_tables_missing_ai_decision()` | a `public` table with `company_id` is neither AI-readable nor on the reviewed exempt list — so a new tenant table cannot ship until somebody decides |
+| `ai_policies_without_grant()` | a table carries `ai_readonly_select` with no grant behind it — RLS with no grant is unreachable, and that is the exact shape of the `shipments` bug |
+| `test_schema_context_describes_only_real_readable_columns` | `SCHEMA_CONTEXT` names a table or column that does not exist, or one the AI role cannot read. It caught two on the day it was written: `customers.website` and `part_pricing_tiers.unit_price`, both described and neither real |
+
+All three live in [`test_ai_read_access.py`](../../api/tests/integration/test_ai_read_access.py),
+which also calls `job_last_ship_date()` **as `jigged_ai_readonly`** rather than checking a grant in
+the catalogue — a helper changed to touch some third ungranted table is the same bug in a new
+costume. Those tests **skip rather than pass** if `AI_READONLY_DATABASE_URL` is not really that
+role, because for years it was the `postgres` superuser locally and every one of them would have
+been vacuous.
+
+**`SCHEMA_CONTEXT` is the schema the model actually navigates by.** It is pasted verbatim into the
+system prompt, which then says *"Only query the tables documented in the schema above"* — so a
+granted table nobody describes is invisible, and a described column that does not exist costs a
+round trip and a self-correction the owner waits through. It is the last hand-maintained copy of the
+schema in this design, and now the only one with a check behind it.
+
+**Access is not default-on, and that was a deliberate call.** Keying it off "has a `company_id`
+column" was considered and rejected: 47 `public` tables have one, and they include the
+`quickbooks_*` OAuth tokens, `customer_carrier_accounts`, `user_company_access`, `auth_audit_log`,
+`company_billing`, and the per-operator pace tables below. Default-allow makes the next credentials
+table readable the moment it is created. The default is that a **decision** is required.
+
+**`SENSITIVE_TABLES` stays**, as a whole-word pre-refusal rather than a boundary — read it from
+[`api/tools/schema_context.py`](../../api/tools/schema_context.py), which is the source of truth.
 
 **`note_views` and `operator_events` are excluded for a product reason, not just privacy hygiene.**
 *"Which operators read the setup notes?"* is a natural question for an owner to type, and
 answering it is precisely what the notes feature forbids: **if an owner can audit who reads notes,
 reading becomes an admission of ignorance and the read side dies.** They are blocked three ways —
-absent from `ALLOWED_TABLES`, no `GRANT` to `jigged_ai_readonly`, no `ai_readonly_select` policy —
-with the denylist as a whole-word backstop. **Never** add them to `ALLOWED_TABLES` or grant them.
-(`notes.viewer_count` / `usage_count` riding along if `notes` is ever allowlisted is fine: those
-are aggregate counts, never identities.)
+no `GRANT` to `jigged_ai_readonly`, no `ai_readonly_select` policy, and a named entry in the
+surveillance block of `tenant_tables_missing_ai_decision()`'s exempt list — with the denylist as a
+whole-word pre-refusal. **Never grant them.** (`notes.viewer_count` / `usage_count` riding along if
+`notes` is ever opened is fine: those are aggregate counts, never identities.)
 
 **`customer_carrier_accounts` holds the customer's own carrier account number** — see
 [customers.md](customers.md). It belongs on the denylist for the same reason as the QuickBooks
@@ -93,21 +125,22 @@ the grant and policy layers on every CI run.
 
 ### Adding a table to AI scope
 
-1. Add it to `ALLOWED_TABLES`
-2. Describe its columns, types and relationships in `SCHEMA_CONTEXT` in the same file
-3. Migration: `GRANT SELECT ON <table> TO jigged_ai_readonly` **and** an `ai_readonly_select` policy
-   **scoped to the company**, exactly as every existing one is:
+1. Migration: `SELECT public.apply_ai_read_access('public.<table>');` — one call, which issues the
+   `GRANT` **and** the company-scoped `ai_readonly_select` policy together, so the two cannot drift
+   apart the way they did on `shipments`. It **refuses** a table with no `company_id` column, and
+   refuses one with RLS disabled: a grant without RLS is not a narrower grant, it is every
+   company's rows.
+2. Describe its columns, types and relationships in `SCHEMA_CONTEXT` in
+   [`schema_context.py`](../../api/tools/schema_context.py) — otherwise the model is never told the
+   table exists, and a readable table nobody mentions is invisible.
 
-   ```sql
-   CREATE POLICY ai_readonly_select ON public.<table>
-       FOR SELECT TO jigged_ai_readonly
-       USING (company_id = (current_setting('jigged.company_id', true))::uuid);
-   ```
+For a **child table** (no `company_id`, scoped through a parent) the helper raises and you write
+both halves by hand in the same migration — see `customer_contacts` in the baseline, or
+`shipment_line_items`.
 
-   For a child table, scope through its parent — see `customer_contacts` in the baseline.
-
-Skip step 3 and the allowlist passes while the query fails at the database — which is the correct
-failure direction, but a confusing one.
+To keep a new tenant table **out** of AI scope, add it to the exempt list in
+`tenant_tables_missing_ai_decision()` with a line saying why. Doing neither fails CI, which is the
+entire point: there is no longer a way to ship a tenant table nobody thought about.
 
 > **This step used to say `USING (true)`, and that was a cross-tenant read waiting to happen.**
 > Corrected 2026-08-25. All 29 real `ai_readonly_select` policies scope on
@@ -300,10 +333,11 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 **The safety boundary**
 
 - [ ] **Given** SQL that is not a single `SELECT`/`WITH`, contains a forbidden keyword, omits `$1`, or nests more than 3 deep, **then** the validator rejects it before execution — *verified by `api/tests/unit/test_sql_validator.py`*.
-- [ ] **Given** a query naming a table outside `ALLOWED_TABLES` — including via a comma-join or a `public.`-qualified name — **then** it is rejected — *verified by `api/tests/unit/test_sql_validator.py`*.
+- [ ] **Given** a query naming a denylisted table — including via a comma-join or a `public.`-qualified name — or any non-`public` schema, **then** it is rejected — *verified by `api/tests/unit/test_sql_validator.py`*.
+- [ ] **Given** a table the role holds no grant on, **then** the database refuses it rather than the validator — *verified by `api/tests/integration/test_ai_read_access.py`*.
 - [ ] **Given** a query referencing **any** `SENSITIVE_TABLES` entry anywhere, **then** it is rejected regardless of join syntax; and even if it were not, no `GRANT` or `ai_readonly_select` policy exists for those tables — *verified by `api/tests/unit/test_sql_validator.py`; the grant/policy half is automation-pending (#367)*.
 - [ ] **Given** a validated query, **when** it executes, **then** `company_id` is bound as `$1`, the statement times out at 5,000 ms, and no more than 200 rows return — *verified by `api/tests/integration/test_sql_executor.py`*.
-- [ ] **Given** `ALLOWED_TABLES` or `SENSITIVE_TABLES` changing in code, **then** this doc's two lists must be updated in the same PR — **no check enforces this today**; it is the gap that let both lists drift.
+- [ ] **Given** a new `company_id` table, **then** it is either AI-readable or on the reviewed exempt list — *enforced by `tenant_tables_missing_ai_decision()`*. **This closes the gap that used to sit here**: the doc no longer copies the readable-table list at all, so it cannot drift from it, and `SENSITIVE_TABLES` is read from the code rather than duplicated.
 
 **Chart decisioning**
 

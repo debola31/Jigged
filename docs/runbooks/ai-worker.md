@@ -115,7 +115,7 @@ offline state within one poll instead of after a two-minute silence.
 | UI says offline, worker is running | `select last_seen_at, models from ai_workers` — is the job's model in `models`? The sweep is model-aware, so a live worker that cannot serve `qwen3-vl:4b` does not keep a drawing job alive. |
 | Jobs queue and never start | `select status, model, count(*) from ai_jobs group by 1,2`. A model no worker advertises stays queued until the sweep. |
 | Every job times out at ~45 s | The model is being evicted between calls. Check `OLLAMA_KEEP_ALIVE=-1` and `ollama ps`. |
-| An insights job fails with a SQL error | That is fed back to the model for self-correction and is often not a bug. Persistent ones: `WORKER_READONLY_DATABASE_URL`, and the allowlist in `api/tools/schema_context.py`. |
+| An insights job fails with a SQL error | That is fed back to the model for self-correction and is often not a bug. Persistent ones: `WORKER_READONLY_DATABASE_URL`, and whether `jigged_ai_readonly` holds a grant on the table (`ai_policies_without_grant()`). |
 | A job sits `running` forever | Only for `executor='backend'` rows — the worker's sweep cannot see them by design. The next enqueue reconciles it; the browser gives up on the lease regardless. |
 
 Cost, per attempt, joined to the job by `request_id`:

@@ -127,23 +127,34 @@ async function openIdleStep(page: Page): Promise<void> {
 /**
  * Close whatever is running on the current step.
  *
- * EVERY TEST THAT STARTS A TIMER ENDS BY CALLING THIS. Leaving one open would
- * leak into the next test through the chain — and worse, through the LAYOUT,
- * since the strip renders on every screen and its buttons then collide with the
- * dispatch rows the station helper is trying to click. The first version of this
- * spec leaked exactly that way and the failure surfaced as an unrelated
- * strict-mode violation inside a shared helper.
+ * EVERY TEST THAT STARTS A TIMER ENDS BY CALLING THIS. Leaving one open leaks
+ * into the next test through the chain: these tests share one job and one work
+ * centre, so a timer left running is silently closed as `switched` by the next
+ * test's Start, and that test then measures a span it did not create.
+ *
+ * (This note used to add "and worse, through the LAYOUT, since the strip renders
+ * on every screen". There is no strip — it was withdrawn 2026-08-17. The chain
+ * half is the real reason and always was.)
  */
 async function stopTimer(page: Page): Promise<void> {
-  // COMPLETE, THEN UNDO. There is no stop-without-completing control any more —
-  // an interval closes by being completed or by the chain, and nothing else. So
-  // the only way for a test to leave the timer closed AND the seeded quantities
-  // untouched is to record a completion and then void it. Undoing does not
-  // reopen the interval, which is what makes this a clean teardown.
-  await recordButton(page).click();
-  await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
+  // CANCEL ACTIVITY, which is what this helper always wanted.
+  //
+  // It used to say: "COMPLETE, THEN UNDO. There is no stop-without-completing
+  // control any more … the only way for a test to leave the timer closed AND the
+  // seeded quantities untouched is to record a completion and then void it."
+  // That was true and it was the problem — teardown had to write a production
+  // record it did not mean and then retract it, which is exactly the laundering
+  // a real operator was forced into. `Cancel activity` (20260826105251) removed
+  // the need, so this helper no longer touches quantities at all and
+  // `returnStepToIdle` is not needed on this path.
+  await page.getByRole('button', { name: /^cancel activity$/i }).first().click();
 
-  await returnStepToIdle(page);
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible({ timeout: 30_000 });
+  await dialog.getByRole('button', { name: /^cancel activity$/i }).click();
+
+  await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
+  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -234,7 +245,10 @@ test.describe('operator time capture', () => {
     await page.goto(`/operator/${companyId}/jobs`);
     await expect(page.getByText(/^since \d/i)).toHaveCount(0);
     // This half is real: no step-level running control may leak into the shell.
+    // Both of them — `Cancel activity` is a step-level running control too, and
+    // an assertion naming only RECORD would cover half of what this comment says.
     await expect(recordButton(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^cancel activity$/i })).toHaveCount(0);
 
     await page.goBack();
     await stopTimer(page);

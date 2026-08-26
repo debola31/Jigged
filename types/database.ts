@@ -4090,6 +4090,10 @@ export type Database = {
         }
         Returns: Json
       }
+      cancel_operation_interval: {
+        Args: { p_interval_id: string }
+        Returns: undefined
+      }
       claim_ai_jobs: {
         Args: {
           p_lease_seconds?: number

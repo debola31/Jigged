@@ -50,6 +50,7 @@ import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
+import CancelActivityDialog from '@/components/operator/CancelActivityDialog';
 import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
 
 /**
@@ -108,6 +109,7 @@ export default function OperatorOperationActionPage() {
     intervalFor,
     start: startInterval,
     close: closeInterval,
+    cancel: cancelInterval,
     serverSkewMs,
   } = useIntervalContext();
   const running = intervalFor(jobOperationId);
@@ -138,6 +140,12 @@ export default function OperatorOperationActionPage() {
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  // The Cancel-activity confirm. Its error is held SEPARATELY from `error` below so a
+  // failed cancel renders inside the dialog the operator is looking at, rather than
+  // behind it on the page — docs/interaction-standards.md: "Avoid: a confirm dialog
+  // that ends in an error" applies to an error the dialog cannot show.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   // Holds the caught error, not a formatted string. This page carries four separate writes
   // (complete, undo, send, receive) and every one of them can be refused by the billing gate;
   // ErrorAlert needs the object to say so rather than 'Failed to record completion'.
@@ -422,6 +430,38 @@ export default function OperatorOperationActionPage() {
       is_partial: Number(qtyValue) < remaining,
     });
     await handleRecord();
+  };
+
+  /**
+   * Discard the running timer — the operator started a step and produced nothing.
+   *
+   * The whole reason this exists: before it, the only way to stop a clock with
+   * nothing to record was to type a quantity you had not made and then undo it.
+   * The E2E suite did exactly that on purpose, and production shows a person doing
+   * it by hand twice. See the migration header for the evidence.
+   *
+   * NOT swallowed, unlike the `closeInterval` call inside handleRecord. There, a
+   * failed close leaves a durable completion already written and the interval
+   * merely open, which the office Still-running card is built to catch. Here the
+   * cancel IS the whole action: if it fails and we say nothing, the operator walks
+   * away believing the timer stopped when it did not.
+   */
+  const handleCancelActivity = async () => {
+    if (!running) return;
+    setActionLoading(true);
+    setCancelError(null);
+    try {
+      await cancelInterval(running.id);
+      setCancelOpen(false);
+      // The interval is gone from the feed as well as the clock, so the feed has to
+      // be told — both its Started and Finished rows vanish with the row itself.
+      setFeedRefreshSignal((n) => n + 1);
+      await reloadAll();
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : 'Could not cancel this activity.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   // Save a note with NO completion.
@@ -1058,6 +1098,46 @@ export default function OperatorOperationActionPage() {
                 Complete without timing
               </Button>
             )}
+
+            {/* The running-side counterpart of the escape hatch above, in the same
+                slot. Before this, that slot was EMPTY whenever a timer was running
+                and an operator who had produced nothing had no way to stop the
+                clock at all — see the migration header.
+
+                A SEPARATE CONDITIONAL, NOT A TERNARY WITH THE BLOCK ABOVE.
+                `primaryAction === 'start'` is not the negation of `running`:
+                `noteOnly` takes precedence in its derivation, so an idle step with
+                a note typed and no quantity has primaryAction 'note'. A ternary
+                would silently change which idle steps show the hatch.
+
+                GATED ON `running` ALONE, deliberately not on `canComplete`. The
+                motivating case is quantity zero — nothing made, nothing typed —
+                where primaryAction is 'none' and the button above is disabled,
+                leaving this the only live control on the screen. That is correct.
+
+                No trash icon: interactionStandardsCheck rule 2 keys on a trash
+                glyph at text.secondary, and rule 3 forbids a `contained` fill on a
+                non-primary action. It stays quiet-tertiary like its sibling.
+
+                It sits where `Undo all` is deliberately HIDDEN while running,
+                which is worth naming rather than leaving as an apparent
+                inconsistency: that control is hidden because "undo what I am
+                doing" is not what it does. Here, that is exactly what this does. */}
+            {running && (
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                onClick={() => {
+                  setCancelError(null);
+                  setCancelOpen(true);
+                }}
+                disabled={actionLoading}
+                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
+              >
+                Cancel activity
+              </Button>
+            )}
           </Box>
 
           {/* Hidden while a timer runs. Undoing earlier completions is not an
@@ -1078,6 +1158,18 @@ export default function OperatorOperationActionPage() {
           )}
         </Box>
       )}
+
+      {/* Mounted outside the action block so it survives the re-render that follows
+          a successful cancel — `running` goes null the moment the list refreshes,
+          and a dialog rendered inside `{running && …}` would unmount mid-transition. */}
+      <CancelActivityDialog
+        open={cancelOpen}
+        startedAt={running?.effective_started_at ?? null}
+        cancelling={actionLoading}
+        error={cancelError}
+        onConfirm={handleCancelActivity}
+        onClose={() => setCancelOpen(false)}
+      />
 
       {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read
           the whole job's feed. This is the primary capture surface: operators

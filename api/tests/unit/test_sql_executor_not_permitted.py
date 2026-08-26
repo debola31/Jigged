@@ -45,12 +45,6 @@ TERMINAL = [
         "public.job_last_ship_date(uuid)",
         id="undefined-function",
     ),
-    pytest.param(
-        asyncpg.exceptions.UndefinedColumnError(
-            'column "freight_account_snapshot" does not exist'),
-        "freight_account_snapshot",
-        id="undefined-column",
-    ),
 ]
 
 
@@ -84,6 +78,13 @@ def test_the_object_comes_from_the_exception_not_the_sql(exc, expected_object):
                      id="timeout"),
         pytest.param(asyncpg.exceptions.InvalidTextRepresentationError(
             'invalid input syntax for type uuid: ""'), id="bad-uuid-cast"),
+        # Regression, from the eval: this was terminal for one run. The model
+        # wrote shipments.total_price, which does not exist, and was told not to
+        # retry -- when the right column name was the whole correction. A missing
+        # column is a model mistake and the next turn fixes it; a missing
+        # privilege is a fact about the database. Only the second ends the turn.
+        pytest.param(asyncpg.exceptions.UndefinedColumnError(
+            "column s.total_price does not exist"), id="undefined-column"),
         pytest.param(RuntimeError("something else entirely"), id="not-a-postgres-error"),
     ],
 )

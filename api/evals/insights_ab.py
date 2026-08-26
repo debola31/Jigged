@@ -17,6 +17,14 @@ enters a production chain.
 
 NOT RUN IN CI. It bills Anthropic and DeepInfra, and needs the desktop worker's
 Ollama reachable. Run it deliberately, read the table, then decide.
+
+SCORING CHANGED ON 2026-08-26, AND RUNS EITHER SIDE OF IT ARE NOT COMPARABLE.
+The `answered` column used to count `ok` -- "the handler returned without
+raising" -- so an arm whose final turn was "The column total_price does not
+exist..." scored as answered. It now counts a SUBSTANTIVE answer, via the same
+predicate the handler gates on (Outcome.answered). Every local arm's number will
+drop, and that drop is the measurement being corrected, not a regression. Do not
+read an older run's table against a newer one.
 """
 from __future__ import annotations
 
@@ -44,7 +52,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 load_dotenv(Path(__file__).resolve().parents[2] / ".env.local", override=False)
 
 from services.ai_features import JobContext, handler_for  # noqa: E402
-from services.insights_presentation import _validate_chart_config  # noqa: E402
+from services.insights_presentation import (  # noqa: E402
+    _validate_chart_config,
+    looks_like_error_echo,
+)
 from services.llm.errors import LLMError  # noqa: E402
 from tools.sql_executor import describe_dsn  # noqa: E402
 
@@ -103,6 +114,25 @@ class Outcome:
         return self.tool_calls > 0
 
     @property
+    def answered(self) -> bool:
+        """Did a shop owner get an answer? NOT the same question as `ok`.
+
+        `ok` means the handler returned without raising, and for most of this
+        eval's life the table counted that as answered -- so an arm whose final
+        turn was "The column total_price does not exist..." scored 11/11. The
+        table said the local arms were doing better than they were, which is the
+        one thing a gate-deciding eval must not do.
+
+        Uses the same predicate the handler gates on, but applies it ALONE. The
+        handler needs the second condition (no query succeeded) because it is
+        deciding whether a real user gets a real failure, and a rule that could
+        reject a grounded answer will eventually reject a good one. Scoring has
+        no such duty -- and could not check it anyway, holding only the answer
+        text and a count of tool calls.
+        """
+        return self.ok and not looks_like_error_echo(self.answer)
+
+    @property
     def grounded(self) -> bool:
         """Did the answer avoid asserting a number with no query behind it?
 
@@ -111,8 +141,11 @@ class Outcome:
         a wrong number that DID come from a query -- that is what the human column is
         for -- but hallucinated totals are the failure that matters most here,
         because a shop owner has no way to tell one from a real one.
+
+        Keyed on `answered`, not `ok`: a non-answer has no number and no query,
+        and crediting it here would flatter the arm twice for one failure.
         """
-        if not self.ok:
+        if not self.answered:
             return False
         has_digits = any(ch.isdigit() for ch in self.answer)
         return self.used_sql or not has_digits
@@ -180,7 +213,7 @@ def summarise(outcomes: list[Outcome]) -> str:
         p95 = lat[min(int(len(lat) * 0.95), len(lat) - 1)] if lat else 0
         lines.append(
             f"{arm:<12}"
-            f"{sum(o.ok for o in rows):>7}/{n:<2}"
+            f"{sum(o.answered for o in rows):>7}/{n:<2}"
             f"{sum(o.used_sql for o in rows):>7}/{n:<2}"
             f"{sum(o.grounded for o in rows):>7}/{n:<2}"
             f"{sum(o.chart_valid for o in rows):>6}/{n:<2}"
@@ -190,9 +223,15 @@ def summarise(outcomes: list[Outcome]) -> str:
             f"{sum(len(o.ledger) for o in rows):>10}"
         )
 
-    lines += ["", "FAILURES", "-" * 91]
-    failures = [o for o in outcomes if not o.ok]
-    lines += [f"  {o.arm:<10} {o.question[:48]:<50} {o.error[:70]}" for o in failures] or ["  none"]
+    # NOT-ANSWERED, not just raised. A run that returned the tool's error text as
+    # the answer is the failure this eval was missing, and it has no `error` to
+    # print -- so the answer stands in for one.
+    lines += ["", "NOT ANSWERED", "-" * 91]
+    lines += [
+        f"  {o.arm:<10} {o.question[:48]:<50} "
+        f"{(o.error or f'answered: {o.answer!r}')[:70]}"
+        for o in outcomes if not o.answered
+    ] or ["  none"]
 
     lines += [
         "",
@@ -264,7 +303,8 @@ async def main() -> int:
         {
             "question": q,
             "arms": {
-                o.arm: {"ok": o.ok, "answer": o.answer, "error": o.error,
+                o.arm: {"ok": o.ok, "answered": o.answered,
+                        "answer": o.answer, "error": o.error,
                         "latency_ms": o.latency_ms, "cost_usd": str(o.cost_usd),
                         "tool_calls": o.tool_calls, "chart_valid": o.chart_valid}
                 for o in outcomes if o.question == q

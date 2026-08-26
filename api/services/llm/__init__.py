@@ -29,6 +29,7 @@ from services.llm.errors import (
     LLMChainExhausted,
     LLMEmptyResponse,
     LLMError,
+    LLMErrorEcho,
     LLMNotConfigured,
     LLMProtocolError,
     LLMProviderError,

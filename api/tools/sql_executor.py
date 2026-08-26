@@ -31,6 +31,38 @@ STATEMENT_TIMEOUT_MS = 5000
 
 
 NOT_PERMITTED_KIND = "not_permitted"
+SQL_ERROR_KIND = "sql_error"
+
+# How much of a Postgres message survives into the tool result. It is prompt on
+# every remaining turn, and a generated query can put a whole statement in there.
+_MESSAGE_CHARS = 400
+
+_REWRITE_INSTRUCTION = (
+    "Rewrite the query using this error and execute again. "
+    "Never describe this error to the user."
+)
+
+
+def retryable_sql_error(message: str) -> dict:
+    """A model-fixable failure, phrased as an instruction rather than a report.
+
+    THE OTHER HALF OF classify_not_permitted. That one says a failure is final;
+    this one says a failure is the model's to fix -- and until it existed, the
+    executor said only what had gone wrong. In the insights A/B every local arm
+    took that as something to pass on, and the final turn of the conversation was
+    "The column total_price does not exist..." delivered to a shop owner as the
+    answer. Saying what to DO with the error is the difference.
+
+    Carrying SQL_ERROR_KIND is what lets the tool loop count "failed, and
+    fixable" without reading message text: infrastructure failures and refused
+    objects deliberately do not get it, because no rewrite reaches either.
+    """
+    one_line = " ".join(str(message).split())[:_MESSAGE_CHARS].rstrip(". ")
+    return {
+        "error": f"SQL_ERROR: {one_line}. {_REWRITE_INSTRUCTION}",
+        "error_kind": SQL_ERROR_KIND,
+        "rows": [],
+    }
 
 # Errors no rewrite of the query can fix. Privilege and existence are properties
 # of the database, not of the phrasing.
@@ -180,7 +212,11 @@ async def execute_sql_query(
 
     Returns:
         Dict with keys: columns, rows, row_count, description.
-        On error: Dict with keys: error, rows (empty list).
+        On error: Dict with keys: error, rows (empty list), and -- when the model
+        can fix it by rewriting, or never can -- error_kind. See
+        retryable_sql_error and classify_not_permitted; an error with NEITHER
+        kind is ours (a dead pool, a malformed company_id) and is not the
+        model's to retry.
     """
     # 0. Validate company_id is a proper UUID (required for safe SET LOCAL interpolation)
     try:
@@ -191,15 +227,14 @@ async def execute_sql_query(
     # 1. Validate
     is_valid, error_msg = validate_query(sql)
     if not is_valid:
-        return {
-            "error": error_msg,
-            "suggestion": (
-                "Please rewrite the query. Common issues: "
-                "missing $1 for company_id, using a restricted table, "
-                "or using non-SELECT statements."
-            ),
-            "rows": [],
-        }
+        # Refused before the round trip, but the same KIND of failure as a syntax
+        # error: the model wrote the wrong query and can write a better one. The
+        # advice used to sit in a second `suggestion` key that nothing rendered
+        # and no prompt mentioned, so it is folded into the instruction here.
+        return retryable_sql_error(
+            f"{error_msg} Common causes: no $1 for company_id, a restricted "
+            f"table, or a statement that is not a SELECT"
+        )
 
     # 2. Ensure pool is ready
     pool = await init_pool()
@@ -261,18 +296,12 @@ async def execute_sql_query(
             }
 
     except asyncpg.exceptions.QueryCanceledError:
-        return {
-            "error": (
-                "Query timed out (5 second limit). "
-                "Try a simpler query, add filters, or reduce the date range."
-            ),
-            "rows": [],
-        }
+        return retryable_sql_error(
+            "query timed out (5 second limit); simplify it, add filters, or "
+            "narrow the date range"
+        )
     except asyncpg.exceptions.PostgresSyntaxError as e:
-        return {
-            "error": f"SQL syntax error: {e.message}",
-            "rows": [],
-        }
+        return retryable_sql_error(f"syntax error: {e.message}")
     except _NOT_PERMITTED_ERRORS as e:
         # Ahead of the generic handler on purpose: these used to fall through to
         # "Query execution failed: <postgres text>", which reads as transient.
@@ -282,8 +311,8 @@ async def execute_sql_query(
         )
         return result
     except Exception as e:
+        # Where UndefinedColumnError lands, deliberately -- see the note above
+        # _NOT_PERMITTED_ERRORS. A column the model invented is the correction
+        # the next turn makes, so this branch has to invite that turn.
         logger.error(f"SQL execution error: {e}", exc_info=True)
-        return {
-            "error": f"Query execution failed: {str(e)}",
-            "rows": [],
-        }
+        return retryable_sql_error(str(e))

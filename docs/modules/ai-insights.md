@@ -44,7 +44,10 @@ thing that rots, and the one that used to sit here did:
    that decides**, not the grant — see below
 5. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
 6. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
-7. **Self-correction** — the model sees SQL errors as tool results and retries, up to 5 iterations
+7. **Self-correction** — a failed query comes back as `SQL_ERROR: <cause>` *plus what to do about
+   it*, and the model rewrites and retries, up to 5 iterations
+8. **A non-answer is a failure, not an answer** — see below. The loop refuses to return the tool's
+   error text to a shop owner
 
 ### Validation rules (`api/tools/sql_validator.py`)
 
@@ -133,6 +136,45 @@ spending on AI?"* is a natural thing for an owner to type, and `ai_calls` is the
 answer it. `ai_jobs` is worse: its `payload` carries the questions **other companies** asked. Both
 are blocked the same three ways, with `ai_call_write_leaks()` and `ai_job_write_leaks()` asserting
 the grant and policy layers on every CI run.
+
+### An answer that is a database error is not an answer
+
+**Added 2026-08-26, from the local-model A/B.** Every local arm reached its final turn holding
+nothing but a failed query and said so — *"The column total_price does not exist…"*, *"The SQL query
+encountered a syntax error, please review…"* — and the handler returned that as the answer with the
+job settled `succeeded`. A shop owner cannot tell it from a real answer. It is the same silent
+degradation [`services/llm/errors.py`](../../api/services/llm/errors.py) refuses one layer down; it
+was just happening one layer above where that rule was enforced. Three changes, all in the **shared**
+path, so Claude gets them too:
+
+| Layer | What it does |
+|---|---|
+| **The tool result** ([`retryable_sql_error`](../../api/tools/sql_executor.py)) | A fixable failure returns `SQL_ERROR: <one-line cause>. Rewrite the query using this error and execute again. Never describe this error to the user.` The executor used to say only what went wrong, so passing it on was a reasonable thing to do with it |
+| **One corrective turn** ([`ai_features/insights.py`](../../api/services/ai_features/insights.py)) | A model trying to answer while **every** query failed and none succeeded is told to fix the SQL and run it once more. **Once per conversation** — a second injection would push the real work past the iteration cap, and the cap is what ends a loop that is not converging |
+| **The answer gate** (`looks_like_error_echo`) | No successful query **and** an empty or error-shaped final text → `LLMErrorEcho`, `error_kind = 'error_echo'`, never an answer |
+
+**Which failures are the model's to fix is now a property of the result, not of its wording.**
+`SQL_ERROR` means a rewrite can reach it (syntax, a column that does not exist, a timeout, a
+validator rejection). `NOT_PERMITTED` means no rewrite ever can. A dead pool or a malformed
+`company_id` carries **neither** — those are ours, and inviting a retry would spend a turn on
+something no query can reach. The loop counts on exactly that distinction, so a refused object can
+neither earn a retry nor condemn a legitimate *"Jigged does not track that"* answer.
+
+**The gate is deliberately conservative: if any query succeeded, the answer passes through
+untouched** — however it reads. It is a floor under "no data at all", not a judge of answers, because
+a rule that *could* reject a grounded answer will eventually reject a good one. Judging a grounded
+answer is the eval's job and a human's.
+
+Two things this does not do. `ai_calls` has no `error_kind`, and the provider call genuinely
+succeeded — so a gated run appears in the ledger as a **successful** call, with the verdict on the
+`ai_jobs` row. And a gated run never reaches `_log_chat_query`, so it does not count against the
+hourly cap, exactly like `LLMToolLoopExhausted`.
+
+**No worked answer appears in the assembled prompt, and that is a rule.** A local arm answered the
+payroll question by pasting `semantics.md`'s model answer back verbatim — placeholders and all,
+*"$X on $Y of revenue, a Z% gross margin"*. Every answer-shaped example is gone; the instructions say
+what to do instead. The `chart_config` sample survives because it is a machine format the next
+sentence refers to by key name, not prose to imitate.
 
 ### Business terms live in `docs/ai/semantics.md`, and it is runtime
 

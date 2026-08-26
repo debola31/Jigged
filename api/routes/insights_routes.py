@@ -28,6 +28,7 @@ from services import ai_jobs
 from services.ai_features import JobContext, handler_for
 from services.llm.errors import (
     LLMChainExhausted,
+    LLMErrorEcho,
     LLMNotConfigured,
     LLMRequestError,
     LLMToolLoopExhausted,
@@ -189,6 +190,11 @@ def _map_llm_error(exc: Exception) -> HTTPException:
             status_code=502,
             detail="That question needed more steps than the assistant could take. Try asking it more simply.",
         )
+    if isinstance(exc, LLMErrorEcho):
+        return HTTPException(
+            status_code=502,
+            detail="That question came back without an answer. Try asking it a different way.",
+        )
     return HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -197,6 +203,11 @@ def _error_kind(exc: Exception) -> str:
         return "ai_offline" if exc.is_offline else "provider"
     if isinstance(exc, LLMToolLoopExhausted):
         return "provider"
+    # Its own kind rather than 'provider' or 'internal'. The provider answered
+    # and our code did not misbehave -- the answer was not an answer, and that
+    # is a distinct thing to be able to count in the job rows.
+    if isinstance(exc, LLMErrorEcho):
+        return "error_echo"
     if isinstance(exc, LLMNotConfigured):
         return "ai_offline"
     return "internal"

@@ -16,6 +16,7 @@ from routes import insights_routes as routes
 from services import ai_jobs
 from services.llm.errors import (
     LLMChainExhausted,
+    LLMErrorEcho,
     LLMNotConfigured,
     LLMRequestError,
     LLMTimeout,
@@ -33,6 +34,7 @@ ALL_FAILURES = [
     LLMChainExhausted("insights", "rid", [LLMTimeout("slow", provider="ollama")]),
     LLMChainExhausted("insights", "rid", [LLMProviderError("500", provider="anthropic")]),
     LLMToolLoopExhausted("too many turns"),
+    LLMErrorEcho("the final turn was the tool's error text"),
     RuntimeError("something else entirely"),
 ]
 
@@ -75,6 +77,10 @@ def test_no_error_message_leaks_a_vendor_name_to_the_user():
     (LLMChainExhausted("insights", "r", [LLMTimeout("s", provider="ollama")]), "ai_offline"),
     (LLMChainExhausted("insights", "r", [LLMProviderError("s", provider="anthropic")]), "provider"),
     (LLMNotConfigured("none"), "ai_offline"),
+    # Its own kind, not 'internal'. A model reading a database error back is not
+    # a bug in our code, and the whole reason the gate exists is so this failure
+    # can be counted -- which needs it to be separable in the job rows.
+    (LLMErrorEcho("echoed the tool error"), "error_echo"),
     (RuntimeError("?"), "internal"),
 ])
 def test_the_error_kind_separates_downtime_from_an_incident(exc, kind):

@@ -13,7 +13,13 @@ import uuid
 
 import pytest
 
-from tools.sql_executor import execute_sql_query, init_pool, close_pool, MAX_ROWS
+from tools.sql_executor import (
+    MAX_ROWS,
+    SQL_ERROR_KIND,
+    close_pool,
+    execute_sql_query,
+    init_pool,
+)
 
 
 # Use a known demo company or skip if no DB configured
@@ -110,12 +116,36 @@ class TestQueryExecution:
         assert result["rows"] == []
 
     async def test_syntax_error_handled(self):
-        """SQL syntax errors should return a clean error, not crash."""
+        """SQL syntax errors should return a clean error, not crash.
+
+        And a clean error is an INSTRUCTION, checked here against a real
+        Postgres rather than the shaped result alone: the unit tests prove
+        retryable_sql_error's shape, this proves the execution branch is wired
+        to it. Without that the model is told what broke and nothing about what
+        to do, which is how the A/B's arms ended up reciting it to the user.
+        """
         result = await execute_sql_query(
             company_id=str(uuid.uuid4()),
             sql="SELECT FROM WHERE $1",
         )
-        assert "error" in result
+        assert result["error"].startswith("SQL_ERROR: ")
+        assert result["error_kind"] == SQL_ERROR_KIND
+        assert "Rewrite the query using this error and execute again." in result["error"]
+        assert "Never describe this error to the user." in result["error"]
+
+    async def test_a_column_that_does_not_exist_invites_a_rewrite(self):
+        """THE EXACT EVAL FAILURE, end to end. An arm wrote shipments.total_price,
+        a column that does not exist, and its final turn to the shop owner was
+        "The column total_price does not exist...". A missing column is a model
+        mistake and the next turn fixes it -- so it must arrive as retryable, not
+        as NOT_PERMITTED and not as bare prose."""
+        result = await execute_sql_query(
+            company_id=str(uuid.uuid4()),
+            sql="SELECT total_price FROM customers WHERE company_id = $1",
+        )
+        assert result["error_kind"] == SQL_ERROR_KIND
+        assert "total_price" in result["error"]
+        assert "NOT_PERMITTED" not in result["error"]
 
     async def test_row_limit_enforced(self):
         """Queries without LIMIT should have one auto-appended."""

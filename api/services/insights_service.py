@@ -42,6 +42,14 @@ def _build_chat_system_prompt() -> str:
     Order is load-bearing: preamble, structure, semantics, guidelines. Everything
     here is static per deploy, so the whole thing is one cacheable prefix and the
     user's question is the only varying part -- and it arrives as a separate turn.
+
+    NO WORKED ANSWER APPEARS ANYWHERE IN HERE, and that is a rule rather than an
+    omission. A local arm answered the payroll question by pasting semantics.md's
+    model answer back verbatim, placeholders included -- "$X on $Y of revenue, a
+    Z% gross margin" -- so every answer-shaped example is gone and the
+    instructions say what to do instead. The chart_config block below is the one
+    thing that still shows a sample, and it is a machine format the next sentence
+    refers to by key name, not prose to imitate.
     """
     from tools.schema_context import SCHEMA_CONTEXT
 
@@ -64,8 +72,13 @@ def _build_chat_system_prompt() -> str:
         "- For chat responses: be direct and concise. 1-3 sentences max. Shop owners are busy.\n"
         "- Write answers as plain prose. NEVER use markdown tables or pipe (|) / --- column "
         "formatting — they render as raw text in the UI. For multiple values, rely on the "
-        "chart_config plus a one-line summary, or a short inline list "
-        "(e.g. 'Customer A: $50k, B: $35k, C: $28k').\n"
+        "chart_config plus a one-line summary, or a short inline list of name-and-value pairs "
+        "separated by commas.\n"
+        "- NEVER write a placeholder or a stand-in figure. State a number you computed from a "
+        "query result, or say the figure is unavailable — never a template.\n"
+        "- If a query fails, fix it using the error and run it again. NEVER report a database "
+        "error, a column name or SQL to the user: if you cannot get the figure, say the figure "
+        "is unavailable and why, in plain language.\n"
         "- Default to a one-line prose answer. Only add a chart_config when there are at least "
         "3 data points AND a chart genuinely helps: a trend over time, a comparison across several "
         "categories, or a part-of-whole breakdown. For a single fact, a ranked top-N where one "
@@ -74,7 +87,8 @@ def _build_chat_system_prompt() -> str:
         "bar_horizontal for ranked lists with long labels, pie for part-of-whole. Never use bold "
         "(**) or any markdown formatting in the answer.\n"
         "- Answer with facts and numbers only. Do not add advice, opinions, or recommendations unless the user asks.\n"
-        "- Include comparisons to previous periods when the data supports it (e.g., 'up 12% vs last week').\n"
+        "- Include comparisons to previous periods when the data supports it: state the actual "
+        "change you computed and the period it is measured against.\n"
         "- Flag risks prominently (low inventory, revenue decline).\n"
         "- Use plain language. Avoid jargon. These are machinists, not MBAs.\n"
         "- In SQL, ALWAYS filter by company_id = $1 on tables that have company_id.\n"

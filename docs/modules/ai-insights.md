@@ -80,11 +80,20 @@ also added the two guards that make the remaining copy impossible to forget:
 |---|---|
 | `tenant_tables_missing_ai_decision()` | a `public` table with `company_id` is neither AI-readable nor on the reviewed exempt list — so a new tenant table cannot ship until somebody decides |
 | `ai_policies_without_grant()` | a table carries `ai_readonly_select` with no grant behind it — RLS with no grant is unreachable, and that is the exact shape of the `shipments` bug |
+| `test_schema_context_describes_only_real_readable_columns` | `SCHEMA_CONTEXT` names a table or column that does not exist, or one the AI role cannot read. It caught two on the day it was written: `customers.website` and `part_pricing_tiers.unit_price`, both described and neither real |
 
-Both are asserted by [`test_ai_read_access.py`](../../api/tests/integration/test_ai_read_access.py),
+All three live in [`test_ai_read_access.py`](../../api/tests/integration/test_ai_read_access.py),
 which also calls `job_last_ship_date()` **as `jigged_ai_readonly`** rather than checking a grant in
 the catalogue — a helper changed to touch some third ungranted table is the same bug in a new
-costume.
+costume. Those tests **skip rather than pass** if `AI_READONLY_DATABASE_URL` is not really that
+role, because for years it was the `postgres` superuser locally and every one of them would have
+been vacuous.
+
+**`SCHEMA_CONTEXT` is the schema the model actually navigates by.** It is pasted verbatim into the
+system prompt, which then says *"Only query the tables documented in the schema above"* — so a
+granted table nobody describes is invisible, and a described column that does not exist costs a
+round trip and a self-correction the owner waits through. It is the last hand-maintained copy of the
+schema in this design, and now the only one with a check behind it.
 
 **Access is not default-on, and that was a deliberate call.** Keying it off "has a `company_id`
 column" was considered and rejected: 47 `public` tables have one, and they include the

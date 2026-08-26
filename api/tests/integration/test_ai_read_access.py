@@ -117,6 +117,78 @@ async def test_the_ship_date_helper_runs_as_the_ai_role():
 
 
 @_needs_ro
+async def test_schema_context_describes_only_real_readable_columns():
+    """The last hand-maintained copy of the schema, finally checked.
+
+    SCHEMA_CONTEXT is pasted verbatim into the system prompt and the prompt says
+    "Only query the tables documented in the schema above" -- so it is both the
+    map the model navigates by and, in practice, the allowlist the model obeys.
+    Nothing verified it. schemaEmbedCheck.ts covers PostgREST embeds in utils/,
+    not this.
+
+    It had drifted twice by the time this test was written: `customers.website`
+    and `part_pricing_tiers.unit_price` were both described and neither exists.
+    A described column that is missing costs a wasted round trip and a
+    self-correction the owner waits through; a described table the role cannot
+    read is the shipments bug pointing the other way.
+
+    Checks description -> reality, deliberately not the reverse: a real column
+    nobody documents is a choice (customers.credit_hold_note is not the AI's
+    business), while a documented column that does not exist is always a bug.
+    """
+    import re
+
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    heading = re.compile(r"^###\s+([a-z_][a-z0-9_]*)", re.MULTILINE)
+    # `- id: UUID (PK)` and `- a: T, b: T`. Types are UPPERCASE so they never
+    # match, and `- NOTE:` never matches either.
+    column = re.compile(r"(?:^-\s*|,\s*)([a-z_][a-z0-9_]*)\s*:")
+
+    described: dict[str, set[str]] = {}
+    current = None
+    for line in SCHEMA_CONTEXT.splitlines():
+        h = heading.match(line)
+        if h:
+            current = h.group(1)
+            described[current] = set()
+        elif current and line.startswith("- ") and not line.startswith("- NOTE"):
+            described[current].update(column.findall(line))
+
+    assert described, "parsed no tables out of SCHEMA_CONTEXT -- the format changed"
+
+    conn = await _connect_as_the_ai_role()
+    problems: list[str] = []
+    try:
+        for table in sorted(described):
+            real = {
+                r[0] for r in await conn.fetch(
+                    "SELECT a.attname FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relname = $1 "
+                    "  AND a.attnum > 0 AND NOT a.attisdropped",
+                    table)
+            }
+            if not real:
+                problems.append(f"{table}: described but no such table")
+                continue
+            if not await conn.fetchval(
+                "SELECT has_any_column_privilege('jigged_ai_readonly', $1, 'SELECT')",
+                f"public.{table}"
+            ):
+                problems.append(f"{table}: described but not readable by the AI role")
+            ghosts = sorted(described[table] - real)
+            if ghosts:
+                problems.append(f"{table}: described column(s) do not exist: {', '.join(ghosts)}")
+    finally:
+        await conn.close()
+
+    if problems:
+        pytest.fail("SCHEMA_CONTEXT does not match the database: " + "; ".join(problems))
+
+
+@_needs_ro
 async def test_an_ungranted_table_refuses_at_the_database():
     """The behaviour the deleted allowlist used to approximate in Python.
 

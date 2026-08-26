@@ -24,7 +24,6 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID (FK -> companies.id) -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- website: TEXT
 - deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
   any list, count or ranking; a by-id lookup deliberately does not)
 - default_payment_terms: TEXT
@@ -98,11 +97,11 @@ SCHEMA_CONTEXT = """
 - sequence: INTEGER (unique per part)
 - quantity: INTEGER (>0; tier breakpoint)
 - markup_percent: NUMERIC(5,2)
-- unit_price: NUMERIC(12,4) (computed at save time: live base × (1 + markup/100))
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- The base cost for a tier is recomputed live via
-  compute_part_cost_at_qty(part_id, tier.quantity) — no stored
-  base_cost_per_unit column.
+- NOTE: there is NO unit_price column and no base_cost_per_unit column, stored or
+  otherwise. A tier's price is markup_percent applied to a base recomputed live
+  via compute_part_cost_at_qty(part_id, tier.quantity). Selecting unit_price here
+  fails; derive it or answer from markup_percent.
 
 ### parts_bom (Bill-Of-Materials — REPLACES routing_materials; NO company_id, join via parts)
 - id: UUID (PK)
@@ -195,6 +194,31 @@ SCHEMA_CONTEXT = """
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: shipped_at column was dropped. Use public.job_part_last_ship_date(job_part_id)
   for the part's last ship date.
+
+### shipments (packing slips; a job ships via one or more of these)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- customer_id: UUID (FK -> customers.id)
+- job_id: UUID (FK -> jobs.id, nullable)
+- packing_slip_number: TEXT
+- ship_date: DATE
+- carrier: TEXT, shipping_method: TEXT, freight_terms: TEXT
+- customer_name: TEXT -- a snapshot of the name as printed on the slip. The
+  customer may have been renamed since, so for "who did we ship to" join
+  customers on customer_id; use this only when reproducing the slip as issued.
+- shipping_address_id: UUID (FK -> customer_addresses.id, nullable)
+- one_time_address: JSONB (nullable), bill_to_address: JSONB, ship_to_address: JSONB
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any
+  count, total, trend or ranking: a voided slip is a correction, not a shipment.
+- voided_by: UUID, created_by: UUID, created_at: TIMESTAMPTZ
+- NOTE: list the columns you need. `SELECT *` on this table is not available.
+
+### shipment_line_items (what went on a slip; NO company_id, join via shipments)
+- id: UUID (PK)
+- shipment_id: UUID (FK -> shipments.id)
+- job_part_id: UUID (FK -> job_parts.id)
+- quantity: NUMERIC -- units of that job_part on this slip
+- created_at: TIMESTAMPTZ
 
 ### job_operations (steps within a job — NO company_id, join via jobs)
 - id: UUID (PK)
@@ -357,9 +381,11 @@ SCHEMA_CONTEXT = """
   parts_bom, parts_unit_conversions. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
 - A "started" job means started_at IS NOT NULL or production_status = 'in_progress'.
-- A "shipped" job means fulfillment_status = 'fully_shipped'. The last ship
-  date comes from public.job_last_ship_date(job_id), which sums non-voided
-  shipments. There is no jobs.shipped_at column anymore.
+- A "shipped" job means fulfillment_status = 'fully_shipped'. There is no
+  jobs.shipped_at column anymore. For the last ship date OF A JOB, use
+  public.job_last_ship_date(job_id) — it already excludes voided slips. For
+  anything else about shipping (how many shipments, by carrier, to whom, what
+  was on them) query `shipments` directly and remember `voided_at IS NULL`.
 - Revenue per OPEN quote (pipeline / not yet converted) = SUM(quote_line_items.total_price) WHERE quote_id = ?.
 - Revenue per job (realized) = SUM(job_parts.total_price) for that job's parts.
   Use job_parts, NOT the source quote line — job_parts.quantity/unit_price are

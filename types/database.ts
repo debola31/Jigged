@@ -4305,6 +4305,7 @@ export type Database = {
       get_ready_operations_for_station: {
         Args: { p_company_id: string; p_work_center_id: string }
         Returns: {
+          has_open_interval: boolean
           is_hot: boolean
           job_id: string
           job_number: string
@@ -4317,6 +4318,10 @@ export type Database = {
           part_name: string
           part_quantity: number
         }[]
+      }
+      get_running_operation_ids_for_station: {
+        Args: { p_company_id: string; p_work_center_id: string }
+        Returns: string[]
       }
       get_user_company_ids: { Args: never; Returns: string[] }
       inv_assert_can_write: {

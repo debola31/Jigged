@@ -144,6 +144,51 @@ describe('getAllStationsOperatorJobs', () => {
     expect(result[1].is_hot).toBe(false);
   });
 
+  it('carries has_open_interval onto each row so the card can mark a running step', async () => {
+    // The flag is the ONLY thing distinguishing "this step is on the list because
+    // somebody is on it" from "this step is next". It cannot be inferred from
+    // op_status — status derives from recorded quantity, so a started step that
+    // has produced nothing is `pending`, exactly like an idle one. Dropping it in
+    // enrichment would silently un-mark the row and leave an out-of-sequence step
+    // on the EDM list with no explanation, which reads as the list being wrong.
+    const readyRow = (over: Record<string, unknown>) => ({
+      job_id: 'j-x',
+      job_part_id: 'jp-x',
+      job_operation_id: 'op-x',
+      operation_name: 'EDM',
+      op_status: 'pending',
+      job_number: 'J-100',
+      part_id: 'p-x',
+      part_name: 'Widget',
+      part_description: null,
+      part_quantity: 5,
+      is_hot: false,
+      has_open_interval: false,
+      ...over,
+    });
+    mockSupabase.rpc.mockResolvedValueOnce({
+      data: [
+        readyRow({
+          job_part_id: 'jp-running',
+          job_operation_id: 'op-running',
+          job_number: 'J-RUN',
+          has_open_interval: true,
+        }),
+        readyRow({ job_part_id: 'jp-idle', job_operation_id: 'op-idle', job_number: 'J-IDLE' }),
+      ],
+      error: null,
+    });
+
+    const result = await getAllStationsOperatorJobs('c1', [{ id: 'wc1', name: 'EDM' }]);
+
+    expect(result[0].job_number).toBe('J-RUN');
+    expect(result[0].has_open_interval).toBe(true);
+    // Same op_status on both rows — which is the point of asserting it here.
+    expect(result[0].operation_status).toBe('pending');
+    expect(result[1].has_open_interval).toBe(false);
+    expect(result[1].operation_status).toBe('pending');
+  });
+
   it('throws (surfaces the error) when the readiness RPC fails, instead of returning []', async () => {
     // Regression guard: a swallowed RPC error used to read as "no work" to
     // operators (the jobs.status column bug). It must propagate so the jobs

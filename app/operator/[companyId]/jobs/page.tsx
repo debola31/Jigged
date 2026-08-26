@@ -8,6 +8,7 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
 import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -204,14 +205,36 @@ function OperatorJobsPageContent() {
           </Typography>
 
           {row.operation_name && (
-            <Typography variant="body1" sx={{ mb: 1 }}>
-              Op: {row.operation_name}
-              {(row.current_op_qty_good ?? 0) > 0 && (
-                <Typography component="span" variant="body2" color="text.secondary">
-                  {' '}— {row.current_op_qty_good} of {row.part_quantity} good
-                </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+              <Typography variant="body1">
+                Op: {row.operation_name}
+                {(row.current_op_qty_good ?? 0) > 0 && (
+                  <Typography component="span" variant="body2" color="text.secondary">
+                    {' '}— {row.current_op_qty_good} of {row.part_quantity} good
+                  </Typography>
+                )}
+              </Typography>
+              {/* Beside the step it describes, not in the card's top-right slot:
+                  the fact is about THIS operation, and the top-right belongs to
+                  HOT (the whole job) and the completed stamp.
+
+                  ONE WORD, AND THE OMISSIONS ARE THE DESIGN. No name, no start
+                  time, no elapsed clock — "OP 30 at EDM is running" is a fact
+                  about a machine, which is the same thing the office
+                  Still-running card says and the only form of it that stays
+                  clear of the surveillance guardrail. A `since 4:01 PM` here
+                  would also revive the copy of the deliberately-removed header
+                  strip, which an E2E assertion still watches for on this page. */}
+              {row.has_open_interval && (
+                <Chip
+                  size="small"
+                  color="warning"
+                  variant="outlined"
+                  label="Running"
+                  sx={{ fontWeight: 600 }}
+                />
               )}
-            </Typography>
+            </Box>
           )}
 
           {row.operations_total > 1 && (

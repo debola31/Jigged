@@ -98,7 +98,10 @@ lines pull the mean toward their own line size rather than counting once each.
 The subquery above is not stylistic. `GROUP BY j.id` produces one row per job, and the outer
 `AVG(job_value)` runs over those rows. **A single-level `AVG(jp.total_price)` is wrong**: on the
 Gate 2 data it returns **$3,038.04** where the correct figure is **$4,774.82**, and three local
-models produced exactly that number.
+models and an eval arm all produced exactly that number. One of them then described its own method
+as "summing the total price of all job parts and dividing by the number of jobs" — the right grain
+in prose, the wrong one in SQL, which is why the two-level shape is spelled out here rather than
+left to the reference query to imply.
 
 **Notes.** Use `job_parts.total_price`, never the source quote line. `job_parts.quantity` and
 `unit_price` are the post-conversion source of truth — a quantity edited after conversion shows here
@@ -124,13 +127,18 @@ GROUP BY 1
 ORDER BY 1
 ```
 
-**Revenue reads exactly three tables and four columns. Nothing else is revenue.**
+**Revenue reads these three tables and these columns, and nothing else is revenue.** Listed rather
+than counted — a hand-maintained count in a doc is the thing that rots, and the one that used to
+open this paragraph said "four columns" above a table of seven.
 
 | Table | Columns revenue uses | For |
 |---|---|---|
-| `shipments` | `ship_date`, `company_id`, `voided_at` | when it shipped, whose it is, whether the slip stands |
+| `shipments` | `id`, `ship_date`, `company_id`, `voided_at` | when it shipped, whose it is, whether the slip stands |
 | `shipment_line_items` | `quantity`, `shipment_id`, `job_part_id` | **how many actually went out** |
-| `job_parts` | `unit_price` | what one unit sold for |
+| `job_parts` | `id`, `unit_price` | what one unit sold for |
+
+Join keys are in the list on purpose: the point of naming them is that the query above can be
+written from this table alone, without going back to the schema section for what joins to what.
 
 **`job_parts.total_price` is NOT a revenue column — it is the job-value column**, and borrowing it
 here is the most common way to get this wrong. `total_price` is the whole agreed line, booked
@@ -160,9 +168,9 @@ Group by the customer's **name**, not `c.id` — name is identity here, and the 
 put in front of a shop owner.
 
 **Notes.** "Revenue trend over time" and "top customer by revenue" both use this, not job value —
-otherwise a large order booked today inflates today and never corrects. `shipments` is readable by column: **list the columns you need, `SELECT *` on it is not
-available.** For the last ship date of a single job use `public.job_last_ship_date(job_id)`, which
-already excludes voided slips.
+otherwise a large order booked today inflates today and never corrects. `shipments` is readable by
+column: **list the columns you need, `SELECT *` on it is not available.** For the last ship date of
+a single job use `public.job_last_ship_date(job_id)`, which already excludes voided slips.
 
 ---
 

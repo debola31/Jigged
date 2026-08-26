@@ -70,6 +70,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     """Answer one question. Returns the shape ai_jobs.result stores."""
     from services.insights_service import _build_chat_system_prompt
     from tools.metric_tools import CHAT_TOOLS
+    from tools.sql_executor import NOT_PERMITTED_KIND
 
     question = (ctx.payload.get("question") or "").strip()
     if not question:
@@ -84,6 +85,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
 
     tool_names: list[str] = []
     tokens_used = 0
+    refused = 0
     result = None
 
     for _ in range(MAX_TOOL_ITERATIONS):
@@ -101,25 +103,32 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         if not result.tool_calls:
             break
 
+        # Run the tools first, then wire the messages: the count of refused
+        # objects is what the eval asserts to zero, and it is invisible once the
+        # dict has been through json.dumps.
+        tool_results = [
+            (call, await _run_tool(ctx.company_id, call)) for call in result.tool_calls
+        ]
+        refused += sum(
+            1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND
+        )
+
         # Rebind rather than append: the gateway's retry works on a copy, and this
         # loop owning one mutable list would make the two aliasing bugs possible
         # again from the other direction.
         messages = messages + [
             Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
         ] + [
-            Message(
-                role="tool",
-                tool_call_id=call.id,
-                content=json.dumps(await _run_tool(ctx.company_id, call)),
-            )
-            for call in result.tool_calls
+            Message(role="tool", tool_call_id=call.id, content=json.dumps(r))
+            for call, r in tool_results
         ]
         tool_names.extend(call.name for call in result.tool_calls)
     else:
         # The cap was reached with the model still asking for tools. Previously
         # this returned a canned apology as a SUCCESS.
         raise LLMToolLoopExhausted(
-            f"the insights loop reached {MAX_TOOL_ITERATIONS} iterations without an answer",
+            f"the insights loop reached {MAX_TOOL_ITERATIONS} iterations without an "
+            f"answer ({refused} refused-object result(s))",
             feature=ctx.feature,
             request_id=ctx.request_id,
             provider=result.provider if result else None,
@@ -140,4 +149,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         "provider": result.provider,
         "model": result.model,
         "tokens_used": tokens_used,
+        # Zero is the acceptance bar: a refused object should end the turn, so a
+        # non-zero count means the context is still advertising what it cannot read.
+        "not_permitted": refused,
     }

@@ -9,14 +9,40 @@ Contains:
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
 
+SEMANTICS_PATH = Path(__file__).resolve().parents[2] / "docs" / "ai" / "semantics.md"
+
+
+@lru_cache(maxsize=1)
+def load_semantics() -> str:
+    """The business-term definitions, read from the file that also documents them.
+
+    ONE SOURCE, not a copy. These definitions used to be prose inside
+    SCHEMA_CONTEXT with a doc describing them separately, and the two drifted --
+    which is how three model arms answered "how many jobs are late right now" with
+    5, 4 and 0, each defensibly. docs/ai/semantics.md is rendered straight into the
+    prompt, so the document IS the runtime and drift is structurally impossible.
+
+    Cached deliberately: the file changes only via PR, and the assembled prompt has
+    to be a stable prefix for prompt caching and Ollama KV reuse to hold.
+    """
+    return SEMANTICS_PATH.read_text(encoding="utf-8").strip()
+
+
 def _build_chat_system_prompt() -> str:
-    """Build the full system prompt for chat interactions with schema context."""
+    """Build the full system prompt for chat interactions with schema context.
+
+    Order is load-bearing: preamble, structure, semantics, guidelines. Everything
+    here is static per deploy, so the whole thing is one cacheable prefix and the
+    user's question is the only varying part -- and it arrives as a separate turn.
+    """
     from tools.schema_context import SCHEMA_CONTEXT
 
     return (
@@ -25,10 +51,16 @@ def _build_chat_system_prompt() -> str:
         "Use execute_sql to answer questions by writing SELECT queries. "
         "Always use $1 as the company_id placeholder.\n\n"
         f"{SCHEMA_CONTEXT}\n\n"
+        f"{load_semantics()}\n\n"
         "Guidelines:\n"
         "- Always use execute_sql to get real data. Never make up numbers.\n"
         "- Only query the tables documented in the schema above. Never reference user, auth, "
-        "access-control, or system tables (e.g. user_company_access) — they are off-limits.\n"
+        "access-control, or system tables — they are off-limits.\n"
+        "- Rows are ALREADY scoped to one company by the executor. Never join an access-control "
+        "table to resolve a person or a company, and never add a company filter beyond the "
+        "required $1.\n"
+        "- A tool result beginning NOT_PERMITTED is FINAL. No rephrasing grants a privilege, so do "
+        "not retry that object: answer from the permitted objects, or say the data is unavailable.\n"
         "- For chat responses: be direct and concise. 1-3 sentences max. Shop owners are busy.\n"
         "- Write answers as plain prose. NEVER use markdown tables or pipe (|) / --- column "
         "formatting — they render as raw text in the UI. For multiple values, rely on the "

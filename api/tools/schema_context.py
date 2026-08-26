@@ -245,29 +245,8 @@ SCHEMA_CONTEXT = """
 - instructions: TEXT, notes: TEXT
 -- NOTE: started_at and assigned_to were DROPPED (20260708225938). They were listed
 -- here until 2026-08-16, so any query the model had learned using them returned a
--- 400. RECORDED TIME now lives in job_operation_intervals (below), not on this table.
-
-### job_operation_intervals (recorded time on an operation — 20260816203641)
-- id: UUID (PK)
-- company_id: UUID (FK -> companies.id)
-- job_operation_id: UUID (FK -> job_operations.id)
-- job_part_id: UUID (FK -> job_parts.id)
-- work_center_id: UUID (nullable) -- the chain key: one OPEN interval per work centre
-- operator_id: UUID (FK -> user_company_access.id)
-- started_at / ended_at: TIMESTAMPTZ -- RAW, immutable. ended_at NULL = still running
-- adjusted_started_at / adjusted_ended_at: TIMESTAMPTZ (nullable) -- the operator's correction
-- effective_started_at / effective_ended_at: TIMESTAMPTZ (GENERATED COALESCE of the two)
-- close_reason: TEXT -- 'completed' | 'switched' | 'done_for_day' | 'left_running'
-- capture_source: TEXT -- 'operator' | 'sensor' | 'system'
-- voided_at / voided_by
-- ALWAYS read effective_*, never the raw pair, unless the question is specifically
-  about corrections. ALWAYS filter voided_at IS NULL.
-- An interval with ended_at IS NULL has NO duration. Exclude it from any SUM and
-  report it separately — do not clamp it to now(), which invents time nobody worked.
-- DO NOT aggregate by operator_id. Time is reported per job / operation / work
-  centre, and there is NO per-person reporting path at all: get_operator_time_detail(),
-  the one function that resolved recorded time to a named person, was dropped along
-  with its access log. See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
+-- 400. There is no per-operation recorded-time or operator data available here:
+-- Jigged does not expose who worked on what, or for how long, to this tool.
 
 ### job_materials (expected-BOM snapshot for a specific job_part — NO company_id, join via jobs)
 - id: UUID (PK)
@@ -377,31 +356,25 @@ SCHEMA_CONTEXT = """
 - inventory_transactions.part_id -> parts.id
 
 ## Important Notes
+
+These are facts about the SHAPE of the data. What the business TERMS mean -- late,
+revenue, job value, this quarter, dormant, pipeline -- is defined in the semantics
+section that follows, and those definitions win over any reading you would
+otherwise pick.
+
 - Tables WITHOUT company_id: job_operations, job_materials, routing_operations,
-  parts_bom, parts_unit_conversions. Filter these via JOIN to their parent table.
+  parts_bom, parts_unit_conversions, shipment_line_items, customer_addresses,
+  customer_contacts. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
-- A "started" job means started_at IS NOT NULL or production_status = 'in_progress'.
-- A "shipped" job means fulfillment_status = 'fully_shipped'. There is no
-  jobs.shipped_at column anymore. For the last ship date OF A JOB, use
-  public.job_last_ship_date(job_id) — it already excludes voided slips. For
-  anything else about shipping (how many shipments, by carrier, to whom, what
-  was on them) query `shipments` directly and remember `voided_at IS NULL`.
-- Revenue per OPEN quote (pipeline / not yet converted) = SUM(quote_line_items.total_price) WHERE quote_id = ?.
-- Revenue per job (realized) = SUM(job_parts.total_price) for that job's parts.
-  Use job_parts, NOT the source quote line — job_parts.quantity/unit_price are
-  the post-conversion source of truth (a quantity edited after conversion shows
-  here), and a price-options quote keeps unchosen lines that would over-count.
-- Use DATE_TRUNC('week', timestamp) for weekly grouping, DATE_TRUNC('month', ...) for monthly.
-- All TIMESTAMPTZ columns are UTC.
-- Cost contract for internal routing/job operations:
-    labor_rate = COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate)
-    cost      = (estimated_setup_minutes + estimated_run_minutes_per_unit * qty)
-                / 60.0 * labor_rate
-  For external operations the cost is external_unit_price * qty + external_setup_cost.
 - Time fields are MINUTES on both routing_operations (setup_minutes,
   cycle_minutes_per_unit) and job_operations (estimated_setup_minutes,
   estimated_run_minutes_per_unit).
   Divide by 60 before multiplying by an hourly labor_rate.
+- Cost inputs for internal routing/job operations:
+    labor_rate = COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate)
+  For external operations the inputs are external_unit_price and external_setup_cost.
+  What to USE for a cost or profit answer is in the semantics section -- prefer the
+  frozen job_parts.true_cost_per_unit over recomputing from current rates.
 
 ## Example Queries
 

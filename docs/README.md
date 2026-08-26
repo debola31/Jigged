@@ -45,7 +45,9 @@ notes read-back loop, and the operator journeys ·
 pilot flag retired · [inventory.md](modules/inventory.md)
 
 **Office and platform:** [dashboard.md](modules/dashboard.md) ·
-[ai-insights.md](modules/ai-insights.md) — its table allow/denylist is a security boundary ·
+[ai-insights.md](modules/ai-insights.md) — the grant plus the RLS policy are the security boundary ·
+[ai/semantics.md](ai/semantics.md) — what "late", "revenue" and "this quarter" mean; **rendered
+into the insights prompt, so editing it changes the product** ·
 [data-import.md](modules/data-import.md) · [demo-mode.md](modules/demo-mode.md) ·
 [feature-flags.md](modules/feature-flags.md) — what a per-tenant flag is, and how to retire one ·
 [invitation-system.md](modules/invitation-system.md) ·

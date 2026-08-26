@@ -134,6 +134,20 @@ answer it. `ai_jobs` is worse: its `payload` carries the questions **other compa
 are blocked the same three ways, with `ai_call_write_leaks()` and `ai_job_write_leaks()` asserting
 the grant and policy layers on every CI run.
 
+### Business terms live in `docs/ai/semantics.md`, and it is runtime
+
+[`ai/semantics.md`](../ai/semantics.md) defines late, revenue, job value, this quarter, dormant,
+pipeline and conversion — **and `_build_chat_system_prompt()` renders it straight into the system
+prompt.** It is documentation and source in one, so editing it changes what the product answers.
+There is no second copy in Python, deliberately: the Gate 1 eval had three arms answer *"how many
+jobs are late right now"* with 5, 4 and 0, each defensibly, because the term was undefined and the
+prose that gestured at it lived somewhere the runtime never read.
+
+Every ```sql block in that file is executed with `LIMIT 1` as `jigged_ai_readonly` on each CI run,
+so a definition citing an unreadable column fails the build. Assembly order —
+preamble → `SCHEMA_CONTEXT` → semantics → guidelines — is fixed so the prompt stays one cacheable
+prefix; the file changes only via PR.
+
 ### Adding a table to AI scope
 
 1. Migration: `SELECT public.apply_ai_read_access('public.<table>');` — one call, which issues the

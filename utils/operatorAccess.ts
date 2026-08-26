@@ -207,6 +207,17 @@ interface ReadyRow {
   part_quantity: number;
   /** jobs.is_hot — the RPC returns rows already ordered hot-first. */
   is_hot: boolean;
+  /**
+   * A timer is still open on this operation at this station.
+   *
+   * The THIRD reason a step can be on this list, alongside "sequence-ready" and
+   * "has quantity recorded". It is its own flag rather than folded into
+   * `op_status` because op status derives from recorded quantity — a step
+   * somebody started but has produced nothing on is `pending`, correctly, and
+   * before 20260826010648 that plus being out of sequence hid it from every
+   * operator surface at once.
+   */
+  has_open_interval: boolean;
 }
 
 async function getReadyOperationsForStation(
@@ -238,7 +249,16 @@ async function getReadyOperationsForStation(
 
 /**
  * List the work an operator can pick up at the current station. Each row is a
- * (job, job_part) pair where the station's operation is ready or in-progress.
+ * (job, job_part) pair whose operation at this station is sequence-ready, has
+ * quantity recorded against it, or has a timer still open.
+ *
+ * That third case is not a nicety. Op status derives from recorded quantity, so
+ * a step somebody started but has produced nothing on reads `pending`; if it is
+ * also out of sequence — which starting permits, deliberately — it used to
+ * appear on NO operator surface, while the office Still-running card showed it.
+ * And the station list is the only place an abandoned interval can be cleared
+ * from: `close_operation_interval` refuses a non-owner, so the recovery is to
+ * start on the same work centre and let the chain close it as `switched`.
  */
 export async function getOperatorJobs(
   companyId: string,
@@ -375,6 +395,7 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       operations_completed: progress.done,
       // Partial progress on the CURRENT operation (good pieces / order qty).
       current_op_qty_good: goodByOp.get(row.job_operation_id) ?? 0,
+      has_open_interval: row.has_open_interval,
     };
   });
 }
@@ -476,6 +497,13 @@ async function getCompletedOperationRows(
         part_description: partsJoin?.description ?? null,
         part_quantity: partJoin?.quantity ?? 0,
         is_hot: jobJoin?.is_hot ?? false,
+        // The completed list does not compute this. A completed step CAN still
+        // carry an open interval (an office-side completion closes none), but
+        // this list exists to undo a mis-tapped completion, and marking a row
+        // "running" in a list headed "Completed" states a contradiction the
+        // operator has no control to resolve. The office Still-running card is
+        // where that combination is meant to be noticed.
+        has_open_interval: false,
       },
       work_center_id: r.work_center_id,
       completed_at: r.completed_at,

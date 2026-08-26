@@ -938,6 +938,44 @@ since there is no list to scope yet.
 **If the readiness RPC errors, the failure surfaces in an Alert** — it is never swallowed into an
 empty "No jobs" list. That is the shape of the May 2026 `jobs.status` regression.
 
+### A step with a timer open is on the list, whatever the sequence says
+
+Added [`20260826010648`](../../supabase/migrations/20260826010648_station_dispatch_includes_running_steps.sql)
+after a production sighting: J-0118 / OP 30 EDM had an interval open since 3:01 PM, showed on the
+office [Still-running card](#recording-time), and appeared **on no operator surface at all** — not
+My Station at EDM, not Completed, not All Stations. The step the floor was actually running was the
+one step the floor could not see.
+
+**Two correct rules composed into a wrong answer.** `job_operations.status` derives from *recorded
+quantity*, so a step somebody started but has produced nothing on is `pending` — correctly. And the
+dispatch RPC admitted a `pending` step only when it was sequence-ready — also correctly, that being
+what a dispatch list is. But **starting does not require sequence-readiness** (that is the
+`predecessors_incomplete` warning above, deliberately non-blocking), so the write path admits a case
+the read path then hid. J-0118's OP 10 and OP 20 were both pending, so EDM was neither ready nor
+"in progress", and fell through every branch.
+
+So there are now **three** ways onto the list, and an open interval is the third: *sequence-ready*,
+*has quantity recorded*, or *somebody is on it right now*. The row is marked `Running`.
+
+**This is also the only route to an abandoned interval.** `close_operation_interval` refuses a
+non-owner, so the office cannot clear one — what can is `start_operation_interval`, which closes
+whatever holds that work centre's chain slot as `switched` (the shift handoff). That recovery runs
+through the station list, which was the one place the forgotten interval did not appear.
+
+**The mark carries no person, and that is enforced in SQL rather than in the card.** The dispatch
+RPC is `SECURITY INVOKER`, and `job_op_intervals_select_own` scopes the interval table to the
+caller's own rows — so the fact is fetched through
+`get_running_operation_ids_for_station`, a `SECURITY DEFINER` helper that returns **operation ids
+and nothing else**: no `operator_id`, no `started_at`, no elapsed figure, no count. "OP 30 at EDM is
+running" is a fact about a machine, the same class of disclosure as the office card, and the only
+form of it that stays clear of the [guardrail](#surveillance-guardrail-non-negotiable). A `since
+<time>` on this list would additionally revive the copy of the deleted header strip, which an E2E
+assertion still watches for.
+
+**Two holes are left open on purpose**, both named in the migration: an interval on a job that was
+later **cancelled**, and one on a step an **office-side completion** marked `completed` (which
+closes no interval). Both still show on the office Still-running card; neither has been observed.
+
 ## QR codes and scanning
 
 There are **two** codes, and nothing else in Jigged is scannable — parts carry no barcode at all
@@ -1106,7 +1144,8 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 
 **Dispatch list**
 
-- [ ] **Given** the My Station lens with a station selected, **when** the list loads, **then** it shows one row per (job, part) whose station operation is ready or in progress, via `get_ready_operations_for_station` — *verified by `api/tests/database/test_operator_ready_ops_rpc.py` (1 test, planned against the real columns); row assembly reload E2E automation-pending (#367)*.
+- [ ] **Given** the My Station lens with a station selected, **when** the list loads, **then** it shows one row per (job, part) whose station operation is ready, in progress, or has a timer still open, via `get_ready_operations_for_station` — *verified by `api/tests/database/test_operator_ready_ops_rpc.py` (1 test, planned against the real columns) and `api/tests/integration/test_station_dispatch_open_intervals.py` (6 tests, incl. the negative control that an idle out-of-sequence step stays hidden); row assembly reload E2E automation-pending (#367)*.
+- [ ] **Given** a step at this station with an interval another member left open, **when** the list loads, **then** the row appears marked `Running`, sorted above idle ready work, and carries no operator identity, start time or elapsed figure — *verified by `api/tests/integration/test_station_dispatch_open_intervals.py`, which asserts as the OTHER member and re-checks that the interval row itself stays unreadable*.
 - [ ] **Given** the readiness RPC returns an error, **when** the list loads, **then** the failure surfaces in an Alert and is NOT swallowed into an empty "No jobs" list — *verified by `__tests__/utils/operatorAccess.test.ts` > `getAllStationsOperatorJobs`*.
 - [ ] **Given** the All Stations lens, **when** it loads, **then** whole-plant work is fetched once per station in parallel and grouped by station — *verified by `__tests__/utils/operatorAccess.test.ts` > `getAllStationsOperatorJobs`*.
 - [ ] **Given** no station selected, **when** the My Station lens loads, **then** it returns an empty list rather than the whole plant — *verified by `__tests__/utils/operatorAccess.test.ts` > `getCompletedOperatorJobs`; the ready-lens equivalent is automation-pending (`getOperatorJobs`)*.

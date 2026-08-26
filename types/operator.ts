@@ -57,6 +57,17 @@ export interface OperatorJob {
    * getAllStationsCompletedOperatorJobs); undefined on the ready list.
    */
   completed_at?: string | null;
+  /**
+   * A timer is still open on this row's operation at this station — the row is
+   * on the list because somebody is on it, not (or not only) because it is next.
+   *
+   * Drives the `Running` mark on the card. It is a fact about the MACHINE and
+   * carries nothing about the person: no name, no start time, no elapsed figure
+   * — see docs/modules/operator-view.md#surveillance-guardrail-non-negotiable,
+   * and note the E2E assertion that no `since <time>` copy may appear on this
+   * list. Always false on the completed list, which does not compute it.
+   */
+  has_open_interval?: boolean;
 }
 
 /**

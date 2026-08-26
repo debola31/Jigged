@@ -349,6 +349,50 @@ the times from the feed afterwards, which is the same correction path every othe
 accepted cost is that a deliberate lights-out run and a forgotten stop now look identical until
 someone says otherwise.
 
+### `Cancel activity` — the third end, added 2026-08-26
+
+An interval still closes exactly two ways. It is now **discarded** a third:
+[`cancel_operation_interval`](../../supabase/migrations/20260826105251_operator_can_cancel_a_running_activity.sql)
+stamps `voided_at` / `voided_by` and leaves `ended_at` and `close_reason` NULL.
+
+**The dead end it closes.** An operator who started a step and produced nothing could not stop the
+clock at all. `close_operation_interval` refuses a non-owner, so the office could not; the owner's
+only close path runs through `createOperationCompletion`, floored at `quantity_good > 0`;
+`Complete without timing` is hidden while a timer runs; and `Adjust` is absent from a running row.
+The only remaining move was to type a quantity you had not made and then undo it.
+
+**That workaround was not hypothetical — it was already in use, in two places.** The E2E suite's
+`stopTimer()` helper did it deliberately and said so in a comment; and of the three intervals that
+had ever existed in production, two were seconds-long runs on J-0013 EDM created with a completion
+and immediately voided, by hand, because there was no other way. Both are gone now: the helper
+drives this control instead.
+
+**Why it voids rather than closes, and the argument NOT to make.** It is tempting to say we do not
+know when the work stopped, so closing at `now()` would fabricate an end. Do not — this schema
+fabricates that end routinely: `start_operation_interval` closes whatever holds the chain slot at
+`now()` on every chained start, and it did exactly that to J-0118 / OP 30 EDM, which is now a
+408-minute `switched` interval feeding that operation's actual-vs-estimate. The real reason is
+simpler: **this is Undo for a timer.** Voiding a completion already voids the intervals it closed;
+this is the same act one step earlier, so it voids too.
+
+**Why it is not a revert of the 2026-08-18 withdrawal.** That removed a control that asked the
+operator to *classify* a stop and that *closed* the interval, preserving the measured span under a
+label. This takes no reason and discards — a different act, and the opposite direction on data
+preservation. The withdrawal's objection, "a second decision on top of the one that matters", does
+not apply where there is no second decision.
+
+**What it costs and what it frees.** Both partial unique indexes carry `voided_at IS NULL`, so a
+discard releases the work centre's chain slot immediately — the machine is available to the next
+start without an end time ever being asserted. Every reader already filters `voided_at IS NULL`, so
+the row contributes to no total and **both** its `Started` and `Finished` feed rows disappear. It
+introduces one genuinely new row state, `voided_at IS NOT NULL AND ended_at IS NULL`: until now
+every voided interval was also closed.
+
+It is confirmed by a dialog rather than an Undo snackbar — this is the "immediately-persisted, no
+restore" row of [interaction-standards.md](../interaction-standards.md)'s scaled-friction table, and
+the audience floor rules the snackbar out. The confirm copy says the step itself is unaffected,
+because "Activity" also names a dashboard section and the notes feed.
+
 **A `Finished` row says how many parts it produced**, resolved through
 `job_operation_intervals.completion_id` rather than stored, so it can never disagree with the
 completion itself. A row that says a step stopped but not what came off it withholds the half an
@@ -1147,6 +1191,8 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 **Dispatch list**
 
 - [ ] **Given** the My Station lens with a station selected, **when** the list loads, **then** it shows one row per (job, part) whose station operation is ready, in progress, or has a timer still open, via `get_ready_operations_for_station` — *verified by `api/tests/database/test_operator_ready_ops_rpc.py` (1 test, planned against the real columns) and `api/tests/integration/test_station_dispatch_open_intervals.py` (6 tests, incl. the negative control that an idle out-of-sequence step stays hidden); row assembly reload E2E automation-pending (#367)*.
+- [ ] **Given** a running timer on a step, **when** the operator taps `Cancel activity` and confirms, **then** the interval is voided (`ended_at` left NULL), no completion is written, the work centre's chain slot frees immediately, and both feed rows disappear — *verified by `api/tests/integration/test_cancel_operation_interval.py` (8 tests) and the running-state describe in `__tests__/app/operator/OperationActionPage.test.tsx`*.
+- [ ] **Given** a running timer belonging to somebody else, **when** a different member calls `cancel_operation_interval`, **then** it is refused — *verified by `test_a_non_owner_is_refused`*.
 - [ ] **Given** a step at this station with an interval another member left open, **when** the list loads, **then** the row appears marked `Running`, sorted above idle ready work, and carries no operator identity, start time or elapsed figure — *verified by `api/tests/integration/test_station_dispatch_open_intervals.py`, which asserts as the OTHER member and re-checks that the interval row itself stays unreadable*.
 - [ ] **Given** the readiness RPC returns an error, **when** the list loads, **then** the failure surfaces in an Alert and is NOT swallowed into an empty "No jobs" list — *verified by `__tests__/utils/operatorAccess.test.ts` > `getAllStationsOperatorJobs`*.
 - [ ] **Given** the All Stations lens, **when** it loads, **then** whole-plant work is fetched once per station in parallel and grouped by station — *verified by `__tests__/utils/operatorAccess.test.ts` > `getAllStationsOperatorJobs`*.

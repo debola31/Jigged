@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -115,6 +115,43 @@ vi.mock('@/components/operator/OperatorChromeContext', () => ({
   useOperatorNav: () => ({ push: vi.fn(), goBack: vi.fn() }),
 }));
 vi.mock('@/components/operator/StationSelector', () => ({ default: () => <div /> }));
+
+/**
+ * The interval context, made SWITCHABLE.
+ *
+ * Until now this file never mocked it, so every test ran against the real
+ * context's default value — `intervalFor: () => null` — and therefore always in
+ * the IDLE state. That left the entire running branch of this page uncovered,
+ * including the `closeInterval` call inside handleRecord and (before it existed)
+ * any control that only appears while a timer runs.
+ *
+ * `intervalState` deliberately defaults to exactly what the real default returns,
+ * so the 21 tests above are unaffected; only the running-state describe at the
+ * bottom of this file changes it.
+ */
+const runningInterval = {
+  id: 'int1',
+  job_operation_id: 'op1',
+  effective_started_at: '2026-08-26T15:01:00.000Z',
+};
+const intervalState: {
+  running: typeof runningInterval | null;
+  cancel: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+} = { running: null, cancel: vi.fn(), close: vi.fn() };
+
+vi.mock('@/components/operator/OperatorIntervalContext', () => ({
+  useIntervalContext: () => ({
+    openIntervals: intervalState.running ? [intervalState.running] : [],
+    serverSkewMs: 0,
+    loading: false,
+    intervalFor: () => intervalState.running,
+    start: vi.fn(),
+    close: intervalState.close,
+    cancel: intervalState.cancel,
+    refresh: vi.fn(),
+  }),
+}));
 
 const mockDetail = vi.mocked(getOperatorOperationDetail);
 const mockSummaries = vi.mocked(getOperationCompletionSummaries);
@@ -549,5 +586,108 @@ describe('operation action page — completion (characterisation)', () => {
         expect.objectContaining({ jobOperationId: 'op1' }),
       ),
     );
+  });
+});
+
+
+/**
+ * THE RUNNING STATE — the first coverage this page has ever had of it.
+ *
+ * `Cancel activity` is the reason it exists: before it, an operator who started a
+ * step and produced nothing had no way to stop the clock, and the documented
+ * workaround was to record a quantity they had not made and then undo it.
+ */
+describe('while a timer is running', () => {
+  beforeEach(() => {
+    intervalState.running = runningInterval;
+    intervalState.cancel = vi.fn(async () => undefined);
+    intervalState.close = vi.fn(async () => undefined);
+    mockDetail.mockResolvedValue(detail() as never);
+    mockSummaries.mockResolvedValue(summary(0) as never);
+  });
+
+  afterEach(() => {
+    intervalState.running = null;
+  });
+
+  /** The PAGE's button, never the dialog's confirm (they share a label). */
+  const cancelButton = () =>
+    screen.getAllByRole('button', { name: /^cancel activity$/i })[0];
+
+  it('offers Cancel activity, and the escape hatch it replaces is gone', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    expect(cancelButton()).toBeInTheDocument();
+    // `Complete without timing` is the IDLE-state sibling in the same slot. Both
+    // showing at once would mean the two conditionals had been collapsed into a
+    // ternary on the wrong predicate.
+    expect(
+      screen.queryByRole('button', { name: /complete without timing/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not offer it when nothing is running', async () => {
+    intervalState.running = null;
+    renderPage();
+    await screen.findByRole('button', { name: /start this step/i });
+
+    expect(screen.queryByRole('button', { name: /^cancel activity$/i })).not.toBeInTheDocument();
+  });
+
+  it('leaves the primary action alone — cancelling is not completing', async () => {
+    renderPage();
+
+    // The quantity default still drives the primary button; Cancel sits beside it
+    // rather than replacing it.
+    expect(await screen.findByRole('button', { name: /record 10 finished/i })).toBeInTheDocument();
+    expect(cancelButton()).toBeInTheDocument();
+  });
+
+  it('confirms before discarding, and does nothing if the dialog is dismissed', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    await userEvent.click(cancelButton());
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    // The consequence is stated before the fact, not discovered after.
+    expect(screen.getByText(/will not be kept/i)).toBeInTheDocument();
+    expect(screen.getByText(/the step stays where it is/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /keep timing/i }));
+    expect(intervalState.cancel).not.toHaveBeenCalled();
+  });
+
+  it('discards the interval on confirm, and records no completion doing it', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    await userEvent.click(cancelButton());
+    // Scoped to the dialog: the page button and the confirm share a label, which
+    // is deliberate (the confirm should say what it does, not "OK") and means an
+    // unscoped query here would be ambiguous.
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: /^cancel activity$/i }));
+
+    await waitFor(() => expect(intervalState.cancel).toHaveBeenCalledWith('int1'));
+    // THE INVARIANT THIS BUTTON EXISTS FOR: no fabricated production record.
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed cancel inside the dialog rather than silently leaving the timer up', async () => {
+    intervalState.cancel = vi.fn(async () => {
+      throw new Error('Your subscription is not active (billing_gate_update)');
+    });
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    await userEvent.click(cancelButton());
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: /^cancel activity$/i }));
+
+    // Unlike handleRecord's closeInterval — swallowed there because a durable
+    // completion has already landed — here the cancel IS the whole action.
+    expect(await within(dialog).findByText(/subscription is not active/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });

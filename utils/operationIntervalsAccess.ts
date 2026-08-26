@@ -148,6 +148,36 @@ export async function closeOperationInterval(
 }
 
 /**
+ * Discard a running interval — the operator started a step and produced nothing.
+ *
+ * VOIDS RATHER THAN CLOSES, so nothing is asserted about when the work stopped:
+ * `voided_at` is stamped and `ended_at` stays NULL. The row then contributes to no
+ * total and vanishes from the job feed, and the work centre's chain slot frees
+ * because both partial unique indexes carry `voided_at IS NULL`.
+ *
+ * This is Undo for a timer, and its sibling is the trigger that voids the
+ * intervals a voided completion had closed. Before it existed, the only way to
+ * stop a clock with nothing to record was to type a quantity you had not made and
+ * then undo it — which the E2E suite's `stopTimer()` did on purpose and a person
+ * did by hand in production twice.
+ */
+export async function cancelOperationInterval(intervalId: string): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error } = await supabase.rpc('cancel_operation_interval', {
+    p_interval_id: intervalId,
+  });
+
+  if (error) {
+    reportRpcError(error, 'cancel activity');
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not cancel this activity.',
+    });
+  }
+}
+
+/**
  * Correct the times on an interval that is already closed.
  *
  * A plain `.from().update()` and not an RPC, because this one does NOT cross

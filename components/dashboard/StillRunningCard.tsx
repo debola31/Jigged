@@ -30,7 +30,11 @@ import type { OpenInterval } from '@/types/operationInterval';
  * enforced in the schema and not by this component's restraint. Whose it was is
  * a separate question, answered by an admin-gated function that logs the ask.
  */
-const STALE_HOURS = 12;
+// Lowered 12 -> 6 on 2026-08-26. Twelve hours meant a timer started at 4pm was not
+// flagged until 4am, i.e. the office never saw the warning on the day the work
+// happened; six catches an overnight leave-running by the next morning. Defined once
+// and interpolated into the banner copy below, so the sentence follows the number.
+const STALE_HOURS = 6;
 
 export default function StillRunningCard({ companyId }: { companyId: string }) {
   const [rows, setRows] = useState<OpenInterval[]>([]);

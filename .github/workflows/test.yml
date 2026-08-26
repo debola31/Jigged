@@ -182,6 +182,18 @@ jobs:
           echo "TEST_SUPABASE_URL=$API_URL" >> $GITHUB_ENV
           echo "TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY" >> $GITHUB_ENV
           echo "TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY" >> $GITHUB_ENV
+          # The insights SQL sandbox runs as jigged_ai_readonly, and
+          # supabase/seed.sql grants it LOGIN locally. Without this, every test
+          # that needs it SKIPS -- test_sql_executor.py (17 of them, written to
+          # catch the SET LOCAL $1 bug that once broke insights),
+          # test_insights_chat.py and test_ai_read_access.py -- which is a green
+          # tick for the absence of the thing they guard.
+          #
+          # Derived from DB_URL so a port change carries. NOT the `postgres`
+          # superuser it replaces: that role is BYPASSRLS, so every per-company
+          # ai_readonly_select policy would do nothing and the assertions would
+          # pass without meaning anything.
+          echo "AI_READONLY_DATABASE_URL=${DB_URL/postgres:postgres@/jigged_ai_readonly:postgres@}" >> $GITHUB_ENV
 
       - name: Run tests with enforced coverage floor
         # 65 = measured-current minus 5pp headroom (measured 70% on

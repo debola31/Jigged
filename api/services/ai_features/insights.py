@@ -16,7 +16,6 @@ scrubbing.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -29,10 +28,11 @@ from services.insights_presentation import (
     _strip_code_blocks,
     _strip_inline_markdown,
     _validate_chart_config,
-    looks_like_error_echo,
+    classify_non_answer,
 )
 from services.llm.base import Message, ToolCall
 from services.llm.errors import LLMErrorEcho, LLMToolLoopExhausted
+from tools.tool_json import dumps_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         messages = messages + [
             Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
         ] + [
-            Message(role="tool", tool_call_id=call.id, content=json.dumps(r))
+            # dumps_tool_result, never a bare json.dumps: a UUID in a result row
+            # killed this exact line twice, because the type mapping lived in a
+            # helper that shaped rows elsewhere and nothing shaped them here.
+            Message(role="tool", tool_call_id=call.id, content=dumps_tool_result(r))
             for call, r in tool_results
         ]
         tool_names.extend(call.name for call in result.tool_calls)
@@ -218,10 +221,16 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # any query succeeded the answer goes through however it reads. Judging a
     # grounded answer is the eval's job and a human's, and a rule that could
     # reject one will eventually reject a good one.
-    if not sql_ok and looks_like_error_echo(answer):
+    #
+    # The kind on the job row stays 'error_echo' even when the rule that fired
+    # was a narrated tool call rather than a read-back error: it is one failure
+    # -- the final turn was not an answer -- and splitting it would cost a
+    # migration to say something the reason in the message already says.
+    non_answer = classify_non_answer(answer) if not sql_ok else None
+    if non_answer:
         raise LLMErrorEcho(
             f"the model's final turn carried no answer and no successful query "
-            f"({sql_failed} failed, {refused} refused): "
+            f"[{non_answer}] ({sql_failed} failed, {refused} refused): "
             f"{answer[:_REJECTED_ECHO_CHARS]!r}",
             feature=ctx.feature,
             request_id=ctx.request_id,

@@ -25,6 +25,15 @@ exist..." scored as answered. It now counts a SUBSTANTIVE answer, via the same
 predicate the handler gates on (Outcome.answered). Every local arm's number will
 drop, and that drop is the measurement being corrected, not a regression. Do not
 read an older run's table against a newer one.
+
+WIDENED AGAIN ON 2026-08-27, same warning. `answered` now also excludes a final
+turn that is an UNEXECUTED tool call -- Arctic answered "which parts have no
+routing yet" with the literal text `<execute_sql>` and the call's JSON, tools=0,
+and scored answered because the text contained no error language. Runs before
+this are not comparable on that case either. The predicate is shared with the
+handler (services/insights_presentation.classify_non_answer), so it will keep
+widening as evals find new ways for a turn to not be an answer; each widening
+re-bases the column.
 """
 from __future__ import annotations
 

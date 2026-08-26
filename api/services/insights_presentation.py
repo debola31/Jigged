@@ -141,29 +141,79 @@ _ERROR_ECHO = (
     re.compile(r"\b(I|the query|the SQL)\b[^.\n]{0,30}\bencountered an error\b", re.I),
 )
 
+# A TOOL CALL THE MODEL ONLY DESCRIBED. Arctic's final turn on "which parts have
+# no routing yet" was the literal text `<execute_sql>` followed by the call's
+# JSON, with no tool_calls on the turn -- it narrated the query instead of
+# running it. Keyed on the tag being a TOOL-SHAPED name (snake_case, or
+# execute_sql by name) so ordinary angle brackets and stray html cannot trip it.
+_TOOL_TAG = re.compile(r"<\s*/?\s*(execute_sql|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\s*[^>]*>", re.I)
 
-def looks_like_error_echo(answer: str) -> bool:
-    """True when the text is the tool's failure read back, or nothing at all.
+# The same payload without the tag. `"sql"` must sit in JSON KEY position -- a
+# quoted name followed by a colon, opening a member -- so prose that merely says
+# the word, or a report with an `sql` column in it, is untouched.
+_SQL_KEY = re.compile(r"[{,]\s*[\"']sql[\"']\s*:", re.I)
 
-    WHAT THIS IS FOR. In the insights A/B every local arm's last turn was the
-    error from a query that had failed -- "The column total_price does not
-    exist...", "The SQL query encountered a syntax error, please review..." --
-    and it was returned as the answer with the job marked succeeded. A shop owner
-    cannot tell that from a real answer, which is exactly the silent degradation
-    services/llm/errors.py refuses one layer down.
+# A fenced block, and how much of the message it is.
+_FENCED = re.compile(r"```[ \t]*(\w+)?[ \t]*\n?(.*?)```", re.S)
 
-    Two callers, and they weigh it differently ON PURPOSE. The handler gates on
-    it only when NO query succeeded, so a grounded answer is never rejected. The
-    A/B applies it alone, because scoring has no such duty and cannot see which
-    tool results succeeded. Sharing the predicate is what stops the two drifting
-    into disagreeing about what an answer is.
+# Above this, the fence IS the message and the prose is a label on it. An answer
+# that explains itself and quotes the filter it used sits well below.
+_FENCE_DOMINATES = 0.6
+
+
+def _sql_fence_share(text: str) -> float:
+    """How much of the message is fenced SQL, 0..1."""
+    fenced = sum(
+        len(body.strip())
+        for lang, body in _FENCED.findall(text)
+        if (lang or "").lower() in ("sql", "postgresql", "psql", "")
+        and re.search(r"\b(select|with)\b", body, re.I)
+    )
+    return fenced / len(text.strip()) if text.strip() else 0.0
+
+
+def classify_non_answer(answer: str) -> str | None:
+    """Which rule says this is not an answer, or None if it is one.
+
+    ONE PREDICATE, TWO CALLERS, and it has now been widened twice by two
+    different evals -- so the rule it encodes is stated generally rather than
+    per-symptom: A FINAL TURN IS A NON-ANSWER WHEN IT IS, IN SUBSTANCE, MACHINE
+    PAYLOAD RATHER THAN PROSE. A database error read back is one kind. A tool
+    call the model typed out instead of making is another. Both reach a shop
+    owner as something they cannot act on and cannot tell from a real answer.
+
+    Returning WHICH rule fired, rather than a bool, is what lets the failure on
+    the job row name its own cause -- "not an answer" alone sends whoever is
+    triaging back to the transcript.
+
+    Every rule is anchored on STRUCTURE, never vocabulary: a tool-shaped tag, a
+    JSON key in key position, a fence that is the message. That is what keeps
+    "we should select the top vendors" and an answer that names a column while
+    reporting figures on the right side of it.
     """
     text = (answer or "").strip()
     if not text:
-        return True
+        return "empty"
     if any(marker in text for marker in _MACHINE_STRINGS):
-        return True
-    return any(pattern.search(text) for pattern in _ERROR_ECHO)
+        return "machine_string"
+    if any(pattern.search(text) for pattern in _ERROR_ECHO):
+        return "error_echo"
+    if _TOOL_TAG.search(text):
+        return "tool_call_tag"
+    if _SQL_KEY.search(text):
+        return "sql_payload"
+    if _sql_fence_share(text) >= _FENCE_DOMINATES:
+        return "sql_block"
+    return None
+
+
+def looks_like_error_echo(answer: str) -> bool:
+    """True when the final turn is not an answer. The name is older than the
+    rule -- it was written when a read-back database error was the only known
+    shape -- and it is kept because the handler, the A/B and the `error_echo`
+    job kind all key on it. classify_non_answer says which shape.
+    """
+    return classify_non_answer(answer) is not None
 
 
 # ---- chart_config validation + deterministic chart-type selection -----------

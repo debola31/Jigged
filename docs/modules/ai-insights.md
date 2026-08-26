@@ -151,7 +151,7 @@ path, so Claude gets them too:
 |---|---|
 | **The tool result** ([`retryable_sql_error`](../../api/tools/sql_executor.py)) | A fixable failure returns `SQL_ERROR: <one-line cause>. Rewrite the query using this error and execute again. Never describe this error to the user.` The executor used to say only what went wrong, so passing it on was a reasonable thing to do with it |
 | **One corrective turn** ([`ai_features/insights.py`](../../api/services/ai_features/insights.py)) | A model trying to answer while **every** query failed and none succeeded is told to fix the SQL and run it once more. **Once per conversation** — a second injection would push the real work past the iteration cap, and the cap is what ends a loop that is not converging |
-| **The answer gate** (`looks_like_error_echo`) | No successful query **and** an empty or error-shaped final text → `LLMErrorEcho`, `error_kind = 'error_echo'`, never an answer |
+| **The answer gate** (`classify_non_answer`) | No successful query **and** a final text that is machine payload rather than prose → `LLMErrorEcho`, `error_kind = 'error_echo'`, never an answer. The reason names itself in the message |
 
 **Which failures are the model's to fix is now a property of the result, not of its wording.**
 `SQL_ERROR` means a rewrite can reach it (syntax, a column that does not exist, a timeout, a
@@ -159,6 +159,26 @@ validator rejection). `NOT_PERMITTED` means no rewrite ever can. A dead pool or 
 `company_id` carries **neither** — those are ours, and inviting a retry would spend a turn on
 something no query can reach. The loop counts on exactly that distinction, so a refused object can
 neither earn a retry nor condemn a legitimate *"Jigged does not track that"* answer.
+
+**What counts as machine payload has been widened twice, by two evals, and the rule is stated
+generally so it does not need a third.** A read-back database error was the first shape. The second
+was Arctic answering *"which parts have no routing yet"* with the literal text `<execute_sql>` and
+the call's JSON — a tool call it narrated instead of making, with `tools=0` and no error language in
+it, which both the gate and the eval scored as a good answer. So the rule is now **a final turn is a
+non-answer when it is, in substance, machine payload rather than prose**, and every test of it is
+anchored on structure — a tool-shaped tag, a `"sql"` key in key position, a fence that *is* the
+message — never on vocabulary. *"We should select the top vendors"* is prose about selecting, and an
+answer that names a column while reporting real figures is an answer; both are pinned.
+
+`error_kind` stays `error_echo` for all of them. It is one failure — the final turn was not an
+answer — and splitting it would cost a migration to say what the reason in the message already says.
+
+**Every tool result is serialised by one function**, [`tools/tool_json.py`](../../api/tools/tool_json.py):
+`to_json_safe` shapes result rows *and* is the `default=` of the single `dumps_tool_result`. There
+used to be two conversion points — the row build and a bare `json.dumps` in the loop — and a UUID
+crashed *"who is my top customer by revenue?"* twice, because the fix each time went into the one the
+failing path did not call. The mapping ends in a `str(value)` catch-all rather than a raise: every
+version of this bug was a type nobody had listed.
 
 **The gate is deliberately conservative: if any query succeeded, the answer passes through
 untouched** — however it reads. It is a floor under "no data at all", not a judge of answers, because

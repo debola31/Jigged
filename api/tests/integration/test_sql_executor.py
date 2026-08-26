@@ -8,6 +8,7 @@ SET LOCAL $1 bug that broke AI insights.
 Requires AI_READONLY_DATABASE_URL to be set.
 """
 
+import json
 import os
 import uuid
 
@@ -20,6 +21,7 @@ from tools.sql_executor import (
     execute_sql_query,
     init_pool,
 )
+from tools.tool_json import dumps_tool_result
 
 
 # Use a known demo company or skip if no DB configured
@@ -196,15 +198,48 @@ class TestDataTypes:
         assert row["num"] == 42.5
         assert row["whole"] == 100  # Should be int, not 100.0
 
-    async def test_uuid_serialization(self):
+    async def test_a_uuid_column_survives_all_the_way_to_a_json_tool_result(self):
+        """THE TEST THAT WOULD HAVE CAUGHT THE REGRESSION, and the one it replaces
+        could not have.
+
+        The old test read `uuid.UUID(str(result["rows"][0]["uid"]))`. `str()` of a
+        real UUID object is a valid uuid string, so it passed identically whether
+        the executor had converted the value or handed back a live UUID -- it
+        laundered the bug through its own assertion. "Who is my top customer by
+        revenue?" then died on `json.dumps` with `Object of type UUID is not JSON
+        serializable`, twice, with that test green both times.
+
+        So this asserts the thing that actually has to be true: a row goes through
+        the executor AND through the serializer the tool loop really uses, and
+        comes out as JSON. Not "the helper knows about UUIDs" -- that is
+        tests/unit/test_tool_result_json.py, and on its own it proved nothing
+        about whether the path called the helper.
+        """
         result = await execute_sql_query(
             company_id=str(uuid.uuid4()),
             sql="SELECT gen_random_uuid() AS uid, COUNT(*) AS cnt "
                 "FROM customers WHERE company_id = $1",
         )
         assert "error" not in result
-        # UUID should be a valid string
-        uuid.UUID(str(result["rows"][0]["uid"]))
+
+        # Exactly what services/ai_features/insights.py wires into the tool turn.
+        round_tripped = json.loads(dumps_tool_result(result))
+
+        uid = round_tripped["rows"][0]["uid"]
+        assert isinstance(uid, str), f"uid reached the model as {type(uid).__name__}"
+        uuid.UUID(uid)
+
+    async def test_the_executor_itself_hands_back_no_live_uuid_objects(self):
+        """Belt to the braces above. The dumps has a catch-all so it cannot fail,
+        which means a regression in the ROW BUILD would now be invisible there --
+        the value would quietly arrive as a string anyway. This pins the build."""
+        result = await execute_sql_query(
+            company_id=str(uuid.uuid4()),
+            sql="SELECT gen_random_uuid() AS uid FROM customers WHERE company_id = $1 "
+                "UNION ALL SELECT gen_random_uuid() LIMIT 1",
+        )
+        assert "error" not in result
+        assert isinstance(result["rows"][0]["uid"], str)
 
 
 class TestWithRealData:

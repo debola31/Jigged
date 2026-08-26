@@ -28,6 +28,9 @@ a legitimate "Jigged does not track that" into a failure.
 from __future__ import annotations
 
 import itertools
+import json
+import uuid
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -285,6 +288,55 @@ async def test_a_successful_query_lets_even_an_echo_through(text, ok_result):
     result = await run(convo)
 
     assert result["answer"] == text.strip()
+
+
+@pytest.mark.parametrize("text", [
+    pytest.param('<execute_sql>\n{"description": "Parts with no routing", '
+                 '"sql": "SELECT p.part_number FROM parts p WHERE p.company_id = $1"}',
+                 id="arctic-verbatim"),
+    pytest.param('{"sql": "SELECT 1", "description": "d"}', id="payload-without-the-tag"),
+])
+async def test_a_tool_call_the_model_only_described_is_not_an_answer(text):
+    """ARCTIC, ON "Which parts have no routing yet?". The final turn was the text
+    of a tool call it never made -- no tool_calls on the turn, so no query ran and
+    nothing was refused. It contained no error language, so the gate passed it and
+    the eval scored it answered.
+
+    No new wiring was needed for this: with zero successful queries it flows
+    through the same `sql_ok == 0` gate the echo does. Only the predicate grew.
+    """
+    convo = Conversation(turns=[_answer(text)])
+
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+
+    assert "tool_call_tag" in str(exc.value) or "sql_payload" in str(exc.value), str(exc.value)
+
+
+async def test_a_uuid_in_a_result_row_does_not_kill_the_turn():
+    """"Who is my top customer by revenue?" groups by c.id, so a UUID lands in the
+    tool result -- and the loop wires each result in with a dumps. That dumps
+    crashed the whole job, twice, because the type mapping lived somewhere this
+    path never called.
+
+    Driven through insights.run rather than the serializer, deliberately: the
+    previous fix passed its own test and still shipped the crash.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("Acme, at $50,120.")],
+        tool_results=[{"columns": ["id", "revenue"],
+                       "rows": [{"id": uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
+                                 "revenue": Decimal("50120.00")}],
+                       "row_count": 1, "description": "top customer"}],
+    )
+
+    result = await run(convo)
+
+    assert result["answer"] == "Acme, at $50,120."
+    tool_turn = next(m for m in convo.seen[-1] if m.role == "tool")
+    wired = json.loads(tool_turn.text())
+    assert wired["rows"][0]["id"] == "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    assert wired["rows"][0]["revenue"] == 50120
 
 
 async def test_a_refused_object_alone_does_not_condemn_a_good_answer():

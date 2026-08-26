@@ -4027,6 +4027,16 @@ export type Database = {
           leak_kind: string
         }[]
       }
+      ai_policies_without_grant: {
+        Args: never
+        Returns: {
+          table_name: string
+        }[]
+      }
+      apply_ai_read_access: {
+        Args: { p_columns?: string[]; p_table: unknown }
+        Returns: undefined
+      }
       apply_billing_write_gate: {
         Args: { p_table: unknown }
         Returns: undefined
@@ -4494,6 +4504,12 @@ export type Database = {
       sync_demo_features: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined
+      }
+      tenant_tables_missing_ai_decision: {
+        Args: never
+        Returns: {
+          table_name: string
+        }[]
       }
       tenant_tables_missing_write_gate: {
         Args: never

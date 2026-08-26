@@ -38,8 +38,17 @@ _NOT_PERMITTED_ERRORS = (
     asyncpg.exceptions.InsufficientPrivilegeError,
     asyncpg.exceptions.UndefinedTableError,
     asyncpg.exceptions.UndefinedFunctionError,
-    asyncpg.exceptions.UndefinedColumnError,
 )
+
+# UndefinedColumnError is deliberately NOT here. It was, for one run, and the eval
+# caught it: the model wrote `shipments.total_price`, a column that simply does not
+# exist, and got told not to retry -- when picking the right column name is exactly
+# the correction the next turn would have made. A missing column is a model
+# mistake; a missing privilege is a property of the database. Only the second is
+# terminal.
+#
+# A WITHHELD column is not affected: reading one raises InsufficientPrivilegeError
+# ("permission denied for column ..."), which is caught above.
 
 # The refused object, taken from POSTGRES'S message rather than from the SQL: a
 # query names several objects and only one of them was the problem, so parsing

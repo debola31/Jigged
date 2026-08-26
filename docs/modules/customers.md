@@ -233,13 +233,15 @@ Job-level freight is written **only by `JobEditForm`**, through `updateJobAddres
 | Customer detail, `JobEditForm` picker | **full number** — behind auth, and whoever ships must be able to read it |
 | **Printed packing slip** | `••••1576`; `<carrier> (account on file)` when the number was too short to reveal any of; carrier alone when there is no account; **row omitted entirely** when there's no freight at all |
 | `freight_account_snapshot` | `{ carrier, bill_to_party, has_account, account_last4 }` — **the full number is never stored** |
-| AI SQL layer | **unreachable** |
+| AI SQL layer | **unreachable** — excluded by column, see below |
 
 `account_last4` is NULL when the trimmed number is ≤ 4 characters — showing 3 of 4 is not redaction. The snapshot deliberately does **not** duplicate the account id: `shipments.customer_carrier_account_id` is a real FK one column over, and a copy would diverge the moment the account is archived.
 
 The snapshot trigger fires `BEFORE INSERT OR UPDATE OF customer_id, shipping_address_id, customer_carrier_account_id`, so **editing the underlying account later does not rewrite an existing shipment** — Document Snapshot Standard.
 
-Four independent layers keep the AI out of `customer_carrier_accounts`: absent from `ALLOWED_TABLES`, present in `SENSITIVE_TABLES` (whole-word denylist), `REVOKE ALL FROM jigged_ai_readonly`, and no `ai_readonly_select` policy. `shipments` is not allowlisted either, so `freight_account_snapshot` is equally out of reach.
+Three independent layers keep the AI out of `customer_carrier_accounts`: `REVOKE ALL FROM jigged_ai_readonly`, no `ai_readonly_select` policy, and presence in `SENSITIVE_TABLES` (whole-word pre-refusal). The fourth used to be absence from `ALLOWED_TABLES`, which was deleted in [`20260826010319`](../../supabase/migrations/20260826010319_ai_read_access_and_guard.sql) — the grant is now the allowlist.
+
+**`shipments` changed in that migration and the protection got stronger, not weaker.** It used to be out of reach because the whole table was, which also meant no shipping question could be answered and `public.job_last_ship_date()` — the helper the AI is *told* to use — failed on every call. It is now readable **by column**: 18 of 20, with `freight_account_snapshot` and `customer_carrier_account_id` withheld. The exclusion is stated where the grant is rather than resting on the table being shut entirely, so opening shipping data later cannot quietly take the snapshot along with it.
 
 ### Carrier vs account
 

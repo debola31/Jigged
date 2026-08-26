@@ -38,20 +38,20 @@ class TestBasicValidation:
         )
         assert valid
 
-    def test_cte_alias_treated_as_table(self):
-        """CTE aliases are checked against the allowlist (known limitation).
+    def test_a_cte_alias_is_not_mistaken_for_a_table(self):
+        """Fixed by 20260826010319, and it is why the fix is worth having.
 
-        The validator's regex can't distinguish CTE aliases from real tables,
-        so CTEs must use names that match allowed tables, or the outer SELECT
-        must reference a real allowed table.
+        The deleted allowlist could not tell a CTE alias from a table name, so it
+        refused this query -- against a CHAT_TOOLS description that promises
+        "a single SELECT statement (or WITH/CTE)". Analytical questions are the
+        ones that want a CTE, which made the allowlist most restrictive exactly
+        where the feature is most useful.
         """
-        # CTE alias "recent" is not in ALLOWED_TABLES, so this fails
         valid, msg = validate_query(
             "WITH recent AS (SELECT * FROM jobs WHERE company_id = $1) "
             "SELECT * FROM recent"
         )
-        assert not valid
-        assert "restricted" in msg.lower()
+        assert valid, msg
 
     def test_cte_with_allowed_table_in_outer(self):
         """CTE works when the outer query references an allowed table."""
@@ -136,8 +136,9 @@ class TestCompanyIdPlaceholder:
         assert valid
 
 
-class TestTableAllowlist:
-    """Tests that only allowed business tables can be queried."""
+class TestRestrictedTables:
+    """What a query may NAME. What it may READ is the grant, checked in
+    api/tests/integration/test_ai_read_access.py against a real database."""
 
     def test_allowed_table_accepted(self):
         valid, _ = validate_query(
@@ -145,12 +146,14 @@ class TestTableAllowlist:
         )
         assert valid
 
-    def test_system_table_rejected(self):
+    def test_the_auth_schema_is_rejected(self):
+        """auth.users by its real name. The allowlist used to refuse this as a
+        side effect of not listing it; the schema rule refuses it on purpose."""
         valid, msg = validate_query(
-            "SELECT * FROM auth_users WHERE company_id = $1"
+            "SELECT * FROM auth.users WHERE company_id = $1"
         )
         assert not valid
-        assert "restricted" in msg.lower()
+        assert "auth schema" in msg.lower()
 
     def test_join_with_allowed_tables(self):
         valid, _ = validate_query(
@@ -270,11 +273,12 @@ class TestSensitiveTableDenylist:
 class TestTableExtractionHardening:
     """Regression tests for comma-joins and schema-qualified table names."""
 
-    def test_comma_join_disallowed_table_rejected(self):
-        # 'auth_users' is not on the sensitive denylist, but must still fail the
-        # allowlist even in a comma-join (the old regex saw only the first table).
+    def test_comma_join_hiding_a_denylisted_table_rejected(self):
+        """The denylist is whole-word, so query SHAPE cannot hide a name from it
+        -- which is the property that outlived the allowlist. The old extraction
+        regex saw only the first table in a comma-join."""
         valid, msg = validate_query(
-            "SELECT * FROM jobs, auth_users WHERE jobs.company_id = $1"
+            "SELECT * FROM jobs, quickbooks_connections WHERE jobs.company_id = $1"
         )
         assert not valid
         assert "restricted" in msg.lower()
@@ -294,9 +298,21 @@ class TestTableExtractionHardening:
         )
         assert valid
 
-    def test_schema_qualified_disallowed_table_rejected(self):
+    def test_schema_qualified_denylisted_table_rejected(self):
         valid, msg = validate_query(
-            "SELECT * FROM public.auth_users WHERE company_id = $1"
+            "SELECT * FROM public.user_company_access WHERE company_id = $1"
         )
         assert not valid
         assert "restricted" in msg.lower()
+
+    def test_a_public_table_we_simply_do_not_grant_is_left_to_the_database(self):
+        """The deliberate behaviour change. `inventory_locations` is a real table
+        the AI has no grant on: the validator passes it and Postgres refuses with
+        `permission denied`, which _run_tool hands back to the model as tool
+        output. One boundary, in the layer that cannot be bypassed by a function
+        call -- which is exactly how the allowlist let job_last_ship_date()
+        through while the database refused its body."""
+        valid, _ = validate_query(
+            "SELECT * FROM inventory_locations WHERE company_id = $1"
+        )
+        assert valid

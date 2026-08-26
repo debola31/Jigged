@@ -509,7 +509,9 @@ admitted. So:
   end.
 - Counters are **monotonic** so deleting a member and differencing the counts cannot reconstruct
   what they read.
-- Never add `note_views` to `supabase_realtime` or `ALLOWED_TABLES`. Never add a constraint
+- Never add `note_views` to `supabase_realtime`, and never call `apply_ai_read_access` on it —
+  it is named in the surveillance block of `tenant_tables_missing_ai_decision()`'s exempt list
+  for this reason. Never add a constraint
   requiring a `note_views` row before a reaction — that turns the reaction endpoint into a
   "has X viewed N" oracle.
 

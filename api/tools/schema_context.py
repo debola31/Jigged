@@ -444,38 +444,22 @@ WHERE p.company_id = $1
 ORDER BY b.sequence;
 """
 
-# Allowlist of tables the AI is permitted to query.
-# Mirrors the new schema — old names (operation_types, inventory_items,
-# routing_nodes, routing_materials, inventory_unit_conversions) are gone.
-ALLOWED_TABLES = frozenset({
-    "companies",
-    "customers",
-    "vendors",
-    "parts",
-    "part_pricing_tiers",
-    "parts_bom",
-    "parts_unit_conversions",
-    "quotes",
-    "quote_line_items",
-    "jobs",
-    "job_parts",
-    "job_operations",
-    "job_materials",
-    "work_centers",
-    "vendor_services",
-    "vendor_addresses",
-    "routings",
-    "routing_operations",
-    "inventory_transactions",
-})
-
-# Denylist of sensitive auth/system tables the AI must NEVER query. The
-# ALLOWED_TABLES allowlist above is the primary boundary; this is a
-# guaranteed-catch backstop: the validator rejects any query in which one of
-# these names appears as a whole word — comma-join, CTE, subquery, or alias —
-# regardless of how table extraction parses it. Database Row-Level Security is
-# the final backstop. Keep this in sync with the "Excluded Tables" section of
-# docs/modules/ai-insights.md.
+# Denylist of sensitive auth/system tables the AI must NEVER query.
+#
+# THE BOUNDARY IS THE GRANT, NOT THIS LIST, and it is not the hand-written
+# allowlist that used to sit above either — that was deleted in
+# 20260826010319 after four separate lists drifted apart and left `shipments`
+# carrying an RLS policy with no grant behind it. What jigged_ai_readonly may
+# read is now decided in exactly one place: `apply_ai_read_access()` in a
+# migration, with `tenant_tables_missing_ai_decision()` failing CI on a tenant
+# table nobody decided about.
+#
+# This list is a whole-word pre-refusal, and it earns its place for two reasons
+# rather than as a second boundary: it rejects a query naming one of these
+# before it reaches the database, however the name is referenced (comma-join,
+# CTE, subquery, alias), and it returns a sentence the model can act on instead
+# of a bare `permission denied`. Keep it in sync with the "Excluded Tables"
+# section of docs/modules/ai-insights.md.
 SENSITIVE_TABLES = frozenset({
     "user_company_access",
     "user_preferences",
@@ -490,12 +474,11 @@ SENSITIVE_TABLES = frozenset({
     # The customer's own carrier account number — their shared secret, not ours.
     # "Which customers ship on their own UPS account?" is a reasonable question
     # for an owner to type, and answering it from this table would put account
-    # numbers into an AI response and into ai_chat_queries. Triple-blocked, the
-    # same way the quickbooks_* tables are: absent from ALLOWED_TABLES (the
-    # primary boundary), REVOKEd from jigged_ai_readonly in the migration
-    # (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new public
-    # table, so that revoke is load-bearing, not decorative), and no
-    # ai_readonly_select policy. This entry is the whole-word backstop.
+    # numbers into an AI response and into ai_chat_queries. Blocked the same way
+    # the quickbooks_* tables are: no grant to jigged_ai_readonly and no
+    # ai_readonly_select policy (the baseline's ALTER DEFAULT PRIVILEGES grants
+    # SELECT on every new public table, so the migration's REVOKE is
+    # load-bearing rather than decorative), plus this whole-word entry.
     "customer_carrier_accounts",
     "quickbooks_invoice_links",
     # The clickwrap record: who accepted which legal document, from which IP.
@@ -503,19 +486,20 @@ SENSITIVE_TABLES = frozenset({
     # It carries IP addresses and user agents, which are personal data nobody
     # needs an AI summary of; and it is a legal audit trail, so putting it in
     # reach of generated SQL creates a path by which a question about it lands
-    # in ai_chat_queries. Triple-blocked: absent from ALLOWED_TABLES, REVOKEd
-    # from jigged_ai_readonly in 20260818142814, and named here as the
-    # whole-word backstop.
+    # in ai_chat_queries. REVOKEd from jigged_ai_readonly in 20260818142814,
+    # carries no ai_readonly_select policy, and is named here as the whole-word
+    # pre-refusal.
     "terms_acceptances",
     # Read-tracking and capture-funnel instrumentation. "Which operators read the
     # setup notes?" is a natural question for a shop owner to type, and answering
     # it is exactly what the product forbids: if an owner can audit who reads
     # notes, reading becomes an admission of ignorance and the read side dies.
-    # These are already triple-blocked (absent from ALLOWED_TABLES, no grant to
-    # jigged_ai_readonly, no ai_readonly_select policy); this is the whole-word
-    # backstop. Never grant these to jigged_ai_readonly and never add them to
-    # ALLOWED_TABLES. notes.viewer_count / usage_count riding along if `notes` is
-    # ever allowlisted is fine — those are aggregate counts, not identities.
+    # These hold no grant to jigged_ai_readonly and no ai_readonly_select
+    # policy; this is the whole-word pre-refusal. Never grant them, and note that
+    # they are named in the surveillance block of
+    # tenant_tables_missing_ai_decision()'s exempt list for the same reason.
+    # notes.viewer_count / usage_count riding along if `notes` is ever opened is
+    # fine — those are aggregate counts, not identities.
     "note_views",
     "operator_events",
     # The AI layer's own plumbing: the work queue, the per-attempt spend ledger,
@@ -523,12 +507,12 @@ SENSITIVE_TABLES = frozenset({
     # perfectly natural thing for an owner to type, and ai_calls is the table that
     # would answer it -- which is exactly why it must not be reachable from
     # generated SQL. ai_jobs is worse: its payload column carries the questions
-    # other companies asked. Triple-blocked like the rest -- absent from
-    # ALLOWED_TABLES, REVOKEd from jigged_ai_readonly in the migrations that create
-    # them (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new
-    # public table, so those revokes are load-bearing), and named here as the
-    # whole-word backstop. ai_call_write_leaks() and ai_job_write_leaks() assert
-    # the first two layers on every CI run.
+    # other companies asked. Blocked like the rest -- REVOKEd from
+    # jigged_ai_readonly in the migrations that create them (the baseline's ALTER
+    # DEFAULT PRIVILEGES grants SELECT on every new public table, so those
+    # revokes are load-bearing), and named here as the whole-word pre-refusal.
+    # ai_call_write_leaks() and ai_job_write_leaks() assert the grant layer on
+    # every CI run.
     "ai_calls",
     "ai_jobs",
     "ai_workers",

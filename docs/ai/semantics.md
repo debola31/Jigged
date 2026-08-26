@@ -89,9 +89,21 @@ FROM (
 ) per_job
 ```
 
+**Average job value aggregates twice, and the order is the whole definition.** Sum
+`job_parts.total_price` **per job** first, then average those per-job totals **across jobs**. A job
+is one sale; a job part is a line on it. Averaging the part rows directly answers a different
+question — the average value of a *line* — and it is systematically lower, because jobs with more
+lines pull the mean toward their own line size rather than counting once each.
+
+The subquery above is not stylistic. `GROUP BY j.id` produces one row per job, and the outer
+`AVG(job_value)` runs over those rows. **A single-level `AVG(jp.total_price)` is wrong**: on the
+Gate 2 data it returns **$3,038.04** where the correct figure is **$4,774.82**, and three local
+models produced exactly that number.
+
 **Notes.** Use `job_parts.total_price`, never the source quote line. `job_parts.quantity` and
 `unit_price` are the post-conversion source of truth — a quantity edited after conversion shows here
-— and a price-options quote keeps unchosen lines that would over-count.
+— and a price-options quote keeps unchosen lines that would over-count. A job with no job parts has
+no value and does not belong in the denominator, which the `JOIN` already handles.
 
 ---
 
@@ -112,10 +124,45 @@ GROUP BY 1
 ORDER BY 1
 ```
 
+**Revenue reads exactly three tables and four columns. Nothing else is revenue.**
+
+| Table | Columns revenue uses | For |
+|---|---|---|
+| `shipments` | `ship_date`, `company_id`, `voided_at` | when it shipped, whose it is, whether the slip stands |
+| `shipment_line_items` | `quantity`, `shipment_id`, `job_part_id` | **how many actually went out** |
+| `job_parts` | `unit_price` | what one unit sold for |
+
+**`job_parts.total_price` is NOT a revenue column — it is the job-value column**, and borrowing it
+here is the most common way to get this wrong. `total_price` is the whole agreed line, booked
+whether or not anything shipped; revenue is `shipment_line_items.quantity × job_parts.unit_price`,
+so a part half shipped contributes half. Summing `total_price` over shipments also double-counts a
+line that shipped in two batches, because the line total is repeated on every slip that touches it.
+
+**Top customer by revenue** is the same three tables with `jobs` and `customers` joined on. Start
+from `shipments`, never from `job_parts`:
+
+```sql
+SELECT c.name AS customer,
+       SUM(sli.quantity * jp.unit_price) AS revenue
+FROM shipments s
+JOIN shipment_line_items sli ON sli.shipment_id = s.id
+JOIN job_parts jp ON jp.id = sli.job_part_id
+JOIN jobs j ON j.id = jp.job_id
+JOIN customers c ON c.id = j.customer_id
+WHERE s.company_id = $1
+  AND s.voided_at IS NULL
+  AND c.deleted_at IS NULL
+GROUP BY c.name
+ORDER BY revenue DESC
+```
+
+Group by the customer's **name**, not `c.id` — name is identity here, and the id is not something to
+put in front of a shop owner.
+
 **Notes.** "Revenue trend over time" and "top customer by revenue" both use this, not job value —
-otherwise a large order booked today inflates today and never corrects. `shipments` is readable by
-column: **list the columns you need, `SELECT *` on it is not available.** For the last ship date of a
-single job use `public.job_last_ship_date(job_id)`, which already excludes voided slips.
+otherwise a large order booked today inflates today and never corrects. `shipments` is readable by column: **list the columns you need, `SELECT *` on it is not
+available.** For the last ship date of a single job use `public.job_last_ship_date(job_id)`, which
+already excludes voided slips.
 
 ---
 

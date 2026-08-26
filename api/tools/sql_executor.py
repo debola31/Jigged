@@ -5,18 +5,16 @@ Uses asyncpg for direct PostgreSQL connection with a read-only role.
 Validates queries before execution and enforces row limits.
 """
 
-import json
 import logging
 import os
 import re
 import uuid
-from datetime import date, datetime
-from decimal import Decimal
-from typing import Any, Optional
+from typing import Optional
 
 import asyncpg
 
 from .sql_validator import validate_query
+from .tool_json import to_json_safe
 
 logger = logging.getLogger(__name__)
 
@@ -141,22 +139,6 @@ def describe_dsn(dsn: str) -> str:
     parts = urlsplit(dsn)
     user = f"{parts.username}@" if parts.username else ""
     return f"{user}{parts.hostname or '?'}:{parts.port or 5432}{parts.path}"
-
-
-def _json_serializable(value: Any) -> Any:
-    """Convert PostgreSQL types to JSON-serializable values."""
-    if isinstance(value, Decimal):
-        # Return int if no decimal places, otherwise float
-        if value == int(value):
-            return int(value)
-        return float(value)
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, list):
-        return value
-    return value
 
 
 async def init_pool() -> Optional[asyncpg.Pool]:
@@ -285,7 +267,7 @@ async def execute_sql_query(
             result_rows = []
             for row in rows[:MAX_ROWS]:
                 result_rows.append(
-                    {col: _json_serializable(row[col]) for col in columns}
+                    {col: to_json_safe(row[col]) for col in columns}
                 )
 
             return {

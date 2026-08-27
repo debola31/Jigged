@@ -96,30 +96,30 @@ from tools.sql_executor import describe_dsn  # noqa: E402
 FLIP_CONDITION = """
 FLIP CONDITION (agreed before the run):
   * SQL validity   >= 90% of the Claude arm's
-  * groundedness   >= 90% of the Claude arm's      <-- WITHDRAWN, see below
+  * groundedness   >= 90% of the Claude arm's
   * human verdict  <= 20% "worse" on the blind side-by-side
 Anything short of all three and the chain stays on anthropic. Latency and cost are
 recorded but are NOT part of the condition: a cheaper wrong answer is not cheaper.
 
-WITHDRAWN 2026-08-27 -- groundedness: the metric behind it could not separate any
-two arms, so the leg was passing on every run regardless of what the arm did.
-Annotated rather than deleted, per docs/writing-docs.md: the original condition is
-what was agreed, and rewriting it silently is the drift stating it here was meant
-to prevent.
+WHAT THE GROUNDEDNESS LEG DOES AND DOES NOT DETECT, from two runs on 2026-08-27,
+because it was nearly retired on the first of them alone.
 
-The measurement said 11/11 for all five arms of the 2026-08-27 run -- including
-one that got 3 of 11 queries to execute, and one that answered "what is the
-average value of a job this quarter?" with the company's gross profit. It asked
-"does this answer contain digits without a tool call?", and since every arm calls
-the tool, it asked nothing. `sql ran` is the column that separated the arms.
+It reads 11/11 for every arm that calls the tool at all -- all five arms of the
+five-arm run, including one that executed 3 of 11 queries and one that answered
+"what is the average value of a job this quarter?" with the company's gross
+profit. On that evidence it looks vacuous, and it is: it cannot RANK arms that all
+use SQL, and it cannot catch a wrong number that did come from a query.
 
-A HONEST REPLACEMENT IS NOT AVAILABLE AT THIS SEAM, which is why there is no new
-leg here rather than a renamed one. For the pipeline arms an untraceable number is
-already impossible -- services/insights_pipeline/facts.py refuses the narration --
-so any version of the metric reads 11/11 by construction. For the tool-loop and
-Claude arms the handler returns tool NAMES and no per-query outcome, so it cannot
-be computed at all. Two of three legs now rest on the human read, and that is the
-true state of the gate rather than a worse one.
+Then Arctic-Text2SQL-R1-7B was run through the tool loop and scored 0/11 -- it
+made no tool call on any question, and narrated prose about the query it would
+write instead. Eight of those scored `answered`. Groundedness is the only column
+that called them what they were.
+
+So the leg is kept, and it is worth exactly one thing: it separates an arm that
+declined honestly from an arm that invented figures. That is the Gate 1 failure,
+and no other column carries it -- `used sql` says a query never ran, not whether
+the answer contained numbers anyway.
+
 """
 
 # Real questions beat clever ones. Seed with what shops actually type -- pull more
@@ -278,9 +278,30 @@ class Outcome:
         """
         return self.ok and not looks_like_error_echo(self.answer)
 
-    # `grounded` was here. Retired 2026-08-27; see the WITHDRAWN note in
-    # FLIP_CONDITION for the measurement that retired it. Do not reinstate it
-    # without a definition that can separate two arms.
+    @property
+    def grounded(self) -> bool:
+        """Did the answer avoid asserting a number with no query behind it?
+
+        A crude proxy, and honestly labelled as one: an answer containing digits
+        but no tool call means the model produced a figure from nowhere. It cannot
+        catch a wrong number that DID come from a query -- that is what the human
+        column is for.
+
+        NEARLY RETIRED ON 2026-08-27, AND THE REASON IT WAS NOT IS WORTH KEEPING.
+        Across the five-arm run it read 11/11 for every arm, including one that got
+        3 of 11 queries to execute, so it plainly cannot rank arms that all call
+        the tool. Then Arctic-Text2SQL-R1-7B went through the tool loop, made ZERO
+        tool calls on eleven questions, narrated prose about the SQL it would write
+        -- and scored 8/11 answered against 0/11 grounded. This column was the only
+        one that said those eight answers were invented.
+
+        Keyed on `answered`, not `ok`: a non-answer has no number and no query, and
+        crediting it here would flatter the arm twice for one failure.
+        """
+        if not self.answered:
+            return False
+        has_digits = any(ch.isdigit() for ch in self.answer)
+        return self.used_sql or not has_digits
 
 
 async def run_arm(arm: str, company_id: str, question: str, index: Any = None) -> Outcome:
@@ -390,9 +411,9 @@ def summarise(outcomes: list[Outcome]) -> str:
 
     lines = [
         "",
-        f"{'arm':<22}{'answered':>10}{'used sql':>10}{'sql ran':>10}"
+        f"{'arm':<22}{'answered':>10}{'used sql':>10}{'grounded':>10}{'sql ran':>10}"
         f"{'charts':>9}{'p50 ms':>9}{'p95 ms':>9}{'total $':>12}{'attempts':>10}",
-        "-" * 101,
+        "-" * 111,
     ]
     for arm, rows in by_arm.items():
         n = len(rows)
@@ -409,6 +430,7 @@ def summarise(outcomes: list[Outcome]) -> str:
             f"{arm:<22}"
             f"{sum(o.answered for o in rows):>7}/{n:<2}"
             f"{sum(o.used_sql for o in rows):>7}/{n:<2}"
+            f"{sum(o.grounded for o in rows):>7}/{n:<2}"
             f"{sql_ran}"
             f"{sum(o.chart_valid for o in rows):>6}/{n:<2}"
             f"{int(statistics.median(lat)) if lat else 0:>9}"
@@ -420,7 +442,7 @@ def summarise(outcomes: list[Outcome]) -> str:
     # NOT-ANSWERED, not just raised. A run that returned the tool's error text as
     # the answer is the failure this eval was missing, and it has no `error` to
     # print -- so the answer stands in for one.
-    lines += ["", "NOT ANSWERED", "-" * 101]
+    lines += ["", "NOT ANSWERED", "-" * 111]
     lines += [
         f"  {o.arm:<21} {o.question[:48]:<50} "
         f"{(o.error or f'answered: {o.answer!r}')[:70]}"
@@ -439,8 +461,9 @@ def summarise(outcomes: list[Outcome]) -> str:
         "outcomes, so there is nothing to count without changing it. That leg has",
         "never had a column behind it -- do not read its absence as a pass.",
         "",
-        "`grounded` was retired on 2026-08-27: it read 11/11 for every arm, one of",
-        "which executed 3 of 11 queries. See the WITHDRAWN note below.",
+        "`grounded` reads 11/11 for any arm that calls the tool, so it cannot rank",
+        "arms that all use SQL. It earns its place on the arm that does NOT: it is",
+        "the only column separating an honest decline from an invented figure.",
         "",
         "`answered` IS NOT LIKE FOR LIKE. The ollama_pipeline* arms additionally",
         "refuse a narration stating a figure that is in neither the returned rows nor",

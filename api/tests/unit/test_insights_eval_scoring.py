@@ -58,25 +58,43 @@ def test_a_run_that_raised_is_never_answered():
     assert _outcome(ok=False, error="LLMErrorEcho: ...", answer="").answered is False
 
 
-def test_grounded_is_gone_and_stays_gone():
-    """Retired 2026-08-27, and pinned so it is not quietly reinstated.
+def test_grounded_separates_an_honest_decline_from_an_invented_figure():
+    """The one thing this column is for, and the reason it survived being retired.
 
-    It asked "does this answer contain digits without a tool call?", and every arm
-    calls the tool -- so it read 11/11 for all five arms of the five-arm run,
-    including one that got 3 of 11 queries to execute and one that answered "what
-    is the average value of a job this quarter?" with the company's gross profit.
-    A gate leg that cannot separate two arms is not a weak signal, it is no signal,
-    and FLIP_CONDITION carried it as one of three.
+    It was nearly deleted on 2026-08-27: across the five-arm run it read 11/11 for
+    every arm, including one that got 3 of 11 queries to execute, so it plainly
+    cannot rank arms that all call the tool. Then Arctic-Text2SQL-R1-7B was put
+    through the tool loop and made ZERO tool calls on eleven questions -- it
+    narrated prose about the SQL it would write -- and scored 8/11 answered against
+    0/11 grounded.
 
-    Reinstating it needs a definition that can tell those arms apart. For the
-    pipeline arms an untraceable number is already impossible by construction, and
-    for the tool-loop arms the handler reports no per-query outcome to compute it
-    from -- so that definition does not exist at this seam today.
+    `used sql` says a query never ran. It does not say whether the answer contained
+    numbers anyway, and that is the whole difference between an arm that declined
+    and an arm that invented. No other column carries it.
     """
-    from evals.insights_ab import FLIP_CONDITION, Outcome
+    invented = _outcome(answer="Your revenue this quarter is $40,000.", tool_calls=0)
+    declined = _outcome(answer="Jigged does not track payroll, so that is unavailable.", tool_calls=0)
 
-    assert not hasattr(Outcome, "grounded")
-    assert "WITHDRAWN" in FLIP_CONDITION
+    assert invented.answered is True, "both reach the user as substantive prose"
+    assert declined.answered is True
+
+    assert invented.grounded is False
+    assert declined.grounded is True
+
+
+def test_grounded_requires_answered():
+    """A non-answer has no number and no query, and counting it as grounded would
+    flatter the arm twice for one failure."""
+    assert _outcome(answer="The column total_price does not exist.", tool_calls=1).grounded is False
+    assert _outcome(answer="You have 4 late jobs.", tool_calls=1).grounded is True
+
+
+def test_grounded_cannot_catch_a_wrong_number_that_came_from_a_query():
+    """Labelled as a crude proxy in its own docstring, and pinned so nobody reads a
+    passing groundedness column as "the figures are right". The five-arm run scored
+    an answer grounded that reported the company's gross profit when asked for the
+    average value of a job."""
+    assert _outcome(answer="The average job value is $60,861.51.", tool_calls=1).grounded is True
 
 def test_the_eval_is_stricter_than_the_handler_on_purpose():
     """The handler lets an echo through when a query succeeded -- it is a floor

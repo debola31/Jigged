@@ -183,10 +183,20 @@ export default function DashboardMetrics({ companyId, revenueEnabled }: Dashboar
         // the split says exactly what the jobs list and its status chips say. A
         // synonym invented for this one card ("queued", "running") makes a
         // reader wonder whether it means something different.
+        // Three buckets since Open Jobs became "not shipped and not cancelled":
+        // a job can be finished on the floor and still owed to the customer.
+        // Completed is dropped from the line when it is empty — most shops ship
+        // as they finish, and a permanent "· 0 Completed" is noise on the one
+        // card that has to be readable at a glance.
         const detail =
           def.key === 'open_jobs' && v?.split
-            ? `${v.split.notStarted.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.not_started.label} · ` +
-              `${v.split.inProgress.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.in_progress.label}`
+            ? [
+                `${v.split.notStarted.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.not_started.label}`,
+                `${v.split.inProgress.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.in_progress.label}`,
+                ...(v.split.completed.count > 0
+                  ? [`${v.split.completed.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.completed.label}`]
+                  : []),
+              ].join(' · ')
             : undefined;
 
         return (

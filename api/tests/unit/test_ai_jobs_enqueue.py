@@ -198,24 +198,3 @@ class TestOfflineAndPriority:
              patch.object(ai_jobs, "worker_can_serve", return_value=True):
             ai_jobs.enqueue(db2, company_id="co", feature="drawings", payload={})
         assert db2.inserted["ai_jobs"][0]["expires_at"] is None
-
-
-class TestRateLimitAccounting:
-    def test_a_fanned_out_package_counts_as_one_unit_not_forty(self):
-        """Counting rows would let a single import exhaust an hourly cap on its own,
-        which would make the drawings surface unusable the first time anyone tried
-        it on a real package."""
-        rows = [{"id": f"j{i}", "batch_key": "pkg-1", "created_at": "now"} for i in range(40)]
-        assert ai_jobs.count_recent(FakeDb({"ai_jobs": rows}), "co", "drawings") == 1
-
-    def test_separate_questions_count_separately(self):
-        rows = [{"id": f"j{i}", "batch_key": None, "created_at": "now"} for i in range(3)]
-        assert ai_jobs.count_recent(FakeDb({"ai_jobs": rows}), "co", "insights") == 3
-
-    def test_a_mix_counts_batches_once_and_singles_each(self):
-        rows = [
-            {"id": "a", "batch_key": "pkg", "created_at": "n"},
-            {"id": "b", "batch_key": "pkg", "created_at": "n"},
-            {"id": "c", "batch_key": None, "created_at": "n"},
-        ]
-        assert ai_jobs.count_recent(FakeDb({"ai_jobs": rows}), "co", "drawings") == 2

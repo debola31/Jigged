@@ -6,13 +6,19 @@ import { getSupabase } from '@/lib/supabase';
 // Types
 // ============================================================
 
+/**
+ * What a card on the dashboard renders. Every one of them is a saved insight.
+ *
+ * It used to also carry `type`, `metric_data` and `is_cached`, from the withdrawn
+ * pre-built "5 cached cards" panel. The one construction site left passes
+ * `type: 'saved'`, `metric_data: {}` and `is_cached: false` — literals, on every
+ * render — which made the alert list and the type-label lookup in InsightCard
+ * statically unreachable. Fields nothing can vary are not fields.
+ */
 export interface InsightCard {
-  type: string;
   summary: string;
-  metric_data: Record<string, unknown>;
   chart_config: ChartConfig | null;
   computed_at: string;
-  is_cached: boolean;
 }
 
 export interface ChartConfig {
@@ -108,14 +114,6 @@ export async function submitChatQuery(
 // The job row, read straight from Supabase
 // ============================================================
 
-export type AiJobStatus =
-  | 'queued'
-  | 'claimed'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'timed_out';
-
 export interface ChatEnqueued {
   job_id: string;
   status: string;
@@ -207,18 +205,6 @@ export async function getAiJob(jobId: string): Promise<AiJob | null> {
 
   if (error) throw error;
   return data;
-}
-
-/** Every job in one fanned-out package, for "3 of 12" progress. */
-export async function getAiJobBatch(batchKey: string): Promise<AiJob[]> {
-  const { data, error } = await getSupabase()
-    .from('ai_jobs')
-    .select(AI_JOB_SELECT)
-    .eq('batch_key', batchKey)
-    .order('created_at', { ascending: true });
-
-  if (error) throw error;
-  return data ?? [];
 }
 
 /**

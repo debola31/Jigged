@@ -119,8 +119,13 @@ const JOB_VALUE_SELECT =
  * The agreed money on a job: its OWN job_parts line totals, never the source
  * quote's. The job part is the post-conversion source of truth, so this follows
  * a quantity edited after conversion and does not over-count a price-options
- * quote's unchosen lines. `insights_service._job_part_revenue` is the same rule
- * on the backend, and the two must not drift.
+ * quote's unchosen lines.
+ *
+ * This used to point at `insights_service._job_part_revenue` as "the same rule on
+ * the backend, and the two must not drift". That helper is deleted along with the
+ * predefined metric functions it served -- and nothing ever compared the two, so
+ * the sentence asserted a parity it could not keep. The definition the AI reads is
+ * api/services/ai/semantics.md; this is the only other implementation.
  */
 function jobValue(row: JobValueRow): number {
   const parts = row.job_parts ?? [];

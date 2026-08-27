@@ -18,14 +18,19 @@ wrong and not notice:
   * RE-TAKEN ON QUANTITY, AND ONLY ON QUANTITY. Cost genuinely depends on how
     many you make (amortised setup, procurement tiers), so a quantity edit
     re-estimates. Any other UPDATE must leave history alone.
-  * NEVER BLOCKS, NEVER LIES. A part that cannot be costed still goes on a job;
-    its snapshot is NULL, and NULL is reported as excluded, never as free.
+  * NEVER BLOCKS. A part that cannot be costed still goes on a job; its snapshot
+    is NULL. (What READ that NULL and excluded it rather than counting it free was
+    insights_service.get_part_profitability, deleted with the rest of the
+    predefined metric-tool path. The rule survives for the AI as prose in
+    api/services/ai/semantics.md; nothing else reports on it.)
   * RECONCILES. Labour rebuilt from the frozen rates plus materials-by-
     subtraction adds back up to the snapshot.
-  * THE QUERY ACTUALLY RUNS. `get_part_profitability` returned HTTP 400 from
-    2026-06-23 to 2026-08-11 because it selected `external_setup_cost`, dropped
-    by 20260623022617. Nothing executed the real select string, so nothing
-    noticed for seven weeks. The last test calls the real function.
+  * (REMOVED) THE QUERY ACTUALLY RUNS. A last test used to call the real
+    get_part_profitability, which had returned HTTP 400 from 2026-06-23 to
+    2026-08-11 after selecting `external_setup_cost`, dropped by 20260623022617.
+    Nothing executed its select string, so nothing noticed for seven weeks. The
+    function is gone, so the guard is too: it protected a query no call path
+    could reach. The cost arithmetic it exercised is covered above.
 
 Run:
     cd api && pytest -m integration tests/integration/test_job_cost_snapshot.py
@@ -461,69 +466,3 @@ def test_labour_and_materials_reconcile_to_the_snapshot(admin: Client, env: JobE
     # The number that is never stored anywhere, recovered exactly:
     # 5 units x 2 BAR x $4.
     assert materials_total == Decimal("40")
-
-
-def test_get_part_profitability_runs_and_charges_materials(
-    admin: Client, env: JobEnv, monkeypatch
-):
-    """Calls the REAL function, including its real select string.
-
-    That string is the thing that broke: it named `external_setup_cost` after the
-    column was dropped, so every call 400'd from 2026-06-23 until this rewrite,
-    silently, because no test ever executed it. It also proves materials now
-    reach the cost side at all — profit here is only correct because the $8/unit
-    of BAR is charged.
-    """
-    from services import insights_service
-
-    routing_id = (
-        admin.table("routings")
-        .select("id")
-        .eq("part_id", env.widget_id)
-        .single()
-        .execute()
-        .data["id"]
-    )
-    admin.rpc(
-        "create_job_part_operations_from_routing",
-        {"p_job_part_id": env.job_part_id, "p_routing_id": routing_id},
-    ).execute()
-
-    monkeypatch.setattr(
-        insights_service, "_get_supabase_service_role", lambda: admin
-    )
-
-    result = insights_service.get_part_profitability(env.company_id)
-
-    assert result["excluded_job_parts"] == 0
-    assert len(result["parts"]) == 1
-    part = result["parts"][0]
-
-    # 5 units: revenue 250, cost 5 x 24 = 120, of which 80 labour and 40 material.
-    assert part["revenue"] == 250.0
-    assert part["cost"] == 120.0
-    assert part["labor_cost"] == 80.0
-    assert part["material_cost"] == 40.0
-    assert part["profit"] == 130.0
-    assert part["margin_pct"] == 52.0
-
-
-def test_an_uncosted_job_part_is_excluded_not_counted_free(
-    admin: Client, env: JobEnv, monkeypatch
-):
-    """"We could not tell" must never render as "it was free" — that inflates
-    profit, which is the one direction a shop must not be misled in."""
-    from services import insights_service
-
-    admin.table("job_parts").update({"true_cost_per_unit": None}).eq(
-        "id", env.job_part_id
-    ).execute()
-
-    monkeypatch.setattr(
-        insights_service, "_get_supabase_service_role", lambda: admin
-    )
-
-    result = insights_service.get_part_profitability(env.company_id)
-
-    assert result["excluded_job_parts"] == 1
-    assert result["parts"] == []

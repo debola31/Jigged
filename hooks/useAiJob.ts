@@ -9,7 +9,6 @@ import {
   getAiJob,
   isAiWorkerAvailable,
   isInFlight,
-  isTerminal,
   WORKER_STALE_AFTER_MS,
 } from '@/utils/insightsAccess';
 
@@ -291,4 +290,3 @@ export function useAiJob(
   };
 }
 
-export { isTerminal };

@@ -337,8 +337,14 @@ doc separately said in another section.)*
 ## Interfaces
 
 `POST /api/insights/{company_id}/chat` is the **only** FastAPI insights route. It takes
-`{question}` and returns `{answer, chart_config?, tool_calls, provider, tokens_used}`. Requires a
-Supabase JWT and an `owner` / `admin` / `user` role — **operators are excluded.**
+`{question}` and returns `{job_id, status, executor}`; the answer arrives on the `ai_jobs` row.
+
+**Operators never see the ask bar**, because `InsightsChat` renders only from
+`app/dashboard/[companyId]/page.tsx` and [`homePathForRole`](../../utils/companyAccess.ts) sends
+operators to `/operator/{companyId}`. That is a routing fact, not an endpoint control — this
+paragraph used to claim the route *"Requires a Supabase JWT and an `owner` / `admin` / `user`
+role"*, and it does not: nothing at the FastAPI layer reads the bearer token the frontend
+attaches, and `company_id` comes from the URL.
 
 **Chat is stateless.** Each request is an independent Q&A; there is no `chat/history` endpoint and
 no frontend caller for one. If multi-turn history is added it should be scoped per user within a
@@ -349,24 +355,31 @@ via [`utils/savedInsightsAccess.ts`](../../utils/savedInsightsAccess.ts), per th
 architecture rule.
 
 **Backend** (`api/`): `routes/insights_routes.py` (the endpoint, chart validation and selection) ·
-`services/insights_service.py` (metric functions, chat system prompt, `execute_sql_tool`) ·
-`services/ai/` (`base_provider.chat_with_tools`, `claude_provider` implementation + dispatch,
-`factory` with the `insights_chat` feature type) · `tools/` (`metric_tools`, `schema_context`,
-`sql_validator`, `sql_executor`).
+`services/insights_service.py` (the chat system prompt and `execute_sql_tool`, and nothing else) ·
+`services/ai_features/insights.py` (the tool loop) · `services/llm/` (the provider gateway) ·
+`tools/` (`chat_tools`, `schema_context`, `sql_validator`, `sql_executor`).
+
+**`services/ai/` is not on this path.** It is the data-import provider package, reached from
+`data_import_routes`. It used to be listed here because `ClaudeProvider.chat_with_tools` held a
+second, pre-gateway tool loop; that is deleted, and `base_provider` never carried the method the
+old wording attributed to it.
 
 **Frontend:** `components/insights/` (`InsightsChat`, `InsightCard`, `InsightChart`) and
-`components/dashboard/` (`InsightsSection`, `PinnedMetrics`, `MetricPickerModal`).
+`components/dashboard/InsightsSection`.
 
 **Env:** `ANTHROPIC_API_KEY` and `AI_READONLY_DATABASE_URL` (the read-only connection string) on
 top of the standard Supabase vars.
 
 ## Dashboard surfaces
 
-**Pinned metrics** — a flat KPI strip, up to 4 at a time, chosen from six
-(`open_quotes`, `not_started_jobs`, `in_progress_jobs`, `revenue`, `completed_jobs`,
-`overdue_jobs`) via a pager. Persisted per user to
-`user_preferences.preferences.dashboard_pinned_metrics`; the Today / This Week toggle to
-`dashboard_metric_periods`.
+**Scorecards** — a fixed metric row rendered by `components/dashboard/DashboardMetrics.tsx`
+(Overdue, Open Jobs, Completed, Open Quotes), with a Today / This Week toggle.
+
+> **Corrected 2026-08-27.** This section described *"Pinned metrics — a flat KPI strip, up to 4
+> at a time, chosen from six via a pager,"* persisted to
+> `user_preferences.preferences.dashboard_pinned_metrics`. **`PinnedMetrics` and
+> `MetricPickerModal` do not exist**, and `20260812211807_prune_dashboard_metric_preferences.sql`
+> removed the preference keys. The metric row is not user-configurable.
 
 **Ask bar** — input plus example prompt chips, inline response, rotating loading messages, and a
 **Save button shown only when a chart survived validation**. Single Q&A per interaction.
@@ -374,47 +387,42 @@ top of the standard Supabase vars.
 **Your Charts** — the current user's saved cards in a responsive grid, each with question, chart,
 summary and a remove button; a dashed empty state inviting the first question.
 
-## Pre-defined metric functions
+## Withdrawn — the predefined metric functions
 
-These live in `insights_service.py` and are registered in `METRIC_TOOLS`, but **`CHAT_TOOLS`
-contains only `execute_sql`**, so they are not offered to the model. The dispatcher in
-`claude_provider.chat_with_tools` still routes a predefined tool call to them, so they remain
-callable if one is ever re-enabled: `get_revenue_by_period`, `get_job_status_distribution`,
+**Deleted 2026-08-27.** Seven functions (`get_revenue_by_period`, `get_job_status_distribution`,
 `get_quote_conversion_rate`, `get_job_cycle_times`, `get_customer_revenue_breakdown`,
-`get_part_profitability`, `get_revenue_forecast`. All receive `company_id` implicitly from the
-authenticated request.
+`get_part_profitability`, `get_revenue_forecast`) lived in `insights_service.py`, registered in a
+`METRIC_TOOLS` list that nothing passed to a model. This section used to justify keeping them:
+*"the dispatcher in `claude_provider.chat_with_tools` still routes a predefined tool call to them,
+so they remain callable if one is ever re-enabled."* **That reason is withdrawn**, along with the
+dispatcher, the `METRIC_TOOLS` list, `chat_with_tools`, and the three private helpers only they
+called.
 
-**Revenue source of truth — the rule that keeps two numbers from disagreeing.** Realized-revenue
-functions (`get_revenue_by_period`, `get_customer_revenue_breakdown`, `get_part_profitability`)
-sum **`job_parts.total_price`**, the agreed per-part line total on the *job* — not the source
-`quote_line_items.total_price`. The job part is the post-conversion source of truth, so revenue
-follows an order quantity edited after conversion, **and it avoids over-counting a price-options
-quote's unchosen lines.** `get_revenue_forecast` is the deliberate exception: it sums
-`quote_line_items.total_price`, because it values the **open, unconverted** pipeline where no job
-exists yet. The same rule is encoded in the NL→SQL guidance in `schema_context.py`.
+**Why, and this is the part worth keeping.** They were a second definition of revenue. They summed
+`job_parts.total_price` over `fully_shipped` jobs and filtered no `deleted_at` — while
+[`semantics.md`](../../api/services/ai/semantics.md), which this same file renders into the system
+prompt, says in bold that **`job_parts.total_price` is NOT a revenue column**, and while the
+dashboard (`getCompletedInRange` in [`utils/dashboardAccess.ts`](../../utils/dashboardAccess.ts))
+computes revenue the `semantics.md` way. Two of the three agreed; this set was the outlier, and the
+section that used to sit here presented the outlier as *"the rule that keeps two numbers from
+disagreeing."* Their `METRIC_TOOLS` descriptions had also drifted from their own bodies —
+`get_revenue_forecast` described quote statuses the schema does not have.
 
-**Cost source of truth — the same discipline, on the other side of the margin.** `get_part_profitability`
-costs a job from **`job_parts.true_cost_per_unit`**, the all-in TRUE cost (labour + materials + the whole
-nested BOM) frozen when the job_part was created and re-taken only when its quantity changes
-([`20260811233748`](../../supabase/migrations/20260811233748_job_cost_snapshot.sql)). It must **never**
-recompute cost from the part's current routing or rates: a job that shipped is history, and re-costing it
-against today's numbers means last year's profit moves whenever someone re-rates a work centre. The
-labour/materials split comes from the rates frozen on `job_operations` (`labor_rate_snapshot`,
-`external_unit_price_snapshot`) with materials as the remainder — materials are deliberately not stored per
-BOM line, because costing one line needs the unit conversion, whole-unit ceiling and made-vs-bought
-valuation rules that live inside `part_rollup_at_qty`.
+**Cost source of truth** used to be documented here too. It is a duplicate: see
+[jobs.md](jobs.md#L119-L154) for `true_cost_per_unit`, the frozen labour/materials split and the
+NULL-excluded rule, which is where it belongs.
 
-A `true_cost_per_unit` of NULL means the cost could not be determined when the job was created. Those
-job_parts are **excluded** and counted in `excluded_job_parts`; folding them in at zero would overstate
-profit, which is the one direction a shop must not be misled in. Costs use **estimated** time — no actual
-duration per operation is recorded anywhere.
+**One incident goes with them.** `get_part_profitability` returned HTTP 400 from 2026-06-23 to
+2026-08-11 because it selected `routing_operations.external_setup_cost` after
+[`20260623022617`](../../supabase/migrations/20260623022617_drop_external_setup_cost.sql) dropped
+the column, and no call path reached it. The integration test written to catch that
+(`test_job_cost_snapshot.py::test_get_part_profitability_runs_and_charges_materials`) is deleted
+with the function: it guarded a query nobody could reach, and the cost arithmetic it exercised is
+covered by `compute_part_cost_at_qty` / `part_rollup_at_qty` and the materials-by-subtraction
+reconciliation beside it in the same file.
 
-**This function returned HTTP 400 from 2026-06-23 to 2026-08-11.** It selected
-`routing_operations.external_setup_cost` after [`20260623022617`](../../supabase/migrations/20260623022617_drop_external_setup_cost.sql)
-dropped that column, and nothing executed the real select string — the predefined metric tools are not
-offered to the model (see above), so no call path reached it and no test covered it.
-`test_job_cost_snapshot.py::test_get_part_profitability_runs_and_charges_materials` now calls the real
-function against a real PostgREST, which is the only thing that would have caught it.
+**If a future question genuinely needs a predefined tool**, it arrives with a definition shared
+with the UI — a SQL object both call — not a second Python copy of one.
 
 ---
 
@@ -443,7 +451,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** a company at its hourly cap, **then** the endpoint returns 429; the cap is `settings.ai_limits.chat_per_hour`, defaulting to 20 — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
 - [ ] **Given** `settings.features.ai_insights = false`, **then** chat is refused; **given** the key absent, **then** it is enabled — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
 - [ ] **Given** the settings read fails, **then** the request proceeds enabled at the default limit — failing open is deliberate — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
-- [ ] **Given** an operator, **then** the endpoint refuses; owner/admin/user are allowed — *automation-pending (#367)*.
+- [ ] **Given** an operator, **then** no ask bar is reachable — they land on `/operator/{companyId}` and the bar renders only on the dashboard. *This used to read "the endpoint refuses", deferred to #367; #367 is the E2E reload convention, so the criterion was parked behind an E2E ticket waiting to prove a backend refusal that does not exist.*
 
 **Saved insights**
 
@@ -457,7 +465,14 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.
 - **No E2E covers the chat path** — validation and chart selection are unit-tested, the browser
   round-trip is not.
-- **`CHAT_TOOLS` is single-tool by design but built for more.** Predefined Python tools can be
-  added alongside `execute_sql` for questions too error-prone for generated SQL (multi-step
-  business logic such as margin attribution across a BOM). Not needed yet.
+- **`CHAT_TOOLS` is single-tool, and adding a second one has a precondition.** Predefined Python
+  tools alongside `execute_sql` are a reasonable answer for questions too error-prone for generated
+  SQL. Seven of them already existed and were deleted (see *Withdrawn* above) because each was a
+  second definition of a business term, and the second definition is what drifts. The precondition:
+  a new tool computes from a definition the UI also reads — a SQL object both call — rather than
+  restating one in Python.
+- **The chat route has no auth at the FastAPI layer.** `company_id` comes from the URL and nothing
+  reads the bearer token the frontend attaches, so a direct HTTP call reaches any company's data
+  and spends credits against its cap. Operators cannot reach the surface, but that is routing, not
+  enforcement.
 - **Multi-turn chat is not built**; `ai_chat_queries` is write-only today.

@@ -47,14 +47,6 @@ BACKEND_LEASE_SECONDS = 90
 BACKEND_QUEUE_TTL_SECONDS = 120
 
 
-class AiJobRateLimited(RuntimeError):
-    """The company is over its hourly cap for this feature -> HTTP 429."""
-
-    def __init__(self, message: str, retry_after: int) -> None:
-        super().__init__(message)
-        self.retry_after = retry_after
-
-
 class AiUnavailable(RuntimeError):
     """No worker can serve this feature's model right now -> HTTP 503.
 
@@ -108,26 +100,6 @@ def sweep(db) -> int:
     except Exception as exc:  # noqa: BLE001 - a sweep failure must not block work
         logger.warning("ai_jobs sweep failed: %s", exc)
         return 0
-
-
-def count_recent(db, company_id: str, feature: str, hours: int = 1) -> int:
-    """Jobs this company started for this feature in the window.
-
-    Counts DISTINCT batch_key for fanned-out work, not rows: a 40-page package is
-    one thing the user did, and counting rows would let a single import exhaust an
-    hourly cap by itself.
-    """
-    since = (_now() - timedelta(hours=hours)).isoformat()
-    rows = (
-        db.table("ai_jobs")
-        .select("id, batch_key, created_at")
-        .eq("company_id", company_id)
-        .eq("feature", feature)
-        .gte("created_at", since)
-        .execute()
-    ).data or []
-    units = {r["batch_key"] or r["id"] for r in rows}
-    return len(units)
 
 
 def enqueue(
@@ -241,13 +213,11 @@ def mark_failed(db, job_id: str, *, error: str, error_kind: str) -> None:
 
 
 __all__ = [
-    "AiJobRateLimited",
     "AiUnavailable",
     "BACKEND_LEASE_SECONDS",
     "MAX_FAN_OUT",
     "PRIORITY_BATCH",
     "PRIORITY_INTERACTIVE",
-    "count_recent",
     "enqueue",
     "mark_failed",
     "mark_running",

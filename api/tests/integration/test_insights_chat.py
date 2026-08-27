@@ -1,16 +1,15 @@
 """
-Integration tests for the AI insights chat pipeline.
+Integration tests for execute_sql_tool, the handler behind the only chat tool.
 
-Tests the full flow from user message -> tool use -> SQL execution -> response,
-with the LLM mocked to control tool calls deterministically.
+A second class used to sit below this one, driving ClaudeProvider.chat_with_tools
+with a mocked Anthropic client. That loop was the pre-gateway implementation and
+had no production caller — services/ai_features/insights.py owns the real loop,
+and test_insights_loop_integrity.py covers it. Both are gone.
 
 Requires AI_READONLY_DATABASE_URL to be set.
 """
 
-import json
-import os
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -62,140 +61,3 @@ class TestSqlTool:
             description="No placeholder",
         )
         assert "error" in result
-
-
-def _mock_tool_use_response(tool_name: str, tool_input: dict):
-    """Build a mock Claude API response that requests a tool call."""
-    tool_block = MagicMock()
-    tool_block.type = "tool_use"
-    tool_block.id = f"tool_{uuid.uuid4().hex[:8]}"
-    tool_block.name = tool_name
-    tool_block.input = tool_input
-
-    response = MagicMock()
-    response.stop_reason = "tool_use"
-    response.content = [tool_block]
-    response.usage = MagicMock(input_tokens=100, output_tokens=50)
-    return response
-
-
-def _mock_text_response(text: str):
-    """Build a mock Claude API response with just text."""
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = text
-
-    response = MagicMock()
-    response.stop_reason = "end_turn"
-    response.content = [text_block]
-    response.usage = MagicMock(input_tokens=100, output_tokens=50)
-    return response
-
-
-@pytest.mark.skipif(
-    not os.getenv("ANTHROPIC_API_KEY"),
-    reason=(
-        "ClaudeProvider() validates ANTHROPIC_API_KEY at construction even when "
-        "the chat call itself is mocked. Set ANTHROPIC_API_KEY (any value — "
-        "the API call is patched) to run these tests locally."
-    ),
-)
-class TestChatPipeline:
-    """Tests for the full chat -> tool -> SQL -> response pipeline."""
-
-    async def test_full_chat_with_sql_tool(self):
-        """Simulate Claude requesting a SQL query via the full chat pipeline."""
-        from services.ai.claude_provider import ClaudeProvider
-
-        company_id = str(uuid.uuid4())
-
-        # Mock the Anthropic API: first call -> tool_use, second call -> text
-        mock_responses = [
-            _mock_tool_use_response(
-                "execute_sql",
-                {
-                    "sql": "SELECT COUNT(*) AS total FROM customers WHERE company_id = $1",
-                    "description": "Count customers",
-                },
-            ),
-            _mock_text_response("You have 0 customers in your system."),
-        ]
-
-        provider = ClaudeProvider()
-
-        with patch.object(
-            provider.client.messages, "create", side_effect=mock_responses
-        ):
-            result = await provider.chat_with_tools(
-                messages=[{
-                    "role": "user",
-                    "content": f"[company_id:{company_id}] How many customers do I have?",
-                }],
-                tools=[{
-                    "name": "execute_sql",
-                    "description": "Execute SQL",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "sql": {"type": "string"},
-                            "description": {"type": "string"},
-                        },
-                        "required": ["sql"],
-                    },
-                }],
-                system_prompt="You are a data analyst.",
-            )
-
-        assert result is not None
-        assert "content" in result
-        assert "customers" in result["content"].lower()
-        assert "execute_sql" in result["tool_calls"]
-
-    async def test_chat_recovers_from_sql_error(self):
-        """When SQL fails, Claude gets the error and responds gracefully."""
-        from services.ai.claude_provider import ClaudeProvider
-
-        company_id = str(uuid.uuid4())
-
-        mock_responses = [
-            # Claude tries a query against a restricted table
-            _mock_tool_use_response(
-                "execute_sql",
-                {
-                    "sql": "SELECT * FROM system_admins WHERE company_id = $1",
-                    "description": "Bad table",
-                },
-            ),
-            # Claude recovers with a text response
-            _mock_text_response("I encountered an error querying that data."),
-        ]
-
-        provider = ClaudeProvider()
-
-        with patch.object(
-            provider.client.messages, "create", side_effect=mock_responses
-        ):
-            result = await provider.chat_with_tools(
-                messages=[{
-                    "role": "user",
-                    "content": f"[company_id:{company_id}] Show admin data",
-                }],
-                tools=[{
-                    "name": "execute_sql",
-                    "description": "Execute SQL",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "sql": {"type": "string"},
-                            "description": {"type": "string"},
-                        },
-                        "required": ["sql"],
-                    },
-                }],
-                system_prompt="You are a data analyst.",
-            )
-
-        assert result is not None
-        assert "content" in result
-        # The tool was called (even though it failed)
-        assert "execute_sql" in result["tool_calls"]

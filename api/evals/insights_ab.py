@@ -100,6 +100,26 @@ FLIP CONDITION (agreed before the run):
   * human verdict  <= 20% "worse" on the blind side-by-side
 Anything short of all three and the chain stays on anthropic. Latency and cost are
 recorded but are NOT part of the condition: a cheaper wrong answer is not cheaper.
+
+WHAT THE GROUNDEDNESS LEG DOES AND DOES NOT DETECT, from two runs on 2026-08-27,
+because it was nearly retired on the first of them alone.
+
+It reads 11/11 for every arm that calls the tool at all -- all five arms of the
+five-arm run, including one that executed 3 of 11 queries and one that answered
+"what is the average value of a job this quarter?" with the company's gross
+profit. On that evidence it looks vacuous, and it is: it cannot RANK arms that all
+use SQL, and it cannot catch a wrong number that did come from a query.
+
+Then Arctic-Text2SQL-R1-7B was run through the tool loop and scored 0/11 -- it
+made no tool call on any question, and narrated prose about the query it would
+write instead. Eight of those scored `answered`. Groundedness is the only column
+that called them what they were.
+
+So the leg is kept, and it is worth exactly one thing: it separates an arm that
+declined honestly from an arm that invented figures. That is the Gate 1 failure,
+and no other column carries it -- `used sql` says a query never ran, not whether
+the answer contained numbers anyway.
+
 """
 
 # Real questions beat clever ones. Seed with what shops actually type -- pull more
@@ -262,14 +282,21 @@ class Outcome:
     def grounded(self) -> bool:
         """Did the answer avoid asserting a number with no query behind it?
 
-        A crude proxy, and honestly labelled as one: an answer containing digits but
-        no tool call means the model produced a figure from nowhere. It cannot catch
-        a wrong number that DID come from a query -- that is what the human column is
-        for -- but hallucinated totals are the failure that matters most here,
-        because a shop owner has no way to tell one from a real one.
+        A crude proxy, and honestly labelled as one: an answer containing digits
+        but no tool call means the model produced a figure from nowhere. It cannot
+        catch a wrong number that DID come from a query -- that is what the human
+        column is for.
 
-        Keyed on `answered`, not `ok`: a non-answer has no number and no query,
-        and crediting it here would flatter the arm twice for one failure.
+        NEARLY RETIRED ON 2026-08-27, AND THE REASON IT WAS NOT IS WORTH KEEPING.
+        Across the five-arm run it read 11/11 for every arm, including one that got
+        3 of 11 queries to execute, so it plainly cannot rank arms that all call
+        the tool. Then Arctic-Text2SQL-R1-7B went through the tool loop, made ZERO
+        tool calls on eleven questions, narrated prose about the SQL it would write
+        -- and scored 8/11 answered against 0/11 grounded. This column was the only
+        one that said those eight answers were invented.
+
+        Keyed on `answered`, not `ok`: a non-answer has no number and no query, and
+        crediting it here would flatter the arm twice for one failure.
         """
         if not self.answered:
             return False
@@ -434,6 +461,10 @@ def summarise(outcomes: list[Outcome]) -> str:
         "outcomes, so there is nothing to count without changing it. That leg has",
         "never had a column behind it -- do not read its absence as a pass.",
         "",
+        "`grounded` reads 11/11 for any arm that calls the tool, so it cannot rank",
+        "arms that all use SQL. It earns its place on the arm that does NOT: it is",
+        "the only column separating an honest decline from an invented figure.",
+        "",
         "`answered` IS NOT LIKE FOR LIKE. The ollama_pipeline* arms additionally",
         "refuse a narration stating a figure that is in neither the returned rows nor",
         "a Python-computed fact; the other arms are held only to 'substantive'. The",
@@ -467,7 +498,7 @@ async def main() -> int:
     dsn = os.getenv("AI_READONLY_DATABASE_URL")
     if not dsn:
         # Refuse rather than run: with no SQL tool every arm answers from nowhere,
-        # every grounded score collapses together, and the run still bills.
+        # and the run still bills.
         print("AI_READONLY_DATABASE_URL is not set -- every arm would answer without "
               "SQL and the comparison would be meaningless. Set it and re-run.")
         return 2

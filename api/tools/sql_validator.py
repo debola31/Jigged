@@ -75,6 +75,41 @@ _FORBIDDEN_CLOCK = re.compile(
     re.IGNORECASE,
 )
 
+# THE BOUND DATE HAS NO TYPE UNTIL SOMETHING GIVES IT ONE.
+#
+# $2 is a parameter, so Postgres infers its type from context. Compared against a
+# typed column it does -- `due_date < $2` resolves to date, `created_at >= $2` to
+# timestamptz -- and a declared parameter position does too, which is why a bare
+# $2 inside public.is_job_late(...) is correct. Handed to an overloaded date
+# function, or to interval arithmetic, there is nothing to infer from, and the
+# query dies on a message that never mentions casting:
+#
+#     function date_trunc(unknown, unknown) is not unique
+#     operator does not exist: timestamp with time zone >= interval
+#
+# THE SAME ARGUMENT AS THE CLOCK RULE ABOVE. semantics.md states this in bold and
+# gives both examples, and a local model drops the cast anyway. In the Gate 2
+# five-arm run it accounted for one of eight SQL failures -- but for THE one: the
+# average-job-value question, which this whole line of work exists to get right.
+# That arm had reproduced the canonical query at 0.988 similarity and dropped
+# exactly this token, while the arm denied that exemplar wrote its own query and
+# got the right figure. Handing Postgres's message back did not fix it --
+# the retry made the same mistake -- because the message does not say what to do.
+# "Did you forget the cast?" is a regex; this is that regex.
+#
+# The positions listed are the ones that actually fail, established by running
+# each shape against Postgres rather than reasoning about overload resolution.
+# `(?!\d)` keeps $2 from matching inside $20, matching the executor's own bind
+# check -- disagreeing with it would refuse a query it would happily run.
+_UNTYPED_TODAY = re.compile(
+    r"\bDATE_TRUNC\s*\(\s*[^,()]+,\s*\$2(?!\d)(?!\s*::)"
+    r"|\bEXTRACT\s*\([^()]*?\bFROM\s+\$2(?!\d)(?!\s*::)"
+    r"|\bAGE\s*\(\s*\$2(?!\d)(?!\s*::)"
+    r"|\$2(?!\d)(?!\s*::)\s*[-+]\s*INTERVAL\b"
+    r"|\bINTERVAL\s*'[^']*'\s*[-+]\s*\$2(?!\d)(?!\s*::)",
+    re.IGNORECASE,
+)
+
 # Whole-word denylist: reject if any sensitive/auth table name appears
 # anywhere in the query, however it is referenced. Not a second boundary --
 # it refuses before the round trip and returns a sentence the model can act
@@ -136,6 +171,16 @@ def validate_query(sql: str) -> tuple[bool, str]:
             f"{clock.group(1)} is not available. Use $2 for today's date -- it is "
             f"bound to the date where the user actually is. The database runs in "
             f"UTC and would call a job late hours before the shop's day ends."
+        )
+
+    # 5c. The bound date, used where nothing can type it.
+    if _UNTYPED_TODAY.search(cleaned):
+        return False, (
+            "$2 has no type of its own in this expression, so Postgres cannot "
+            "resolve it -- write $2::date. Comparing $2 against a typed column is "
+            "fine, and so is passing it to a function that declares its parameter "
+            "type; handing it to DATE_TRUNC, EXTRACT, AGE or interval arithmetic "
+            "is not."
         )
 
     # 6. Check for $1 placeholder (company_id scoping)

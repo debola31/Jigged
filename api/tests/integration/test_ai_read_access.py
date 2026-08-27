@@ -255,7 +255,7 @@ async def test_every_object_the_assembled_context_names_is_usable():
 
 @_needs_ro
 async def test_every_reference_query_in_semantics_runs():
-    """docs/ai/semantics.md is rendered into the prompt verbatim, so a definition
+    """api/services/ai/semantics.md is rendered into the prompt verbatim, so a definition
     that cites a column the sandbox cannot read is a wrong answer waiting to be
     given. Each block runs under the real role with LIMIT 1.
     """

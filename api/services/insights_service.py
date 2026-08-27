@@ -16,6 +16,7 @@ rather than repaired: a second definition of revenue in the file that serves the
 first one is the drift, not a hedge against it.
 """
 
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -116,15 +117,23 @@ def _build_chat_system_prompt() -> str:
     )
 
 
-async def execute_sql_tool(company_id: str, sql: str, description: str = "") -> dict:
+async def execute_sql_tool(
+    company_id: str,
+    sql: str,
+    description: str = "",
+    today: date | None = None,
+) -> dict:
     """
     Execute an AI-generated SQL query via the SQL executor.
     This is the handler for the 'execute_sql' chat tool.
 
     Args:
         company_id: The company UUID (bound as $1)
-        sql: The SELECT query with $1 placeholder
+        sql: The SELECT query with $1, and $2 wherever it needs today's date
         description: Brief description of what the query computes
+        today: The caller's LOCAL date, bound as $2. The database is UTC, so the
+            model must never read the clock itself -- the validator refuses
+            CURRENT_DATE and now() for exactly this reason.
 
     Returns:
         Dict with columns, rows, row_count (or error message)
@@ -135,4 +144,5 @@ async def execute_sql_tool(company_id: str, sql: str, description: str = "") -> 
         company_id=company_id,
         sql=sql,
         description=description,
+        today=today,
     )

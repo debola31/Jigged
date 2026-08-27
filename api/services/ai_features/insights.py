@@ -17,6 +17,7 @@ scrubbing.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from services import llm
@@ -58,7 +59,7 @@ CORRECTION = (
 _REJECTED_ECHO_CHARS = 300
 
 
-async def _run_tool(company_id: str, call: ToolCall) -> dict[str, Any]:
+async def _run_tool(company_id: str, call: ToolCall, today: date | None) -> dict[str, Any]:
     """Execute one tool call. A tool FAILING is data for the model, not an error.
 
     The executor returns shaped errors -- SQL_ERROR for anything a rewrite can
@@ -87,6 +88,7 @@ async def _run_tool(company_id: str, call: ToolCall) -> dict[str, Any]:
             company_id=company_id,
             sql=call.arguments.get("sql", ""),
             description=call.arguments.get("description", ""),
+            today=today,
         )
     except Exception as exc:  # noqa: BLE001 - hand the failure back to the model
         logger.warning("insights tool %s failed: %s", call.name, type(exc).__name__)
@@ -126,6 +128,13 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     question = (ctx.payload.get("question") or "").strip()
     if not question:
         raise ValueError("insights job payload has no question")
+
+    # The caller's local date, bound as $2 by the executor. Absent only on a job row
+    # enqueued before this field existed; those cannot reach a model needing a date,
+    # because the validator refuses CURRENT_DATE and a query using $2 with nothing
+    # bound fails loudly rather than answering from the server's clock.
+    raw_today = ctx.payload.get("today")
+    today = date.fromisoformat(raw_today) if raw_today else None
 
     # No `system=` parameter anywhere in this layer: the system prompt is a turn,
     # and split_system() puts it where each vendor wants it.
@@ -177,7 +186,8 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # objects is what the eval asserts to zero, and it is invisible once the
         # dict has been through json.dumps.
         tool_results = [
-            (call, await _run_tool(ctx.company_id, call)) for call in result.tool_calls
+            (call, await _run_tool(ctx.company_id, call, today))
+            for call in result.tool_calls
         ]
         refused += sum(
             1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND

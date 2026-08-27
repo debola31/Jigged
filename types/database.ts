@@ -4027,6 +4027,12 @@ export type Database = {
           leak_kind: string
         }[]
       }
+      ai_policies_missing_soft_delete_filter: {
+        Args: never
+        Returns: {
+          table_name: string
+        }[]
+      }
       ai_policies_without_grant: {
         Args: never
         Returns: {
@@ -4355,6 +4361,15 @@ export type Database = {
         Returns: string
       }
       is_company_admin: { Args: { check_company_id: string }; Returns: boolean }
+      is_job_late: {
+        Args: {
+          p_due_date: string
+          p_fulfillment_status: string
+          p_production_status: string
+          p_today: string
+        }
+        Returns: boolean
+      }
       is_system_admin: { Args: { check_user_id: string }; Returns: boolean }
       job_last_ship_date: { Args: { p_job_id: string }; Returns: string }
       job_part_last_ship_date: {

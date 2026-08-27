@@ -1,12 +1,23 @@
 """Pydantic models for AI Insights & Charts feature."""
 
+from datetime import date
+
 from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    """Request to submit a natural language question."""
+    """Request to submit a natural language question.
+
+    `today` is the browser's local calendar date, and it is required. The database
+    runs in UTC, so for part of every evening in the Americas its idea of "today"
+    is a day ahead of the shop's -- which is enough to call a job late before it
+    is. The jobs list already sends the same value into SQL as p_today; this is the
+    chat catching up, not a new idea. The route sanity-checks it against the
+    server's own date rather than trusting it outright.
+    """
 
     question: str = Field(..., max_length=500, description="Natural language question about business data")
+    today: date = Field(..., description="The caller's LOCAL calendar date, bound as $2 in generated SQL")
 
 
 class ChatEnqueued(BaseModel):

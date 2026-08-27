@@ -17,8 +17,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  *     alternatives that were never all going to happen (~8% overstatement on the
  *     pilot shop's live data), and the correct figure is not merely hard to
  *     compute but undefined until someone chooses.
- *   * Overdue is a SUBSET of Open Jobs — the shared predicate restricts to
- *     not_started / in_progress — so its money is a slice, not a fifth pot.
+ *   * Overdue OVERLAPS Open Jobs, so its money is not a fifth pot. It stopped
+ *     being a strict subset on 2026-08-27: overdue now counts a completed-but-
+ *     unshipped job (delivery is the promise) while Open Jobs still restricts to
+ *     not_started / in_progress, because "what work is on the books" is a
+ *     question about the floor rather than about the customer.
  */
 
 type JobPart = {

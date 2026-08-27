@@ -27,6 +27,28 @@ reasonable**. When a question uses a term that is *not* here, say which reading 
 `$1` is the company id and the executor binds it. **Rows are already scoped to one company** — never
 join an access-control table and never add a company filter beyond the required `$1`.
 
+**`$2` is today's date, and it is the only clock you have.** `CURRENT_DATE`, `now()` and
+`CURRENT_TIMESTAMP` are refused by the validator, so a query that needs today must use `$2`. The
+reason is not style: this database runs in UTC, and for the last hours of every working day in the
+Americas its date is already tomorrow. `$2` is the date on the calendar where the person asking is
+actually sitting — the same date the jobs list sends into SQL — so an answer from it matches the
+screen beside it. Relative windows are built from it too: `$2::date - INTERVAL '6 months'`,
+`DATE_TRUNC('quarter', $2::date)`.
+
+**Write `$2::date`, not bare `$2`, anywhere the surrounding expression does not already fix the
+type.** A parameter carries no type of its own, so `DATE_TRUNC('quarter', $2)` is ambiguous —
+Postgres cannot tell which `date_trunc` overload was meant — and `$2 - INTERVAL '6 months'` guesses
+`interval` and fails outright. The cast costs nothing and always works. Inside
+`public.is_job_late(...)` the parameter position already declares the type, so a bare `$2` is fine
+there.
+
+**Archived rows are already gone.** Every table you can read is filtered to `deleted_at IS NULL` by
+the connection itself, so never write that clause — it is redundant, and the fact that it is
+enforced rather than remembered is deliberate. Six archived jobs were once reported to a shop owner
+as late because the filter lived in a sentence like this one instead of in the database. The
+consequence to be honest about: you **cannot** answer questions about archived work. Say so plainly
+rather than reporting zero.
+
 ---
 
 ## Late job
@@ -38,15 +60,27 @@ finished but still sitting on the bench **counts as late** — delivery is the p
 SELECT COUNT(*) AS late_jobs
 FROM jobs
 WHERE company_id = $1
-  AND deleted_at IS NULL
-  AND due_date < CURRENT_DATE
-  AND fulfillment_status <> 'fully_shipped'
-  AND production_status <> 'cancelled'
+  AND public.is_job_late(due_date, production_status, fulfillment_status, $2)
 ```
 
-**Notes.** `due_date` is a DATE, so "late" flips at midnight, not on a rolling 24 hours. A job with
-no `due_date` is never late — we never promised. Cancelled jobs are excluded because nobody is
-waiting for them.
+**Do not spell this rule out inline — call the function.** `public.is_job_late()` is the same
+object the jobs list uses through `search_jobs_by_identifier`, so an answer from it is the number on
+the screen. Writing the clauses by hand is how the chat came to report 7 late jobs where the
+dashboard showed 6. It composes anywhere a boolean does:
+
+```sql
+SELECT customer_name, COUNT(*) AS late_jobs
+FROM jobs
+WHERE company_id = $1
+  AND public.is_job_late(due_date, production_status, fulfillment_status, $2)
+GROUP BY customer_name
+ORDER BY late_jobs DESC
+```
+
+**Notes.** `due_date` is a DATE, so "late" flips at midnight, not on a rolling 24 hours, and a job
+due **today is not late** — the comparison is strict. A job with no `due_date` is never late: we
+never promised. Cancelled jobs are excluded because nobody is waiting for them. There is no
+`deleted_at` clause because archived rows are invisible to this connection — see below.
 
 ---
 
@@ -60,8 +94,7 @@ invented.
 SELECT COUNT(*) AS jobs_this_quarter
 FROM jobs
 WHERE company_id = $1
-  AND deleted_at IS NULL
-  AND created_at >= DATE_TRUNC('quarter', CURRENT_DATE)
+  AND created_at >= DATE_TRUNC('quarter', $2::date)
 ```
 
 **Notes.** "Last quarter" is the preceding `DATE_TRUNC('quarter', …)` window; "this month" and "last
@@ -83,8 +116,7 @@ FROM (
   FROM jobs j
   JOIN job_parts jp ON jp.job_id = j.id
   WHERE j.company_id = $1
-    AND j.deleted_at IS NULL
-    AND j.created_at >= DATE_TRUNC('quarter', CURRENT_DATE)
+    AND j.created_at >= DATE_TRUNC('quarter', $2::date)
   GROUP BY j.id
 ) per_job
 ```
@@ -150,22 +182,27 @@ line that shipped in two batches, because the line total is repeated on every sl
 from `shipments`, never from `job_parts`:
 
 ```sql
-SELECT c.name AS customer,
+SELECT j.customer_name AS customer,
        SUM(sli.quantity * jp.unit_price) AS revenue
 FROM shipments s
 JOIN shipment_line_items sli ON sli.shipment_id = s.id
 JOIN job_parts jp ON jp.id = sli.job_part_id
 JOIN jobs j ON j.id = jp.job_id
-JOIN customers c ON c.id = j.customer_id
 WHERE s.company_id = $1
   AND s.voided_at IS NULL
-  AND c.deleted_at IS NULL
-GROUP BY c.name
+GROUP BY j.customer_name
 ORDER BY revenue DESC
 ```
 
-Group by the customer's **name**, not `c.id` — name is identity here, and the id is not something to
-put in front of a shop owner.
+**Group by `jobs.customer_name`, not by a join to `customers`.** The name is snapshotted onto the
+job, so this needs one table fewer — and it is the safe form now that archived rows are hidden from
+this connection. An inner join to `customers` silently DROPS every job whose customer has since been
+archived, which turns a customer who stopped buying into revenue that never happened. Same rule for
+`shipments.customer_name`. Join `customers` only when you need something the snapshot does not carry
+(an address, a contact), and know that you are then asking only about live customers.
+
+Group by the **name**, not the id — name is identity here, and an id is not something to put in
+front of a shop owner.
 
 **Notes.** "Revenue trend over time" and "top customer by revenue" both use this, not job value —
 otherwise a large order booked today inflates today and never corrects. `shipments` is readable by
@@ -184,15 +221,13 @@ lose.
 SELECT c.id, c.name
 FROM customers c
 WHERE c.company_id = $1
-  AND c.deleted_at IS NULL
   AND EXISTS (
-    SELECT 1 FROM jobs j WHERE j.customer_id = c.id AND j.deleted_at IS NULL
+    SELECT 1 FROM jobs j WHERE j.customer_id = c.id
   )
   AND NOT EXISTS (
     SELECT 1 FROM jobs j
      WHERE j.customer_id = c.id
-       AND j.deleted_at IS NULL
-       AND j.created_at >= CURRENT_DATE - INTERVAL '6 months'
+       AND j.created_at >= $2::date - INTERVAL '6 months'
   )
 ```
 
@@ -211,11 +246,10 @@ SELECT COALESCE(SUM(qli.total_price), 0) AS pipeline_worth
 FROM quotes q
 JOIN quote_line_items qli ON qli.quote_id = q.id
 WHERE q.company_id = $1
-  AND q.deleted_at IS NULL
   AND q.status = 'active'
-  AND q.expiration_date >= CURRENT_DATE
+  AND q.expiration_date >= $2::date
   AND NOT EXISTS (
-    SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.deleted_at IS NULL
+    SELECT 1 FROM jobs j WHERE j.quote_id = q.id
   )
 ```
 
@@ -236,12 +270,11 @@ SELECT COUNT(*) FILTER (WHERE converted) AS converted,
 FROM (
   SELECT q.id,
          EXISTS (
-           SELECT 1 FROM jobs j WHERE j.quote_id = q.id AND j.deleted_at IS NULL
+           SELECT 1 FROM jobs j WHERE j.quote_id = q.id
          ) AS converted
   FROM quotes q
   WHERE q.company_id = $1
-    AND q.deleted_at IS NULL
-    AND q.created_at >= CURRENT_DATE - INTERVAL '90 days'
+    AND q.created_at >= $2::date - INTERVAL '90 days'
 ) t
 ```
 
@@ -263,7 +296,6 @@ SELECT COUNT(*) FILTER (WHERE started_at IS NOT NULL OR production_status = 'in_
        COUNT(*) FILTER (WHERE fulfillment_status = 'fully_shipped') AS shipped
 FROM jobs
 WHERE company_id = $1
-  AND deleted_at IS NULL
 ```
 
 **Notes.** There is no `jobs.shipped_at` column. `partially_shipped` is neither shipped nor
@@ -284,7 +316,6 @@ SELECT SUM(jp.total_price) AS revenue_booked,
 FROM job_parts jp
 JOIN jobs j ON j.id = jp.job_id
 WHERE j.company_id = $1
-  AND j.deleted_at IS NULL
   AND jp.true_cost_per_unit IS NOT NULL
 ```
 

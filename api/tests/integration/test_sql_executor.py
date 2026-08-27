@@ -11,6 +11,7 @@ Requires AI_READONLY_DATABASE_URL to be set.
 import json
 import os
 import uuid
+from datetime import date
 
 import pytest
 
@@ -178,14 +179,54 @@ class TestDataTypes:
     """
 
     async def test_timestamp_serialization(self):
+        # A LITERAL timestamp, not NOW(): the validator refuses every clock source
+        # so that today has exactly one origin, the bound $2. This test is about
+        # whether a timestamptz survives the trip to JSON, which a literal exercises
+        # just as well -- and it no longer doubles as an accidental assertion that
+        # reading the server clock is allowed.
         result = await execute_sql_query(
             company_id=str(uuid.uuid4()),
-            sql="SELECT NOW() AS ts, COUNT(*) AS cnt FROM customers WHERE company_id = $1",
+            sql="SELECT '2026-08-27 10:11:12+00'::timestamptz AS ts, COUNT(*) AS cnt "
+                "FROM customers WHERE company_id = $1",
         )
         assert "error" not in result
         assert result["row_count"] == 1
         # Should be ISO format string
         assert "T" in str(result["rows"][0]["ts"])
+
+    async def test_the_clock_is_refused_and_the_bound_date_is_not(self):
+        """The executor half of the day-boundary fix, end to end.
+
+        A query reading the server clock never reaches the database; one using $2
+        runs with the date the caller supplied. Without this the two halves could
+        drift -- a validator rule with nothing bound behind it would refuse every
+        date query outright.
+        """
+        company_id = str(uuid.uuid4())
+
+        refused = await execute_sql_query(
+            company_id=company_id,
+            sql="SELECT CURRENT_DATE AS d, COUNT(*) AS cnt FROM customers WHERE company_id = $1",
+        )
+        assert "error" in refused
+        assert "$2" in refused["error"]
+
+        ran = await execute_sql_query(
+            company_id=company_id,
+            sql="SELECT $2::date AS d, COUNT(*) AS cnt FROM customers WHERE company_id = $1",
+            today=date(2026, 8, 27),
+        )
+        assert "error" not in ran, ran.get("error")
+        assert str(ran["rows"][0]["d"]).startswith("2026-08-27")
+
+    async def test_a_query_that_ignores_the_date_still_runs(self):
+        """$2 is bound only when referenced -- asyncpg errors on a spare argument."""
+        result = await execute_sql_query(
+            company_id=str(uuid.uuid4()),
+            sql="SELECT COUNT(*) AS cnt FROM customers WHERE company_id = $1",
+            today=date(2026, 8, 27),
+        )
+        assert "error" not in result, result.get("error")
 
     async def test_numeric_serialization(self):
         result = await execute_sql_query(

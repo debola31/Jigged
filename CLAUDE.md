@@ -143,8 +143,18 @@ Full standard, including which tables carry it: [architecture.md §16](docs/arch
   snapshot, so renaming eagerly would rewrite how every past document reads.
 - Don't re-introduce records-of-value delete guards. An invoiced job archives like anything else.
 
-**Nothing enforces this** ([#687](https://github.com/debola31/Jigged/issues/687)), and it is the
-most-violated rule in the repo — a missing filter is silent. Two live violations: #682, #684.
+**Nothing enforces this for app code** ([#687](https://github.com/debola31/Jigged/issues/687)), and
+it is the most-violated rule in the repo — a missing filter is silent. Two live violations: #682,
+#684.
+
+**One caller is exempt because it is enforced instead: the insights AI.** Its
+`ai_readonly_select` RLS policies carry `AND deleted_at IS NULL`, so archived rows are invisible to
+the sandbox whatever SQL a model writes, and `ai_policies_missing_soft_delete_filter()` fails CI on
+a readable table that skips it. **Do not add the filter to a query in `semantics.md` or
+`SCHEMA_CONTEXT`** — it is redundant there. This is the one place the rule became structural, and
+the reason is instructive: the model omitted the clause once and reported six archived jobs to a
+shop owner as overdue. A rule that depends on remembering fails eventually for a person and sooner
+for a language model.
 
 ### Never make changes directly on the main branch
 

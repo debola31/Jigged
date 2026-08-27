@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from datetime import date
 import uuid
 from decimal import Decimal
 from unittest.mock import patch
@@ -87,6 +88,7 @@ class Conversation:
     def __init__(self, turns: list[LLMResult], tool_results: list[dict] | None = None) -> None:
         self.turns = list(turns)
         self.tool_results = list(tool_results or [])
+        self.tool_dates: list[object] = []
         self.seen: list[list[Message]] = []
 
     async def complete(self, feature, messages, **kwargs):
@@ -98,8 +100,13 @@ class Conversation:
             )
         return self.turns.pop(0)
 
-    async def run_tool(self, company_id, call):
+    async def run_tool(self, company_id, call, today):
         assert self.tool_results, "the loop ran a tool the script has no result for"
+        # The caller's local date, on its way to the executor to be bound as $2.
+        # Captured rather than ignored: if the loop forwarded None the sandbox
+        # would silently fall back to the UTC database clock, and every other
+        # assertion in this file would still pass.
+        self.tool_dates.append(today)
         return self.tool_results.pop(0)
 
     # ------------------------------------------------------------- assertions
@@ -123,7 +130,7 @@ async def run(convo: Conversation):
          patch("services.insights_service._build_chat_system_prompt", return_value="SYSTEM"):
         return await insights.run(JobContext(
             feature="insights", company_id="c0", request_id="rid",
-            payload={"question": "how many jobs are late?"},
+            payload={"question": "how many jobs are late?", "today": "2026-08-27"},
         ))
 
 
@@ -346,3 +353,52 @@ async def test_a_refused_object_alone_does_not_condemn_a_good_answer():
     )
 
     assert (await run(convo))["answer"] == "That figure is not something Jigged tracks."
+
+
+# ------------------------------------------------- the day boundary reaches SQL
+
+async def test_the_callers_date_reaches_the_tool_as_a_date():
+    """The loop forwards payload["today"] to every tool call, parsed.
+
+    THE FAILURE THIS CATCHES IS INVISIBLE OTHERWISE. If the loop dropped the date,
+    the executor would bind nothing for $2 and the model would be back on the
+    database's UTC clock -- three or four hours ahead of a shop in the Americas for
+    the last part of every working day, long enough to call a job late the evening
+    before it is. No answer would look wrong; a number would just quietly disagree
+    with the screen next to it, which is the exact failure this change removes.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("7 jobs are late.")],
+        tool_results=[SQL_OK],
+    )
+
+    await run(convo)
+
+    assert convo.tool_dates == [date(2026, 8, 27)], (
+        f"the loop handed the tool {convo.tool_dates!r}; it must forward the "
+        "caller's local date, parsed from the job payload"
+    )
+
+
+async def test_a_job_row_without_a_date_forwards_none_rather_than_inventing_one():
+    """Rows enqueued before `today` existed still run.
+
+    None is safe here and a substituted date would not be: the validator refuses
+    CURRENT_DATE, so a query needing a date cannot fall back to the server's -- it
+    fails loudly and the model is told to rewrite. Quietly supplying UTC's date
+    instead would be the bug wearing the fix's clothes.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("Nine open jobs.")],
+        tool_results=[SQL_OK],
+    )
+
+    with patch.object(insights.llm, "complete", convo.complete), \
+         patch.object(insights, "_run_tool", convo.run_tool), \
+         patch("services.insights_service._build_chat_system_prompt", return_value="SYSTEM"):
+        await insights.run(JobContext(
+            feature="insights", company_id="c0", request_id="rid",
+            payload={"question": "how many open jobs?"},
+        ))
+
+    assert convo.tool_dates == [None]

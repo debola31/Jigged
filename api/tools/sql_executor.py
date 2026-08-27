@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import uuid
+from datetime import date
 from typing import Optional
 
 import asyncpg
@@ -26,6 +27,11 @@ MAX_ROWS = 200
 
 # Statement timeout in milliseconds
 STATEMENT_TIMEOUT_MS = 5000
+
+# $2 followed by anything that is not another digit -- so $2 matches and $20 does
+# not. Only decides whether to BIND the date; the validator is what makes a query
+# needing a date use it.
+_USES_TODAY_PARAM = re.compile(r"\$2(?!\d)")
 
 
 NOT_PERMITTED_KIND = "not_permitted"
@@ -180,17 +186,35 @@ async def execute_sql_query(
     company_id: str,
     sql: str,
     description: str = "",
+    today: date | None = None,
 ) -> dict:
     """
     Validate and execute an AI-generated SQL query.
 
-    The query must use $1 as a placeholder for company_id.
+    The query must use $1 as a placeholder for company_id, and $2 for today's
+    date wherever it needs one.
+
+    WHY TODAY IS A BOUND PARAMETER AND NOT SOMETHING THE QUERY COMPUTES. This
+    database runs in UTC. A shop in Halifax is three or four hours behind it, so
+    between roughly 20:00 and midnight local, CURRENT_DATE is already tomorrow --
+    and every "is it past its due date" comparison flips a day early. The jobs
+    list has always avoided this by threading the browser's local date into SQL
+    as p_today (see applyOverdueJobsFilter / search_jobs_by_identifier); binding
+    $2 gives the model the same date the screen is using, from the same source.
+
+    It is bound rather than written into the prompt on purpose: the assembled
+    system prompt is one long cacheable prefix, and a date inside it would make
+    that prefix change every day for every company.
+
     Results are limited to MAX_ROWS rows.
 
     Args:
         company_id: The company UUID to bind as $1.
-        sql: The SQL query with $1 placeholder.
+        sql: The SQL query with $1 (and optionally $2) placeholders.
         description: Brief description of what the query computes.
+        today: The CALLER's local date, bound as $2. None binds nothing, which
+            is safe only because the validator refuses CURRENT_DATE outright --
+            a query needing a date cannot silently fall back to the server's.
 
     Returns:
         Dict with keys: columns, rows, row_count, description.
@@ -251,7 +275,15 @@ async def execute_sql_query(
                     f"SET LOCAL jigged.company_id = '{company_id}'"
                 )
 
-                rows = await conn.fetch(cleaned_sql, company_id)
+                # $2 is bound ONLY when the query references it. asyncpg checks
+                # the argument count against the prepared statement, so passing a
+                # date to a query that never mentions $2 is an error, not a
+                # harmless extra.
+                args = [company_id]
+                if _USES_TODAY_PARAM.search(cleaned_sql):
+                    args.append(today)
+
+                rows = await conn.fetch(cleaned_sql, *args)
 
             # Process results outside the transaction
             if not rows:

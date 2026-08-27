@@ -14,7 +14,7 @@ import os
 import time
 
 import sentry_sdk
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
@@ -209,6 +209,32 @@ def _error_kind(exc: Exception) -> str:
     return "internal"
 
 
+# How far the browser's date may sit from the server's before we stop believing it.
+# One day covers every real timezone (UTC-12..UTC+14 spans two calendar dates at any
+# instant, so a legitimate client is never more than one day either side) plus a
+# clock that is slightly wrong. Beyond that it is a broken device clock or someone
+# asking what was late in 2019, and neither should quietly reshape an answer.
+_TODAY_SKEW_DAYS = 1
+
+
+def _client_today(claimed: date) -> date:
+    """The caller's local date, refused if it is not plausibly today.
+
+    Trusting it outright would let a caller pick any "today" and get a confidently
+    wrong answer about what is overdue; ignoring it would put us back on UTC, which
+    is the bug. So: believe it within a day of the server's date, and refuse
+    outside that rather than silently substituting one -- a substituted date is
+    exactly the kind of quiet disagreement this whole change exists to remove.
+    """
+    server_today = datetime.now(timezone.utc).date()
+    if abs((claimed - server_today).days) > _TODAY_SKEW_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail="Your device's date looks wrong. Check the clock and try again.",
+        )
+    return claimed
+
+
 @router.post("/{company_id}/chat", response_model=ChatEnqueued, status_code=202)
 async def chat(company_id: str, request: ChatRequest):
     """Enqueue a question. The answer arrives on the job row.
@@ -236,7 +262,13 @@ async def chat(company_id: str, request: ChatRequest):
             db,
             company_id=company_id,
             feature="insights",
-            payload={"question": request.question},
+            payload={
+                "question": request.question,
+                # In the PAYLOAD, not a handler argument: the desktop worker gets
+                # the job row and nothing else, so this is the one place that makes
+                # both execution paths see the same date without wiring it twice.
+                "today": _client_today(request.today).isoformat(),
+            },
         )
     except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
         raise _map_llm_error(exc) from exc

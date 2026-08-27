@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/lib/api';
 import type { Database } from '@/types/database';
 import { getSupabase } from '@/lib/supabase';
+import { todayLocalISODate } from '@/lib/localDate';
 
 // ============================================================
 // Types
@@ -94,7 +95,12 @@ export async function submitChatQuery(
   const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/chat`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question }),
+    // `today` is the browser's LOCAL date, bound as $2 in whatever SQL the model
+    // writes. Without it the sandbox falls back to a UTC database clock, which for
+    // a US shop calls a job late from about 8pm the evening before — the jobs list
+    // has always sent the same value as p_today, and the chat disagreeing with the
+    // screen beside it is the whole reason this parameter exists.
+    body: JSON.stringify({ question, today: todayLocalISODate() }),
   });
 
   if (!response.ok) {

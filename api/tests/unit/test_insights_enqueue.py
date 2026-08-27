@@ -6,6 +6,7 @@ status a human sentence can go with, and that sentence is a plain string.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -98,8 +99,19 @@ class TestTheOnlyDoor:
     aborting the whole session. A unit file must never reach it.
     """
 
-    async def _post(self, question="how many jobs are late?"):
-        return await routes.chat("co-1", ChatRequest(question=question))
+    async def _post(self, question="how many jobs are late?", today=None):
+        # `today` is the caller's LOCAL date and is required: the sandbox binds it
+        # as $2 and refuses CURRENT_DATE, so there is no server-side fallback to
+        # fall back TO. Defaulted to the server's own date here so these tests stay
+        # about the door, not about the clock -- _client_today's own rules are
+        # pinned in TestTheClientsDate below.
+        return await routes.chat(
+            "co-1",
+            ChatRequest(
+                question=question,
+                today=today or datetime.now(timezone.utc).date(),
+            ),
+        )
 
     async def test_a_disabled_company_cannot_enqueue(self):
         with patch.object(routes, "_get_company_ai_settings", return_value=(False, 20)), \
@@ -177,3 +189,84 @@ class TestTheOnlyDoor:
              patch.object(routes.ai_jobs, "enqueue", return_value=[job]):
             await self._post()
         sweep.assert_called_once()
+
+
+class TestTheClientsDate:
+    """`today` comes from the browser, so it is checked before it is used.
+
+    WHY IT COMES FROM THE BROWSER AT ALL. This database runs in UTC. For a shop in
+    the Americas that means UTC has already rolled into tomorrow for the last hours
+    of every working day, so anything computed from the server clock calls a job
+    late before the shop's day is over. The jobs list has always sent the browser's
+    date into SQL as p_today; the chat now sends the same value, and the sandbox
+    binds it as $2 with CURRENT_DATE refused outright.
+
+    WHY IT IS CHECKED. Trusting it outright lets a caller name any "today" and get a
+    confidently wrong answer about what is overdue. Ignoring it puts us back on UTC.
+    So: believe it within a day, refuse outside that.
+    """
+
+    def _today(self, offset_days=0):
+        return datetime.now(timezone.utc).date() + timedelta(days=offset_days)
+
+    @pytest.mark.parametrize("offset", [-1, 0, 1])
+    def test_any_real_timezone_is_accepted(self, offset):
+        # UTC-12 through UTC+14 means two calendar dates are live at any instant,
+        # so a legitimate client is never more than a day either side.
+        assert routes._client_today(self._today(offset)) == self._today(offset)
+
+    @pytest.mark.parametrize("offset", [-2, 2, -400, 4000])
+    def test_a_date_no_timezone_could_produce_is_refused(self, offset):
+        with pytest.raises(HTTPException) as exc:
+            routes._client_today(self._today(offset))
+        assert exc.value.status_code == 400
+
+    def test_the_refusal_does_not_quietly_substitute_a_date(self):
+        """A substituted date would be the original bug in a new place.
+
+        Silently using the server's date here would mean the answer disagrees with
+        the screen and nobody is told -- which is exactly the class of failure this
+        parameter exists to remove. Fail loudly instead.
+        """
+        with pytest.raises(HTTPException):
+            routes._client_today(self._today(5))
+
+    def test_the_message_tells_the_user_what_to_fix(self):
+        with pytest.raises(HTTPException) as exc:
+            routes._client_today(self._today(9))
+        assert "clock" in exc.value.detail.lower()
+        # No SQL, no parameter names, no "$2" -- a shop owner reads this.
+        assert "$2" not in exc.value.detail
+
+
+class TestTheDateReachesTheQueue:
+    """The date rides on the ai_jobs row, not on a handler argument.
+
+    That is the one place that makes the desktop worker behave identically without
+    a second piece of wiring: the worker claims a row and gets its payload, nothing
+    else. A `today` passed only to the inline path would leave a local model
+    answering from the UTC clock while the hosted one did not.
+    """
+
+    async def test_the_payload_carries_the_callers_date(self):
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep"), \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            enqueue.return_value = [
+                {"id": "j1", "status": "queued", "executor": "worker",
+                 "payload": {}, "request_id": "r", "feature": "insights"}
+            ]
+            await routes.chat(
+                "co-1",
+                ChatRequest(question="how many jobs are late?",
+                            today=datetime.now(timezone.utc).date()),
+            )
+
+        payload = enqueue.call_args.kwargs["payload"]
+        assert payload["today"] == datetime.now(timezone.utc).date().isoformat(), (
+            "the caller's date must be on the job row -- the desktop worker sees "
+            "nothing else"
+        )
+        assert payload["question"] == "how many jobs are late?"

@@ -1,0 +1,104 @@
+{
+  "$comment": [
+    "ONE FILE, TWO RUNNERS. __tests__/types/job.test.ts feeds these to isJobOverdue();",
+    "api/tests/integration/test_late_job_parity.py feeds the same rows to",
+    "public.is_job_late(). If the TypeScript mirror and the SQL definition ever",
+    "disagree, one of the two suites fails on the case that separates them.",
+    "",
+    "This improves on the entitlement precedent (GOLDEN_CASES in",
+    "__tests__/lib/entitlement.test.ts, hand-copied into",
+    "api/tests/integration/test_billing_enforcement.py), where the two lists are kept",
+    "in step by a comment asking people to remember.",
+    "",
+    "today is fixed at 2026-08-27 so the boundary cases mean something. Dates are",
+    "plain calendar dates on both sides -- no timezone conversion happens here,",
+    "which is the point: the caller supplies the day boundary."
+  ],
+  "today": "2026-08-27",
+  "cases": [
+    {
+      "name": "past due, on the floor, unshipped",
+      "due_date": "2026-08-25",
+      "production_status": "in_progress",
+      "fulfillment_status": "unshipped",
+      "late": true
+    },
+    {
+      "name": "past due, not started",
+      "due_date": "2026-08-01",
+      "production_status": "not_started",
+      "fulfillment_status": "unshipped",
+      "late": true
+    },
+    {
+      "name": "past due, finished but not shipped -- delivery is the promise",
+      "due_date": "2026-07-25",
+      "production_status": "completed",
+      "fulfillment_status": "unshipped",
+      "late": true
+    },
+    {
+      "name": "past due, finished, only part shipped -- this is J-0021, the 7th job",
+      "due_date": "2026-07-25",
+      "production_status": "completed",
+      "fulfillment_status": "partially_shipped",
+      "late": true
+    },
+    {
+      "name": "past due but fully shipped -- delivered, so not late",
+      "due_date": "2026-07-01",
+      "production_status": "completed",
+      "fulfillment_status": "fully_shipped",
+      "late": false
+    },
+    {
+      "name": "past due but cancelled -- nobody is waiting",
+      "due_date": "2026-07-01",
+      "production_status": "cancelled",
+      "fulfillment_status": "unshipped",
+      "late": false
+    },
+    {
+      "name": "cancelled AFTER a partial shipment is still not late",
+      "due_date": "2026-07-01",
+      "production_status": "cancelled",
+      "fulfillment_status": "partially_shipped",
+      "late": false
+    },
+    {
+      "name": "due TODAY is not late -- the boundary is strict, you have until midnight",
+      "due_date": "2026-08-27",
+      "production_status": "not_started",
+      "fulfillment_status": "unshipped",
+      "late": false
+    },
+    {
+      "name": "due tomorrow is not late",
+      "due_date": "2026-08-28",
+      "production_status": "not_started",
+      "fulfillment_status": "unshipped",
+      "late": false
+    },
+    {
+      "name": "due yesterday IS late -- the other side of the same boundary",
+      "due_date": "2026-08-26",
+      "production_status": "not_started",
+      "fulfillment_status": "unshipped",
+      "late": true
+    },
+    {
+      "name": "no due date -- we never promised, so it can never be late",
+      "due_date": null,
+      "production_status": "not_started",
+      "fulfillment_status": "unshipped",
+      "late": false
+    },
+    {
+      "name": "no due date and long finished is still not late",
+      "due_date": null,
+      "production_status": "completed",
+      "fulfillment_status": "unshipped",
+      "late": false
+    }
+  ]
+}

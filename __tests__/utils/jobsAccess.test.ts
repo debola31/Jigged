@@ -215,12 +215,36 @@ describe('jobsAccess', () => {
       const result = applyOverdueJobsFilter(builder);
 
       expect(result).toBe(builder);
-      // Past due (local date), production active, not fully shipped — the single
-      // server-side definition shared by the list filter and dashboard count.
+      // Past due (local date), not delivered, not cancelled — the same rule as
+      // public.is_job_late() and isJobOverdue(), expressed in the one dialect that
+      // cannot call a function.
       expect(builder.not).toHaveBeenNthCalledWith(1, 'due_date', 'is', null);
       expect(builder.lt).toHaveBeenCalledWith('due_date', expect.any(String));
       expect(builder.not).toHaveBeenNthCalledWith(2, 'fulfillment_status', 'eq', 'fully_shipped');
-      expect(builder.in).toHaveBeenCalledWith('production_status', ['not_started', 'in_progress']);
+      expect(builder.not).toHaveBeenNthCalledWith(3, 'production_status', 'eq', 'cancelled');
+      // NOT `.in('production_status', ['not_started','in_progress'])`, which is
+      // what this asserted until 2026-08-27. That form dropped finished-but-
+      // unshipped work off the overdue list while the insights chat counted it.
+      expect(builder.in).not.toHaveBeenCalled();
+    });
+
+    it('sends the browser local date, never a UTC one', () => {
+      // toISOString().slice(0,10) is the tempting one-liner and it is wrong for
+      // several hours a day in the Americas: it converts to UTC first. Pin the
+      // local form, because the whole point of passing a date is that it matches
+      // the calendar the user is looking at.
+      const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+      ['not', 'lt', 'in'].forEach((m) => {
+        builder[m] = vi.fn().mockImplementation(() => builder);
+      });
+
+      applyOverdueJobsFilter(builder);
+
+      const d = new Date();
+      const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+        d.getDate(),
+      ).padStart(2, '0')}`;
+      expect(builder.lt).toHaveBeenCalledWith('due_date', expected);
     });
   });
 

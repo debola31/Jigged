@@ -16,6 +16,7 @@ assert the answer the sandbox will actually get.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 import pytest
 
@@ -79,6 +80,84 @@ def test_no_ai_policy_without_a_grant_behind_it(supabase_admin):
         "RLS with no grant is unreachable; apply both with "
         "public.apply_ai_read_access(), or drop the policy."
     )
+
+
+def test_no_ai_readable_table_still_shows_archived_rows(supabase_admin):
+    """Soft-delete is enforced in RLS, not asked for in the prompt.
+
+    The reason this is a guard and not a sentence: it WAS a sentence. SCHEMA_CONTEXT
+    and most of semantics.md said to filter deleted_at, the model omitted it once,
+    and a shop owner was shown six archived jobs as overdue -- J-0071, J-0095,
+    J-0069, J-0061, J-0113, J-0110, none of which exist on any screen. Nothing
+    failed; a plausible number came back from a query that ran.
+
+    apply_ai_read_access() now appends the clause for any table with a deleted_at
+    column, so the supported path cannot reintroduce this. A hand-written
+    parent-scoped policy still can, which is what this catches.
+    """
+    res = supabase_admin.rpc("ai_policies_missing_soft_delete_filter", {}).execute()
+    assert res.data == [], (
+        f"AI-readable tables whose policy does not filter deleted_at: {res.data}. "
+        "Archived rows are visible to the model there, and it will eventually "
+        "report them as live. Re-run public.apply_ai_read_access() on the table, "
+        "or add the clause by hand if it is parent-scoped."
+    )
+
+
+@_needs_ro
+async def test_the_sandbox_cannot_see_an_archived_job():
+    """The end-to-end version of the guard above: archive a row, fail to read it.
+
+    Catalogue assertions prove the policy SAYS the right thing. This proves the
+    database DOES it, which is the claim the six phantom jobs disproved.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    job_id = None
+    try:
+        row = await admin.fetchrow(
+            "SELECT id, company_id FROM public.jobs WHERE deleted_at IS NULL LIMIT 1"
+        )
+        if row is None:
+            pytest.skip("seeded database has no live jobs")
+        job_id, company_id = row["id"], row["company_id"]
+
+        await ro.execute(f"SET jigged.company_id = '{company_id}'")
+        before = await ro.fetchval(
+            "SELECT count(*) FROM public.jobs WHERE id = $1", job_id
+        )
+        assert before == 1, "the sandbox should see a live job in its own company"
+
+        await admin.execute(
+            "UPDATE public.jobs SET deleted_at = now() WHERE id = $1", job_id
+        )
+        after = await ro.fetchval(
+            "SELECT count(*) FROM public.jobs WHERE id = $1", job_id
+        )
+        assert after == 0, (
+            "the sandbox can still see an archived job -- the ai_readonly_select "
+            "policy on public.jobs is not filtering deleted_at"
+        )
+
+        # And not merely by id: no archived job of any kind is reachable.
+        assert (
+            await ro.fetchval(
+                "SELECT count(*) FROM public.jobs WHERE deleted_at IS NOT NULL"
+            )
+            == 0
+        )
+    finally:
+        if job_id is not None:
+            await admin.execute(
+                "UPDATE public.jobs SET deleted_at = NULL WHERE id = $1", job_id
+            )
+        await admin.close()
+        await ro.close()
 
 
 @_needs_ro
@@ -267,15 +346,23 @@ async def test_every_reference_query_in_semantics_runs():
     blocks = re.findall(r"```sql\n(.*?)```", text, re.DOTALL)
     assert blocks, "no ```sql blocks found in semantics.md"
 
+    # $2 is today, bound by the executor. Only pass it to blocks that use it --
+    # asyncpg checks the argument count against the prepared statement, so a
+    # spare argument is an error rather than something harmlessly ignored.
+    today = datetime.now(timezone.utc).date()
+
     conn = await _connect_as_the_ai_role()
     problems: list[str] = []
     try:
         await conn.execute(f"SET jigged.company_id = '{_PROBE_COMPANY}'")
         for block in blocks:
             sql = block.strip().rstrip(";")
+            args = [_PROBE_COMPANY]
+            if re.search(r"\$2(?!\d)", sql):
+                args.append(today)
             try:
                 async with conn.transaction():
-                    await conn.fetch(f"{sql}\nLIMIT 1", _PROBE_COMPANY)
+                    await conn.fetch(f"{sql}\nLIMIT 1", *args)
             except Exception as exc:  # noqa: BLE001
                 first_line = sql.splitlines()[0][:60]
                 problems.append(

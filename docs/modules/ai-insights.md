@@ -42,11 +42,13 @@ thing that rots, and the one that used to sit here did:
 4. **Per-company RLS** — an `ai_readonly_select` policy scoped to
    `current_setting('jigged.company_id')`, which the executor sets per query. **This is the layer
    that decides**, not the grant — see below
-5. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
-6. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
-7. **Self-correction** — a failed query comes back as `SQL_ERROR: <cause>` *plus what to do about
+5. **Archived rows filtered in that same policy** — every readable table with a `deleted_at`
+   column carries `AND deleted_at IS NULL`. Not prose the model is asked to honour; see below
+6. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
+7. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
+8. **Self-correction** — a failed query comes back as `SQL_ERROR: <cause>` *plus what to do about
    it*, and the model rewrites and retries, up to 5 iterations
-8. **A non-answer is a failure, not an answer** — see below. The loop refuses to return the tool's
+9. **A non-answer is a failure, not an answer** — see below. The loop refuses to return the tool's
    error text to a shop owner
 
 ### Validation rules (`api/tools/sql_validator.py`)
@@ -59,6 +61,7 @@ thing that rots, and the one that used to sit here did:
 | Non-`public` schemas | `auth`, `storage`, `vault`, `extensions`, `realtime`, `cron` … rejected whole. The one exclusion that does **not** grow as our schema does |
 | Sensitive-table denylist | `SENSITIVE_TABLES` — rejected if referenced *anywhere* in the query, regardless of join syntax. Not a boundary: it refuses before the round trip and returns a sentence the model can act on, where the database returns a bare `permission denied` |
 | Company scoping | Must contain `$1` at least once |
+| **No clock** | `CURRENT_DATE`, `CURRENT_TIMESTAMP`, `LOCALTIMESTAMP`, `now()` and the other `*_timestamp()` forms are rejected. Today is the caller's local date, bound as `$2` |
 | Nesting limit | Max 3 levels of subquery nesting |
 
 ### What the AI may read
@@ -216,6 +219,52 @@ so a definition citing an unreadable column fails the build. Assembly order —
 preamble → `SCHEMA_CONTEXT` → semantics → guidelines — is fixed so the prompt stays one cacheable
 prefix; the file changes only via PR.
 
+### Archived rows do not exist here, and today comes from the browser
+
+Two facts the model used to be *told* and is now *prevented from getting wrong*. Both were reported
+by a shop owner on the same afternoon, and neither produced an error — each produced a plausible
+number that disagreed with the screen.
+
+**Six late jobs that were not on any screen.** Asked to list overdue jobs missing from a list the
+owner had pasted, the chat named J-0071, J-0095, J-0069, J-0061, J-0113 and J-0110. All six are real
+production rows with `deleted_at` set. Splitting the late-job definition on `deleted_at` for that
+company returns **17 live + 6 archived** — the 17 are exactly what the owner could see. Nothing
+malfunctioned: `ai_readonly_select` scoped company and nothing else, and `AND deleted_at IS NULL`
+lived only in `SCHEMA_CONTEXT` and some of `semantics.md`'s reference queries. The model omitted it
+once.
+
+`apply_ai_read_access()` now appends the clause for any table that has a `deleted_at` column, so the
+supported path cannot reintroduce this, and `ai_policies_missing_soft_delete_filter()` fails CI on a
+hand-written policy that skips it. **The consequence, stated rather than discovered:** the AI cannot
+answer questions about archived work at all. It is told to say so rather than report zero. The
+prompt no longer asks for the filter — writing it is now redundant.
+
+**A join caveat that comes with it.** Hiding archived parents changes JOIN *results*: an inner join
+from `jobs` to an archived `customers` row drops the job, under-counting silently. `SCHEMA_CONTEXT`
+and `semantics.md` now steer to the `jobs.customer_name` / `shipments.customer_name` snapshots for
+grouping. Measured against production the day this shipped, it affected **0 rows** — 0 live jobs
+with an archived customer, 0 live job_parts with an archived part, 0 live quotes with an archived
+customer.
+
+**Seven late jobs where the dashboard said six.** Two definitions, written eighteen days apart:
+`search_jobs_by_identifier` required `production_status IN ('not_started','in_progress')`;
+`semantics.md` excluded only `cancelled`. They differ on one job — finished, not fully shipped, past
+due. Resolved in favour of delivery and moved into
+[`public.is_job_late()`](../../supabase/migrations/20260827114506_shared_late_job_predicate.sql),
+which the jobs list and the AI now both call. See [jobs.md](jobs.md#overdue-derived-never-stored).
+
+**And the day boundary underneath it.** Postgres runs in UTC, so `CURRENT_DATE` is already tomorrow
+for the last hours of a working day in the Americas — enough to call a job late the evening before
+it is. The jobs list had always avoided this by threading the browser's date in as `p_today`; the
+chat was reading the server clock. The validator now **refuses every clock source** and the executor
+binds the caller's local date as `$2`.
+
+It is bound, never prompted, and that is deliberate: the assembled system prompt is one long
+cacheable prefix, and a date inside it would change that prefix daily for every company. The route
+sanity-checks the claimed date against the server's own (±1 day, which covers UTC-12 through UTC+14)
+and **refuses rather than substituting** — a quietly substituted date would be this same class of
+bug in a new place.
+
 ### Adding a table to AI scope
 
 1. Migration: `SELECT public.apply_ai_read_access('public.<table>');` — one call, which issues the
@@ -227,9 +276,16 @@ prefix; the file changes only via PR.
    [`schema_context.py`](../../api/tools/schema_context.py) — otherwise the model is never told the
    table exists, and a readable table nobody mentions is invisible.
 
+The helper also appends `AND deleted_at IS NULL` when the table has that column, decided from the
+table rather than from an argument — so the next soft-deletable table cannot be made readable
+without it.
+
 For a **child table** (no `company_id`, scoped through a parent) the helper raises and you write
-both halves by hand in the same migration — see `customer_contacts` in the baseline, or
-`shipment_line_items`.
+both halves by hand in the same migration — see `customer_contacts`, or `shipment_line_items`.
+**A hand-written policy on a soft-deletable table must filter `deleted_at` itself, on both sides:**
+`customer_contacts` requires the contact to be live AND its customer to be live, or an archived
+contact of a live customer stays visible. `ai_policies_missing_soft_delete_filter()` fails CI if you
+forget — it is the only half of this the helper cannot do for you.
 
 To keep a new tenant table **out** of AI scope, add it to the exempt list in
 `tenant_tables_missing_ai_decision()` with a line saying why. Doing neither fails CI, which is the

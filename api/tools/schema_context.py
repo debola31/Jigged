@@ -24,8 +24,8 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID (FK -> companies.id) -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
-  any list, count or ranking; a by-id lookup deliberately does not)
+- deleted_at: TIMESTAMPTZ (archived when set. Do NOT filter on it: this
+  connection cannot see archived rows at all — see "Archived rows" below)
 - default_payment_terms: TEXT
   -- the customer's STANDING term, applied to NEW quotes only. A quote's own
   payment_terms / lead_time_text are what that quote was issued
@@ -51,7 +51,8 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- deleted_at: TIMESTAMPTZ (archive marker. Do NOT filter on it -- archived rows
+  are already invisible to this connection)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: a vendor row is IDENTITY ONLY. There are no contact_* columns (dropped
   20260504), no notes column, and no address columns (dropped 20260824).
@@ -264,7 +265,8 @@ SCHEMA_CONTEXT = """
 - name: TEXT (unique per company)
 - labor_rate: NUMERIC(10,2) (per-hour rate)
 - description: TEXT, metadata: JSONB
-- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- deleted_at: TIMESTAMPTZ (archive marker. Do NOT filter on it -- archived rows
+  are already invisible to this connection)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: there is NO `kind` and NO `vendor_id` here. Outsourced processes are
   NOT work centres -- they are vendor_services (below). A query looking for
@@ -277,7 +279,8 @@ SCHEMA_CONTEXT = """
 - name: TEXT -- the PROCESS, unique per vendor (two vendors may both offer 'Anodize')
 - unit_price: NUMERIC(12,4) -- price per piece; INHERITED by routing operations
 - description: TEXT
-- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- deleted_at: TIMESTAMPTZ (archive marker. Do NOT filter on it -- archived rows
+  are already invisible to this connection)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### routings (1:1 with manufacturable parts)
@@ -362,6 +365,21 @@ revenue, job value, this quarter, dormant, pipeline -- is defined in the semanti
 section that follows, and those definitions win over any reading you would
 otherwise pick.
 
+- ARCHIVED ROWS DO NOT EXIST HERE. Every table you can read is filtered to
+  `deleted_at IS NULL` by the connection itself. Never write that clause -- it is
+  redundant. Two consequences that matter:
+    * You CANNOT answer questions about archived work. Say so; do not report zero.
+    * An INNER JOIN to a parent that has since been archived now DROPS the child
+      row. Group by the snapshot columns jobs.customer_name and
+      shipments.customer_name rather than joining customers, or a customer who
+      stopped buying takes their revenue history with them. Join customers only
+      for something the snapshot does not carry, and only about live customers.
+- TODAY IS $2, NEVER THE CLOCK. CURRENT_DATE, now(), CURRENT_TIMESTAMP and
+  LOCALTIMESTAMP are rejected before execution. This database runs in UTC and is
+  already on tomorrow's date for the last hours of a working day in the Americas,
+  so reading its clock disagrees with the screen the user is looking at. $2 is
+  their local date. Cast it -- `$2::date` -- anywhere the expression does not
+  already fix the type, e.g. DATE_TRUNC('month', $2::date).
 - Tables WITHOUT company_id: job_operations, job_materials, routing_operations,
   parts_bom, parts_unit_conversions, shipment_line_items, customer_addresses,
   customer_contacts. Filter these via JOIN to their parent table.
@@ -382,8 +400,8 @@ otherwise pick.
 SELECT COUNT(*) AS job_count
 FROM jobs
 WHERE company_id = $1
-  AND started_at >= DATE_TRUNC('week', NOW()) - INTERVAL '1 week'
-  AND started_at <  DATE_TRUNC('week', NOW());
+  AND started_at >= DATE_TRUNC('week', $2::date) - INTERVAL '1 week'
+  AND started_at <  DATE_TRUNC('week', $2::date);
 
 -- Revenue by month (last 6 months) — sum job_parts.total_price (the agreed
 -- per-part line total, post-conversion source of truth). Uses the
@@ -395,7 +413,7 @@ FROM jobs j
 JOIN job_parts jp ON jp.job_id = j.id
 WHERE j.company_id = $1
   AND j.fulfillment_status = 'fully_shipped'
-  AND public.job_last_ship_date(j.id) >= (CURRENT_DATE - INTERVAL '6 months')
+  AND public.job_last_ship_date(j.id) >= ($2::date - INTERVAL '6 months')
 GROUP BY DATE_TRUNC('month', public.job_last_ship_date(j.id)::timestamptz)
 ORDER BY month;
 
@@ -429,7 +447,7 @@ JOIN jobs j          ON j.id = jo.job_id
 JOIN job_parts jp    ON jp.id = jo.job_part_id
 JOIN work_centers wc ON wc.id = jo.work_center_id
 WHERE j.company_id = $1
-  AND jo.created_at >= NOW() - INTERVAL '30 days'
+  AND jo.created_at >= $2::date - INTERVAL '30 days'
 GROUP BY wc.name
 ORDER BY hours DESC;
 

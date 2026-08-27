@@ -28,6 +28,7 @@ import type {
 } from '@/types/job';
 import { isJobClosed, stagesToStatusPairs } from '@/types/job';
 import { JOB_SEARCH_LIMIT } from '@/lib/queryLimits';
+import { todayLocalISODate } from '@/lib/localDate';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import type { FreightTerms } from '@/types/shipment';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
@@ -58,30 +59,22 @@ export function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
 }
 
 /**
- * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
- * client-side isJobOverdue predicate uses local midnight, so the
- * server-side overdue filter has to agree on what date "today" is —
- * otherwise a job due 2026-05-19 can show the overdue icon locally
- * (because the user's local clock has rolled past midnight) while the
- * server query, anchored on UTC, still considers "today" to be 2026-05-19
- * and excludes it from the `due_date < today` filter.
- */
-function todayLocalISODate(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/**
- * The single server-side definition of "overdue" for a jobs query: due date set
- * and in the past (local date, via todayLocalISODate), production still active
- * (not_started or in_progress), and not fully shipped. Shared by the jobs-list
- * "overdue only" filter (getAllJobs) and the dashboard overdue-count metric so
- * the two SQL queries can't drift — including agreeing on the day boundary
- * (local date, not a UTC timestamp). The client-side mirror, applied per-row for
- * the overdue icon/badge, is isJobOverdue() in types/job.ts.
+ * Overdue as a PostgREST filter: due date set and in the past (local date, via
+ * todayLocalISODate), not fully shipped, not cancelled. Shared by the jobs-list
+ * "overdue only" filter (getAllJobs) and the dashboard overdue-count metric.
+ *
+ * THIS IS ONE OF THREE PLACES THE SAME RULE IS WRITTEN, and the other two are the
+ * authority: public.is_job_late() in SQL, and isJobOverdue() in types/job.ts for
+ * the per-row badge. PostgREST cannot call a function inside a filter, so this
+ * clause list has to exist; it is pinned to the other two by the shared golden
+ * cases in __tests__/fixtures/lateJobCases.json, which both a unit test and a
+ * Python integration test run. Change the rule in the migration first.
+ *
+ * A COMPLETED-BUT-UNSHIPPED JOB IS NOW OVERDUE. It was not until 2026-08-27: this
+ * used to require production_status IN ('not_started','in_progress'), so work that
+ * came off the machine and sat waiting to ship dropped off the list. The insights
+ * chat had always counted it — "delivery is the promise" — and the two disagreed
+ * by exactly one job on every demo company. The customer is waiting either way.
  *
  * Typed structurally (method syntax) so it accepts any Supabase filter builder
  * and returns the same builder for further chaining. (It predates #573, when
@@ -92,14 +85,13 @@ export function applyOverdueJobsFilter<
   Q extends {
     not(column: string, operator: string, value: unknown): Q;
     lt(column: string, value: unknown): Q;
-    in(column: string, values: readonly unknown[]): Q;
   },
 >(query: Q): Q {
   return query
     .not('due_date', 'is', null)
     .lt('due_date', todayLocalISODate())
     .not('fulfillment_status', 'eq', 'fully_shipped')
-    .in('production_status', ['not_started', 'in_progress']);
+    .not('production_status', 'eq', 'cancelled');
 }
 
 // ============== Read Queries ==============

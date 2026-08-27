@@ -78,17 +78,36 @@ inverse, used for querying; the two must stay in lockstep. `completed` and `canc
 
 ### Overdue (derived, never stored)
 
-Overdue = `due_date` set and past **and** production is not `completed`/`cancelled` **and**
-fulfillment is not `fully_shipped`. Derived at read time so a job can be both "in progress" and
-"overdue", and so no cron has to flip statuses.
+Overdue = `due_date` set and past **and** production is not `cancelled` **and** fulfillment is not
+`fully_shipped`. Derived at read time so a job can be both "in progress" and "overdue", and so no
+cron has to flip statuses.
 
-The predicate exists **twice on purpose** and the two must agree on the day boundary:
-`isJobOverdue(job)` in [`types/job.ts`](../../types/job.ts) (per-row, client) and
-`applyOverdueJobsFilter(query)` in [`utils/jobsAccess.ts`](../../utils/jobsAccess.ts)
-(server-side, shared by the list filter and the `overdue_jobs` dashboard metric).
-**Both parse the date as *local* midnight.** `new Date('YYYY-MM-DD')` parses as UTC midnight,
-which is the previous calendar day in negative-UTC zones — that bug painted a job due *today* as
-overdue in US Pacific.
+**A finished job that has not shipped IS overdue.** Delivery is the promise: a customer whose parts
+are sitting done on a bench is waiting exactly as long as one whose parts are still on the mill, and
+the overdue list is where you go to find out who to call. Changed 2026-08-27; until then the rule
+also cleared `production_status = 'completed'`, which is what made the jobs list show 6 overdue on a
+demo company where the insights chat said 7.
+
+**The definition is [`public.is_job_late()`](../../supabase/migrations/20260827114506_shared_late_job_predicate.sql),
+and it has three callers, in two dialects.**
+
+| Caller | How |
+|---|---|
+| `search_jobs_by_identifier` (the list's `overdue` filter) | calls the function |
+| The insights AI | calls the function — `public.is_job_late(due_date, production_status, fulfillment_status, $2)` |
+| [`applyOverdueJobsFilter`](../../utils/jobsAccess.ts) (list + `overdue_jobs` tile) | a clause list, because PostgREST cannot call a function inside a filter |
+| [`isJobOverdue`](../../types/job.ts) (per-row badge) | a TypeScript mirror, because a badge has no round trip to spend |
+
+The last two are pinned to the function by a shared golden-case fixture,
+[`__tests__/fixtures/lateJobCases.json`](../../__tests__/fixtures/lateJobCases.json), read by both a
+Vitest suite and `api/tests/integration/test_late_job_parity.py`. Neither side can be edited into
+agreement alone. **Change the migration first.**
+
+**The day boundary is the CALLER's, everywhere.** Postgres runs in UTC, so a job due Thursday would
+go overdue at 8pm Wednesday for a US shop if anything read the server clock. Nothing does: the RPC
+takes `p_today`, the AI binds `$2` (and its validator refuses `CURRENT_DATE` and `now()` outright),
+and the browser builds the date with [`todayLocalISODate`](../../lib/localDate.ts) — never
+`toISOString().slice(0, 10)`, which converts to UTC first and is the same bug in one line.
 
 Surfaces: an "Overdue" chip on the job detail header (`JobOverdueBadge`), and a trailing
 `Overdue by N days` icon on the list's **Due** cell. *(This doc previously said the chip also

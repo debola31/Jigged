@@ -10,7 +10,9 @@ import {
   type JobLifecycleStage,
   type ProductionStatus,
   type FulfillmentStatus,
+  type Job,
 } from '@/types/job';
+import lateJobCases from '../fixtures/lateJobCases.json';
 
 // Every production × fulfillment combination (4 × 3), with the expected
 // combined lifecycle stage and closed-ness. This is the contract the jobs-list
@@ -149,54 +151,56 @@ describe('STAGE_TO_JOB_FILTERS', () => {
 });
 
 describe('isJobOverdue', () => {
-  // `due_date` is a bare YYYY-MM-DD parsed at LOCAL midnight, so build the
-  // fixtures relative to the machine's today to stay deterministic anywhere.
-  function localDateOffset(days: number): string {
+  // THE CASES LIVE IN A FILE THAT SQL ALSO READS.
+  // __tests__/fixtures/lateJobCases.json is fed to isJobOverdue() here and to
+  // public.is_job_late() by api/tests/integration/test_late_job_parity.py, so the
+  // TypeScript mirror cannot drift from the definition the database and the AI
+  // use. Add a case there, not here.
+  //
+  // The fixture pins `today` to a fixed date; isJobOverdue reads the machine
+  // clock, so each case is re-anchored to the same OFFSET from the real today.
+  // That keeps the boundary cases (due today / yesterday / tomorrow) meaningful
+  // on any machine, on any day.
+  const fixtureToday = Date.parse(`${lateJobCases.today}T00:00:00Z`);
+
+  function reanchor(dueDate: string | null): string | null {
+    if (dueDate === null) return null;
+    const offsetDays = Math.round(
+      (Date.parse(`${dueDate}T00:00:00Z`) - fixtureToday) / 86_400_000,
+    );
     const d = new Date();
     d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + days);
+    d.setDate(d.getDate() + offsetDays);
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   }
-  const pastDue = localDateOffset(-2);
-  const futureDue = localDateOffset(2);
 
-  it('is overdue when past due and production is still active + unshipped', () => {
-    expect(
-      isJobOverdue({ due_date: pastDue, production_status: 'not_started', fulfillment_status: 'unshipped' }),
-    ).toBe(true);
-    expect(
-      isJobOverdue({ due_date: pastDue, production_status: 'in_progress', fulfillment_status: 'partially_shipped' }),
-    ).toBe(true);
-  });
+  it.each(lateJobCases.cases.map((c) => [c.name, c] as const))(
+    'golden case: %s',
+    (_name, c) => {
+      expect(
+        isJobOverdue({
+          due_date: reanchor(c.due_date),
+          production_status: c.production_status as Job['production_status'],
+          fulfillment_status: c.fulfillment_status as Job['fulfillment_status'],
+        }),
+      ).toBe(c.late);
+    },
+  );
 
-  it('is NOT overdue once production is completed, even if unshipped (the reported fix)', () => {
-    expect(
-      isJobOverdue({ due_date: pastDue, production_status: 'completed', fulfillment_status: 'unshipped' }),
-    ).toBe(false);
-  });
-
-  it('is NOT overdue once production is cancelled, even if unshipped', () => {
-    expect(
-      isJobOverdue({ due_date: pastDue, production_status: 'cancelled', fulfillment_status: 'unshipped' }),
-    ).toBe(false);
-  });
-
-  it('is NOT overdue once fully shipped, even while production is still active', () => {
-    expect(
-      isJobOverdue({ due_date: pastDue, production_status: 'in_progress', fulfillment_status: 'fully_shipped' }),
-    ).toBe(false);
-  });
-
-  it('is NOT overdue when the due date is in the future or absent', () => {
-    expect(
-      isJobOverdue({ due_date: futureDue, production_status: 'in_progress', fulfillment_status: 'unshipped' }),
-    ).toBe(false);
-    expect(
-      isJobOverdue({ due_date: null, production_status: 'in_progress', fulfillment_status: 'unshipped' }),
-    ).toBe(false);
+  it('covers both sides of the day boundary, so a strict < is actually pinned', () => {
+    // Guards the fixture itself: a case list that never exercises "due today" and
+    // "due yesterday" would let < and <= both pass, and that one character is a
+    // whole day of jobs.
+    const dues = lateJobCases.cases.map((c) => c.due_date);
+    expect(dues).toContain(lateJobCases.today);
+    expect(dues).toContain('2026-08-26');
+    const dueToday = lateJobCases.cases.find((c) => c.due_date === lateJobCases.today);
+    const dueYesterday = lateJobCases.cases.find((c) => c.due_date === '2026-08-26');
+    expect(dueToday?.late).toBe(false);
+    expect(dueYesterday?.late).toBe(true);
   });
 });
 

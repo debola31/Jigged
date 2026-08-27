@@ -187,12 +187,16 @@ export function isJobOverdue(
   job: Pick<Job, 'due_date' | 'production_status' | 'fulfillment_status'>,
 ): boolean {
   if (!job.due_date) return false;
-  // Not overdue once production has ended (completed or cancelled) or the job
-  // is fully shipped — a delivered or closed-out job can't be late. Keyed off
-  // production_status directly (not isJobDone, which additionally requires full
-  // shipment) so a completed-but-unshipped job also clears. Mirrors the
-  // server-side overdue filters in jobsAccess/dashboardAccess.
-  if (job.production_status === 'completed' || job.production_status === 'cancelled') return false;
+  // Cancelled work is not late: nobody is waiting for it. A FINISHED job that has
+  // not shipped IS late — delivery is the promise, and a customer whose parts are
+  // sitting on a bench is waiting exactly as long as one whose parts are still on
+  // the mill. This is the TypeScript mirror of public.is_job_late(); the golden
+  // cases in __tests__/fixtures/lateJobCases.json pin the two together, and a
+  // Python integration test runs the same file against the SQL.
+  //
+  // Until 2026-08-27 this also cleared `completed`, which is what made the jobs
+  // list show 6 overdue where the insights chat said 7.
+  if (job.production_status === 'cancelled') return false;
   if (job.fulfillment_status === 'fully_shipped') return false;
   const [y, m, d] = job.due_date.split('-').map((n) => parseInt(n, 10));
   if (!y || !m || !d) return false;

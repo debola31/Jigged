@@ -53,6 +53,28 @@ _FORBIDDEN_SCHEMA_PATTERN = re.compile(
 # SELECT INTO is a mutation (creates a table)
 _SELECT_INTO = re.compile(r"\bSELECT\b.*\bINTO\b", re.IGNORECASE | re.DOTALL)
 
+# The clock, refused so the caller's day boundary is the only one available.
+#
+# This database is UTC. A shop in the Americas is hours behind it, so for part of
+# every evening CURRENT_DATE is already tomorrow and "past its due date" is true a
+# day early -- which is how the chat and the jobs list came to disagree about which
+# jobs were late. The executor binds the CALLER's local date as $2, the same date
+# the jobs list already threads into SQL as p_today.
+#
+# THIS RULE IS THE MECHANICAL HALF OF THE FIX, and the only half worth automating.
+# "Did you filter deleted_at?" cannot be decided by looking at a query -- that one
+# is enforced in RLS instead. "Did you read the clock?" is exactly a regex.
+#
+# now() is matched with its parens so a column or alias merely CALLED now is not
+# refused; the bare words CURRENT_DATE / CURRENT_TIMESTAMP / LOCALTIMESTAMP are
+# reserved and cannot be identifiers, so \b is enough for them.
+_FORBIDDEN_CLOCK = re.compile(
+    r"\b(CURRENT_DATE|CURRENT_TIMESTAMP|LOCALTIMESTAMP|LOCALTIME|now\s*\(\s*\)|"
+    r"statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|"
+    r"clock_timestamp\s*\(\s*\))",
+    re.IGNORECASE,
+)
+
 # Whole-word denylist: reject if any sensitive/auth table name appears
 # anywhere in the query, however it is referenced. Not a second boundary --
 # it refuses before the round trip and returns a sentence the model can act
@@ -106,6 +128,15 @@ def validate_query(sql: str) -> tuple[bool, str]:
     match = _FORBIDDEN_PATTERNS.search(cleaned)
     if match:
         return False, f"Forbidden pattern: {match.group(1)}. System catalog access is not allowed."
+
+    # 5b. The clock. Refused so today has exactly one source: the bound $2.
+    clock = _FORBIDDEN_CLOCK.search(cleaned)
+    if clock:
+        return False, (
+            f"{clock.group(1)} is not available. Use $2 for today's date -- it is "
+            f"bound to the date where the user actually is. The database runs in "
+            f"UTC and would call a job late hours before the shop's day ends."
+        )
 
     # 6. Check for $1 placeholder (company_id scoping)
     if "$1" not in cleaned:

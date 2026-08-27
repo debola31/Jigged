@@ -316,3 +316,74 @@ class TestTableExtractionHardening:
             "SELECT * FROM inventory_locations WHERE company_id = $1"
         )
         assert valid
+
+
+class TestTheClockIsRefused:
+    """CURRENT_DATE and friends are rejected so today has exactly one source.
+
+    This is the mechanically checkable half of the insights/UI parity fix. The
+    other half -- "did you filter deleted_at" -- cannot be decided by looking at a
+    query and is enforced in RLS instead. This one is exactly a regex, so it is a
+    validator rule: the executor binds the CALLER's local date as $2, and a query
+    that reads the server clock instead is answering from a UTC day boundary that
+    the shop's screens do not use.
+    """
+
+    @pytest.mark.parametrize(
+        "clock",
+        [
+            "CURRENT_DATE",
+            "current_date",
+            "CURRENT_TIMESTAMP",
+            "LOCALTIMESTAMP",
+            "LOCALTIME",
+            "now()",
+            "NOW ()",
+            "clock_timestamp()",
+            "statement_timestamp()",
+            "transaction_timestamp()",
+        ],
+    )
+    def test_every_clock_source_is_refused(self, clock):
+        ok, msg = validate_query(
+            f"SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < {clock}"
+        )
+        assert ok is False
+        assert "$2" in msg, "the refusal must name the replacement, not just say no"
+
+    def test_the_refusal_explains_why_rather_than_just_forbidding(self):
+        _, msg = validate_query(
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < CURRENT_DATE"
+        )
+        # A bare "forbidden keyword" would invite the model to try
+        # CURRENT_TIMESTAMP next, then now(), burning an iteration each time.
+        assert "UTC" in msg
+
+    def test_a_query_using_the_bound_date_passes(self):
+        ok, _ = validate_query(
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < $2::date"
+        )
+        assert ok is True
+
+    def test_the_shared_predicate_passes(self):
+        ok, _ = validate_query(
+            "SELECT count(*) FROM jobs WHERE company_id = $1 "
+            "AND public.is_job_late(due_date, production_status, fulfillment_status, $2)"
+        )
+        assert ok is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # Identifiers that merely CONTAIN a clock word must survive: the rule
+            # matches now only with its parens, and the bare keywords are reserved
+            # words that cannot be column names anyway.
+            "SELECT nowhere FROM parts WHERE company_id = $1",
+            "SELECT known_now FROM parts WHERE company_id = $1",
+            "SELECT part_name AS now_shipping FROM parts WHERE company_id = $1",
+            "SELECT snowplough FROM parts WHERE company_id = $1",
+        ],
+    )
+    def test_a_column_that_merely_contains_a_clock_word_is_not_refused(self, sql):
+        ok, msg = validate_query(sql)
+        assert ok is True, msg

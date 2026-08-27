@@ -53,10 +53,17 @@ word would imply otherwise. Both phrases are the product's existing fulfilment v
 for this card. Words rather than a colour code, so the distinction survives bright shop lighting and colour
 blindness.
 
-**Overdue's money is a slice of Open Jobs', not a fifth pot.** `applyOverdueJobsFilter` restricts to
-`production_status IN ('not_started','in_progress')`, so every overdue job is also counted in Open Jobs.
-Nothing on this row is safe to add together except the two halves of the Open Jobs split, which are disjoint
-by construction.
+**Overdue's money overlaps Open Jobs', so it is not a fifth pot.** Nothing on this row is safe to add
+together except the two halves of the Open Jobs split, which are disjoint by construction.
+
+> **It stopped being a strict SUBSET on 2026-08-27**, and the difference is worth knowing before you
+> reconcile two tiles by hand. Overdue now counts a job whose production is `completed` but which has
+> not fully shipped — delivery is the promise, see [jobs.md](jobs.md#overdue-derived-never-stored) —
+> while Open Jobs still restricts to `not_started` / `in_progress`, because "what work is on the
+> books" is a question about the floor rather than about the customer. So an overdue job can sit
+> outside Open Jobs. Measured across production the day it changed: 5 such jobs in one usability
+> sandbox, 1 in each demo company, **0 in the pilot shop**. Both tiles' money is still honestly
+> labelled "not yet shipped"; only the containment claim changed.
 
 ### Open Quotes carries no money, deliberately
 
@@ -263,7 +270,7 @@ Also wanted: a wider period range for Completed (Month / Year / All Time).
 | An admin sees the money, with Overdue and Open Jobs sharing one label; a non-admin sees no dollar figure anywhere, but still sees counts and the split named as the jobs list names it | same file — 3 its |
 | The two gates compose: an admin of a tenant with `dashboard_revenue` off sees no money at all, and a non-admin sees none even with the flag on | same file — 2 its |
 | Open Quotes shows no money even for an admin; changing the period refetches and persists | same file — 2 its |
-| The overdue count uses one canonical clause set on the same builder as the jobs list, so tile and list agree | `__tests__/utils/jobsAccess.test.ts` — `describe('applyOverdueJobsFilter')`, 1 it |
+| The overdue count uses one canonical clause set on the same builder as the jobs list, so tile and list agree — and that clause set matches `public.is_job_late()` and the per-row badge | `__tests__/utils/jobsAccess.test.ts` — `describe('applyOverdueJobsFilter')`, 2 its; plus the shared golden cases in `__tests__/fixtures/lateJobCases.json`, run by `__tests__/types/job.test.ts` and `api/tests/integration/test_late_job_parity.py` |
 | The card returns only business milestones — never notes/photos/operations — newest-first, capped to the requested limit | `__tests__/utils/dashboardAccess.test.ts` — `describe('getDashboardActivity')`, 2 its |
 | `/activity` adds floor activity, separates text notes from photo notes, tags outside-op sent/received by vendor, merges sources newest-first, and **degrades best-effort when one source query errors** (returns the others, never throws) | same file — `describe('getActivityStream')`, 5 its |
 | Inventory events say what moved, how much and where; a transfer folds to the leg saying where stock ended up; a lone depletion leg survives; an adjustment reads as a count; the type is left out unless asked for | same file — `describe('inventory activity')`, 5 its |

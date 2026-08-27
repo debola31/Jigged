@@ -58,13 +58,25 @@ def test_a_run_that_raised_is_never_answered():
     assert _outcome(ok=False, error="LLMErrorEcho: ...", answer="").answered is False
 
 
-def test_grounded_requires_answered():
-    """`grounded` asks whether a number came from a query. A non-answer has no
-    number and no query, and counting it as grounded would flatter the arm
-    twice for the same failure."""
-    assert _outcome(answer="The column total_price does not exist.", tool_calls=1).grounded is False
-    assert _outcome(answer="You have 4 late jobs.", tool_calls=1).grounded is True
+def test_grounded_is_gone_and_stays_gone():
+    """Retired 2026-08-27, and pinned so it is not quietly reinstated.
 
+    It asked "does this answer contain digits without a tool call?", and every arm
+    calls the tool -- so it read 11/11 for all five arms of the five-arm run,
+    including one that got 3 of 11 queries to execute and one that answered "what
+    is the average value of a job this quarter?" with the company's gross profit.
+    A gate leg that cannot separate two arms is not a weak signal, it is no signal,
+    and FLIP_CONDITION carried it as one of three.
+
+    Reinstating it needs a definition that can tell those arms apart. For the
+    pipeline arms an untraceable number is already impossible by construction, and
+    for the tool-loop arms the handler reports no per-query outcome to compute it
+    from -- so that definition does not exist at this seam today.
+    """
+    from evals.insights_ab import FLIP_CONDITION, Outcome
+
+    assert not hasattr(Outcome, "grounded")
+    assert "WITHDRAWN" in FLIP_CONDITION
 
 def test_the_eval_is_stricter_than_the_handler_on_purpose():
     """The handler lets an echo through when a query succeeded -- it is a floor

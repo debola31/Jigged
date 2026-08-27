@@ -387,3 +387,113 @@ class TestTheClockIsRefused:
     def test_a_column_that_merely_contains_a_clock_word_is_not_refused(self, sql):
         ok, msg = validate_query(sql)
         assert ok is True, msg
+
+
+class TestTheBoundDateMustCarryItsType:
+    """`$2::date`, not bare `$2`, wherever the expression does not fix the type.
+
+    A parameter carries no type of its own, so Postgres has to infer one from
+    context. Compared against a typed column, or passed to a declared parameter,
+    it does. Handed to an overloaded date function, or to interval arithmetic, it
+    cannot -- and the query dies on a message that says nothing about casting:
+
+        function date_trunc(unknown, unknown) is not unique
+        operator does not exist: timestamp with time zone >= interval
+
+    IT IS ONE FAILURE IN EIGHT, AND IT IS THE ONE THAT MATTERED. semantics.md
+    states the rule in bold and gives both examples, and in the Gate 2 five-arm run
+    a local model dropped the cast anyway -- on the average-job-value question,
+    which is the question this line of work exists to get right. That arm had
+    reproduced the canonical query at 0.988 similarity and broke it on this single
+    token; the arm denied the exemplar wrote its own query and returned the correct
+    figure. The retry was handed Postgres's message and made the same mistake,
+    because the message never mentions casting.
+
+    The positions below are the ones that actually fail, established by running
+    each shape against Postgres rather than by reasoning about overload
+    resolution: see tests/integration/test_sql_error_classification.py.
+    """
+
+    UNTYPED = [
+        pytest.param("DATE_TRUNC('quarter', $2)", id="date_trunc"),
+        pytest.param("DATE_TRUNC('month', $2)", id="date_trunc-month"),
+        pytest.param("EXTRACT(MONTH FROM $2)", id="extract"),
+        pytest.param("AGE($2)", id="age"),
+    ]
+
+    @pytest.mark.parametrize("expr", UNTYPED)
+    def test_an_untyped_parameter_in_a_date_function_is_refused(self, expr):
+        is_valid, error = validate_query(
+            f"SELECT {expr} AS x, count(*) FROM jobs WHERE company_id = $1 GROUP BY 1"
+        )
+        assert not is_valid
+        assert "$2::date" in error
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            pytest.param("$2 - INTERVAL '6 months'", id="minus-interval"),
+            pytest.param("$2 + INTERVAL '1 day'", id="plus-interval"),
+            pytest.param("INTERVAL '1 day' + $2", id="interval-first"),
+        ],
+    )
+    def test_untyped_interval_arithmetic_is_refused(self, expr):
+        is_valid, error = validate_query(
+            f"SELECT count(*) FROM jobs WHERE company_id = $1 AND created_at >= {expr}"
+        )
+        assert not is_valid
+        assert "$2::date" in error
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            pytest.param("DATE_TRUNC('quarter', $2::date)", id="date_trunc-cast"),
+            pytest.param("DATE_TRUNC('quarter', $2 :: date)", id="spaced-cast"),
+            pytest.param("EXTRACT(MONTH FROM $2::date)", id="extract-cast"),
+            pytest.param("AGE($2::date)", id="age-cast"),
+        ],
+    )
+    def test_the_cast_makes_it_acceptable(self, expr):
+        is_valid, error = validate_query(
+            f"SELECT {expr} AS x, count(*) FROM jobs WHERE company_id = $1 GROUP BY 1"
+        )
+        assert is_valid, error
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # A comparison against a typed column fixes the type; Postgres infers
+            # date from due_date and timestamptz from created_at. Refusing these
+            # would reject correct SQL and spend the model's single retry.
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < $2",
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND created_at >= $2",
+            # A declared parameter position fixes it too -- semantics.md says a bare
+            # $2 inside is_job_late is fine, and it is.
+            "SELECT count(*) FROM jobs WHERE company_id = $1 "
+            "AND public.is_job_late(due_date, production_status, fulfillment_status, $2)",
+        ],
+    )
+    def test_a_position_that_already_fixes_the_type_is_left_alone(self, sql):
+        is_valid, error = validate_query(sql)
+        assert is_valid, error
+
+    def test_a_higher_numbered_placeholder_is_not_mistaken_for_the_date(self):
+        """`$2` must not match inside `$20`. The executor's own bind check makes the
+        same distinction; disagreeing with it would refuse a query it would run."""
+        is_valid, error = validate_query(
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < $20 - INTERVAL '1 day'"
+        )
+        assert is_valid, error
+
+    def test_no_reference_query_in_semantics_is_refused(self):
+        """The false-positive guard. These are executed for real under
+        jigged_ai_readonly on every CI run, so any of them failing here is this
+        rule's bug."""
+        from services.insights_pipeline.retrieval import load_pairs
+
+        refused = {}
+        for pair in load_pairs():
+            is_valid, error = validate_query(pair.sql)
+            if not is_valid:
+                refused[pair.id] = error
+        assert not refused, f"the cast rule refused known-good reference SQL: {refused}"

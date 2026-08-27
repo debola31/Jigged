@@ -17,7 +17,12 @@ from supabase import Client, create_client
 logger = logging.getLogger(__name__)
 
 
-SEMANTICS_PATH = Path(__file__).resolve().parents[2] / "docs" / "ai" / "semantics.md"
+# INSIDE api/, NOT docs/, AND THAT IS LOAD-BEARING. vercel.json's excludeFiles
+# drops docs/** from every api/** function bundle, so the previous
+# docs/ai/semantics.md resolved locally and in CI and raised FileNotFoundError on
+# Vercel -- insights was down in production until this moved. Resolve relative to
+# this package and the file ships with the code that reads it.
+SEMANTICS_PATH = Path(__file__).resolve().parent / "ai" / "semantics.md"
 
 
 @lru_cache(maxsize=1)
@@ -27,8 +32,9 @@ def load_semantics() -> str:
     ONE SOURCE, not a copy. These definitions used to be prose inside
     SCHEMA_CONTEXT with a doc describing them separately, and the two drifted --
     which is how three model arms answered "how many jobs are late right now" with
-    5, 4 and 0, each defensibly. docs/ai/semantics.md is rendered straight into the
-    prompt, so the document IS the runtime and drift is structurally impossible.
+    5, 4 and 0, each defensibly. api/services/ai/semantics.md is rendered straight
+    into the prompt, so the document IS the runtime and drift is structurally
+    impossible.
 
     Cached deliberately: the file changes only via PR, and the assembled prompt has
     to be a stable prefix for prompt caching and Ollama KV reuse to hold.

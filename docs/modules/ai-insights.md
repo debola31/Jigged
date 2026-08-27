@@ -196,14 +196,20 @@ payroll question by pasting `semantics.md`'s model answer back verbatim — plac
 what to do instead. The `chart_config` sample survives because it is a machine format the next
 sentence refers to by key name, not prose to imitate.
 
-### Business terms live in `docs/ai/semantics.md`, and it is runtime
+### Business terms live in `api/services/ai/semantics.md`, and it is runtime
 
-[`ai/semantics.md`](../ai/semantics.md) defines late, revenue, job value, this quarter, dormant,
-pipeline and conversion — **and `_build_chat_system_prompt()` renders it straight into the system
-prompt.** It is documentation and source in one, so editing it changes what the product answers.
+[`api/services/ai/semantics.md`](../../api/services/ai/semantics.md) defines late, revenue, job
+value, this quarter, dormant, pipeline and conversion — **and `_build_chat_system_prompt()` renders
+it straight into the system prompt.** It is documentation and source in one, so editing it changes
+what the product answers.
 There is no second copy in Python, deliberately: the Gate 1 eval had three arms answer *"how many
 jobs are late right now"* with 5, 4 and 0, each defensibly, because the term was undefined and the
 prose that gestured at it lived somewhere the runtime never read.
+
+**It lives under `api/`, not `docs/`, and moving it back would take insights down.** `excludeFiles`
+in [`vercel.json`](../../vercel.json) drops `docs/**` from every `api/**` function bundle, so the
+file resolved locally and in CI and raised `FileNotFoundError: /var/task/docs/ai/semantics.md` in
+production. It is source that reads as documentation, so it ships beside the code that reads it.
 
 Every ```sql block in that file is executed with `LIMIT 1` as `jigged_ai_readonly` on each CI run,
 so a definition citing an unreadable column fails the build. Assembly order —

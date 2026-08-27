@@ -39,12 +39,6 @@ TERMINAL = [
         "user_company_access",
         id="undefined-table",
     ),
-    pytest.param(
-        asyncpg.exceptions.UndefinedFunctionError(
-            "function public.job_last_ship_date(uuid) does not exist"),
-        "public.job_last_ship_date(uuid)",
-        id="undefined-function",
-    ),
 ]
 
 
@@ -85,6 +79,29 @@ def test_the_object_comes_from_the_exception_not_the_sql(exc, expected_object):
         # privilege is a fact about the database. Only the second ends the turn.
         pytest.param(asyncpg.exceptions.UndefinedColumnError(
             "column s.total_price does not exist"), id="undefined-column"),
+        # UndefinedFunctionError, all three shapes of it. It was terminal until
+        # the Gate 2 pipeline run, where it cost the arm a whole question:
+        # Arctic-Text2SQL wrote `DATE($2, '-6 months')` -- a SQLite idiom, which is
+        # what Spider and BIRD are written in -- Postgres answered `operator does
+        # not exist: timestamp with time zone >= interval`, and the model was told
+        # "This object is unavailable. Do not retry this query." Adding a cast is
+        # exactly the correction the next turn makes.
+        #
+        # THE JUSTIFICATION FOR KEEPING IT TERMINAL TURNED OUT NOT TO EXIST. A
+        # function the sandbox may not EXECUTE does not raise this at all -- it
+        # raises InsufficientPrivilegeError, "permission denied for function X",
+        # which is still terminal above. Verified against a live database in
+        # tests/integration/test_sql_error_classification.py. So every remaining
+        # way to reach UndefinedFunctionError is a model mistake: wrong argument
+        # types, wrong arity, a dialect that is not Postgres, or a function nobody
+        # ever defined. Same argument as UndefinedColumnError, one line down.
+        pytest.param(asyncpg.exceptions.UndefinedFunctionError(
+            "operator does not exist: timestamp with time zone >= interval"),
+            id="operator-type-mismatch"),
+        pytest.param(asyncpg.exceptions.UndefinedFunctionError(
+            "function date(unknown, unknown) does not exist"), id="sqlite-dialect"),
+        pytest.param(asyncpg.exceptions.UndefinedFunctionError(
+            "function public.no_such_fn(uuid) does not exist"), id="invented-function"),
         pytest.param(RuntimeError("something else entirely"), id="not-a-postgres-error"),
     ],
 )

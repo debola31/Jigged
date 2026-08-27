@@ -73,9 +73,28 @@ def retryable_sql_error(message: str) -> dict:
 _NOT_PERMITTED_ERRORS = (
     asyncpg.exceptions.InsufficientPrivilegeError,
     asyncpg.exceptions.UndefinedTableError,
-    asyncpg.exceptions.UndefinedFunctionError,
 )
 
+# UndefinedFunctionError is deliberately NOT here either, and the reason it was is
+# worth writing down: it looked like the privilege case and is not one.
+#
+# WHAT IT ACTUALLY COVERS. Postgres raises 42883 for a wrong ARGUMENT TYPE, a wrong
+# ARITY, an operator that does not exist for the operand types, and a function
+# nobody defined. Every one of those is the model's own expression, and every one
+# is fixed by rewriting it. What it does NOT cover is a function the sandbox may
+# not execute: that raises InsufficientPrivilegeError, "permission denied for
+# function X", which is still terminal above. Verified against a live database in
+# tests/integration/test_sql_error_classification.py rather than reasoned about,
+# because reasoning about it is how it got here.
+#
+# WHAT IT COST. In the Gate 2 pipeline run, Arctic-Text2SQL answered "which
+# customers have not ordered in six months?" with `DATE($2, '-6 months')` -- a
+# SQLite idiom, which is what Spider and BIRD are written in. Postgres said
+# `operator does not exist: timestamp with time zone >= interval`; the executor
+# said "This object is unavailable. Do not retry this query." Adding a cast is
+# precisely the correction the next turn makes, and the turn never came. A local
+# SQL specialist trained on SQLite will produce this constantly.
+#
 # UndefinedColumnError is deliberately NOT here. It was, for one run, and the eval
 # caught it: the model wrote `shipments.total_price`, a column that simply does not
 # exist, and got told not to retry -- when picking the right column name is exactly

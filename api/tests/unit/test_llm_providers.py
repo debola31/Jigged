@@ -308,7 +308,7 @@ async def test_the_real_chat_tools_reach_the_wire_openai_shaped():
     """The object actually sent in production, not a stand-in. A tool added to
     CHAT_TOOLS in Anthropic shape -- which is the shape that file is written in --
     must keep arriving translated."""
-    from tools.metric_tools import CHAT_TOOLS
+    from tools.chat_tools import CHAT_TOOLS
 
     provider, seen = _compat()
     await provider.complete([Message(role="user", content="q")], tools=CHAT_TOOLS)

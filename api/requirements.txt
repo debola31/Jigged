@@ -9,7 +9,10 @@ email-validator>=2.0.0
 # Authentication (for operator JWT tokens)
 PyJWT>=2.8.0
 
-# AI providers (for CSV import mapping)
+# AI provider. Anthropic is the only one — the OpenAI and Gemini provider classes
+# were deleted along with `openai` and `google-genai`, which they alone imported.
+# services/llm/openai_compat.py talks to OpenAI-compatible endpoints over httpx
+# and needs no vendor SDK.
 # >=0.86.0 for output_config json_schema, the structured-output mechanism used by
 # routes/drawing_routes.py and services/llm/anthropic_provider.py. The floor was
 # >=0.40.0 (chosen for client.models.list(), the model-deprecation check in
@@ -17,8 +20,6 @@ PyJWT>=2.8.0
 # drawing_routes code -- prod happened to install 0.86.0, so nothing broke and
 # nothing said so. Raised 2026-08-25.
 anthropic>=0.86.0
-openai>=1.0.0
-google-genai>=0.3.0
 
 # Error monitoring
 sentry-sdk[fastapi]>=2.0.0

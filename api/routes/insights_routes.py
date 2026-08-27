@@ -19,11 +19,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
-from models.insights_models import (
-    ChatEnqueued,
-    ChatRequest,
-    ChatResponse,
-)
+from models.insights_models import ChatEnqueued, ChatRequest
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
 from services.llm.errors import (
@@ -324,11 +320,6 @@ def _log_chat_query(db, company_id: str, question: str, result: dict, duration_m
 # and the route body itself resolve them from this namespace -- the same shape as
 # quickbooks_routes.py's `_service_client = company_auth.service_client`.
 from services.insights_presentation import (  # noqa: E402
-    _ALLOWED_CHART_TYPES,
-    _COMPARABLE_RATIO,
-    _MIN_CHART_POINTS,
-    _coerce_number,
-    _comparable,
     _extract_chart_config,
     _flatten_markdown_tables,
     _select_chart_type,

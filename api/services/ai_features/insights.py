@@ -71,18 +71,22 @@ async def _run_tool(company_id: str, call: ToolCall) -> dict[str, Any]:
     fixable failure nor a success. That is the right reading: the executor
     already shapes every failure the model could have caused, so anything left
     is ours and no retry reaches it.
+
+    CHAT_TOOLS offers exactly one tool, so a name other than execute_sql means the
+    model INVENTED one -- which an OpenAI-compat local model does, and
+    openai_compat parses whatever name comes back. The raise below is caught two
+    lines down and handed to the model as data, exactly as the deleted
+    execute_tool dispatcher used to do with its own ValueError.
     """
-    from services.insights_service import execute_sql_tool, execute_tool
+    from services.insights_service import execute_sql_tool
 
     try:
-        if call.name == "execute_sql":
-            return await execute_sql_tool(
-                company_id=company_id,
-                sql=call.arguments.get("sql", ""),
-                description=call.arguments.get("description", ""),
-            )
-        return execute_tool(
-            company_id=company_id, tool_name=call.name, tool_input=call.arguments
+        if call.name != "execute_sql":
+            raise ValueError(f"Unknown tool: {call.name}")
+        return await execute_sql_tool(
+            company_id=company_id,
+            sql=call.arguments.get("sql", ""),
+            description=call.arguments.get("description", ""),
         )
     except Exception as exc:  # noqa: BLE001 - hand the failure back to the model
         logger.warning("insights tool %s failed: %s", call.name, type(exc).__name__)
@@ -116,7 +120,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     settled `succeeded` with "The column total_price does not exist..." in it.
     """
     from services.insights_service import _build_chat_system_prompt
-    from tools.metric_tools import CHAT_TOOLS
+    from tools.chat_tools import CHAT_TOOLS
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
     question = (ctx.payload.get("question") or "").strip()

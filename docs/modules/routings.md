@@ -202,9 +202,14 @@ Still true as of 2026-08-03: the column is absent from `types/database.ts` and
 `supabase/migrations/`, yet the importer maps, validates
 (`invalid_external_setup_cost`), and writes it. The covering test mocks Supabase, so it
 passes on a column that does not exist. The same stale reference also survives in
-`api/routes/parts_import_routes.py`, `api/services/insights_service.py`,
-`api/tools/metric_tools.py`, and `api/tools/schema_context.py` — the last two feed the AI's
-schema context, so the model is told about a dropped column.
+`api/routes/parts_import_routes.py` and `api/tools/schema_context.py` — the second feeds the
+AI's schema context, so the model is still told about a dropped column in one place
+(`:375`) while being told at `:305` that it was dropped.
+
+**Two of the four are gone.** `api/services/insights_service.py` and the METRIC_TOOLS list
+(in the file now named [`api/tools/chat_tools.py`](../../api/tools/chat_tools.py)) held theirs
+inside the predefined metric-tool path, which was deleted whole — a reminder that some stale
+references are cheapest to fix by deleting the code that carries them.
 
 ---
 

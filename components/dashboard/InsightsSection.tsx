@@ -111,12 +111,9 @@ export default function InsightsSection({
             <Grid key={saved.id} size={{ xs: 12, md: 6 }}>
               <InsightCard
                 insight={{
-                  type: 'saved',
                   summary: saved.answer,
-                  metric_data: {},
                   chart_config: saved.chart_config,
                   computed_at: saved.created_at,
-                  is_cached: false,
                 }}
                 title={saved.question}
                 removable

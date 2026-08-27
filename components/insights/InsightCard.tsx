@@ -6,11 +6,6 @@ import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import IconButton from '@mui/material/IconButton';
-import Alert from '@mui/material/Alert';
-import Chip from '@mui/material/Chip';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
 import CloseIcon from '@mui/icons-material/Close';
 import InsightChart from './InsightChart';
 import type { InsightCard as InsightCardType } from '@/utils/insightsAccess';
@@ -18,7 +13,7 @@ import type { InsightCard as InsightCardType } from '@/utils/insightsAccess';
 interface InsightCardProps {
   insight: InsightCardType | null;
   loading?: boolean;
-  /** Override card title (used for saved insights where title = question) */
+  /** Card title — the saved insight's question. Absent only for the skeleton. */
   title?: string;
   /** Show × remove button */
   removable?: boolean;
@@ -26,13 +21,6 @@ interface InsightCardProps {
   /** Chart height in pixels */
   chartHeight?: number;
 }
-
-const INSIGHT_LABELS: Record<string, string> = {
-  revenue_trend: 'Revenue Trend',
-  job_pipeline: 'Job Pipeline',
-  quote_conversion: 'Quote Conversion',
-  inventory_alerts: 'Inventory Alerts',
-};
 
 function getTimeAgo(computedAt: string): string {
   const now = new Date();
@@ -48,62 +36,10 @@ function getTimeAgo(computedAt: string): string {
   return `${diffDays}d ago`;
 }
 
-function AlertList({ insight }: { insight: InsightCardType }) {
-  const { type, metric_data } = insight;
-
-  if (type === 'inventory_alerts') {
-    const alerts = (metric_data?.alerts as Array<Record<string, unknown>>) || [];
-    if (alerts.length === 0) {
-      return (
-        <Alert severity="success" sx={{ mb: 1 }}>
-          All inventory levels are above reorder points.
-        </Alert>
-      );
-    }
-    return (
-      <List dense disablePadding>
-        {alerts.slice(0, 5).map((alert, i) => (
-          <ListItem key={i} disableGutters sx={{ py: 0.5 }}>
-            <ListItemText
-              primary={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {String(alert.item_name || '')}
-                  </Typography>
-                  <Chip
-                    label={String(alert.severity || 'unknown')}
-                    size="small"
-                    color={
-                      alert.severity === 'critical'
-                        ? 'error'
-                        : alert.severity === 'high'
-                          ? 'warning'
-                          : 'default'
-                    }
-                    sx={{ height: 20, fontSize: '0.7rem' }}
-                  />
-                </Box>
-              }
-              secondary={`Qty: ${Number(alert.quantity || 0)} / Reorder: ${Number(alert.reorder_point || 0)} ${String(alert.unit || 'ea')}`}
-            />
-          </ListItem>
-        ))}
-        {alerts.length > 5 && (
-          <Typography variant="caption" color="text.secondary" sx={{ pl: 1 }}>
-            +{alerts.length - 5} more
-          </Typography>
-        )}
-      </List>
-    );
-  }
-
-  return null;
-}
-
 export default function InsightCard({
   insight,
   loading = false,
-  title: titleOverride,
+  title,
   removable = false,
   onRemove,
   chartHeight = 200,
@@ -139,8 +75,6 @@ export default function InsightCard({
     );
   }
 
-  const isAlertType = insight.type === 'inventory_alerts';
-  const title = titleOverride || INSIGHT_LABELS[insight.type] || insight.type;
   const timeAgo = getTimeAgo(insight.computed_at);
 
   return (
@@ -190,11 +124,9 @@ export default function InsightCard({
         </Typography>
       </Box>
 
-      {/* Content: Chart or Alert List */}
+      {/* Content */}
       <Box sx={{ flex: 1, mb: 1.5, minHeight: 0 }}>
-        {isAlertType ? (
-          <AlertList insight={insight} />
-        ) : insight.chart_config ? (
+        {insight.chart_config ? (
           <InsightChart chartConfig={insight.chart_config} height={chartHeight} />
         ) : (
           <Box

@@ -70,8 +70,14 @@ chosen yet. `MetricValue.money` is `null` here, not `0`, because `0` would rende
 Money on a job is the sum of its own `job_parts.total_price` (falling back to `unit_price × quantity`). The job
 part is the post-conversion source of truth, so this follows a quantity edited after conversion, counts a job
 created without a quote at all, and does not over-count a price-options quote's unchosen lines.
-`insights_service._job_part_revenue` is the same rule on the backend and the two must not drift; the rule
-itself is stated once in [AI Insights](ai-insights.md).
+The rule itself is stated once, in [`semantics.md`](../../api/services/ai/semantics.md), which the
+insights chat renders into its system prompt.
+
+> **Corrected 2026-08-27.** This used to say *"`insights_service._job_part_revenue` is the same rule
+> on the backend and the two must not drift"*. That helper is gone with the predefined metric
+> functions it served, and the claim was never enforced by anything — no test compared the two. The
+> lesson generalises: a sentence asserting that two implementations agree is not a mechanism for
+> making them agree. See [ai-insights.md](ai-insights.md#withdrawn--the-predefined-metric-functions).
 
 ### The Open Jobs split
 

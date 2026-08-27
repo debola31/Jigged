@@ -1,22 +1,25 @@
 """AI provider factory with database-driven configuration."""
 
-import os
 from typing import Optional
 
 from supabase import Client
 
 from .base_provider import AIProvider
 from .claude_provider import ClaudeProvider
-from .openai_provider import OpenAIProvider
-from .gemini_provider import GeminiProvider
-from .model_config import DEFAULT_ANTHROPIC_MODEL
 
 
 def create_provider(provider_name: str, model: Optional[str] = None) -> AIProvider:
     """Create an AI provider instance by name.
 
+    Anthropic is the only implementation. `OpenAIProvider` and `GeminiProvider`
+    used to sit beside it and every one of their methods raised
+    NotImplementedError, so an `ai_config.provider` row naming either one bought
+    a 500 at call time rather than a second provider. They are gone; an unknown
+    name now raises here, which `get_provider` catches and answers with the
+    Anthropic default.
+
     Args:
-        provider_name: Provider identifier ('anthropic', 'openai', 'gemini')
+        provider_name: Provider identifier ('anthropic')
         model: Optional model override
 
     Returns:
@@ -29,10 +32,6 @@ def create_provider(provider_name: str, model: Optional[str] = None) -> AIProvid
 
     if provider_name == "anthropic":
         return ClaudeProvider(model=model)
-    elif provider_name == "openai":
-        return OpenAIProvider(model=model)
-    elif provider_name == "gemini":
-        return GeminiProvider(model=model)
     else:
         raise ValueError(f"Unknown AI provider: {provider_name}")
 
@@ -79,38 +78,3 @@ async def get_provider(
 
     # Default to Claude/Anthropic
     return create_provider("anthropic")
-
-
-def get_available_providers() -> list[dict]:
-    """Get list of available AI providers and their status.
-
-    Returns:
-        List of provider info dicts with name, available status, and model info
-    """
-    providers = []
-
-    # Check Anthropic
-    providers.append({
-        "name": "anthropic",
-        "display_name": "Claude (Anthropic)",
-        "available": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "default_model": DEFAULT_ANTHROPIC_MODEL,
-    })
-
-    # Check OpenAI
-    providers.append({
-        "name": "openai",
-        "display_name": "GPT (OpenAI)",
-        "available": bool(os.getenv("OPENAI_API_KEY")),
-        "default_model": "gpt-4o",
-    })
-
-    # Check Gemini
-    providers.append({
-        "name": "gemini",
-        "display_name": "Gemini (Google)",
-        "available": bool(os.getenv("GOOGLE_AI_API_KEY")),
-        "default_model": "gemini-1.5-pro",
-    })
-
-    return providers

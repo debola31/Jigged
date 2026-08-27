@@ -414,10 +414,17 @@ the live list.
 #### 8.5 Backend Structure
 
 `routes/` (thin HTTP) → `models/` (Pydantic) → `services/` (`ai/` provider package:
-factory + base/claude/openai/gemini + `model_config`; plus `email`,
-`insights_service`, `quickbooks`, `uom_normalizer`) → `tools/` (`sql_validator`,
-`sql_executor`, `schema_context`, `metric_tools` — the insights SQL sandbox) →
-`utils/` (`rate_limiter`, `db_pagination`).
+factory + base/claude + `model_config`; plus `email`, `insights_service`,
+`quickbooks`, `uom_normalizer`) → `tools/` (`sql_validator`, `sql_executor`,
+`schema_context`, `chat_tools` — the insights SQL sandbox) → `utils/`
+(`rate_limiter`, `db_pagination`).
+
+**Claude is the only `AIProvider`.** `openai_provider.py` and `gemini_provider.py` sat
+beside it with every method raising `NotImplementedError`, so an `ai_config.provider` row
+naming either bought a 500 at call time rather than a second provider; both are deleted,
+along with the `openai` and `google-genai` dependencies they alone imported. This is
+separate from `services/llm/`, which does talk to non-Anthropic models — over an
+OpenAI-compatible HTTP API, with no vendor SDK.
 
 **CSV import flow, identical for every entity:** **Analyze** (AI suggests column
 mapping) → **Validate** (conflict detection + preview) → **Execute** (batched

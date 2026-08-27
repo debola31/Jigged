@@ -55,18 +55,22 @@ class TestParseJsonResponse:
 
 # --------------------------------------------------------------------------- subclasses concrete
 class TestProvidersConcrete:
-    def test_claude_openai_gemini_have_no_abstract_methods(self):
-        from services.ai.openai_provider import OpenAIProvider
-        from services.ai.gemini_provider import GeminiProvider
+    """ClaudeProvider is the only AIProvider implementation.
 
-        for cls in (ClaudeProvider, OpenAIProvider, GeminiProvider):
-            assert not inspect.isabstract(cls), f"{cls.__name__} still abstract"
-            assert cls.__abstractmethods__ == frozenset(), f"{cls.__name__} missing overrides"
+    OpenAIProvider and GeminiProvider used to be asserted here too. Every one of
+    their methods raised NotImplementedError, so an ai_config row naming either
+    bought a 500 at call time rather than a second provider; both are deleted.
+    """
 
-    def test_create_provider_openai_constructs(self, monkeypatch):
-        # Adding abstract methods must not make the subclass un-instantiable.
-        monkeypatch.setenv("OPENAI_API_KEY", "x")
-        assert create_provider("openai").provider_name == "openai"
+    def test_claude_has_no_abstract_methods(self):
+        # Adding an abstract method to AIProvider must not make the one concrete
+        # subclass un-instantiable.
+        assert not inspect.isabstract(ClaudeProvider)
+        assert ClaudeProvider.__abstractmethods__ == frozenset()
+
+    def test_unknown_provider_name_raises(self):
+        with pytest.raises(ValueError, match="Unknown AI provider"):
+            create_provider("openai")
 
 
 # --------------------------------------------------------------------------- analyze_structure

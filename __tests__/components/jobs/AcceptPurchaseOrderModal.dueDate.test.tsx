@@ -64,6 +64,45 @@ describe('AcceptPurchaseOrderModal — due date validation timing', () => {
     expect(screen.queryByText('Due date is required')).not.toBeInTheDocument();
   });
 
+  // The native date input paints its own empty state — today's date in Safari,
+  // "mm/dd/yyyy" in Chrome — which reads as already-filled. We blank the
+  // segments via CSS while the value is empty. The rule MUST come back off
+  // once a date exists: left on permanently it hides the real value too
+  // (verified in a browser; jsdom applies no ::-webkit-datetime-edit styling,
+  // so this asserts the rule's presence rather than the paint).
+  const segmentsBlanked = () => {
+    const root = dueField().closest('.MuiFormControl-root');
+    if (!root) throw new Error('due date field has no FormControl root');
+    const own = Array.from(root.classList);
+    const css = Array.from(document.querySelectorAll('style'))
+      .map((el) => el.textContent ?? '')
+      .join('\n');
+    return css
+      .split('}')
+      .some(
+        (rule) =>
+          rule.includes('datetime-edit') &&
+          !rule.includes(':focus') &&
+          own.some((c) => rule.includes(`.${c}`)),
+      );
+  };
+
+  it('blanks the native date segments while empty, so it does not read as pre-filled', () => {
+    render(<AcceptPurchaseOrderModal open {...props} />);
+
+    expect(segmentsBlanked()).toBe(true);
+  });
+
+  it('stops blanking once a real date is entered, or it would hide the value', async () => {
+    render(<AcceptPurchaseOrderModal open {...props} />);
+    expect(segmentsBlanked()).toBe(true);
+
+    fireEvent.change(dueField(), { target: { value: FUTURE } });
+
+    await waitFor(() => expect(dueField().value).toBe(FUTURE));
+    expect(segmentsBlanked()).toBe(false);
+  });
+
   it('still rejects a past date immediately, without waiting for a blur', async () => {
     render(<AcceptPurchaseOrderModal open {...props} />);
 

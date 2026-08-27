@@ -80,6 +80,24 @@ function todayLocalISODate(): string {
 }
 
 /**
+ * An EMPTY <input type="date"> still paints something: Safari fills the
+ * segments with today's date in grey, Chrome shows "mm/dd/yyyy". Both read as
+ * a value that is already there — the one thing a required, still-blank field
+ * must not look like. Blanking the native segments leaves a genuinely empty
+ * box; the shrunk "Due date *" label and the calendar indicator (untouched by
+ * this) still say what the field is and how to open the picker.
+ *
+ * Only applied while the value is empty — the same rule left permanently on
+ * hides a real date too. Focus restores the segments so there is something to
+ * type into: an empty field is focusable before it has a value, and typing
+ * into an invisible one is worse than the problem being fixed.
+ */
+const blankDateSegments = {
+  '& input::-webkit-datetime-edit': { color: 'transparent' },
+  '& input:focus::-webkit-datetime-edit': { color: 'inherit' },
+} as const;
+
+/**
  * Accept a customer Purchase Order and create a job directly — no quote.
  * Existing parts only (each must already have a routing). The agreed price is
  * captured per line and stored on the job; an optional PO PDF is attached after
@@ -374,6 +392,7 @@ export default function AcceptPurchaseOrderModal({
                 disabled={loading}
                 error={dueDateError}
                 helperText={dueDateHelper}
+                sx={dueDateEmpty ? blankDateSegments : undefined}
                 slotProps={{ htmlInput: { min: today }, inputLabel: { shrink: true } }}
               />
             </Box>

@@ -26,7 +26,7 @@ is prefixed `/dashboard/{companyId}`.
 | Key | Label | Count | Money | Drill-down |
 |---|---|---|---|---|
 | `overdue_jobs` | Overdue Jobs | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "not yet shipped" | `/jobs?overdue=true` |
-| `open_jobs` | Open Jobs | `production_status IN ('not_started','in_progress')` AND not `fully_shipped` | ordered **minus already shipped** — "not yet shipped" | `/jobs?status=not_started` |
+| `open_jobs` | Open Jobs | not `fully_shipped` AND not `cancelled` | ordered **minus already shipped** — "not yet shipped" | `/jobs?status=not_started` |
 | `completed_jobs` | Completed Jobs | distinct jobs **shipped from** in the period | value shipped in the period — "shipped this week" / "shipped today", with a period-over-period delta | `/jobs?status=completed` |
 | `open_quotes` | Open Quotes | `quotes.status = 'active'` | none — see below | `/quotes?status=active` |
 
@@ -53,17 +53,22 @@ word would imply otherwise. Both phrases are the product's existing fulfilment v
 for this card. Words rather than a colour code, so the distinction survives bright shop lighting and colour
 blindness.
 
-**Overdue's money overlaps Open Jobs', so it is not a fifth pot.** Nothing on this row is safe to add
-together except the two halves of the Open Jobs split, which are disjoint by construction.
+**Overdue's money is a slice of Open Jobs', not a fifth pot.** The two tiles are one rule apart:
 
-> **It stopped being a strict SUBSET on 2026-08-27**, and the difference is worth knowing before you
-> reconcile two tiles by hand. Overdue now counts a job whose production is `completed` but which has
-> not fully shipped — delivery is the promise, see [jobs.md](jobs.md#overdue-derived-never-stored) —
-> while Open Jobs still restricts to `not_started` / `in_progress`, because "what work is on the
-> books" is a question about the floor rather than about the customer. So an overdue job can sit
-> outside Open Jobs. Measured across production the day it changed: 5 such jobs in one usability
-> sandbox, 1 in each demo company, **0 in the pilot shop**. Both tiles' money is still honestly
-> labelled "not yet shipped"; only the containment claim changed.
+| | Rule |
+|---|---|
+| **Open Jobs** | not fully shipped **and** not cancelled |
+| **Overdue** | the same, **and** past its due date |
+
+So every overdue job is an open job by construction, not by two filters that happen to line up.
+Nothing on this row is safe to add together except the three parts of the Open Jobs split, which are
+disjoint by construction.
+
+> **Both widened on 2026-08-27.** Each used to require `production_status IN
+> ('not_started','in_progress')`, which dropped a job finished on the floor but not yet shipped out
+> of *both* tiles — it was neither open nor overdue, while the customer was still waiting for it.
+> `production_status` is no longer part of either rule; it only decides which bucket of the Open
+> Jobs split a job lands in. See [jobs.md](jobs.md#overdue-derived-never-stored).
 
 ### Open Quotes carries no money, deliberately
 
@@ -88,13 +93,19 @@ insights chat renders into its system prompt.
 
 ### The Open Jobs split
 
-The merged tile shows `51 Not Started · 12 In Progress` beneath the money. The total answers *how much work is
-on the books*; the split answers *is it flowing or piling up*, which a single number would hide. The split is
-visible to everyone — it carries no money.
+The merged tile shows `51 Not Started · 12 In Progress` beneath the money, and `· 3 Completed` when any job is
+finished on the floor but not yet shipped. The total answers *how much work is on the books*; the split
+answers *is it flowing or piling up*, which a single number would hide. The split is visible to everyone — it
+carries no money.
 
-The two state names come from `PRODUCTION_STATUS_CONFIG` rather than being spelled out in the card, so they
-are the same words the jobs list and its status chips use. A synonym invented for one card ("queued",
-"running") makes a reader wonder whether it means something different.
+**Three buckets, because `production_status` is not part of the Open Jobs rule.** It only says where inside
+the tile a job sits. The three states are disjoint and cover the filter exactly, which is what makes this the
+one genuinely additive figure on the row. **Completed is omitted when it is zero** — most shops ship as they
+finish, and a permanent `· 0 Completed` is noise on the card that most has to read at a glance.
+
+The state names come from `PRODUCTION_STATUS_CONFIG` rather than being spelled out in the card, so they are
+the same words the jobs list and its status chips use. A synonym invented for one card ("queued", "running")
+makes a reader wonder whether it means something different.
 
 ### Money is admin-only
 

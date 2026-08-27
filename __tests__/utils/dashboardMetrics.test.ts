@@ -17,11 +17,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  *     alternatives that were never all going to happen (~8% overstatement on the
  *     pilot shop's live data), and the correct figure is not merely hard to
  *     compute but undefined until someone chooses.
- *   * Overdue OVERLAPS Open Jobs, so its money is not a fifth pot. It stopped
- *     being a strict subset on 2026-08-27: overdue now counts a completed-but-
- *     unshipped job (delivery is the promise) while Open Jobs still restricts to
- *     not_started / in_progress, because "what work is on the books" is a
- *     question about the floor rather than about the customer.
+ *   * Overdue is a SUBSET of Open Jobs, so its money is a slice and not a fifth
+ *     pot. That holds by construction rather than by coincidence: Open Jobs is
+ *     "not fully shipped and not cancelled", and Overdue is the same two clauses
+ *     plus a due date in the past. Both were widened on 2026-08-27 — they used
+ *     to restrict to production IN (not_started, in_progress), which dropped a
+ *     job finished on the floor but still owed to the customer out of both.
  */
 
 type JobPart = {
@@ -254,27 +255,52 @@ describe('dashboard metrics', () => {
     expect(m.completed_jobs?.previousMoney).toBe(1000);
   });
 
-  it('merges Open Jobs but keeps the not-started / in-progress split', async () => {
+  it('merges Open Jobs but keeps the production split', async () => {
     // The merged tile would otherwise hide whether work is flowing or piling
     // up, which is what the old two-card split was good for.
+    //
+    // Three buckets, not two: Open Jobs is "not shipped and not cancelled", so a
+    // job finished on the floor and still owed to the customer belongs in the
+    // tile. Bucketing it under Not Started would be the one place it is
+    // definitely not.
     STATE.openJobs = [
       job('not_started', [{ total_price: 60000 }]),
       job('not_started', [{ total_price: 9859 }]),
       job('in_progress', [{ total_price: 15434 }]),
+      job('completed', [{ total_price: 4000 }]),
     ];
 
     const m = await getDashboardMetrics('c1', 'this_week');
 
-    expect(m.open_jobs?.count).toBe(3);
-    expect(m.open_jobs?.money).toBe(85293);
+    expect(m.open_jobs?.count).toBe(4);
+    expect(m.open_jobs?.money).toBe(89293);
     expect(m.open_jobs?.split).toEqual({
       notStarted: { count: 2, money: 69859 },
       inProgress: { count: 1, money: 15434 },
+      completed: { count: 1, money: 4000 },
     });
-    // These two states are disjoint, so this is the one genuinely additive
-    // figure on the dashboard.
-    const { notStarted, inProgress } = m.open_jobs!.split!;
-    expect(notStarted.money + inProgress.money).toBe(m.open_jobs?.money);
+    // These three states are disjoint and cover the filter exactly, so this is
+    // the one genuinely additive figure on the dashboard.
+    const { notStarted, inProgress, completed } = m.open_jobs!.split!;
+    expect(notStarted.money + inProgress.money + completed.money).toBe(m.open_jobs?.money);
+  });
+
+  it('counts a finished-but-unshipped job as open, and as overdue', async () => {
+    // The containment rule, as one assertion. Open Jobs = not shipped and not
+    // cancelled; Overdue = the same, past its due date. So every overdue job is
+    // an open job by construction.
+    //
+    // Until 2026-08-27 Open Jobs also required production IN
+    // (not_started, in_progress), which dropped exactly this job from the tile
+    // while the customer was still waiting for it.
+    STATE.openJobs = [job('completed', [{ total_price: 4000 }])];
+    STATE.overdue = [job('completed', [{ total_price: 4000 }])];
+
+    const m = await getDashboardMetrics('c1', 'this_week');
+
+    expect(m.open_jobs?.count).toBe(1);
+    expect(m.overdue_jobs?.count).toBe(1);
+    expect(m.overdue_jobs!.count).toBeLessThanOrEqual(m.open_jobs!.count);
   });
 
   it('leaves already-shipped work out of Open Jobs entirely', async () => {

@@ -99,6 +99,7 @@ export interface MetricValue {
   split?: {
     notStarted: { count: number; money: number };
     inProgress: { count: number; money: number };
+    completed: { count: number; money: number };
   };
 }
 
@@ -138,15 +139,27 @@ function jobValue(row: JobValueRow): number {
 
 
 /**
- * Work still owed: jobs not finished on the floor AND not fully out the door.
+ * Work still owed: **not fully shipped and not cancelled.**
  *
- * Both axes, deliberately. `production_status` and `fulfillment_status` are
- * independent — a shop that ships without operators closing out operations
- * leaves jobs `not_started` and `fully_shipped` at the same time, and there are
- * 39 such jobs on the pilot shop. Filtering on production alone put $37,769 of
- * already-delivered work in this tile under the words "not yet shipped", while
- * the same money also counted as revenue in Completed Jobs. `applyOverdueJobsFilter`
- * always excluded fully-shipped; this now agrees with it.
+ * That is the whole rule, and Overdue is the same rule plus "past its due date"
+ * — so every overdue job is an open job, by construction rather than by
+ * coincidence. `applyOverdueJobsFilter` states it with the identical two
+ * clauses.
+ *
+ * `production_status` is NOT part of the rule. It used to be
+ * (`IN ('not_started','in_progress')`), which quietly meant a job finished on
+ * the floor but not yet shipped counted as neither open nor — until 2026-08-27 —
+ * overdue. It is plainly still owed: the customer does not have it. That
+ * exclusion was also what broke containment for a day when Overdue widened
+ * first.
+ *
+ * Fulfillment is on the rule for a reason worth keeping. `production_status` and
+ * `fulfillment_status` are independent — a shop that ships without operators
+ * closing out operations leaves jobs `not_started` and `fully_shipped` at the
+ * same time, and there are 39 such jobs on the pilot shop. Filtering on
+ * production alone put $37,769 of already-delivered work in this tile under the
+ * words "not yet shipped", while the same money also counted as revenue in
+ * Completed Jobs.
  *
  * The money is what is still OWED — ordered minus already shipped — so a
  * part-shipped job contributes only the remainder. Its shipped half is revenue
@@ -159,7 +172,7 @@ async function getOpenJobs(companyId: string): Promise<MetricValue> {
     .select(JOB_VALUE_SELECT)
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .in('production_status', ['not_started', 'in_progress'])
+    .not('production_status', 'eq', 'cancelled')
     .not('fulfillment_status', 'eq', 'fully_shipped');
 
   if (error) throw error;
@@ -193,22 +206,32 @@ async function getOpenJobs(companyId: string): Promise<MetricValue> {
 
   const notStarted = { count: 0, money: 0 };
   const inProgress = { count: 0, money: 0 };
+  const completed = { count: 0, money: 0 };
 
   for (const row of rows) {
-    const bucket = row.production_status === 'in_progress' ? inProgress : notStarted;
+    // Three buckets, because the filter admits three production states. A
+    // finished-but-unshipped job used to be excluded from the tile entirely;
+    // folding it into "Not Started" instead would be worse than excluding it,
+    // since it is the one bucket it is definitely not in.
+    const bucket =
+      row.production_status === 'completed'
+        ? completed
+        : row.production_status === 'in_progress'
+          ? inProgress
+          : notStarted;
     bucket.count += 1;
     // Never below zero: shipping more than was ordered is a data problem, not a
     // negative amount of backlog.
     bucket.money += Math.max(0, jobValue(row) - (shippedByJob.get(row.id) ?? 0));
   }
 
-  // These two states are disjoint, so this is the one figure on the dashboard
-  // that is genuinely additive. Every other pair of cards overlaps or measures
-  // a different kind of money.
+  // These three states are disjoint and cover the filter exactly, so this is the
+  // one figure on the dashboard that is genuinely additive. Every other pair of
+  // cards overlaps or measures a different kind of money.
   return {
-    count: notStarted.count + inProgress.count,
-    money: notStarted.money + inProgress.money,
-    split: { notStarted, inProgress },
+    count: notStarted.count + inProgress.count + completed.count,
+    money: notStarted.money + inProgress.money + completed.money,
+    split: { notStarted, inProgress, completed },
   };
 }
 

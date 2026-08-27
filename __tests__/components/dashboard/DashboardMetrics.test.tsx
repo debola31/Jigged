@@ -42,6 +42,7 @@ const VALUES = {
     split: {
       notStarted: { count: 51, money: 69859 },
       inProgress: { count: 12, money: 15434 },
+      completed: { count: 0, money: 0 },
     },
   },
   completed_jobs: { count: 6, money: 12480, previousMoney: 11143 },

@@ -105,6 +105,9 @@ export default function AcceptPurchaseOrderModal({
   const [customerId, setCustomerId] = useState('');
   const [poNumber, setPoNumber] = useState('');
   const [dueDate, setDueDate] = useState('');
+  // Blur-gated so an untouched empty field isn't already red on open — see
+  // the validation block below.
+  const [dueDateTouched, setDueDateTouched] = useState(false);
   // "Hot" (rush) marker for the new job. Off by default; toggleable later on the
   // job detail page.
   const [hot, setHot] = useState(false);
@@ -121,6 +124,7 @@ export default function AcceptPurchaseOrderModal({
     setCustomerId('');
     setPoNumber('');
     setDueDate('');
+    setDueDateTouched(false);
     setHot(false);
     setLines([emptyLine()]);
     setAttachment(null);
@@ -220,13 +224,22 @@ export default function AcceptPurchaseOrderModal({
   const dueDateParseable = !Number.isNaN(new Date(dueDate).getTime());
   const dueDateInPast = !dueDateEmpty && dueDateParseable && dueDate < today;
   const dueDateValid = !dueDateEmpty && dueDateParseable && !dueDateInPast;
-  const dueDateHelper = dueDateEmpty
+  // An empty field on open is unfinished, not wrong: "required" only turns red
+  // once the user has been in the field and left it blank. A value that IS
+  // wrong (unparseable, or in the past) says so as soon as it exists — the
+  // native date input only emits a complete date, so there's no half-typed
+  // state to scold. Submit stays gated on dueDateValid either way.
+  const dueDateMissing = dueDateTouched && dueDateEmpty;
+  const dueDateError = dueDateMissing || (!dueDateEmpty && !dueDateValid);
+  const dueDateHelper = dueDateMissing
     ? 'Due date is required'
-    : !dueDateParseable
-      ? 'Enter a valid date'
-      : dueDateInPast
-        ? "Due date can't be in the past"
-        : ' ';
+    : dueDateEmpty
+      ? ' '
+      : !dueDateParseable
+        ? 'Enter a valid date'
+        : dueDateInPast
+          ? "Due date can't be in the past"
+          : ' ';
   const poValid = poNumber.trim() !== '';
   const completeLines = lines.filter(
     (l) =>
@@ -357,8 +370,9 @@ export default function AcceptPurchaseOrderModal({
                 required
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
+                onBlur={() => setDueDateTouched(true)}
                 disabled={loading}
-                error={!dueDateValid}
+                error={dueDateError}
                 helperText={dueDateHelper}
                 slotProps={{ htmlInput: { min: today }, inputLabel: { shrink: true } }}
               />

@@ -1,0 +1,40 @@
+{
+  "__note": [
+    "One line per table, hand-written, and the ONLY hand-written thing about a card.",
+    "The table NAMES and the schema blocks are parsed out of tools/schema_context.py at",
+    "load; a test asserts the key set here equals that parsed set, so this file cannot",
+    "drift the way the deleted ALLOWED_TABLES list did (19 names against 21 grants).",
+    "",
+    "WRITTEN FOR AN EMBEDDING, NOT FOR A READER. These strings are what a shop owner's",
+    "question is scored against, so they use the words an owner would type -- 'past the",
+    "promised date', 'went out the door', 'work centres' -- rather than column names.",
+    "The British spelling in work_centers is deliberate: the eval asks 'which work",
+    "centre has the most operations queued' and an earlier arm answered by inventing",
+    "job_operations.work_centre.",
+    "shipments and shipment_line_items name REVENUE and SALES on purpose. They are not in CORE_SPINE, so 'what is my revenue trend' has to reach them through this line alone -- and with the first draft of these purposes it did not: shipments ranked fifth, behind inventory_transactions and routing_operations, because no purpose said the word revenue anywhere."
+  ],
+  "purposes": {
+    "companies": "The tenant record for this shop: its own name and configuration flags.",
+    "customers": "Who the shop sells to. Name is identity; archived customers have deleted_at set.",
+    "customer_addresses": "Where a customer's invoices and deliveries are posted: their billing and delivery addresses.",
+    "vendors": "Suppliers and outside-process providers the shop buys from. Identity only.",
+    "vendor_addresses": "A vendor's postal addresses, one row per address.",
+    "parts": "Parts and part numbers: every part the shop makes, buys or stocks, with its description, pricing and stock level.",
+    "part_pricing_tiers": "Volume price breaks per part: what a part costs at each quantity band.",
+    "parts_bom": "Bill of materials: which child parts and raw stock go into making a parent part.",
+    "parts_unit_conversions": "How a part's purchase unit converts to its stocking or usage unit.",
+    "quotes": "Prices offered to customers: status, expiry, and whether one turned into a job.",
+    "quote_line_items": "The priced lines on a quote -- what was quoted, how many, at what price.",
+    "jobs": "Work the shop has taken on: promised due date, production and fulfillment status, customer.",
+    "job_parts": "The parts on a job -- quantity, unit price, line total, and all-in cost per unit.",
+    "shipments": "Packing slips: what actually left the building, and when. Realised revenue and sales are dated from here \u2014 only shipped work counts.",
+    "shipment_line_items": "How many of each job part actually shipped on a slip. Revenue is this quantity times the part's unit price.",
+    "job_operations": "The steps of work inside a job: sequence, status, and which work centre runs each.",
+    "job_materials": "The material a specific job part is expected to consume, snapshotted at job time.",
+    "work_centers": "In-house machines, cells and benches -- work centres -- where operations are run.",
+    "vendor_services": "A process an outside vendor performs, such as anodising, plating or heat treat.",
+    "routings": "The manufacturing plan for a part: the ordered set of operations that make it.",
+    "routing_operations": "One step in a part's standing routing: its sequence, the work centre that runs it, and standard times.",
+    "inventory_transactions": "Stock movements against a part: material taken in, issued to jobs, and adjusted after a count."
+  }
+}

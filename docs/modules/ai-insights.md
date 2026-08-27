@@ -482,6 +482,61 @@ with the UI — a SQL object both call — not a second Python copy of one.
 
 ---
 
+## Measuring a local model: the pipeline arm
+
+**Measurement only. Nothing here runs in production, and nothing here is registered in
+`handler_for()`.** [`api/evals/insights_ab.py`](../../api/evals/insights_ab.py) gained three arms
+that replace the agentic tool loop with a fixed path —
+[`api/services/insights_pipeline/`](../../api/services/insights_pipeline/) — giving a SQL-specialist
+model one job per stage: link the schema, retrieve exemplars, generate SQL, execute, narrate.
+
+**Why a second path exists at all.** The tool loop asks one model to choose a tool, write SQL, read
+an error, and then summarise. A 7B local model can do each of those and fails at the seams: it
+narrates a tool call instead of making it, or it runs an exploratory query and then reports *that*
+result whatever the question was. The pipeline removes the first failure by construction — there is
+no tool to narrate — and makes the second measurable rather than invisible, because every retrieved
+exemplar carries the question it answers into the dump.
+
+**Three arms, because one would not separate two variables.** `ollama_pipeline` retrieves normally;
+`ollama_pipeline_loo` holds out each question's own exemplar; `ollama_pipeline_bare` turns retrieval
+off entirely. Read against each other they say what retrieval buys and what merely copying an
+exemplar buys. Three of the eleven questions — work-centre queue, quoted-last-month-versus-prior,
+parts-with-no-routing — have no exemplar in **any** arm and are the within-run control.
+
+**Exemplars are seeded from this repo's own reference queries and nowhere else.**
+[`data/pairs.json`](../../api/services/insights_pipeline/data/pairs.json) stores no SQL: it names a
+section of [`semantics.md`](../../api/services/ai/semantics.md) and the index of a `sql` block
+inside it. That file is already the runtime prompt and every block in it is already executed under
+`jigged_ai_readonly` on each CI run, so the exemplars inherit that check instead of needing their
+own. **Never hand-author an exemplar for an eval question** — it would delete the control.
+
+**Two things the arm is deliberately stricter about than production.** A narration stating a figure
+that is in neither the returned rows nor a Python-computed fact fails the answer, where
+`services/ai_features/insights.py` lets a grounded answer through however it reads; and a query
+whose select list names no column at all is refused before execution. The second was earned: asked
+for net profit margin after payroll, the specialist wrote `SELECT '100%' AS
+net_profit_margin_after_payroll FROM job_parts WHERE company_id = $1`, which executed, returned 37
+rows, and was narrated as "100%" — the Gate 1 payroll hallucination reappearing through a pipeline
+built to prevent it, with a better score. Nothing downstream of the query can tell a computed value
+from a constant a model typed.
+
+**Budget two model loads per question, not one.** `a-kore/Arctic-Text2SQL-R1-7B` is 8.6 GB
+resident, and on a 16 GB machine it does not fit alongside the narrator: `ollama ps` during a run
+shows the generator alone, so each question evicts and reloads a model between generating and
+narrating. That put the observed per-question latency at 35–45 s. It is a real cost and it is
+deliberately **not** part of `FLIP_CONDITION` — latency is recorded, and a cheaper wrong answer is
+not cheaper.
+
+**Verified as-built 2026-08-27** against `nomic-embed-text`, `a-kore/Arctic-Text2SQL-R1-7B` and
+`qwen3:4b-instruct-2507-q4_K_M` on a local stack: the payroll question declines with an empty `sql`,
+and the schema linker reaches every table the eleven questions need. Retrieval tuning is checked by
+[`api/tests/integration/test_insights_pipeline_retrieval_live.py`](../../api/tests/integration/test_insights_pipeline_retrieval_live.py),
+which skips wherever Ollama is unreachable — including CI. **Re-run it after editing
+`data/purposes.json` or `data/pairs.json`**: both are scored against a real embedding model, and a
+reworded line moves what the linker can see.
+
+---
+
 ## Acceptance Criteria
 
 Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);

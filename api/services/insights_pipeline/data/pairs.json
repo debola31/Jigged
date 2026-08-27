@@ -1,0 +1,144 @@
+{
+  "__note": [
+    "Question -> exemplar SQL, seeded from api/services/ai/semantics.md AND NOWHERE ELSE.",
+    "",
+    "NO SQL LIVES IN THIS FILE. Each entry names a section and the index of the ```sql",
+    "block inside it; the SQL is read from semantics.md at load. That file is already",
+    "runtime (load_semantics renders it into the system prompt) and every block in it is",
+    "already executed with LIMIT 1 under jigged_ai_readonly on every CI run by",
+    "test_ai_read_access.py::test_every_reference_query_in_semantics_runs. Copying the",
+    "queries here would create a second source of truth for SQL that the repo executes",
+    "from exactly one place, and only one of the two copies would be checked.",
+    "",
+    "NEVER HAND-AUTHOR AN EXEMPLAR FOR AN EVAL QUESTION. Three of the eleven eval",
+    "questions -- work centre queue, quoted-last-month-versus-prior, parts with no",
+    "routing -- have no reference query in semantics.md, and they STAY exemplar-free.",
+    "They are the within-experiment control: three questions in the same run, same",
+    "model, same pipeline, with nothing retrieved. Writing pairs for them would delete",
+    "the only part of the run that measures the pipeline without retrieval's help.",
+    "The payroll question likewise has no pair and must decline.",
+    "",
+    "source_question IS AN EXACT KEY, NOT A LABEL. Leave-one-out excludes on this",
+    "string, so for a pair that answers an eval question it is that question verbatim.",
+    "The three pairs whose source_question is not an eval question are distractors in",
+    "the index -- which is what makes the floor measurement mean anything.",
+    "",
+    "ALIASES ARE SCORED, NOT DISPLAYED. A pair's score is the max cosine over its",
+    "canonical question and its aliases, which is what lifts a real shop phrasing",
+    "('how many jobs are overdue') over the floor without dropping the floor for",
+    "everyone. A phrasing used as a test paraphrase must NOT appear here, or the test",
+    "measures string identity instead of retrieval.",
+    "AN ALIAS CAN RE-OPEN A TRAP THE FLOOR WAS SET TO CLOSE, and one did. cost_and_gross_profit carried 'how much margin are we making on jobs', which scores 0.763 against 'What is our net profit margin after payroll?' -- over the floor, on the shared word 'margin'. The payroll question would then have been handed gross-profit SQL, which is exactly the proxy that produced 'net profit margin after payroll: 67.9%' in Gate 1. The canonical phrasing scores 0.682 and is fine; the alias was the whole of the problem. Measure a new alias against the payroll question before adding it."
+  ],
+  "floor": 0.7,
+  "top_k": 2,
+  "pairs": [
+    {
+      "id": "revenue_trend",
+      "section": "Revenue",
+      "block": 0,
+      "source_question": "What is my revenue trend over time?",
+      "aliases": [
+        "how has revenue changed month by month",
+        "show me sales over the last year",
+        "is the shop making more money than it used to"
+      ]
+    },
+    {
+      "id": "top_customer_by_revenue",
+      "section": "Revenue",
+      "block": 1,
+      "source_question": "Who is my top customer by revenue?",
+      "aliases": [
+        "which customer spends the most with us",
+        "who are our biggest accounts by sales",
+        "rank customers by how much they have bought"
+      ]
+    },
+    {
+      "id": "quote_pipeline_worth",
+      "section": "Quote pipeline worth",
+      "block": 0,
+      "source_question": "What is my quote pipeline worth?",
+      "aliases": [
+        "how much work is out on quote right now",
+        "what is the value of our open quotes",
+        "how much is sitting in the pipeline"
+      ]
+    },
+    {
+      "id": "late_jobs",
+      "section": "Late job",
+      "block": 0,
+      "source_question": "How many jobs are late right now?",
+      "aliases": [
+        "which jobs are past their promised date",
+        "what work is running behind schedule",
+        "how many orders have missed their due date"
+      ]
+    },
+    {
+      "id": "average_job_value",
+      "section": "Job value",
+      "block": 0,
+      "source_question": "What is the average value of a job this quarter?",
+      "aliases": [
+        "what does a typical job sell for",
+        "average order size this quarter",
+        "how much is the average job worth"
+      ]
+    },
+    {
+      "id": "quote_to_job_conversion",
+      "section": "Quote-to-job conversion",
+      "block": 0,
+      "source_question": "How many quotes turned into jobs in the last 90 days?",
+      "aliases": [
+        "what share of our quotes become orders",
+        "how good is our quote win rate",
+        "how many quotes did we actually land"
+      ]
+    },
+    {
+      "id": "dormant_customers",
+      "section": "Dormant customer",
+      "block": 0,
+      "source_question": "Which customers have not ordered in six months?",
+      "aliases": [
+        "which customers have gone quiet",
+        "who has stopped buying from us",
+        "list customers we may have lost"
+      ]
+    },
+    {
+      "id": "jobs_this_quarter",
+      "section": "This quarter, and other relative periods",
+      "block": 0,
+      "source_question": "How many jobs did we take in this quarter?",
+      "aliases": [
+        "how much work came in this quarter",
+        "count of orders booked so far this quarter"
+      ]
+    },
+    {
+      "id": "started_and_shipped",
+      "section": "Started and shipped",
+      "block": 0,
+      "source_question": "How many jobs are started and how many have shipped?",
+      "aliases": [
+        "what is on the floor and what has gone out",
+        "how many jobs are in progress versus complete"
+      ]
+    },
+    {
+      "id": "cost_and_gross_profit",
+      "section": "Cost, and what it does and does not include",
+      "block": 0,
+      "source_question": "What is our gross profit on booked work?",
+      "aliases": [
+        "what does our work cost us versus what we sell it for",
+        "what do our jobs cost us to make"
+      ]
+    }
+  ]
+}

@@ -390,7 +390,11 @@ additive, so two people each recording "the remaining 2" on a 2-piece step silen
 on an order of 2 — over-completion the UI warns about when you *type* it, arriving with nobody
 having typed it. Both surfaces pass the `qty_good` they were showing as `expectedQtyGood`;
 `createOperationCompletion` re-reads the live sum immediately before inserting and throws
-`CompletionConflictError` on a mismatch, writing nothing. The losing screen re-reads and shows where
+`CompletionConflictError` if it has **grown**, writing nothing. Grown, not merely changed: a sum
+that *shrank* means somebody undid work, and banking against a smaller base is a correct outcome
+rather than a double-count. Symmetry was the wrong instinct — the operator step screen reloads the
+job and the summary together after an undo, and there is a render between the two where its own
+`qty_good` is still the pre-undo figure, so `!==` refused writes that were never dangerous. The losing screen re-reads and shows where
 the step actually stands, with Undo beside it if the winner got it wrong.
 
 That check is a compare-then-write rather than a constraint, and the limit is stated rather than

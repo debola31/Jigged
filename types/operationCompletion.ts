@@ -65,9 +65,13 @@ export interface CreateOperationCompletionInput {
   captureSource: CompletionCaptureSource;
   /**
    * The qty_good this caller believed was already recorded, for first-write-wins
-   * conflict detection. When supplied and the live sum no longer matches,
+   * conflict detection. When supplied and the live sum has GROWN since,
    * `createOperationCompletion` throws `CompletionConflictError` INSTEAD of
    * inserting, so two people completing the same step do not double-count.
+   *
+   * GROWN, not merely changed: a live sum that SHRANK means somebody undid work,
+   * and banking against a smaller base is a correct outcome rather than a
+   * double-count. See the check itself for why symmetry was the wrong instinct.
    *
    * Optional because a caller with no prior view of the step (a fresh scan) has
    * nothing to be stale about; every surface that renders a quantity passes it.

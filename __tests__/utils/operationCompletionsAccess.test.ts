@@ -170,6 +170,21 @@ describe('createOperationCompletion — conflict detection', () => {
     });
   });
 
+  it('proceeds when the live quantity SHRANK — an undo is not a double-count', async () => {
+    // The asymmetry. Somebody voided work while this caller was looking, so the
+    // live sum is smaller than the caller's view. Recording now banks against a
+    // smaller base and leaves more outstanding, which is correct. Refusing it
+    // was the first version's bug: the operator step screen reloads the job and
+    // the summary together after an undo, and there is a render between the two
+    // where its own `qtyGood` is still the pre-undo figure.
+    responses['job_operation_completions'] = { data: [], error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 5,
+      captureSource: 'operator', expectedQtyGood: 5,
+    }).catch(() => undefined);
+    expect(captured['job_operation_completions.insert']).toMatchObject({ quantity_good: 5 });
+  });
+
   it('proceeds when the live quantity still matches what the caller saw', async () => {
     // One response object serves the check read AND the insert; the check reads
     // an array, the insert reads `.single()`. Sequenced by setting the array

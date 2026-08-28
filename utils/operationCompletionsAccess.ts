@@ -105,8 +105,23 @@ export async function createOperationCompletion(
       });
     }
 
+    // GREATER THAN, NOT NOT-EQUAL, and the asymmetry is the correctness of this
+    // check rather than a loosening of it.
+    //
+    //   * live > expected — somebody RECORDED while this caller was looking.
+    //     Adding on top double-counts, which is the whole harm. Refuse.
+    //   * live < expected — somebody UNDID work. Recording now simply banks
+    //     against a smaller base and leaves more outstanding, which is a correct
+    //     outcome and not a double-count.
+    //
+    // Refusing both directions looked symmetric and was wrong: an undo that the
+    // caller's own screen has not finished re-reading yet lands in the second
+    // case, so `!==` turned a stale-by-a-moment view into a refusal of a write
+    // that was never dangerous. The operator step screen reloads the job and the
+    // summary together after an undo, and there is a render between the two
+    // where `qtyGood` is still the pre-undo figure.
     const liveQtyGood = (live ?? []).reduce((acc, c) => acc + Number(c.quantity_good), 0);
-    if (liveQtyGood !== input.expectedQtyGood) {
+    if (liveQtyGood > input.expectedQtyGood) {
       throw new CompletionConflictError(liveQtyGood);
     }
   }

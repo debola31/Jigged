@@ -432,6 +432,21 @@ beside them — a job-scoped list of what each named person finished and when wo
 production log the guardrail refuses. A completion an interval already claims is shown once, as the
 timed row; the feed drops the duplicate by matching `completion_id`.
 
+**With one addition, made 2026-08-28: every completion the OFFICE recorded is shown to everyone.**
+The own-rows rule is about *people*, and an office completion has no person in it — so including it
+exposes nobody's pace, and **excluding it was a bug**. The office marked a step done and the floor's
+own record of that step stayed silent, so the operator standing at the machine had no way to learn
+their step had been closed out from under them. Those rows read `recorded in the office` where an
+operator's untimed row reads `not timed`: both are untimed, but "you finished this and forgot the
+clock" and "the office closed this step out" are different facts, and rendering the second as the
+first tells an operator they did something they did not do.
+
+The split is [`job_operation_completions.capture_source`](../../supabase/migrations/20260828124806_office_completion_is_untimed_and_in_the_feed.sql)
+— the **surface**, never the actor's role. An admin standing at a machine records through the
+operator surface and their row is operator capture; classifying by role would publish it shop-wide.
+`NULL` means "recorded before that migration, surface unknown" — an honest no-data state rather than
+a default, and those rows stay own-only, so nothing at rest changed meaning.
+
 **Times can only be adjusted once the interval is closed** — `job_op_intervals_adjust_only_when_
 closed`, and `Adjust` is absent from a running row rather than merely disabled. A running interval
 has no finish to check a new start against, so a correction made mid-run can be contradicted by the
@@ -473,8 +488,21 @@ a PWA is the same one who remembers to close their interval. **The correction pr
 operator's next tap instead**, which is on-shift, phone in hand, and has a delivery receipt.
 
 **The office keeps the detection half.** `get_open_intervals` backs a Still-running list, which is
-also the *only* route to an interval whose owner has gone home — `close_operation_interval` refuses
-a non-owner by design, so without that list the row would be unreachable.
+also the *only* route to an interval whose owner has gone home — `close_operation_interval` and
+`cancel_operation_interval` both refuse a non-owner by design, so without that list the row would be
+unreachable.
+
+**And, since 2026-08-28, the correction half.** That "only route" claim was aspirational for twelve
+days: the list rendered rows and no control, so the route led to a read. J-0001 is what it cost —
+an interval opened at 06:49, visible from the office, closable by nobody.
+[`void_open_intervals_for_operation`](../../supabase/migrations/20260828124806_office_completion_is_untimed_and_in_the_feed.sql)
+is the missing half, and the card's **Stop** is its caller. It **discards rather than closes**:
+`voided_at` is stamped and `ended_at` left NULL, because nobody at that desk knows when the work
+stopped and a stamped end would be counted as a measurement. It is admin-gated rather than
+owner-gated — the narrow exception to the ownership assertion every other write path here enforces —
+and it takes an *operation* and returns a *count*, so the office can stop a timer without ever
+learning whose it was. The same call runs when the office completes a step somebody was timing; see
+[jobs.md](jobs.md#job-operations-on-the-admin-side).
 
 **Costing is untouched.** Quoting and job cost still read `estimated_setup_minutes` /
 `estimated_run_minutes_per_unit` and the snapshot rates. Actuals are reported *beside* the
@@ -764,6 +792,7 @@ schema rather than in review:
 |---|---|
 | The interval running **right now**, as a large monospace clock | A total across jobs, a weekly figure, an average, a rate |
 | Their own start and finish entries in the job feed, each correctable | Anyone else's start or finish, on any surface |
+| That the **office** completed a step on this job, unnamed and untimed | Who in the office did it, or what any other operator finished |
 | A journal of their own recorded intervals, each naming its job and step | A row count, an entry total, or any scalar over that journal |
 | Their own raw times beside their own corrections | Anyone else's times, or their own compared to the estimate |
 

@@ -365,6 +365,42 @@ Neither `startJobOperation` nor `skipJobOperation` exists, and nothing enforces 
 `completeJobOperation` and `undoJobOperation` both **throw for an outside op**, routing
 the user to the send/receive controls instead.
 
+### Mark Complete is the untimed path, and first write wins
+
+Rewritten 2026-08-28 after J-0001, where the office and the shop floor each had a half-picture of
+one step and neither could see the other's.
+
+**It records `capture_source: 'office'` and opens no interval** — the same shape as the operator's
+`Complete without timing`. The office was not standing at the machine and has no duration to report,
+so it writes none rather than a guess. The completion appears in the operator's job feed marked
+`recorded in the office` ([operator-view.md](operator-view.md#recording-a-completion)); before this
+it appeared nowhere on the floor at all.
+
+**If a timer is running on that step, Mark Complete discards it.** Closing someone else's interval
+would stamp an end time nobody in the office witnessed, and a fabricated duration is worse than a
+missing one because the estimating loop reads it back as measurement. So the interval is voided:
+better no data than bad data. The dialog says so *before* the click when
+`get_operation_actuals` reports an open interval, and the snackbar says how many were discarded
+after. The completion is written **first** — it is the durable production fact — so a failed discard
+leaves an orphan the dashboard's Still-running **Stop** can clear, rather than destroying an
+operator's measured minutes and then failing to record the work they were measuring.
+
+**A second completion against work someone already recorded is refused, not added.** Completions are
+additive, so two people each recording "the remaining 2" on a 2-piece step silently produces 4 good
+on an order of 2 — over-completion the UI warns about when you *type* it, arriving with nobody
+having typed it. Both surfaces pass the `qty_good` they were showing as `expectedQtyGood`;
+`createOperationCompletion` re-reads the live sum immediately before inserting and throws
+`CompletionConflictError` on a mismatch, writing nothing. The losing screen re-reads and shows where
+the step actually stands, with Undo beside it if the winner got it wrong.
+
+That check is a compare-then-write rather than a constraint, and the limit is stated rather than
+hidden: **the database cannot tell a legitimate partial from a stale duplicate** — additivity is the
+feature — so only the caller can, by saying what it believed was there. It closes the window that
+matters, which is minutes long (a dialog left open while the floor finishes the step), and not a
+sub-second double-submit. Making it atomic would mean moving the insert into an RPC, which is a
+Supabase-first violation for a race whose damage is one click of Undo. `operation completion
+conflicted` measures whether that trade stays right.
+
 ---
 
 ## Outside (external-vendor) operations

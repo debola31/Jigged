@@ -78,6 +78,17 @@ vi.mock('@/utils/operationCompletionsAccess', () => ({
   // using the return value.
   createOperationCompletion: vi.fn(async () => ({ id: 'completion-1' })),
   getOperationCompletionSummaries: vi.fn(),
+  // THE REAL CLASS, not a stand-in. The page branches on `instanceof`, so a
+  // mock exporting a different constructor would send a genuine conflict down
+  // the generic-error path and the test would still pass.
+  CompletionConflictError: class CompletionConflictError extends Error {
+    liveQtyGood: number;
+    constructor(liveQtyGood: number) {
+      super('Someone else recorded work on this step while this page was open.');
+      this.name = 'CompletionConflictError';
+      this.liveQtyGood = liveQtyGood;
+    }
+  },
 }));
 
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
@@ -248,6 +259,11 @@ describe('operation action page — completion (characterisation)', () => {
         jobOperationId: 'op1',
         jobPartId: 'jp1',
         quantityGood: 10,
+        // The step screen is operator capture by definition, and it declares the
+        // qty_good it was showing so a completion the office recorded meanwhile
+        // is refused rather than added on top of.
+        captureSource: 'operator',
+        expectedQtyGood: 0,
       }),
     );
   });

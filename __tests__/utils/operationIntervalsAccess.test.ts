@@ -55,6 +55,7 @@ import {
   closeOperationInterval,
   getOperationActuals,
   startOperationInterval,
+  voidOpenIntervalsForOperation,
 } from '@/utils/operationIntervalsAccess';
 
 beforeEach(() => {
@@ -229,3 +230,41 @@ describe('getOperationActuals', () => {
   });
 });
 
+/**
+ * The office's correction for an abandoned timer. Its siblings assert the caller
+ * OWNS the interval; this one is admin-gated instead, which is what makes an
+ * interval whose owner has gone home reachable at all.
+ */
+describe('voidOpenIntervalsForOperation', () => {
+  it('addresses the OPERATION, never an interval id', async () => {
+    responses['void_open_intervals_for_operation'] = { data: 1, error: null };
+    await voidOpenIntervalsForOperation('op-1');
+    expect(rpcCalls.at(-1)).toEqual({
+      fn: 'void_open_intervals_for_operation',
+      // The whole payload, asserted exactly. An interval-id parameter would mean
+      // the caller had to know WHOSE row it was discarding, and the office is
+      // deliberately never told.
+      args: { p_job_operation_id: 'op-1' },
+    });
+  });
+
+  it('returns how many were discarded, so a caller can say so', async () => {
+    responses['void_open_intervals_for_operation'] = { data: 2, error: null };
+    expect(await voidOpenIntervalsForOperation('op-1')).toBe(2);
+  });
+
+  it('reads a quiet no-op as zero rather than as a failure', async () => {
+    // The common path: the office completes a step nobody was timing.
+    responses['void_open_intervals_for_operation'] = { data: 0, error: null };
+    expect(await voidOpenIntervalsForOperation('op-1')).toBe(0);
+  });
+
+  it('reports the failure by hand — .rpc() is outside the Sentry integration', async () => {
+    responses['void_open_intervals_for_operation'] = {
+      data: null,
+      error: { code: '42501', message: 'Only an admin can discard a running timer' },
+    };
+    await expect(voidOpenIntervalsForOperation('op-1')).rejects.toThrow();
+    expect(captureException).toHaveBeenCalled();
+  });
+});

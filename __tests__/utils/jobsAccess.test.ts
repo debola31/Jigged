@@ -33,6 +33,16 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksInvoiceLinkForJob: vi.fn(),
   getJobPartInvoiceSummaries: vi.fn(),
 }));
+// The two writes the office Complete now composes. Stubbed so this file drives
+// the orchestration — which surface it declares, and whether it stops a timer —
+// without re-testing either dependency's own behaviour.
+vi.mock('@/utils/operationCompletionsAccess', () => ({
+  createOperationCompletion: vi.fn(async () => ({ id: 'c-1' })),
+  voidAllOperationCompletions: vi.fn(async () => undefined),
+}));
+vi.mock('@/utils/operationIntervalsAccess', () => ({
+  voidOpenIntervalsForOperation: vi.fn(async () => 0),
+}));
 
 import {
   applyOverdueJobsFilter,
@@ -58,6 +68,8 @@ import {
   getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
 } from '@/utils/quickbooksAccess';
+import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
+import { voidOpenIntervalsForOperation } from '@/utils/operationIntervalsAccess';
 
 describe('jobsAccess', () => {
   beforeEach(() => {
@@ -1095,5 +1107,108 @@ describe('admin op guards refuse external (outside-vendor) ops', () => {
   it('undoJobOperation throws for an external op (undo goes through its own lifecycle)', async () => {
     mockQueryBuilder.data = { vendor_service_id: 'vs-1' };
     await expect(undoJobOperation('op-1')).rejects.toThrow(/outside/i);
+  });
+});
+
+/**
+ * The office Complete button, which is the UNTIMED path — the same shape as the
+ * step screen's `Complete without timing`, plus the discard the operator path
+ * has no need of.
+ */
+describe('completeJobOperation — the office surface', () => {
+  const internalOpRow = {
+    id: 'op-1',
+    job_id: 'job-1',
+    job_part_id: 'jp-1',
+    vendor_service_id: null,
+    job_parts: { company_id: 'co-1', quantity: 4, production_status: 'in_progress' },
+    jobs: { production_status: 'in_progress' },
+  };
+
+  // A PER-TABLE builder, unlike the file-wide single one. completeJobOperation
+  // reads four different tables in sequence and the shared builder answers all
+  // of them with the same row — which makes the completions sum crash on an
+  // object rather than an array.
+  const byTable: Record<string, unknown> = {};
+  beforeEach(() => {
+    // This describe is a sibling of `describe('jobsAccess')`, so it does not
+    // inherit that block's clear — without this, call counts accumulate across
+    // tests and `not.toHaveBeenCalled()` fails on the previous test's calls.
+    vi.clearAllMocks();
+    byTable['job_operations'] = internalOpRow;
+    byTable['job_operation_completions'] = []; // nothing recorded yet
+    byTable['job_parts'] = { production_status: 'in_progress' };
+    byTable['jobs'] = { production_status: 'in_progress' };
+
+    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const b: Record<string, unknown> = {};
+      for (const m of ['select', 'insert', 'update', 'eq', 'is', 'order', 'single', 'maybeSingle']) {
+        b[m] = vi.fn().mockImplementation(() => b);
+      }
+      Object.defineProperty(b, 'data', { get: () => byTable[table] ?? null });
+      Object.defineProperty(b, 'error', { get: () => null });
+      return b;
+    });
+
+    vi.mocked(createOperationCompletion).mockResolvedValue({ id: 'c-1' });
+    vi.mocked(voidOpenIntervalsForOperation).mockResolvedValue(0);
+  });
+
+  it('records the completion as office capture, never as the operator', async () => {
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 2 });
+    expect(createOperationCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ captureSource: 'office', quantityGood: 2 }),
+    );
+  });
+
+  it('opens no interval — the office was not at the machine and has no duration to report', async () => {
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 2 });
+    // The one positive assertion available: nothing here starts or closes an
+    // interval, only discards. `startOperationInterval` is not even imported by
+    // jobsAccess, so a regression would be a new import rather than a new call.
+    expect(mockSupabase.rpc).not.toHaveBeenCalledWith(
+      'start_operation_interval',
+      expect.anything(),
+    );
+  });
+
+  it('discards any timer running on the step — first write wins', async () => {
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 2 });
+    expect(voidOpenIntervalsForOperation).toHaveBeenCalledWith('op-1');
+  });
+
+  it('records FIRST, then discards, so a failed discard cannot lose the production fact', async () => {
+    const order: string[] = [];
+    vi.mocked(createOperationCompletion).mockImplementationOnce(async () => {
+      order.push('completion');
+      return { id: 'c-1' };
+    });
+    vi.mocked(voidOpenIntervalsForOperation).mockImplementationOnce(async () => {
+      order.push('discard');
+      return 1;
+    });
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 2 });
+    expect(order).toEqual(['completion', 'discard']);
+  });
+
+  it('reports how many timers it discarded, so the UI can say so rather than claim a clean success', async () => {
+    vi.mocked(voidOpenIntervalsForOperation).mockResolvedValue(1);
+    const result = await completeJobOperation('op-1', 'job-1', { quantityGood: 2 });
+    expect(result.discardedRunningTimers).toBe(1);
+  });
+
+  it('forwards the caller\'s expected quantity so a stale dialog is refused', async () => {
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 2, expectedQtyGood: 0 });
+    expect(createOperationCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedQtyGood: 0 }),
+    );
+  });
+
+  it('discards nothing when there is nothing to record', async () => {
+    // qtyGood 0 writes no completion, so there is no override and no reason to
+    // destroy an operator's running measurement.
+    await completeJobOperation('op-1', 'job-1', { quantityGood: 0 });
+    expect(createOperationCompletion).not.toHaveBeenCalled();
+    expect(voidOpenIntervalsForOperation).not.toHaveBeenCalled();
   });
 });

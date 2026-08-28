@@ -16,10 +16,39 @@
 import { getSupabase } from '@/lib/supabase';
 import { toFriendlyError } from '@/lib/supabaseErrors';
 import type {
+  CompletionCaptureSource,
   CreateOperationCompletionInput,
   OperationCompletionEvent,
   OperationCompletionSummary,
 } from '@/types/operationCompletion';
+
+/**
+ * Somebody else recorded work on this step while this caller was looking at it.
+ *
+ * A DISTINCT CLASS, not a message, because every surface has to react to it
+ * differently from a failed write: the completion did NOT land, nothing is
+ * broken, and the right response is to re-read and show the operator what is
+ * actually there rather than to offer a retry of a write that would now
+ * double-count.
+ *
+ * FIRST WRITE WINS, decided 2026-08-28. Completions are additive, so two people
+ * each recording "the remaining 2" on a 2-piece step silently produces 4 good on
+ * an order of 2 — over-completion the UI warns about when you type it, arriving
+ * here with nobody having typed it.
+ */
+export class CompletionConflictError extends Error {
+  /** What is actually recorded now, so the caller can say so without re-reading. */
+  readonly liveQtyGood: number;
+
+  constructor(liveQtyGood: number) {
+    super(
+      'Someone else recorded work on this step while this page was open. ' +
+        'Nothing was recorded — the step has been refreshed to show where it actually stands.',
+    );
+    this.name = 'CompletionConflictError';
+    this.liveQtyGood = liveQtyGood;
+  }
+}
 
 /**
  * Record a good-quantity completion event on an operation. The insert fires the
@@ -47,6 +76,41 @@ export async function createOperationCompletion(
     );
   }
 
+  // FIRST-WRITE-WINS CHECK, and it is deliberately a re-read rather than a
+  // constraint. Completions are additive by design — partial quantities are the
+  // whole point of the table — so the database cannot tell a legitimate second
+  // event from a stale duplicate. Only the caller can, by saying what it thought
+  // was there.
+  //
+  // This closes the window that MATTERS, which is minutes long: a Complete dialog
+  // left open on the office screen while an operator finishes the step on their
+  // phone. It does not close a sub-second double-submit, and making it atomic
+  // would mean moving the insert into an RPC — a Supabase-first violation for a
+  // race whose realistic frequency is zero and whose damage (an over-completion
+  // the office can void) is one click to undo.
+  if (input.expectedQtyGood !== undefined) {
+    const { data: live, error: liveError } = await supabase
+      .from('job_operation_completions')
+      .select('quantity_good')
+      .eq('job_operation_id', input.jobOperationId)
+      .is('voided_at', null);
+
+    // A FAILED CHECK IS NOT A PASSED CHECK. "Couldn't read" must not render as
+    // "nothing changed" — the same rule the access-check guidance states, and the
+    // consequence here is a double-counted completion rather than a wrong badge.
+    if (liveError) {
+      throw toFriendlyError(liveError, {
+        entity: 'completion',
+        fallback: 'Could not check what is already recorded on this step.',
+      });
+    }
+
+    const liveQtyGood = (live ?? []).reduce((acc, c) => acc + Number(c.quantity_good), 0);
+    if (liveQtyGood !== input.expectedQtyGood) {
+      throw new CompletionConflictError(liveQtyGood);
+    }
+  }
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -61,6 +125,7 @@ export async function createOperationCompletion(
       job_part_id: input.jobPartId,
       quantity_good: input.quantityGood,
       completed_by: user?.id ?? null,
+      capture_source: input.captureSource,
       note,
     })
     .select('id')
@@ -254,7 +319,7 @@ export async function getOperationCompletionEvents(
  * types/database.ts and the row comes back as GenericStringError[].
  */
 const FEED_COMPLETION =
-  'id, job_operation_id, quantity_good, completed_at, job_operations!inner(job_id, operation_name)' as const;
+  'id, job_operation_id, quantity_good, completed_at, capture_source, job_operations!inner(job_id, operation_name)' as const;
 
 /** A completion as the operator's job feed shows it. Carries no actor — see below. */
 export interface JobFeedCompletion {
@@ -263,24 +328,41 @@ export interface JobFeedCompletion {
   quantity_good: number;
   completed_at: string;
   operation_name: string;
+  /**
+   * 'office' rows are in this list because the OFFICE recorded them, not because
+   * the reader did. The feed labels them, since "someone in the office marked
+   * this done" is a different fact from "you finished this".
+   */
+  capture_source: CompletionCaptureSource | null;
 }
 
 /**
- * The caller's OWN non-voided completions on this job, for the feed.
+ * The completions this job's feed shows: the caller's OWN, plus every one the
+ * OFFICE recorded.
  *
- * OWN ONLY, and no actor name, exactly like the interval rows beside them. A
- * job-scoped feed listing what each named person finished and when would be a
+ * THE OWN-ROWS RULE IS ABOUT PEOPLE, AND THE SECOND HALF HAS NO PERSON IN IT.
+ * A job-scoped feed listing what each named person finished and when would be a
  * per-person production log available shop-wide — the thing the surveillance
- * guardrail refuses. The reader is the only person in it, so naming them would
- * be telling an operator who they are. See
- * docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
+ * guardrail refuses, and the reason operator completions stay own-only with no
+ * actor name (docs/modules/operator-view.md#surveillance-guardrail-non-negotiable).
+ * An office completion is an act by the shop, not by a machinist: including it
+ * exposes nobody's pace, and EXCLUDING it was the bug — the office marked a step
+ * done and the floor's own record of that step stayed silent, so the operator
+ * standing at the machine had no way to learn their step had been closed out
+ * from under them.
+ *
+ * SPLIT ON THE SURFACE COLUMN, NOT THE ACTOR'S ROLE. An admin at a machine
+ * records through the operator surface and their row is operator capture; role
+ * would file it as an office action and publish it to the whole shop.
+ * NULL — every row written before 20260828124806 — is neither, so it stays
+ * own-only and nothing at rest changes meaning.
  *
  * Returns ALL of them, timed and untimed, because this query cannot tell the
  * difference — a completion does not know whether an interval points at it. The
  * feed drops the ones its already-loaded intervals claim, which is also what
  * makes a completion whose interval was voided correctly reappear as untimed.
  */
-export async function getMyCompletionsForJob(
+export async function getFeedCompletionsForJob(
   companyId: string,
   jobId: string,
 ): Promise<JobFeedCompletion[]> {
@@ -296,7 +378,10 @@ export async function getMyCompletionsForJob(
     .select(FEED_COMPLETION)
     .eq('company_id', companyId)
     .eq('job_operations.job_id', jobId)
-    .eq('completed_by', user.id)
+    // ONE ROUND TRIP, not two. `or` on a mounted feed matters on cellular, which
+    // is the connection this screen actually runs on. Both sides of it are
+    // indexed-column equalities, so PostgREST resolves it as a bitmap OR.
+    .or(`completed_by.eq.${user.id},capture_source.eq.office`)
     // Undo is a soft void, so an undone completion must not keep claiming work.
     .is('voided_at', null)
     .order('completed_at', { ascending: false });
@@ -304,7 +389,7 @@ export async function getMyCompletionsForJob(
   if (error) {
     throw toFriendlyError(error, {
       entity: 'completion',
-      fallback: 'Could not load what you finished on this job.',
+      fallback: 'Could not load what has been finished on this job.',
     });
   }
 
@@ -316,6 +401,7 @@ export async function getMyCompletionsForJob(
       quantity_good: Number(row.quantity_good),
       completed_at: row.completed_at,
       operation_name: op?.operation_name ?? '',
+      capture_source: (row.capture_source as CompletionCaptureSource | null) ?? null,
     };
   });
 }

@@ -23,7 +23,11 @@ import {
   markOperationReceived,
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
-import { getOperationCompletionSummaries } from '@/utils/operationCompletionsAccess';
+import {
+  CompletionConflictError,
+  getOperationCompletionSummaries,
+} from '@/utils/operationCompletionsAccess';
+import posthog from 'posthog-js';
 import { getOperationActuals } from '@/utils/operationIntervalsAccess';
 import type { OperationActuals } from '@/types/operationInterval';
 import { useSearchParams } from 'next/navigation';
@@ -166,11 +170,41 @@ export default function OperationsPanel({
   // Record a completion for the good quantity entered in the dialog (defaults to
   // the full remaining balance). Omitting quantityGood would complete the whole
   // remainder, but the dialog always passes an explicit number.
+  //
+  // THIS IS THE UNTIMED PATH. completeJobOperation records capture_source
+  // 'office' and opens no interval — the same shape as the step screen's
+  // `Complete without timing` — and discards any timer running on the step,
+  // because first write wins and the office cannot honestly end a stranger's
+  // clock. See its docblock for the whole argument.
   const runComplete = async (operationId: string, quantityGood?: number) => {
     setLoading(true);
     try {
-      const result = await completeJobOperation(operationId, job.id, { quantityGood });
-      if (result.jobStatusChanged || result.jobPartStatusChanged) {
+      const result = await completeJobOperation(operationId, job.id, {
+        quantityGood,
+        // What THIS screen was showing when the dialog opened. A mismatch at
+        // submit means the floor got there first, and nothing is written.
+        expectedQtyGood: summaryByOp.get(operationId)?.qty_good ?? 0,
+      });
+      posthog.capture('operation completed', {
+        surface: 'office',
+        job_operation_id: operationId,
+        quantity_good: quantityGood ?? 0,
+        is_partial: (quantityGood ?? 0) < (summaryByOp.get(operationId)?.qty_remaining ?? 0),
+        discarded_running_timers: result.discardedRunningTimers ?? 0,
+      });
+
+      // SAID OUT LOUD, and it outranks the celebration below. Discarding a timer
+      // destroys minutes somebody actually measured — the accepted cost of
+      // refusing to fabricate an end time — and reporting that as a plain
+      // "Completion recorded" is how the office would never learn it happens.
+      if (result.discardedRunningTimers) {
+        showSnackbar(
+          result.discardedRunningTimers === 1
+            ? 'Completion recorded. A timer was running on this step — it was discarded, so no time is recorded against it.'
+            : `Completion recorded. ${result.discardedRunningTimers} timers were running on this step — they were discarded, so no time is recorded against it.`,
+          'warning',
+        );
+      } else if (result.jobStatusChanged || result.jobPartStatusChanged) {
         handleStatusChanges(
           result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
           result.jobStatusChanged ? result.newJobProductionStatus : undefined,
@@ -182,6 +216,18 @@ export default function OperationsPanel({
       await Promise.all([reloadSummaries(), reloadActuals()]);
       onOperationUpdate();
     } catch (err) {
+      // A CONFLICT IS NOT A FAILED WRITE, and must not offer a retry: retrying
+      // is precisely the double-count the check just prevented. Close the
+      // dialog, re-read, and let the refreshed card carry the answer — the
+      // office can see what was recorded and Undo it if the floor got it wrong.
+      if (err instanceof CompletionConflictError) {
+        posthog.capture('operation completion conflicted', { surface: 'office' });
+        setDialogOp(null);
+        await Promise.all([reloadSummaries(), reloadActuals()]);
+        onOperationUpdate();
+        showSnackbar(err.message, 'warning');
+        return;
+      }
       showSnackbar(err instanceof Error ? err.message : 'Failed to complete operation', 'error');
     } finally {
       setLoading(false);
@@ -337,6 +383,7 @@ export default function OperationsPanel({
           target={summaryByOp.get(dialogOp.id)?.target ?? 0}
           qtyGood={summaryByOp.get(dialogOp.id)?.qty_good ?? 0}
           remaining={summaryByOp.get(dialogOp.id)?.qty_remaining ?? 0}
+          openTimerCount={actualsByOp.get(dialogOp.id)?.open_count ?? 0}
           busy={loading}
           onClose={() => setDialogOp(null)}
           onRecord={(qty) => runComplete(dialogOp.id, qty)}

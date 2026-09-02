@@ -10,8 +10,8 @@ import type { StorageEntityType } from '@/utils/storageHelpers';
 import type { JobNoteMedia } from '@/types/operator';
 
 /**
- * Access layer for note media — photos (and, later, short videos) attached to a
- * `notes` entry. File bytes live in the private `attachments` storage bucket
+ * Access layer for note media — photos and short videos attached to a `notes`
+ * entry. File bytes live in the private `attachments` storage bucket
  * under {companyId}/{entityType}/{entityId}/... (see utils/storageHelpers.ts,
  * whose bucket RLS already gates by the company folder); this module manages the
  * `note_media` metadata rows and ties the two together.
@@ -24,15 +24,17 @@ import type { JobNoteMedia } from '@/types/operator';
  * exception to it.
  *
  * Mirrors partAttachmentsAccess.ts. Heavy media work (compression, EXIF fix,
- * dimension reading) happens in the browser BEFORE these calls — they only see
- * an already-compressed File and upload it (Supabase-first, no FastAPI/ffmpeg).
+ * dimension reading, and for a clip the encode itself and its poster frame)
+ * happens in the browser BEFORE these calls — they only see a File that is already
+ * the size it will be stored at, and upload it (Supabase-first, no FastAPI/ffmpeg).
+ * A video is never re-encoded here: the recorder's bitrate IS the compression pass.
  */
 
 /** Signed-URL lifetime for feed thumbnails; long enough that an open feed won't 403. */
 const MEDIA_URL_EXPIRY_SECONDS = 4 * 60 * 60;
 
 const MEDIA_SELECT =
-  'id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height';
+  'id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height, duration_seconds';
 
 type MediaRow = {
   id: string;
@@ -43,6 +45,7 @@ type MediaRow = {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  duration_seconds: number | null;
 };
 
 function rowToMedia(row: MediaRow): JobNoteMedia {
@@ -55,11 +58,38 @@ function rowToMedia(row: MediaRow): JobNoteMedia {
     mime_type: row.mime_type,
     width: row.width,
     height: row.height,
+    duration_seconds: row.duration_seconds,
   };
 }
 
 /**
- * Put one (already-compressed) photo in the bucket and return where it landed.
+ * One file already in the bucket, waiting for a note to belong to.
+ *
+ * AN OBJECT RATHER THAN POSITIONAL ARGUMENTS because video needs three more facts
+ * than a photo does, and threading `(…, dims, kind, durationSeconds, thumbnailPath)`
+ * through three call sites is how a caller ends up passing a duration as a width.
+ * The union keeps the video-only fields off the photo shape entirely.
+ */
+export type UploadedMedia =
+  | {
+      kind: 'photo';
+      storagePath: string;
+      file: File;
+      dims?: { width: number; height: number };
+    }
+  | {
+      kind: 'video';
+      storagePath: string;
+      file: File;
+      dims?: { width: number; height: number };
+      /** Poster key. Null when the frame could not be grabbed — the gallery copes. */
+      thumbnailPath: string | null;
+      durationSeconds: number;
+    };
+
+/**
+ * Put one already-sized file — a compressed photo, a recorded clip, or a clip's poster — in the
+ * bucket and return where it landed.
  *
  * SPLIT FROM THE ROW INSERT ON PURPOSE, and the split is the whole point of #624. The bytes are
  * the slow, failure-prone half; the row is a fast local write. Keeping them in one function forced
@@ -114,32 +144,40 @@ export async function discardNoteMediaUploads(storagePaths: string[]): Promise<v
 export async function insertNoteMedia(
   companyId: string,
   noteId: string,
-  storagePath: string,
-  file: File,
-  dims?: { width: number; height: number },
+  upload: UploadedMedia,
 ): Promise<JobNoteMedia> {
   const supabase = getSupabase();
+  const isVideo = upload.kind === 'video';
+  const thumbnailPath = isVideo ? upload.thumbnailPath : null;
 
   const { data, error } = await supabase
     .from('note_media')
     .insert({
       company_id: companyId,
       note_id: noteId,
-      storage_path: storagePath,
-      kind: 'photo',
-      mime_type: file.type || null,
-      size_bytes: file.size,
-      width: dims?.width ?? null,
-      height: dims?.height ?? null,
+      storage_path: upload.storagePath,
+      thumbnail_path: thumbnailPath,
+      kind: upload.kind,
+      mime_type: upload.file.type || null,
+      size_bytes: upload.file.size,
+      width: upload.dims?.width ?? null,
+      height: upload.dims?.height ?? null,
+      duration_seconds: isVideo ? upload.durationSeconds : null,
     })
     .select(MEDIA_SELECT)
     .single();
 
   if (error) {
-    // Roll back the orphaned upload so a failed insert doesn't leak a file.
-    await deleteFileFromStorage(storagePath).catch(() => {});
+    // Roll back the orphaned upload so a failed insert doesn't leak a file. The
+    // poster goes with it — it exists only to stand for this row.
+    await deleteFileFromStorage(upload.storagePath).catch(() => {});
+    if (thumbnailPath) await deleteFileFromStorage(thumbnailPath).catch(() => {});
     console.error('Error inserting note media:', error);
-    throw new Error('Failed to attach the photo. Please try again.');
+    throw new Error(
+      isVideo
+        ? 'Failed to attach the video. Please try again.'
+        : 'Failed to attach the photo. Please try again.',
+    );
   }
 
   return rowToMedia(data as unknown as MediaRow);
@@ -159,7 +197,10 @@ export async function addNoteMedia(
   },
 ): Promise<JobNoteMedia> {
   const storagePath = await uploadNoteMediaFile(companyId, file, opts.folder);
-  return insertNoteMedia(companyId, noteId, storagePath, file, opts.dims);
+  // Photo-only by design: this one-step helper is for callers that already hold a
+  // note, and video never arrives that way — the composer stages a clip and its
+  // poster together, which is exactly the two-half path below.
+  return insertNoteMedia(companyId, noteId, { kind: 'photo', storagePath, file, dims: opts.dims });
 }
 
 /**
@@ -208,6 +249,8 @@ export function getJobNoteMediaUrl(storagePath: string): Promise<string> {
 export async function deleteJobNoteMedia(media: {
   id: string;
   storage_path: string;
+  /** Optional so existing photo call sites need no change; a video always has one. */
+  thumbnail_path?: string | null;
 }): Promise<void> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -220,9 +263,14 @@ export async function deleteJobNoteMedia(media: {
     throw toFriendlyError(error, { entity: 'photo' });
   }
   assertDeleted(data, 'photo');
-  await deleteFileFromStorage(media.storage_path).catch((err) =>
-    console.warn('Failed to delete media file after row delete:', err),
-  );
+  // Both objects, not just the clip: a poster whose row is gone is an orphan
+  // nothing will ever name again.
+  for (const path of [media.storage_path, media.thumbnail_path ?? null]) {
+    if (!path) continue;
+    await deleteFileFromStorage(path).catch((err) =>
+      console.warn('Failed to delete media file after row delete:', err),
+    );
+  }
 }
 
 /**
@@ -238,14 +286,16 @@ export async function deleteJobNote(noteId: string): Promise<void> {
   let paths: string[] = [];
   const { data: mediaRows, error: listError } = await supabase
     .from('note_media')
-    .select('storage_path')
+    .select('storage_path, thumbnail_path')
     .eq('note_id', noteId);
   if (listError) {
     console.warn('Could not list note media for cleanup:', listError);
   } else {
-    paths = ((mediaRows ?? []) as Array<{ storage_path: string }>)
-      .map((r) => r.storage_path)
-      .filter(Boolean);
+    // Posters included — the cascade takes the rows, so this is the last moment
+    // anything knows a video's thumbnail existed.
+    paths = ((mediaRows ?? []) as Array<{ storage_path: string; thumbnail_path: string | null }>)
+      .flatMap((r) => [r.storage_path, r.thumbnail_path])
+      .filter((p): p is string => !!p);
   }
 
   const { data, error } = await supabase

@@ -1483,7 +1483,7 @@ const JOB_NOTE_SELECT =
   'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
   'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
   'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
-  'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+  'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height, duration_seconds)';
 
 export type ReactionRel = {
   kind: string;

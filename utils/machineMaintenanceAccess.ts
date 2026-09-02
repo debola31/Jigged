@@ -34,7 +34,7 @@ const MACHINE_NOTE_SELECT =
   'created_at, edited_at, viewer_count, author_id, ' +
   'author:user_company_access(name), ' +
   'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
-  'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+  'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height, duration_seconds)';
 
 const MACHINE_DETAIL_COLUMNS = 'make, model, serial_number, year_built, purchased_on';
 

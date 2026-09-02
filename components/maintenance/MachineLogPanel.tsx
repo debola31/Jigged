@@ -130,9 +130,10 @@ export default function MachineLogPanel({
         }),
       uploadMedia: (file) => uploadMachineNoteMediaFile(companyId, workCenterId, file),
       linkMedia: (note, upload) =>
-        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
+        insertNoteMedia(companyId, note.id, upload),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { workCenterId, maintenanceKind: kind },
+      analyticsSurface: 'operator_machine',
     };
   }, [readOnly, memberId, workCenterId, companyId, kind]);
 

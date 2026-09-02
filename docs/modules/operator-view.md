@@ -809,8 +809,8 @@ Where the office needs a denominator, the dimension is the **work centre**: `wor
 already the chain key on every interval, and `get_open_intervals` already reports by machine.
 
 `operator_events` (funnel instrumentation: `app_opened`, `op_card_opened`, `prior_notes_opened`,
-`composer_focused`, `note_saved`, `note_saved_with_photo`, `station_selected`,
-`completion_recorded`) is **service-role only** and carries no note ids of what the actor read. A
+`composer_focused`, `note_saved`, `note_saved_with_photo`, `photo_attached`, `video_attached`,
+`station_selected`, `completion_recorded`) is **service-role only** and carries no note ids of what the actor read. A
 per-operator event log readable by the shop's own admin would reconstruct exactly the reading
 behaviour the above exists to protect. The PostHog `operator_operation_completed` capture carries
 no operator identity for the same reason.
@@ -825,7 +825,7 @@ Four decisions govern this screen; all four were arrived at against a real failu
 
 Finishing a step and writing down what you learned are **one act, one button, one commit**. The
 completion block carries the quantity field, an optional *"Anything worth noting for next time?"*
-with photo attach, and `RECORD COMPLETION` submits all of it.
+with a camera and a video recorder, and `RECORD COMPLETION` submits all of it.
 
 It used to be three separate things: record the completion, then a prompt offering to add a photo,
 then a *separate* Post. The middle had no durability — attaching a photo showed a thumbnail, the
@@ -837,6 +837,64 @@ offer is deleted, not relocated.**
 first and durably, then the note. A transaction across the two would be *worse* — it would roll back
 real finished work because an image failed to upload on shop wifi. So if the note fails the
 completion stands, and the note error surfaces on its own next to the text the operator still has.
+
+### Attached material is shot in Jigged (2026-09-02)
+
+**Both controls go to a live camera.** The photo input carries `capture="environment"`, so a tap
+opens the rear camera rather than the OS sheet; video is recorded by
+[`VideoRecorderDialog`](../../components/operator/VideoRecorderDialog.tsx) inside the app. There is
+no camera roll and no file picker on this surface any more. Several items per note come from
+tapping again — HTML Media Capture is one shot per invocation, so `multiple` was dropped with the
+sheet.
+
+**This reverses a decision, and the evidence it reverses still stands.** The sheet was deliberately
+left open because the observed failure was setup photos stranded in the camera roll, and the audit
+that followed found the phone-camera-then-attach flow was how photos actually arrived. Neither
+finding has been contradicted. What changed is what the photo is *for*: a note's media is read back
+later as a record of what this job looked like, and material picked from a roll cannot say when or
+where it was taken. The cost is real and was accepted — an operator who shoots at the machine and
+files the note later must now open Jigged at the machine.
+
+**The signal to watch is `composer_focused` against `note_saved`.** That pair is documented below as
+reading "capture friction". If this change hurts, it will look exactly like that and mean something
+else, so read a widening gap as this first.
+
+**`MovementPhotoField` deliberately did NOT follow.** Movement evidence is a receipt for a
+transaction happening now, and the likeliest photo is the one already taken of the shelf. Same
+attribute, opposite answer, because it is a different question.
+
+### Video: two minutes, recorded in the app
+
+**Why an in-app recorder rather than `capture` on a video input.** HTML Media Capture takes no
+duration argument and no bitrate argument. iOS runs to its own ten-minute default, and two minutes
+of phone-native 1080p is 100–400 MB — over the bucket's inherited 50 MB ceiling and hopeless on
+shop cellular. A two-minute rule imposed that way could only reject a clip *after* it was shot.
+`MediaRecorder` stops itself, and encodes at 720p / 1.5 Mbit/s so a full-length clip is ~23 MB.
+A byte budget stops the recording early if a handset ignores the bitrate hint, because an oversized
+clip otherwise fails at the *end* of a multi-minute upload.
+
+**Audio is recorded, and noise suppression is off.** A chattering tool or a bearing starting to go is
+diagnosed by sound, and suppression is tuned to remove exactly the steady machine noise that is the
+content here.
+
+**MP4 is preferred over WebM, and that is a compatibility requirement rather than a taste.** These
+clips are read back by the office on a desktop, and Safari cannot play VP8 WebM at all — an
+Android-recorded WebM would be a permanently unplayable file for the person it was recorded for.
+The probe order is pinned by a test for that reason.
+
+**Duration is measured, never read off the file.** A fresh `MediaRecorder` blob reports its own
+duration as `Infinity` or `0`, because the container is written without knowing the length in
+advance. That is what `note_media.duration_seconds` is for.
+
+**Every clip gets a poster, and `thumbnail_path` finally has a writer.** Without one the galleries
+fall back to `storage_path`, so painting a 72px thumbnail would pull the whole clip down a cellular
+link — and an `<img>` cannot decode it anyway. The poster is a ~40 KB JPEG grabbed from the live
+preview shortly after recording starts, not at stop, because by stop the phone is usually already
+coming down. **Every read surface also handles a poster-less clip** with a play-badge tile rather
+than falling back, since that fallback is the expensive case.
+
+**The countdown is inside the guardrail.** It describes the recording in front of the operator and
+resets every time. Nothing accumulates, and nothing on this screen counts clips.
 
 **Within the note, photos upload BEFORE the note row is written** — `uploadJobNoteMediaFile` for
 every photo, then `addJobNote`, then `insertNoteMedia` per photo. Corrected 2026-08-04 from
@@ -1232,7 +1290,10 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 
 - [ ] **Given** a step WITH a `routing_operation_id`, **when** a note is saved, **then** it is written as a **durable `part` subject** with the job recorded only as provenance; **given** an ad-hoc step with no routing link, **then** it falls back to a `job` subject — a genuine subject difference, not a silent fallback — *verified by `__tests__/utils/operatorNoteSubject.test.ts` (6 `it`s) and `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
 - [ ] **Given** a blank-text note with a photo, **when** it is saved, **then** `body` is stored as null so a media-only note is valid — *verified by `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
-- [ ] **Given** a note with a photo, **when** it is saved, **then** every photo reaches storage **before** the note row is written; **given** an upload that fails or times out, **then** no note is created at all, the draft and photos stay in the composer so saving again is a retry rather than a second note, and the photos that did land are swept — *verified by `__tests__/hooks/useNoteCapture.test.tsx` (8 `it`s) and `__tests__/components/operator/JobFeed.test.tsx`*.
+- [ ] **Given** a clip, **when** the note is saved, **then** the clip uploads before its poster and both before the note row, a failure sweeps **both** objects, and `compressPhoto` is never called on a video — *verified by `__tests__/hooks/useNoteCapture.test.tsx` > `useNoteCapture — video`*.
+- [ ] **Given** a recording, **when** it reaches two minutes, **then** it stops itself, hands back exactly one clip however many things asked it to stop, and releases every camera track — *verified by `__tests__/components/operator/VideoRecorderDialog.test.tsx`*.
+- [ ] **Given** a browser that cannot record, **when** the composer renders, **then** no video control appears at all and photos still work — *verified by `__tests__/lib/videoCapture.test.ts` and `__tests__/components/operator/JobFeed.test.tsx` > `JobFeed — capture-only media`*.
+- [ ] **Given** a note with a photo, **when** it is saved, **then** every photo reaches storage **before** the note row is written; **given** an upload that fails or times out, **then** no note is created at all, the draft and photos stay in the composer so saving again is a retry rather than a second note, and the photos that did land are swept — *verified by `__tests__/hooks/useNoteCapture.test.tsx` and `__tests__/components/operator/JobFeed.test.tsx`*.
 - [ ] **Given** a stalled upload, **when** its size-aware deadline expires, **then** it fails rather than hanging on "Saving…" forever — *verified by `__tests__/utils/storageHelpers.test.ts` > `uploadFileToStorage deadline`*.
 - [ ] **Given** the job feed, **when** it loads, **then** job-subject notes AND durable part-subject notes captured on this job roll up together, newest first — *verified by `__tests__/utils/operatorAccess.test.ts` > `getJobNotes`*.
 - [ ] **Given** an author editing their own note, **when** it saves, **then** only `body` changes, `edited_at` is stamped by the trigger, a "· edited" marker renders, and **the view count does not reset** — *verified by `__tests__/components/notes/NoteEditDialog.test.tsx` (12 `it`s), `__tests__/components/operator/JobFeed.test.tsx` (17 `it`s) and `__tests__/utils/operatorAccess.test.ts` > `updateNoteBody`*.

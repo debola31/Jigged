@@ -145,8 +145,14 @@ matching [Operator View](operator-view.md), so a four-word entry no longer costs
 ### 4.3 Capture
 
 Free text; dictation is the phone keyboard's dictation key, which operators already use — **no custom voice
-capture is built or proposed**. Photos are optional and go through the native sheet, so the end-of-shift
-offset photo already on the phone works. Alongside them one optional toggle: **Needs attention**, off by
+capture is built or proposed**. Photos and short videos are optional and are both **captured in Jigged**:
+the camera button opens the rear camera directly and the video button opens the in-app recorder, capped at
+two minutes with sound. This composer is the same component the job-step composer uses, so it inherited both
+changes on 2026-09-02 — including the loss of the camera roll, which means **the end-of-shift offset photo
+already sitting on the phone can no longer be attached here**; it has to be re-taken in the app. The
+reasoning, and the signal to watch if that hurts, is in
+[operator-view.md](operator-view.md#attached-material-is-shot-in-jigged-2026-09-02). Alongside them one
+optional toggle: **Needs attention**, off by
 default (most entries record work already done) and deselectable, because a person who is unsure must still
 be able to write the sentence.
 

@@ -43,6 +43,14 @@ export type OperatorEventKind =
   | 'note_saved'
   | 'note_saved_with_photo'
   | 'photo_attached'
+  /**
+   * A clip finished recording and was staged. Its own kind rather than a property on
+   * `photo_attached`, because the question it answers is different: whether anyone
+   * reaches for video AT ALL is the unknown this feature ships to find out, and it
+   * would be unreadable buried inside the photo count. `note_saved_with_photo` keeps
+   * its name for both — that one means "saved with something attached".
+   */
+  | 'video_attached'
   | 'completion_recorded'
   // Machine Maintenance. The composer moments (composer_focused, note_saved,
   // note_saved_with_photo, photo_attached, composer_abandoned) are REUSED on the

@@ -16,6 +16,7 @@ import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import UndoIcon from '@mui/icons-material/Undo';
 import BrokenImageOutlinedIcon from '@mui/icons-material/BrokenImageOutlined';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import type { JobNoteMedia } from '@/types/operator';
 
@@ -135,6 +136,20 @@ export default function NoteEditDialog({
   const changed = trimmed !== (initialBody ?? '').trim() || removed.length > 0;
   const canSave = changed && !emptyBlocked && !saving;
 
+  /**
+   * "photo", "video", or "item" for a mixed selection.
+   *
+   * The dialog can now hold both, so "1 photo will be removed" became capable of
+   * being false. Flattening everything to "item" would have fixed that and made
+   * the common case — a note with photos on it — read like a spreadsheet, so the
+   * noun is only given up when the selection genuinely mixes kinds.
+   */
+  const removedNoun = (() => {
+    const kinds = new Set(media.filter((m) => removed.includes(m.id)).map((m) => m.kind));
+    if (kinds.size !== 1) return 'item';
+    return kinds.has('video') ? 'video' : 'photo';
+  })();
+
   // Keyed on the ids, not the array — same reason as NoteMediaGallery. NO_MEDIA
   // above already gives the omitted-prop case a stable identity; this covers a
   // caller that rebuilds a real media array each render, and keeps useLoad's
@@ -193,12 +208,18 @@ export default function NoteEditDialog({
         {media.length > 0 && (
           <Box sx={{ mt: 2 }}>
             <Typography variant="caption" color="text.secondary">
-              Photos
+              Photos &amp; videos
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
               {media.map((m) => {
                 const isRemoved = removed.includes(m.id);
                 const url = urls?.[m.id];
+                // Same rule as the galleries: the URL falls back to storage_path, so
+                // a poster-less clip must not be handed to an <img>. This dialog only
+                // removes media, so it needs the tile to be honest, not playable.
+                const posterless = m.kind === 'video' && !m.thumbnail_path;
+                const showImage = !!url && !posterless;
+                const noun = m.kind === 'video' ? 'video' : 'photo';
                 return (
                   <Box key={m.id} sx={{ position: 'relative', width: THUMB, height: THUMB }}>
                     <Box
@@ -216,20 +237,34 @@ export default function NoteEditDialog({
                         opacity: isRemoved ? 0.25 : 1,
                       }}
                     >
-                      {url ? (
+                      {showImage ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={url}
                           alt=""
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         />
+                      ) : posterless ? (
+                        <PlayCircleOutlineIcon fontSize="small" color="disabled" />
                       ) : (
                         <BrokenImageOutlinedIcon fontSize="small" color="disabled" />
+                      )}
+                      {m.kind === 'video' && showImage && (
+                        <PlayCircleOutlineIcon
+                          sx={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            color: 'common.white',
+                            pointerEvents: 'none',
+                          }}
+                        />
                       )}
                     </Box>
 
                     <IconButton
-                      aria-label={isRemoved ? 'Keep this photo' : 'Remove this photo'}
+                      aria-label={isRemoved ? `Keep this ${noun}` : `Remove this ${noun}`}
                       disabled={saving}
                       onClick={() =>
                         setRemoved((prev) =>
@@ -257,8 +292,8 @@ export default function NoteEditDialog({
             </Box>
             {removed.length > 0 && (
               <FormHelperText>
-                {removed.length} photo{removed.length === 1 ? '' : 's'} will be removed when you
-                save.
+                {removed.length} {removedNoun}
+                {removed.length === 1 ? '' : 's'} will be removed when you save.
               </FormHelperText>
             )}
           </Box>

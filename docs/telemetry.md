@@ -167,6 +167,7 @@ fails, and so does a listed property nothing passes.
 | `scanner opened` | The in-app scanner dialog opens. The denominator for everything below | `surface` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
 | `label scanned` | A decoded code was accepted by the caller. `ms_to_decode` is measured from the dialog opening and `scan_index` counts within that session, so `scan_index = 1` is time-to-first-scan and the rest is continuous-scan cadence | `surface`, `kind`, `ms_to_decode`, `scan_index`, `torch_used` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
 | `label scan rejected` | A code decoded but was refused. `reason` is one of `not_jigged`, `foreign_company`, `traveler_unsupported`, `caller_rejected` | `surface`, `reason` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
+| `note posted` | An operator saves a note from the shop-floor composer — a step note or a machine log entry. **This closes the gap named below**: the notes-and-photos loop had no event at all and was measured by an autocapture text-match on the Post button, which is also what blocked `mask_all_text`. Deliberately shape-only — `has_text` and not the text, because an operator note is the customer's business data. `video_count` is the number the in-app recorder shipped to find: whether anyone reaches for video at all | `surface`, `has_text`, `photo_count`, `video_count` | [useNoteCapture.ts](../hooks/useNoteCapture.ts) |
 | `scan link opened` | A printed code scanned with the phone's **camera app** lands on the operator login passthrough. `had_session` false means the scan cost an extra screen | `kind`, `had_session` | [login/page.tsx](../app/operator/[companyId]/login/page.tsx) |
 
 | `accounting connect started` | An admin picks an accounting system and starts connecting. `provider` is `qbo` (an Intuit OAuth redirect) or `qbd` (a setup link created for the shop computer) | `provider` | [QuickBooksIntegrationCard.tsx](../components/settings/QuickBooksIntegrationCard.tsx) |
@@ -186,19 +187,27 @@ contains other tables whose first cells are backticked identifiers.
 `job_operation_id` identifiers ([#702](https://github.com/debola31/Jigged/issues/702)). This table
 records what we send, not what we have decided is right.
 
-### Known gap: notes and photos are not instrumented
+### Closed 2026-09-02: notes and photos are now instrumented
 
 The operator activity feed — the notes-and-photos loop
-[modules/operator-view.md](modules/operator-view.md) treats as a core surface — sends **no event**.
+[modules/operator-view.md](modules/operator-view.md) treats as a core surface — sent **no event**.
 A pilot user posted a note on 2026-08-06 and it appeared nowhere in analytics; that is how the gap
 was found.
 
-Measurement today is a PostHog **action** (`Note posted (autocapture proxy)`, id 311795) matching
-autocapture clicks on the `Post` button. It works retroactively, which is why it was worth making,
-but it is text-matched and breaks silently if the label changes.
+Measurement was a PostHog **action** (`Note posted (autocapture proxy)`, id 311795) matching
+autocapture clicks on the `Post` button. It worked retroactively, which is why it was worth making,
+but it was text-matched and would have broken silently if the label changed — and the operator
+composer's buttons were relabelled in the same release that closed this, so it would have.
 
-**This blocks a fix we want.** `mask_all_text` — the remedy for autocapture capturing customer
-names — would also break the proxy. Instrument `note posted` properly and both resolve.
+`note posted` (registry above) now fires from the hook both composers share, which is why it
+covers the machine log as well as job steps. **The `mask_all_text` fix it was blocking is now
+unblocked** — the proxy action can be retired, and the two should be compared for a couple of weeks
+first, since the proxy counted button clicks and the real event counts successful saves. They will
+not agree, and the real event is the one that is right.
+
+**The gap was found the slow way, and that is the lesson worth keeping.** Nothing in CI can report
+that a feature was never instrumented — the check compares code to this registry, so a feature in
+neither passes green.
 
 ### Autocapture is for discovery, not measurement
 

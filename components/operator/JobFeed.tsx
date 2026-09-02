@@ -16,6 +16,8 @@ import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import CloseIcon from '@mui/icons-material/Close';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import { formatStopwatch } from '@/lib/duration';
 import { getJobNotes, getCurrentMember, updateNoteBody } from '@/utils/operatorAccess';
 import NoteReactions from '@/components/operator/NoteReactions';
 import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
@@ -142,7 +144,7 @@ export default function JobFeed({
   // Signed URLs for media thumbnails, keyed by media id (fetched on demand).
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   // Full-size viewer.
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ url: string; kind: JobNoteMedia['kind'] } | null>(null);
 
   // The feed's own composer, only where nothing else owns capture — see the
   // standaloneCapture prop.
@@ -346,9 +348,9 @@ export default function JobFeed({
 
   const openViewer = async (media: JobNoteMedia) => {
     try {
-      setViewerUrl(await getJobNoteMediaUrl(media.storage_path));
+      setViewer({ url: await getJobNoteMediaUrl(media.storage_path), kind: media.kind });
     } catch {
-      setError('Could not open the photo.');
+      setError(media.kind === 'video' ? 'Could not open the video.' : 'Could not open the photo.');
     }
   };
 
@@ -491,11 +493,17 @@ export default function JobFeed({
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
                     {note.media.map((m) => {
                       const url = mediaUrls[m.id];
+                      // See NoteMediaGallery: the signed URL falls back to
+                      // storage_path, so a poster-less clip must never reach an
+                      // <img> — it paints nothing and costs the whole file.
+                      const posterless = m.kind === 'video' && !m.thumbnail_path;
+                      const showImage = !!url && !posterless;
                       return (
                         <Box
                           key={m.id}
                           onClick={() => url && openViewer(m)}
                           sx={{
+                            position: 'relative',
                             width: THUMB,
                             height: THUMB,
                             borderRadius: 1,
@@ -507,15 +515,47 @@ export default function JobFeed({
                             justifyContent: 'center',
                           }}
                         >
-                          {url ? (
+                          {showImage ? (
                             <Box
                               component="img"
                               src={url}
-                              alt="Job photo"
+                              alt={m.kind === 'video' ? 'Job video' : 'Job photo'}
                               sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
+                          ) : posterless ? (
+                            <PlayCircleOutlineIcon sx={{ color: 'text.secondary' }} />
                           ) : (
                             <CircularProgress size={16} />
+                          )}
+                          {m.kind === 'video' && showImage && (
+                            <PlayCircleOutlineIcon
+                              sx={{
+                                position: 'absolute',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                color: 'common.white',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                          )}
+                          {m.kind === 'video' && m.duration_seconds != null && (
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                position: 'absolute',
+                                bottom: 2,
+                                right: 3,
+                                px: 0.5,
+                                borderRadius: 0.5,
+                                bgcolor: 'rgba(0,0,0,0.6)',
+                                color: 'common.white',
+                                fontVariantNumeric: 'tabular-nums',
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              {formatStopwatch(m.duration_seconds * 1000)}
+                            </Typography>
                           )}
                         </Box>
                       );
@@ -585,11 +625,11 @@ export default function JobFeed({
         />
       )}
 
-      {/* Full-size photo viewer. */}
-      <Dialog open={!!viewerUrl} onClose={() => setViewerUrl(null)} fullScreen>
+      {/* Full-size media viewer — an image or a clip, per `kind`. */}
+      <Dialog open={!!viewer} onClose={() => setViewer(null)} fullScreen>
         <IconButton
           aria-label="Close"
-          onClick={() => setViewerUrl(null)}
+          onClick={() => setViewer(null)}
           sx={{ position: 'absolute', right: 12, top: 12, zIndex: 1, color: 'common.white' }}
         >
           <CloseIcon />
@@ -603,14 +643,25 @@ export default function JobFeed({
             justifyContent: 'center',
           }}
         >
-          {viewerUrl && (
+          {viewer?.kind === 'video' ? (
+            /* No autoPlay — see NoteMediaGallery. Tapping a thumbnail is not consent
+               to spend tens of megabytes of cellular data. */
+            <Box
+              component="video"
+              src={viewer.url}
+              controls
+              playsInline
+              preload="metadata"
+              sx={{ maxWidth: '100%', maxHeight: '100%' }}
+            />
+          ) : viewer ? (
             <Box
               component="img"
-              src={viewerUrl}
+              src={viewer.url}
               alt="Job photo"
               sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             />
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
 

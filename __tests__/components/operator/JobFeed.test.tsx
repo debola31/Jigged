@@ -150,13 +150,49 @@ beforeEach(() => {
 // attempted — is asserted in OperationActionPage.test.tsx
 // ('writes the note only AFTER the completion has landed').
 
-describe('JobFeed — camera-roll photos unlocked', () => {
-  it('file input has no capture attribute and still accepts images', async () => {
+// REVERSED: this block used to be 'JobFeed — camera-roll photos unlocked', and it
+// asserted `not.toHaveAttribute('capture')`.
+//
+// That assertion was correct for the requirement it was written under. The camera
+// roll was deliberately left reachable because the observed failure was setup
+// photos stranded in it, and the audit that followed found the
+// phone-camera-then-attach flow was how photos actually arrived. Neither
+// observation has been contradicted.
+//
+// What changed is what a note's photo is FOR. It is read back later as a record of
+// what this job looked like, so it now has to be shot in Jigged — which the camera
+// roll cannot promise. The cost was accepted openly: an operator who shoots at the
+// machine and files the note afterwards must now open Jigged at the machine.
+//
+// The signal to watch is composer_focused against note_saved. That pair is
+// documented as reading "capture friction", and if this change hurts, it will look
+// exactly like that and mean something else.
+describe('JobFeed — capture-only media', () => {
+  it('sends the photo button straight to the camera, with no library', async () => {
     const { container } = renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    expect(fileInput).not.toHaveAttribute('capture');
+    expect(fileInput).toHaveAttribute('capture', 'environment');
     expect(fileInput).toHaveAttribute('accept', 'image/*');
+  });
+
+  it('drops `multiple`, which HTML Media Capture ignores anyway', async () => {
+    const { container } = renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    // Several photos per note come from tapping again, each appending to the strip.
+    expect(fileInput).not.toHaveAttribute('multiple');
+  });
+
+  it('offers no video button under jsdom, because jsdom cannot record', async () => {
+    renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    // The capability gate is what keeps every other suite in this repo green: with
+    // no MediaRecorder the control is never rendered, so no existing test that
+    // queries the composer has to know video exists. A device that cannot record
+    // sees the same thing, which is the point — a button that can only fail is
+    // worse than no button.
+    expect(screen.queryByLabelText('Record video')).toBeNull();
   });
 });
 

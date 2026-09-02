@@ -126,8 +126,11 @@ describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)
     // Uncheck Housing to leave it for a separate PO.
     await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
 
-    // Fill the two required fields.
-    fireEvent.change(screen.getByLabelText(/^Due date — /i), { target: { value: '2030-01-01' } });
+    // Fill the two required fields. Name the part: an unchecked part keeps its
+    // (disabled) date field rendered, so an unanchored "Due date — " matches two.
+    fireEvent.change(screen.getByLabelText(/^Due date — Bracket$/i), {
+      target: { value: '2030-01-01' },
+    });
     await userEvent.type(poField(), 'PO-1');
 
     await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
@@ -186,7 +189,7 @@ describe('ConvertToJobModal — partial quantity acceptance', () => {
       expect(convertQuoteToJobs).toHaveBeenCalledWith(
         'q1',
         expect.objectContaining({
-          lineOverrides: { li1: { quantity: 5, useTierPrice: false } },
+          lineOverrides: { li1: { quantity: 5, useTierPrice: false, dueDate: '2030-01-01' } },
         }),
       ),
     );
@@ -316,7 +319,7 @@ describe('ConvertToJobModal — price-options part (quick-pick breaks + editable
         'q1',
         expect.objectContaining({
           selectedLineItemIds: ['li80'],
-          lineOverrides: { li80: { quantity: 80, useTierPrice: true } },
+          lineOverrides: { li80: { quantity: 80, useTierPrice: true, dueDate: '2030-01-01' } },
         }),
       ),
     );
@@ -670,7 +673,12 @@ describe('ConvertToJobModal — one job per checked part', () => {
 
     const pdf = new File(['%PDF-1.4'], 'po.pdf', { type: 'application/pdf' });
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-    fireEvent.change(fileInput, { target: { files: [pdf] } });
+    // userEvent.upload, not fireEvent.change: the input is `hidden`, and a
+    // `target: { files }` shorthand does not populate `files` for it, so the
+    // component's onChange saw nothing and the PDF was never staged.
+    // `applyAccept: false` matches CompanyProfileCard's upload tests — the
+    // `accept` attribute is a picker hint, not the check being tested.
+    await userEvent.upload(fileInput, pdf, { applyAccept: false });
 
     await fillAndSubmit(/create 2 jobs/i);
 
@@ -706,9 +714,11 @@ describe('ConvertToJobModal — one job per checked part', () => {
 
     await waitFor(() => expect(poField().value).toBe(''));
     const pdf = new File(['%PDF-1.4'], 'po.pdf', { type: 'application/pdf' });
-    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
-      target: { files: [pdf] },
-    });
+    await userEvent.upload(
+      document.querySelector('input[type="file"]') as HTMLInputElement,
+      pdf,
+      { applyAccept: false },
+    );
 
     await fillAndSubmit(/create 2 jobs/i);
 

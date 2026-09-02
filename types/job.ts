@@ -535,6 +535,13 @@ export interface CompleteOperationData {
    * whole remaining balance (the one-click default). Over-completion is allowed.
    */
   quantityGood?: number;
+  /**
+   * The qty_good the office screen was showing when the dialog opened, for
+   * first-write-wins conflict detection. A mismatch at submit throws
+   * `CompletionConflictError` and records nothing — see
+   * `createOperationCompletion`.
+   */
+  expectedQtyGood?: number;
 }
 
 /**
@@ -549,4 +556,11 @@ export interface OperationUpdateResult {
   /** True when the parent job's aggregate status changed as a side effect. */
   jobStatusChanged: boolean;
   newJobProductionStatus?: ProductionStatus;
+  /**
+   * How many running timers this completion discarded on the shop floor. Almost
+   * always 0. Non-zero means the office closed out a step somebody was standing
+   * at, and the UI has to SAY SO rather than report a plain success — that
+   * operator's measured minutes are gone.
+   */
+  discardedRunningTimers?: number;
 }

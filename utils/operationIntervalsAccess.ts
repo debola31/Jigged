@@ -178,6 +178,43 @@ export async function cancelOperationInterval(intervalId: string): Promise<void>
 }
 
 /**
+ * Discard every open interval on one operation — the OFFICE's correction.
+ *
+ * The sibling of `cancelOperationInterval`, and the difference is who may call
+ * it. That one asserts the caller owns the interval, which is what keeps one
+ * member from rewriting another's hours — and is also what left an interval
+ * whose owner has gone home unreachable by anybody at all. This one is
+ * admin-gated inside the function instead, and is the narrowest exception that
+ * works: it takes an OPERATION and returns a COUNT, so the office can stop a
+ * timer without ever learning whose it was.
+ *
+ * VOIDS, NEVER CLOSES. Nobody in the office knows when the work stopped, and the
+ * person who does is not here, so an `ended_at` would be a fabricated duration —
+ * worse than a missing one, because the estimating loop reads it back as
+ * measurement.
+ *
+ * Two callers: the job page's Complete (first write wins — the office overrode a
+ * timer it cannot honestly end) and the dashboard Still-running card's Stop.
+ * Returns how many were discarded, which is 0 on the common path.
+ */
+export async function voidOpenIntervalsForOperation(jobOperationId: string): Promise<number> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('void_open_intervals_for_operation', {
+    p_job_operation_id: jobOperationId,
+  });
+
+  if (error) {
+    reportRpcError(error, 'discard open intervals');
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not stop the timer running on this step.',
+    });
+  }
+  return Number(data ?? 0);
+}
+
+/**
  * Correct the times on an interval that is already closed.
  *
  * A plain `.from().update()` and not an RPC, because this one does NOT cross

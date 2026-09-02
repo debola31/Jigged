@@ -13,6 +13,13 @@ const { responses, captured, mockSupabase } = vi.hoisted(() => {
     chain.forEach((m) => {
       builder[m] = vi.fn().mockImplementation(() => builder);
     });
+    // Captured, not merely chained: the feed's whole visibility rule lives in
+    // this one filter string, and a builder that silently swallowed it would let
+    // the rule be deleted with every test still green.
+    builder.or = vi.fn().mockImplementation((filter: string) => {
+      captured[`${table}.or`] = filter;
+      return builder;
+    });
     builder.insert = vi.fn().mockImplementation((payload: unknown) => {
       captured[`${table}.insert`] = payload;
       return builder;
@@ -40,7 +47,9 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import {
+  CompletionConflictError,
   createOperationCompletion,
+  getFeedCompletionsForJob,
   voidOperationCompletion,
   voidAllOperationCompletions,
   getOperationCompletionSummaries,
@@ -63,6 +72,7 @@ describe('createOperationCompletion', () => {
       jobPartId: 'jp-1',
       quantityGood: 3,
       note: '  hand-finished ',
+      captureSource: 'operator',
     });
 
     expect(res).toEqual({ id: 'c-1' });
@@ -80,6 +90,7 @@ describe('createOperationCompletion', () => {
     responses['job_operation_completions'] = { data: { id: 'c-2' }, error: null };
     await createOperationCompletion({
       companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1, note: '   ',
+      captureSource: 'operator',
     });
     expect((captured['job_operation_completions.insert'] as { note: unknown }).note).toBeNull();
   });
@@ -92,7 +103,7 @@ describe('createOperationCompletion', () => {
       error: { code: '42501', message: 'permission denied' },
     };
     await expect(
-      createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1 }),
+      createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1, captureSource: 'operator' }),
     ).rejects.toThrow(/don't have permission/i);
   });
 
@@ -108,8 +119,109 @@ describe('createOperationCompletion', () => {
       },
     };
     await expect(
-      createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1 }),
+      createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1, captureSource: 'operator' }),
     ).rejects.toThrow(/subscription isn't active/i);
+  });
+
+  // The column the job feed's visibility rule reads. A wrong value here either
+  // hides an office action from the shop floor or publishes an operator's output
+  // to the whole shop, so it is asserted per surface rather than once.
+  it.each(['operator', 'office'] as const)('records %s as the capturing surface', async (surface) => {
+    responses['job_operation_completions'] = { data: { id: 'c-3' }, error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1,
+      captureSource: surface,
+    });
+    expect(captured['job_operation_completions.insert']).toMatchObject({ capture_source: surface });
+  });
+});
+
+/**
+ * FIRST WRITE WINS. Completions are additive by design, so the database cannot
+ * tell a legitimate second event from a stale duplicate — only the caller can,
+ * by saying what it believed was already there.
+ */
+describe('createOperationCompletion — conflict detection', () => {
+  it('records nothing when someone else got there first', async () => {
+    // The caller last saw 0 good. Two are now recorded, so the step it is about
+    // to "complete the remaining 2" of is already done.
+    responses['job_operation_completions'] = { data: [{ quantity_good: 2 }], error: null };
+
+    await expect(
+      createOperationCompletion({
+        companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 2,
+        captureSource: 'office', expectedQtyGood: 0,
+      }),
+    ).rejects.toBeInstanceOf(CompletionConflictError);
+
+    // THE ASSERTION THAT MATTERS. A conflict that still inserts is the
+    // double-count this whole check exists to prevent, and the rejection above
+    // would look identical either way.
+    expect(captured['job_operation_completions.insert']).toBeUndefined();
+  });
+
+  it('carries the live quantity so the caller can say what is actually there', async () => {
+    responses['job_operation_completions'] = { data: [{ quantity_good: 2 }, { quantity_good: 3 }], error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1,
+      captureSource: 'office', expectedQtyGood: 0,
+    }).catch((err: unknown) => {
+      expect((err as CompletionConflictError).liveQtyGood).toBe(5);
+    });
+  });
+
+  it('proceeds when the live quantity SHRANK — an undo is not a double-count', async () => {
+    // The asymmetry. Somebody voided work while this caller was looking, so the
+    // live sum is smaller than the caller's view. Recording now banks against a
+    // smaller base and leaves more outstanding, which is correct. Refusing it
+    // was the first version's bug: the operator step screen reloads the job and
+    // the summary together after an undo, and there is a render between the two
+    // where its own `qtyGood` is still the pre-undo figure.
+    responses['job_operation_completions'] = { data: [], error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 5,
+      captureSource: 'operator', expectedQtyGood: 5,
+    }).catch(() => undefined);
+    expect(captured['job_operation_completions.insert']).toMatchObject({ quantity_good: 5 });
+  });
+
+  it('proceeds when the live quantity still matches what the caller saw', async () => {
+    // One response object serves the check read AND the insert; the check reads
+    // an array, the insert reads `.single()`. Sequenced by setting the array
+    // first and swapping to the row once the check has run is over-engineering —
+    // the insert path only reads `data.id`, and an array has none, so assert on
+    // the captured payload instead of the return.
+    responses['job_operation_completions'] = { data: [{ quantity_good: 4 }], error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1,
+      captureSource: 'operator', expectedQtyGood: 4,
+    }).catch(() => undefined);
+    expect(captured['job_operation_completions.insert']).toMatchObject({ quantity_good: 1 });
+  });
+
+  it('skips the check entirely when the caller states no expectation', async () => {
+    responses['job_operation_completions'] = { data: { id: 'c-9' }, error: null };
+    await createOperationCompletion({
+      companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1,
+      captureSource: 'operator',
+    });
+    expect(captured['job_operation_completions.insert']).toMatchObject({ quantity_good: 1 });
+  });
+
+  it('refuses rather than assumes when the check itself cannot be read', async () => {
+    // "Couldn't check" is never "nothing changed". Reading the failure as a pass
+    // is how a double-count would get written by the guard meant to stop it.
+    responses['job_operation_completions'] = {
+      data: null,
+      error: { code: '57014', message: 'canceling statement due to statement timeout' },
+    };
+    await expect(
+      createOperationCompletion({
+        companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1,
+        captureSource: 'office', expectedQtyGood: 0,
+      }),
+    ).rejects.toThrow();
+    expect(captured['job_operation_completions.insert']).toBeUndefined();
   });
 });
 
@@ -175,5 +287,54 @@ describe('getOperationCompletionEvents', () => {
     const events = await getOperationCompletionEvents('op-1', 'co-1');
     expect(events).toHaveLength(1);
     expect(events[0].completed_by_name).toBe('Sam');
+  });
+});
+
+/**
+ * The feed read. Own rows plus every OFFICE row — the own-rows rule is about
+ * PEOPLE, and an office completion has no person in it.
+ */
+describe('getFeedCompletionsForJob', () => {
+  it('asks for the caller\'s own rows OR any the office recorded', async () => {
+    responses['job_operation_completions'] = { data: [], error: null };
+    await getFeedCompletionsForJob('co-1', 'job-1');
+    // Both halves asserted. Losing the first publishes every operator's output
+    // shop-wide; losing the second is the bug this change fixes — the office
+    // marks a step done and the floor's record of it stays silent.
+    expect(captured['job_operation_completions.or']).toBe(
+      'completed_by.eq.user-1,capture_source.eq.office',
+    );
+  });
+
+  it('carries the surface through so the feed can label an office row', async () => {
+    responses['job_operation_completions'] = {
+      data: [
+        {
+          id: 'c-1', job_operation_id: 'op-1', quantity_good: '2',
+          completed_at: '2026-08-28T10:00:00Z', capture_source: 'office',
+          job_operations: { job_id: 'job-1', operation_name: 'OP 10' },
+        },
+      ],
+      error: null,
+    };
+    const rows = await getFeedCompletionsForJob('co-1', 'job-1');
+    expect(rows[0]).toMatchObject({ quantity_good: 2, capture_source: 'office' });
+  });
+
+  it('reports a pre-column row as unknown rather than guessing a surface', async () => {
+    // NULL means "recorded before 20260828124806". Coercing it to 'operator'
+    // would be the silent default the migration deliberately refused.
+    responses['job_operation_completions'] = {
+      data: [
+        {
+          id: 'c-2', job_operation_id: 'op-1', quantity_good: '1',
+          completed_at: '2026-08-01T10:00:00Z', capture_source: null,
+          job_operations: { job_id: 'job-1', operation_name: 'OP 10' },
+        },
+      ],
+      error: null,
+    };
+    const rows = await getFeedCompletionsForJob('co-1', 'job-1');
+    expect(rows[0].capture_source).toBeNull();
   });
 });

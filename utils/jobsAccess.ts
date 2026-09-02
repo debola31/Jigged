@@ -38,6 +38,7 @@ import {
   createOperationCompletion,
   voidAllOperationCompletions,
 } from '@/utils/operationCompletionsAccess';
+import { voidOpenIntervalsForOperation } from '@/utils/operationIntervalsAccess';
 
 /** PostgREST embeds a to-one relation as either the object or a 1-element array. */
 function firstRelation<T>(rel: T | T[]): T {
@@ -1312,6 +1313,26 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
  * Over-completion is allowed (only quantity_good > 0 is enforced in the DB).
  * Returns the resulting op plus whether the part/job status changed, so the UI
  * can celebrate a finished part or job.
+ *
+ * ── THIS IS THE UNTIMED PATH, AND IT MATCHES THE OPERATOR'S ESCAPE HATCH ─────
+ * It records `capture_source: 'office'` and opens no interval, which is exactly
+ * what `Complete without timing` does on the step screen: no duration is written
+ * rather than a guessed one. The office was not standing at the machine and has
+ * nothing to report about how long the work took.
+ *
+ * ── AND IT DISCARDS ANY TIMER RUNNING ON THE STEP ───────────────────────────
+ * Decided 2026-08-28, first write wins. Closing someone else's interval would
+ * stamp an end time nobody here witnessed, and a fabricated duration is worse
+ * than a missing one — it is read back as measurement by the estimating loop.
+ * So the running interval is VOIDED: better no data than bad data. The operator
+ * sees the clock disappear on their next refresh, and the step reads complete.
+ *
+ * ORDER IS LOAD-BEARING: the completion lands FIRST. It is the durable
+ * production fact, and the same ordering the step screen uses for the same
+ * reason. If the discard then fails, the completion still stands and the orphan
+ * interval is reachable from the dashboard's Still-running Stop control — which
+ * is strictly better than discarding an operator's measured minutes and then
+ * failing to record the work they were measuring.
  */
 export async function completeJobOperation(
   operationId: string,
@@ -1367,6 +1388,7 @@ export async function completeJobOperation(
   const remaining = Math.max(0, Number(part.quantity) - good);
   const qtyGood = data.quantityGood != null ? data.quantityGood : remaining;
 
+  let discardedRunningTimers = 0;
   if (qtyGood > 0) {
     await createOperationCompletion({
       companyId: part.company_id,
@@ -1374,7 +1396,16 @@ export async function completeJobOperation(
       jobPartId: opCtx.job_part_id,
       quantityGood: qtyGood,
       note: data.notes ?? null,
+      captureSource: 'office',
+      expectedQtyGood: data.expectedQtyGood,
     });
+
+    // NOT SWALLOWED. The step screen swallows its close failure because an
+    // operator cannot act on it from the shop floor; here the caller IS the
+    // office, the one party who can see the Still-running list and retry from
+    // it. Reporting the completion as a clean success while a timer it
+    // overrode keeps running is the exact silence this whole change is about.
+    discardedRunningTimers = await voidOpenIntervalsForOperation(operationId);
   }
   if (data.notes !== undefined) {
     // Checked: postgrest-js resolves with `{ error }` rather than rejecting, so an
@@ -1425,6 +1456,7 @@ export async function completeJobOperation(
     newJobPartProductionStatus: partChanged ? newPart : undefined,
     jobStatusChanged: jobChanged,
     newJobProductionStatus: jobChanged ? newJob : undefined,
+    discardedRunningTimers,
   };
 }
 

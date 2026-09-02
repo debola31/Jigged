@@ -34,6 +34,7 @@ import {
   markOperationReceived,
 } from '@/utils/operatorAccess';
 import {
+  CompletionConflictError,
   createOperationCompletion,
   getOperationCompletionSummaries,
 } from '@/utils/operationCompletionsAccess';
@@ -332,6 +333,12 @@ export default function OperatorOperationActionPage() {
         jobOperationId,
         jobPartId,
         quantityGood: qty,
+        captureSource: 'operator',
+        // FIRST WRITE WINS. `qtyGood` is what the summary said when this screen
+        // last loaded; if the office (or another operator) has recorded against
+        // this step since, the write is refused and the catch below re-reads
+        // rather than adding on top of a number this operator never saw.
+        expectedQtyGood: qtyGood,
       });
       setQtyDirty(false);
       // After the write resolves — a failed completion is not a completion.
@@ -340,6 +347,11 @@ export default function OperatorOperationActionPage() {
       // below: the completion is durable at this point, and a slow photo upload must not delay or
       // skip the measurement of the thing that already happened.
       posthog.capture('operation completed', {
+        // NAMED, not left to be inferred from the absence of the office's
+        // properties. The split between recorded-by-the-person-who-did-it and
+        // keyed-in-afterwards is the question this event now answers, and an
+        // unattributed row is a row missing from both halves of it.
+        surface: 'operator',
         job_operation_id: jobOperationId,
         quantity_good: qty,
         is_partial: qty < remaining,
@@ -389,6 +401,16 @@ export default function OperatorOperationActionPage() {
 
       await reloadAll();
     } catch (err) {
+      if (err instanceof CompletionConflictError) {
+        // NOT AN ERROR THE OPERATOR CAUSED, and not one a retry fixes — the
+        // step moved while they were looking at it. Re-read first so the
+        // message lands beside the state it is describing: by the time they
+        // read it, the screen already shows the completion that won, with the
+        // Undo control beside it if it was wrong.
+        posthog.capture('operation completion conflicted', { surface: 'operator' });
+        await reloadAll();
+        setQtyDirty(false);
+      }
       setError(err);
     } finally {
       setActionLoading(false);

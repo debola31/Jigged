@@ -1175,6 +1175,7 @@ export type Database = {
       }
       job_operation_completions: {
         Row: {
+          capture_source: string | null
           company_id: string
           completed_at: string
           completed_by: string | null
@@ -1189,6 +1190,7 @@ export type Database = {
           voided_by: string | null
         }
         Insert: {
+          capture_source?: string | null
           company_id: string
           completed_at?: string
           completed_by?: string | null
@@ -1203,6 +1205,7 @@ export type Database = {
           voided_by?: string | null
         }
         Update: {
+          capture_source?: string | null
           company_id?: string
           completed_at?: string
           completed_by?: string | null
@@ -4571,6 +4574,10 @@ export type Database = {
       viewer_excluded_from_metrics: {
         Args: { p_access_id: string }
         Returns: boolean
+      }
+      void_open_intervals_for_operation: {
+        Args: { p_job_operation_id: string }
+        Returns: number
       }
       work_center_usage: {
         Args: { p_company_id: string }

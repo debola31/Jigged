@@ -37,7 +37,7 @@ import FeedTimeEntry from '@/components/operator/FeedTimeEntry';
 import FeedUntimedEntry from '@/components/operator/FeedUntimedEntry';
 import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
 import { getMyIntervalsForJob, adjustOperationInterval } from '@/utils/operationIntervalsAccess';
-import { getMyCompletionsForJob } from '@/utils/operationCompletionsAccess';
+import { getFeedCompletionsForJob } from '@/utils/operationCompletionsAccess';
 import type { JobFeedCompletion } from '@/utils/operationCompletionsAccess';
 import type { OperationIntervalWithContext } from '@/types/operationInterval';
 
@@ -182,12 +182,13 @@ export default function JobFeed({
   );
   const intervals = intervalsData ?? EMPTY_INTERVALS;
 
-  // The caller's own completions, so the ones NO interval claims can still
-  // appear. Loaded separately rather than folded into the intervals query
-  // because it is the absence of an interval that makes a completion
-  // interesting here, and an absence cannot be expressed as a join to one.
+  // The caller's own completions PLUS every office-recorded one, so the ones NO
+  // interval claims can still appear. Loaded separately rather than folded into
+  // the intervals query because it is the absence of an interval that makes a
+  // completion interesting here, and an absence cannot be expressed as a join to
+  // one — and because office rows have no interval to join through at all.
   const { data: completionsData, refresh: reloadCompletions } = useLoad(
-    () => getMyCompletionsForJob(companyId, jobId),
+    () => getFeedCompletionsForJob(companyId, jobId),
     [companyId, jobId],
   );
   const completions = completionsData ?? EMPTY_COMPLETIONS;

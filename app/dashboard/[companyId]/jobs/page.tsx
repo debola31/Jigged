@@ -800,7 +800,7 @@ export default function JobsPage() {
       )}
 
       {/* Data Grid or Empty State. Jobs come from converting an accepted quote
-          (utils/quotesAccess#convertQuoteToJob) or directly from a customer PO
+          (utils/quotesAccess#convertQuoteToJobs) or directly from a customer PO
           (New Job from PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
       {!loading && jobsError == null && visibleJobs.length === 0 ? (
         <Card elevation={2}>

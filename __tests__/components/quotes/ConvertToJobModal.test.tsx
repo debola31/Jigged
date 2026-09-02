@@ -8,10 +8,16 @@ import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
 import type { QuoteWithRelations } from '@/types/quote';
 
 vi.mock('@/utils/quotesAccess', () => ({
-  convertQuoteToJob: vi.fn(),
+  convertQuoteToJobs: vi.fn(),
 }));
 vi.mock('@/utils/jobAttachmentsAccess', () => ({
   uploadJobAttachment: vi.fn(),
+  // AttachmentUploadField imports this from the same module, so the factory has
+  // to provide it: without it the hidden input's onChange throws on the first
+  // file selected, no file is ever staged, and an upload assertion fails looking
+  // like the upload broke. Nothing exercised the file input until the fan-out
+  // tests did, which is why an incomplete mock survived this long.
+  validateAttachmentFile: vi.fn().mockReturnValue(null),
 }));
 
 const quote = (): QuoteWithRelations =>
@@ -68,9 +74,21 @@ describe('ConvertToJobModal — reopen resets the Customer PO field', () => {
 
 describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)', () => {
   it('converts only the checked parts, leaving the rest for a later PO', async () => {
-    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
-    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
-      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [
+        {
+          job_id: 'job1',
+          job_number: 'J-100',
+          source_quote_line_item_id: 'li1',
+          part_id: 'p1',
+          job_part_id: 'jp1',
+          quantity: 10,
+          unit_price: 5,
+          due_date: '2030-01-01',
+        },
+      ],
+      failures: [],
     });
 
     const twoPartQuote = {
@@ -114,27 +132,42 @@ describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)
     // Uncheck Housing to leave it for a separate PO.
     await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
 
-    // Fill the two required fields.
-    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    // Fill the two required fields. Name the part: an unchecked part keeps its
+    // (disabled) date field rendered, so an unanchored "Due date — " matches two.
+    fireEvent.change(screen.getByLabelText(/^Due date — Bracket$/i), {
+      target: { value: '2030-01-01' },
+    });
     await userEvent.type(poField(), 'PO-1');
 
     await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
 
     await waitFor(() =>
-      expect(convertQuoteToJob).toHaveBeenCalledWith(
+      expect(convertQuoteToJobs).toHaveBeenCalledWith(
         'q1',
         expect.objectContaining({ selectedLineItemIds: ['li1'], customerPoNumber: 'PO-1' }),
       ),
     );
-    expect(onConverted).toHaveBeenCalledWith('job1');
+    expect(onConverted).toHaveBeenCalledWith({ jobIds: ['job1'], navigateToJobId: 'job1' });
   });
 });
 
 describe('ConvertToJobModal — partial quantity acceptance', () => {
   it('lets you order fewer than quoted (10 → 5) and passes the quantity override', async () => {
-    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
-    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
-      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [
+        {
+          job_id: 'job1',
+          job_number: 'J-100',
+          source_quote_line_item_id: 'li1',
+          part_id: 'p1',
+          job_part_id: 'jp1',
+          quantity: 10,
+          unit_price: 5,
+          due_date: '2030-01-01',
+        },
+      ],
+      failures: [],
     });
 
     render(
@@ -154,15 +187,15 @@ describe('ConvertToJobModal — partial quantity acceptance', () => {
     await waitFor(() => expect(qty.value).toBe('10'));
     fireEvent.change(qty, { target: { value: '5' } });
 
-    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    fireEvent.change(screen.getByLabelText(/^Due date — /i), { target: { value: '2030-01-01' } });
     await userEvent.type(poField(), 'PO-1');
     await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
 
     await waitFor(() =>
-      expect(convertQuoteToJob).toHaveBeenCalledWith(
+      expect(convertQuoteToJobs).toHaveBeenCalledWith(
         'q1',
         expect.objectContaining({
-          lineOverrides: { li1: { quantity: 5, useTierPrice: false } },
+          lineOverrides: { li1: { quantity: 5, useTierPrice: false, dueDate: '2030-01-01' } },
         }),
       ),
     );
@@ -220,9 +253,21 @@ describe('ConvertToJobModal — reprice opt-in only on a real price-break crossi
 
 describe('ConvertToJobModal — price-options part (quick-pick breaks + editable qty)', () => {
   it('quoted breaks are one-tap chips; any qty converts at the tier price (useTierPrice)', async () => {
-    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
-    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
-      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [
+        {
+          job_id: 'job1',
+          job_number: 'J-100',
+          source_quote_line_item_id: 'li1',
+          part_id: 'p1',
+          job_part_id: 'jp1',
+          quantity: 10,
+          unit_price: 5,
+          due_date: '2030-01-01',
+        },
+      ],
+      failures: [],
     });
 
     const snapshot = {
@@ -271,16 +316,16 @@ describe('ConvertToJobModal — price-options part (quick-pick breaks + editable
     await userEvent.click(screen.getByText(/80 ea/i));
     expect(qty.value).toBe('80');
 
-    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    fireEvent.change(screen.getByLabelText(/^Due date — /i), { target: { value: '2030-01-01' } });
     await userEvent.type(poField(), 'PO-1');
     await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
 
     await waitFor(() =>
-      expect(convertQuoteToJob).toHaveBeenCalledWith(
+      expect(convertQuoteToJobs).toHaveBeenCalledWith(
         'q1',
         expect.objectContaining({
           selectedLineItemIds: ['li80'],
-          lineOverrides: { li80: { quantity: 80, useTierPrice: true } },
+          lineOverrides: { li80: { quantity: 80, useTierPrice: true, dueDate: '2030-01-01' } },
         }),
       ),
     );
@@ -384,5 +429,309 @@ describe('ConvertToJobModal — per-part lead times', () => {
     await waitFor(() => expect(screen.getByText(/Lead time: 2–3 weeks/)).toBeInTheDocument());
     expect(screen.queryByText(/one due date/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/convert them separately/i)).not.toBeInTheDocument();
+  });
+});
+
+// ============== The fan-out: one job per checked part ==============
+
+describe('ConvertToJobModal — one job per checked part', () => {
+  const twoPartQuote = () =>
+    ({
+      ...quote(),
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 10,
+          unit_price: 5,
+          total_price: 50,
+          parts: { part_name: 'Bracket', primary_unit: null },
+        },
+        {
+          id: 'li2',
+          sequence: 2,
+          part_id: 'p2',
+          quantity: 4,
+          unit_price: 20,
+          total_price: 80,
+          parts: { part_name: 'Housing', primary_unit: null },
+        },
+      ],
+    }) as unknown as QuoteWithRelations;
+
+  const bracketJob = {
+    job_id: 'job1',
+    job_number: 'J-100',
+    source_quote_line_item_id: 'li1',
+    part_id: 'p1',
+    job_part_id: 'jp1',
+    quantity: 10,
+    unit_price: 5,
+    due_date: '2030-01-01',
+  };
+  const housingJob = {
+    job_id: 'job2',
+    job_number: 'J-100-2',
+    source_quote_line_item_id: 'li2',
+    part_id: 'p2',
+    job_part_id: 'jp2',
+    quantity: 4,
+    unit_price: 20,
+    due_date: '2030-02-02',
+  };
+
+  /** Fill the required fields for a two-part pass and press Create. */
+  async function fillAndSubmit(buttonName: RegExp) {
+    fireEvent.change(screen.getByLabelText(/^Due date \(all parts\)$/i), {
+      target: { value: '2030-01-01' },
+    });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: buttonName }));
+  }
+
+  it('counts the jobs on the button, and drops back to the mirror number at one part', async () => {
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Both parts start checked — two parts, two jobs. The modal can't promise
+    // the second number (an archived sibling would shift every suffix), so it
+    // says the count instead.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /create 2 jobs/i })).toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
+
+    // One part on a fresh quote IS the mirror number, so promise it — this is
+    // the label both existing E2E specs match.
+    expect(screen.getByRole('button', { name: /create j-100/i })).toBeInTheDocument();
+  });
+
+  it('the set-all field fills every part, and a part can then differ', async () => {
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [bracketJob, housingJob],
+      failures: [],
+    });
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(poField().value).toBe(''));
+
+    // One entry sets both — the common case (one PO, one date) stays one field.
+    fireEvent.change(screen.getByLabelText(/^Due date \(all parts\)$/i), {
+      target: { value: '2030-01-01' },
+    });
+    expect((screen.getByLabelText(/^Due date — Bracket$/i) as HTMLInputElement).value).toBe(
+      '2030-01-01',
+    );
+    expect((screen.getByLabelText(/^Due date — Housing$/i) as HTMLInputElement).value).toBe(
+      '2030-01-01',
+    );
+
+    // Housing is quoted longer, so it gets its own date.
+    fireEvent.change(screen.getByLabelText(/^Due date — Housing$/i), {
+      target: { value: '2030-02-02' },
+    });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: /create 2 jobs/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJobs).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({
+          lineOverrides: {
+            li1: { quantity: 10, useTierPrice: false, dueDate: '2030-01-01' },
+            li2: { quantity: 4, useTierPrice: false, dueDate: '2030-02-02' },
+          },
+        }),
+      ),
+    );
+  });
+
+  it('stays open and lists every job it created when the pass makes more than one', async () => {
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [bracketJob, housingJob],
+      failures: [],
+    });
+    const onConverted = vi.fn();
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={onConverted}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(poField().value).toBe(''));
+    await fillAndSubmit(/create 2 jobs/i);
+
+    // The page's "Jobs from this quote" banner lists EVERY job off the quote, so
+    // it can't say what this click did. The panel can.
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'J-100' })).toHaveAttribute(
+        'href',
+        '/dashboard/co1/jobs/job1',
+      ),
+    );
+    expect(screen.getByRole('link', { name: 'J-100-2' })).toHaveAttribute(
+      'href',
+      '/dashboard/co1/jobs/job2',
+    );
+    expect(screen.getByText(/created 2 jobs from q-100/i)).toBeInTheDocument();
+
+    // No hand-off: the page just refreshes underneath the open panel.
+    expect(onConverted).toHaveBeenCalledWith({
+      jobIds: ['job1', 'job2'],
+      navigateToJobId: null,
+    });
+  });
+
+  it('shows a partial failure verbatim and does NOT navigate, even at one job', async () => {
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [bracketJob],
+      failures: [
+        {
+          source_quote_line_item_id: 'li2',
+          part_id: 'p2',
+          message: 'This part was just converted on another job.',
+          retryable: false,
+        },
+      ],
+    });
+    const onConverted = vi.fn();
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={onConverted}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(poField().value).toBe(''));
+    await fillAndSubmit(/create 2 jobs/i);
+
+    await waitFor(() =>
+      expect(screen.getByText(/created 1 of 2 jobs from q-100/i)).toBeInTheDocument(),
+    );
+    // The reason is the whole point — closing on a partial failure would throw it away.
+    expect(
+      screen.getByText(/Housing — This part was just converted on another job\./i),
+    ).toBeInTheDocument();
+    // Exactly one job was created, but there IS something to report, so no hand-off.
+    expect(onConverted).toHaveBeenCalledWith({ jobIds: ['job1'], navigateToJobId: null });
+  });
+
+  it('attaches the PO PDF to every job the pass created', async () => {
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [bracketJob, housingJob],
+      failures: [],
+    });
+    const { uploadJobAttachment } = await import('@/utils/jobAttachmentsAccess');
+    (uploadJobAttachment as ReturnType<typeof vi.fn>).mockResolvedValue({});
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(poField().value).toBe(''));
+
+    const pdf = new File(['%PDF-1.4'], 'po.pdf', { type: 'application/pdf' });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    // userEvent.upload, not fireEvent.change: the input is `hidden`, and a
+    // `target: { files }` shorthand does not populate `files` for it, so the
+    // component's onChange saw nothing and the PDF was never staged.
+    // `applyAccept: false` matches CompanyProfileCard's upload tests — the
+    // `accept` attribute is a picker hint, not the check being tested.
+    await userEvent.upload(fileInput, pdf, { applyAccept: false });
+
+    await fillAndSubmit(/create 2 jobs/i);
+
+    // One PO authorizes both jobs, and a job showing a PO number with no
+    // document is the worse failure.
+    await waitFor(() => expect(uploadJobAttachment).toHaveBeenCalledTimes(2));
+    expect(uploadJobAttachment).toHaveBeenCalledWith('co1', 'job1', pdf);
+    expect(uploadJobAttachment).toHaveBeenCalledWith('co1', 'job2', pdf);
+  });
+
+  it('notes a failed PDF attach per job without demoting the job to a failure', async () => {
+    const { convertQuoteToJobs } = await import('@/utils/quotesAccess');
+    (convertQuoteToJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+      jobs: [bracketJob, housingJob],
+      failures: [],
+    });
+    const { uploadJobAttachment } = await import('@/utils/jobAttachmentsAccess');
+    (uploadJobAttachment as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('storage down'));
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={twoPartQuote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(poField().value).toBe(''));
+    const pdf = new File(['%PDF-1.4'], 'po.pdf', { type: 'application/pdf' });
+    await userEvent.upload(
+      document.querySelector('input[type="file"]') as HTMLInputElement,
+      pdf,
+      { applyAccept: false },
+    );
+
+    await fillAndSubmit(/create 2 jobs/i);
+
+    // Both jobs still read as created; only the second carries the note.
+    await waitFor(() => expect(screen.getByRole('link', { name: 'J-100' })).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'J-100-2' })).toBeInTheDocument();
+    expect(screen.getByText(/created 2 jobs from q-100/i)).toBeInTheDocument();
+    expect(screen.getByText(/PDF not attached/i)).toBeInTheDocument();
   });
 });

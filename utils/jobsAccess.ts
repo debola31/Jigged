@@ -511,14 +511,14 @@ export interface CreateJobFromPoResult {
 /**
  * Create a job directly from a customer Purchase Order — no source quote.
  *
- * Mirrors convertQuoteToJob (utils/quotesAccess.ts) but the line data comes
+ * Mirrors convertQuoteToJobs (utils/quotesAccess.ts) but the line data comes
  * from the PO form instead of quote line items, and the agreed price is stored
  * straight on each job_part (quote-sourced jobs carry it too — see A4 — so the
  * invoice read path is single-shaped). Existing parts only: every part must
  * already have a routing, which is cloned into job_operations + job_materials
  * by the shared create_job_part_operations_from_routing RPC.
  *
- * Like convertQuoteToJob, the writes are sequential (the JS client has no
+ * Like convertQuoteToJobs, the writes are sequential (the JS client has no
  * multi-statement transaction); on partial failure the partial job stays in
  * place and the owner can delete + retry.
  */
@@ -558,7 +558,7 @@ export async function createJobFromPurchaseOrder(
     }
   }
   // Exactly one line per part — duplicate parts would silently create duplicate
-  // job parts (mirrors convertQuoteToJob's guard).
+  // job parts (mirrors convertQuoteToJobs's guard).
   const partLineCounts = new Map<string, number>();
   for (const line of lines) {
     partLineCounts.set(line.part_id, (partLineCounts.get(line.part_id) ?? 0) + 1);

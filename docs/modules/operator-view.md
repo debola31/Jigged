@@ -74,7 +74,7 @@ and doubly so now; the bar's shape depends on the station, not on the tenant.
 | Read what the shop learned about this part | step → **Playbook · N** | Every note ever written about this part, useful-first. |
 | Fix a wrong number | step → `Undo all (N)` | Voids this operator's entries; the status recomputes. Never an edit. |
 | Send a part to a vendor / take it back | outside step | **Mark Sent Out** → **Mark Received**. No quantity, no station guard. |
-| See all the parts on a multi-part job | `jobs/{jobId}` | Parts with progress. Single-part jobs redirect straight to the traveler. |
+| See all the parts on a multi-part job | `jobs/{jobId}` | Parts with progress. Single-part jobs redirect straight to the traveler — **which is now every new job**, since quote conversion creates one job per part. The hub still serves grandfathered multi-part jobs. |
 | Go to a shelf, or open a traveler | `scan` | One scanner reads location labels *and* job travelers; a code from another company is refused by name. |
 | Log something about this machine | `maintenance` | The machine logbook for the current station. |
 | See who read my notes | `me` | Notes / photos / times viewed, then each note with its view count and readers. |
@@ -89,7 +89,7 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 |---|---|
 | Station entry by tap-select | **Built**, and it is the only entry path — see [Stations](#stations-work-centers). |
 | Whole-plant "sign into the plant" view | **Built** as the All Stations lens — the **Andon / visibility pattern**: answer "where is job #123?" and "my station is idle, what else is ready?" without walking the floor. It was the one genuinely missing capability; it is not missing any more, and three sections of the old journey doc never caught up. |
-| Multi-part job navigation | **Built** as the parts hub, with a back-link from the traveler on multi-part jobs only. |
+| Multi-part job navigation | **Built** as the parts hub, with a back-link from the traveler on multi-part jobs only. Reachable only via grandfathered data now — no new job has more than one part. |
 | Printed traveler as the primary path | **Demoted, deliberately.** It remains a fallback for shops mid-transition or spotty connectivity. |
 | Scrap / defect flagging | **Not built, and not designed.** [Discovery first](#scrap-and-defect-capture-discovery). |
 | Exploring real-looking data before doing real work | **Built** — the shop's **demo company**, same name as the office, entered from the "Me" tab and left from a bar carried on every screen. Operators enter but never create: the RPC is admin-only, so the entry renders nothing until an admin sets one up. Demo activity is excluded from `operator_events` at the write, so it cannot inflate the funnel. [demo-mode.md](demo-mode.md) |
@@ -1362,7 +1362,7 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 
 - [ ] **Given** a job_part, **when** the traveler loads, **then** it lists every operation in `sequence` order with per-step status, and a completed step stays tappable so it can be reopened — *automation-pending (`getJobPartTraveler`)*.
 - [ ] **Given** an operation whose predecessors aren't complete, **when** the page loads, **then** `predecessors_incomplete` is flagged and a warning shows, but recording is still allowed — *automation-pending (`getOperatorOperationDetail` / `isJobOperationReady`)*.
-- [ ] **Given** a multi-part job, **when** the hub loads, **then** it lists each part with progress; **given** a single-part job, **then** it redirects straight to the traveler — *automation-pending (`getJobPartsOverview`)*.
+- [ ] **Given** a multi-part job, **when** the hub loads, **then** it lists each part with progress; **given** a single-part job, **then** it redirects straight to the traveler — *automation-pending (`getJobPartsOverview`)*. **The multi-part half can no longer be produced through the UI** — quote conversion creates one job per part — so automating it needs a fixture that inserts a second `job_parts` row directly. Keep the criterion: it protects grandfathered jobs at the pilot shop that carry live shipments and invoices.
 
 **Notes: subject, capture, edit and delete**
 

@@ -62,15 +62,27 @@ Two statuses only: **Active** (open — editable, attachable, convertible) and *
 guaranteed). Expiry is a lazy sweep (`sweepExpiredQuotes`), fire-and-forget on list/detail load
 and idempotent.
 
-**Conversion is multi-pass — one job per customer PO.** A customer typically accepts by issuing
-several POs over time, so a quote converts in passes: each creates **one job** carrying **one
-PO** over a chosen subset of still-unconverted lines. Each `job_part` records
-`source_quote_line_item_id`, and a line converts **once** (a line already on a live job is
-skipped).
+**Conversion is multi-pass, and fans out — one job per PART.** A customer typically accepts by
+issuing several POs over time, so a quote converts in passes: each pass carries **one PO** over a
+chosen subset of still-unconverted lines, and creates **one job per checked part**, each owning
+exactly one `job_part`. A three-part quote converted two-then-one yields two jobs, then a third.
+Each `job_part` records `source_quote_line_item_id`, and a line converts **once** (a line already
+on a live job is skipped).
+
+Because each part is its own job, **each carries its own due date** — the Convert-to-Job modal
+collects one per part, with a set-all field for the common case. The PO, the Hot flag and the
+addresses are shared by every job the pass creates.
 
 **Every job off a quote keeps the quote's index** — the first is the mirror `Q-NNNN → J-NNNN`,
-each later PO gets a suffix (`J-NNNN-2`, `J-NNNN-3`, …) via `nextQuoteJobNumber`, so all a
-quote's jobs stay grouped under one number.
+the rest take suffixes (`J-NNNN-2`, `J-NNNN-3`, …) via `nextQuoteJobNumber`, whether they came
+from one pass or several, so all a quote's jobs stay grouped under one number. The jobs list has
+no quote column, so this adjacency under **Job #** is what keeps one order reading as one block.
+
+**Legacy multi-part jobs.** Jobs created before the fan-out carry several `job_parts`, and they
+are grandfathered: there is no `UNIQUE(job_id)` constraint and none is being added. Some are
+already shipped and QuickBooks-invoiced, so renumbering them would falsify paperwork customers
+already hold. Every multi-part read path stays in place to serve them — anything reading
+`job_parts` must keep assuming N.
 
 `converted_at` marks the **first** conversion and from then on locks the quote from edits; it is
 not re-stamped, so it reads *"acceptance began at"*. "Fully converted" is **derived from job
@@ -453,10 +465,10 @@ the quote. Quoting an in-between quantity like 3 snaps to the qty-2 price.
 
 ---
 
-## `convertQuoteToJob`
+## `convertQuoteToJobs`
 
-`convertQuoteToJob(quoteId, { dueDate, customerPoNumber, selectedLineItemIds, lineOverrides })`
-— callable **many times per quote**, once per customer PO:
+`convertQuoteToJobs(quoteId, { dueDate, customerPoNumber, selectedLineItemIds, lineOverrides, hot, onProgress })`
+— callable **many times per quote**, once per customer PO, creating **one job per part**:
 
 1. Refuse only if the quote has no line items. **`converted_at` being set does not block.**
 2. Exclude lines already on a live job (`getQuoteConversionState`). Resolve the set:
@@ -466,17 +478,39 @@ the quote. Quoting an in-between quantity like 3 snaps to the qty-2 price.
    part before converting."*
 3. Pre-flight: every **made** part needs a routing, else fail before any write. **Bought parts
    are exempt** — purchased, not manufactured.
-4. Require a due date, not in the past, written straight to the job. Require a non-empty
-   `customer_po_number` — never coerced to NULL.
-5. Insert **one** `jobs` row; number via `nextQuoteJobNumber`.
-6. Per line, insert a `job_parts` row. Made parts clone the routing via the
-   `create_job_part_operations_from_routing` RPC and start `not_started`; **bought parts skip the
-   clone and start `completed`** — no operations to run, ready to ship and invoice. `quantity`
-   defaults to the line's but honours `lineOverrides[line.id].quantity` (partial acceptance);
-   price defaults to the agreed `unit_price`, or re-resolves from `pricing_basis_snapshot` at the
-   ordered qty when `useTierPrice` is set.
-7. Stamp `converted_at` on the **first** pass only; status unchanged; every line item is kept as
-   the record of what was offered.
+4. Require a non-empty `customer_po_number` — never coerced to NULL.
+5. **Build a plan per part, before any write.** Resolve `quantity` (the line's, or
+   `lineOverrides[line.id].quantity` for partial acceptance), the price (the agreed `unit_price`,
+   or re-resolved from `pricing_basis_snapshot` at the ordered qty when `useTierPrice` is set
+   **and** the qty crosses a real tier break), and the due date (`lineOverrides[line.id].dueDate`,
+   else `dueDate`; required and not in the past). Validating here rather than in the loop is what
+   keeps a bad quantity on part 3 from throwing after parts 1 and 2 already have jobs.
+6. **Per part: insert one `jobs` row and one `job_parts` row.** The number comes from
+   `nextQuoteJobNumber` over a locally-accumulated `taken` list — the mirror read happens once and
+   cannot see a row written a moment ago, so without the accumulation every job in the pass would
+   compute the same suffix. A `23505` on `jobs_company_id_job_number_key` **re-reads and re-mints**
+   (bounded): a competing pass now takes a contiguous *run* of suffixes, so incrementing would
+   collide again on the next attempt. `job_parts.sequence` is always `10`. Made parts clone the
+   routing via the `create_job_part_operations_from_routing` RPC and start `not_started`; **bought
+   parts skip the clone and start `completed`** — no operations to run, ready to ship and invoice.
+7. Stamp `converted_at` on the **first** pass only, and only if the pass created something; status
+   unchanged; every line item is kept as the record of what was offered. The stamp **does not
+   throw** on failure — it never rolled anything back, and throwing would destroy the report of
+   every job just created.
+
+> **Errors follow one rule: it throws for anything before the first write, and returns for
+> everything after.** A throw means nothing was attempted. A result — `{ quote, jobs, failures }`
+> — means the pre-flight passed and **every requested part has an outcome**, including the case
+> where all of them failed, which is returned rather than thrown because "here is why each of the
+> three failed" beats one error.
+>
+> **Each part is isolated and compensated.** A failure after the `jobs` insert archives the empty
+> shell (`deleteJob`); a failure after the `job_parts` insert cancels the job (`cancelJob`), which
+> drops the part out of `job_parts_one_active_per_quote_line` and frees the quote line again. Both
+> are imported from `jobsAccess` rather than re-implemented. A failure marks
+> `retryable: false` only when the compensation *itself* failed, in which case the message names
+> the job a human has to go cancel. One job per part is what makes this possible at all — before
+> the fan-out, rolling back part 3 meant touching the job carrying parts 1 and 2.
 
 > **Concurrency.** The step-2 pre-check is a read-then-write and could lose a race on its own.
 > The hard guarantee is the partial unique index **`job_parts_one_active_per_quote_line`**
@@ -484,9 +518,16 @@ the quote. Quoting an in-between quantity like 3 snaps to the qty-2 price.
 > makes the losing insert fail `23505` — turned into the same friendly "already on a job"
 > message. **The app check is the fast path; the index is the arbiter.** Its cancelled-scope is
 > also what defines "converted", which is why cancelling frees a line and archiving does not.
-> Full transactional atomicity of the multi-insert would need a single-transaction RPC; the
-> sequential-write behaviour matches every other multi-insert flow and is orthogonal to the
-> double-conversion guarantee.
+> Losing that race is no longer fatal to the pass: it fails **that part only**, and the others
+> proceed.
+>
+> A single-transaction RPC was considered for real atomicity and rejected. It buys the wrong
+> property — all-or-nothing would discard two good jobs because the third part's routing clone
+> failed, where the domain wants what worked to exist and what didn't to stay on the quote. It
+> would also duplicate policy (which quote fields become job fields — `payment_terms` carries,
+> **freight deliberately does not**) and the whole pre-flight into SQL. A narrow per-part
+> `create_job_from_quote_line` RPC is the principled escalation if the compensation path ever
+> proves flaky in production.
 
 ---
 
@@ -604,8 +645,8 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** the modal, **when** parts are unchecked, **then** only checked parts convert and the rest stay on the quote for a later PO — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx` > `per-part selection (multiple jobs/POs per quote)`*.
 - [ ] **Given** a firm part, **when** fewer than quoted are ordered, **then** the quantity override passes through and the job records the ordered figure — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx` > `partial quantity acceptance`*.
 - [ ] **Given** a price-options part, **when** converting, **then** its quoted breaks render as one-tap chips, the qty field accepts any value, and the price resolves at the tier for that quantity (`useTierPrice`) — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx` > `price-options part (quick-pick breaks + editable qty)`*.
-- [ ] **Given** a missing or empty Customer PO, **then** Create stays disabled and `convertQuoteToJob` rejects — *automation-pending (#367)*.
-- [ ] **Given** a set resolving to more than one line for a part, **then** `convertQuoteToJob` rejects it — *automation-pending (#367)*.
+- [ ] **Given** a missing or empty Customer PO, **then** Create stays disabled and `convertQuoteToJobs` rejects — *automation-pending (#367)*.
+- [ ] **Given** a set resolving to more than one line for a part, **then** `convertQuoteToJobs` rejects it — *automation-pending (#367)*.
 - [ ] **Given** two simultaneous conversions of one line, **then** the loser fails `23505` on `job_parts_one_active_per_quote_line` and surfaces the friendly "already on a job" message — *automation-pending (#367)*.
 - [ ] **Given** conversion, **then** ONE job is created with a `job_part` per line carrying `source_quote_line_item_id`, `converted_at` is stamped on the first pass only, and the quote keeps every line — *verified by `e2e/quote-to-job.spec.ts` and `e2e/fractional-quote-to-job.spec.ts`*.
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -60,6 +60,10 @@ export default function QuoteDetailPage() {
   const companyId = params.companyId as string;
   const quoteId = params.quoteId as string;
 
+  // Set when a conversion pass created jobs but left the modal open to report
+  // them. The quote reload is held until the modal closes, because reloading
+  // unmounts it — see the ConvertToJobModal call site below.
+  const convertedThisVisitRef = useRef(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -889,11 +893,30 @@ export default function QuoteDetailPage() {
       {/* Convert to Job Modal */}
       <ConvertToJobModal
         open={convertModalOpen}
-        onClose={() => setConvertModalOpen(false)}
+        onClose={() => {
+          setConvertModalOpen(false);
+          // Deferred from onConverted — see below.
+          if (convertedThisVisitRef.current) {
+            convertedThisVisitRef.current = false;
+            fetchQuote();
+          }
+        }}
         quote={quote}
         conversions={conversions}
-        onConverted={(jobId) => {
-          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
+        onConverted={({ navigateToJobId }) => {
+          // One job, nothing to report — hand off to it, exactly as before the
+          // fan-out.
+          if (navigateToJobId) {
+            router.push(`/dashboard/${companyId}/jobs/${navigateToJobId}`);
+            return;
+          }
+          // Otherwise the modal keeps itself open to show what it created, and
+          // the refresh MUST wait for it to close. This page renders a spinner
+          // instead of its content while useLoad reloads, so calling fetchQuote()
+          // here unmounts the modal mid-summary and it remounts as a blank form —
+          // the jobs are created, but the user never sees which. Caught by
+          // e2e/quote-fans-out-to-jobs.spec.ts.
+          convertedThisVisitRef.current = true;
         }}
       />
 

@@ -15,6 +15,9 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
     'eq',
     'neq',
     'ilike',
+    // convertQuoteToJobs reads the quote's mirror job-number namespace with
+    // .like('job_number', 'J-0141%').
+    'like',
     'or',
     'in',
     'is',
@@ -122,6 +125,19 @@ vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersWithComputedPrices: getTiersWithComputedPricesMock,
 }));
 
+// convertQuoteToJobs compensates a part that fails mid-conversion by calling
+// jobsAccess rather than re-implementing cancel/archive. Spy on both so the
+// tests can assert WHICH compensation ran — the empty-job archive and the
+// cancel-the-landed-part path are different bugs when they fire wrongly.
+const { cancelJobMock, deleteJobMock } = vi.hoisted(() => ({
+  cancelJobMock: vi.fn().mockResolvedValue({}),
+  deleteJobMock: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/utils/jobsAccess', () => ({
+  cancelJob: cancelJobMock,
+  deleteJob: deleteJobMock,
+}));
+
 // Import functions after mock setup
 import {
   getQuotes,
@@ -133,7 +149,7 @@ import {
   updateQuote,
   deleteQuote,
   bulkDeleteQuotes,
-  convertQuoteToJob,
+  convertQuoteToJobs,
   detectQuoteLineDrift,
   repriceQuoteDriftedLinesToCurrent,
   nextQuoteJobNumber,
@@ -754,7 +770,7 @@ describe('quotesAccess utilities', () => {
 
   // ============== Convert to Job Tests ==============
 
-  // convertQuoteToJob produces a job that owns one job_part per converted
+  // convertQuoteToJobs produces a job that owns one job_part per converted
   // quote_line_item. A quote can be converted in SEVERAL passes (one job per
   // customer PO), so converted_at no longer blocks — instead each line can only
   // be converted once (a line already on a live job is skipped). The remaining
@@ -762,7 +778,7 @@ describe('quotesAccess utilities', () => {
   // price-options-without-a-selection, and the required customer PO. The
   // happy-path test that mocks the full RPC chain (job insert +
   // create_job_part_operations_from_routing) is sub-PR 3f territory.
-  describe('convertQuoteToJob (validation paths)', () => {
+  describe('convertQuoteToJobs (validation paths)', () => {
     it('rejects when every line item is already on a job', async () => {
       // A previously-converted quote whose only line is already on a live job:
       // getQuoteConversionState returns it, so there is nothing left to convert.
@@ -818,7 +834,7 @@ describe('quotesAccess utilities', () => {
         };
       });
 
-      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-2' })).rejects.toThrow(
+      await expect(convertQuoteToJobs('quote-1', { customerPoNumber: 'PO-2' })).rejects.toThrow(
         'Every line item on this quote is already on a job',
       );
     });
@@ -838,7 +854,7 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow(
+      await expect(convertQuoteToJobs('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow(
         'This quote has no line items to convert.',
       );
     });
@@ -866,7 +882,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       // No selectedLineItemIds → both lines for part-A would convert → guard fires.
-      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow('price-options quote');
+      await expect(convertQuoteToJobs('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow('price-options quote');
     });
 
     it('rejects conversion when no customer PO is provided', async () => {
@@ -894,11 +910,11 @@ describe('quotesAccess utilities', () => {
 
       // No customerPoNumber → guard fires before any write.
       await expect(
-        convertQuoteToJob('quote-1', { customerPoNumber: '' }),
+        convertQuoteToJobs('quote-1', { customerPoNumber: '' }),
       ).rejects.toThrow('Customer PO is required');
       // Whitespace-only is also rejected.
       await expect(
-        convertQuoteToJob('quote-1', { customerPoNumber: '   ' }),
+        convertQuoteToJobs('quote-1', { customerPoNumber: '   ' }),
       ).rejects.toThrow('Customer PO is required');
     });
   });
@@ -1723,4 +1739,436 @@ describe('quotesAccess utilities', () => {
     });
   });
 
+});
+
+// ============== convertQuoteToJobs — the fan-out ==============
+//
+// One job per checked part, each owning exactly one job_part. These are the
+// happy-path and failure-isolation tests the validation-only block above
+// deliberately left out; they mock the whole write chain (job insert →
+// job_part insert → create_job_part_operations_from_routing → quote stamp)
+// because the interesting behaviour is entirely in how those interleave.
+describe('convertQuoteToJobs — one job per part', () => {
+  // Self-contained fixture rather than the shared mockQuote: these tests assert
+  // on generated job numbers, so the quote number has to be a clean Q-NNNN whose
+  // mirror namespace is obvious (J-0001, J-0001-2, …).
+  const fanOutQuote = {
+    id: 'quote-1',
+    company_id: 'company-1',
+    quote_number: 'Q-0001',
+    customer_id: 'customer-1',
+    status: 'active',
+    converted_at: null,
+    payment_terms: 'Net 30',
+    billing_address_id: 'addr-bill',
+    shipping_address_id: 'addr-ship',
+    contact_id: 'contact-1',
+    lead_time_text: '2 weeks',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cancelJobMock.mockResolvedValue({});
+    deleteJobMock.mockResolvedValue(undefined);
+    mockSupabase.auth.getUser = vi
+      .fn()
+      .mockResolvedValue({ data: { user: { id: 'test-user-id' } }, error: null });
+  });
+
+  interface JobInsertOutcome {
+    data?: { id: string; job_number: string };
+    error?: { code: string; message: string };
+  }
+  interface JobPartOutcome {
+    data?: { id: string; part_id: string };
+    error?: { code: string; message: string };
+  }
+
+  interface FanOutOptions {
+    lineItems?: Array<Record<string, unknown>>;
+    /** Job numbers already in the quote's mirror namespace, per read (in order). */
+    mirrorReads?: string[][];
+    /** Consumed in order, one per `jobs` insert attempt. */
+    jobInserts?: JobInsertOutcome[];
+    /** Consumed in order, one per `job_parts` insert attempt. */
+    jobPartInserts?: JobPartOutcome[];
+    rpcError?: { code?: string; message: string } | null;
+    quoteUpdateError?: { code?: string; message: string } | null;
+  }
+
+  const twoLines = [
+    { id: 'li-1', part_id: 'part-A', sequence: 10, quantity: 5, unit_price: 20, total_price: 100 },
+    { id: 'li-2', part_id: 'part-B', sequence: 20, quantity: 3, unit_price: 40, total_price: 120 },
+  ];
+  const threeLines = [
+    ...twoLines,
+    { id: 'li-3', part_id: 'part-C', sequence: 30, quantity: 2, unit_price: 60, total_price: 120 },
+  ];
+
+  /** Recorded writes, so a test can assert exactly what hit the DB. */
+  let jobInsertPayloads: Array<Record<string, unknown>>;
+  let jobPartInsertPayloads: Array<Record<string, unknown>>;
+  let mirrorReadCount: number;
+
+  function setupFanOut(opts: FanOutOptions = {}) {
+    const lineItems = opts.lineItems ?? twoLines;
+    const mirrorReads = opts.mirrorReads ?? [[]];
+    const jobInserts = [...(opts.jobInserts ?? [])];
+    const jobPartInserts = [...(opts.jobPartInserts ?? [])];
+
+    jobInsertPayloads = [];
+    jobPartInsertPayloads = [];
+    mirrorReadCount = 0;
+
+    let jobInsertSeq = 0;
+    let jobPartSeq = 0;
+
+    mockSupabase.rpc = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: opts.rpcError ?? null });
+
+    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === 'quotes') {
+        return {
+          ...mockQueryBuilder,
+          // The initial quote + line_items read.
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            eq: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              single: vi.fn().mockResolvedValue({
+                data: { ...fanOutQuote, line_items: lineItems },
+                error: null,
+              }),
+            }),
+          }),
+          // The converted_at / status_changed_at stamp at the end.
+          update: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            eq: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              select: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                single: vi.fn().mockResolvedValue(
+                  opts.quoteUpdateError
+                    ? { data: null, error: opts.quoteUpdateError }
+                    : { data: { ...fanOutQuote, converted_at: "2026-09-02T00:00:00Z" }, error: null },
+                ),
+              }),
+            }),
+          }),
+        };
+      }
+
+      if (table === 'job_parts') {
+        return {
+          ...mockQueryBuilder,
+          // getQuoteConversionState — nothing converted yet.
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            eq: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              neq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                not: vi.fn().mockResolvedValue({ data: [], error: null }),
+              }),
+            }),
+          }),
+          insert: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+            jobPartInsertPayloads.push(payload);
+            const scripted = jobPartInserts[jobPartSeq++];
+            // `{}` means "this one succeeds normally" — it's how a test scripts a
+            // failure at position N without having to spell out the others.
+            const outcome: JobPartOutcome =
+              scripted && (scripted.data || scripted.error)
+                ? scripted
+                : { data: { id: `jp-${jobPartSeq}`, part_id: payload.part_id as string } };
+            return {
+              ...mockQueryBuilder,
+              select: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                single: vi
+                  .fn()
+                  .mockResolvedValue({ data: outcome.data ?? null, error: outcome.error ?? null }),
+              }),
+            };
+          }),
+        };
+      }
+
+      if (table === 'parts') {
+        return {
+          ...mockQueryBuilder,
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            in: vi.fn().mockResolvedValue({
+              data: lineItems.map((li) => ({ id: li.part_id, source: 'made' })),
+              error: null,
+            }),
+          }),
+        };
+      }
+
+      if (table === 'routings') {
+        return {
+          ...mockQueryBuilder,
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            in: vi.fn().mockResolvedValue({
+              data: lineItems.map((li) => ({
+                id: `routing-${li.part_id}`,
+                part_id: li.part_id,
+              })),
+              error: null,
+            }),
+          }),
+        };
+      }
+
+      if (table === 'jobs') {
+        return {
+          ...mockQueryBuilder,
+          // fetchMirrorJobNumbers — .select().eq().like()
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            eq: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              like: vi.fn().mockImplementation(() => {
+                const read =
+                  mirrorReads[Math.min(mirrorReadCount, mirrorReads.length - 1)] ?? [];
+                mirrorReadCount += 1;
+                return Promise.resolve({
+                  data: read.map((n) => ({ job_number: n })),
+                  error: null,
+                });
+              }),
+            }),
+          }),
+          insert: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+            jobInsertPayloads.push(payload);
+            const scripted = jobInserts[jobInsertSeq++];
+            const outcome: JobInsertOutcome =
+              scripted && (scripted.data || scripted.error)
+                ? scripted
+                : {
+                    data: {
+                      id: `job-${jobInsertSeq}`,
+                      job_number: payload.job_number as string,
+                    },
+                  };
+            return {
+              ...mockQueryBuilder,
+              select: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                single: vi
+                  .fn()
+                  .mockResolvedValue({ data: outcome.data ?? null, error: outcome.error ?? null }),
+              }),
+            };
+          }),
+        };
+      }
+
+      return mockQueryBuilder;
+    });
+  }
+
+  const baseOptions = { customerPoNumber: 'PO-1', dueDate: '2030-01-01' };
+
+  it('creates one job per selected part, each owning exactly one job_part', async () => {
+    setupFanOut({ lineItems: threeLines });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.jobs).toHaveLength(3);
+    expect(result.failures).toEqual([]);
+    expect(jobInsertPayloads).toHaveLength(3);
+    expect(jobPartInsertPayloads).toHaveLength(3);
+    // Each job_part carries exactly one quote line, and sequence is always 10 —
+    // a job holds one part, so UNIQUE(job_id, sequence) is trivially satisfied.
+    expect(jobPartInsertPayloads.map((p) => p.source_quote_line_item_id)).toEqual([
+      'li-1',
+      'li-2',
+      'li-3',
+    ]);
+    expect(jobPartInsertPayloads.every((p) => p.sequence === 10)).toBe(true);
+    // Every job_part landed on its OWN job.
+    expect(new Set(jobPartInsertPayloads.map((p) => p.job_id)).size).toBe(3);
+  });
+
+  it('accumulates minted job numbers so the pass does not reuse one suffix', async () => {
+    // The mirror read happens ONCE, before the loop, and cannot see a number we
+    // created a moment ago. Without the local accumulation all three jobs would
+    // compute J-0001 — this is the regression a naive loop produces.
+    setupFanOut({ lineItems: threeLines, mirrorReads: [[]] });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(jobInsertPayloads.map((p) => p.job_number)).toEqual(['J-0001', 'J-0001-2', 'J-0001-3']);
+    expect(result.jobs.map((j) => j.job_number)).toEqual(['J-0001', 'J-0001-2', 'J-0001-3']);
+    expect(mirrorReadCount).toBe(1);
+  });
+
+  it('re-reads and re-mints when another conversion takes the number first', async () => {
+    // A competing pass now takes a CONTIGUOUS RUN of suffixes, so the retry
+    // re-reads rather than incrementing — one extra read jumps the whole run.
+    setupFanOut({
+      lineItems: [twoLines[0]],
+      mirrorReads: [[], ['J-0001', 'J-0001-2']],
+      jobInserts: [
+        { error: { code: '23505', message: 'duplicate key value violates unique constraint "jobs_company_id_job_number_key"' } },
+      ],
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(jobInsertPayloads.map((p) => p.job_number)).toEqual(['J-0001', 'J-0001-3']);
+    expect(result.jobs).toHaveLength(1);
+    expect(result.jobs[0].job_number).toBe('J-0001-3');
+    expect(mirrorReadCount).toBe(2);
+  });
+
+  it('isolates a failing part: the others still convert, and nothing throws', async () => {
+    setupFanOut({
+      lineItems: threeLines,
+      jobPartInserts: [
+        {},
+        { error: { code: '23505', message: 'duplicate key value violates unique constraint "job_parts_one_active_per_quote_line"' } },
+        {},
+      ],
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.jobs.map((j) => j.source_quote_line_item_id)).toEqual(['li-1', 'li-3']);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].source_quote_line_item_id).toBe('li-2');
+    expect(result.failures[0].message).toMatch(/just converted on another job/i);
+    // Part 2's job never got a part, so it is an empty shell — archived, not left
+    // behind as a dead husk holding a number.
+    expect(deleteJobMock).toHaveBeenCalledTimes(1);
+    expect(cancelJobMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels the job when the routing clone fails, freeing the quote line again', async () => {
+    // The job_part landed, so the quote line reads as converted and the job has
+    // no operations. cancelJob cancels the part; the rollup trigger flips the job
+    // to cancelled and the line drops out of the partial unique index.
+    setupFanOut({
+      lineItems: [twoLines[0]],
+      rpcError: { message: 'routing clone exploded' },
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.jobs).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].retryable).toBe(true);
+    expect(cancelJobMock).toHaveBeenCalledTimes(1);
+    expect(deleteJobMock).not.toHaveBeenCalled();
+  });
+
+  it('marks a failure NOT retryable when the compensation itself fails', async () => {
+    cancelJobMock.mockRejectedValueOnce(new Error('cancel blew up too'));
+    setupFanOut({
+      lineItems: [twoLines[0]],
+      rpcError: { message: 'routing clone exploded' },
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.failures[0].retryable).toBe(false);
+    // The message has to name the job, because the quote line is consumed and
+    // only a human opening that job can free it.
+    expect(result.failures[0].message).toMatch(/J-0001/);
+  });
+
+  it('returns a result — not a throw — when every part fails', async () => {
+    // "Here is why each of the three failed" beats one error, and it keeps the
+    // throws-before-the-first-write rule intact.
+    setupFanOut({
+      lineItems: threeLines,
+      jobPartInserts: [
+        { error: { code: '23505', message: 'one_active_per_quote_line' } },
+        { error: { code: '23505', message: 'one_active_per_quote_line' } },
+        { error: { code: '23505', message: 'one_active_per_quote_line' } },
+      ],
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.jobs).toEqual([]);
+    expect(result.failures).toHaveLength(3);
+  });
+
+  it('gives each part its own due date', async () => {
+    setupFanOut({ lineItems: twoLines });
+
+    const result = await convertQuoteToJobs('quote-1', {
+      ...baseOptions,
+      lineOverrides: {
+        'li-1': { quantity: 5, dueDate: '2030-01-05' },
+        'li-2': { quantity: 3, dueDate: '2030-02-20' },
+      },
+    });
+
+    expect(jobInsertPayloads.map((p) => p.due_date)).toEqual(['2030-01-05', '2030-02-20']);
+    expect(result.jobs.map((j) => j.due_date)).toEqual(['2030-01-05', '2030-02-20']);
+  });
+
+  it('rejects a bad quantity BEFORE any job is created', async () => {
+    // Validation used to live inside the write loop, where a bad quantity on
+    // part 3 would throw after parts 1 and 2 already had jobs.
+    setupFanOut({ lineItems: threeLines });
+
+    await expect(
+      convertQuoteToJobs('quote-1', {
+        ...baseOptions,
+        lineOverrides: { 'li-3': { quantity: 0 } },
+      }),
+    ).rejects.toThrow('greater than zero');
+
+    expect(jobInsertPayloads).toEqual([]);
+    expect(jobPartInsertPayloads).toEqual([]);
+  });
+
+  it('rejects a missing due date BEFORE any job is created', async () => {
+    setupFanOut({ lineItems: threeLines });
+
+    await expect(
+      convertQuoteToJobs('quote-1', { customerPoNumber: 'PO-1', dueDate: '' }),
+    ).rejects.toThrow('due date is required');
+
+    expect(jobInsertPayloads).toEqual([]);
+  });
+
+  it('does not throw away created jobs when the quote stamp fails', async () => {
+    // Throwing there would destroy the report of what this pass created, and it
+    // never rolled anything back anyway.
+    setupFanOut({
+      lineItems: twoLines,
+      quoteUpdateError: { message: 'stamp failed' },
+    });
+
+    const result = await convertQuoteToJobs('quote-1', baseOptions);
+
+    expect(result.jobs).toHaveLength(2);
+    expect(result.failures).toEqual([]);
+  });
+
+  it('reports progress once per part so the button can name its wait', async () => {
+    setupFanOut({ lineItems: threeLines });
+    const seen: Array<[number, number]> = [];
+
+    await convertQuoteToJobs('quote-1', {
+      ...baseOptions,
+      onProgress: (done, total) => seen.push([done, total]),
+    });
+
+    expect(seen).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ]);
+  });
 });

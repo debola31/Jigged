@@ -308,11 +308,14 @@ public.work_centers` in the baseline migration.)*
 a customer PO with no quote (`quote_id` null, `createJobFromPurchaseOrder`). It
 owns customer, due date and one `customer_po_number`.
 
-- **A quote converts in several passes** — one job per customer PO, each covering a
-  subset of the lines — so many jobs share one `quote_id`. Each line converts at
-  most once (`job_parts.source_quote_line_item_id`, enforced by the partial unique
-  index `job_parts_one_active_per_quote_line`; `getQuoteConversionState` reports
-  what's still open).
+- **A quote converts in several passes, and each pass fans out** — one PO per pass,
+  covering a subset of the lines, and **one job per part** within it — so many jobs
+  share one `quote_id`. Each line converts at most once
+  (`job_parts.source_quote_line_item_id`, enforced by the partial unique index
+  `job_parts_one_active_per_quote_line`; `getQuoteConversionState` reports what's
+  still open). **Jobs created before the fan-out carry several `job_parts` and are
+  grandfathered** — there is no `UNIQUE(job_id)`, so any reader of `job_parts` must
+  still assume N.
 - **Numbering.** A quote takes `Q-N` from the shared per-company counter
   (`company_order_counters` + `next_order_number()`); the first conversion keeps
   `J-N`; each later PO on the same quote gets a suffix (`J-N-2`, `J-N-3`, … via

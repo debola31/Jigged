@@ -112,14 +112,14 @@ test.describe('Quote to Job workflow', () => {
 
     await page.getByRole('button', { name: /Convert to Job/i }).click();
 
-    // Wait for the Convert to Job dialog. The current ConvertToJobModal
-    // no longer renders a "Routing found" line — it shows a one-paragraph
-    // job preview ("One job will be created with one work cell per part…")
-    // and a "Create J-NNNN" button. The seeded routing is required to
-    // enable the button; the seed (ensureRouting) provides it.
+    // Wait for the Convert to Jobs dialog. Each checked part becomes its OWN
+    // job, which the body copy states — assert that rather than the old
+    // "Convert Q-N to J-N" phrasing, so this line pins the contract instead of
+    // the wording. The seeded routing is required to enable Create; the seed
+    // (ensureRouting) provides it.
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/Convert .* to/i)).toBeVisible();
+    await expect(dialog.getByText(/each checked part becomes its own job/i)).toBeVisible();
 
     // Customer PO is required to convert — the Create button stays disabled
     // until it's filled. Enter any PO so the conversion can proceed.

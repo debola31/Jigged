@@ -80,7 +80,7 @@ test.describe('Fractional quote to job workflow', () => {
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/Convert .* to/i)).toBeVisible();
+    await expect(dialog.getByText(/each checked part becomes its own job/i)).toBeVisible();
     await dialog.getByRole('textbox', { name: /Customer PO/i }).fill('PO-E2E-FRAC-001');
     // Due date is now required (not prefilled from lead time) and not-in-past.
     await dialog.getByLabel(/Due date/i).fill('2099-12-31');

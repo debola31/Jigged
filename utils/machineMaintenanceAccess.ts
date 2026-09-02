@@ -59,6 +59,7 @@ type MachineNoteRow = {
     mime_type: string | null;
     width: number | null;
     height: number | null;
+    duration_seconds: number | null;
   }> | null;
 };
 
@@ -79,6 +80,7 @@ function rowToNote(row: MachineNoteRow): MachineNote {
     mime_type: m.mime_type,
     width: m.width,
     height: m.height,
+    duration_seconds: m.duration_seconds,
   }));
 
   return {

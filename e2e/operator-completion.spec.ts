@@ -272,39 +272,52 @@ test.describe('operator completion', () => {
  * silently matched nothing against live data would pass every other gate.
  */
 test.describe('finding one job on the dispatch list', () => {
-  test('narrows the station list to a match and back', async ({ page }) => {
+  test('narrows the list to a match and back', async ({ page }) => {
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     const companyId = page.url().match(/\/operator\/([0-9a-f-]{36})\//)?.[1];
     expect(companyId, 'company id should be in the operator URL').toBeTruthy();
 
-    await page.goto(`/operator/${companyId}/jobs`);
-    // The lens toggle renders only once a station is chosen — the same settled
-    // marker openTravelerWithStation uses.
-    await expect(page.getByRole('button', { name: 'My Station' })).toBeVisible({
+    // ALL STATIONS, and the target is read off the page rather than named here.
+    // This spec runs serially after the completion tests, which finish steps on
+    // the seeded job — so any fixture job number written into this file is a
+    // claim about mutable state that the tests ahead of it are free to change.
+    // The whole plant is the broadest list there is, and whatever sits at the
+    // top of it is a row the readiness RPC really returned.
+    await page.goto(`/operator/${companyId}/jobs?scope=plant`);
+    await expect(page.getByRole('button', { name: 'All Stations' })).toBeVisible({
       timeout: 30_000,
     });
-    const row = page.getByText('E2E-JS-NOTSTARTED').first();
-    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    // Each job card is a CardActionArea, so it is a button; the station group
+    // headings are plain text. Filtering buttons by the card's "{job} · {part}"
+    // separator therefore picks out a job row and never a heading or a control.
+    const cards = page.getByRole('button').filter({ hasText: '·' });
+    const firstCard = cards.first();
+    await expect(firstCard).toBeVisible({ timeout: 30_000 });
+    const jobNumber = ((await firstCard.textContent()) ?? '').split('·')[0].trim();
+    expect(jobNumber, 'a card heading should start with a job number').toBeTruthy();
 
     const find = page.getByLabel('Find a job');
 
-    // A query that matches keeps the row. Typed against whatever else the shared
-    // company holds, so this asserts the match, not the list length.
-    await find.fill('NOTSTARTED');
-    await expect(row).toBeVisible();
+    // A query that matches keeps its row — asserted against live data, which is
+    // the half a unit test over fixtures cannot cover.
+    await find.fill(jobNumber);
+    // Visible, not a count of one: a job with its operation ready at more than
+    // one station legitimately shows a row per station on this lens.
+    await expect(cards.filter({ hasText: jobNumber }).first()).toBeVisible();
 
-    // A query that matches nothing empties the list and SAYS SO — the assertion
-    // that matters, because the failure mode is the unfiltered "there are no
-    // pending jobs for your station" copy, which is a confident claim about the
-    // shop floor rather than about the query.
+    // A query that matches nothing empties the list and SAYS SO. This is the
+    // assertion that matters: the failure mode is the unfiltered copy, which
+    // claims there is no work for your station when the only fact available is
+    // about the query.
     await find.fill('zzz-no-such-job-zzz');
     await expect(page.getByText(/No jobs match/)).toBeVisible();
-    await expect(page.getByText('E2E-JS-NOTSTARTED')).toHaveCount(0);
-    await expect(page.getByText(/There are no pending jobs/)).toHaveCount(0);
+    await expect(cards).toHaveCount(0);
+    await expect(page.getByText(/There is no ready or in-progress work/)).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Show all jobs' }).click();
-    await expect(row).toBeVisible();
     await expect(find).toHaveValue('');
+    await expect(firstCard).toBeVisible();
   });
 });
 

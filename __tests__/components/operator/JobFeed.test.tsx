@@ -50,7 +50,11 @@ vi.mock('@/utils/operationCompletionsAccess', () => ({
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const OP_CONTEXT = { jobPartId: 'jp1', jobOperationId: 'jo1' };
-const OFFER_TEXT = /add it before you go/i;
+// OFFER_TEXT (/add it before you go/) lived here for the post-completion
+// "add a photo?" prompt. That prompt was deleted with B4 and its last reference
+// went with the tests below it; the constant outlived both. Gone now — capture
+// is offered by a composer that is always on screen, so there is nothing left to
+// chase after the fact.
 const HINT_TEXT = /talk instead of type/i;
 
 function makeNote(over: Partial<JobNote> = {}): JobNote {

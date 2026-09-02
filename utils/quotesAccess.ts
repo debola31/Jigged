@@ -1452,8 +1452,14 @@ export async function convertQuoteToJobs(
   // Job numbers: read the mirror namespace ONCE, then accumulate as we mint.
   // That read can't see a number we created a moment ago, so without the local
   // push every job in this pass would compute the same suffix.
-  const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
-  let taken = await fetchMirrorJobNumbers(quote.company_id, mirrorNumber);
+  // Captured as plain consts because insertJobWithNumber below is a closure, and
+  // TypeScript does not carry the destructured `{ data: quote, error }`
+  // discrimination into a nested function — inside it, `quote` reads as possibly
+  // null again.
+  const quoteNumber: string = quote.quote_number;
+  const quoteCompanyId: string = quote.company_id;
+  const mirrorNumber = quoteNumber.replace(/^Q-/, 'J-');
+  let taken = await fetchMirrorJobNumbers(quoteCompanyId, mirrorNumber);
 
   /**
    * Insert one job, re-minting its number if a competing conversion of this
@@ -1467,7 +1473,7 @@ export async function convertQuoteToJobs(
     dueDate: string,
   ): Promise<{ id: string; job_number: string }> {
     for (let attempt = 1; ; attempt++) {
-      const jobNumber = nextQuoteJobNumber(quote.quote_number, taken);
+      const jobNumber = nextQuoteJobNumber(quoteNumber, taken);
       const { data, error } = await supabase
         .from('jobs')
         .insert({ ...jobBase, job_number: jobNumber, due_date: dueDate })
@@ -1481,7 +1487,7 @@ export async function convertQuoteToJobs(
 
       if (isJobNumberCollision(error) && attempt < JOB_NUMBER_ATTEMPTS) {
         taken = Array.from(
-          new Set([...taken, ...(await fetchMirrorJobNumbers(quote.company_id, mirrorNumber))]),
+          new Set([...taken, ...(await fetchMirrorJobNumbers(quoteCompanyId, mirrorNumber))]),
         );
         continue;
       }
@@ -1513,7 +1519,7 @@ export async function convertQuoteToJobs(
         .from('job_parts')
         .insert({
           job_id: createdJob.id,
-          company_id: quote.company_id,
+          company_id: quoteCompanyId,
           part_id: li.part_id,
           source_quote_line_item_id: li.id,
           // Always 10: a job holds exactly one part, so UNIQUE(job_id, sequence)
@@ -1613,7 +1619,7 @@ export async function convertQuoteToJobs(
             // An empty job holding a number. Archive it: the job page gates
             // Edit / Print Traveler / Shipments / Invoices on having parts, so a
             // zero-part job is a dead husk wherever it appears.
-            await deleteJob(createdJob.id, quote.company_id);
+            await deleteJob(createdJob.id, quoteCompanyId);
           }
         } catch (compensationErr) {
           console.error('Failed to roll back a partial conversion:', compensationErr);
@@ -1640,8 +1646,11 @@ export async function convertQuoteToJobs(
     options.onProgress?.(jobs.length + failures.length, plans.length);
   }
 
-  // Stamp the quote only if this pass actually created something.
-  let stampedQuote = quote;
+  // Stamp the quote only if this pass actually created something. Typed as the
+  // shape asQuote accepts rather than inferred from `quote`: the initial read
+  // embeds `line_items` and the update's `.select()` does not, so inferring would
+  // make the two rows incompatible.
+  let stampedQuote: Record<string, unknown> & { status: string } = quote;
   if (jobs.length > 0) {
     const nowIso = new Date().toISOString();
     const quoteUpdate: {

@@ -12,6 +12,12 @@ vi.mock('@/utils/quotesAccess', () => ({
 }));
 vi.mock('@/utils/jobAttachmentsAccess', () => ({
   uploadJobAttachment: vi.fn(),
+  // AttachmentUploadField imports this from the same module, so the factory has
+  // to provide it: without it the hidden input's onChange throws on the first
+  // file selected, no file is ever staged, and an upload assertion fails looking
+  // like the upload broke. Nothing exercised the file input until the fan-out
+  // tests did, which is why an incomplete mock survived this long.
+  validateAttachmentFile: vi.fn().mockReturnValue(null),
 }));
 
 const quote = (): QuoteWithRelations =>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
@@ -9,6 +9,12 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import VideocamIcon from '@mui/icons-material/Videocam';
+import VideocamOffOutlinedIcon from '@mui/icons-material/VideocamOffOutlined';
+import VideoRecorderDialog from '@/components/operator/VideoRecorderDialog';
+import { canRecordVideo } from '@/lib/videoCapture';
+import { formatStopwatch } from '@/lib/duration';
 import type { NoteCaptureFieldsState } from '@/hooks/useNoteCapture';
 
 const THUMB = 76;
@@ -17,23 +23,79 @@ const THUMB = 76;
 function PendingThumbs({ capture }: { capture: NoteCaptureFieldsState }) {
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-      {capture.pending.map((p) => (
+      {capture.pending.map((p) => {
+        const isVideo = p.kind === 'video';
+        // A clip paints from its POSTER, never from itself. An <img> cannot decode
+        // an mp4, and pointing one at the clip would also mean holding the whole
+        // thing in the layout to draw 76 pixels.
+        const thumbSrc = isVideo ? p.posterUrl : p.previewUrl;
+        return (
         <Box key={p.id} sx={{ position: 'relative' }}>
-          <Box
-            component="img"
-            src={p.previewUrl}
-            alt="Pending photo"
-            sx={{
-              width: THUMB,
-              height: THUMB,
-              objectFit: 'cover',
-              borderRadius: 1,
-              display: 'block',
-            }}
-          />
+          {thumbSrc ? (
+            <Box
+              component="img"
+              src={thumbSrc}
+              alt={isVideo ? 'Pending video' : 'Pending photo'}
+              sx={{
+                width: THUMB,
+                height: THUMB,
+                objectFit: 'cover',
+                borderRadius: 1,
+                display: 'block',
+              }}
+            />
+          ) : (
+            // The poster grab failed. Say "there is a clip here" rather than
+            // rendering a broken image or, worse, falling back to the clip itself.
+            <Box
+              sx={{
+                width: THUMB,
+                height: THUMB,
+                borderRadius: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: 'rgba(255,255,255,0.06)',
+              }}
+            >
+              <VideocamOffOutlinedIcon fontSize="small" sx={{ color: 'text.disabled' }} />
+            </Box>
+          )}
+          {isVideo && (
+            <>
+              {thumbSrc && (
+                <PlayCircleOutlineIcon
+                  sx={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    color: 'common.white',
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+              <Typography
+                variant="caption"
+                sx={{
+                  position: 'absolute',
+                  bottom: 4,
+                  right: 4,
+                  px: 0.5,
+                  borderRadius: 0.5,
+                  bgcolor: 'rgba(0,0,0,0.6)',
+                  color: 'common.white',
+                  fontVariantNumeric: 'tabular-nums',
+                  pointerEvents: 'none',
+                }}
+              >
+                {formatStopwatch(p.durationSeconds * 1000)}
+              </Typography>
+            </>
+          )}
           <IconButton
             size="small"
-            aria-label="Remove photo"
+            aria-label={isVideo ? 'Remove video' : 'Remove photo'}
             onClick={() => capture.removePending(p.id)}
             sx={{
               position: 'absolute',
@@ -46,7 +108,8 @@ function PendingThumbs({ capture }: { capture: NoteCaptureFieldsState }) {
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
-      ))}
+        );
+      })}
     </Box>
   );
 }
@@ -91,7 +154,12 @@ function MicHint({ onDismiss }: { onDismiss: () => void }) {
 }
 
 /**
- * The capture fields: text, photo picker, pending thumbnails, dictation hint.
+ * The capture fields: text, camera, video recorder, pending thumbnails, dictation hint.
+ *
+ * CAPTURE-ONLY. Both controls go to a live camera — the photo input carries
+ * `capture="environment"` and the video button opens Jigged's own recorder. Neither
+ * offers the camera roll or a file picker any more. See the picker's comment for the
+ * decision this reverses and what to watch.
  *
  * Rendered in two places from one implementation — inside the completion block,
  * where RECORD COMPLETION submits it, and inside the job feed for steps with no
@@ -118,6 +186,15 @@ export default function NoteCaptureFields({
   compact?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  /**
+   * Decided once per mount, before the control is rendered rather than when it is
+   * tapped. A device with no MediaRecorder (an old iOS, or an insecure context) gets
+   * no video button at all — a button that can only ever fail is worse than its
+   * absence, and photos still work.
+   */
+  const [videoOffered] = useState(canRecordVideo);
+  const captureDisabled = disabled || capture.saving;
 
   const field = (
     <TextField
@@ -149,22 +226,43 @@ export default function NoteCaptureFields({
   );
 
   {
-    /* No `capture` attribute: on iOS/Android this makes the OS present the full
-       native sheet (Photo Library / Take Photo / Choose File), so operators can
-       attach an EXISTING photo from the camera roll — the observed failure mode
-       was setup photos stuck in the roll — not only shoot a new one.
-       `capture="environment"` would force the camera and hide the library. */
+    /* `capture="environment"` sends the tap STRAIGHT to the rear camera, replacing
+       the OS sheet (Photo Library / Take Photo / Choose File) that used to appear
+       here.
+
+       THIS REVERSES A DOCUMENTED DECISION, and the reason it was made is still
+       true: the sheet was deliberately left open because the observed failure mode
+       was setup photos stuck in the camera roll, and the audit that followed found
+       the phone-camera-then-attach flow was how photos actually arrived. What
+       changed is the requirement, not the evidence — attached material must now be
+       shot in Jigged, so that it is known to be of this job at this moment rather
+       than of something a photo happens to depict. The cost is real and was
+       accepted: an operator who shoots at the machine and files the note later must
+       now open Jigged at the machine. Watch `composer_focused` against `note_saved`
+       for it; a widening gap is this, not general capture friction.
+
+       `multiple` is gone with it. HTML Media Capture is one shot per invocation, so
+       the attribute had no meaning left — several clips or photos per note come from
+       tapping again, each appending to the strip. */
   }
   const picker = (
     <input
       ref={fileInputRef}
       type="file"
       accept="image/*"
-      multiple
+      capture="environment"
       hidden
       onChange={capture.pickPhotos}
     />
   );
+
+  const recorder = videoOffered ? (
+    <VideoRecorderDialog
+      open={recorderOpen}
+      onClose={() => setRecorderOpen(false)}
+      onCaptured={capture.addVideo}
+    />
+  ) : null;
 
   const errorAlert = capture.error ? (
     <Alert severity="error" onClose={capture.clearError}>
@@ -179,14 +277,25 @@ export default function NoteCaptureFields({
           {field}
           {picker}
           <IconButton
-            aria-label="Add photo"
+            aria-label="Take photo"
             onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || capture.saving}
+            disabled={captureDisabled}
             sx={{ width: 48, height: 48, flexShrink: 0 }}
           >
             <PhotoCameraIcon />
           </IconButton>
+          {videoOffered && (
+            <IconButton
+              aria-label="Record video"
+              onClick={() => setRecorderOpen(true)}
+              disabled={captureDisabled}
+              sx={{ width: 48, height: 48, flexShrink: 0 }}
+            >
+              <VideocamIcon />
+            </IconButton>
+          )}
         </Box>
+        {recorder}
         {/* A CAPTION, not an icon button. The icon version sat beside a real
             camera button and read as "tap here to dictate" — but nothing can
             invoke the OS keyboard's dictation from a web page, so tapping it only
@@ -209,16 +318,28 @@ export default function NoteCaptureFields({
       {errorAlert}
 
       {picker}
-      <Box>
+      {recorder}
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Button
           variant="outlined"
           startIcon={<PhotoCameraIcon />}
           onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || capture.saving}
+          disabled={captureDisabled}
           sx={{ minHeight: 48 }}
         >
-          Add photo
+          Take photo
         </Button>
+        {videoOffered && (
+          <Button
+            variant="outlined"
+            startIcon={<VideocamIcon />}
+            onClick={() => setRecorderOpen(true)}
+            disabled={captureDisabled}
+            sx={{ minHeight: 48 }}
+          >
+            Record video
+          </Button>
+        )}
       </Box>
     </Box>
   );

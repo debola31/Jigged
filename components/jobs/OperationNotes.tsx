@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import { formatStopwatch } from '@/lib/duration';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import IconButton from '@mui/material/IconButton';
@@ -95,7 +96,10 @@ export default function OperationNotes({ notes }: { notes: JobNote[] }) {
                       border: '1px solid rgba(255, 255, 255, 0.1)',
                     }}
                   >
-                    {thumbs[m.id] && (
+                    {/* `thumbs` resolves thumbnail_path ?? storage_path, so a clip with
+                        no poster would put a whole video file behind an <img> that can
+                        never decode it. The badge alone is the honest tile. */}
+                    {thumbs[m.id] && !(m.kind === 'video' && !m.thumbnail_path) && (
                       <Box
                         component="img"
                         src={thumbs[m.id]}
@@ -114,6 +118,24 @@ export default function OperationNotes({ notes }: { notes: JobNote[] }) {
                         }}
                       />
                     )}
+                    {m.kind === 'video' && m.duration_seconds != null && (
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          position: 'absolute',
+                          bottom: 2,
+                          right: 3,
+                          px: 0.5,
+                          borderRadius: 0.5,
+                          bgcolor: 'rgba(0,0,0,0.6)',
+                          color: 'common.white',
+                          fontVariantNumeric: 'tabular-nums',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        {formatStopwatch(m.duration_seconds * 1000)}
+                      </Typography>
+                    )}
                   </Box>
                 ))}
               </Box>
@@ -131,11 +153,16 @@ export default function OperationNotes({ notes }: { notes: JobNote[] }) {
         </IconButton>
         <DialogContent sx={{ p: 0, bgcolor: 'black' }}>
           {lightbox?.kind === 'video' ? (
+            /* `autoPlay` is gone now that clips actually exist: this branch was
+               written speculatively against a kind nothing could produce. Opening a
+               note should not start playing sound in an office, and `preload` keeps
+               it to the metadata until somebody presses play. */
             <Box
               component="video"
               src={lightbox.url}
               controls
-              autoPlay
+              playsInline
+              preload="metadata"
               sx={{ display: 'block', maxWidth: '90vw', maxHeight: '85vh' }}
             />
           ) : lightbox ? (

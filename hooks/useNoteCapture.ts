@@ -1,12 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import posthog from 'posthog-js';
 import { addJobNote } from '@/utils/operatorAccess';
 import {
   discardNoteMediaUploads,
   insertNoteMedia,
   uploadJobNoteMediaFile,
 } from '@/utils/jobNoteMediaAccess';
+import type { UploadedMedia } from '@/utils/jobNoteMediaAccess';
+import type { CapturedVideo } from '@/lib/videoCapture';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { OperatorEventContext } from '@/utils/operatorEventsAccess';
@@ -14,7 +17,7 @@ import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
 /**
- * Text + photos for one step, and the write that lands them.
+ * Text, photos and short videos for one step, and the write that lands them.
  *
  * EXTRACTED FROM JobFeed so completion can own it. Capture used to live only in
  * the feed, behind its own Post button — which made saving a note a SECOND,
@@ -25,8 +28,12 @@ import type { JobNote, JobNoteMedia } from '@/types/operator';
  *
  * The hook owns the draft, so the same fields can be rendered inside the
  * completion block (submitted WITH the completion, one button) and inside the
- * feed (its own Post button) without duplicating the photo pipeline, the
+ * feed (its own Post button) without duplicating the media pipeline, the
  * iOS-unreadable-file mitigation, or the funnel instrumentation.
+ *
+ * A CLIP IS NOT A PHOTO ANYWHERE IN HERE. It skips compression entirely, and it
+ * uploads twice — once for the clip, once for the poster that lets a feed draw a
+ * thumbnail without fetching the whole file. Both differences live in `submit`.
  *
  * WHAT IT DOES NOT DO: decide when to write. The caller does, because ordering
  * is load-bearing — completion must be durable before a note is attempted, so a
@@ -62,11 +69,42 @@ function writeMicHint(state: MicHintState): void {
   }
 }
 
-export interface PendingPhoto {
+/**
+ * Release every object URL a staged item holds. A video holds TWO — the clip and
+ * its poster — and the leak from forgetting the second one is invisible, so this
+ * exists rather than three call sites each remembering.
+ */
+function revokePreviews(item: PendingMedia): void {
+  URL.revokeObjectURL(item.previewUrl);
+  if (item.kind === 'video' && item.posterUrl) URL.revokeObjectURL(item.posterUrl);
+}
+
+interface PendingBase {
   id: string;
   file: File;
+  /** Object URL of the file itself — an `<img>` src for a photo, a `<video>` src for a clip. */
   previewUrl: string;
 }
+
+/**
+ * One staged item, before anything has been uploaded.
+ *
+ * A UNION RATHER THAN OPTIONAL FIELDS: a photo has no duration and a clip has no
+ * compressed variant, and `submit` must not be able to reach for the wrong half.
+ * The video arm carries its poster as a Blob because it has not been uploaded yet
+ * — staging is free, and removing a staged clip must stay free.
+ */
+export type PendingMedia =
+  | (PendingBase & { kind: 'photo' })
+  | (PendingBase & {
+      kind: 'video';
+      poster: Blob | null;
+      /** Object URL for the poster, so the strip paints without touching the clip. */
+      posterUrl: string | null;
+      durationSeconds: number;
+      width: number;
+      height: number;
+    });
 
 export interface NoteCaptureContext {
   jobPartId: string;
@@ -93,19 +131,21 @@ export interface NoteWriter<TNote> {
    */
   uploadMedia: (file: File) => Promise<string>;
   /** Record an already-uploaded file against the note. A fast local write, not a transfer. */
-  linkMedia: (note: TNote, upload: UploadedPhoto) => Promise<JobNoteMedia>;
+  linkMedia: (note: TNote, upload: UploadedMedia) => Promise<JobNoteMedia>;
   /** Merge saved media onto the note for the optimistic prepend. */
   withMedia: (note: TNote, media: JobNoteMedia[]) => TNote;
   /** Merged into every funnel event this composer emits. */
   eventContext?: OperatorEventContext;
+  /**
+   * Which composer this is, for the `note posted` PostHog event.
+   *
+   * A SURFACE IS A PROPERTY, NOT AN EVENT NAME — docs/telemetry.md is explicit, and
+   * a step note and a machine entry are the same act in two containers.
+   */
+  analyticsSurface: 'operator_step' | 'operator_machine';
 }
 
-/** A compressed photo that is already in the bucket, waiting for a note to belong to. */
-export interface UploadedPhoto {
-  storagePath: string;
-  file: File;
-  dims?: { width: number; height: number };
-}
+export type { UploadedMedia } from '@/utils/jobNoteMediaAccess';
 
 /**
  * Everything about a capture that does NOT depend on where the note ends up:
@@ -119,7 +159,7 @@ export interface UploadedPhoto {
 export interface NoteCaptureFieldsState {
   draft: string;
   setDraft: (v: string) => void;
-  pending: PendingPhoto[];
+  pending: PendingMedia[];
   saving: boolean;
   error: string | null;
   clearError: () => void;
@@ -130,6 +170,8 @@ export interface NoteCaptureFieldsState {
   /** Records composer_focused exactly once per mount. */
   noteFocused: () => void;
   pickPhotos: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
+  /** Stage a clip the in-app recorder just produced. */
+  addVideo: (video: CapturedVideo) => void;
   removePending: (id: string) => void;
 }
 
@@ -160,7 +202,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
   const { companyId, operatorId, writer, enabled } = opts;
 
   const [draft, setDraft] = useState('');
-  const [pending, setPending] = useState<PendingPhoto[]>([]);
+  const [pending, setPending] = useState<PendingMedia[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Decided once from storage at mount — DERIVED, not synchronised, so there is
@@ -178,7 +220,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
   // state would re-render on every keystroke to record something never shown.
   const focusedRef = useRef(false);
   const capturedRef = useRef(false);
-  const draftRef = useRef({ bodyLength: 0, photoCount: 0 });
+  const draftRef = useRef({ bodyLength: 0, photoCount: 0, videoCount: 0 });
   // The writer's event context, mirrored into a ref so the unmount handler can
   // read it without re-registering the effect (and without a stale closure).
   // Every event from this composer carries it, so a machine capture is
@@ -200,7 +242,11 @@ export function useNoteCapture<TNote = JobNote>(opts: {
   // Keep the unmount snapshot current. In an effect, not during render: mutating
   // a ref while rendering is unsafe under concurrent rendering.
   useEffect(() => {
-    draftRef.current = { bodyLength: draft.trim().length, photoCount: pending.length };
+    draftRef.current = {
+      bodyLength: draft.trim().length,
+      photoCount: pending.filter((p) => p.kind === 'photo').length,
+      videoCount: pending.filter((p) => p.kind === 'video').length,
+    };
   }, [draft, pending]);
 
   useEffect(() => {
@@ -210,7 +256,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
   // Revoke preview URLs on unmount.
   useEffect(() => {
     return () => {
-      pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      pending.forEach(revokePreviews);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -255,7 +301,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
       // zero-byte blob. Copy the bytes into a stable File now, while the
       // reference is fresh, and drop any pick that reads back empty rather than
       // silently posting nothing.
-      const prepared: PendingPhoto[] = [];
+      const prepared: PendingMedia[] = [];
       let unreadable = 0;
       for (const file of files) {
         let stable = file;
@@ -273,6 +319,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
           continue;
         }
         prepared.push({
+          kind: 'photo',
           id: `pp-${pendingIdRef.current++}`,
           file: stable,
           previewUrl: URL.createObjectURL(stable),
@@ -300,10 +347,44 @@ export function useNoteCapture<TNote = JobNote>(opts: {
     [companyId],
   );
 
+  /**
+   * Stage a clip the recorder just finished.
+   *
+   * NOT async and doing no work: the recorder already holds real bytes in memory, so
+   * unlike `pickPhotos` there is nothing to stabilise — the iOS unreadable-File
+   * problem is a property of a camera-roll handle, not of a Blob we assembled
+   * ourselves. Copying 23 MB through `arrayBuffer()` here would double peak memory on
+   * a phone to prove something already true.
+   */
+  const addVideo = useCallback(
+    (video: CapturedVideo) => {
+      setError(null);
+      setPending((prev) => [
+        ...prev,
+        {
+          kind: 'video',
+          id: `pv-${pendingIdRef.current++}`,
+          file: video.file,
+          previewUrl: URL.createObjectURL(video.file),
+          poster: video.poster,
+          posterUrl: video.poster ? URL.createObjectURL(video.poster) : null,
+          durationSeconds: video.durationSeconds,
+          width: video.width,
+          height: video.height,
+        },
+      ]);
+      logOperatorEvent(companyId, 'video_attached', {
+        ...eventContextRef.current,
+        durationSeconds: video.durationSeconds,
+      });
+    },
+    [companyId],
+  );
+
   const removePending = useCallback((id: string) => {
     setPending((prev) => {
       const target = prev.find((p) => p.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target) revokePreviews(target);
       return prev.filter((p) => p.id !== id);
     });
   }, []);
@@ -311,8 +392,8 @@ export function useNoteCapture<TNote = JobNote>(opts: {
   const submit = useCallback(async (): Promise<TNote | null> => {
     if (!writer) return null;
     const body = draft.trim();
-    const photos = pending;
-    if (!body && photos.length === 0) return null;
+    const staged = pending;
+    if (!body && staged.length === 0) return null;
     if (!operatorId) {
       const message = 'Could not identify your account — reload and try again.';
       setError(message);
@@ -323,7 +404,9 @@ export function useNoteCapture<TNote = JobNote>(opts: {
     setError(null);
     try {
       /**
-       * UPLOAD EVERY PHOTO FIRST, COMMIT SECOND. The order is the fix for #624.
+       * UPLOAD EVERY FILE FIRST, COMMIT SECOND. The order is the fix for #624, and a
+       * clip makes the reasoning bite harder rather than differently — it is ~23 MB
+       * where a photo is ~1.5 MB, so the stall this prevents is fifteen times longer.
        *
        * It used to be the other way round: create the note, then upload into it. Uploading is the
        * slow, failure-prone half — a shop-floor phone on dropping wifi can stall on it for minutes
@@ -338,25 +421,67 @@ export function useNoteCapture<TNote = JobNote>(opts: {
        * never after" — and the reason it was reachable here is that the storage path keys on the
        * job or the machine, never on the note, so it needs nothing the note provides.
        *
-       * The cost is symmetrical and much smaller: if a later step fails, the photos already in the
+       * The cost is symmetrical and much smaller: if a later step fails, the files already in the
        * bucket are orphans. They are invisible and cheap, and we make a best-effort sweep below.
        */
-      const uploads: UploadedPhoto[] = [];
+      const uploads: UploadedMedia[] = [];
+      /**
+       * Every object key that has reached the bucket, including posters.
+       *
+       * Tracked SEPARATELY from `uploads` rather than derived from it, because a video
+       * contributes two keys and can fail between them — at that moment the clip is up
+       * and there is no `UploadedMedia` entry yet to hang the sweep off.
+       */
+      const landed: string[] = [];
       let note: TNote;
       try {
-        for (const p of photos) {
-          const prepared = await compressPhoto(p.file);
+        for (const p of staged) {
+          if (p.kind === 'photo') {
+            const prepared = await compressPhoto(p.file);
+            const storagePath = await writer.uploadMedia(prepared.file);
+            landed.push(storagePath);
+            uploads.push({
+              kind: 'photo',
+              storagePath,
+              file: prepared.file,
+              dims: prepared.dims,
+            });
+            continue;
+          }
+
+          /**
+           * NEVER `compressPhoto` — it is a canvas/JPEG pipeline and a clip is already
+           * encoded at the bitrate it was recorded at. The recorder is where a video's
+           * size is decided; there is no second pass.
+           *
+           * CLIP FIRST, POSTER SECOND. The clip is the expensive, failure-prone half, so
+           * uploading it first means a failure has not already paid for a poster.
+           */
+          const storagePath = await writer.uploadMedia(p.file);
+          landed.push(storagePath);
+
+          let thumbnailPath: string | null = null;
+          if (p.poster) {
+            thumbnailPath = await writer.uploadMedia(
+              new File([p.poster], 'poster.jpg', { type: 'image/jpeg' }),
+            );
+            landed.push(thumbnailPath);
+          }
+
           uploads.push({
-            storagePath: await writer.uploadMedia(prepared.file),
-            file: prepared.file,
-            dims: prepared.dims,
+            kind: 'video',
+            storagePath,
+            thumbnailPath,
+            file: p.file,
+            dims: { width: p.width, height: p.height },
+            durationSeconds: p.durationSeconds,
           });
         }
         note = await writer.createNote(body || null);
       } catch (err) {
         // Everything up to and including the note write is still reversible, so sweep the bytes
         // that did land rather than leaving them unreferenced.
-        await discardNoteMediaUploads(uploads.map((u) => u.storagePath));
+        await discardNoteMediaUploads(landed);
         throw err;
       }
 
@@ -365,16 +490,42 @@ export function useNoteCapture<TNote = JobNote>(opts: {
         media.push(await writer.linkMedia(note, u));
       }
 
-      photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      staged.forEach(revokePreviews);
       setPending([]);
       setDraft('');
       // After the write resolves, so a failed save is never counted as one —
       // the funnel's whole job is separating "tried" from "succeeded".
       capturedRef.current = true;
+      /**
+       * `note_saved_with_photo` KEEPS ITS NAME even when the media is a clip. It means
+       * "saved with something attached", and renaming it would split the funnel it was
+       * built to read — the counts below are what tell photo from video.
+       */
+      const photoCount = media.filter((m) => m.kind === 'photo').length;
+      const videoCount = media.filter((m) => m.kind === 'video').length;
+
       logOperatorEvent(companyId, media.length > 0 ? 'note_saved_with_photo' : 'note_saved', {
         ...(writer.eventContext ?? {}),
         bodyLength: body.length,
-        photoCount: media.length,
+        photoCount,
+        videoCount,
+      });
+
+      /**
+       * CLOSES A GAP docs/telemetry.md names outright: the notes-and-photos loop has
+       * never sent a PostHog event, and is measured by an autocapture action matched
+       * on the text of the Post button — which also blocks turning on `mask_all_text`.
+       * Video would have widened that gap rather than being measurable.
+       *
+       * Shape only. `has_text` rather than the text, counts rather than ids: the body
+       * of an operator note is the customer's business data and must not leave in an
+       * analytics property.
+       */
+      posthog.capture('note posted', {
+        surface: writer.analyticsSurface,
+        has_text: body.length > 0,
+        photo_count: photoCount,
+        video_count: videoCount,
       });
       return writer.withMedia(note, media);
     } catch (err) {
@@ -397,6 +548,7 @@ export function useNoteCapture<TNote = JobNote>(opts: {
     dismissMicHint,
     noteFocused,
     pickPhotos,
+    addVideo,
     removePending,
     submit,
   };
@@ -429,9 +581,10 @@ export function useStepNoteWriter(args: {
         }),
       uploadMedia: (file) => uploadJobNoteMediaFile(companyId, jobId, file),
       linkMedia: (note, upload) =>
-        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
+        insertNoteMedia(companyId, note.id, upload),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { jobOperationId: context.jobOperationId },
+      analyticsSurface: 'operator_step',
     };
   }, [companyId, jobId, operatorId, context]);
 }

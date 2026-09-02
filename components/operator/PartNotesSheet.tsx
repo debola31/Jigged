@@ -324,7 +324,13 @@ export default function PartNotesSheet({
             await updateNoteBody(editingNote.id, body);
             for (const id of removedMediaIds) {
               const m = editingNote.media.find((x) => x.id === id);
-              if (m) await deleteJobNoteMedia({ id: m.id, storage_path: m.storage_path });
+              if (m) await deleteJobNoteMedia({
+                id: m.id,
+                storage_path: m.storage_path,
+                // A clip's poster goes with it. Without this the row and the clip
+                // disappear and the thumbnail stays in the bucket, named by nothing.
+                thumbnail_path: m.thumbnail_path,
+              });
             }
             setEditingNote(null);
             // Refetch rather than patch: the RPC ranks by usage and helpful marks

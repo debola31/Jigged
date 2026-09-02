@@ -130,9 +130,10 @@ export default function MachineLogPanel({
         }),
       uploadMedia: (file) => uploadMachineNoteMediaFile(companyId, workCenterId, file),
       linkMedia: (note, upload) =>
-        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
+        insertNoteMedia(companyId, note.id, upload),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { workCenterId, maintenanceKind: kind },
+      analyticsSurface: 'operator_machine',
     };
   }, [readOnly, memberId, workCenterId, companyId, kind]);
 
@@ -183,7 +184,13 @@ export default function MachineLogPanel({
         await updateNoteBody(editingEntry.id, body);
         for (const id of removedMediaIds) {
           const m = editingEntry.media.find((x) => x.id === id);
-          if (m) await deleteJobNoteMedia({ id: m.id, storage_path: m.storage_path });
+          if (m) await deleteJobNoteMedia({
+                id: m.id,
+                storage_path: m.storage_path,
+                // A clip's poster goes with it. Without this the row and the clip
+                // disappear and the thumbnail stays in the bucket, named by nothing.
+                thumbnail_path: m.thumbnail_path,
+              });
         }
         setEditingEntry(null);
         reload();

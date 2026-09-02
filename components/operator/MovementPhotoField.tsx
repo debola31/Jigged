@@ -95,10 +95,16 @@ export default function MovementPhotoField({ value, onChange, disabled }: Moveme
 
   return (
     <Box>
-      {/* No `capture` attribute, deliberately — the same call JobFeed documents. Omitting it makes
-          iOS/Android show the whole native sheet (Photo Library / Take Photo / Choose File), so a
-          shot already sitting in the camera roll can be attached. `capture="environment"` would
-          force the camera and hide the library, and photos-already-taken is the observed case. */}
+      {/* No `capture` attribute, deliberately. Omitting it makes iOS/Android show the whole
+          native sheet (Photo Library / Take Photo / Choose File), so a shot already sitting in
+          the camera roll can be attached, and photos-already-taken is the observed case.
+
+          THIS NO LONGER MATCHES THE NOTE COMPOSER, and the divergence is the point rather than
+          drift. NoteCaptureFields went capture-only because a note's photo is EVIDENCE — it is
+          read back later as a record of what this job looked like, so where it came from
+          matters. Movement evidence is a receipt attached to a transaction the operator is
+          performing right now, and the likeliest photo is the one they already took of the
+          shelf. Same attribute, opposite answer, different question. */}
       <input
         ref={inputRef}
         type="file"

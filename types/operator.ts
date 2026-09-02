@@ -249,6 +249,12 @@ export interface JobNoteMedia {
   mime_type: string | null;
   width: number | null;
   height: number | null;
+  /**
+   * Video only; null for photos. MEASURED BY THE RECORDER, not read from the file —
+   * a fresh MediaRecorder blob reports its own duration as Infinity or 0, which is
+   * the reason this is stored rather than derived at render time.
+   */
+  duration_seconds: number | null;
 }
 
 /**

@@ -2,10 +2,12 @@
 // file is now validated against types/database.ts at compile time. Aliased
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import {
   friendlyErrorMessage,
   isBillingWriteBlocked,
+  toError,
   toFriendlyError,
 } from '@/lib/supabaseErrors';
 import type {
@@ -20,6 +22,11 @@ import type {
 } from '@/types/quote';
 import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
 import { getCompanyMembers } from '@/utils/companyAccess';
+// Compensation for a part that fails mid-conversion. Imported rather than
+// re-implemented: cancel semantics (which rows, which rollup trigger) are
+// exactly the kind of thing that drifts when written twice. No cycle —
+// jobsAccess does not import this module.
+import { cancelJob, deleteJob } from '@/utils/jobsAccess';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import {
@@ -435,7 +442,7 @@ export async function createQuote(
   // common case is that all four arrive populated. NULL is allowed for
   // backwards compatibility with legacy edit paths that didn't have the
   // selectors — the integrity trigger only validates non-null FKs.
-  // The customer PO is captured at convertQuoteToJob time and lives on
+  // The customer PO is captured at convertQuoteToJobs time and lives on
   // jobs.customer_po_number — never on the quote (migration 20260526).
   const nullIfEmpty = (s: string | null | undefined) =>
     s && s.trim() !== '' ? s : null;
@@ -562,7 +569,7 @@ export async function updateQuote(
   const leadTimeText = nullIfBlank(formData.lead_time_text);
 
   // customer_po_number is not on the quote — it lives on jobs and is
-  // captured during convertQuoteToJob (migration 20260526). updateQuote
+  // captured during convertQuoteToJobs (migration 20260526). updateQuote
   // therefore can't touch it.
   const nullIfEmpty = (s: string | null | undefined) =>
     s && s.trim() !== '' ? s : null;
@@ -813,7 +820,7 @@ export interface RepriceQuoteResult {
  * detectQuoteLineDrift, so they're never touched.
  *
  * Writes are sequential: the JS client has no multi-statement transaction (the
- * same constraint convertQuoteToJob accepts). Each repriceLineItemToCurrent is
+ * same constraint convertQuoteToJobs accepts). Each repriceLineItemToCurrent is
  * idempotent (re-resolves to the same current tier) and the caller refetches
  * after, so a partial failure mid-loop is recoverable, not corrupting.
  */
@@ -956,21 +963,37 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
   return asQuote(data);
 }
 
-// ============== Convert to Job ==============
+// ============== Convert to Jobs ==============
 
-export interface ConvertToJobOptions {
+/**
+ * How many times to re-mint a job number when a competing conversion of the
+ * SAME quote takes the slot between our read and our insert.
+ *
+ * Four is generous. A direct-PO job draws from the atomic `next_order_number`
+ * counter and can never land in a quote's mirror namespace, so the only writer
+ * that can collide here is another conversion of THIS quote — and each retry
+ * re-reads rather than incrementing, which clears a whole competing run in one
+ * round trip (see insertJobWithNumber).
+ */
+const JOB_NUMBER_ATTEMPTS = 4;
+
+export interface ConvertQuoteToJobsOptions {
   /**
-   * Ship-by date for the new job. ISO date string (yyyy-mm-dd). REQUIRED:
-   * lead time is now free text and no longer implies a date, so the due date
-   * is entered manually in the Convert-to-Job modal and rejected here if
-   * empty/missing.
+   * Default ship-by date, ISO (yyyy-mm-dd). REQUIRED: lead time is free text and
+   * no longer implies a date, so the due date is entered manually in the
+   * Convert-to-Job modal and rejected here if empty/missing.
+   *
+   * Each converted part becomes its OWN job, so each can carry its own date —
+   * see `lineOverrides[].dueDate`. This value covers any line that doesn't
+   * specify one (the modal always specifies).
    */
   dueDate: string;
   /**
    * Customer-issued PO number, captured at conversion time. The customer
    * doesn't typically have a PO at quote creation — it's issued when they
    * accept and turn the quote into an order. Written to jobs.customer_po_number
-   * (migration 20260526 — PO lives on the work order, not the quote).
+   * (migration 20260526 — PO lives on the work order, not the quote). One PO
+   * authorizes the whole pass, so every job it creates carries this value.
    *
    * REQUIRED: the PO is the work-order authorization, so conversion rejects an
    * empty/missing value rather than coercing it to NULL. (The DB column stays
@@ -979,50 +1002,84 @@ export interface ConvertToJobOptions {
    */
   customerPoNumber: string;
   /**
-   * Which quote line items to convert — one per part. A price-options quote
-   * offers several quantities per part with no single committed quantity, so
-   * the salesperson picks the accepted quantity (line item) per part at
-   * conversion. When omitted, ALL line items convert (the firm-quote path —
-   * each part already has exactly one line). Whichever set is used, it must
-   * resolve to exactly one line per part_id or the conversion is rejected.
+   * Which quote line items to convert — one per part, and now one JOB per part.
+   * A price-options quote offers several quantities per part with no single
+   * committed quantity, so the salesperson picks the accepted quantity (line
+   * item) per part at conversion. When omitted, ALL line items convert (the
+   * firm-quote path — each part already has exactly one line). Whichever set is
+   * used, it must resolve to exactly one line per part_id or the conversion is
+   * rejected.
    */
   selectedLineItemIds?: string[];
   /**
-   * Per-line quantity (and optional reprice) overrides, keyed by line item id.
-   * Lets the customer order a DIFFERENT quantity than quoted — partial
-   * acceptance (quote 15, order 5). The job_part records the ordered quantity
-   * while the quote line stays frozen at the quoted figure. By default the
-   * agreed unit price is KEPT; set `useTierPrice` to re-resolve the price from
-   * the line's frozen tier snapshot at the new quantity (mirrors
-   * updateJobPartQuantity's opt-in reprice). Lines without an override keep
-   * their quoted quantity + price.
+   * Per-line overrides, keyed by line item id.
+   *
+   * `quantity` lets the customer order a DIFFERENT quantity than quoted —
+   * partial acceptance (quote 15, order 5). The job_part records the ordered
+   * quantity while the quote line stays frozen at the quoted figure. By default
+   * the agreed unit price is KEPT; set `useTierPrice` to re-resolve the price
+   * from the line's frozen tier snapshot at the new quantity (mirrors
+   * updateJobPartQuantity's opt-in reprice).
+   *
+   * `dueDate` sets THIS part's job's ship-by date. Each part is its own job now,
+   * so a quote whose parts carry different lead times converts into jobs that
+   * are genuinely due on different days instead of sharing one date.
    */
-  lineOverrides?: Record<string, { quantity: number; useTierPrice?: boolean }>;
-  /** Mark the new job "Hot" (rush) at conversion. Visibility only. Defaults to false. */
+  lineOverrides?: Record<
+    string,
+    { quantity: number; useTierPrice?: boolean; dueDate?: string }
+  >;
+  /** Mark the new jobs "Hot" (rush) at conversion. Visibility only. Defaults to false. */
   hot?: boolean;
+  /**
+   * Called after each part finishes (created or failed), so a caller can show
+   * "Creating job 2 of 3…". A fan-out is ~3 sequential round trips per part,
+   * which crosses the 1s threshold in docs/interaction-standards.md §5 where a
+   * pressed control must name what it is waiting for. Mirrors the same option on
+   * createPartsFromRows.
+   */
+  onProgress?: (done: number, total: number) => void;
 }
 
-export interface ConvertToJobResult {
+/** One job created by a conversion pass — exactly one part, by construction. */
+export interface ConvertedJob {
+  job_id: string;
+  job_number: string;
+  source_quote_line_item_id: string;
+  part_id: string;
+  job_part_id: string;
+  quantity: number;
+  unit_price: number | null;
+  due_date: string;
+}
+
+/** One part that did not become a job, and whether it can simply be retried. */
+export interface FailedConversion {
+  source_quote_line_item_id: string;
+  part_id: string;
+  /** Already user-facing — friendlyErrorMessage has run. Render it verbatim. */
+  message: string;
+  /**
+   * True when the quote line is genuinely free again, so "try again" is honest
+   * advice. False when a job_part landed and the compensating cancel ALSO
+   * failed — the line is consumed, and `message` names the job to go fix.
+   */
+  retryable: boolean;
+}
+
+export interface ConvertQuoteToJobsResult {
   quote: Quote;
-  job: {
-    id: string;
-    job_number: string;
-    parts: Array<{
-      id: string;
-      part_id: string;
-      quantity: number;
-      source_quote_line_item_id: string;
-    }>;
-  };
+  jobs: ConvertedJob[];
+  failures: FailedConversion[];
 }
 
 /**
  * One quote line item already consumed by a job, and the job/PO that owns it. A
- * quote can be converted in several passes — one job per customer PO, each
- * covering a subset of the not-yet-converted line items — so this is the source
- * of truth for "what's left to convert." It drives the Convert-to-Job modal
- * (hides already-converted parts) and the quote detail page (lists the jobs +
- * their POs, shows remaining lines).
+ * quote can be converted in several passes — one PO at a time, each covering a
+ * subset of the not-yet-converted line items — so this is the source of truth
+ * for "what's left to convert." It drives the Convert-to-Job modal (hides
+ * already-converted parts) and the quote detail page (lists the jobs + their
+ * POs, shows remaining lines).
  *
  * A line counts as converted when it has a **non-cancelled** job_part — matching
  * the `job_parts_one_active_per_quote_line` partial unique index exactly, so the
@@ -1083,27 +1140,91 @@ export async function getQuoteConversionState(
 }
 
 /**
- * Convert (part of) a quote into a job that owns one job_part per converted line
- * item (one per part). A quote may be converted in SEVERAL passes — one job per
- * customer PO — each pass taking a subset of the still-unconverted lines; lines
- * already on a live job are skipped so nothing is double-converted. For a
- * price-options quote the caller passes `options.selectedLineItemIds` to pick the
- * accepted quantity per part; a firm quote converts all its remaining lines.
- * Either way the set must resolve to exactly one line per part_id. The first job
- * off a quote keeps the mirror number (Q-NNNN → J-NNNN); a later PO draws a fresh
- * J-N from the shared order counter.
- * Each part's routing is cloned into job_operations + job_materials via the
+ * Every existing job number in this quote's mirror namespace (J-0141, J-0141-2,
+ * …), INCLUDING archived ones — the (company_id, job_number) uniqueness
+ * constraint counts them, so a since-archived mirror still has to bump us to a
+ * suffix. One helper so the pre-flight read and the collision re-read can't
+ * drift apart.
+ */
+async function fetchMirrorJobNumbers(
+  companyId: string,
+  mirrorNumber: string,
+): Promise<string[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('job_number')
+    .eq('company_id', companyId)
+    .like('job_number', `${mirrorNumber}%`);
+  if (error) {
+    console.error('Error checking job numbers:', error);
+    throw toFriendlyError(error, {
+      entity: 'job',
+      fallback: 'Could not check existing job numbers. Please try again.',
+    });
+  }
+  return ((data ?? []) as Array<{ job_number: string }>).map((r) => r.job_number);
+}
+
+/** A unique violation on jobs(company_id, job_number) — someone took our slot. */
+function isJobNumberCollision(err: unknown): boolean {
+  const e = (err ?? {}) as { code?: string; message?: string };
+  return e.code === '23505' && (e.message ?? '').includes('jobs_company_id_job_number_key');
+}
+
+/** A unique violation on the one-live-job_part-per-quote-line partial index. */
+function isQuoteLineTaken(err: unknown): boolean {
+  const e = (err ?? {}) as { code?: string; message?: string };
+  return e.code === '23505' && (e.message ?? '').includes('one_active_per_quote_line');
+}
+
+/**
+ * Everything decided about one part BEFORE any write happens. Building these up
+ * front is what keeps a bad quantity or a missing due date on part 3 from
+ * throwing after parts 1 and 2 already have jobs.
+ */
+interface PartPlan {
+  line: QuoteLineItem;
+  isBought: boolean;
+  routingId: string | undefined;
+  orderedQty: number;
+  orderedUnitPrice: number | null;
+  orderedTotal: number | null;
+  dueDate: string;
+}
+
+/**
+ * Convert (part of) a quote into JOBS — one job per checked part, each owning
+ * exactly one job_part.
+ *
+ * A quote may be converted in SEVERAL passes, each taking a subset of the
+ * still-unconverted lines under its own customer PO; lines already on a live job
+ * are skipped so nothing is double-converted. For a price-options quote the
+ * caller passes `options.selectedLineItemIds` to pick the accepted quantity per
+ * part; a firm quote converts all its remaining lines. Either way the set must
+ * resolve to exactly one line per part_id. Every job off a quote keeps the
+ * quote's index — the first is the mirror (Q-0141 → J-0141), the rest take
+ * suffixes (J-0141-2, J-0141-3, …) whether they came from this pass or a later
+ * one — so one order still reads as one block in a job list sorted by number.
+ * Each made part's routing is cloned into job_operations + job_materials via the
  * `create_job_part_operations_from_routing` RPC.
  *
- * The flow is sequential because Supabase doesn't expose multi-statement
- * transactions to the JS client; on partial failure the partial job stays in
- * place and the caller can retry/clean up. The single insert path makes the
- * "Job not found" race observed pre-refactor impossible.
+ * ERRORS FOLLOW ONE RULE: **this throws for anything before the first write, and
+ * returns for everything after it.** A throw means nothing was attempted. A
+ * result means the pre-flight passed and every requested part has an outcome —
+ * including the case where all of them failed, which is returned rather than
+ * thrown because "here is why each of the three failed" beats one error.
+ *
+ * There is no multi-statement transaction available to the JS client, so each
+ * part is isolated with its own compensation instead (see the catch below). That
+ * is the better fit anyway: a part that fails simply stays unconverted and
+ * available on the quote, which is a resumable state rather than a corrupt one.
+ * Same shape as createPartsFromRows in utils/drawingImportCreate.ts.
  */
-export async function convertQuoteToJob(
+export async function convertQuoteToJobs(
   quoteId: string,
-  options: ConvertToJobOptions,
-): Promise<ConvertToJobResult> {
+  options: ConvertQuoteToJobsOptions,
+): Promise<ConvertQuoteToJobsResult> {
   const supabase = getSupabase();
 
   const { data: quote, error: quoteError } = await supabase
@@ -1131,15 +1252,15 @@ export async function convertQuoteToJob(
     throw new Error('This quote has no line items to convert.');
   }
 
-  // A quote is converted in one or more passes (one job per customer PO). Load
-  // the line items already consumed by a live job so this pass never
-  // double-converts one — the quote stays "open" until every line is on a job.
+  // A quote is converted in one or more passes. Load the line items already
+  // consumed by a live job so this pass never double-converts one — the quote
+  // stays "open" until every line is on a job.
   const alreadyConverted = new Set(
     (await getQuoteConversionState(quoteId)).map((c) => c.line_item_id),
   );
 
-  // Resolve which line items become job parts. A price-options quote offers
-  // several quantities per part, so the caller picks one line per part via
+  // Resolve which line items become jobs. A price-options quote offers several
+  // quantities per part, so the caller picks one line per part via
   // selectedLineItemIds; a firm quote (one line per part) converts all its
   // still-unconverted lines. Either way, lines already on a job are excluded.
   const selectedIds = options.selectedLineItemIds;
@@ -1162,9 +1283,10 @@ export async function convertQuoteToJob(
         : 'Every line item on this quote is already on a job.',
     );
   }
-  // Exactly one line per part — converting two quantities of the same part
-  // would silently create duplicate job parts. Reject instead (this also
-  // hard-guards any caller that forgot to pick a quantity).
+  // Exactly one line per part. Two quantities of the same part are ALTERNATIVE
+  // offers, not two orders — converting both would silently create two jobs for
+  // a part the customer ordered once. Reject instead (this also hard-guards any
+  // caller that forgot to pick a quantity).
   const partLineCounts = new Map<string, number>();
   for (const li of lineItemsToConvert) {
     partLineCounts.set(li.part_id, (partLineCounts.get(li.part_id) ?? 0) + 1);
@@ -1229,94 +1351,21 @@ export async function convertQuoteToJob(
     throw new Error('Authentication required. Please log in and try again.');
   }
 
-  // The due date is entered manually at conversion — lead time is now free
-  // text and no longer implies a date. Required: reject an empty/invalid value
-  // before any write (the Convert-to-Job modal also enforces not-in-the-past).
-  const dueDate = (options.dueDate ?? '').trim();
-  if (dueDate === '' || Number.isNaN(new Date(dueDate).getTime())) {
-    throw new Error('A due date is required to create the job.');
-  }
-
-  // Job number: EVERY job off a quote keeps the quote's index (mirror J-0141,
-  // then J-0141-2, J-0141-3, … per later PO) — see nextQuoteJobNumber. Uniqueness
-  // is (company_id, job_number) and counts archived rows, so we fetch every job
-  // matching the mirror prefix (including archived) and let the helper pick the
-  // next free slot.
-  const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
-  const { data: existingJobs, error: existingJobsErr } = await supabase
-    .from('jobs')
-    .select('job_number')
-    .eq('company_id', quote.company_id)
-    .like('job_number', `${mirrorNumber}%`);
-  if (existingJobsErr) {
-    console.error('Error checking job numbers:', existingJobsErr);
-    throw existingJobsErr;
-  }
-  const jobNumber = nextQuoteJobNumber(
-    quote.quote_number,
-    ((existingJobs ?? []) as Array<{ job_number: string }>).map((r) => r.job_number),
-  );
-
-  const { data: job, error: jobError } = await supabase
-    .from('jobs')
-    .insert({
-      company_id: quote.company_id,
-      quote_id: quoteId,
-      customer_id: quote.customer_id,
-      job_number: jobNumber,
-      production_status: 'not_started',
-      fulfillment_status: 'unshipped',
-      is_hot: options.hot ?? false,
-      due_date: dueDate,
-      customer_po_number: customerPoNumber,
-      // The commercial term this order was sold on, frozen onto the job.
-      // Unlike freight below, this IS carried: the quote genuinely stated it,
-      // the customer accepted it by issuing the PO, and it has to survive to
-      // the QuickBooks invoice — which until now sent no terms at all and let
-      // QBO silently apply a company default nobody in Jigged could see.
-      payment_terms: quote.payment_terms,
-      // Carry the quote's billing/shipping address + contact onto the job so
-      // it has a shippable address of its own. Editable on the job afterwards
-      // (utils/jobsAccess.ts updateJobAddressContact) without touching the quote.
-      billing_address_id: quote.billing_address_id,
-      shipping_address_id: quote.shipping_address_id,
-      contact_id: quote.contact_id,
-      // FREIGHT IS DELIBERATELY LEFT NULL HERE, unlike the address/contact above.
-      // jobs.freight_terms means "what the customer's PO said for this order".
-      // Seeding it from their standing arrangement would make the job assert
-      // something the PO may never have stated, and resolveFreightLine would
-      // then report the value as coming from the job when it really came from
-      // the customer. Left null, the fallback happens at ship time with honest
-      // provenance, and the job's Freight section stays empty until someone
-      // types what the PO actually says.
-      created_by: user.id,
-    })
-    .select('id, job_number')
-    .single();
-
-  if (jobError) {
-    console.error('Error creating job:', jobError);
-    throw jobError;
-  }
-
-  const partsCreated: ConvertToJobResult['job']['parts'] = [];
-  const jobPartNowIso = new Date().toISOString();
-
-  let sequence = 10;
-  for (const li of lineItemsToConvert) {
-    const isBought = isBoughtPart(li.part_id);
-    const routingId = routingByPart.get(li.part_id);
-    if (!isBought && !routingId) {
-      // Should be impossible after the pre-flight, but guard anyway.
-      throw new Error(`Routing for part ${li.part_id} disappeared mid-conversion.`);
-    }
+  // Decide EVERYTHING about every part before writing anything. Quantity
+  // validation, price resolution and due-date validation used to live inside the
+  // write loop, which was harmless when the loop built one job — now a bad
+  // quantity on part 3 would throw after parts 1 and 2 already had jobs, and the
+  // caller would have no idea what had been created. Hoisting them is what keeps
+  // the "throws before the first write" rule true.
+  const defaultDueDate = (options.dueDate ?? '').trim();
+  const plans: PartPlan[] = lineItemsToConvert.map((li) => {
+    const override = options.lineOverrides?.[li.id];
 
     // Partial acceptance: the customer may order a different quantity than
     // quoted. Default to the quoted qty + price; an override reprices exactly
     // like updateJobPartQuantity (keep the agreed price unless useTierPrice
     // opts into the snapshot's tier price at the new qty). The quote line itself
     // stays frozen — only the job_part carries the ordered figures.
-    const override = options.lineOverrides?.[li.id];
     let orderedQty = li.quantity;
     let orderedUnitPrice: number | null = li.unit_price;
     if (override) {
@@ -1348,105 +1397,292 @@ export async function convertQuoteToJob(
     const orderedTotal =
       orderedUnitPrice != null ? Math.round(orderedUnitPrice * orderedQty * 10000) / 10000 : null;
 
-    const { data: jobPart, error: jpErr } = await supabase
-      .from('job_parts')
-      .insert({
-        job_id: job.id,
-        company_id: quote.company_id,
-        part_id: li.part_id,
-        source_quote_line_item_id: li.id,
-        sequence,
-        quantity: orderedQty,
-        // Copy the (possibly repriced) price onto the job_part so the invoice
-        // read path is single-shaped (job_parts.unit_price) for both quote- and
-        // PO-sourced jobs — no "quote line vs job_part" branching. Mirrors the
-        // backfill in 20260621162024_add_job_part_pricing.sql.
-        unit_price: orderedUnitPrice,
-        total_price: orderedTotal,
-        // A bought part is purchased, not manufactured — no operations to run, so
-        // its production is complete on creation (ready to ship + invoice). Made
-        // parts start not_started and advance as operators complete the cloned
-        // routing operations.
-        production_status: isBought ? 'completed' : 'not_started',
-        fulfillment_status: 'unshipped',
-        ...(isBought ? { started_at: jobPartNowIso, completed_at: jobPartNowIso } : {}),
-      })
-      .select('id, part_id')
-      .single();
-    if (jpErr) {
-      // Race backstop: the app-level pre-check above can't see a conversion that
-      // landed between it and this insert. The job_parts_one_active_per_quote_line
-      // partial unique index rejects the duplicate (23505); surface the same
-      // friendly message the pre-check uses rather than a raw DB error.
-      const code = (jpErr as { code?: string }).code;
-      if (code === '23505' && (jpErr.message ?? '').includes('one_active_per_quote_line')) {
-        throw new Error(
-          'Some selected parts were just converted on another job. Reload the quote and pick from the remaining parts.',
-        );
-      }
-      console.error('Error creating job_part:', jpErr);
-      throw jpErr;
+    // Each part is its own job, so each carries its own ship-by date. The
+    // per-line value wins; options.dueDate covers a line that doesn't name one.
+    // Required either way — lead time is free text and no longer implies a date.
+    const dueDate = (override?.dueDate ?? '').trim() || defaultDueDate;
+    if (dueDate === '' || Number.isNaN(new Date(dueDate).getTime())) {
+      throw new Error('A due date is required to create the job.');
     }
 
-    // Made parts clone their routing into job_operations + job_materials. Bought
-    // parts have no routing, so there's nothing to clone — the job_part stands
-    // alone (production-complete, ready to ship).
-    if (!isBought && routingId) {
-      const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
-        p_job_part_id: jobPart.id,
-        p_routing_id: routingId,
-      });
-      if (rpcErr) {
-        console.error('Failed to copy operations from routing:', rpcErr);
-        throw new Error('Job created but failed to copy operations from routing.');
-      }
-    }
+    return {
+      line: li,
+      isBought: isBoughtPart(li.part_id),
+      routingId: routingByPart.get(li.part_id),
+      orderedQty,
+      orderedUnitPrice,
+      orderedTotal,
+      dueDate,
+    };
+  });
 
-    partsCreated.push({
-      id: jobPart.id,
-      part_id: jobPart.part_id,
-      quantity: orderedQty,
-      source_quote_line_item_id: li.id,
-    });
-
-    sequence += 10;
-  }
-
-  const nowIso = new Date().toISOString();
-  const quoteUpdate: {
-    status_changed_at: string;
-    updated_at: string;
-    converted_at?: string;
-  } = {
-    status_changed_at: nowIso,
-    updated_at: nowIso,
+  // The job fields every job in this pass shares, built once so N inserts can't
+  // drift apart. Only job_number and due_date vary per part.
+  const jobBase = {
+    company_id: quote.company_id,
+    quote_id: quoteId,
+    customer_id: quote.customer_id,
+    production_status: 'not_started',
+    fulfillment_status: 'unshipped',
+    is_hot: options.hot ?? false,
+    customer_po_number: customerPoNumber,
+    // The commercial term this order was sold on, frozen onto the job.
+    // Unlike freight below, this IS carried: the quote genuinely stated it,
+    // the customer accepted it by issuing the PO, and it has to survive to
+    // the QuickBooks invoice — which until now sent no terms at all and let
+    // QBO silently apply a company default nobody in Jigged could see.
+    payment_terms: quote.payment_terms,
+    // Carry the quote's billing/shipping address + contact onto the job so
+    // it has a shippable address of its own. Editable on the job afterwards
+    // (utils/jobsAccess.ts updateJobAddressContact) without touching the quote.
+    billing_address_id: quote.billing_address_id,
+    shipping_address_id: quote.shipping_address_id,
+    contact_id: quote.contact_id,
+    // FREIGHT IS DELIBERATELY LEFT NULL HERE, unlike the address/contact above.
+    // jobs.freight_terms means "what the customer's PO said for this order".
+    // Seeding it from their standing arrangement would make the job assert
+    // something the PO may never have stated, and resolveFreightLine would
+    // then report the value as coming from the job when it really came from
+    // the customer. Left null, the fallback happens at ship time with honest
+    // provenance, and the job's Freight section stays empty until someone
+    // types what the PO actually says.
+    created_by: user.id,
   };
-  // converted_at marks the FIRST conversion (and locks the quote from edits).
-  // Leave it untouched on later passes so it keeps meaning "acceptance began at",
-  // and so a partially-converted quote doesn't churn its timestamp per PO.
-  if (!quote.converted_at) {
-    quoteUpdate.converted_at = nowIso;
+
+  // Job numbers: read the mirror namespace ONCE, then accumulate as we mint.
+  // That read can't see a number we created a moment ago, so without the local
+  // push every job in this pass would compute the same suffix.
+  const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  let taken = await fetchMirrorJobNumbers(quote.company_id, mirrorNumber);
+
+  /**
+   * Insert one job, re-minting its number if a competing conversion of this
+   * quote took the slot. On a collision we RE-READ rather than incrementing: a
+   * competing pass now takes a CONTIGUOUS RUN of suffixes (that is exactly what
+   * this fan-out does), so +1 would collide again on the very next attempt and
+   * walk the run one round trip at a time. Union the re-read into `taken` rather
+   * than replacing it — a stale read must never un-take a number we hold.
+   */
+  async function insertJobWithNumber(
+    dueDate: string,
+  ): Promise<{ id: string; job_number: string }> {
+    for (let attempt = 1; ; attempt++) {
+      const jobNumber = nextQuoteJobNumber(quote.quote_number, taken);
+      const { data, error } = await supabase
+        .from('jobs')
+        .insert({ ...jobBase, job_number: jobNumber, due_date: dueDate })
+        .select('id, job_number')
+        .single();
+
+      if (!error && data) {
+        taken.push(jobNumber);
+        return data;
+      }
+
+      if (isJobNumberCollision(error) && attempt < JOB_NUMBER_ATTEMPTS) {
+        taken = Array.from(
+          new Set([...taken, ...(await fetchMirrorJobNumbers(quote.company_id, mirrorNumber))]),
+        );
+        continue;
+      }
+
+      console.error('Error creating job:', error);
+      throw toFriendlyError(error, {
+        entity: 'job',
+        fallback: isJobNumberCollision(error)
+          ? 'Another job was created from this quote at the same moment. Nothing was lost — try this part again.'
+          : 'Could not create the job. Please try again.',
+      });
+    }
   }
 
-  const { data: updatedQuote, error: updateError } = await supabase
-    .from('quotes')
-    .update(quoteUpdate)
-    .eq('id', quoteId)
-    .select()
-    .single();
+  const jobs: ConvertedJob[] = [];
+  const failures: FailedConversion[] = [];
+  const jobPartNowIso = new Date().toISOString();
 
-  if (updateError) {
-    console.error('Error updating quote with conversion timestamp:', updateError);
-    throw updateError;
+  for (const plan of plans) {
+    const li = plan.line;
+    // Which writes have landed for THIS part, so the catch knows what to undo.
+    let createdJob: { id: string; job_number: string } | null = null;
+    let jobPartLanded = false;
+
+    try {
+      createdJob = await insertJobWithNumber(plan.dueDate);
+
+      const { data: jobPart, error: jpErr } = await supabase
+        .from('job_parts')
+        .insert({
+          job_id: createdJob.id,
+          company_id: quote.company_id,
+          part_id: li.part_id,
+          source_quote_line_item_id: li.id,
+          // Always 10: a job holds exactly one part, so UNIQUE(job_id, sequence)
+          // is satisfied trivially. Legacy multi-part jobs keep their 10/20/30.
+          sequence: 10,
+          quantity: plan.orderedQty,
+          // Copy the (possibly repriced) price onto the job_part so the invoice
+          // read path is single-shaped (job_parts.unit_price) for both quote- and
+          // PO-sourced jobs — no "quote line vs job_part" branching. Mirrors the
+          // backfill in 20260621162024_add_job_part_pricing.sql.
+          unit_price: plan.orderedUnitPrice,
+          total_price: plan.orderedTotal,
+          // A bought part is purchased, not manufactured — no operations to run,
+          // so its production is complete on creation (ready to ship + invoice).
+          // Made parts start not_started and advance as operators complete the
+          // cloned routing operations.
+          production_status: plan.isBought ? 'completed' : 'not_started',
+          fulfillment_status: 'unshipped',
+          ...(plan.isBought ? { started_at: jobPartNowIso, completed_at: jobPartNowIso } : {}),
+        })
+        .select('id, part_id')
+        .single();
+
+      if (jpErr || !jobPart) {
+        // Race backstop: the app-level pre-check above can't see a conversion
+        // that landed between it and this insert. The
+        // job_parts_one_active_per_quote_line partial unique index rejects the
+        // duplicate (23505). This is now ONE part's failure rather than the whole
+        // pass's — the other parts are unaffected and proceed.
+        throw isQuoteLineTaken(jpErr)
+          ? new Error(
+              'This part was just converted on another job. Reload the quote to see where it went.',
+            )
+          : toFriendlyError(jpErr, {
+              entity: 'job',
+              fallback: 'Could not add the part to its job. Please try again.',
+            });
+      }
+      jobPartLanded = true;
+
+      // Made parts clone their routing into job_operations + job_materials.
+      // Bought parts have no routing, so there's nothing to clone — the job_part
+      // stands alone (production-complete, ready to ship).
+      if (!plan.isBought && plan.routingId) {
+        const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+          p_job_part_id: jobPart.id,
+          p_routing_id: plan.routingId,
+        });
+        if (rpcErr) {
+          // `.rpc()` is deliberately outside Sentry's Supabase integration, and
+          // this failure is now swallowed into a FailedConversion instead of
+          // thrown — so without a manual capture it would go entirely unseen.
+          Sentry.captureException(toError(rpcErr, 'create_job_part_operations_from_routing'), {
+            tags: { area: 'quote-conversion' },
+          });
+          console.error('Failed to copy operations from routing:', rpcErr);
+          throw new Error('The job was created but its operations could not be copied.');
+        }
+      }
+
+      jobs.push({
+        job_id: createdJob.id,
+        job_number: createdJob.job_number,
+        source_quote_line_item_id: li.id,
+        part_id: jobPart.part_id,
+        job_part_id: jobPart.id,
+        quantity: plan.orderedQty,
+        unit_price: plan.orderedUnitPrice,
+        due_date: plan.dueDate,
+      });
+    } catch (err) {
+      // Compensate, so a failed part is genuinely un-converted and the user can
+      // simply try it again. One job per part is what makes this possible at all:
+      // before, rolling back part 3 meant touching the job carrying 1 and 2.
+      // Everything thrown inside the try above is already user-facing — either a
+      // sentence we wrote or a toFriendlyError. Passing it as the FALLBACK is
+      // what preserves it: friendlyErrorMessage only reaches the fallback when it
+      // has no code mapping of its own, which is exactly the authored case.
+      const message = friendlyErrorMessage(err, {
+        entity: 'job',
+        fallback:
+          err instanceof Error && err.message
+            ? err.message
+            : 'Could not create a job for this part.',
+      });
+      let retryable = true;
+
+      if (createdJob) {
+        try {
+          if (jobPartLanded) {
+            // The job_part exists, so the quote line reads as converted and the
+            // job has no operations. cancelJob cancels the part; the rollup
+            // trigger flips the job to cancelled, the part drops out of
+            // job_parts_one_active_per_quote_line, and the line is free again.
+            await cancelJob(createdJob.id);
+          } else {
+            // An empty job holding a number. Archive it: the job page gates
+            // Edit / Print Traveler / Shipments / Invoices on having parts, so a
+            // zero-part job is a dead husk wherever it appears.
+            await deleteJob(createdJob.id, quote.company_id);
+          }
+        } catch (compensationErr) {
+          console.error('Failed to roll back a partial conversion:', compensationErr);
+          Sentry.captureException(toError(compensationErr, 'convert-quote-compensation'), {
+            tags: { area: 'quote-conversion' },
+          });
+          retryable = false;
+        }
+      }
+
+      failures.push({
+        source_quote_line_item_id: li.id,
+        part_id: li.part_id,
+        message: retryable
+          ? message
+          : `Job ${createdJob?.job_number ?? ''} was created but couldn't be finished or cancelled automatically. Open it and cancel it, then convert this part again.`.replace(
+              /\s+/g,
+              ' ',
+            ),
+        retryable,
+      });
+    }
+
+    options.onProgress?.(jobs.length + failures.length, plans.length);
+  }
+
+  // Stamp the quote only if this pass actually created something.
+  let stampedQuote = quote;
+  if (jobs.length > 0) {
+    const nowIso = new Date().toISOString();
+    const quoteUpdate: {
+      status_changed_at: string;
+      updated_at: string;
+      converted_at?: string;
+    } = {
+      status_changed_at: nowIso,
+      updated_at: nowIso,
+    };
+    // converted_at marks the FIRST conversion (and locks the quote from edits).
+    // Leave it untouched on later passes so it keeps meaning "acceptance began at",
+    // and so a partially-converted quote doesn't churn its timestamp per PO.
+    if (!quote.converted_at) {
+      quoteUpdate.converted_at = nowIso;
+    }
+
+    const { data: updatedQuote, error: updateError } = await supabase
+      .from('quotes')
+      .update(quoteUpdate)
+      .eq('id', quoteId)
+      .select()
+      .single();
+
+    if (updateError) {
+      // DELIBERATELY NOT THROWN, and this is not an oversight. Throwing here
+      // would destroy the report of every job this pass just created, and it
+      // never rolled anything back anyway. converted_at is an edit-lock and a
+      // display timestamp; conversion state itself is derived from job linkage
+      // (getQuoteConversionState), which is already correct without the stamp,
+      // and the next pass restamps. Report the jobs; log the stamp.
+      console.error('Error updating quote with conversion timestamp:', updateError);
+    } else if (updatedQuote) {
+      stampedQuote = updatedQuote;
+    }
   }
 
   return {
-    quote: asQuote(updatedQuote),
-    job: {
-      id: job.id,
-      job_number: job.job_number,
-      parts: partsCreated,
-    },
+    quote: asQuote(stampedQuote),
+    jobs,
+    failures,
   };
 }
 

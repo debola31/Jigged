@@ -892,8 +892,17 @@ export default function QuoteDetailPage() {
         onClose={() => setConvertModalOpen(false)}
         quote={quote}
         conversions={conversions}
-        onConverted={(jobId) => {
-          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
+        onConverted={({ navigateToJobId }) => {
+          // One job, nothing to report — hand off to it, exactly as before the
+          // fan-out. Otherwise the modal keeps itself open to say what happened,
+          // so all this page owes is a refresh: fetchQuote() also re-runs the
+          // conversions effect, which repaints the "Jobs from this quote" banner
+          // and the remaining-parts set underneath the open summary.
+          if (navigateToJobId) {
+            router.push(`/dashboard/${companyId}/jobs/${navigateToJobId}`);
+            return;
+          }
+          fetchQuote();
         }}
       />
 

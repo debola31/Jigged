@@ -234,15 +234,52 @@ describe('JobFeed — capture is independent of completing the step', () => {
     );
   });
 
-  it('warns when a step action lands on top of an unposted draft', async () => {
+  it('says so while a draft is unposted, and stops saying it once it is gone', async () => {
     /**
-     * The hazard the merged commit existed to prevent, answered where it happens
-     * instead of by welding the two writes together. The operator recorded a
-     * completion with a photo still staged; without this they walk away believing
-     * it was saved, which is exactly the failure that got capture merged into
-     * completion in the first place.
+     * The hazard the merged commit existed to prevent, answered by a status line
+     * rather than by welding the two writes together: a staged photo used to LOOK
+     * saved, and nothing said otherwise.
+     *
+     * Derived from the draft alone, deliberately — it is true the whole time the
+     * risk exists, instead of firing once at a moment we guessed. It is also the
+     * only shape available: remembering that moment needs setState in an effect
+     * (the repo's ratcheting warning budget), setState during render, or a ref
+     * read during render — and the last two are lint ERRORS here.
      */
     const user = userEvent.setup();
+    renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    expect(screen.queryByText(/not posted yet/i)).not.toBeInTheDocument();
+
+    const field = screen.getByPlaceholderText('Add a note or photo for this step…');
+    await user.type(field, 'half a thought');
+    expect(await screen.findByText(/not posted yet/i)).toBeInTheDocument();
+
+    await user.clear(field);
+    await waitFor(() =>
+      expect(screen.queryByText(/not posted yet/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it('brings the composer back into view when a step action lands on a draft', async () => {
+    /**
+     * The status line sits BELOW the action block the operator just tapped, which
+     * on a phone has already scrolled past — saying it where they are not looking
+     * is the same silence in a different colour. This is the half that has to be
+     * an event, and the only half that needs to remember anything, so it lives
+     * entirely inside an effect where touching a ref is legal.
+     */
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    // jsdom implements no scrollIntoView at all, so there is nothing to spy on —
+    // it has to be installed.
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true,
+    });
+
     const { rerender } = render(
       <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={0} />,
     );
@@ -252,37 +289,37 @@ describe('JobFeed — capture is independent of completing the step', () => {
       screen.getByPlaceholderText('Add a note or photo for this step…'),
       'half a thought',
     );
-    expect(screen.queryByText(/hasn.t been posted yet/i)).not.toBeInTheDocument();
+    scrollIntoView.mockClear();
 
     rerender(
       <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={1} />,
     );
 
-    expect(await screen.findByText(/hasn.t been posted yet/i)).toBeInTheDocument();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
 
-  it('retracts that warning once the draft is gone', async () => {
-    // Derived from the draft rather than latched on its own, so clearing the
-    // field takes the warning with it and there is no second thing to keep in
-    // step.
-    const user = userEvent.setup();
+  it('does NOT chase the operator when the step action lands on an empty composer', async () => {
+    // Completing a step with nothing typed is the ordinary case. Scrolling for it
+    // would move the screen under someone for no reason.
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true,
+    });
+
     const { rerender } = render(
       <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={0} />,
     );
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    scrollIntoView.mockClear();
 
-    const field = screen.getByPlaceholderText('Add a note or photo for this step…');
-    await user.type(field, 'half a thought');
     rerender(
       <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={1} />,
     );
-    await screen.findByText(/hasn.t been posted yet/i);
 
-    await user.clear(field);
-
-    await waitFor(() =>
-      expect(screen.queryByText(/hasn.t been posted yet/i)).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(getFeedCompletionsForJob).toHaveBeenCalled());
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });
 

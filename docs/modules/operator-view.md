@@ -882,11 +882,18 @@ worse than a second commit.
 - **The composer is its own card, below the action block**, with its own `Post`. What made a staged
   photo read as saved was that capture *looked like part of the completion*. It no longer is, on any
   branch or any surface.
-- **A step action that lands on an unposted draft says so.** `JobFeed` watches `refreshSignal` — the
-  same bump the page already sends after start, complete and cancel — and when a draft is staged it
-  scrolls the composer into view and shows *"This note hasn't been posted yet — tap Post."* The
-  scroll is not decoration: the warning renders below the button the operator just tapped, which on a
-  phone is exactly what has been scrolled past.
+- **An unposted draft says so, the whole time it is unposted.** A quiet *"Not posted yet"* shares the
+  Post button's row, derived from the draft and nothing else — true for as long as the risk exists
+  rather than fired once at a moment we guessed. When a step action lands while a draft is staged
+  (`JobFeed` watches the `refreshSignal` the page already sends after start, complete and cancel) the
+  composer is **scrolled back into view**, because that line sits below the button just tapped, which
+  on a phone has already scrolled past.
+  **The shape was forced, and it came out better.** Every version that REMEMBERED the moment needed
+  one of `set-state-in-effect` (the ratcheting warning budget), `set-state-in-render`, or a ref read
+  during render — and the last two are lint **errors**: all three ship in
+  eslint-plugin-react-hooks' recommended preset, which `eslint-config-next` spreads, and only the
+  first is downgraded in `eslint.config.mjs`. Deriving the visible half and confining the remembered
+  half to an effect satisfies all three.
 - **`composer_abandoned` against `composer_focused` measures the residual.** If this trade is wrong
   it will show up there first.
 
@@ -1335,7 +1342,7 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 - [ ] **Given** a wrong entry, **when** the operator taps `Undo all (N)`, **then** the events are `voided_at`-stamped rather than deleted, excluded from the sum, and the status recomputes — *verified by `__tests__/utils/operationCompletionsAccess.test.ts`*.
 - [ ] **Given** an **outside** step, **when** `compute_job_operation_status` runs, **then** its stored status is returned untouched so a quantity edit cannot reset a `sent` op — *verified by `__tests__/schema/externalOperationMigration.test.ts`*.
 - [ ] **Given** the quantity left at its prefilled default and something typed, **when** `Post` is tapped, **then** the note is saved and **no completion is created** — the reported regression, and the reason the e2e no longer zeroes the field first; **given** an empty quantity, **then** no note button exists on this page at any quantity — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`, `__tests__/components/operator/JobFeed.test.tsx` > `JobFeed — capture is independent of completing the step` and `e2e/operator-completion.spec.ts`*.
-- [ ] **Given** a staged draft, **when** the operator records a completion instead of posting it, **then** the completion writes **no note**, the composer is scrolled into view and warns that it is unposted, and the warning retracts when the draft is posted or cleared — *verified by `__tests__/components/operator/JobFeed.test.tsx` and `e2e/operator-completion.spec.ts`*.
+- [ ] **Given** a staged draft, **then** the composer reads *"Not posted yet"* for as long as it is staged and stops once it is posted or cleared; **when** a step action lands while it is staged, **then** the composer is scrolled back into view, and **not** when the composer is empty; **and** the completion itself writes **no note** — *verified by `__tests__/components/operator/JobFeed.test.tsx` and `e2e/operator-completion.spec.ts`*.
 - [ ] **Given** a completion and a note submitted together, **when** they are written, **then** the completion lands **first and durably**, and a failing note leaves the completion standing — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.
 - [ ] **Given** the operator's station differs from the operation's `work_center_id`, **when** the page loads, **then** a mismatch **warning** shows and the step can still be recorded — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.
 - [ ] **Given** the step screen, **when** it loads, **then** the job card is collapsed and expands IN PLACE without navigating — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.

@@ -244,8 +244,9 @@ test.describe('operator completion', () => {
   }) => {
     // The other half of the split. Completion stopped sweeping up the composer,
     // which is what makes the note independent — but it is also how a staged
-    // photo used to get silently discarded, so the composer speaks up instead of
-    // letting the operator walk away believing it was saved.
+    // photo used to get silently discarded, so the composer says plainly that it
+    // still holds something, instead of letting the operator walk away believing
+    // it was saved.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openStep(page);
 
@@ -255,7 +256,7 @@ test.describe('operator completion', () => {
 
     await recordButton(page).click();
 
-    await expect(page.getByText(/hasn.t been posted yet/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/not posted yet/i)).toBeVisible({ timeout: 30_000 });
     // Still a draft, never written: no feed entry carries it.
     await expect(page.locator('p').filter({ hasText: body })).toHaveCount(0);
   });

@@ -291,66 +291,56 @@ export default function JobFeed({
   }, [companyId]);
 
   /**
-   * A staged draft was still sitting here when the parent recorded a step action.
+   * An unposted draft, and the two halves of saying so.
    *
-   * THIS IS THE HAZARD THE OLD MERGED COMMIT EXISTED TO PREVENT, and it is worth
-   * naming rather than leaving as a nicety. Capture and completion were welded
-   * into one button because a two-stage commit lost photos: the thumbnail showed,
-   * the flow read as finished, a back tap discarded it and nothing said so.
-   * Splitting them apart again re-opens exactly that, so it is answered at the
-   * moment it happens — the operator finished a step with an unposted photo still
-   * in the composer, and this says so instead of letting them walk away.
+   * THIS IS THE HAZARD THE OLD MERGED COMMIT EXISTED TO PREVENT. Capture and
+   * completion were welded into one button because a two-stage commit lost
+   * photos: the thumbnail showed, the flow read as finished, a back tap discarded
+   * it and nothing said so. Splitting them apart again re-opens that, so it has
+   * to be answered — but every way of REMEMBERING the moment it happens is
+   * closed. `set-state-in-effect` is the repo's ratcheting warning budget,
+   * `set-state-in-render` is an error, and so is reading a ref during render
+   * (all three ship in eslint-plugin-react-hooks' recommended preset, which
+   * eslint-config-next spreads; only the first is downgraded in
+   * eslint.config.mjs). Every history-keeping version of this needed one of them.
    *
-   * DERIVED, NOT STORED, and that is forced rather than stylistic. Both places
-   * this could have been latched are linted: `set-state-in-effect` is the repo's
-   * ratcheting warning budget (the cap only ever goes down), and
-   * `set-state-in-render` is an ERROR — it ships in eslint-plugin-react-hooks'
-   * recommended preset, which eslint-config-next spreads, and only the first of
-   * the two is downgraded in eslint.config.mjs.
+   * That constraint produced a better answer than the one it refused. Rather than
+   * a warning that fires once and has to be remembered, there is:
    *
-   * So the only thing kept is WHEN the current draft began, in a ref written from
-   * an effect. The ref is READ during render, which is safe here in a way that
-   * writing during render would not be: it is only ever written after a commit,
-   * so a render always sees the last committed value, and every transition that
-   * changes the answer — `hasContent` (state) or `refreshSignal` (a prop) —
-   * re-renders on its own.
-   *
-   * The comparison also self-clears: posting or emptying the draft drops
-   * `hasContent`, and a draft started AFTER the action records the current signal
-   * and so reads as not-yet-interrupted.
+   *   1. A STATUS LINE derived from nothing but the draft itself, so it is true
+   *      the whole time the risk exists rather than only in the moment we guessed
+   *      the operator was about to walk away. Quiet, not an alert: it reports a
+   *      state, and something that shouts while you are still typing teaches
+   *      people to ignore it.
+   *   2. A SCROLL, when a step action lands while a draft is staged. That is the
+   *      moment the status line would go unread — it sits below the button just
+   *      tapped, which on a phone has already scrolled past. Bringing it back is
+   *      the part that has to be an event, and it is the only part that needs the
+   *      history, so ALL of it lives inside the effect where a ref is legal.
    */
+  const hasUnpostedDraft = capture.hasContent;
+
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const draftSinceSignal = useRef<number | undefined>(undefined);
   useEffect(() => {
+    const signal = refreshSignal ?? 0;
     if (!capture.hasContent) {
       draftSinceSignal.current = undefined;
-    } else if (draftSinceSignal.current === undefined) {
-      draftSinceSignal.current = refreshSignal ?? 0;
+      return;
     }
-  }, [capture.hasContent, refreshSignal]);
-
-  const unpostedAfterAction =
-    capture.hasContent &&
-    draftSinceSignal.current !== undefined &&
-    (refreshSignal ?? 0) !== draftSinceSignal.current;
-
-  /**
-   * Bring the composer to them.
-   *
-   * The warning renders BELOW the action block the operator just tapped, which on
-   * a phone is precisely what has been scrolled past — saying it where they are
-   * not looking is the same silence in a different colour. Keyed on the warning
-   * rather than on the signal, so it fires exactly when there is something to
-   * scroll to and never for a step action with nothing staged.
-   *
-   * Optional-call: jsdom does not implement scrollIntoView, and this is a nicety
-   * rather than behaviour worth throwing over — the same `?.()` guard
-   * NoteCaptureFields uses for the same reason.
-   */
-  const composerRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!unpostedAfterAction) return;
+    if (draftSinceSignal.current === undefined) {
+      draftSinceSignal.current = signal;
+      return;
+    }
+    if (draftSinceSignal.current === signal) return;
+    // A step action landed on top of this draft. Move the goalposts first, so a
+    // later re-render cannot scroll a second time for the same action.
+    draftSinceSignal.current = signal;
+    // Optional-call: jsdom does not implement scrollIntoView, and this is a
+    // nicety rather than behaviour worth throwing over — the same `?.()` guard
+    // NoteCaptureFields uses for the same reason.
     composerRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  }, [unpostedAfterAction]);
+  }, [capture.hasContent, refreshSignal]);
 
   // Reflect a write the PARENT made — a start, a completion, a cancelled timer.
   // Ignores the initial undefined/0 so a mount does not double-load.
@@ -466,15 +456,20 @@ export default function JobFeed({
                   : 'Add a note or photo for this job…'
               }
             />
-            {/* An Alert rather than coloured text: this has to survive being
-                read at arm's length under shop lighting, and the icon carries it
-                when the colour does not. */}
-            {unpostedAfterAction && (
-              <Alert severity="warning">
-                This note hasn&apos;t been posted yet — tap Post.
-              </Alert>
-            )}
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            {/* Shares the button's row rather than taking one of its own: this
+                screen's failure mode is crowding, and a status line is not worth
+                a line of height. */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 1,
+              }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                {hasUnpostedDraft ? 'Not posted yet' : ''}
+              </Typography>
               {/* NAMES THE WAIT, because on this surface the wait is not a
                   Supabase round trip — `submit` puts every file in the bucket
                   BEFORE the note row, and a full-length clip is ~23 MB over shop

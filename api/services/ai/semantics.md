@@ -135,6 +135,14 @@ as "summing the total price of all job parts and dividing by the number of jobs"
 in prose, the wrong one in SQL, which is why the two-level shape is spelled out here rather than
 left to the reference query to imply.
 
+**This is still the rule even though nearly every job now has exactly one part.** Quote conversion
+creates one job per part, so for anything new the two levels collapse and both forms agree — but
+jobs created before that carry up to four parts, and the flat `AVG` is wrong for any window
+containing one of them. The collapse makes the error *smaller*, not absent, which makes it harder
+to notice rather than safer: $4,774 against $3,038 is catchable, $4,774 against $4,740 is not.
+Note also that only the **average** has a grain problem. Every `SUM` over `job_parts` in this
+document is unaffected by how many parts a job has, so do not "consistently" apply this fix to one.
+
 **Notes.** Use `job_parts.total_price`, never the source quote line. `job_parts.quantity` and
 `unit_price` are the post-conversion source of truth — a quantity edited after conversion shows here
 — and a price-options quote keeps unchosen lines that would over-count. A job with no job parts has

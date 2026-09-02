@@ -221,7 +221,7 @@ Resolution happens at **form load**, not at submit, so the shipper sees and can 
 
 Job-level freight is written **only by `JobEditForm`**, through `updateJobAddressContact`. `JobBillingShippingCard` displays it read-only and writes none of it — the job page renders that card with `readOnly`, so an earlier version that put the editor there was write-dead and left all four columns NULL for every job.
 
-`convertQuoteToJob` deliberately leaves freight NULL (unlike addresses, contact and `payment_terms`, which are carried): prefilling would make the job assert something the PO may never have stated, and `resolveFreightLine` would then mis-report provenance as `'job'`.
+`convertQuoteToJobs` deliberately leaves freight NULL (unlike addresses, contact and `payment_terms`, which are carried): prefilling would make the job assert something the PO may never have stated, and `resolveFreightLine` would then mis-report provenance as `'job'`.
 
 ### The redaction boundary
 

@@ -7,7 +7,8 @@ This string is injected into the system prompt so the AI can generate correct SQ
 Reflects the unified `parts` schema (parts absorbed inventory_items),
 `work_centers` (replaces operation_types), `vendors`, `routing_operations`
 (replaces routing_nodes), `parts_bom` (replaces routing_materials), and
-`job_parts` (the new intermediary that lets a single job ship multiple parts).
+`job_parts` (the intermediary between jobs and parts; one row per part on a
+job -- new jobs carry exactly one, some historical jobs carry several).
 """
 
 SCHEMA_CONTEXT = """
@@ -165,12 +166,14 @@ SCHEMA_CONTEXT = """
 - started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
 - due_date: DATE
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- NOTE: jobs no longer carry part_id. A job ships one or more parts via job_parts.
+- NOTE: jobs no longer carry part_id. A job's parts live in job_parts.
+  A job created today has exactly ONE part; some older jobs have several,
+  so always JOIN job_parts rather than assuming a single row per job.
 - NOTE: shipped_at column was dropped. Use the SQL helper
   public.job_last_ship_date(job_id) for the last ship date — it sums
   non-voided shipments.
 
-### job_parts (intermediate between jobs and parts; lets one job ship multiple parts)
+### job_parts (intermediate between jobs and parts; one row per part on a job)
 - id: UUID (PK)
 - job_id: UUID (FK -> jobs.id)
 - company_id: UUID -- ALWAYS filter with $1

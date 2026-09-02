@@ -125,7 +125,7 @@ through `applyOverdueJobsFilter` in `utils/dashboardAccess.ts`.)*
 |---|---|
 | `job_number` | A job off a quote keeps the quote's index (`Q-0141` → `J-0141`); each **later PO on the same quote** gets a suffix (`J-0141-2`, …). A direct-PO job draws a fresh `J-N` from the shared per-company order counter (`generate_direct_job_number` → `next_order_number`, atomic, so it can never collide with a quote's reserved number). Set explicitly at creation — no auto-numbering trigger. |
 | `quote_id` | Null for direct-PO jobs. **Many jobs may share one `quote_id`** — a quote converts in passes, one job (one customer PO) per pass. |
-| `due_date` | Entered **manually** in the Convert-to-Job modal (required, not in the past). **Not derived from lead time**, and no lead-time snapshot is stored. Shared by every part — split-shipping deadlines are a gap. |
+| `due_date` | Entered **manually** in the Convert-to-Job modal (required, not in the past). **Not derived from lead time**, and no lead-time snapshot is stored. Now **per part**: quote conversion creates one job per part, so a quote whose parts carry different lead times converts into jobs genuinely due on different days. (It was previously shared by every part on one job, and per-part deadlines were a named gap; that gap closes for anything new, and still applies to legacy multi-part jobs.) |
 | `production_status` / `fulfillment_status` / `invoicing_status` | See above. Derived. |
 | `is_hot` | Rush flag. Toggled by **Mark Hot / Unmark Hot** on the detail header; sorts hot rows to the top of the list (`.order('is_hot', …)`) and of the operator station queue, and washes the row red — echoing pink-paper travelers. |
 | `started_at` / `completed_at` | Stamped by the part→job sync trigger, not by the app: `started_at` the first time the rolled-up status reaches `in_progress` **or** `completed` (never overwritten after), `completed_at` when it reaches `completed`. **`completed_at` is reset to NULL when the job falls back to `in_progress`** — so undoing an operation on a finished job clears the completion date rather than leaving a stale one. The same pair on `job_parts` follows the same rule. **There is no `shipped_at`** on `jobs` or `job_parts` — *(this doc previously listed one on both)*; use `public.job_part_last_ship_date(job_part_id)`. |
@@ -197,12 +197,14 @@ and outside steps are exempt from that recompute (see below).
 There is no `/jobs/new`. Both paths store the agreed price on each `job_part`, so PO-sourced and
 quote-sourced jobs invoice identically.
 
-**(a) Convert a quote** — **Convert to Job** on the quote detail page (`convertQuoteToJob`,
-`utils/quotesAccess.ts`); one `job_part` per (part, selected quantity), carrying the PO entered at
-conversion. A quote converts in **several passes** (button relabels to **Create Another Job** while
-lines remain). Owned by [Quotes](quotes.md). This is the *only* path that offers the price-break opt-in
-(`ConvertToJobModal`: if the chosen quantity crosses a break, the user may take the re-resolved
-tier price).
+**(a) Convert a quote** — **Convert to Job** on the quote detail page (`convertQuoteToJobs`,
+`utils/quotesAccess.ts`); **one job per checked part**, each owning exactly one `job_part` and
+carrying the PO entered at conversion. One pass can therefore create several jobs, and a quote
+converts in **several passes** besides (button relabels to **Create Another Job** while lines
+remain). Because each part is its own job, each also gets **its own due date**, collected per part
+in the modal. Owned by [Quotes](quotes.md). This is the *only* path that offers the price-break
+opt-in (`ConvertToJobModal`: if the chosen quantity crosses a break, the user may take the
+re-resolved tier price).
 
 **(b) New Job from PO (direct)** — the **Accept Purchase Order** modal (a modal, not a route) on
 the jobs list captures customer, PO #, due date, hot flag, an optional PO PDF, and one-or-more
@@ -225,8 +227,9 @@ Both paths therefore **exempt it from the routing pre-flight** and create its `j
 **zero operations**, `production_status = 'completed'`, and `started_at`/`completed_at` stamped at
 creation. It flows straight to ship + invoice — the "work" is buy → receive → ship. This matches
 how job-shop ERPs handle purchased/COTS items (JobBOSS "buy-to-job", ProShop COTS): the item rides
-the same order-to-ship document, it just skips manufacturing. On a mixed job the bought parts show
-production-complete while the made parts run their routings.
+the same order-to-ship document, it just skips manufacturing. On a legacy **mixed** job the bought
+parts show production-complete while the made parts run their routings; quote conversion no longer
+produces one, since each part becomes its own job.
 **Gap:** no "received from vendor" step — a bought part is shippable immediately. A purchasing
 module would add one.
 

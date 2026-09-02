@@ -7,6 +7,7 @@ import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import BusyButton from '@/components/common/BusyButton';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
@@ -63,40 +64,36 @@ const THUMB = 76;
 const EMPTY_NOTES: JobNote[] = [];
 
 /**
- * Context the operation page passes so the composer auto-tags every capture to
- * the step the operator is working — no step selector. The traveler omits this
- * (read-only) and renders the same rolled-up feed.
+ * What a capture on this surface is ABOUT, and the only thing that differs
+ * between the two places this feed is mounted.
+ *
+ * The operation page passes a step, so every capture is auto-tagged to it — no
+ * step selector, which is the decision this feed was built around. The traveler
+ * passes the part with a NULL step, because an operator looking at the whole
+ * list has not picked one and should not have to; that lands as a job-subject
+ * note, which the feed already renders.
+ *
+ * Omitted entirely only when there is no job context at all, which no caller
+ * does today — the composer then simply does not render.
  */
 export interface JobFeedOperationContext {
   jobPartId: string;
-  jobOperationId: string;
+  jobOperationId: string | null;
 }
 
 interface JobFeedProps {
   jobId: string;
   companyId: string;
-  /** Read-only feed (traveler). When true, no composer is shown. */
-  readOnly?: boolean;
-  /** Set on the operation page to auto-tag captures to the step. */
+  /** What captures are tagged to. Without it there is no composer. */
   operationContext?: JobFeedOperationContext;
   /**
-   * Bumped by the parent after IT writes a note, so the feed reloads and shows
-   * it. Replaces captureOfferSignal: capture now happens inside the completion
-   * block, so the feed's job is to reflect a write rather than to prompt for one.
+   * Bumped by the parent after a STEP ACTION — start, complete, cancel — so the
+   * feed reloads to show the row that action created.
+   *
+   * It also drives the unposted-draft warning below, because those are the exact
+   * moments a staged note is most likely to be forgotten.
    */
   refreshSignal?: number;
-  /**
-   * Show the feed's OWN composer + Post button.
-   *
-   * False on the normal path, where the operation page renders the same capture
-   * fields inside the completion block and one button commits both — the whole
-   * point of merging them. True only where no completion block is left to attach
-   * a note to: an already-complete step (so a photo can still be added
-   * afterwards, which is the phone-camera-then-attach flow the audit found) and
-   * an outside step, whose "sent to coater, back on the 16th" note the paperless
-   * doc calls the highest-value note in the system.
-   */
-  standaloneCapture?: boolean;
 }
 
 // The dictation hint and the pending-photo pipeline moved into
@@ -124,10 +121,8 @@ function formatTimestamp(value: string): string {
 export default function JobFeed({
   jobId,
   companyId,
-  readOnly,
   operationContext,
   refreshSignal,
-  standaloneCapture = false,
 }: JobFeedProps) {
   const [error, setError] = useState<string | null>(null);
   // Notes posted optimistically (prepended before the next full load). Deduped
@@ -146,16 +141,32 @@ export default function JobFeed({
   // Full-size viewer.
   const [viewer, setViewer] = useState<{ url: string; kind: JobNoteMedia['kind'] } | null>(null);
 
-  // The feed's own composer, only where nothing else owns capture — see the
-  // standaloneCapture prop.
-  const showComposer = !readOnly && !!operationContext && standaloneCapture;
-
   const writer = useStepNoteWriter({
     companyId,
     jobId,
     operatorId,
     context: operationContext ?? null,
   });
+
+  /**
+   * THE ONLY COMPOSER, on every branch of every surface that has a job context.
+   *
+   * It used to be switched off wherever the operation page's completion block
+   * rendered capture instead, which made saving a note something you could only
+   * do by finishing the step — see the hook's header for how that came about.
+   * There is one composer now and it is always this one, so there is no branch
+   * left where capture goes missing and none where two appear.
+   *
+   * KEYED ON THE CONTEXT, NOT ON THE WRITER, and that distinction is load-bearing
+   * rather than stylistic. `writer` is null until `getCurrentMember` resolves, so
+   * gating on it would make this false on the first render — and `useNoteCapture`
+   * reads `enabled` AT MOUNT for two things that never re-evaluate: the mic hint's
+   * initial state and the `composer_abandoned` cleanup, whose effect has empty
+   * deps. Both would have gone permanently silent, and neither would have looked
+   * broken. The Post button carries the not-loaded-yet case instead, where it is
+   * visible.
+   */
+  const showComposer = !!operationContext;
   const capture = useNoteCapture({ companyId, operatorId, writer, enabled: showComposer });
 
   // Read tracking. The feed is where an operator encounters other people's notes
@@ -280,15 +291,48 @@ export default function JobFeed({
     };
   }, [companyId]);
 
-  // Reflect a write the PARENT made. The completion block now owns capture on the
-  // normal path, so when it posts a note this feed has to reload to show it —
-  // which is all that is left of the old captureOfferSignal. Ignores the initial
-  // undefined/0 so a mount does not double-load.
+  /**
+   * A staged draft was still sitting here when the parent recorded a step action.
+   *
+   * THIS IS THE HAZARD THE OLD MERGED COMMIT EXISTED TO PREVENT, and it is worth
+   * naming rather than leaving as a nicety. Capture and completion were welded
+   * into one button because a two-stage commit lost photos: the thumbnail showed,
+   * the flow read as finished, a back tap discarded it and nothing said so.
+   * Splitting them apart again re-opens exactly that, so it is answered at the
+   * moment it happens — the operator finished a step with an unposted photo still
+   * in the composer, and this says so instead of letting them walk away.
+   *
+   * Latched here and CLEARED BY DERIVATION below, so posting or emptying the
+   * draft retracts it without a second effect to keep in step.
+   */
+  const [unpostedAfterAction, setUnpostedAfterAction] = useState(false);
+  // The warning renders BELOW the action block the operator just tapped, which is
+  // precisely where a phone has already scrolled past. Saying it where they are
+  // not looking is the same silence in a different colour, so the composer comes
+  // to them.
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  // Mirrored into a ref so the refresh effect can read it without listing it as a
+  // dependency — it changes on every keystroke, and re-running that effect would
+  // re-fetch the whole feed while someone is typing into it.
+  const hasContentRef = useRef(false);
+  useEffect(() => {
+    hasContentRef.current = capture.hasContent;
+  }, [capture.hasContent]);
+
+  // Reflect a write the PARENT made — a start, a completion, a cancelled timer.
+  // Ignores the initial undefined/0 so a mount does not double-load.
   const lastRefresh = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!refreshSignal) return;
     if (refreshSignal === lastRefresh.current) return;
     lastRefresh.current = refreshSignal;
+    if (hasContentRef.current) {
+      setUnpostedAfterAction(true);
+      // Optional-call: jsdom does not implement scrollIntoView, and this is a
+      // nicety rather than behaviour worth throwing over — the same `?.()` guard
+      // NoteCaptureFields uses for the same reason.
+      composerRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    }
     // `refresh`, not `load`: the parent bumps this right after a write, and
     // blanking the feed to a spinner at the exact moment its new entry arrives
     // is the worst possible time to do it.
@@ -331,13 +375,32 @@ export default function JobFeed({
   // Preview-URL cleanup, the draft snapshot and composer_abandoned all moved into
   // useNoteCapture, so they fire for whichever surface owns capture.
 
-  // The photo pipeline, the dictation hint and the note+media write now live in
-  // useNoteCapture, so this feed and the completion block share one
-  // implementation. All that is left here is what "Post" means on THIS surface:
-  // write it, then show it optimistically.
+  // The photo pipeline, the dictation hint and the note+media write live in
+  // useNoteCapture, shared with the machine log. All that is left here is what
+  // "Post" means on THIS surface: write it, then show it optimistically.
+
+  /**
+   * What Post is waiting for. Media is the whole reason this is not "Saving…":
+   * a text note is a fast insert, a clip is a multi-minute transfer, and the
+   * operator cannot tell which they are in without being told.
+   */
+  const photoCount = capture.pending.filter((m) => m.kind === 'photo').length;
+  const videoCount = capture.pending.filter((m) => m.kind === 'video').length;
+  const postPendingLabel =
+    videoCount > 0
+      ? videoCount > 1
+        ? 'Uploading videos…'
+        : 'Uploading video…'
+      : photoCount > 0
+        ? photoCount > 1
+          ? 'Uploading photos…'
+          : 'Uploading photo…'
+        : 'Posting…';
+
   const handlePost = async () => {
     try {
       const note = await capture.submit();
+      setUnpostedAfterAction(false);
       if (note) setPendingNotes((prev) => [note, ...prev]);
     } catch {
       // useNoteCapture surfaces the message in the fields. A note may exist with
@@ -356,7 +419,67 @@ export default function JobFeed({
   };
 
   return (
-    <Card elevation={2} sx={cardSx}>
+    <>
+      {/* CAPTURE IS ITS OWN CARD, AND ITS OWN COMMIT.
+          It sits above the feed and BELOW whatever the parent renders — on the
+          step screen that is the action block, so the primary button does not
+          move down to make room for it. Taking these fields back out of the
+          completion block is what shortened that block, and the button actually
+          moved up.
+          A separate card rather than a section inside the feed because the two
+          are different acts: one is what you are writing, the other is what has
+          already happened. Reading them as one surface is how a staged draft came
+          to look like something already saved. */}
+      {showComposer && (
+        <Card elevation={2} sx={{ ...cardSx, mb: 2 }} ref={composerRef}>
+          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <NoteCaptureFields
+              capture={capture}
+              placeholder={
+                operationContext?.jobOperationId
+                  ? 'Add a note or photo for this step…'
+                  : 'Add a note or photo for this job…'
+              }
+            />
+            {/* Only while the draft is actually still there, so posting or
+                clearing it retracts the warning with no second effect. An Alert
+                rather than coloured text: this has to survive being read at arm's
+                length under shop lighting, and the icon carries it when the
+                colour does not. */}
+            {unpostedAfterAction && capture.hasContent && (
+              <Alert severity="warning">
+                This note hasn&apos;t been posted yet — tap Post.
+              </Alert>
+            )}
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              {/* NAMES THE WAIT, because on this surface the wait is not a
+                  Supabase round trip — `submit` puts every file in the bucket
+                  BEFORE the note row, and a full-length clip is ~23 MB over shop
+                  cellular. That is interaction-standards §5's 1–10s row, where a
+                  silent spinner is a WCAG 4.1.3 gap rather than a style choice.
+                  The label says which of the two waits it is, since "posting a
+                  sentence" and "pushing 23 MB up a bar of signal" are minutes
+                  apart. */}
+              <BusyButton
+                variant="contained"
+                onClick={handlePost}
+                // `!writer` is the brief window before getCurrentMember resolves.
+                // Disabled rather than letting the tap through, because `submit`
+                // returns null without a writer — a Post that silently does
+                // nothing is the worse of the two.
+                disabled={!writer || !capture.hasContent || capture.saving}
+                pending={capture.saving}
+                pendingLabel={postPendingLabel}
+                sx={{ minHeight: 48 }}
+              >
+                Post
+              </BusyButton>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card elevation={2} sx={cardSx}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <DynamicFeedIcon fontSize="small" color="action" />
@@ -364,30 +487,6 @@ export default function JobFeed({
             Job Feed
           </Typography>
         </Box>
-
-        {showComposer && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-            {/* The post-completion "add a photo?" offer is gone. It existed to
-                chase a note AFTER the fact, which is exactly the two-stage commit
-                that lost photos; capture now sits inside the completion block and
-                lands with it. This composer survives only on surfaces with no
-                completion left to attach to. */}
-            <NoteCaptureFields
-              capture={capture}
-              placeholder="Add a note or photo for this step…"
-            />
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Button
-                variant="contained"
-                onClick={handlePost}
-                disabled={!capture.hasContent || capture.saving}
-                sx={{ minHeight: 48 }}
-              >
-                {capture.saving ? <CircularProgress size={20} /> : 'Post'}
-              </Button>
-            </Box>
-          </Box>
-        )}
 
         {error && (
           <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>
@@ -458,7 +557,7 @@ export default function JobFeed({
                         order-quantity change) — never editable, never deletable.
                         RLS refuses them too, so this gate stops a guaranteed
                         42501 rendering as a broken button. */}
-                    {!readOnly && note.note_type === 'user' && (
+                    {note.note_type === 'user' && (
                       <NoteActionsMenu
                         canEdit={operatorId !== null && note.author_id === operatorId}
                         canDelete={
@@ -735,6 +834,7 @@ export default function JobFeed({
           }
         }}
       />
-    </Card>
+      </Card>
+    </>
   );
 }

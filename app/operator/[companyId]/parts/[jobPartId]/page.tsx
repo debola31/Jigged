@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -75,6 +75,22 @@ export default function OperatorJobTravelerPage() {
    * Everything below that needs the job reads `traveler.job_id`.
    */
   const jobPartId = params.jobPartId as string;
+
+  /**
+   * What a note written here is about: this part, and NO step.
+   *
+   * An operator reading the whole step list has not picked one, and asking them
+   * to would be the step selector this feed was deliberately designed without.
+   * It lands as a job-subject note, which the feed already renders.
+   *
+   * Memoized because the feed's useStepNoteWriter memoizes on it — an inline
+   * literal would rebuild the writer, and the submit callback that closes over
+   * it, on every keystroke.
+   */
+  const jobContext = useMemo(
+    () => ({ jobPartId, jobOperationId: null }),
+    [jobPartId],
+  );
 
   const [error, setError] = useState<string | null>(null);
 
@@ -229,11 +245,15 @@ export default function OperatorJobTravelerPage() {
         excludeJobId={traveler.job_id}
       />
 
-      {/* Job feed (read-only here) — notes + photos for the whole job, captured per step on
-          the operation pages.
-          COLLAPSED by default. It was expanded and sat between the header and the steps, so a
-          job with a few notes pushed the one thing an operator came here to do below the fold.
-          The steps are the point of this page; the feed is context you open when you want it. */}
+      {/* Notes + photos for the whole job — read here, and now WRITTEN here too.
+          The composer inside carries no step, so a note about the job rather than
+          any one operation finally has somewhere to go; until this it had none,
+          because the step pages were the only capture surface in the app.
+          COLLAPSED by default, unchanged. It was expanded and sat between the header and the
+          steps, so a job with a few notes pushed the one thing an operator came here to do below
+          the fold. The steps are the point of this page; the feed is context you open when you
+          want it — and a composer behind one tap is the right price for keeping them above the
+          fold. */}
       <Box sx={{ mb: 3 }}>
         <Accordion
           disableGutters
@@ -249,7 +269,11 @@ export default function OperatorJobTravelerPage() {
             </Typography>
           </AccordionSummary>
           <AccordionDetails sx={{ pt: 0 }}>
-            <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
+            <JobFeed
+              jobId={traveler.job_id}
+              companyId={companyId}
+              operationContext={jobContext}
+            />
           </AccordionDetails>
         </Accordion>
       </Box>

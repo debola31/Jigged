@@ -6,7 +6,6 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
 import BusyButton from '@/components/common/BusyButton';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
@@ -302,22 +301,56 @@ export default function JobFeed({
    * moment it happens — the operator finished a step with an unposted photo still
    * in the composer, and this says so instead of letting them walk away.
    *
-   * Latched here and CLEARED BY DERIVATION below, so posting or emptying the
-   * draft retracts it without a second effect to keep in step.
+   * DERIVED, NOT STORED, and that is forced rather than stylistic. Both places
+   * this could have been latched are linted: `set-state-in-effect` is the repo's
+   * ratcheting warning budget (the cap only ever goes down), and
+   * `set-state-in-render` is an ERROR — it ships in eslint-plugin-react-hooks'
+   * recommended preset, which eslint-config-next spreads, and only the first of
+   * the two is downgraded in eslint.config.mjs.
+   *
+   * So the only thing kept is WHEN the current draft began, in a ref written from
+   * an effect. The ref is READ during render, which is safe here in a way that
+   * writing during render would not be: it is only ever written after a commit,
+   * so a render always sees the last committed value, and every transition that
+   * changes the answer — `hasContent` (state) or `refreshSignal` (a prop) —
+   * re-renders on its own.
+   *
+   * The comparison also self-clears: posting or emptying the draft drops
+   * `hasContent`, and a draft started AFTER the action records the current signal
+   * and so reads as not-yet-interrupted.
    */
-  const [unpostedAfterAction, setUnpostedAfterAction] = useState(false);
-  // The warning renders BELOW the action block the operator just tapped, which is
-  // precisely where a phone has already scrolled past. Saying it where they are
-  // not looking is the same silence in a different colour, so the composer comes
-  // to them.
-  const composerRef = useRef<HTMLDivElement | null>(null);
-  // Mirrored into a ref so the refresh effect can read it without listing it as a
-  // dependency — it changes on every keystroke, and re-running that effect would
-  // re-fetch the whole feed while someone is typing into it.
-  const hasContentRef = useRef(false);
+  const draftSinceSignal = useRef<number | undefined>(undefined);
   useEffect(() => {
-    hasContentRef.current = capture.hasContent;
-  }, [capture.hasContent]);
+    if (!capture.hasContent) {
+      draftSinceSignal.current = undefined;
+    } else if (draftSinceSignal.current === undefined) {
+      draftSinceSignal.current = refreshSignal ?? 0;
+    }
+  }, [capture.hasContent, refreshSignal]);
+
+  const unpostedAfterAction =
+    capture.hasContent &&
+    draftSinceSignal.current !== undefined &&
+    (refreshSignal ?? 0) !== draftSinceSignal.current;
+
+  /**
+   * Bring the composer to them.
+   *
+   * The warning renders BELOW the action block the operator just tapped, which on
+   * a phone is precisely what has been scrolled past — saying it where they are
+   * not looking is the same silence in a different colour. Keyed on the warning
+   * rather than on the signal, so it fires exactly when there is something to
+   * scroll to and never for a step action with nothing staged.
+   *
+   * Optional-call: jsdom does not implement scrollIntoView, and this is a nicety
+   * rather than behaviour worth throwing over — the same `?.()` guard
+   * NoteCaptureFields uses for the same reason.
+   */
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!unpostedAfterAction) return;
+    composerRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [unpostedAfterAction]);
 
   // Reflect a write the PARENT made — a start, a completion, a cancelled timer.
   // Ignores the initial undefined/0 so a mount does not double-load.
@@ -326,13 +359,6 @@ export default function JobFeed({
     if (!refreshSignal) return;
     if (refreshSignal === lastRefresh.current) return;
     lastRefresh.current = refreshSignal;
-    if (hasContentRef.current) {
-      setUnpostedAfterAction(true);
-      // Optional-call: jsdom does not implement scrollIntoView, and this is a
-      // nicety rather than behaviour worth throwing over — the same `?.()` guard
-      // NoteCaptureFields uses for the same reason.
-      composerRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-    }
     // `refresh`, not `load`: the parent bumps this right after a write, and
     // blanking the feed to a spinner at the exact moment its new entry arrives
     // is the worst possible time to do it.
@@ -400,7 +426,6 @@ export default function JobFeed({
   const handlePost = async () => {
     try {
       const note = await capture.submit();
-      setUnpostedAfterAction(false);
       if (note) setPendingNotes((prev) => [note, ...prev]);
     } catch {
       // useNoteCapture surfaces the message in the fields. A note may exist with
@@ -441,12 +466,10 @@ export default function JobFeed({
                   : 'Add a note or photo for this job…'
               }
             />
-            {/* Only while the draft is actually still there, so posting or
-                clearing it retracts the warning with no second effect. An Alert
-                rather than coloured text: this has to survive being read at arm's
-                length under shop lighting, and the icon carries it when the
-                colour does not. */}
-            {unpostedAfterAction && capture.hasContent && (
+            {/* An Alert rather than coloured text: this has to survive being
+                read at arm's length under shop lighting, and the icon carries it
+                when the colour does not. */}
+            {unpostedAfterAction && (
               <Alert severity="warning">
                 This note hasn&apos;t been posted yet — tap Post.
               </Alert>

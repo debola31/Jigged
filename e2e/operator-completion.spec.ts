@@ -263,6 +263,52 @@ test.describe('operator completion', () => {
 });
 
 /**
+ * The find field on the dispatch list.
+ *
+ * Unit tests cover the matching and the empty state against mocked rows; what
+ * only a browser can show is that the field narrows the list the READINESS RPC
+ * actually returned, with a real station selected — the two things that decide
+ * whether a row is on screen at all. A filter that worked over fixtures and
+ * silently matched nothing against live data would pass every other gate.
+ */
+test.describe('finding one job on the dispatch list', () => {
+  test('narrows the station list to a match and back', async ({ page }) => {
+    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    const companyId = page.url().match(/\/operator\/([0-9a-f-]{36})\//)?.[1];
+    expect(companyId, 'company id should be in the operator URL').toBeTruthy();
+
+    await page.goto(`/operator/${companyId}/jobs`);
+    // The lens toggle renders only once a station is chosen — the same settled
+    // marker openTravelerWithStation uses.
+    await expect(page.getByRole('button', { name: 'My Station' })).toBeVisible({
+      timeout: 30_000,
+    });
+    const row = page.getByText('E2E-JS-NOTSTARTED').first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    const find = page.getByLabel('Find a job');
+
+    // A query that matches keeps the row. Typed against whatever else the shared
+    // company holds, so this asserts the match, not the list length.
+    await find.fill('NOTSTARTED');
+    await expect(row).toBeVisible();
+
+    // A query that matches nothing empties the list and SAYS SO — the assertion
+    // that matters, because the failure mode is the unfiltered "there are no
+    // pending jobs for your station" copy, which is a confident claim about the
+    // shop floor rather than about the query.
+    await find.fill('zzz-no-such-job-zzz');
+    await expect(page.getByText(/No jobs match/)).toBeVisible();
+    await expect(page.getByText('E2E-JS-NOTSTARTED')).toHaveCount(0);
+    await expect(page.getByText(/There are no pending jobs/)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Show all jobs' }).click();
+    await expect(row).toBeVisible();
+    await expect(find).toHaveValue('');
+  });
+});
+
+/**
  * B5 — TRIANGULARITY.
  *
  * The asymmetry that makes writing something down worth the extra taps:

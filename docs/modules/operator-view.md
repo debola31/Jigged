@@ -65,8 +65,9 @@ and doubly so now; the bar's shape depends on the station, not on the tenant.
 | I want to… | Where | How |
 |---|---|---|
 | Start work at the machine I'm standing at | `jobs` | Tap the work centre in the station picker. Remembered on the device, so every later visit lands straight on the queue. |
-| See what's ready here | `jobs` | One row per (job, part) with an operation ready or in progress at this station, sorted by due date. |
+| See what's ready here | `jobs` | One row per (job, part) with an operation ready or in progress at this station. **Hot first, then whatever is running, then by job number** — not by due date, whatever this row said until 2026-09-02: `get_ready_operations_for_station` orders `is_hot DESC, has_open_interval DESC, job_number` and does not return `due_date` at all. |
 | Find work when my station is idle | `jobs` → **All Stations** | The whole plant, grouped by station. Tapping a row at another station works — the mismatch only warns. |
+| Find a named job on the floor | `jobs` → the find field | Type a job number, part or customer; narrows whichever lens is showing, from rows already in memory. See [Finding one job](#finding-one-job). |
 | Check something I already finished | `jobs` → **Show completed** | Completed work at the current lens, so a step can be reopened and undone. |
 | Work a step | `jobs` → row → step | Land on the ready operation, or the part's step list when no single step is ready. |
 | **Record what I finished** | step → `Parts finished` | A quantity, then `RECORD COMPLETION`. Partial is normal. |
@@ -1118,6 +1119,52 @@ since there is no list to scope yet.
 
 **If the readiness RPC errors, the failure surfaces in an Alert** — it is never swallowed into an
 empty "No jobs" list. That is the shape of the May 2026 `jobs.status` regression.
+
+### Finding one job
+
+The All Stations lens was built as the **Andon pattern** and its brief was two questions: *"my
+station is idle, what else is ready?"* and *"where is job #123?"*. It only ever answered the first.
+The second question got the whole plant, grouped by station and unpaginated, and an operator holding
+a phone scrolled for it — doing by hand the thing the lens exists to save them.
+
+The **find field** closes that. It sits below the two lens controls and directly above the list —
+the right reading order (pick the list, then narrow it), and the lower position, which is where a
+thumb reaches one-handed. It narrows the station lens and the completed list too, because "which of
+these is mine" is the same question at any scope.
+
+**It filters rows already in memory.** The list arrives whole — one readiness RPC per station, then
+one enrichment pass — so narrowing it is a `useMemo` over an array
+([`lib/operatorJobSearch.ts`](../../lib/operatorJobSearch.ts)) and never a round trip. The query must
+therefore stay out of the load effect's dependencies; a keystroke that refetched would fan the
+readiness RPC across every station in the shop.
+
+**It matches identity, not category** — job number, part name, customer. `operation_name` sits right
+there on the row and is deliberately excluded: "what is running at Deburr" is already answered by
+switching stations or by All Stations, which groups by station, and matching it here would mean a
+query aimed at one job (`mill`) answers with a whole class of steps across the plant. A test pins the
+absence, because it is the obvious field for a later reader to add back.
+
+**Three details that are about the phone, not the feature.** The field does **not** autofocus — the
+office jobs list does, because a salesperson at a keyboard arrives to look something up, and the same
+line here would throw the keyboard over the dispatch list on every arrival that is not a search.
+Grouping consumes the *filtered* rows, so a station whose rows all fall out of the query takes its
+heading with it rather than leaving it standing over a gap. And when nothing matches, the empty state
+says so and offers `Show all jobs` — never the unfiltered copy, which would report a confident fact
+about the shop floor ("there are no pending jobs for your station") when the only fact available is
+about the query.
+
+**The query is URL-backed (`?q=`) and deliberately not persisted.** Back from a traveler restores the
+narrowed view; tapping the **Jobs** tab pushes the bare path and clears it. That asymmetry is the
+whole mitigation for a filter left on and forgotten — an operator who returns to a stale three-row
+list and concludes there is no work. A `localStorage` key would make exactly that permanent: a
+station is a standing fact about where you work, a search is a momentary question, and only the first
+earns persistence.
+
+**No match count.** The station headings already carry `{station} · {rows.length}`; a second figure
+is noise, and every number added to an operator surface is a place the
+[guardrail](#surveillance-guardrail-non-negotiable) has to be argued again. A filter is precisely the
+control that invites a "3 of 12 done today" tally to be added beside it later, so the jobs list now
+carries the guardrail regex block in its own suite.
 
 ### A step with a timer open is on the list, whatever the sequence says
 

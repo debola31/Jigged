@@ -473,10 +473,14 @@ multiline field gives dictation on every phone with no permission prompt and no 
 `MicHint` draws the iOS dictation glyph and says *"tap the ⌇ on your keyboard to talk instead of
 type"*, capped at five shows and dismissible.
 
-**The cap is per hook instance, which constrains where the composer may be mounted.** The confirm
-sheet renders the step screen's *existing* `useNoteCapture` object rather than creating its own —
-otherwise one visit would count two shows and retire the tip in half the time. A future surface
-that wants a composer should pass the caller's capture in, not call the hook again.
+**The cap is spent once per SESSION, not once per composer mounted.** It used to be per hook
+instance, which constrained where a composer could be mounted at all — a second one anywhere in a
+journey retired a five-show tip in two and a half visits. Adding the traveler composer made that
+concrete, so the marker moved to `sessionStorage` (`jigged:composer-mic-hint-counted`): a tab's
+lifetime is what "one visit" means to the person holding the phone, it survives a route change, and
+unlike a module variable it can be reset — so the rule is pinned by a test rather than asserted here.
+Sharing one `useNoteCapture` object between two views of the same composer is still right where it
+applies; it is no longer load-bearing for the count.
 
 **Why there is no "you left a timer running" notification.** iOS Web Push requires the site to be a
 Home Screen *web app*, and [`app/manifest.ts`](../../app/manifest.ts) sets `display: 'browser'`
@@ -850,22 +854,54 @@ no operator identity for the same reason.
 
 Four decisions govern this screen; all four were arrived at against a real failure.
 
-### Capture is part of completing (B4)
+### Capture is its own commit — reversing B4 (2026-09-02)
 
-Finishing a step and writing down what you learned are **one act, one button, one commit**. The
-completion block carries the quantity field, an optional *"Anything worth noting for next time?"*
-with a camera and a video recorder, and `RECORD COMPLETION` submits all of it.
+**Notes, photos and clips save on their own, at any time, from a composer that is visibly its own
+card.** The completion block records production and nothing else.
 
-It used to be three separate things: record the completion, then a prompt offering to add a photo,
-then a *separate* Post. The middle had no durability — attaching a photo showed a thumbnail, the
-flow read as finished, and a back tap discarded it silently. There was no `beforeunload` guard and
-no draft persistence, so the only real fix was to stop having two commits. **The post-completion
-offer is deleted, not relocated.**
+For five weeks it was the opposite, and the reversal is worth stating precisely because the evidence
+behind the original decision has *not* been withdrawn.
 
-**Submit order is load-bearing and deliberately NOT atomic:** `createOperationCompletion` lands
-first and durably, then the note. A transaction across the two would be *worse* — it would roll back
-real finished work because an image failed to upload on shop wifi. So if the note fails the
-completion stands, and the note error surfaces on its own next to the text the operator still has.
+**What B4 said, and why.** Finishing a step and writing down what you learned were made *one act,
+one button, one commit*. Before it there were three separate things — record the completion, then a
+prompt offering to add a photo, then a separate Post — and the middle had no durability: attaching a
+photo showed a thumbnail, the flow read as finished, and a back tap discarded it silently. There was
+no `beforeunload` guard and no draft persistence. Merging the commits closed that.
+
+**What was wrong with it.** The quantity field is prefilled with the remaining balance, so
+`canComplete` is true before the operator touches anything — which made the primary button `START
+THIS STEP` and then `RECORD n FINISHED`, never the note button. The `SAVE NOTE` arm that was
+supposed to catch this appeared *only* after the operator cleared the quantity by hand, and nobody
+found it. `3fb68616` ("mandatory start") had already put `start` ahead of `note` in that precedence
+chain, which is the commit that finished the job. The net effect, reported from the floor: **you had
+to complete a step before you could save the first note about it.** A composer you cannot commit is
+worse than a second commit.
+
+**How the original hazard is answered now**, since it is a real failure that will otherwise return:
+
+- **The composer is its own card, below the action block**, with its own `Post`. What made a staged
+  photo read as saved was that capture *looked like part of the completion*. It no longer is, on any
+  branch or any surface.
+- **An unposted draft says so, the whole time it is unposted.** A quiet *"Not posted yet"* shares the
+  Post button's row, derived from the draft and nothing else — true for as long as the risk exists
+  rather than fired once at a moment we guessed. When a step action lands while a draft is staged
+  (`JobFeed` watches the `refreshSignal` the page already sends after start, complete and cancel) the
+  composer is **scrolled back into view**, because that line sits below the button just tapped, which
+  on a phone has already scrolled past.
+  **The shape was forced, and it came out better.** Every version that REMEMBERED the moment needed
+  one of `set-state-in-effect` (the ratcheting warning budget), `set-state-in-render`, or a ref read
+  during render — and the last two are lint **errors**: all three ship in
+  eslint-plugin-react-hooks' recommended preset, which `eslint-config-next` spreads, and only the
+  first is downgraded in `eslint.config.mjs`. Deriving the visible half and confining the remembered
+  half to an effect satisfies all three.
+- **`composer_abandoned` against `composer_focused` measures the residual.** If this trade is wrong
+  it will show up there first.
+
+**Completion no longer waits on an upload at all.** The old ordering rule — completion lands first
+and durably, then the note, deliberately not atomic, because a transaction would roll back real
+finished work when an image failed on shop wifi — is now structural rather than a sequencing
+discipline: `handleRecord` never touches the composer, so a slow photo cannot delay, fail or
+un-complete anything.
 
 ### Attached material is shot in Jigged (2026-09-02)
 
@@ -942,29 +978,41 @@ best-effort by `discardNoteMediaUploads` and otherwise invisible. A `insertNoteM
 the note lands can still leave a text-only note, but that is a fast local write rather than a
 transfer, so it is a far smaller exposure than the one it replaced.
 
-**Capture is always optional.** Completion works with the field empty.
+**Capture is always optional.** Completion works with the composer empty — structurally, since that
+button cannot write a note.
 
-**Where the feed keeps its own composer.** Three of the four branches have no completion block, so
-capture cannot live only there:
+**One composer, every branch, every surface.** `JobFeed` owns it and renders it whenever it is given
+a job context; the `standaloneCapture` and `readOnly` props that used to switch it are **deleted**,
+not re-tuned. There is no longer a branch where capture goes missing and none where two appear:
 
-| Branch | Capture |
+| Surface / branch | Capture |
 |---|---|
-| Internal, incomplete | **In the completion block**, one button |
-| Internal, **complete** | Feed composer — otherwise a photo could never be added after finishing, which is how photos actually arrive (taken on the camera, attached later) |
-| **Outside** step (send/receive) | Feed composer — *"sent to coater 7/9, expected back 7/16"* is the highest-value note in the system, precisely because the part is invisible while it is away |
-| No station selected | Neither: the page is only a station picker |
+| Step page — internal, incomplete | Composer card below the action block, own `Post` |
+| Step page — internal, **complete** | Same card. A photo added after finishing is how photos actually arrive — taken on the camera, attached later |
+| Step page — **outside** step (send/receive) | Same card. *"Sent to coater 7/9, expected back 7/16"* is the highest-value note in the system, precisely because the part is invisible while it is away |
+| **Traveler** (whole job) | Same card, inside the collapsed *Notes & photos* accordion, with a **null step** — a note about the job rather than one operation. See below |
+| Step page — no station selected | None: the page is only a station picker. Unchanged, and the one remaining place a note cannot be written |
 
-`JobFeed`'s `standaloneCapture` prop is that switch, false on the normal path so there is never
-more than one composer on screen. This is a **deliberate deviation** from the plan's *"the note
-cannot be saved without completing"*, forced by the render branches rather than by preference.
+Taking the fields *out* of the completion block made that block shorter, so the primary action moved
+**up** — the Density rule below got better, not worse. It also let the job composer go back to
+`NoteCaptureFields`' full layout; `compact` now exists for the machine log alone, which still has a
+primary action underneath it.
 
-**The primary button says what it will do, and that closes a hole.** With a quantity it reads
-`RECORD COMPLETION`; with **nothing finished but something typed** it reads `SAVE NOTE` and writes
-the note alone. That path is not a convenience. `qty > 0` is enforced, so an operator who finished
-zero pieces — *"machine down"*, *"waiting on material"*, *"tool chipped, swapping it"* — otherwise
-had two bad options: stay silent and lose exactly the knowledge this workstream exists to capture,
-or **type a false quantity** to get the note saved. Corrupting the number that feeds costing and
-scheduling to satisfy a UI constraint is far worse than an extra code path.
+**Notes from the traveler carry no step, and are not asked to.** An operator reading the whole step
+list has not picked one, and asking them to would be the step selector this feed was deliberately
+designed without. `addJobNote` writes it as a `job` subject with the part recorded, which
+`notes_subject_valid` permits — its rule runs the other way, *a step requires a part*. Told apart in
+analytics by `surface: operator_job`.
+
+**The primary button records production and nothing else.** It used to fall back to `SAVE NOTE` at
+quantity zero, and that path was not a convenience: `qty > 0` is enforced, so an operator who
+finished zero pieces — *"machine down"*, *"waiting on material"*, *"tool chipped, swapping it"* —
+otherwise had two bad options, stay silent and lose exactly the knowledge this workstream exists to
+capture, or **type a false quantity** to get the note saved. Corrupting the number that feeds costing
+and scheduling to satisfy a UI constraint is far worse than an extra code path. **That requirement
+is unchanged and now met more strongly**: `Post` is on screen whatever is in the quantity field, so
+the field is never standing between an operator and a note. The guarantee this page must hold is
+therefore the *absence* of a note button on it.
 
 ### Density
 
@@ -1293,14 +1341,15 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 - [ ] **Given** an entry above the remaining quantity, **when** it is submitted, **then** it is **warned but allowed** (the only floor is `quantity_good > 0`) and remaining clamps to zero — *verified by `__tests__/components/operations/operationMath.test.ts`*.
 - [ ] **Given** a wrong entry, **when** the operator taps `Undo all (N)`, **then** the events are `voided_at`-stamped rather than deleted, excluded from the sum, and the status recomputes — *verified by `__tests__/utils/operationCompletionsAccess.test.ts`*.
 - [ ] **Given** an **outside** step, **when** `compute_job_operation_status` runs, **then** its stored status is returned untouched so a quantity edit cannot reset a `sent` op — *verified by `__tests__/schema/externalOperationMigration.test.ts`*.
-- [ ] **Given** an empty quantity and an empty note, **then** the button is disabled; **given** nothing finished but something typed, **then** it reads `SAVE NOTE` and saves the note with **no completion invented to carry it** — *verified by `__tests__/app/operator/OperationActionPage.test.tsx` (21 `it`s) and `e2e/operator-completion.spec.ts` (5 tests)*.
+- [ ] **Given** the quantity left at its prefilled default and something typed, **when** `Post` is tapped, **then** the note is saved and **no completion is created** — the reported regression, and the reason the e2e no longer zeroes the field first; **given** an empty quantity, **then** no note button exists on this page at any quantity — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`, `__tests__/components/operator/JobFeed.test.tsx` > `JobFeed — capture is independent of completing the step` and `e2e/operator-completion.spec.ts`*.
+- [ ] **Given** a staged draft, **then** the composer reads *"Not posted yet"* for as long as it is staged and stops once it is posted or cleared; **when** a step action lands while it is staged, **then** the composer is scrolled back into view, and **not** when the composer is empty; **and** the completion itself writes **no note** — *verified by `__tests__/components/operator/JobFeed.test.tsx` and `e2e/operator-completion.spec.ts`*.
 - [ ] **Given** a completion and a note submitted together, **when** they are written, **then** the completion lands **first and durably**, and a failing note leaves the completion standing — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.
 - [ ] **Given** the operator's station differs from the operation's `work_center_id`, **when** the page loads, **then** a mismatch **warning** shows and the step can still be recorded — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.
 - [ ] **Given** the step screen, **when** it loads, **then** the job card is collapsed and expands IN PLACE without navigating — *verified by `__tests__/app/operator/OperationActionPage.test.tsx`*.
 
 **Outside steps**
 
-- [ ] **Given** an outside step, **when** the page loads, **then** it offers **Mark Sent Out** / **Mark Received** rather than a quantity, suppresses the station guard, and shows the feed composer — *verified by `__tests__/utils/operatorAccess.test.ts` > `markOperationSent`, `markOperationReceived`, `external operation lifecycle` and `revertOperationCompletion (external branches)`*.
+- [ ] **Given** an outside step, **when** the page loads, **then** it offers **Mark Sent Out** / **Mark Received** rather than a quantity, suppresses the station guard, and shows the composer (as every branch now does) — *verified by `__tests__/utils/operatorAccess.test.ts` > `markOperationSent`, `markOperationReceived`, `external operation lifecycle` and `revertOperationCompletion (external branches)`*.
 - [ ] **Given** a `sent` op, **when** its part's status is derived, **then** it counts as not completed, holding the part at `in_progress` and gating downstream internal steps — *verified by `__tests__/schema/externalOperationMigration.test.ts`*.
 
 **Traveler & scanning**
@@ -1317,7 +1366,9 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 
 **Notes: subject, capture, edit and delete**
 
-- [ ] **Given** a step WITH a `routing_operation_id`, **when** a note is saved, **then** it is written as a **durable `part` subject** with the job recorded only as provenance; **given** an ad-hoc step with no routing link, **then** it falls back to a `job` subject — a genuine subject difference, not a silent fallback — *verified by `__tests__/utils/operatorNoteSubject.test.ts` (6 `it`s) and `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
+- [ ] **Given** a step WITH a `routing_operation_id`, **when** a note is saved, **then** it is written as a **durable `part` subject** with the job recorded only as provenance; **given** an ad-hoc step with no routing link, **then** it falls back to a `job` subject — a genuine subject difference, not a silent fallback — *verified by `__tests__/utils/operatorNoteSubject.test.ts` and `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
+- [ ] **Given** the traveler composer, which names a part and an explicitly **null** step, **when** a note is saved, **then** it lands as a `job` subject carrying `job_part_id`, no durable anchor is looked for, and the placeholder reads *"for this job"* rather than *"for this step"* — *verified by `__tests__/utils/operatorNoteSubject.test.ts` and `__tests__/components/operator/JobFeed.test.tsx`*.
+- [ ] **Given** two composers mounted in one session, **when** the dictation tip is shown, **then** the five-show budget is charged **once** — *verified by `__tests__/components/operator/JobFeed.test.tsx` > `JobFeed — dictation hint`*.
 - [ ] **Given** a blank-text note with a photo, **when** it is saved, **then** `body` is stored as null so a media-only note is valid — *verified by `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
 - [ ] **Given** a clip, **when** the note is saved, **then** the clip uploads before its poster and both before the note row, a failure sweeps **both** objects, and `compressPhoto` is never called on a video — *verified by `__tests__/hooks/useNoteCapture.test.tsx` > `useNoteCapture — video`*.
 - [ ] **Given** a recording, **when** it reaches two minutes, **then** it stops itself, hands back exactly one clip however many things asked it to stop, and releases every camera track — *verified by `__tests__/components/operator/VideoRecorderDialog.test.tsx`*.

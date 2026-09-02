@@ -20,7 +20,6 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import NoteAddIcon from '@mui/icons-material/NoteAdd';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -47,8 +46,6 @@ import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/Oper
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
-import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
-import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
 import CancelActivityDialog from '@/components/operator/CancelActivityDialog';
@@ -155,9 +152,10 @@ export default function OperatorOperationActionPage() {
   // then defaults to the remaining balance (dialled down for a partial).
   const [qtyInput, setQtyInput] = useState('');
   const [qtyDirty, setQtyDirty] = useState(false);
-  // Bumped after this page writes a note, so the feed below reloads and shows
-  // it. Replaces the old capture-offer signal: there is no prompt any more,
-  // because capture happens in the completion block itself.
+  // Bumped after every step action — start, complete, cancel — so the feed below
+  // reloads and shows the row it created. It is also what makes the composer
+  // down there warn about a draft still sitting unposted when one of those
+  // actions lands on top of it.
   const [feedRefreshSignal, setFeedRefreshSignal] = useState(0);
 
   // Job-card details, collapsed by default. STICKY across steps: an operator who
@@ -242,37 +240,29 @@ export default function OperatorOperationActionPage() {
   const isExternal = job?.operation_work_center_kind === 'external';
   const isCompleted = job?.operation_status === 'completed';
 
-  // Capture belongs to the completion action, so it is enabled on exactly the
-  // branch that renders RECORD COMPLETION. A completed step and an outside step
-  // have no completion to attach a note to, so the feed keeps its own composer
-  // there (standaloneCapture below) — otherwise finishing a step would make it
-  // impossible to add the photo afterwards, and an outside step could never
-  // carry "sent to coater, back on the 16th".
-  const ownsCapture = !isCompleted && !isExternal;
+  // THIS PAGE DOES NOT OWN CAPTURE, on any branch. Notes, photos and clips are
+  // written by the feed's composer below, with its own Post button, and this
+  // screen's buttons record production and nothing else.
+  //
+  // It used to render the capture fields inside the completion block so one tap
+  // committed both. That closed a real hole — a staged photo that read as saved
+  // and was not — but it opened a worse one: the quantity field is prefilled, so
+  // the primary button was never the note button, and saving a note meant
+  // finishing the step. The composer is separate again, and the discarded-draft
+  // hazard is answered where it happens (JobFeed warns when a step action lands
+  // on top of an unposted draft) rather than by welding the two commits together.
+  // Memoized because the feed's useStepNoteWriter memoizes on it: a fresh object
+  // every render rebuilds the writer, and `submit` closes over the writer, so an
+  // inline literal here would rebuild the whole capture callback on every
+  // keystroke typed into the composer below.
   const stepContext = useMemo(
     () => ({ jobPartId, jobOperationId }),
     [jobPartId, jobOperationId],
   );
-  const writer = useStepNoteWriter({
-    companyId,
-    jobId,
-    operatorId: currentOperatorId,
-    context: stepContext,
-  });
-  const capture = useNoteCapture({
-    companyId,
-    operatorId: currentOperatorId,
-    writer,
-    enabled: ownsCapture,
-  });
 
   const qtyValue = qtyDirty ? qtyInput : remaining > 0 ? String(remaining) : '';
 
-  // What the single primary button will do. Completing takes precedence: a
-  // quantity in the field is a statement about production, and the note rides
-  // along with it.
   const canComplete = Number(qtyValue) > 0;
-  const noteOnly = !canComplete && capture.hasContent;
 
   // This block only renders for an internal, incomplete op (see the
   // isCompleted / isExternal branches below), so "nothing running" is the whole
@@ -280,22 +270,20 @@ export default function OperatorOperationActionPage() {
   const showStart = !running;
 
   /**
-   * What the single primary button does, in strict precedence order.
+   * What the single primary button does.
    *
-   * `note` IS FIRST, AND THAT ORDERING IS LOAD-BEARING. An operator who cleared
-   * the quantity and typed something has finished zero pieces and is telling us
-   * why — "machine down", "waiting on material". That path exists precisely so
-   * nobody types a false quantity to get a note saved, and an earlier draft of
-   * this refactor put `start` first and made SAVE NOTE unreachable, which
-   * quietly reinstated the hole B4 was opened to close.
+   * It is about PRODUCTION ONLY now. There used to be a third arm — `SAVE NOTE`,
+   * reachable when the quantity was zero and something was typed — which existed
+   * so nobody would type a false quantity just to get a note saved. That reason
+   * has not gone away; it is simply better served. The composer's own Post button
+   * is always on screen, so the quantity field is never standing between an
+   * operator and a note, whatever number is in it.
    */
-  const primaryAction: 'note' | 'start' | 'complete' | 'none' = noteOnly
-    ? 'note'
-    : showStart
-      ? 'start'
-      : canComplete
-        ? 'complete'
-        : 'none';
+  const primaryAction: 'start' | 'complete' | 'none' = showStart
+    ? 'start'
+    : canComplete
+      ? 'complete'
+      : 'none';
 
   /**
    * Post-write refetch that KEEPS THE SCREEN UP.
@@ -343,9 +331,9 @@ export default function OperatorOperationActionPage() {
       setQtyDirty(false);
       // After the write resolves — a failed completion is not a completion.
       logOperatorEvent(companyId, 'completion_recorded', { jobOperationId, quantityGood: qty });
-      // Analytics fires here, beside the existing operator event and BEFORE the note capture
-      // below: the completion is durable at this point, and a slow photo upload must not delay or
-      // skip the measurement of the thing that already happened.
+      // Analytics fires here, beside the existing operator event: the completion
+      // is durable at this point, and nothing after it may delay or skip the
+      // measurement of the thing that already happened.
       posthog.capture('operation completed', {
         // NAMED, not left to be inferred from the absence of the office's
         // properties. The split between recorded-by-the-person-who-did-it and
@@ -374,30 +362,19 @@ export default function OperatorOperationActionPage() {
         }
       }
 
-      // ORDER IS LOAD-BEARING, AND DELIBERATELY NOT ATOMIC.
+      // NO NOTE IS WRITTEN HERE, and that is the point of this screen now.
       //
-      // The completion is already durable by the time we get here. The note is
-      // attempted second so that a failed photo upload — the slowest, most
-      // failure-prone part of the whole flow on shop wifi — can never un-complete
-      // a finished step. Wrapping both in a transaction would be worse, not
-      // better: it would roll back real work because an image did not upload.
+      // Recording production and writing down what happened are two commits
+      // again, because merging them made the note unreachable without the
+      // completion. What survives from that merge is its lesson, not its shape:
+      // a slow, failure-prone photo upload must never be able to un-complete a
+      // finished step — and now it structurally cannot, because the completion
+      // does not wait on one.
       //
-      // So a note failure surfaces on its own and the step stays complete. The
-      // operator can retype it; they cannot un-finish the part they finished.
-      // Bumped unconditionally: the completion closed an interval, which is a
-      // feed entry in its own right whether or not a note rode along with it.
+      // The completion is a feed entry in its own right, so the feed is told.
+      // That bump is ALSO what makes the composer warn if a draft is still
+      // staged down there — see JobFeed's unpostedAfterAction.
       setFeedRefreshSignal((n) => n + 1);
-
-      if (capture.hasContent) {
-        try {
-          await capture.submit();
-          setFeedRefreshSignal((n) => n + 1);
-        } catch {
-          // useNoteCapture puts the message in the fields, next to the text the
-          // operator still has. Do not overwrite the page-level error with it —
-          // "the completion worked, the note did not" is the accurate reading.
-        }
-      }
 
       await reloadAll();
     } catch (err) {
@@ -481,31 +458,6 @@ export default function OperatorOperationActionPage() {
       await reloadAll();
     } catch (err) {
       setCancelError(err instanceof Error ? err.message : 'Could not cancel this activity.');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Save a note with NO completion.
-  //
-  // Closes a hole B4 opened. Capture rides on RECORD COMPLETION, and that button
-  // requires qty > 0 — so an operator who finished ZERO pieces ("machine down",
-  // "waiting on material", "tool chipped") had two options and both were bad:
-  // say nothing, and lose exactly the knowledge this whole workstream exists to
-  // capture; or type a false quantity to get the note saved, corrupting the
-  // number that feeds costing and scheduling. Falsifying production data to
-  // satisfy a UI constraint is far worse than an extra code path.
-  //
-  // No second composer and no extra chrome: the SAME field, and the primary
-  // button says what it will actually do.
-  const handleSaveNoteOnly = async () => {
-    setActionLoading(true);
-    setError(null);
-    try {
-      await capture.submit();
-      setFeedRefreshSignal((n) => n + 1);
-    } catch {
-      // useNoteCapture surfaces the message in the field itself.
     } finally {
       setActionLoading(false);
     }
@@ -1007,21 +959,6 @@ export default function OperatorOperationActionPage() {
             </Box>
           )}
 
-          {/* CAPTURE, MERGED INTO COMPLETION.
-              Finishing a step and writing down what you learned are one act, one
-              button, one commit. It used to be two: RECORD COMPLETION, then a
-              separate offer, then a separate Post — and the middle of that had no
-              durability, so attaching a photo showed a thumbnail, read as
-              finished, and was discarded by a back tap. There is no second Post
-              to forget now.
-              Optional, always: completion works with the field left empty. */}
-          <NoteCaptureFields
-            capture={capture}
-            placeholder="Anything worth noting for next time?"
-            disabled={actionLoading}
-            compact
-          />
-
           {/* STICKY, and that is the point. The action used to sit in normal flow
               and fell below the fold on a 6.9" phone as soon as anything was added
               above it — which B4 promptly did. Decluttering fixes that for today;
@@ -1032,12 +969,14 @@ export default function OperatorOperationActionPage() {
               it, and the errors above it stay visible. */}
           {/* IN NORMAL FLOW, not pinned. A fixed bar guaranteed the action was
               always reachable but overlaid the content beneath it, so it was
-              reverted by decision. The protection now comes from density instead:
-              the quantity field shares a row with Files/Playbook and the job card
-              collapses to a few lines, which keeps this above the fold on a tall
-              phone. That is a weaker guarantee than pinning — if this screen grows
-              again the action can drift off-screen, which is exactly how it broke
-              the first time. Measure before adding anything above it. */}
+              reverted by decision. The protection comes from density instead: the
+              quantity field shares a row with Files/Playbook, the job card
+              collapses to a few lines, and — since 2026-09-02 — the composer is
+              no longer here at all, which bought back the ~56px it occupied and
+              moved this button UP. That is still a weaker guarantee than pinning:
+              if this screen grows again the action can drift off-screen, which is
+              exactly how it broke the first time. Measure before adding anything
+              above it, and add capture below it, never here. */}
           <Box>
             {/* ONE PRIMARY, AND IT CHANGES MEANING WITH THE STATE.
                 Idle it is START; running it records what was finished. Having
@@ -1053,30 +992,19 @@ export default function OperatorOperationActionPage() {
                 will write. Same reason Harvest labels its recovery actions
                 "Add 47 minutes as a new entry" rather than "Add".
 
-                Still falls back to SAVE NOTE at qty 0 — that path exists so
-                nobody types a false quantity to get a note saved, and it stays
-                reachable without a timer for exactly that reason. */}
+                IT NO LONGER SAVES NOTES at any quantity. The composer below has
+                its own Post button on every branch, so the reason the SAVE NOTE
+                arm existed — never make someone type a false quantity to record
+                "machine down" — is met without this button changing meaning. */}
             <Button
               fullWidth
               variant="contained"
               size="large"
               color="primary"
               startIcon={
-                primaryAction === 'start' ? (
-                  <PlayArrowIcon />
-                ) : primaryAction === 'complete' ? (
-                  <CheckCircleIcon />
-                ) : (
-                  <NoteAddIcon />
-                )
+                primaryAction === 'start' ? <PlayArrowIcon /> : <CheckCircleIcon />
               }
-              onClick={
-                primaryAction === 'start'
-                  ? handleStart
-                  : primaryAction === 'complete'
-                    ? handleRecord
-                    : handleSaveNoteOnly
-              }
+              onClick={primaryAction === 'start' ? handleStart : handleRecord}
               disabled={actionLoading || primaryAction === 'none'}
               sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
             >
@@ -1087,7 +1015,10 @@ export default function OperatorOperationActionPage() {
               ) : primaryAction === 'complete' ? (
                 `RECORD ${qtyValue} FINISHED`
               ) : (
-                'SAVE NOTE'
+                // Running, nothing entered. Disabled, and it has to say what it
+                // is waiting for — this arm used to read SAVE NOTE by falling
+                // through, which now names something this button cannot do.
+                'RECORD FINISHED PARTS'
               )}
             </Button>
 
@@ -1127,10 +1058,11 @@ export default function OperatorOperationActionPage() {
                 clock at all — see the migration header.
 
                 A SEPARATE CONDITIONAL, NOT A TERNARY WITH THE BLOCK ABOVE.
-                `primaryAction === 'start'` is not the negation of `running`:
-                `noteOnly` takes precedence in its derivation, so an idle step with
-                a note typed and no quantity has primaryAction 'note'. A ternary
-                would silently change which idle steps show the hatch.
+                `primaryAction === 'start'` IS the negation of `running` today,
+                now that the note arm is gone — but the block above is also gated
+                on `canComplete` and this one is not, so a ternary would silently
+                stop offering the cancel on a running step with nothing entered,
+                which is the exact case it exists for.
 
                 GATED ON `running` ALONE, deliberately not on `canComplete`. The
                 motivating case is quantity zero — nothing made, nothing typed —
@@ -1193,22 +1125,17 @@ export default function OperatorOperationActionPage() {
         onClose={() => setCancelOpen(false)}
       />
 
-      {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read
-          the whole job's feed. This is the primary capture surface: operators
-          land here from the per-operation QR. */}
+      {/* Job feed — the composer for THIS step (auto-tagged, its own Post
+          button), then the whole job's feed. This is the primary capture
+          surface: operators land here from the per-operation QR. It sits below
+          the action block deliberately, so nothing here pushes the primary
+          button down the screen. */}
       <Box sx={{ mt: 3 }}>
         <JobFeed
           jobId={jobId}
           companyId={companyId}
           refreshSignal={feedRefreshSignal}
-          // Only where this page's completion block is not rendered — see
-          // ownsCapture. Two composers on one screen would be a bug, and none
-          // would strand a finished or outside step with no way to add a photo.
-          standaloneCapture={!ownsCapture}
-          operationContext={{
-            jobPartId,
-            jobOperationId,
-          }}
+          operationContext={stepContext}
         />
       </Box>
 

@@ -17,31 +17,70 @@ import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
 /**
- * Text, photos and short videos for one step, and the write that lands them.
+ * Text, photos and short videos, and the write that lands them.
  *
- * EXTRACTED FROM JobFeed so completion can own it. Capture used to live only in
- * the feed, behind its own Post button — which made saving a note a SECOND,
- * separate commit after RECORD COMPLETION. Attaching a photo showed a thumbnail
- * and the flow read as finished, but nothing was written until Post; a back tap
- * discarded it silently. There was no beforeunload guard and no draft
- * persistence, so the only real fix was to stop having two commits.
+ * ONE COMPOSER PER SURFACE, AND IT COMMITS ON ITS OWN. Capture briefly lived
+ * inside the operation page's completion block, submitted by RECORD COMPLETION —
+ * to close a hole where a staged photo showed a thumbnail, the flow read as
+ * finished, and a back tap discarded it silently. It closed that hole by welding
+ * the two together, and the weld turned out to be the worse defect: the quantity
+ * field is prefilled, so the primary button was never the note button, and in
+ * practice a note could not be saved without finishing the step. Capture is its
+ * own commit again, and the discarded-draft hazard is now answered where it
+ * happens — the feed warns when a step action lands on top of an unposted draft.
  *
- * The hook owns the draft, so the same fields can be rendered inside the
- * completion block (submitted WITH the completion, one button) and inside the
- * feed (its own Post button) without duplicating the media pipeline, the
- * iOS-unreadable-file mitigation, or the funnel instrumentation.
+ * The hook owns the draft, so the job feed and the machine log render the same
+ * fields without duplicating the media pipeline, the iOS-unreadable-file
+ * mitigation, or the funnel instrumentation.
  *
  * A CLIP IS NOT A PHOTO ANYWHERE IN HERE. It skips compression entirely, and it
  * uploads twice — once for the clip, once for the poster that lets a feed draw a
  * thumbnail without fetching the whole file. Both differences live in `submit`.
  *
- * WHAT IT DOES NOT DO: decide when to write. The caller does, because ordering
- * is load-bearing — completion must be durable before a note is attempted, so a
- * failed photo upload can never un-complete a finished step.
+ * WHAT IT DOES NOT DO: decide when to write. The caller does — it owns the
+ * button.
  */
 
 const MIC_HINT_KEY = 'jigged:composer-mic-hint';
 const MIC_HINT_MAX_SHOWS = 5;
+
+/**
+ * The five-show budget is spent ONCE PER SESSION, not once per composer mounted.
+ *
+ * The cap used to be per hook instance, which quietly constrained WHERE a
+ * composer could be mounted — operator-view.md says so outright. A second one
+ * anywhere in a journey retired the tip in half the visits, and the tip is a
+ * teaching aid whose whole value is being seen a few times spread out. There are
+ * two job composers now, the step page and the traveler, and an operator
+ * routinely passes through both.
+ *
+ * `sessionStorage` rather than a module flag, and the difference is not
+ * incidental: a tab's lifetime is exactly what "one visit" means to the person
+ * holding the phone, it survives a route change like the module variable would,
+ * AND it is observable — a module flag cannot be reset between tests, so the rule
+ * would have been unpinnable. Best-effort in both directions: if storage throws
+ * (private mode, quota) the answer is "not counted yet", which spends the budget
+ * slightly faster and never suppresses the tip.
+ */
+const MIC_HINT_SESSION_KEY = 'jigged:composer-mic-hint-counted';
+
+function micHintCountedThisSession(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.sessionStorage?.getItem(MIC_HINT_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markMicHintCounted(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage?.setItem(MIC_HINT_SESSION_KEY, '1');
+  } catch {
+    /* private mode / quota — the cap is best-effort, never block on it */
+  }
+}
 
 interface MicHintState {
   shows: number;
@@ -106,9 +145,19 @@ export type PendingMedia =
       height: number;
     });
 
+/**
+ * WHICH part, and WHICH step if there is one.
+ *
+ * `jobOperationId` is NULLABLE because the traveler composes against the whole
+ * job rather than a step — an operator on the step list has not chosen one, and
+ * making them pick would be the step selector this feed was designed without.
+ * A null operation is a real, representable note: `addJobNote` writes it as a
+ * `job` subject, which `notes_subject_valid` permits (its rule is the other
+ * direction — a step requires a part).
+ */
 export interface NoteCaptureContext {
   jobPartId: string;
-  jobOperationId: string;
+  jobOperationId: string | null;
 }
 
 /**
@@ -140,9 +189,13 @@ export interface NoteWriter<TNote> {
    * Which composer this is, for the `note posted` PostHog event.
    *
    * A SURFACE IS A PROPERTY, NOT AN EVENT NAME — docs/telemetry.md is explicit, and
-   * a step note and a machine entry are the same act in two containers.
+   * a step note, a job note and a machine entry are the same act in three
+   * containers. `operator_job` is the traveler: worth telling apart from
+   * `operator_step` because a note nobody could attach to a step is the case the
+   * whole-job composer exists to serve, and its volume is the only evidence that
+   * it was needed.
    */
-  analyticsSurface: 'operator_step' | 'operator_machine';
+  analyticsSurface: 'operator_step' | 'operator_job' | 'operator_machine';
 }
 
 export type { UploadedMedia } from '@/utils/jobNoteMediaAccess';
@@ -232,10 +285,15 @@ export function useNoteCapture<TNote = JobNote>(opts: {
 
   // Count the show. A write to localStorage IS the external-system update an
   // effect is for; only the setState above had to move out of one.
+  //
+  // Guarded twice, for two different things: `countedRef` stops a re-render
+  // counting again, and the session marker stops a SECOND composer in the same
+  // session counting at all. See MIC_HINT_SESSION_KEY.
   const countedRef = useRef(false);
   useEffect(() => {
-    if (!showMicHint || countedRef.current) return;
+    if (!showMicHint || countedRef.current || micHintCountedThisSession()) return;
     countedRef.current = true;
+    markMicHintCounted();
     writeMicHint({ shows: readMicHint().shows + 1, dismissed: false });
   }, [showMicHint]);
 
@@ -555,11 +613,13 @@ export function useNoteCapture<TNote = JobNote>(opts: {
 }
 
 /**
- * The writer for a note captured at a step, which is what both job surfaces use.
+ * The writer for a note captured on a job, at a step or against the job itself.
  *
  * `addJobNote` chooses the SUBJECT itself — durable (part, routing step) when the
  * step has a routing link, this-job-only when it doesn't — so that decision stays
- * where it was and the operator is still never asked to classify anything.
+ * where it was and the operator is still never asked to classify anything. A null
+ * `jobOperationId` simply has no step to be durable about, and lands as a `job`
+ * subject; the same call, not a second path.
  *
  * Memoized on its inputs: `submit` closes over the writer, so a fresh object each
  * render would rebuild the callback every keystroke.
@@ -584,7 +644,9 @@ export function useStepNoteWriter(args: {
         insertNoteMedia(companyId, note.id, upload),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { jobOperationId: context.jobOperationId },
-      analyticsSurface: 'operator_step',
+      // Told apart by whether there is a step, which is the only thing that
+      // actually differs between the two containers.
+      analyticsSurface: context.jobOperationId ? 'operator_step' : 'operator_job',
     };
   }, [companyId, jobId, operatorId, context]);
 }

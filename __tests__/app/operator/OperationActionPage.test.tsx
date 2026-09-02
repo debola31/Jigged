@@ -97,15 +97,18 @@ vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
 vi.mock('@/components/operator/JobFeed', () => ({
   default: ({
     refreshSignal,
-    standaloneCapture,
+    operationContext,
   }: {
     refreshSignal?: number;
-    standaloneCapture?: boolean;
+    operationContext?: { jobPartId: string; jobOperationId: string | null };
   }) => (
     <div
       data-testid="job-feed"
       data-refresh-signal={refreshSignal ?? 0}
-      data-standalone-capture={String(!!standaloneCapture)}
+      // The feed owns the composer on every branch now, so what this page has to
+      // get right is WHICH STEP a capture is tagged to — not whether a composer
+      // is switched on.
+      data-operation={operationContext?.jobOperationId ?? ''}
     />
   ),
 }));
@@ -306,35 +309,35 @@ describe('operation action page — completion (characterisation)', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('saves a note alone when nothing was finished', async () => {
-    // THE HOLE B4 OPENED. Capture rides on RECORD COMPLETION, which needs
-    // qty > 0 — so an operator who finished ZERO pieces ("machine down",
-    // "waiting on material") had to either say nothing, losing exactly the
-    // knowledge this workstream exists to capture, or type a false quantity to
-    // get the note saved. Falsifying production data to satisfy a UI constraint
-    // is much worse than an extra code path.
+  it('never offers a note button, at any quantity', async () => {
+    /**
+     * THE HOLE THIS PAGE MUST NOT RE-OPEN, now guarded from the other side.
+     *
+     * `qty > 0` is enforced, so an operator who finished ZERO pieces ("machine
+     * down", "waiting on material") must never be pushed into typing a false
+     * quantity to get a note saved — falsifying the number that feeds costing
+     * and scheduling to satisfy a UI constraint is far worse than an extra code
+     * path. This screen used to answer that with a SAVE NOTE arm on the primary
+     * button, reachable only once the quantity was cleared by hand.
+     *
+     * The answer moved rather than went away: the feed's composer sits below with
+     * its own Post, on every branch, whatever is in this field. So the guarantee
+     * is now the ABSENCE of a note button here — one act, one place — and the
+     * cleared-quantity state offers START and nothing that writes a note.
+     */
     const user = userEvent.setup();
     renderPage();
     const field = await screen.findByLabelText('Parts finished');
 
-    await user.clear(field);
-    await user.type(screen.getByPlaceholderText(/worth noting/i), 'machine down, nothing run');
+    expect(screen.queryByRole('button', { name: /save note/i })).not.toBeInTheDocument();
 
-    const save = screen.getByRole('button', { name: /save note/i });
-    await waitFor(() => expect(save).toBeEnabled());
-    await user.click(save);
+    await user.clear(field);
 
     await waitFor(() =>
-      expect(mockAddNote).toHaveBeenCalledWith(
-        'job1',
-        'co1',
-        'acc1',
-        'machine down, nothing run',
-        { jobPartId: 'jp1', jobOperationId: 'op1' },
-      ),
+      expect(screen.getByRole('button', { name: /start this step/i })).toBeEnabled(),
     );
-    // And crucially: NO completion was invented to carry it.
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /save note/i })).not.toBeInTheDocument();
+    expect(mockAddNote).not.toHaveBeenCalled();
   });
 
   it('collapses the job details by default, and opens them in place', async () => {
@@ -407,35 +410,17 @@ describe('operation action page — completion (characterisation)', () => {
     expect(mockEvent).not.toHaveBeenCalledWith('co1', 'completion_recorded', expect.anything());
   });
 
-  it('writes the note only AFTER the completion has landed', async () => {
-    // THE INVARIANT, in its post-B4 shape. The note — and especially its photo
-    // upload, the slowest and most failure-prone part of the flow on shop wifi —
-    // is attempted strictly after the completion resolves, so it can never
-    // un-complete finished work. Not a transaction, on purpose: rolling back real
-    // work because an image failed to upload would be worse, not safer.
-    const user = userEvent.setup();
-    let release: () => void = () => {};
-    // Resolves to { id }, like the real function — the page reads it to link the
-    // interval to its completion. A void promise here breaks the caller, not the
-    // ordering property this test is actually about.
-    mockCreate.mockReturnValue(
-      new Promise<{ id: string }>((r) => (release = () => r({ id: 'completion-1' }))) as never,
-    );
-    renderPage();
-    await screen.findByLabelText('Parts finished');
-
-    await user.type(screen.getByPlaceholderText(/worth noting/i), 'fixture walks');
-    await user.click(recordButton());
-
-    expect(mockAddNote).not.toHaveBeenCalled();
-
-    release();
-    await waitFor(() => expect(mockAddNote).toHaveBeenCalled());
-  });
-
-  it('completes with no note at all', async () => {
-    // Capture is optional, always. Requiring it would make finishing a step
-    // conditional on having something to say.
+  it('records production and NOTHING ELSE — no note rides along', async () => {
+    /**
+     * THE INVARIANT, inverted from what it was.
+     *
+     * Capture used to sit inside this block and be submitted by this button, so
+     * that finishing a step and writing it down were one commit. That closed a
+     * real hole and opened a worse one: the quantity field is prefilled, so this
+     * button was never the note button, and saving a note meant completing the
+     * step. The two are separate writes again and this screen owns only one of
+     * them — the feed's composer owns the other, with its own Post.
+     */
     renderPage();
     await screen.findByLabelText('Parts finished');
 
@@ -445,80 +430,49 @@ describe('operation action page — completion (characterisation)', () => {
     expect(mockAddNote).not.toHaveBeenCalled();
   });
 
-  it('records the note and the completion from ONE button', async () => {
-    // The defect this removes: capture used to need a SECOND tap on a separate
-    // Post, with no durability in between — attaching a photo showed a thumbnail,
-    // read as finished, and a back tap discarded it silently.
-    const user = userEvent.setup();
+  it('renders no composer of its own', async () => {
+    // One composer per screen, and it is the feed's. Two would be a bug; the
+    // completion block having one at all is what made a note require a
+    // completion.
     renderPage();
     await screen.findByLabelText('Parts finished');
 
-    await user.type(screen.getByPlaceholderText(/worth noting/i), 'back the feed off');
-    await user.click(recordButton());
-
-    await waitFor(() => expect(mockCreate).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(mockAddNote).toHaveBeenCalledWith('job1', 'co1', 'acc1', 'back the feed off', {
-        jobPartId: 'jp1',
-        jobOperationId: 'op1',
-      }),
-    );
-    // No second Post anywhere on the screen.
-    expect(screen.queryByRole('button', { name: /^post$/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/worth noting/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('job-feed')).toHaveAttribute('data-operation', 'op1');
   });
 
-  it('keeps the completion when the note fails', async () => {
-    // A failed note must not un-complete a finished step, and the operator must
-    // not be told the completion failed when it did not.
-    const user = userEvent.setup();
-    mockAddNote.mockRejectedValue(new Error('note write failed'));
-    renderPage();
-    await screen.findByLabelText('Parts finished');
-
-    await user.type(screen.getByPlaceholderText(/worth noting/i), 'something');
-    await user.click(recordButton());
-
-    await waitFor(() => expect(mockCreate).toHaveBeenCalled());
-    expect(
-      mockEvent.mock.calls.some(
-        (c) => c[1] === 'completion_recorded',
-      ),
-      'the completion still counts',
-    ).toBe(true);
-    expect(screen.queryByText('Failed to record completion')).not.toBeInTheDocument();
-  });
-
-  it('owns capture itself, so the feed does not offer a second composer', async () => {
-    // Two composers on one screen would be a bug; this asserts which one is live.
-    renderPage();
-    await screen.findByLabelText('Parts finished');
-
-    expect(screen.getByTestId('job-feed')).toHaveAttribute('data-standalone-capture', 'false');
-  });
-
-  it('hands capture BACK to the feed once the step is complete', async () => {
-    // A completed step has no completion block to attach a note to. Without this
-    // an operator could never add the photo afterwards — the phone-camera-then-
-    // attach flow the audit found is how photos actually arrive.
+  it('tags the feed to this step on every branch, complete and outside included', async () => {
+    // The feed used to be handed capture only where this page had no completion
+    // block. It has it everywhere now, so what matters is that the step context
+    // reaches it — including on the two branches that used to be special.
     mockDetail.mockResolvedValue(detail({ operation_status: 'completed' }) as never);
-    renderPage();
-
+    const { unmount } = renderPage();
     await waitFor(() =>
-      expect(screen.getByTestId('job-feed')).toHaveAttribute('data-standalone-capture', 'true'),
+      expect(screen.getByTestId('job-feed')).toHaveAttribute('data-operation', 'op1'),
     );
-  });
+    unmount();
 
-  it('hands capture back to the feed on an outside step', async () => {
-    // Outside steps use send/receive, so there is no completion block either —
-    // and operator-view.md calls "sent to coater 7/9, back 7/16" the
-    // highest-value note in the system.
     mockDetail.mockResolvedValue(
       detail({ operation_work_center_kind: 'external', operation_vendor_name: 'AcmeCoat' }) as never,
     );
     renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('job-feed')).toHaveAttribute('data-operation', 'op1'),
+    );
+  });
+
+  it('tells the feed a completion landed, so it can warn about an unposted draft', async () => {
+    // The bump is what reloads the feed AND what makes the composer speak up if
+    // a photo is still staged down there — the answer that replaced welding the
+    // two commits together.
+    renderPage();
+    await screen.findByLabelText('Parts finished');
+    const before = screen.getByTestId('job-feed').getAttribute('data-refresh-signal');
+
+    await userEvent.click(recordButton());
 
     await waitFor(() =>
-      expect(screen.getByTestId('job-feed')).toHaveAttribute('data-standalone-capture', 'true'),
+      expect(screen.getByTestId('job-feed').getAttribute('data-refresh-signal')).not.toBe(before),
     );
   });
 

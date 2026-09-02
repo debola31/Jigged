@@ -161,18 +161,19 @@ function MicHint({ onDismiss }: { onDismiss: () => void }) {
  * offers the camera roll or a file picker any more. See the picker's comment for the
  * decision this reverses and what to watch.
  *
- * Rendered in two places from one implementation — inside the completion block,
- * where RECORD COMPLETION submits it, and inside the job feed for steps with no
- * completion block left to attach to (an already-complete step, or an outside
- * step). It deliberately owns NO submit button: the surface it sits in decides
- * what "save" means.
+ * Rendered from one implementation by the job composer and the machine log. It
+ * deliberately owns NO submit button: the surface it sits in decides what "save"
+ * means.
  *
  * TWO LAYOUTS. `compact` is one row — single-line field that grows as it fills,
  * camera as an adjacent icon, the dictation tip as an icon rather than a
- * sentence. The four-row version pushed RECORD COMPLETION off the bottom of a
- * 6.9" phone, putting the primary action of the screen below the fold, which is
- * the one thing that must never happen. The full layout stays for the feed, where
- * capture is the only thing on offer and has room to invite.
+ * sentence. It exists because a four-row composer above a screen's primary action
+ * pushes that action off the bottom of a 6.9" phone, which is the one thing that
+ * must never happen; the machine log still needs it for that reason.
+ * The JOB composer went back to the full layout when it moved out of the
+ * completion block and BELOW the action buttons — nothing it does can push them
+ * anywhere now, and capture is the only thing in its card, so it has the room to
+ * invite.
  */
 export default function NoteCaptureFields({
   capture,
@@ -206,11 +207,10 @@ export default function NoteCaptureFields({
       onChange={(e) => capture.setDraft(e.target.value)}
       onFocus={(e) => {
         capture.noteFocused();
-        // The completion block's action bar is FIXED, so it overlays whatever
-        // sits at that viewport position — the documented hazard of sticky and
-        // fixed bars is covering the element the user is currently editing.
-        // Centring the field on focus keeps it clear of both the bar and the
-        // on-screen keyboard.
+        // A compact composer is the one that sits directly above a screen's
+        // action controls, so the on-screen keyboard is most likely to cover the
+        // very field being typed into. Centring on focus keeps it clear of both
+        // the keyboard and whatever sits below it.
         // Optional-call: jsdom does not implement scrollIntoView, and this is a
         // progressive nicety rather than behaviour worth throwing over. The same
         // `?.()` guard is used elsewhere in the operator components for exactly

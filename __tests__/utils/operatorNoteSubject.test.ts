@@ -133,6 +133,28 @@ describe('addJobNote — subject selection', () => {
     expect(mockSupabase.from).not.toHaveBeenCalledWith('job_operations');
   });
 
+  it('writes the traveler shape — a part, an explicitly null step', async () => {
+    // What the whole-job composer sends. The traveler has no operation selected
+    // and must not ask for one, so it names the part and passes the step as null
+    // rather than omitting it. That has to reach the row as a JOB subject with
+    // the part recorded: `notes_subject_valid` allows it (its rule runs the other
+    // way — a step requires a part), and the feed reads it back through job_id.
+    await addJobNote('job-1', 'c1', 'acc-1', 'customer called about the finish', {
+      jobPartId: 'jp-1',
+      jobOperationId: null,
+    });
+
+    expect(INSERTED.row).toMatchObject({
+      subject_kind: 'job',
+      job_id: 'job-1',
+      job_part_id: 'jp-1',
+      job_operation_id: null,
+    });
+    // No step means no durable anchor is even looked for.
+    expect(mockSupabase.from).not.toHaveBeenCalledWith('job_operations');
+    expect(INSERTED.row).not.toHaveProperty('part_id');
+  });
+
   it('keeps auto-logged event notes job-scoped even on a routed step', async () => {
     // A machine-generated audit line (e.g. the order-quantity trail) is not
     // durable part knowledge and must never land in the Playbook.

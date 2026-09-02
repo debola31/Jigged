@@ -50,7 +50,11 @@ vi.mock('@/utils/operationCompletionsAccess', () => ({
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 const OP_CONTEXT = { jobPartId: 'jp1', jobOperationId: 'jo1' };
-const OFFER_TEXT = /add it before you go/i;
+// OFFER_TEXT (/add it before you go/) lived here for the post-completion
+// "add a photo?" prompt. That prompt was deleted with B4 and its last reference
+// went with the tests below it; the constant outlived both. Gone now — capture
+// is offered by a composer that is always on screen, so there is nothing left to
+// chase after the fact.
 const HINT_TEXT = /talk instead of type/i;
 
 function makeNote(over: Partial<JobNote> = {}): JobNote {
@@ -78,16 +82,14 @@ function renderFeed(props: Partial<React.ComponentProps<typeof JobFeed>> = {}) {
 }
 
 /**
- * Render with the feed's OWN composer live.
+ * Render with the composer live.
  *
- * After B4 the composer only appears where no completion block owns capture — an
- * already-complete step, or an outside step. The behaviour these tests cover
- * (the photo picker, the dictation hint, the funnel events) did not change; it
- * moved into useNoteCapture and is rendered by both hosts, so they are still
- * exercised through this surface.
+ * There is no switch left: a job context IS the composer, on every branch of
+ * every surface. The alias stays because it says what a test is about — these
+ * cover capture (the picker, the dictation hint, the funnel), not the timeline.
  */
 function renderComposer(props: Partial<React.ComponentProps<typeof JobFeed>> = {}) {
-  return renderFeed({ standaloneCapture: true, ...props });
+  return renderFeed(props);
 }
 
 // This jsdom env ships no Storage — polyfill a minimal in-memory one (same
@@ -120,11 +122,19 @@ beforeAll(() => {
     configurable: true,
     writable: true,
   });
+  // sessionStorage too: the mic hint spends its five-show budget once per
+  // session rather than once per composer mounted, and that marker lives here.
+  Object.defineProperty(window, 'sessionStorage', {
+    value: new MemoryStorage(),
+    configurable: true,
+    writable: true,
+  });
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   mock(getCurrentMember).mockResolvedValue({ id: 'op1', name: 'Op', role: 'operator' });
   mock(getJobNotes).mockResolvedValue([]);
   mock(getMyIntervalsForJob).mockResolvedValue([]);
@@ -167,6 +177,152 @@ beforeEach(() => {
 // The signal to watch is composer_focused against note_saved. That pair is
 // documented as reading "capture friction", and if this change hurts, it will look
 // exactly like that and mean something else.
+describe('JobFeed — capture is independent of completing the step', () => {
+  it('posts a note with no completion, at the default quantity', async () => {
+    /**
+     * THE REGRESSION THIS FILE EXISTS TO HOLD DOWN.
+     *
+     * Capture briefly lived inside the operation page's completion block, and
+     * the quantity field is prefilled with the remaining balance — so the
+     * primary button was START, then RECORD n FINISHED, and the note arm it was
+     * supposed to fall back to needed the operator to clear the quantity by hand
+     * first. In practice a note could not be saved without finishing the step.
+     *
+     * Nothing here clears any field, because there is no field to clear: the
+     * composer commits itself.
+     */
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'waiting on material' }));
+    renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'waiting on material',
+    );
+    await user.click(await screen.findByRole('button', { name: 'Post' }));
+
+    await waitFor(() =>
+      expect(addJobNote).toHaveBeenCalledWith('job1', 'co1', 'op1', 'waiting on material', {
+        jobPartId: 'jp1',
+        jobOperationId: 'jo1',
+      }),
+    );
+  });
+
+  it('writes a JOB note, with no step, from the traveler', async () => {
+    // The traveler has no operation selected and must not ask for one — that
+    // would be the step selector this feed was designed without. A null step is
+    // a real note, not a degraded one.
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'customer called' }));
+    renderFeed({ operationContext: { jobPartId: 'jp1', jobOperationId: null } });
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    // And it says so — "for this job", not "for this step".
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this job…'),
+      'customer called',
+    );
+    await user.click(await screen.findByRole('button', { name: 'Post' }));
+
+    await waitFor(() =>
+      expect(addJobNote).toHaveBeenCalledWith('job1', 'co1', 'op1', 'customer called', {
+        jobPartId: 'jp1',
+        jobOperationId: null,
+      }),
+    );
+  });
+
+  it('says so while a draft is unposted, and stops saying it once it is gone', async () => {
+    /**
+     * The hazard the merged commit existed to prevent, answered by a status line
+     * rather than by welding the two writes together: a staged photo used to LOOK
+     * saved, and nothing said otherwise.
+     *
+     * Derived from the draft alone, deliberately — it is true the whole time the
+     * risk exists, instead of firing once at a moment we guessed. It is also the
+     * only shape available: remembering that moment needs setState in an effect
+     * (the repo's ratcheting warning budget), setState during render, or a ref
+     * read during render — and the last two are lint ERRORS here.
+     */
+    const user = userEvent.setup();
+    renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    expect(screen.queryByText(/not posted yet/i)).not.toBeInTheDocument();
+
+    const field = screen.getByPlaceholderText('Add a note or photo for this step…');
+    await user.type(field, 'half a thought');
+    expect(await screen.findByText(/not posted yet/i)).toBeInTheDocument();
+
+    await user.clear(field);
+    await waitFor(() =>
+      expect(screen.queryByText(/not posted yet/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it('brings the composer back into view when a step action lands on a draft', async () => {
+    /**
+     * The status line sits BELOW the action block the operator just tapped, which
+     * on a phone has already scrolled past — saying it where they are not looking
+     * is the same silence in a different colour. This is the half that has to be
+     * an event, and the only half that needs to remember anything, so it lives
+     * entirely inside an effect where touching a ref is legal.
+     */
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    // jsdom implements no scrollIntoView at all, so there is nothing to spy on —
+    // it has to be installed.
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true,
+    });
+
+    const { rerender } = render(
+      <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={0} />,
+    );
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'half a thought',
+    );
+    scrollIntoView.mockClear();
+
+    rerender(
+      <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={1} />,
+    );
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+  });
+
+  it('does NOT chase the operator when the step action lands on an empty composer', async () => {
+    // Completing a step with nothing typed is the ordinary case. Scrolling for it
+    // would move the screen under someone for no reason.
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true,
+    });
+
+    const { rerender } = render(
+      <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={0} />,
+    );
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    scrollIntoView.mockClear();
+
+    rerender(
+      <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={1} />,
+    );
+
+    await waitFor(() => expect(getFeedCompletionsForJob).toHaveBeenCalled());
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
 describe('JobFeed — capture-only media', () => {
   it('sends the photo button straight to the camera, with no library', async () => {
     const { container } = renderComposer();
@@ -204,6 +360,27 @@ describe('JobFeed — dictation hint', () => {
     renderComposer();
     expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!)).toEqual({ shows: 1, dismissed: false });
+  });
+
+  it('spends ONE show for two composers in the same session', async () => {
+    /**
+     * The constraint operator-view.md states outright: the cap used to be per
+     * hook instance, which is why it said the tip's budget "constrains where the
+     * composer may be mounted". There are two job composers now — the step page
+     * and the traveler — and an operator passes through both in one journey, so
+     * a per-mount count would retire a five-show tip in two and a half visits.
+     */
+    window.localStorage.removeItem(HINT_KEY);
+
+    const first = renderComposer();
+    expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!).shows).toBe(1);
+    first.unmount();
+
+    // Same session, second composer — still shown, still one show spent.
+    renderComposer();
+    expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!).shows).toBe(1);
   });
 
   it('still shows on the last allowed mount (below the cap of 5)', async () => {
@@ -420,12 +597,16 @@ describe('note actions', () => {
     expect(menuFor()).not.toBeInTheDocument();
   });
 
-  it('offers nothing on the read-only traveler feed', async () => {
+  it('offers the menu on the traveler too, which is a writable surface now', async () => {
+    // The traveler used to pass `readOnly`, which suppressed both the composer
+    // and this menu. It posts notes now, and an operator who can write one there
+    // must be able to fix their own typo there — RLS scopes edit to the author
+    // and delete to author-or-admin either way.
     mock(getJobNotes).mockResolvedValue([makeNote({ author_id: 'op1' })]);
-    renderFeed({ readOnly: true });
+    renderFeed({ operationContext: { jobPartId: 'jp1', jobOperationId: null } });
     await screen.findByText('existing note');
 
-    expect(menuFor()).not.toBeInTheDocument();
+    expect(menuFor()).toBeInTheDocument();
   });
 
   it('marks an edited note, and leaves an unedited one unmarked', async () => {

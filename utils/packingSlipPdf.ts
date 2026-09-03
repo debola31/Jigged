@@ -168,7 +168,15 @@ export function buildShopHeaderLines(company: Company): string[] {
   return lines;
 }
 
-function buildAddressBlockLines(
+/**
+ * The shared address renderer, including the `(No address on file)` fallback.
+ *
+ * Exported for the outside-processing slip (utils/outsideShipmentPdf.ts), which
+ * renders a vendor ship-to from the same AddressSnapshot shape. A fourth
+ * hand-rolled copy of this is how four documents start disagreeing about how an
+ * address reads.
+ */
+export function buildAddressBlockLines(
   customerName: string | null | undefined,
   address: AddressSnapshot | null,
   attentionText: string | null,

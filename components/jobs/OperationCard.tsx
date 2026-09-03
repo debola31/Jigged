@@ -17,6 +17,7 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 
+import { isOutsideOperation } from '@/types/job';
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
 import type { OperationCompletionSummary, OperationCompletionEvent } from '@/types/operationCompletion';
@@ -99,7 +100,7 @@ export default function OperationCard({
   // Outside (external-vendor) op: the part is finished elsewhere, so it uses a
   // send/receive lifecycle instead of quantity completions. The column is the
   // discriminator — an op is outside work iff it targets a vendor service.
-  const isExternal = Boolean(operation.vendor_service_id ?? operation.vendor_service);
+  const isExternal = isOutsideOperation(operation);
   const vendorName = operation.vendor_service?.vendor?.name ?? null;
 
   // Quantity-completion progress (internal ops only — external ops have no

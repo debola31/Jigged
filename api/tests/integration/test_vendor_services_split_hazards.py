@@ -226,37 +226,81 @@ def test_job_creation_does_not_drop_the_outside_step(admin: Client, env: Outside
 
 
 def test_a_quantity_edit_does_not_reset_a_sent_op(admin: Client, env: OutsideEnv):
-    """HAZARD 1. A part-quantity edit must leave a sent op's status and stamp alone."""
+    """HAZARD 1. A part-quantity edit must leave a sent op's status and stamp alone.
+
+    Since 20260903203741 the send IS a row in `outside_shipments`, so this test
+    creates one instead of writing `status='sent'` onto the operation (which the
+    browser can no longer do at all, and which would now be re-derived away).
+
+    The assertion is unchanged, and the reason it holds is stronger than it was.
+    The hazard used to be held off by an explicit early return that a dead join
+    could stop firing. Now the outside arm of compute_job_operation_status reads
+    outside_shipments and outside_shipment_receipts, and a part-quantity edit
+    writes NEITHER -- so it cannot reach the send even in principle. sent_at
+    survives for the same reason: it is a mirror of the shipment row rather than
+    the record itself.
+    """
     job_part_id = _make_job_part(admin, env)
 
-    outside_op_id = (
+    op = (
         admin.table("job_operations")
-        .select("id")
+        .select("id, job_id, job_part_id")
         .eq("job_part_id", job_part_id)
         .not_.is_("vendor_service_id", "null")
-        .single()
-        .execute()
-        .data["id"]
-    )
-
-    admin.table("job_operations").update(
-        {"status": "sent", "sent_at": "2026-08-01T00:00:00Z"}
-    ).eq("id", outside_op_id).execute()
-
-    # The trigger path that used to wipe it.
-    admin.table("job_parts").update({"quantity": 25}).eq("id", job_part_id).execute()
-
-    after = (
-        admin.table("job_operations")
-        .select("status, sent_at")
-        .eq("id", outside_op_id)
         .single()
         .execute()
         .data
     )
 
+    service = (
+        admin.table("vendor_services")
+        .select("vendor_id, name, vendors(name)")
+        .eq("id", env.service_id)
+        .single()
+        .execute()
+        .data
+    )
+
+    # Service role, so this goes straight at the table. The RPC is the browser's
+    # only door and is covered by the route tests; what is under test here is the
+    # recompute, and a shipment row is what drives it.
+    shipped_at = "2026-08-01T00:00:00Z"
+    admin.table("outside_shipments").insert(
+        {
+            "company_id": env.company_id,
+            "job_id": op["job_id"],
+            "job_part_id": op["job_part_id"],
+            "job_operation_id": op["id"],
+            "vendor_id": service["vendor_id"],
+            "vendor_name": service["vendors"]["name"],
+            "service_name": service["name"],
+            "slip_number": f"OSP-HAZARD-{uuid.uuid4().hex[:6]}",
+            "quantity": 10,
+            "shipped_at": shipped_at,
+        }
+    ).execute()
+
+    def read() -> dict:
+        return (
+            admin.table("job_operations")
+            .select("status, sent_at")
+            .eq("id", op["id"])
+            .single()
+            .execute()
+            .data
+        )
+
+    before = read()
+    assert before["status"] == "sent", "creating a shipment did not send the operation"
+    assert before["sent_at"] is not None, "creating a shipment did not stamp sent_at"
+
+    # The trigger path that used to wipe it.
+    admin.table("job_parts").update({"quantity": 25}).eq("id", job_part_id).execute()
+
+    after = read()
     assert after["status"] == "sent", "a part-quantity edit reset the outside op to pending"
     assert after["sent_at"] is not None, "a part-quantity edit cleared the send stamp"
+    assert after["sent_at"] == before["sent_at"], "a part-quantity edit moved the send stamp"
 
 
 def test_both_priceability_verdicts_agree_on_an_inherited_price(admin: Client, env: OutsideEnv):

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -13,8 +13,15 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import ClearIcon from '@mui/icons-material/Clear';
+import SearchIcon from '@mui/icons-material/Search';
+import posthog from 'posthog-js';
 import {
   getOperatorJobs,
   getAllStationsOperatorJobs,
@@ -26,12 +33,13 @@ import StationSelector from '@/components/operator/StationSelector';
 import NoteUsageBanner from '@/components/operator/NoteUsageBanner';
 import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
+import { filterOperatorJobs } from '@/lib/operatorJobSearch';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
 
 /**
  * Operator Jobs List Page.
  *
- * Two controls, orthogonal:
+ * Three controls, orthogonal:
  *  - Scope (segmented, the primary/high-frequency switch):
  *    - "My Station" — work ready/in-progress at the selected station (the
  *      dispatch list). Prompts for a station if none is selected.
@@ -41,12 +49,39 @@ import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
  *    completed work so an operator can reopen a step finished by mistake and
  *    undo it. Off by default — the plain list IS the active/ready view (there is
  *    deliberately no "Active" label; the app has no "active" state).
+ *  - Find (a text field, below the other two and directly above the list):
+ *    narrows whichever list is showing to one job. See below.
  *
- * Both controls live in the URL (?scope=, ?completed=1) so returning to this
+ * All three live in the URL (?scope=, ?completed=1, ?q=) so returning to this
  * page — e.g. Back from a traveler opened via All Stations — restores the exact
  * view the operator left.
+ *
+ * WHY FIND EXISTS. The All Stations lens was built as the Andon pattern, to
+ * answer two questions without walking the floor: "my station is idle, what else
+ * is ready?" and "where is job #123?" (operator-view.md, "Who does what, and
+ * where"). Only the first was actually answered — All Stations returns the whole
+ * plant, grouped and unpaginated, so finding one job meant scrolling for it. The
+ * field closes that, and it narrows the station lens and the completed list too,
+ * because "which of these is mine" is the same question at any scope.
+ *
+ * It filters rows ALREADY IN MEMORY (see lib/operatorJobSearch.ts) — the list
+ * arrives fully materialized, so `q` must never join the load effect's
+ * dependencies or every keystroke would refetch the plant.
+ *
+ * NO MATCH COUNT, deliberately. The station group headers already carry
+ * `{station} · {rows.length}`; a second figure is noise, and every number added
+ * to an operator surface is a place the surveillance guardrail has to be
+ * re-argued. The empty state carries the "nothing matched" message instead.
  */
 type Scope = 'station' | 'plant';
+
+/**
+ * How long a keystroke waits before it reaches the URL. Long enough that typing
+ * a job number is one `router.replace` rather than six; short enough that the
+ * list feels live. The INPUT is not debounced — only the URL write and the
+ * analytics capture are, so the field itself never lags the thumb.
+ */
+const QUERY_DEBOUNCE_MS = 200;
 
 function OperatorJobsPageContent() {
   const params = useParams();
@@ -65,15 +100,28 @@ function OperatorJobsPageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // The URL for this exact view — used to write the scope/completed toggle state
+  // The find query is held LOCALLY and mirrored into the URL on a debounce, not
+  // driven from it. Filtering off local state is what makes the list track the
+  // thumb; the URL copy exists only so Back from a traveler lands on the same
+  // narrowed view. Seeded from ?q= on mount — the page is already inside a
+  // Suspense boundary for exactly this reason (useSearchParams).
+  const [queryInput, setQueryInput] = useState(() => searchParams.get('q') ?? '');
+
+  // The URL for this exact view — used to write the scope/completed/find state
   // into the URL (so Back restores the exact view the operator left).
-  const jobsUrl = (s: Scope, c: boolean) =>
-    `/operator/${companyId}/jobs?scope=${s}${c ? '&completed=1' : ''}`;
+  const jobsUrl = (s: Scope, c: boolean, q: string) => {
+    const trimmed = q.trim();
+    return (
+      `/operator/${companyId}/jobs?scope=${s}` +
+      (c ? '&completed=1' : '') +
+      (trimmed ? `&q=${encodeURIComponent(trimmed)}` : '')
+    );
+  };
 
   const updateView = (next: { scope?: Scope; completed?: boolean }) => {
     const nextScope = next.scope ?? scope;
     const nextCompleted = next.completed ?? completed;
-    router.replace(jobsUrl(nextScope, nextCompleted));
+    router.replace(jobsUrl(nextScope, nextCompleted, queryInput));
   };
 
   useEffect(() => {
@@ -128,17 +176,67 @@ function OperatorJobsPageContent() {
     }
   };
 
+  // The find filter, over rows already in memory. NOTE the load effect above
+  // does NOT depend on the query — the list arrives whole, so narrowing it is a
+  // pure client-side pass and a keystroke must never refetch the plant.
+  const visibleJobs = useMemo(() => filterOperatorJobs(jobs, queryInput), [jobs, queryInput]);
+  const visiblePlantJobs = useMemo(
+    () => filterOperatorJobs(plantJobs, queryInput),
+    [plantJobs, queryInput],
+  );
+
   // Group whole-plant rows by station for the "All Stations" scope.
+  //
+  // GROUPING CONSUMES THE FILTERED ROWS, and that ordering is the whole point: a
+  // station whose rows all fell out of the query must not leave its header
+  // behind over an empty gap.
   const plantGroups = useMemo(() => {
     const map = new Map<string, OperatorPlantJob[]>();
-    for (const row of plantJobs) {
+    for (const row of visiblePlantJobs) {
       const key = row.work_center_name ?? 'Unassigned';
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return Array.from(map.entries());
-  }, [plantJobs]);
+  }, [visiblePlantJobs]);
+
+  // How many rows the current query matched, kept in a ref so the debounced
+  // effect below can read it without taking the row arrays as dependencies
+  // (which would restart the debounce every time a load settled). Written in an
+  // effect, read in an effect — never during render, which this repo lints as an
+  // error.
+  const matchCountRef = useRef(0);
+  useEffect(() => {
+    matchCountRef.current = scope === 'plant' ? visiblePlantJobs.length : visibleJobs.length;
+  }, [scope, visibleJobs, visiblePlantJobs]);
+
+  // Mirror the settled query into the URL, and report it once. Both are
+  // debounced together: typing a job number should be one history write and one
+  // capture, not one per keystroke.
+  const lastCapturedQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    const trimmed = queryInput.trim();
+    const timer = setTimeout(() => {
+      if ((searchParams.get('q') ?? '') !== trimmed) {
+        router.replace(jobsUrl(scope, completed, trimmed));
+      }
+      // Report only a real, settled search — never the blank query, never the
+      // same query twice, and never while the list is still loading (the match
+      // count would be a fact about an empty array rather than about the query).
+      if (trimmed && trimmed !== lastCapturedQueryRef.current && !loading) {
+        lastCapturedQueryRef.current = trimmed;
+        posthog.capture('job list searched', {
+          surface: 'operator',
+          scope,
+          has_results: matchCountRef.current > 0,
+        });
+      }
+    }, QUERY_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // jobsUrl closes over companyId; searchParams is read only to skip a no-op replace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryInput, scope, completed, companyId, loading]);
 
   const renderJobCard = (row: OperatorJob, key: string) => (
     <Card
@@ -333,6 +431,57 @@ function OperatorJobsPageContent() {
         </Box>
       )}
 
+      {/* Find: below the two lens controls and directly above the list. That is
+          the right reading order (pick the list, then narrow it) and it is also
+          the lower position, which is where a thumb reaches on a phone held one
+          -handed.
+
+          DELIBERATELY NOT AUTOFOCUSED. The office jobs page does autofocus its
+          search, because a salesperson at a keyboard arrives to look something
+          up. Here the same line of code would throw the keyboard over the
+          dispatch list on every single visit to the tab, for the many arrivals
+          that are not a search. The operator taps the field when they want it.
+
+          No hand-set minHeight: the theme floors `.MuiInputBase-root` at 48 for
+          every MuiTextField, and that override sits on `root`, so `size="small"`
+          still clears the touch floor. (A Chip or ToggleButton would NOT — the
+          theme floors neither.) */}
+      {!showStationSelector && (
+        <TextField
+          fullWidth
+          size="small"
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.target.value)}
+          placeholder="Find a job, part or customer"
+          inputMode="search"
+          sx={{ mb: 2 }}
+          slotProps={{
+            htmlInput: { 'aria-label': 'Find a job' },
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon sx={{ color: 'text.secondary' }} />
+                </InputAdornment>
+              ),
+              // One tap out of a filter, without needing the keyboard back to
+              // erase it — the return trip matters more here than on a desktop.
+              endAdornment: queryInput ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear search"
+                    onClick={() => setQueryInput('')}
+                    edge="end"
+                    sx={{ minWidth: 48, minHeight: 48 }}
+                  >
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            },
+          }}
+        />
+      )}
+
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -353,15 +502,25 @@ function OperatorJobsPageContent() {
           <CircularProgress />
         </Box>
       ) : scope === 'station' ? (
-        jobs.length === 0 ? (
-          <EmptyState completed={completed} scope="station" />
+        visibleJobs.length === 0 ? (
+          <EmptyState
+            completed={completed}
+            scope="station"
+            query={queryInput}
+            onClearQuery={() => setQueryInput('')}
+          />
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {jobs.map((row) => renderJobCard(row, row.operation_id ?? row.id))}
+            {visibleJobs.map((row) => renderJobCard(row, row.operation_id ?? row.id))}
           </Box>
         )
-      ) : plantJobs.length === 0 ? (
-        <EmptyState completed={completed} scope="plant" />
+      ) : visiblePlantJobs.length === 0 ? (
+        <EmptyState
+          completed={completed}
+          scope="plant"
+          query={queryInput}
+          onClearQuery={() => setQueryInput('')}
+        />
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {plantGroups.map(([station, rows]) => (
@@ -384,8 +543,51 @@ function OperatorJobsPageContent() {
   );
 }
 
-/** Empty-state copy, keyed on scope + whether the Completed filter is on. */
-function EmptyState({ completed, scope }: { completed: boolean; scope: Scope }) {
+/**
+ * Empty-state copy, keyed on scope + whether the Completed filter is on — and,
+ * winning over both, whether a find query is what emptied the list.
+ *
+ * THE THIRD CASE IS NOT COSMETIC. Without it, an operator who typed a job
+ * number that isn't at their station reads "There are no pending jobs for your
+ * station at this time" — a confident, wrong answer about the shop rather than a
+ * fact about their query. The `Clear search` button is the recovery, and it is a
+ * button rather than a hint because the keyboard is not necessarily still up.
+ */
+function EmptyState({
+  completed,
+  scope,
+  query,
+  onClearQuery,
+}: {
+  completed: boolean;
+  scope: Scope;
+  query: string;
+  onClearQuery: () => void;
+}) {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 8, px: 2 }}>
+        <Typography variant="h6" color="text.secondary" gutterBottom>
+          No jobs match “{trimmedQuery}”
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          {scope === 'station'
+            ? 'Nothing at this station matches. Try All Stations, or clear the search.'
+            : 'Nothing across the plant matches that search.'}
+        </Typography>
+        {/* "Show all jobs", not a second "Clear search". The field's × is
+            already on screen and already carries that name, and two buttons with
+            the same accessible name are two identical entries in a screen
+            reader's button list. Naming this one by its RESULT rather than by
+            what it undoes disambiguates them and is the better label anyway. */}
+        <Button variant="outlined" onClick={onClearQuery}>
+          Show all jobs
+        </Button>
+      </Box>
+    );
+  }
+
   const [title, body] = completed
     ? scope === 'station'
       ? ['No recently completed jobs', 'You haven’t completed any steps at this station recently.']

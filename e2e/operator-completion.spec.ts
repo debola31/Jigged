@@ -263,6 +263,65 @@ test.describe('operator completion', () => {
 });
 
 /**
+ * The find field on the dispatch list.
+ *
+ * Unit tests cover the matching and the empty state against mocked rows; what
+ * only a browser can show is that the field narrows the list the READINESS RPC
+ * actually returned, with a real station selected — the two things that decide
+ * whether a row is on screen at all. A filter that worked over fixtures and
+ * silently matched nothing against live data would pass every other gate.
+ */
+test.describe('finding one job on the dispatch list', () => {
+  test('narrows the list to a match and back', async ({ page }) => {
+    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    const companyId = page.url().match(/\/operator\/([0-9a-f-]{36})\//)?.[1];
+    expect(companyId, 'company id should be in the operator URL').toBeTruthy();
+
+    // ALL STATIONS, and the target is read off the page rather than named here.
+    // This spec runs serially after the completion tests, which finish steps on
+    // the seeded job — so any fixture job number written into this file is a
+    // claim about mutable state that the tests ahead of it are free to change.
+    // The whole plant is the broadest list there is, and whatever sits at the
+    // top of it is a row the readiness RPC really returned.
+    await page.goto(`/operator/${companyId}/jobs?scope=plant`);
+    await expect(page.getByRole('button', { name: 'All Stations' })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Each job card is a CardActionArea, so it is a button; the station group
+    // headings are plain text. Filtering buttons by the card's "{job} · {part}"
+    // separator therefore picks out a job row and never a heading or a control.
+    const cards = page.getByRole('button').filter({ hasText: '·' });
+    const firstCard = cards.first();
+    await expect(firstCard).toBeVisible({ timeout: 30_000 });
+    const jobNumber = ((await firstCard.textContent()) ?? '').split('·')[0].trim();
+    expect(jobNumber, 'a card heading should start with a job number').toBeTruthy();
+
+    const find = page.getByLabel('Find a job');
+
+    // A query that matches keeps its row — asserted against live data, which is
+    // the half a unit test over fixtures cannot cover.
+    await find.fill(jobNumber);
+    // Visible, not a count of one: a job with its operation ready at more than
+    // one station legitimately shows a row per station on this lens.
+    await expect(cards.filter({ hasText: jobNumber }).first()).toBeVisible();
+
+    // A query that matches nothing empties the list and SAYS SO. This is the
+    // assertion that matters: the failure mode is the unfiltered copy, which
+    // claims there is no work for your station when the only fact available is
+    // about the query.
+    await find.fill('zzz-no-such-job-zzz');
+    await expect(page.getByText(/No jobs match/)).toBeVisible();
+    await expect(cards).toHaveCount(0);
+    await expect(page.getByText(/There is no ready or in-progress work/)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Show all jobs' }).click();
+    await expect(find).toHaveValue('');
+    await expect(firstCard).toBeVisible();
+  });
+});
+
+/**
  * B5 — TRIANGULARITY.
  *
  * The asymmetry that makes writing something down worth the extra taps:

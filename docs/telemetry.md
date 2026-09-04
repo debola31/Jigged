@@ -394,14 +394,14 @@ The section above is mechanics. This is the state, and it is recorded here becau
 lives in the repo — **all alerting config is server-side only**, which is exactly why the two
 holes below went unnoticed for months. Re-measure with `sentry api` before trusting it.
 
-| | `javascript-nextjs` | `python-fastapi` |
-|---|---|---|
-| Workflow id | 3138841 | 3174587 |
-| Environment | `vercel-production` | `production` |
-| Detector | 6744903 (Issue Stream) | 6806071 (Issue Stream) |
-| Triggers (`any-short`) | `new_high_priority_issue`, `existing_high_priority_issue` | same |
-| Action | `email` → `issue_owners` | same |
-| Frequency | 30 min | 30 min |
+| | `javascript-nextjs` | `python-fastapi` | Uptime |
+|---|---|---|---|
+| Workflow id | 3138841 | 3174587 | 3943738 |
+| Environment | `vercel-production` | `production` | **none, on purpose** (see Trap 2) |
+| Detector | 6744903 (Issue Stream) | 6806071 (Issue Stream) | 6785095 (Stripe webhook) |
+| Triggers (`any-short`) | `new_high_priority_issue`, `existing_high_priority_issue` | same | same |
+| Action | `email` → `issue_owners` | same | same |
+| Frequency | 30 min | 30 min | 30 min |
 
 Ownership on both projects is `{"raw": null, "fallthrough": true}` — **no CODEOWNERS**, so
 `issue_owners` always falls through to ActiveMembers, which is the org's single member. In
@@ -421,19 +421,32 @@ Sentry also does not deliver to an **unverified** primary address, and the org-s
 denied on `/users/{id}/emails/` — so verification can only be confirmed in
 Settings → Account → Emails. A green workflow is not evidence anyone was told.
 
-**Trap 2 — a detector with no workflow notifies nobody.** The uptime monitor is live and
-unrouted:
+**Trap 2 — a detector with no workflow notifies nobody.** Both uptime monitors were live and
+unrouted from creation until 2026-09-04:
 
 ```bash
 sentry api '/api/0/organizations/jigged/detectors/' \
   | jq -r '.[] | "\(.name) → workflowIds=\(.workflowIds)"'
-# Stripe webhook reachable (405 = healthy) → workflowIds=[]
+# Stripe webhook reachable (405 = healthy) → workflowIds=["3943738"]   # fixed
+# QuickBooks webhook reachable (405 = healthy) → workflowIds=[]        # detector is disabled anyway
 ```
 
 An empty `workflowIds`, with no workflow listing it in `detectorIds`, means downtime is detected
-and then dropped. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
-behind the event. **Any new detector is silent until a workflow claims it** — the uptime UI does
-not warn about this.
+and then dropped. **Any new detector is silent until a workflow claims it** — the uptime UI does
+not warn about this. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
+behind the event, which is why the CI probe below exists alongside it rather than instead of it.
+
+Stripe's is now claimed by workflow **3943738 — "Uptime — inbound webhook unreachable"**, and two
+things about how it was made are the reusable part:
+
+- **A new workflow, not a detector added to an existing one.** Updating a workflow requires a full
+  `PUT` body (see above), so a mistake while editing 3138841 or 3174587 would take live *error*
+  alerting down with it. A separate workflow cannot.
+- **`environment` is deliberately `null`.** The two issue workflows are scoped to
+  `vercel-production` and `production` respectively, while an uptime detector stamps the
+  environment from its own config — so attaching one to a workflow whose scope does not match
+  produces a rule that reads correctly and never fires, which is the failure this whole section
+  keeps describing. Scope an uptime workflow to the DETECTOR and leave the environment open.
 
 **There are two inbound webhooks to watch, and both need the same monitor.** Stripe's is the one
 above; Intuit's is `GET https://www.jigged.app/api/quickbooks/webhook`, expecting **405** — route

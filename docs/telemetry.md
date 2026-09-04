@@ -465,6 +465,16 @@ Two more limits worth knowing before reaching for the CLI here: `PATCH
 `/projects/jigged/<project>/uptime/{id}/` instead), that `PUT` rejects `mode` as superuser-only, and
 omitting `status` from its body makes it try to activate — which is what surfaces the seat error.
 
+**What actually watches the webhooks is CI, not Sentry.**
+[`webhook-reachability.yml`](../.github/workflows/webhook-reachability.yml) probes every inbound
+endpoint after each production deploy and once a day, asserts `405`, and prints what any other code
+means. It is free (Actions minutes are unmetered on a public repo), it is in the repo rather than in
+server-side config nobody can review, and — unlike both detectors above — **a failure emails
+somebody**. Its own trap is written in its header: GitHub disables a scheduled workflow after 60 days
+of repository inactivity, which is why the post-deploy trigger exists rather than the cron alone.
+Adding an inbound webhook means adding a row to its `ENDPOINTS` list. Vercel's Deployment Protection
+Exceptions, the other route to a probeable preview domain, is **$150/month** and was declined.
+
 **What is deliberately not alerted.** Only *high* priority fires, and Sentry derives priority from
 level: `error`/`fatal` → high, `warning` → medium, `info`/`debug` → low. So the repo's deliberate
 `captureException(…, { level: 'warning' })` sites raise nothing, by construction. That is the

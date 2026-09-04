@@ -153,7 +153,7 @@ QuickBooks terms are fetched in their **own effect**, outside the form's main lo
 
 ## Credit hold
 
-`credit_status` (`'open'` | `'hold'`) + `credit_hold_note`. A human decision, typed by a human. **No balance, no automation, no QuickBooks sync, nothing computed.**
+`credit_status` (`'open'` | `'hold'`) + `credit_hold_note`. A human decision, typed by a human. **No balance, no automation, nothing computed.** The QuickBooks Online payment mirror added 2026-09-03 ([invoicing.md](invoicing.md#payment-status-quickbooks-online-mirror)) does not change that and must not: `qb_balance` is per invoice, and rolling it up into this field would turn a judgement somebody made into a number that changes overnight.
 
 **It warns and never gates.** No code path may block on it — a held customer's quote, job and shipment all proceed.
 
@@ -292,6 +292,8 @@ So `discover_po_custom_field` **finds** the shop's field, matching on its **labe
 **Success-with-no-match and a failed read are different outcomes, deliberately.** No match returns `id: None` — the normal starting state. A failed Preferences read **raises**, and the route turns it into a 502 and writes nothing. "Couldn't check" is not "there is no field": the result is persisted, so swallowing the error would let one Intuit blip wipe a correctly discovered id and silently stop the PO reaching invoices.
 
 **Nothing about terms is cached.** A stored term map would be a second list drifting from QuickBooks' own — the exact problem this removes — to save a four-row query. The PO field *is* cached on `quickbooks_connections`, because it changes only when a human edits QuickBooks settings; refreshing it is an explicit admin button, never a mount or a push.
+
+**Something now comes back the other way.** Since 2026-09-03 the integration is no longer purely outbound: each QuickBooks **Online** invoice Jigged pushed carries what QBO last said about it — balance, total, due date, invoice date and a status word — refreshed when the job's Invoices menu opens and marked stale by an Intuit webhook in between. Nothing of it reaches a customer record. It is stored on the invoice row, read by the invoice chip, and rolls up nowhere: no customer balance, no aging, no input to `credit_status`. Spec: [invoicing.md](invoicing.md#payment-status-quickbooks-online-mirror).
 
 ---
 
@@ -448,7 +450,7 @@ Both were dropped in favour of fixing [#653](https://github.com/debola31/Jigged/
 
 **Customer pricing tiers / group codes** — E2's own manual admits a group code grays out the customer's own values; that is `markup_rates` written down by the vendor.
 
-**An invoices table / AR subledger. Statements & dunning** — QuickBooks already ships three formats plus automated reminders; two engines means the AP clerk gets two past-due emails. **Sales tax calculation** — QBO Automated Sales Tax computes from the address and overwrites anything we send.
+**An invoices table / AR subledger. Statements & dunning** — QuickBooks already ships three formats plus automated reminders; two engines means the AP clerk gets two past-due emails. *(The per-invoice payment mirror added 2026-09-03 is **not** this refusal being quietly reversed, and the distinction is the whole design: it is the latest answer to one question about one invoice, stored on that invoice's own row, feeding nothing. No sum per customer, no bucket by age, no statement, no reminder, no input to `credit_status`. The subledger begins the moment those numbers are added up or sorted by date — and the deferred list in [invoicing.md](invoicing.md#not-built-deferred) names each piece that would do it.)* **Sales tax calculation** — QBO Automated Sales Tax computes from the address and overwrites anything we send.
 
 **Lead/prospect/opportunity pipeline** — quote-to-book is ~98% on repeat part numbers and below 10% for new customers. Build retention, not acquisition.
 

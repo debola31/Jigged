@@ -2572,6 +2572,7 @@ export type Database = {
           po_custom_field_id: string | null
           po_custom_field_name: string | null
           qb_company_name: string | null
+          qb_invoices_stale_since: string | null
           qb_settings_checked_at: string | null
           realm_id: string
           reconnect_required: boolean
@@ -2579,6 +2580,7 @@ export type Database = {
           refresh_token: string
           token_version: number
           updated_at: string
+          webhook_last_received_at: string | null
         }
         Insert: {
           access_expires_at: string
@@ -2593,6 +2595,7 @@ export type Database = {
           po_custom_field_id?: string | null
           po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_invoices_stale_since?: string | null
           qb_settings_checked_at?: string | null
           realm_id: string
           reconnect_required?: boolean
@@ -2600,6 +2603,7 @@ export type Database = {
           refresh_token: string
           token_version?: number
           updated_at?: string
+          webhook_last_received_at?: string | null
         }
         Update: {
           access_expires_at?: string
@@ -2614,6 +2618,7 @@ export type Database = {
           po_custom_field_id?: string | null
           po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_invoices_stale_since?: string | null
           qb_settings_checked_at?: string | null
           realm_id?: string
           reconnect_required?: boolean
@@ -2621,6 +2626,7 @@ export type Database = {
           refresh_token?: string
           token_version?: number
           updated_at?: string
+          webhook_last_received_at?: string | null
         }
         Relationships: [
           {
@@ -2829,12 +2835,19 @@ export type Database = {
           job_id: string
           provider: string
           pushed_by: string | null
+          qb_balance: number | null
           qb_customer_id: string | null
+          qb_due_date: string | null
           qb_invoice_doc_number: string | null
           qb_invoice_id: string | null
           qb_invoice_sync_token: string | null
           qb_invoice_url: string | null
           qb_request_id: string
+          qb_stale_at: string | null
+          qb_status: string | null
+          qb_status_checked_at: string | null
+          qb_total_amt: number | null
+          qb_txn_date: string | null
           quote_id: string | null
           realm_id: string
           status: string
@@ -2850,12 +2863,19 @@ export type Database = {
           job_id: string
           provider?: string
           pushed_by?: string | null
+          qb_balance?: number | null
           qb_customer_id?: string | null
+          qb_due_date?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
           qb_invoice_url?: string | null
           qb_request_id: string
+          qb_stale_at?: string | null
+          qb_status?: string | null
+          qb_status_checked_at?: string | null
+          qb_total_amt?: number | null
+          qb_txn_date?: string | null
           quote_id?: string | null
           realm_id: string
           status?: string
@@ -2871,12 +2891,19 @@ export type Database = {
           job_id?: string
           provider?: string
           pushed_by?: string | null
+          qb_balance?: number | null
           qb_customer_id?: string | null
+          qb_due_date?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
           qb_invoice_url?: string | null
           qb_request_id?: string
+          qb_stale_at?: string | null
+          qb_status?: string | null
+          qb_status_checked_at?: string | null
+          qb_total_amt?: number | null
+          qb_txn_date?: string | null
           quote_id?: string | null
           realm_id?: string
           status?: string
@@ -4073,6 +4100,15 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      apply_qbo_invoice_mirror: {
+        Args: {
+          p_checked_at: string
+          p_company_id: string
+          p_realm_id: string
+          p_rows: Json
+        }
+        Returns: number
       }
       apply_stripe_subscription: {
         Args: {

@@ -78,6 +78,113 @@ to `partially_invoiced` via a trigger.
 - **Edit job**: quantity stays editable (upward) even after invoicing, down to
   `max(shipped, invoiced)`; a part's unit price is disabled once it has invoiced qty.
 
+## Payment status (QuickBooks Online mirror)
+
+**As-built 2026-09-03**, schema in
+[`20260903203624`](../../supabase/migrations/20260903203624_qbo_invoice_payment_mirror.sql), logic in
+`api/services/quickbooks.py`. A **read-only mirror of what QuickBooks Online last said** about each
+invoice Jigged created, shown as a chip per row in the job page's Invoices menu. It answers one
+question per invoice and feeds nothing else: no payment record, no aging bucket, no statement, no
+dunning, and `customers.credit_status` is still typed by a human
+([customers.md](customers.md#credit-hold)). **Online only** — a Desktop read is a Web Connector
+round trip to a PC that may be off ([quickbooks-desktop.md](quickbooks-desktop.md)).
+
+Seven columns on `quickbooks_invoice_links`, all NULL until a read succeeds:
+
+| Column | What it holds |
+|---|---|
+| `qb_status` | `paid` / `partial` / `open` / `voided` / `missing`. NULL means **never checked**, and a DB CHECK ties it to `qb_status_checked_at` so no row can claim a status nobody can date |
+| `qb_total_amt` | `Invoice.TotalAmt` — **tax-inclusive**, so it may legitimately exceed Jigged's line total |
+| `qb_balance` | `Invoice.Balance`: what is still owed. 0 is paid |
+| `qb_due_date` | `Invoice.DueDate` as QuickBooks computed it from the terms. NULL means QBO reported none, and such an invoice never renders overdue |
+| `qb_txn_date` | `Invoice.TxnDate` — for Online this is the authoritative invoice date, not `transaction_date` (which is what the browser sent at push time) |
+| `qb_status_checked_at` | When Intuit last **answered**. Stamped only on a definitive answer |
+| `qb_stale_at` | When a webhook last said this invoice changed |
+
+### The status rule
+
+Evaluated top-down, stored, and **clock-free** — the same order in the backend and in the chip:
+
+| Condition | `qb_status` |
+|---|---|
+| The id was absent from a successful query **and** absent again from a per-id confirm query | `missing` |
+| `total_amt == 0` while Jigged's line total is > 0 | `voided` |
+| `balance <= 0` | `paid` |
+| `0 < balance < total_amt` | `partial` |
+| otherwise | `open` |
+
+**`jigged_total` (Σ `quickbooks_invoice_line_items.total_price`) is used for the void test and
+nothing else.** QuickBooks totals are tax-inclusive and Jigged's are not, so comparing the two to
+decide partial vs open would report a fully-paid taxable invoice as partly paid forever. Partial is
+decided against QuickBooks' own total, never against ours.
+
+**The $0 edge is deliberately read as a void.** A voided QBO invoice keeps its number and reports
+`TotalAmt` 0; so does an invoice a bookkeeper discounted to nothing. Both mean "this invoice is no
+longer money owed", the quantity should reopen either way, and Intuit exposes nothing that
+distinguishes them.
+
+**Overdue is not stored.** It depends on today, so it is derived at render from `qb_due_date` — a
+stored `overdue` would be a claim that goes wrong overnight with nobody writing to the row.
+
+**Deleted takes two successful observations.** A QBO query that omits an id proves nothing on its
+own — batching, paging and minor-version behaviour can all drop one — so an absent id is re-asked
+for by id, and only a second successful miss writes `missing`. It is not terminal: every later
+refresh queries it again, and an invoice that comes back clears it.
+
+### A failed read is never written down
+
+`qb_status_checked_at` moves only on a definitive answer. An Intuit outage, an expired refresh
+token, a timeout — none of them touch the row, and the menu keeps showing the last answer **with
+the date it was given**. The route says so out loud (409 `qbo_unreachable`, *"Showing what it last
+said"*) rather than rendering an unchecked invoice as open or unpaid: **"couldn't check" is never
+"nothing was paid"**, which is the same rule the PO-field discovery follows
+([customers.md](customers.md#quickbooks)).
+
+**The monotonic guard.** `apply_qbo_invoice_mirror` ignores a row whose `qb_status_checked_at` is
+already newer than the pass being applied. Two people opening the same job, or a menu open racing
+the launch backfill, otherwise let the slower Intuit response land last and flip a paid invoice back
+to open. Same shape as `apply_stripe_subscription`'s guard on event time.
+
+**The realm rule.** The write matches on `company_id` **and** `realm_id`, and the route counts what
+it left alone as `skipped_other_realm`. A shop that disconnects and connects a different QuickBooks
+company keeps its old invoices exactly as they last read: an Intuit invoice id is only meaningful
+inside the realm that issued it, and re-querying it against a new realm would attach another
+company's numbers to Jigged's invoice.
+
+### A void in QuickBooks reopens the quantity
+
+`voided` or `missing` sets `voided_at`, which fires the existing
+`trigger_recompute_jp_invoicing_on_link`: the parts stop counting as invoiced, "Left to invoice"
+reopens, and no further code is involved. Clearing it again — the invoice came back — re-locks them.
+
+**The mirror only ever touches rows where `voided_by IS NULL`.** `voided_at` now has two possible
+writers (this, and the deferred in-app void below) and `voided_by` is what tells them apart, so a
+human void can never be undone by a QuickBooks read.
+
+### Freshness: the webhook is a signal, not a payload
+
+**Intuit webhooks say only *that* something changed.** The handler verifies the signature, stamps
+staleness markers in Postgres, returns 200, and makes **zero Intuit calls** — resolving a Payment
+event to the invoices it touched would need a read inside the handler, and a webhook that can call
+out is a webhook that times out. Payment and CreditMemo events name only the payment or memo, so
+they stamp the connection-wide `quickbooks_connections.qb_invoices_stale_since`; an Invoice event
+stamps that invoice's own `qb_stale_at`.
+
+**Opening the Invoices menu is what reads balances back** — one call to our own backend per open,
+and the *backend* decides whether Intuit is asked at all. It is asked when a link has never been
+checked, or its `qb_stale_at` is newer than its `qb_status_checked_at`, or the company marker is,
+or the last check is older than ten minutes. Otherwise the stored rows are returned with
+`checked: false` and Intuit never hears from us.
+
+**There is no "Check payment status" button, and that is the requirement**, not an omission: a
+button asks the user to know something they cannot know (whether the number in front of them is
+current). The ten-minute floor and the webhook markers exist so that opening the menu is enough.
+Reads are batched (`INVOICE_QUERY_CHUNK = 100` ids per query, `maxresults` 1000), so a job's whole
+menu is normally one Intuit call.
+
+A one-time backfill made every existing job current at launch; after that these two paths are the
+only things that write the mirror. **There is no scheduler and no poll** — see the deferred list.
+
 ## Editing gates (`utils/jobsAccess.ts`)
 
 - `updateJobPartQuantity` — floor is `max(qty_shipped, qty_invoiced)`; increases always
@@ -94,5 +201,21 @@ to `partially_invoiced` via a trigger.
 ## Not built (deferred)
 
 In-app void / credit-memo / correction of a created invoice (do it in QBO). Jigged's
-invoiced-qty reflects invoices *issued from Jigged*; a credit issued directly in QBO does
-not sync back.
+invoiced-qty reflects invoices *issued from Jigged*.
+
+**Corrected 2026-09-03:** this used to add *"a credit issued directly in QBO does not sync back"*,
+which is now wrong for half of what it covered. A **void or delete** in QuickBooks Online does come
+back — the mirror sets `voided_at` and the quantity reopens (above). A **credit memo** still does
+not: it is a separate QuickBooks transaction that leaves the invoice standing with a balance of its
+own, so Jigged keeps counting the original invoice's quantity as billed.
+
+Also deferred, each a piece of the AR subledger this product refuses
+([customers.md](customers.md#explicitly-not-built)):
+
+- **A paid date.** QBO reports a balance, not when it reached zero; the date would have to come from
+  Payment objects, which is the subledger.
+- **Aging buckets, statements, dunning.** QuickBooks ships three statement formats and automated
+  reminders — two engines means the AP clerk gets two past-due emails.
+- **Any scheduler or background poll** refreshing the mirror without someone opening the menu. The
+  webhook and the menu open are the only writers by design; a cron would call Intuit for jobs nobody
+  is looking at.

@@ -43,11 +43,29 @@ interface QuickBooksIntegrationCardProps {
   companyId: string;
 }
 
+/**
+ * The connection status as this card reads it.
+ *
+ * `webhook_last_received_at` is on the wire -- GET /{company}/status returns it
+ * from the connection row -- but is not yet declared on the shared
+ * `QuickBooksStatus`. Declared here as OPTIONAL rather than asserted with a cast:
+ * a `QuickBooksStatus` is assignable to this without one, and the only thing the
+ * card can conclude from a missing value is "no webhook has arrived", which is
+ * exactly what it renders. Fold it into `QuickBooksStatus` and delete this when
+ * that type is next touched.
+ */
+interface QuickBooksStatusView extends QuickBooksStatus {
+  /** When Intuit last told us something about this company changed. Null until
+   *  the first notification lands -- it carries no numbers, only the fact that
+   *  there is something to re-read. */
+  webhook_last_received_at?: string | null;
+}
+
 export default function QuickBooksIntegrationCard({ companyId }: QuickBooksIntegrationCardProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<QuickBooksStatus | null>(null);
+  const [status, setStatus] = useState<QuickBooksStatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -246,7 +264,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
       }
       statusChip={statusChip}
-      description="Push invoices from Jigged into QuickBooks. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
+      description="Push invoices from Jigged into QuickBooks, and read back what QuickBooks says about them — what’s still owed, and when it’s due. Jigged only ever adds invoices and reads; it never changes or deletes anything already in your QuickBooks."
     >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -352,10 +370,27 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               </Alert>
             )}
 
-            <Typography variant="body2" sx={{ mb: 3 }}>
+            <Typography variant="body2" sx={{ mb: 1 }}>
               {status?.qb_company_name
                 ? <>Connected to <strong>{status.qb_company_name}</strong>.</>
                 : 'QuickBooks is connected.'}
+            </Typography>
+
+            {/* Evidence that the inbound half of the integration is alive.
+                QuickBooks notifies us that something changed; the notification
+                carries no numbers, so nothing here is a balance -- it is a
+                timestamp, and its whole value is that an empty one is the single
+                visible symptom of a webhook that never got registered. Without
+                it the shop still sees correct payment status (opening a job's
+                Invoices menu re-reads anything older than ten minutes), just at
+                the cost of a round trip to Intuit every time, and nobody would
+                ever notice. */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              {status?.webhook_last_received_at
+                ? `Live payment updates from QuickBooks: last received ${formatReceivedAt(
+                    status.webhook_last_received_at,
+                  )}.`
+                : 'No live payment updates have arrived from QuickBooks yet. Payment status still refreshes whenever someone opens a job’s Invoices menu — but if this stays empty, the QuickBooks notification setup is worth checking.'}
             </Typography>
 
             {/* PO number placement.
@@ -438,6 +473,22 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   );
 }
 
+
+/** When Intuit last notified us, to the minute — the resolution that answers
+ *  "is this working right now". Falls back to the raw value rather than an empty
+ *  string, so an unparseable timestamp shows as something odd instead of turning
+ *  the sentence into "last received ." */
+function formatReceivedAt(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+}
 
 /** One of the two co-equal provider choices. Both buttons are `contained`: they
  *  are peers, and ranking them by giving one a border would imply a house

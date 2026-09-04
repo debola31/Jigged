@@ -179,6 +179,7 @@ fails, and so does a listed property nothing passes.
 | `accounting connection tested` | An explicit "Test connection" returns. `ok` false is the ordinary "QuickBooks isn't open right now" case, not an error — it is the denominator for how often a shop PC is actually reachable | `provider`, `ok`, `ms_elapsed` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
 | `accounting disconnected` | An admin disconnects the accounting system | `provider` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
 | `invoice pushed` | An invoice is created in QuickBooks from the job push dialog. `has_deep_link` is false for QuickBooks Desktop, which has no web page to link to | `provider`, `line_count`, `already_existed`, `has_deep_link` | [PushToQuickBooksDialog.tsx](../components/jobs/PushToQuickBooksDialog.tsx) |
+| `invoice status checked` | The job's Invoices menu opens and Jigged reconciles payment status with QuickBooks Online. There is no button — opening the menu is the whole trigger, and the backend decides whether Intuit is actually asked. **`checked` false is the interesting half**: it means nothing was stale, so QuickBooks was never called, which makes this event the denominator for how well the webhook path is doing its job — a rate stuck near 100% true says the webhook is not arriving and every menu open is paying for a round trip. **`ok` false is an Intuit outage or a connection that has lapsed, not a Jigged error**; the menu still shows the last answer QuickBooks gave, with its date. Counts only, never amounts — what an invoice is worth is the shop's business data | `ok`, `checked`, `invoice_count`, `paid_count`, `overdue_count`, `voided_count` | [InvoicesMenu.tsx](../components/jobs/InvoicesMenu.tsx) |
 
 <!-- registry:end -->
 
@@ -433,6 +434,16 @@ An empty `workflowIds`, with no workflow listing it in `detectorIds`, means down
 and then dropped. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
 behind the event. **Any new detector is silent until a workflow claims it** — the uptime UI does
 not warn about this.
+
+**There are two inbound webhooks to watch, and both need the same monitor.** Stripe's is the one
+above; Intuit's is `GET https://www.jigged.app/api/quickbooks/webhook`, expecting **405** — route
+reachable, method not allowed. The code is the whole diagnosis: `405` healthy · `307` the endpoint
+got registered on the **apex**, where Vercel's edge router redirects before the function runs (the
+2026-07-26 Stripe outage, [billing.md](modules/billing.md#the-production-webhook-url-must-be-wwwjiggedapp-verified-2026-08-03), and Intuit no
+more follows redirects than Stripe does) · `404` backend not deployed · `401` Vercel deployment
+protection. `GET` is deliberate on both: it never reaches the signature path, so the probe files no
+Sentry events. **Nothing in this repo creates either detector** — they are server-side config like
+everything else in this section, and Trap 2 applies to them equally.
 
 **What is deliberately not alerted.** Only *high* priority fires, and Sentry derives priority from
 level: `error`/`fatal` → high, `warning` → medium, `info`/`debug` → low. So the repo's deliberate

@@ -153,6 +153,14 @@ def test_the_probe_the_notes_design_forbids_is_finally_closed(shop):
                             "p_template_name": "x"}),
         ("inv_get_or_create_unassigned", {"p_company_id": "00000000-0000-0000-0000-000000000000"}),
         ("inv_location_path_label", {"p_location_id": "00000000-0000-0000-0000-000000000000"}),
+        # Not a definer helper but a backend-only writer, so function_execute_leaks()
+        # does not police it: what QuickBooks said about an invoice is written by the
+        # service-role backend after a read it made, and a browser-writable mirror
+        # would let anyone mark their own invoices paid.
+        ("apply_qbo_invoice_mirror", {"p_company_id": "00000000-0000-0000-0000-000000000000",
+                                      "p_realm_id": "realm-x",
+                                      "p_checked_at": "2026-01-01T00:00:00+00:00",
+                                      "p_rows": []}),
     ],
 )
 def test_internal_helpers_are_not_callable_from_the_browser(shop, fn, args):

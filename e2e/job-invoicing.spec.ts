@@ -4,18 +4,26 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 /**
  * E2E: create a QuickBooks invoice for a job (progressive, quantity-based).
  *
- * Seeds — via the service-role client — a job with all 10 shipped (so the line
- * is invoiceable, since invoicing is ship-capped) plus a fake-connected QBO
- * connection + customer map, then drives the UI: open the job → Create invoice →
- * the picker defaults to the shipped-unbilled qty → submit → the Invoices card
- * lists the new invoice.
+ * Seeds — via the service-role client — a job of 10 ordered with all 10 shipped,
+ * plus a fake-connected QBO connection + customer map, then drives the UI: open
+ * the job → Create invoice → the picker defaults to the shipped-unbilled qty →
+ * submit → the Invoices menu lists the new invoice and what QuickBooks says
+ * became of it.
+ *
+ * Shipping sets that DEFAULT; it is not what makes the line billable. Invoicing
+ * is ordered-capped, not ship-capped (docs/modules/invoicing.md → "Ordered-cap
+ * (not ship-cap)"): the 10 could have been invoiced before any packing slip
+ * existed, and the shipment is seeded so the picker arrives pre-filled at 10.
  *
  * The QuickBooks HTTP boundary is stubbed in the backend via QUICKBOOKS_FAKE
  * (set for FastAPI by e2e/run-stack.mjs), so no Intuit call is made — but
  * everything else runs for real: the connection + mapped-customer resolution,
  * the link + quickbooks_invoice_line_items persistence, the request-id
- * idempotency, and the invoicing_status triggers. If invoicing stops working
- * here it is a real regression — do NOT runtime-skip.
+ * idempotency, and the invoicing_status triggers. The same flag also makes the
+ * status read answer "balance 0 of a non-zero total" for every invoice, which is
+ * what the Paid chip at the end asserts on — everything between the menu open
+ * and that chip is the real code path. If invoicing stops working here it is a
+ * real regression — do NOT runtime-skip.
  */
 
 const REALM = 'e2e-realm';
@@ -137,7 +145,8 @@ async function seedInvoiceableJob(
     .select('id')
     .single();
   if (shipErr || !ship) throw new Error(`shipment seed: ${shipErr?.message}`);
-  // Ship all 10 → fulfillment triggers flip the line to fully_shipped; invoiceable = 10.
+  // Ship all 10 → fulfillment triggers flip the line to fully_shipped, which is
+  // what makes the picker pre-fill 10 (the ordered cap already allowed them).
   const { error: sliErr } = await a
     .from('shipment_line_items')
     .insert({ shipment_id: ship.id, job_part_id: jp.id, quantity: 10 });
@@ -214,6 +223,31 @@ test.describe('Job invoicing (QuickBooks)', () => {
       timeout: 15_000,
     });
     await page.getByRole('button', { name: /Invoices \(1\)/i }).click();
-    await expect(page.getByRole('menuitem').filter({ hasText: '$1,000.00' })).toBeVisible();
+    const invoiceItem = page.getByRole('menuitem').filter({ hasText: '$1,000.00' });
+    await expect(invoiceItem).toBeVisible();
+
+    // THAT ONE CLICK IS THE WHOLE ASSERTION. Opening the menu is also what brings
+    // the payment mirror up to date, so everything below has to appear with no
+    // further interaction: POST …/invoice-status → fetch_invoice_facts →
+    // apply_qbo_invoice_mirror → the menu's Supabase re-read. Under
+    // QUICKBOOKS_FAKE every invoice comes back with a zero balance, so the
+    // derived status is `paid`. Matched EXACTLY, which is what makes this the
+    // chip and not the row's own "Paid · as of …" line — the chip is the part a
+    // shop owner reads at a glance, so it is the part worth pinning.
+    await expect(invoiceItem.getByText('Paid', { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // A chip with no date is the failure this caption exists to prevent — a
+    // cached balance read as a live one — so the freshness line is asserted
+    // alongside it. Matched loosely and without AM/PM on purpose: the value is a
+    // real local timestamp, and ICU separates the meridiem with a narrow no-break
+    // space that is not worth encoding here.
+    await expect(page.getByText(/Checked \w{3} \d{1,2}, \d{1,2}:\d{2}/)).toBeVisible();
+
+    // And nothing to press. The refresh is automatic by design; a "check payment
+    // status" action would be a second, unbounded way to spend an Intuit call
+    // (components/jobs/InvoicesMenu.tsx → reconcilePaymentStatus).
+    await expect(page.getByRole('menuitem', { name: /check payment/i })).toHaveCount(0);
   });
 });

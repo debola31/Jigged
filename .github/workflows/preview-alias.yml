@@ -57,11 +57,14 @@ concurrency:
   group: preview-alias
   cancel-in-progress: true
 
-# `contents: read` is for the SHA → branch fallback in the step below, which asks
-# GitHub what branch a commit is the head of rather than trusting Vercel to report
-# it. Everything else here still only calls Vercel.
+# Both are for the SHA → branch fallback in the step below, which asks GitHub what
+# branch a commit belongs to rather than trusting Vercel to report it:
+# `contents: read` for branches-where-head, `pull-requests: read` for the
+# commits/{sha}/pulls lookup that covers a commit the branch has moved past.
+# Everything else here still only calls Vercel.
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   alias:
@@ -141,15 +144,30 @@ jobs:
             echo "::warning::Vercel deployment lookup returned HTTP ${HTTP} for ${HOST}. If 401/403, VERCEL_TOKEN has expired or lost scope; regenerate it and update the repository secret."
           fi
 
-          # Fallback: ask GitHub which branch this commit heads. `deployment_status`
-          # gives a SHA rather than a branch name, so this is the missing lookup —
-          # and it returns nothing if the branch has already moved past that commit,
-          # which is the right answer anyway (a newer deployment is on its way).
+          # Fallback: ask GitHub which branch this commit belongs to.
+          # `deployment_status` gives a SHA rather than a branch name, so this is
+          # the lookup that was missing. TWO endpoints, in this order, because the
+          # obvious one alone is not enough:
+          #
+          #   branches-where-head — exact, but matches only a commit that is STILL
+          #     the branch tip. Two pushes in quick succession leave the first
+          #     deployment's commit superseded before its alias job runs, and this
+          #     then answers "none" for a branch that plainly exists. Measured on
+          #     129c00e6 while adding this.
+          #   commits/{sha}/pulls — answers for any commit in an open PR, which is
+          #     exactly the case above and the case this workflow exists to serve.
+          #
+          # Neither needs a Vercel credential, which is the point: the branch is a
+          # GitHub fact and asking Vercel for it added a dependency for nothing.
           if [ -z "${BRANCH}" ]; then
             for CANDIDATE in "${DEPLOY_SHA}" "${DEPLOY_REF}"; do
               [ -z "${CANDIDATE}" ] && continue
               BRANCH=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE}/branches-where-head" \
                 --jq '.[0].name // empty' 2>/dev/null) || BRANCH=""
+              if [ -z "${BRANCH}" ]; then
+                BRANCH=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${CANDIDATE}/pulls" \
+                  --jq '.[0].head.ref // empty' 2>/dev/null) || BRANCH=""
+              fi
               if [ -n "${BRANCH}" ]; then
                 echo "Vercel reported no branch; GitHub resolved ${CANDIDATE:0:8} → ${BRANCH}."
                 break

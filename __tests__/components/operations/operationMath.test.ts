@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  completionConsequenceCaption,
   operationCompletionConsequence,
   operationQtyRemaining,
-  completionConsequenceCaption,
+  outsideReceiptCaption,
+  outsideReceiptConsequence,
+  outsideSendCaption,
+  outsideSendConsequence,
 } from '@/components/operations/operationMath';
 
 // Acceptance criteria AC1–AC5, now in
@@ -54,5 +58,45 @@ describe('completionConsequenceCaption', () => {
     expect(completionConsequenceCaption({ kind: 'full' })).toBe('Completes this operation');
     expect(completionConsequenceCaption({ kind: 'partial', leftover: 6 })).toBe('6 will remain');
     expect(completionConsequenceCaption({ kind: 'over', excess: 21 })).toBe('Over by 21');
+  });
+});
+
+describe('outsideSendConsequence', () => {
+  it('says nothing at zero', () => {
+    expect(outsideSendConsequence(0, 100)).toEqual({ kind: 'none' });
+    expect(outsideSendConsequence('', 100)).toEqual({ kind: 'none' });
+  });
+
+  it('names what stays in the shop on a partial send — the whole reason for the picker', () => {
+    expect(outsideSendConsequence(50, 100)).toEqual({ kind: 'partial', staying: 50 });
+    expect(outsideSendCaption(outsideSendConsequence(50, 100), 'ProFinish'))
+      .toBe('50 will stay in the shop.');
+  });
+
+  it('warns on an over-send without blocking it', () => {
+    // You made extras, or the plater wants the whole lot in one rack.
+    const c = outsideSendConsequence(120, 100);
+    expect(c).toEqual({ kind: 'over', excess: 20 });
+    expect(outsideSendCaption(c, 'ProFinish')).toMatch(/fine/i);
+  });
+});
+
+describe('outsideReceiptConsequence', () => {
+  it('closes the slip when good + scrapped accounts for everything that went out', () => {
+    // 98 back and 2 the plater ruined: nothing is on their rack any more, even
+    // though the step is still two pieces short.
+    expect(outsideReceiptConsequence(98, 2, 100)).toEqual({ kind: 'closes' });
+  });
+
+  it('leaves the rest at the vendor on a partial return', () => {
+    expect(outsideReceiptConsequence(60, 0, 100)).toEqual({ kind: 'partial', stillOut: 40 });
+    expect(outsideReceiptCaption(outsideReceiptConsequence(60, 0, 100), 'ProFinish'))
+      .toBe('40 still at ProFinish on this slip.');
+  });
+
+  it('flags a receipt bigger than the slip — usually the wrong slip', () => {
+    const c = outsideReceiptConsequence(120, 0, 100);
+    expect(c).toEqual({ kind: 'over', excess: 20 });
+    expect(outsideReceiptCaption(c, 'ProFinish')).toMatch(/check the slip number/i);
   });
 });

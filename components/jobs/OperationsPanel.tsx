@@ -18,11 +18,16 @@ import {
   completeJobOperation,
   undoJobOperation,
 } from '@/utils/jobsAccess';
+import { isOutsideOperation } from '@/types/job';
+import type { OutsideOperationSummary } from '@/types/outsideShipment';
 import {
-  markOperationSent,
-  markOperationReceived,
-  revertOperationCompletion,
-} from '@/utils/operatorAccess';
+  createOutsideShipment,
+  getOpenOutsideShipments,
+  getOutsideSummariesForPart,
+  receiveOutsideOperation,
+  receiveOutsideShipment,
+  undoLastOutsideMovement,
+} from '@/utils/outsideShipmentsAccess';
 import {
   CompletionConflictError,
   getOperationCompletionSummaries,
@@ -33,9 +38,33 @@ import type { OperationActuals } from '@/types/operationInterval';
 import { useSearchParams } from 'next/navigation';
 import OperationCard from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
+import SendToVendorDialog, { type SendToVendorSubmit } from './SendToVendorDialog';
+import ReceiveFromVendorDialog, {
+  type OpenSlipOption,
+  type ReceiveFromVendorSubmit,
+} from './ReceiveFromVendorDialog';
+import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 
 const EMPTY_SUMMARY_MAP: Map<string, OperationCompletionSummary> = new Map();
 const EMPTY_ACTUALS_MAP: Map<string, OperationActuals> = new Map();
+const EMPTY_OUTSIDE_MAP: Map<string, OutsideOperationSummary> = new Map();
+
+/**
+ * Days at the vendor, BUCKETED. A raw per-slip duration answers nothing the
+ * bucket does not, and 21 days is already the shop-facing threshold the vendor
+ * page paints red -- so the analytics boundary is the same one the product
+ * draws. Buckets, not a number, also keeps this shape-only per the telemetry
+ * convention.
+ */
+function daysAtVendorBucket(shippedAt: string | null): string {
+  if (!shippedAt) return 'unknown';
+  const days = (Date.now() - Date.parse(shippedAt)) / 86_400_000;
+  if (days < 1) return 'same_day';
+  if (days <= 3) return '1_3d';
+  if (days <= 7) return '4_7d';
+  if (days <= 21) return '8_21d';
+  return 'over_21d';
+}
 
 interface OperationsPanelProps {
   job: Job;
@@ -80,6 +109,18 @@ export default function OperationsPanel({
     return next;
   }, [partIdsKey]);
   const summaryByOp = summaryData ?? EMPTY_SUMMARY_MAP;
+
+  // The outside quantity ledger, loaded per PART for the same reason the
+  // completion summaries are: one pass per part rather than one per operation.
+  // Same primitive dep -- useLoad rejects an object literal at runtime.
+  const { data: outsideData, reload: reloadOutside } = useLoad(async () => {
+    const partIds = partIdsKey ? partIdsKey.split(',') : [];
+    const perPart = await Promise.all(partIds.map((id) => getOutsideSummariesForPart(id)));
+    const next = new Map<string, OutsideOperationSummary>();
+    for (const rows of perPart) for (const r of rows) next.set(r.job_operation_id, r);
+    return next;
+  }, [partIdsKey]);
+  const outsideByOp = outsideData ?? EMPTY_OUTSIDE_MAP;
 
   // Recorded time per op, keyed the same way. AGGREGATE AND WITHOUT OPERATOR
   // IDENTITY — `get_operation_actuals` cannot return it, because a row-returning
@@ -240,13 +281,23 @@ export default function OperationsPanel({
       // Outside ops step back through their own lifecycle (received → sent →
       // pending); internal ops void their completion events.
       const op = operations.find((o) => o.id === operationId);
-      if (op?.vendor_service_id ?? op?.vendor_service) {
-        await revertOperationCompletion(operationId);
+      // An outside op steps back exactly ONE movement -- the newest receipt if
+      // there is one, else the newest slip. Never both, never skipped.
+      if (op && isOutsideOperation(op)) {
+        const { undid } = await undoLastOutsideMovement(operationId);
+        showSnackbar(
+          undid === 'receipt'
+            ? 'Last receipt undone — those pieces are back at the vendor.'
+            : undid === 'shipment'
+              ? 'Last slip voided — those pieces are back in the shop.'
+              : 'Nothing to undo on this step.',
+          'info',
+        );
       } else {
         await undoJobOperation(operationId);
+        showSnackbar('Operation reverted', 'info');
       }
-      showSnackbar('Operation reverted', 'info');
-      await Promise.all([reloadSummaries(), reloadActuals()]);
+      await Promise.all([reloadSummaries(), reloadActuals(), reloadOutside()]);
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to undo operation', 'error');
@@ -255,36 +306,104 @@ export default function OperationsPanel({
     }
   };
 
-  // Outside (external-vendor) op actions — the part leaves the shop and comes
-  // back. markOperationSent/Received live in operatorAccess and are shared with
-  // the operator view and the Outside-work tab.
-  const handleSend = async (operationId: string) => {
+  /**
+   * SHIPPING IS THE SEND. These no longer write anything themselves -- they open
+   * a dialog, because a send now needs a quantity, a ship-to and a slip. The
+   * database refuses a hand-written status on an outside op, so there is no
+   * shorter path left to take.
+   */
+  const [sendOp, setSendOp] = useState<JobOperation | null>(null);
+  const [receiveOp, setReceiveOp] = useState<JobOperation | null>(null);
+  const [openSlips, setOpenSlips] = useState<OpenSlipOption[]>([]);
+  const [previewSlipId, setPreviewSlipId] = useState<string | null>(null);
+
+  const handleSend = (operationId: string) => {
+    setSendOp(operations.find((o) => o.id === operationId) ?? null);
+  };
+
+  const handleReceive = async (operationId: string) => {
+    const op = operations.find((o) => o.id === operationId) ?? null;
     setLoading(true);
     try {
-      await markOperationSent(operationId);
-      showSnackbar('Marked sent out to the vendor.', 'info');
-      await Promise.all([reloadSummaries(), reloadActuals()]);
-      onOperationUpdate();
+      const slips = await getOpenOutsideShipments(operationId);
+      setOpenSlips(
+        slips.map((s) => ({
+          id: s.id,
+          slip_number: s.slip_number,
+          shipped_at: s.shipped_at,
+          outstanding: s.outstanding,
+        })),
+      );
+      setReceiveOp(op);
     } catch (err) {
-      showSnackbar(err instanceof Error ? err.message : 'Failed to mark sent', 'error');
+      showSnackbar(err instanceof Error ? err.message : 'Failed to load the open slips', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleReceive = async (operationId: string) => {
+  const submitSend = async (v: SendToVendorSubmit) => {
+    if (!sendOp) return;
     setLoading(true);
     try {
-      const result = await markOperationReceived(operationId);
-      if (result.job_completed) {
-        showSnackbar('Parts received — job marked as completed!', 'success');
-      } else {
-        showSnackbar('Marked received from the vendor.', 'success');
-      }
-      await Promise.all([reloadSummaries(), reloadActuals()]);
+      const before = outsideByOp.get(sendOp.id);
+      const { shipmentId, slipNumber } = await createOutsideShipment({
+        jobOperationId: sendOp.id,
+        quantity: v.quantity,
+        dueBackOn: v.dueBackOn,
+        vendorAddressId: v.vendorAddressId,
+        notes: v.notes,
+      });
+      posthog.capture('outside shipment created', {
+        surface: 'office',
+        is_partial: v.quantity < (before?.qty_to_send ?? v.quantity),
+        shipment_index: (before?.open_slip_count ?? 0) + 1,
+        has_due_back_date: Boolean(v.dueBackOn),
+        has_instructions: Boolean(v.notes),
+        has_ship_to_address: Boolean(v.vendorAddressId),
+      });
+      setSendOp(null);
+      showSnackbar(`Sent ${v.quantity} — slip ${slipNumber}`, 'success');
+      await Promise.all([reloadSummaries(), reloadActuals(), reloadOutside()]);
+      onOperationUpdate();
+      // Open the slip straight away: it has to go in the box, and making the
+      // shipper hunt for it is how it ends up not printed.
+      setPreviewSlipId(shipmentId);
+    } catch (err) {
+      showSnackbar(err instanceof Error ? err.message : 'Failed to send', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitReceive = async (v: ReceiveFromVendorSubmit) => {
+    if (!receiveOp) return;
+    setLoading(true);
+    try {
+      const slip = openSlips.find((s) => s.id === v.shipmentId);
+      const shippedAt = slip?.shipped_at ?? null;
+      const result = v.shipmentId
+        ? await receiveOutsideShipment(v.shipmentId, {
+            quantityGood: v.quantityGood,
+            quantityScrapped: v.quantityScrapped,
+          }).then(() => ({ wasBackfilled: false }))
+        : await receiveOutsideOperation(receiveOp.id, {
+            quantityGood: v.quantityGood,
+            quantityScrapped: v.quantityScrapped,
+          });
+      posthog.capture('outside shipment received', {
+        surface: 'office',
+        is_full: slip ? v.quantityGood + v.quantityScrapped >= slip.outstanding : true,
+        had_scrap: v.quantityScrapped > 0,
+        was_backfilled: result.wasBackfilled,
+        days_at_vendor_bucket: daysAtVendorBucket(shippedAt),
+      });
+      setReceiveOp(null);
+      showSnackbar(`Recorded ${v.quantityGood} back from the vendor.`, 'success');
+      await Promise.all([reloadSummaries(), reloadActuals(), reloadOutside()]);
       onOperationUpdate();
     } catch (err) {
-      showSnackbar(err instanceof Error ? err.message : 'Failed to mark received', 'error');
+      showSnackbar(err instanceof Error ? err.message : 'Failed to record the receipt', 'error');
     } finally {
       setLoading(false);
     }
@@ -357,6 +476,8 @@ export default function OperationsPanel({
                 operation={operation}
                 companyId={job.company_id}
                 summary={summaryByOp.get(operation.id)}
+                outside={outsideByOp.get(operation.id)}
+                onViewSlip={setPreviewSlipId}
                 disabled={isDisabled}
                 stepNotes={notesByOperation?.get(operation.id)}
                 onComplete={handleOpenComplete}
@@ -375,6 +496,46 @@ export default function OperationsPanel({
           </Box>
         </CardContent>
       </Card>
+
+      {sendOp && (
+        <SendToVendorDialog
+          open
+          vendorId={sendOp.vendor_service?.vendor?.id ?? null}
+          vendorName={sendOp.vendor_service?.vendor?.name ?? 'the vendor'}
+          operationName={sendOp.operation_name}
+          partName={sendOp.vendor_service?.name ?? sendOp.operation_name}
+          qtyToSend={outsideByOp.get(sendOp.id)?.qty_to_send ?? 0}
+          defaultInstructions={sendOp.instructions}
+          busy={loading}
+          onClose={() => setSendOp(null)}
+          onSubmit={submitSend}
+        />
+      )}
+
+      {receiveOp && (
+        <ReceiveFromVendorDialog
+          open
+          vendorName={receiveOp.vendor_service?.vendor?.name ?? 'the vendor'}
+          operationName={receiveOp.operation_name}
+          partName={receiveOp.vendor_service?.name ?? receiveOp.operation_name}
+          openSlips={openSlips}
+          busy={loading}
+          onClose={() => setReceiveOp(null)}
+          onSubmit={submitReceive}
+        />
+      )}
+
+      <OutsideShipmentPreviewDialog
+        open={previewSlipId !== null}
+        shipmentId={previewSlipId}
+        onClose={() => setPreviewSlipId(null)}
+        onVoided={() => {
+          reloadSummaries();
+          reloadActuals();
+          reloadOutside();
+          onOperationUpdate();
+        }}
+      />
 
       {dialogOp && (
         <OperationCompleteDialog

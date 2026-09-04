@@ -17,6 +17,7 @@ import CategoryIcon from '@mui/icons-material/Category';
 import WarehouseIcon from '@mui/icons-material/WarehouseOutlined';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import FactoryIcon from '@mui/icons-material/Factory';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -54,6 +55,10 @@ const menuItems: MenuItem[] = [
   { name: 'Storage', path: '/inventory/locations', icon: WarehouseIcon },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
+  // Read and reprint only -- SLIPS, not operations. Send, receive and undo stay
+  // on the job, which is what keeps this from being the second action surface
+  // that got the outside-work TAB deleted in Aug 2026.
+  { name: 'Outside work', path: '/outside-work', icon: LocalShippingIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
   // Utility area (near Team/Settings): the recurring, low-emphasis entry to the unified
   // data importer. Onboarding discoverability lives on the empty-dashboard Get-started

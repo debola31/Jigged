@@ -41,6 +41,12 @@ export interface JobOperation {
   sent_at: string | null;
   sent_by: string | null;
   notes: string | null;
+  /**
+   * Snapshotted from the routing step. For an outside op this is what the shop
+   * already wrote about the process, so it is the natural first draft of what to
+   * tell the vendor on the slip.
+   */
+  instructions?: string | null;
   created_at: string;
   updated_at: string;
   /** Non-null iff this op is performed by an outside vendor. */

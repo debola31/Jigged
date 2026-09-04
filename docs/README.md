@@ -37,7 +37,9 @@ Detailed specs live in [modules/](modules/).
 [jobs.md](modules/jobs.md) ·
 [work-centers.md](modules/work-centers.md) — owns the station = work-centre definition and the
 `operation_types` terminology history ·
-[vendors.md](modules/vendors.md) · [shipments.md](modules/shipments.md)
+[vendors.md](modules/vendors.md) · [shipments.md](modules/shipments.md) ·
+[outside-processing.md](modules/outside-processing.md) — shipping parts out to a vendor and
+receiving them back; owns the quantity-derived outside-op status and the trigger-depth trap
 
 **Shop floor:** [operator-view.md](modules/operator-view.md) — screens, quantity capture, the
 notes read-back loop, and the operator journeys ·

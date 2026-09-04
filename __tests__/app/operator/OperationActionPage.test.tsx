@@ -52,8 +52,6 @@ vi.mock('@/utils/operatorAccess', () => ({
   getOperatorOperationDetail: vi.fn(),
   getCurrentMember: vi.fn(async () => ({ id: 'acc1', name: 'Diego', user_id: 'u1' })),
   revertOperationCompletion: vi.fn(async () => undefined),
-  markOperationSent: vi.fn(),
-  markOperationReceived: vi.fn(),
   // B4: the page now writes the note itself, through useNoteCapture.
   addJobNote: vi.fn(async () => ({ id: 'note1', media: [] })),
 }));

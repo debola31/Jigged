@@ -44,7 +44,7 @@ import { isJobClosed } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import type { JobNote } from '@/types/operator';
 import { getJobNotes } from '@/utils/operatorAccess';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, OutsideShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
@@ -398,6 +398,14 @@ export default function JobDetailPage() {
               disabled={actionLoading}
             />
           )}
+          {/* Renders nothing when the job has no outside work, so it costs no
+              toolbar room on a shop that does none. */}
+          <OutsideShipmentsMenu
+            jobId={jobId}
+            refreshKey={historyRefreshKey}
+            onVoided={fetchJob}
+            disabled={actionLoading}
+          />
           {parts.length > 0 && (
             <InvoicesMenu
               companyId={companyId}

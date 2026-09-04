@@ -18,6 +18,8 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 import { isOutsideOperation } from '@/types/job';
+import type { OutsideOperationSummary, OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import { getOutsideShipmentsForOperation, outstandingOn } from '@/utils/outsideShipmentsAccess';
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
 import type { OperationCompletionSummary, OperationCompletionEvent } from '@/types/operationCompletion';
@@ -49,6 +51,14 @@ interface OperationCardProps {
   onUndo: (operationId: string) => void;
   /** Outside-op actions. Required in practice when the op is external; the panel
    *  wires them to operatorAccess.markOperationSent / markOperationReceived. */
+  /**
+   * The outside quantity ledger for this op. Absent for an in-house op, and
+   * absent for an outside op whose summary has not loaded yet — the buttons
+   * stay disabled rather than guessing a quantity.
+   */
+  outside?: OutsideOperationSummary;
+  /** Open the slip preview. Omitted on surfaces that should not reprint. */
+  onViewSlip?: (shipmentId: string) => void;
   onSend?: (operationId: string) => void;
   onReceive?: (operationId: string) => void;
   /** Called after a per-event void so the panel can refresh summaries + parent. */
@@ -85,11 +95,15 @@ export default function OperationCard({
   stepNotes = [],
   onComplete,
   onUndo,
+  outside,
+  onViewSlip,
   onSend,
   onReceive,
   onCompletionsChanged,
 }: OperationCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [slips, setSlips] = useState<OutsideShipmentWithRelations[]>([]);
+  const [slipsLoading, setSlipsLoading] = useState(false);
   const [events, setEvents] = useState<OperationCompletionEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [voidingId, setVoidingId] = useState<string | null>(null);
@@ -123,10 +137,27 @@ export default function OperationCard({
   // Load the completion history lazily on expand (in the click handler, not an
   // effect, so there's no setState-in-effect cascade). External ops have no
   // completion events, so skip the fetch.
+  const loadSlips = async () => {
+    setSlipsLoading(true);
+    try {
+      setSlips(await getOutsideShipmentsForOperation(operation.id));
+    } catch {
+      setSlips([]);
+    } finally {
+      setSlipsLoading(false);
+    }
+  };
+
+  // Loaded in the click handler, not an effect, so there is no
+  // setState-in-effect cascade. An outside op has no completion events -- it has
+  // SLIPS, which is a different history and the primary answer to "what has been
+  // shipped out" without inventing a new surface for it.
   const handleToggleExpand = () => {
     const next = !expanded;
     setExpanded(next);
-    if (next && !isExternal) loadEvents();
+    if (!next) return;
+    if (isExternal) loadSlips();
+    else loadEvents();
   };
 
   const handleVoidEvent = async (completionId: string) => {
@@ -140,11 +171,23 @@ export default function OperationCard({
     }
   };
 
-  // Internal: any not-done op shows Complete; a completed op shows Undo. External
-  // ops never show Complete — a pending op offers both Mark Sent Out and Mark
-  // Received; a sent op offers Mark Received; both send and receipt can be undone.
+  // Internal: any not-done op shows Complete; a completed op shows Undo. Outside
+  // ops never show Complete.
+  //
+  // OUTSIDE GATES ARE QUANTITY-BASED, NOT STATUS-BASED, and that single change is
+  // what makes send-50-now-50-later reachable: a `sent` op with 50 still in the
+  // shop must keep offering Send. Gating on `status === 'pending'` -- what this
+  // did -- hides the button the moment the first slip exists.
   const canComplete = !isExternal && status !== 'completed';
-  const canUndo = status === 'completed' || (isExternal && status === 'sent');
+  const canSend = isExternal && !!outside && outside.qty_to_send > 0;
+  // The second clause preserves the after-the-fact case: nobody made a slip and
+  // the parts came back anyway.
+  const canReceive =
+    isExternal && !!outside &&
+    (outside.qty_at_vendor > 0 || (outside.qty_sent === 0 && outside.qty_good === 0));
+  const canUndo = isExternal
+    ? !!outside && (outside.qty_sent > 0 || outside.qty_good > 0)
+    : status === 'completed';
 
   const formatDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '—';
@@ -236,11 +279,15 @@ export default function OperationCard({
               )}
             </Box>
           )}
-          {isExternal && status === 'sent' && operation.sent_at && (
+          {isExternal && outside && outside.qty_at_vendor > 0 && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
               <LocalShippingIcon sx={{ fontSize: 14, color: 'warning.main' }} />
               <Typography variant="caption" color="text.secondary">
-                At vendor since {formatDateTime(operation.sent_at)}
+                {outside.qty_at_vendor} at {vendorName ?? 'the vendor'} since{' '}
+                {formatDateTime(outside.oldest_open_shipped_at)}
+                {outside.earliest_due_back_on
+                  ? ` · due back ${formatDateTime(outside.earliest_due_back_on)}`
+                  : ''}
               </Typography>
             </Box>
           )}
@@ -263,6 +310,27 @@ export default function OperationCard({
             >
               {qtyGood} / {target} good
               {qtyRemaining > 0 ? ` · ${qtyRemaining} remaining` : ''}
+            </Typography>
+          )}
+          {/* The outside ledger, in the shop's own words. Every zero clause is
+              dropped -- "0 scrapped" is noise on a job that had none. */}
+          {isExternal && outside && outside.qty_ordered > 0 && (
+            <Typography
+              variant="caption"
+              sx={{
+                display: 'block',
+                mt: 0.5,
+                color: outside.qty_good >= outside.qty_ordered ? 'success.main' : 'warning.main',
+              }}
+            >
+              {[
+                `${outside.qty_good} / ${outside.qty_ordered} back`,
+                outside.qty_at_vendor > 0 ? `${outside.qty_at_vendor} at vendor` : '',
+                outside.qty_scrapped > 0 ? `${outside.qty_scrapped} scrapped` : '',
+                outside.qty_to_send > 0 ? `${outside.qty_to_send} to send` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </Typography>
           )}
         </Box>
@@ -293,8 +361,8 @@ export default function OperationCard({
 
           {/* Outside op: Mark Sent Out (only while pending) + Mark Received
               (while pending or sent — sent is an optional waypoint). */}
-          {isExternal && status === 'pending' && onSend && (
-            <Tooltip title="Mark parts sent out to the vendor">
+          {canSend && onSend && (
+            <Tooltip title={`Ship ${outside?.qty_to_send ?? 0} to the vendor and print the slip`}>
               <span>
                 <Button
                   size="small"
@@ -304,12 +372,12 @@ export default function OperationCard({
                   onClick={() => onSend(operation.id)}
                   disabled={disabled}
                 >
-                  Mark Sent Out
+                  Send to {vendorName ?? 'vendor'}
                 </Button>
               </span>
             </Tooltip>
           )}
-          {isExternal && (status === 'pending' || status === 'sent') && onReceive && (
+          {canReceive && onReceive && (
             <Tooltip title="Mark parts received back from the vendor">
               <span>
                 <Button
@@ -320,7 +388,7 @@ export default function OperationCard({
                   onClick={() => onReceive(operation.id)}
                   disabled={disabled}
                 >
-                  Mark Received
+                  Receive{outside && outside.qty_at_vendor > 0 ? ` ${outside.qty_at_vendor}` : ''}
                 </Button>
               </span>
             </Tooltip>
@@ -386,9 +454,64 @@ export default function OperationCard({
             mt: 0,
           }}
         >
+          {/* Slip history — an outside op has no completion events; it has
+              DOCUMENTS. Numbered, printable and voidable, which is why this is
+              the primary answer to "what has been shipped out" and costs no new
+              surface to give. Void is deliberately NOT here: it lives inside the
+              slip preview, so the destructive action is only reachable once the
+              document is on screen. */}
+          {isExternal && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Outside slips
+              </Typography>
+              {slipsLoading ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Loading…
+                </Typography>
+              ) : slips.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Nothing has gone out for this step yet
+                </Typography>
+              ) : (
+                <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  {slips.map((sl) => {
+                    const voided = sl.voided_at !== null;
+                    const live = (sl.receipts ?? []).filter((r) => !r.voided_at);
+                    const good = live.reduce((n, r) => n + Number(r.quantity_good), 0);
+                    const scrap = live.reduce((n, r) => n + Number(r.quantity_scrapped), 0);
+                    const out = outstandingOn(sl);
+                    return (
+                      <Box
+                        key={sl.id}
+                        sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: voided ? 0.5 : 1 }}
+                      >
+                        <Typography
+                          variant="body2"
+                          sx={{ flex: 1, textDecoration: voided ? 'line-through' : 'none' }}
+                        >
+                          {sl.slip_number} · {sl.quantity} sent {formatDateTime(sl.shipped_at)}
+                          {good > 0 ? ` · ${good} back` : ''}
+                          {scrap > 0 ? `, ${scrap} scrapped` : ''}
+                          {!voided && out > 0 ? ` · ${out} still out` : ''}
+                          {voided ? ' · voided' : ''}
+                        </Typography>
+                        {onViewSlip && (
+                          <Button size="small" onClick={() => onViewSlip(sl.id)} sx={{ minWidth: 0 }}>
+                            View slip
+                          </Button>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
+            </Box>
+          )}
+
           {/* Completion history — who completed how many, when. Voided events
               stay on record (struck through) so corrections are auditable. */}
-          <Box sx={{ mt: 2 }}>
+          {!isExternal && <Box sx={{ mt: 2 }}>
             <Typography variant="caption" color="text.secondary" fontWeight={600}>
               Completion history
             </Typography>
@@ -435,7 +558,7 @@ export default function OperationCard({
                 })}
               </Box>
             )}
-          </Box>
+          </Box>}
 
           {/* Admin note captured at completion (Complete modal). */}
           {operation.notes && (

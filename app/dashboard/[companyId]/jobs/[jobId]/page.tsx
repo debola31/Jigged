@@ -587,6 +587,10 @@ export default function JobDetailPage() {
                             onOperationUpdate={fetchJob}
                             disabled={actionLoading}
                             notesByOperation={notesByOperation}
+                            // The outside-send dialog names the part in its
+                            // subtitle; without this it would repeat the process
+                            // name twice, which reads as a rendering bug.
+                            partName={part.parts?.part_name ?? null}
                           />
                         ) : (
                           <Typography

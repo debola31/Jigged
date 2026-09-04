@@ -114,6 +114,17 @@ good back and 20 never returned: the op is done, and testing outstanding first w
 | 100 out, 98 good, **0 scrapped** | Outstanding 2 → stays **`sent`**. As far as the shop knows, 2 pieces are on someone's rack. Booking them as scrapped is a decision a person takes. |
 | A part-quantity edit | **The 2026-08-23 hazard is closed by construction, not by a guard.** The exemption existed because `recompute_job_ops_status_from_part_qty()` runs the status function over every op on the part and a `sent` op reset to `pending`. The outside arm reads shipments and receipts; a quantity edit writes neither. `sent_at` survives for the same reason — it is a mirror, not the record. |
 
+### "How many still have to go out" is not `ordered − sent`
+
+`qty_to_send` is **`ordered − good − at_vendor`**, and the difference matters the first time a
+vendor scraps something. Send 12, get 10 good and 2 scrapped: `ordered − sent` says **0** while the
+job is still two parts short, so the shop is offered a dead button and no way to act. The pieces the
+vendor ruined have to be re-run and sent again, so they reappear in what is left to send.
+
+*Found by driving the app, not by a test — the arithmetic was self-consistent and every unit test
+passed. What gave it away was a disabled `SEND 0 TO PROFINISH ANODIZING` on a job that was
+visibly two parts light.*
+
 ---
 
 ## The write surface, and why it is shaped this way

@@ -119,7 +119,11 @@ export interface OutsideOperationSummary {
   qty_scrapped: number;
   /** sent − (good + scrapped), clamped at 0. What is physically at the vendor. */
   qty_at_vendor: number;
-  /** ordered − sent, clamped at 0. What has never left the building. */
+  /**
+   * What still has to go through the process: ordered − good − at_vendor,
+   * clamped at 0. Deliberately NOT ordered − sent, which counts a piece the
+   * vendor scrapped as satisfied and leaves the job short with nothing to send.
+   */
   qty_to_send: number;
   /** shipped_at of the oldest slip with anything still out. Null when nothing is out. */
   oldest_open_shipped_at: string | null;

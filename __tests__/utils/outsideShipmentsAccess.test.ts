@@ -141,11 +141,33 @@ describe('getOutsideSummariesForPart', () => {
     expect(row.qty_scrapped).toBe(2);
     // s1 is fully accounted for (58 + 2 = 60); only s2's 40 are still out.
     expect(row.qty_at_vendor).toBe(40);
-    expect(row.qty_to_send).toBe(0);
+    // ordered 100 − good 58 − at_vendor 40 = 2: the pieces the vendor scrapped
+    // have to be re-run and sent again. `ordered − sent` would say 0 here and
+    // leave the job two parts short with nothing to send.
+    expect(row.qty_to_send).toBe(2);
     expect(row.open_slip_count).toBe(1);
     // s1 is closed, so its due date must not be the one the UI chases.
     expect(row.oldest_open_shipped_at).toBe('2026-08-05T00:00:00Z');
     expect(row.earliest_due_back_on).toBeNull();
+  });
+
+  it('counts scrapped pieces back into what still has to be sent', async () => {
+    // Everything ordered went out, 10 came back good and the vendor ruined 2.
+    // Nothing is at the vendor and the step is two short, so two still have to
+    // be re-run and sent -- which is the case that surfaced a dead "SEND 0"
+    // button when this was `ordered - sent`.
+    queueBuilders([
+      buildQueryStub({
+        data: [{ id: 'op-out', vendor_service_id: 'vs-1', job_part: { quantity: 12 } }],
+      }),
+      buildQueryStub({ data: [{ id: 's1', job_operation_id: 'op-out', quantity: 12, shipped_at: 'x', due_back_on: null }] }),
+      buildQueryStub({
+        data: [{ job_operation_id: 'op-out', outside_shipment_id: 's1', quantity_good: 10, quantity_scrapped: 2 }],
+      }),
+    ]);
+    const [row] = await getOutsideSummariesForPart('jp-1');
+    expect(row.qty_at_vendor).toBe(0);
+    expect(row.qty_to_send).toBe(2);
   });
 
   it('clamps at zero rather than reporting a negative backlog when more came back than went out', async () => {

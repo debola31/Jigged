@@ -475,7 +475,13 @@ export async function getOutsideSummariesForPart(
       qty_good: good,
       qty_scrapped: scrapped,
       qty_at_vendor: roundQty(Math.max(0, sent - good - scrapped)),
-      qty_to_send: roundQty(Math.max(0, ordered - sent)),
+      // WHAT STILL HAS TO GO THROUGH THE PROCESS -- ordered minus what is
+      // already good minus what is currently away. NOT `ordered - sent`, which
+      // counts a scrapped piece as satisfied: send 12, get 10 good and 2
+      // scrapped, and that formula says 0 left while the job is still two parts
+      // short. The shop re-runs those 2 and sends them again, so they have to
+      // reappear here or the button offers to send nothing.
+      qty_to_send: roundQty(Math.max(0, ordered - good - Math.max(0, sent - good - scrapped))),
       oldest_open_shipped_at: openDates[0] ?? null,
       earliest_due_back_on: dueDates[0] ?? null,
       open_slip_count: openSlips.length,

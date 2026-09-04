@@ -274,7 +274,7 @@ export default function OperatorOperationActionPage() {
   // The outside quantity ledger for THIS step. It is what the button label, the
   // prefill and the at-vendor line all read from -- one derivation, so the
   // number on the button is the number that gets sent.
-  const { data: outsideRows } = useLoad(
+  const { data: outsideRows, reload: reloadOutside } = useLoad(
     () =>
       jobPartId
         ? getOutsideSummariesForPart(jobPartId)
@@ -363,7 +363,11 @@ export default function OperatorOperationActionPage() {
    * single action.
    */
   const reloadAll = async () => {
-    await Promise.all([loadJob(), loadSummary()]);
+    // The outside ledger is reloaded here rather than only in the outside
+    // handlers: a part-quantity change or an internal completion moves what is
+    // left to send, and a stale ledger would leave the phone offering to send
+    // pieces that have already gone.
+    await Promise.all([loadJob(), loadSummary(), reloadOutside()]);
   };
 
   // Record a specific good quantity. Over-completion is allowed (warned, not
@@ -634,7 +638,6 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  const isSent = job?.operation_status === 'sent';
   const consequence = operationCompletionConsequence(qtyValue, remaining);
 
   // Wait for BOTH the job fetch and the station context's one-time init before
@@ -1010,7 +1013,7 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
-          {outsideMode === 'send' && (
+          {outsideMode === 'send' && outsideDefault > 0 && (
             <Button
               fullWidth
               variant="outlined"

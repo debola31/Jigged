@@ -16,6 +16,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import { parseHeatNumbersSnapshot } from '@/types/shipment';
 import type {
   CreateShipmentPayload,
   FreightTerms,
@@ -370,7 +371,12 @@ export async function listShipmentsForCompany(
     console.error('Error listing shipments:', error);
     throw new Error(`Failed to list shipments: ${error.message}`);
   }
-  return (data ?? []) as Shipment[];
+  // The heat snapshot crosses the `Json` boundary here, parsed once so every reader of a
+  // `Shipment` sees the typed array the database's CHECK and the RPC together promise.
+  return (data ?? []).map((row) => ({
+    ...row,
+    heat_numbers_snapshot: parseHeatNumbersSnapshot(row.heat_numbers_snapshot),
+  })) as Shipment[];
 }
 
 /**

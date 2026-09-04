@@ -23,6 +23,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+  getRecentHeatNumbersAtLocation: vi.fn(async () => []),
 }));
 /** New: the modal resolves the acting member so owner-side writes carry an author. */
 vi.mock('@/utils/operatorAccess', () => ({

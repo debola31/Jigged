@@ -84,6 +84,12 @@ export interface MaterialRequirement {
   issued: number;
   /** Any of those depletions was clamped to zero (took more than was recorded). */
   hasDiscrepancy: boolean;
+  /**
+   * The distinct mill heats on those depletions, in the order they were first taken — what the
+   * job's packing slip will print for this material. Empty when none was recorded, which is
+   * the normal state; the card shows nothing rather than a blank.
+   */
+  heatNumbers: string[];
   /** `max(0, required − issued)` — what's still to fetch. `null` when incomparable. */
   remainingToIssue: number | null;
   /** `max(0, remaining − onHand)`. `null` when incomparable — never 0, which reads as fine. */

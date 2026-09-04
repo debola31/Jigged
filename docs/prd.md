@@ -326,7 +326,10 @@ Phase 1.
 
 **Deliberately cut, so they are not re-proposed:** **traceability** (certs, heat numbers, lot
 layer) — the pilot shop keeps no certs and serves no regulated customers; reopen only if an
-aerospace, defence or medical customer appears. **Customer-supplied material** — real and
+aerospace, defence or medical customer appears. **Partly reopened 2026-09-04:** a second
+customer required heat numbers, and they were built as text on the stock movement and a frozen
+line on the packing slip — optional everywhere, hidden when absent; the lot layer and certs stay
+cut ([inventory.md §5.6](modules/inventory.md#56-lots--resolved-dont-build-them)). **Customer-supplied material** — real and
 frequent, but it never enters stock: it arrives with the job, is worked, and leaves. An attribute
 of a job, not of inventory.
 

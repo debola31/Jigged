@@ -213,6 +213,15 @@ export default function PlaceStockActionForm({
   const [qty, setQty] = useState<Record<string, string>>({});
   /** part id → unit, only where the person changed it away from the part's own. */
   const [unitFor, setUnitFor] = useState<Record<string, string>>({});
+  /**
+   * part id → the mill heat / lot number off that bar's tag, verbatim.
+   *
+   * Per ROW, unlike the note: a note explains the trip, a heat identifies the bar, and two bars
+   * of one material on the same trip carry two heats. Only on `add` and `deplete` — a move keeps
+   * the tag on the bar. Optional everywhere; a blank stays blank downstream.
+   */
+  const [heatFor, setHeatFor] = useState<Record<string, string>>({});
+  const showHeat = action !== 'move';
   /** `add` only: the rows built by picking. The catalogue is unbounded, so rows are chosen. */
   const [picked, setPicked] = useState<Row[]>([]);
   /**
@@ -437,11 +446,13 @@ export default function PlaceStockActionForm({
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
       const unit = unitOf(row);
+      const heatNumber = showHeat ? heatFor[row.partId]?.trim() || undefined : undefined;
       try {
         if (action === 'add') {
           await addStockAtLocation(row.partId, locationId, value, unit, {
             notes: notes || undefined,
             operatorId: operatorId || undefined,
+            heatNumber,
           });
         } else if (action === 'deplete') {
           await depleteStockAtLocation(row.partId, locationId, value, unit, {
@@ -449,6 +460,7 @@ export default function PlaceStockActionForm({
             notes: notes || undefined,
             operatorId: operatorId || undefined,
             jobId: job?.id,
+            heatNumber,
           });
         } else {
           await transferStock(row.partId, locationId, destination!.id, value, unit, {
@@ -461,6 +473,7 @@ export default function PlaceStockActionForm({
          * happened" and carries the part and quantity; collapsing a batch into one event would
          * make those two properties describe an arbitrary member of it.
          */
+        // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
         posthog.capture('stock updated', {
           surface: 'storage',
           action,
@@ -468,6 +481,7 @@ export default function PlaceStockActionForm({
           quantity: value,
           unit,
           location_id: locationId,
+          heat_captured: Boolean(heatNumber),
         });
         succeeded.push(row.partId);
       } catch (e) {
@@ -497,6 +511,12 @@ export default function PlaceStockActionForm({
        */
       setQty((q) => {
         const next = { ...q };
+        for (const id of succeeded) delete next[id];
+        return next;
+      });
+      // The heat goes with the quantity: a landed line's heat re-sent would be a second bar.
+      setHeatFor((h) => {
+        const next = { ...h };
         for (const id of succeeded) delete next[id];
         return next;
       });
@@ -675,6 +695,24 @@ export default function PlaceStockActionForm({
                         </MenuItem>
                       ))}
                     </TextField>
+                    {showHeat && (
+                      <TextField
+                        size="small"
+                        placeholder="Heat"
+                        value={heatFor[row.partId] ?? ''}
+                        onChange={(e) =>
+                          setHeatFor((s) => ({ ...s, [row.partId]: e.target.value }))
+                        }
+                        sx={{ width: 110 }}
+                        slotProps={{
+                          htmlInput: {
+                            maxLength: 64,
+                            autoCapitalize: 'characters',
+                            'aria-label': `Heat number for ${row.partName}`,
+                          },
+                        }}
+                      />
+                    )}
                     {row.onHand != null && (
                       <Button
                         size="small"

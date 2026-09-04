@@ -71,6 +71,17 @@ export interface FreightAccountSnapshot {
   account_last4: string | null;
 }
 
+/**
+ * One heat number the packing slip prints, frozen onto the shipment at creation.
+ *
+ * `material_name` is the depletion row's `item_name` — itself a snapshot — so a
+ * slip can say "4471 — 1.25 4140 BAR" without ever reading a live part row.
+ */
+export interface HeatNumberSnapshotEntry {
+  heat_number: string;
+  material_name: string;
+}
+
 export function toFreightTerms(value: string | null | undefined): FreightTerms | null {
   return value === 'prepaid' || value === 'collect' || value === 'third_party' ||
     value === 'customer_arranged'
@@ -106,6 +117,15 @@ export interface Shipment {
   /** Navigation only — the document renders freight_account_snapshot. */
   customer_carrier_account_id: string | null;
   freight_account_snapshot: FreightAccountSnapshot | null;
+  /**
+   * The job's material heat numbers as they stood when this slip was created: the
+   * DISTINCT (heat, material) pairs on the depletion rows tagged to the job, ordered
+   * by material then heat. `[]` — never null — when none was recorded, which is the
+   * normal state for a shop that does not track heats, and the slip then prints no
+   * heat line at all. Frozen (Document Snapshot Standard): correcting a typo on the
+   * ledger afterwards never rewrites a slip a customer already holds.
+   */
+  heat_numbers_snapshot: HeatNumberSnapshotEntry[];
 }
 
 export interface ShipmentLineItem {
@@ -315,4 +335,40 @@ export function describeShipmentFreight(shipment: {
     }
   }
   return parts.join(' — ');
+}
+
+/**
+ * The entries of a heat-number snapshot, read through the `Json` boundary.
+ *
+ * The column is `jsonb` and the database only guarantees it is an array; the shape
+ * of each element is the RPC's promise, not the type system's. An element that is
+ * not `{heat_number, material_name}` is dropped rather than printed — a packing slip
+ * must never carry garbage where a heat number goes — and `[]` is what a slip with
+ * nothing to say gets.
+ */
+export function parseHeatNumbersSnapshot(value: unknown): HeatNumberSnapshotEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: HeatNumberSnapshotEntry[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const { heat_number, material_name } = item as Record<string, unknown>;
+    if (typeof heat_number !== 'string' || typeof material_name !== 'string') continue;
+    if (heat_number.trim() === '') continue;
+    out.push({ heat_number, material_name });
+  }
+  return out;
+}
+
+/**
+ * One printable line of the material heat numbers on a shipment, from the FROZEN
+ * snapshot — `4471 — 1.25 4140 BAR; 8823 — 6061 PLATE`.
+ *
+ * Returns null when nothing was recorded, so the caller omits the row rather than
+ * printing "Material heat no(s).: —". A blank is the normal state for most shops and
+ * must not read as a missing value on a receiving dock.
+ */
+export function describeHeatNumbers(shipment: { heat_numbers_snapshot: unknown }): string | null {
+  const entries = parseHeatNumbersSnapshot(shipment.heat_numbers_snapshot);
+  if (entries.length === 0) return null;
+  return entries.map((e) => `${e.heat_number} — ${e.material_name}`).join('; ');
 }

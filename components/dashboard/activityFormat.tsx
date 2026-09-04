@@ -97,9 +97,11 @@ export function formatActivityText(item: ActivityItem): string {
     case 'inventory': {
       const where = item.locationName ? ` at ${item.locationName}` : '';
       const qty = item.quantityLabel ?? '';
+      // The heat only when one was recorded; a blank is the normal state, not a gap.
+      const heat = item.heatNumber ? ` (heat ${item.heatNumber})` : '';
       if (item.action === 'moved') return `${qty} moved to ${item.locationName ?? 'another location'}`;
-      if (item.action === 'stock_in') return `${qty} added${where}`;
-      if (item.action === 'stock_out') return `${qty} taken${where}`;
+      if (item.action === 'stock_in') return `${qty} added${where}${heat}`;
+      if (item.action === 'stock_out') return `${qty} taken${where}${heat}`;
       return `Counted — set to ${qty}${where}`;
     }
     case 'note':

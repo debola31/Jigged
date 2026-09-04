@@ -581,6 +581,7 @@ missing" read-path fallback (CLAUDE.md, "No silent runtime fallbacks").
 | Job | address block, customer name, contact | ✅ `jobs.*` |
 | Job part qty / price | order quantity, unit & total price | ◻️ **intentionally live** — `job_parts.quantity`/`unit_price`/`total_price` are the editable post-conversion source of truth, not identity fields. Invoicing and revenue read them live **by design**; not a snapshot gap. |
 | Shipment / packing slip | bill-to & ship-to address, customer name | ✅ `shipments.*` |
+| Shipment / packing slip | material heat numbers | ✅ `shipments.heat_numbers_snapshot` (2026-09-04) — frozen by the RPC from the job's ledger depletions; a later ledger correction never rewrites the slip |
 | Inventory ledger | part name (`item_name`), location (`location_name`) | ✅ pre-existing |
 | **Quote line items / packing slip** | **part name & description** | ⚠️ **gap — rendered live.** Re-confirmed 2026-08-03: `quote_line_items` has no name/description column. |
 | **QuickBooks invoice push** | **customer name, part names, billing address** | ⚠️ **gap — rendered live at push** ([`api/services/quickbooks.py`](../api/services/quickbooks.py)) |

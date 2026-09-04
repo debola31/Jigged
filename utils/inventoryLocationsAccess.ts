@@ -1002,6 +1002,7 @@ export async function addStockAtLocation(
     // immutable except for notes. See StockWriteOptions.
     p_operator_id: opts.operatorId ?? undefined,
     p_photo_path: opts.photoPath ?? undefined,
+    p_heat_number: opts.heatNumber ?? undefined,
   });
   if (error) {
     console.error('Error adding stock at location:', error);
@@ -1032,12 +1033,57 @@ export async function depleteStockAtLocation(
     p_job_id: opts.jobId,
     p_job_operation_id: opts.jobOperationId,
     p_operator_id: opts.operatorId,
+    p_heat_number: opts.heatNumber ?? undefined,
   });
   if (error) {
     console.error('Error depleting stock at location:', error);
     throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as StockMutationResult;
+}
+
+/**
+ * The mill heats recently RECEIVED into one place for one part, newest first, distinct.
+ *
+ * The suggestion list for the take-to-job dialog: the bar on the shelf almost always carries a
+ * heat that was typed when it was put down, so the operator taps rather than transcribes a mill
+ * tag on a phone in bright light. Additions only — a depletion's heat is a copy of one of these,
+ * and an adjustment carries none. Typing still wins when the bar is not among them; the list is
+ * a convenience, never a constraint, and stock is not tracked per heat (inventory.md §5.6).
+ *
+ * Read-only and small; a failure here must never block a removal, which is why callers catch.
+ */
+export async function getRecentHeatNumbersAtLocation(
+  partId: string,
+  locationId: string,
+  limit = 5,
+): Promise<string[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    .select('heat_number, created_at')
+    .eq('part_id', partId)
+    .eq('location_id', locationId)
+    .eq('type', 'addition')
+    .not('heat_number', 'is', null)
+    .order('created_at', { ascending: false })
+    // Over-fetch: the same bar is often received in several deliveries, and distinct-ing
+    // afterwards would otherwise shrink the list below what was asked for.
+    .limit(limit * 4);
+  if (error) {
+    console.error('Error loading recent heat numbers:', error);
+    throw error;
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of data ?? []) {
+    const heat = row.heat_number;
+    if (!heat || seen.has(heat)) continue;
+    seen.add(heat);
+    out.push(heat);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export async function adjustStockAtLocation(
@@ -1180,7 +1226,7 @@ export async function bulkPutAway(
  */
 /** Columns every movement view needs. One literal — a concatenation defeats the typed client. */
 const MOVEMENT_COLUMNS =
-  'id, created_at, type, part_id, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
+  'id, created_at, type, part_id, item_name, quantity, unit, notes, heat_number, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
 
 interface MovementRow {
   id: string;
@@ -1191,6 +1237,7 @@ interface MovementRow {
   quantity: number;
   unit: string;
   notes: string | null;
+  heat_number: string | null;
   operator_id: string | null;
   photo_path: string | null;
   has_discrepancy: boolean;
@@ -1221,6 +1268,7 @@ async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEnt
     quantity: Number(r.quantity ?? 0),
     unit: r.unit,
     notes: r.notes,
+    heatNumber: r.heat_number ?? null,
     actorName: r.operator_id ? nameById.get(r.operator_id) ?? null : null,
     photoUrl: r.photo_path ? urlByPath.get(r.photo_path) ?? null : null,
     hasDiscrepancy: Boolean(r.has_discrepancy),

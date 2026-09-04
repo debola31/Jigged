@@ -42,6 +42,8 @@ export interface ActivityItem {
   /** Inventory events: where it happened, and how much. */
   locationName?: string;
   quantityLabel?: string;
+  /** Inventory events: the mill heat the movement carried, when one was recorded. */
+  heatNumber?: string;
 }
 
 // ============== Dashboard metrics ==============
@@ -796,7 +798,7 @@ async function fetchInventoryActivity(
 
   let q = supabase
     .from('inventory_transactions')
-    .select('id, created_at, type, item_name, quantity, unit, part_id, location_name, transfer_group_id, notes')
+    .select('id, created_at, type, item_name, quantity, unit, part_id, location_name, transfer_group_id, notes, heat_number')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(perSource);
@@ -819,6 +821,7 @@ async function fetchInventoryActivity(
     location_name: string | null;
     transfer_group_id: string | null;
     notes: string | null;
+    heat_number: string | null;
   };
   const rows = (data ?? []) as unknown as Row[];
 
@@ -850,6 +853,7 @@ async function fetchInventoryActivity(
       timestamp: r.created_at,
       locationName: r.location_name ?? undefined,
       quantityLabel: `${Number(r.quantity ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${r.unit}`,
+      heatNumber: r.heat_number ?? undefined,
       href: r.part_id ? `/dashboard/${companyId}/parts/${r.part_id}?tab=inventory` : undefined,
     });
   }

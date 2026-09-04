@@ -18,13 +18,14 @@ import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
 import NextLink from 'next/link';
+import posthog from 'posthog-js';
 import type { InventoryTransactionWithRelations } from '@/types/partTransaction';
 import {
   getTransactionTypeDisplay,
   formatTransactionDate,
   formatQuantityWithUnit,
 } from '@/types/partTransaction';
-import { getPartTransactions, updateTransactionNotes } from '@/utils/partsAccess';
+import { getPartTransactions, updateTransactionAnnotations } from '@/utils/partsAccess';
 import SaveStatus from '@/components/common/SaveStatus';
 
 interface PartTransactionHistoryTableProps {
@@ -48,9 +49,10 @@ export default function PartTransactionHistoryTable({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  // Inline notes editing state
+  // Inline editing state — the notes and the heat number, the two correctable fields on a row.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingNotes, setEditingNotes] = useState('');
+  const [editingHeat, setEditingHeat] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
 
   useEffect(() => {
@@ -86,20 +88,36 @@ export default function PartTransactionHistoryTable({
   const handleStartEdit = (transaction: InventoryTransactionWithRelations) => {
     setEditingId(transaction.id);
     setEditingNotes(transaction.notes || '');
+    setEditingHeat(transaction.heat_number || '');
   };
 
+  /**
+   * Notes and the heat number are the two things on a ledger row that can be corrected; they are
+   * edited together, in one row, and saved as one write. The database normalises the heat
+   * (upper-case, trimmed, "" → not recorded), so the local copy mirrors that rather than showing
+   * the raw keystrokes until the next reload.
+   */
   const handleSaveNotes = async () => {
     if (!editingId) return;
 
+    const before = transactions.find((t) => t.id === editingId);
     setSavingNotes(true);
     try {
-      await updateTransactionNotes(editingId, editingNotes);
+      await updateTransactionAnnotations(editingId, {
+        notes: editingNotes,
+        heatNumber: editingHeat,
+      });
+      const heat = editingHeat.trim().toUpperCase() || null;
+      const notes = editingNotes || null;
       // Update local state
       setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === editingId ? { ...t, notes: editingNotes || null } : t
-        )
+        prev.map((t) => (t.id === editingId ? { ...t, notes, heat_number: heat } : t)),
       );
+      // Which field moved, never what it says — the heat is the customer's business data.
+      posthog.capture('stock movement annotated', {
+        notes_changed: notes !== (before?.notes ?? null),
+        heat_changed: heat !== (before?.heat_number ?? null),
+      });
       setEditingId(null);
     } catch (err) {
       console.error('Error saving notes:', err);
@@ -242,11 +260,20 @@ export default function PartTransactionHistoryTable({
                   </TableCell>
                   <TableCell>
                     {editingId === transaction.id ? (
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                      // Saved when focus leaves the EDITOR, not a field: with two fields, a
+                      // per-field blur would save and close the editor the moment you tabbed
+                      // from the notes into the heat number.
+                      <Box
+                        sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}
+                        onBlur={(e) => {
+                          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                            handleSaveNotes();
+                          }
+                        }}
+                      >
                         <TextField
                           value={editingNotes}
                           onChange={(e) => setEditingNotes(e.target.value)}
-                          onBlur={handleSaveNotes}
                           onKeyDown={handleNotesKeyDown}
                           size="small"
                           multiline
@@ -256,10 +283,39 @@ export default function PartTransactionHistoryTable({
                           sx={{ minWidth: 180 }}
                           placeholder="Add notes..."
                         />
+                        {/* Beside the notes because it is corrected the same way: a typo on a
+                            mill tag, fixed from the history. Saved with the notes on blur or
+                            Enter — one write, two fields. The database upper-cases and trims. */}
+                        <TextField
+                          value={editingHeat}
+                          onChange={(e) => setEditingHeat(e.target.value)}
+                          onKeyDown={handleNotesKeyDown}
+                          size="small"
+                          disabled={savingNotes}
+                          sx={{ minWidth: 180 }}
+                          placeholder="Heat number"
+                          slotProps={{
+                            htmlInput: {
+                              maxLength: 64,
+                              autoCapitalize: 'characters',
+                              'aria-label': 'Heat number',
+                            },
+                          }}
+                        />
                         {savingNotes && <SaveStatus state="saving" />}
                       </Box>
                     ) : (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {/* Only when one was recorded — a blank is the normal state and must
+                            not read as a missing value. */}
+                        {transaction.heat_number && (
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={`Heat ${transaction.heat_number}`}
+                            sx={{ flexShrink: 0 }}
+                          />
+                        )}
                         <Typography
                           variant="body2"
                           color="text.secondary"

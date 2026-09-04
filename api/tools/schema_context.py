@@ -331,6 +331,9 @@ SCHEMA_CONTEXT = """
 - operator_id: UUID, created_by: UUID
 - has_discrepancy: BOOLEAN (default false)
 - notes: TEXT, created_at: TIMESTAMPTZ
+- heat_number: TEXT (nullable) -- the mill heat / lot number on this movement, upper-case;
+  NULL means none was recorded, which is the normal state. Stock is NOT tracked per heat:
+  "which jobs used heat X" = depletion rows with that heat_number, grouped by job_id.
 
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)

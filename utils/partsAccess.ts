@@ -1313,23 +1313,46 @@ export async function getPartCostExplain(
  */
 
 /**
- * Update the notes field on an existing transaction. All other fields are
- * immutable (enforced by the `restrict_transaction_update_to_notes` trigger).
+ * The two fields on a ledger row that may be corrected after the fact.
+ *
+ * Everything else is immutable (the `restrict_transaction_update_to_notes` trigger): quantities,
+ * places, the job, the author. `notes` and `heat_number` are transcriptions — what someone wrote
+ * down about the movement — and a typo on a mill tag has to be fixable from the part's history.
+ * The heat is normalised by the database (upper-case, trimmed, "" → not recorded); a slip already
+ * created keeps its own frozen copy, so correcting here never rewrites paperwork a customer holds.
  */
+export interface TransactionAnnotations {
+  notes?: string;
+  heatNumber?: string;
+}
+
+export async function updateTransactionAnnotations(
+  transactionId: string,
+  { notes, heatNumber }: TransactionAnnotations,
+): Promise<void> {
+  const patch: { notes?: string; heat_number?: string | null } = {};
+  if (notes !== undefined) patch.notes = notes;
+  if (heatNumber !== undefined) patch.heat_number = heatNumber.trim() || null;
+  if (Object.keys(patch).length === 0) return;
+
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('inventory_transactions')
+    .update(patch)
+    .eq('id', transactionId);
+
+  if (error) {
+    console.error('Error updating transaction annotations:', error);
+    throw toFriendlyError(error, { entity: 'note' });
+  }
+}
+
+/** Update the notes field on an existing transaction. See `updateTransactionAnnotations`. */
 export async function updateTransactionNotes(
   transactionId: string,
   notes: string,
 ): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('inventory_transactions')
-    .update({ notes })
-    .eq('id', transactionId);
-
-  if (error) {
-    console.error('Error updating transaction notes:', error);
-    throw toFriendlyError(error, { entity: 'note' });
-  }
+  return updateTransactionAnnotations(transactionId, { notes });
 }
 
 /**

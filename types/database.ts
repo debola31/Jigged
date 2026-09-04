@@ -860,6 +860,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           has_discrepancy: boolean
+          heat_number: string | null
           id: string
           item_name: string
           job_id: string | null
@@ -881,6 +882,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           has_discrepancy?: boolean
+          heat_number?: string | null
           id?: string
           item_name: string
           job_id?: string | null
@@ -902,6 +904,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           has_discrepancy?: boolean
+          heat_number?: string | null
           id?: string
           item_name?: string
           job_id?: string | null
@@ -3370,6 +3373,7 @@ export type Database = {
           customer_name: string | null
           freight_account_snapshot: Json | null
           freight_terms: string | null
+          heat_numbers_snapshot: Json
           id: string
           job_id: string
           one_time_address: Json | null
@@ -3392,6 +3396,7 @@ export type Database = {
           customer_name?: string | null
           freight_account_snapshot?: Json | null
           freight_terms?: string | null
+          heat_numbers_snapshot?: Json
           id?: string
           job_id: string
           one_time_address?: Json | null
@@ -3414,6 +3419,7 @@ export type Database = {
           customer_name?: string | null
           freight_account_snapshot?: Json | null
           freight_terms?: string | null
+          heat_numbers_snapshot?: Json
           id?: string
           job_id?: string
           one_time_address?: Json | null
@@ -3993,6 +3999,7 @@ export type Database = {
       add_stock_at_location: {
         Args: {
           p_converted_quantity: number
+          p_heat_number?: string
           p_location_id: string
           p_notes?: string
           p_operator_id?: string
@@ -4251,6 +4258,7 @@ export type Database = {
         Args: {
           p_converted_quantity: number
           p_graceful?: boolean
+          p_heat_number?: string
           p_job_id?: string
           p_job_operation_id?: string
           p_location_id: string

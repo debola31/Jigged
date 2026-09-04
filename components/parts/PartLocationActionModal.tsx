@@ -21,7 +21,9 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
+  getRecentHeatNumbersAtLocation,
 } from '@/utils/inventoryLocationsAccess';
+import HeatNumberField from '@/components/inventory/HeatNumberField';
 import { compareLocationNames } from '@/lib/locationTree';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import LocationPicker, {
@@ -112,6 +114,31 @@ export default function PartLocationActionModal({
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
   /**
+   * The mill heat / lot number, on the two actions where a bar changes hands with its tag on:
+   * `add` (typed off the tag) and `deplete` (read back off the bar being taken to a job). Not on
+   * `adjust` or `move`. On `deplete` the heats recently received into the chosen location for
+   * this part are offered as options — loaded when the location is picked, since that is what
+   * they depend on. Optional and never nagged; a blank stays blank downstream.
+   */
+  const [heatNumber, setHeatNumber] = useState('');
+  const [recentHeats, setRecentHeats] = useState<string[]>([]);
+  const showHeat = action === 'add' || action === 'deplete';
+
+  const loadRecentHeats = (loc: LocationOption | null) => {
+    setRecentHeats([]);
+    if (action !== 'deplete' || !loc) return;
+    // Suggestions only — a failure must never block a removal.
+    getRecentHeatNumbersAtLocation(partId, loc.id)
+      .then(setRecentHeats)
+      .catch(() => setRecentHeats([]));
+  };
+
+  const pickLocation = (loc: LocationOption | null) => {
+    setLocation(loc);
+    loadRecentHeats(loc);
+  };
+
+  /**
    * Who is doing this, so the ledger can name them.
    *
    * `operator_id` is a `user_company_access.id`. The RPCs also stamp `created_by = auth.uid()`,
@@ -135,6 +162,9 @@ export default function PartLocationActionModal({
     setNotes('');
     setError(null);
     setJob(null);
+    setHeatNumber('');
+    // The only-one-place case picked the location above without going through the picker.
+    loadRecentHeats(locations.length === 1 ? locations[0] : null);
     setOperatorId(null);
     // ABOVE the deplete-only return: all four actions write a ledger row, and an earlier draft
     // that put this after it would have attributed removals and nothing else.
@@ -225,6 +255,7 @@ export default function PartLocationActionModal({
         await addStockAtLocation(partId, location!.id, qty, unit, {
           notes: notes || undefined,
           operatorId,
+          heatNumber: heatNumber.trim() || undefined,
         });
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
@@ -236,6 +267,7 @@ export default function PartLocationActionModal({
           operatorId: operatorId ?? undefined,
           notes: notes || undefined,
           jobId: job?.id || undefined,
+          heatNumber: heatNumber.trim() || undefined,
         });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, location!.id, qty, unit, {
@@ -248,12 +280,14 @@ export default function PartLocationActionModal({
           operatorId,
         });
       }
+      // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
       posthog.capture('stock updated', {
         surface: 'office',
         action,
         part_id: partId,
         quantity: qty,
         unit,
+        heat_captured: showHeat && heatNumber.trim().length > 0,
       });
       await onDone();
       onClose();
@@ -322,7 +356,7 @@ export default function PartLocationActionModal({
               label="Location"
               options={locationOptions}
               value={location}
-              onChange={setLocation}
+              onChange={pickLocation}
               unit={primaryUnit}
               required
               onCreate={onCreateLocation}
@@ -370,6 +404,14 @@ export default function PartLocationActionModal({
               would mean nothing. Issue #59. */}
           {action === 'deplete' && (
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+          )}
+          {showHeat && (
+            <HeatNumberField
+              value={heatNumber}
+              onChange={setHeatNumber}
+              suggestions={action === 'deplete' ? recentHeats : []}
+              disabled={saving}
+            />
           )}
           <TextField
             label="Notes (optional)"

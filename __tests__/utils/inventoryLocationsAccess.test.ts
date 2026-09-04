@@ -89,6 +89,7 @@ import {
   resolveScan,
   getRecentActivity,
   getLocationHistory,
+  getRecentHeatNumbersAtLocation,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { ID_CHUNK } from '@/lib/queryLimits';
@@ -286,6 +287,37 @@ describe('RPC wrappers', () => {
     expect(res.shortfall).toBe(3);
   });
 
+  // The heat is optional on both writes. It travels as `p_heat_number` and is OMITTED (undefined,
+  // so JSON drops the key) rather than sent as null when nothing was typed — the RPC's default is
+  // what "not recorded" means, and the database normalises whatever does arrive.
+  it('addStockAtLocation forwards the heat number as p_heat_number', async () => {
+    queueFrom(partCtx());
+    state.rpc = { data: { location_balance: 12, part_quantity: 12 }, error: null };
+    await addStockAtLocation('part1', 'loc1', 12, 'ft', { heatNumber: '4471' });
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'add_stock_at_location',
+      expect.objectContaining({ p_heat_number: '4471' }),
+    );
+  });
+
+  it('depleteStockAtLocation forwards the heat number, and omits it when none was typed', async () => {
+    queueFrom(partCtx());
+    state.rpc = { data: { location_balance: 4, part_quantity: 4 }, error: null };
+    await depleteStockAtLocation('part1', 'loc1', 8, 'ft', { jobId: 'job1', heatNumber: '8823' });
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'deplete_stock_at_location',
+      expect.objectContaining({ p_job_id: 'job1', p_heat_number: '8823' }),
+    );
+
+    queueFrom(partCtx());
+    await depleteStockAtLocation('part1', 'loc1', 8, 'ft', {});
+    const args = (mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(args.p_heat_number).toBeUndefined();
+  });
+
   it('adjustStockAtLocation calls adjust with the new converted quantity', async () => {
     queueFrom(partCtx());
     state.rpc = { data: { location_balance: 5, part_quantity: 5 }, error: null };
@@ -334,6 +366,36 @@ describe('RPC wrappers', () => {
  * halfway left a partial tree with no rollback. `create_location_tree` does the whole subtree in
  * one statement, so the assertions worth having are the REQUEST COUNT and the payload shape.
  */
+describe('getRecentHeatNumbersAtLocation', () => {
+  // The suggestion list for a take: receipts only, this part at this place, newest first,
+  // distinct — a bar delivered three times under one heat is one option, not three.
+  it('reads additions with a heat at this place, dedupes, and keeps newest-first order', async () => {
+    queueFrom({
+      data: [
+        { heat_number: '8823', created_at: '2026-09-03T10:00:00Z' },
+        { heat_number: '4471', created_at: '2026-09-02T10:00:00Z' },
+        { heat_number: '8823', created_at: '2026-09-01T10:00:00Z' },
+        { heat_number: '1100', created_at: '2026-08-30T10:00:00Z' },
+      ],
+      error: null,
+    });
+    const heats = await getRecentHeatNumbersAtLocation('part1', 'loc1', 2);
+    expect(heats).toEqual(['8823', '4471']);
+
+    const seen = state.calls[0];
+    expect(seen.eq).toBeDefined();
+    expect(state.calls[0].not).toEqual(['heat_number', 'is', null]);
+    expect(state.calls[0].order).toEqual(['created_at', { ascending: false }]);
+    // Over-fetched so that dedupe cannot shrink the list below what was asked for.
+    expect(state.calls[0].limit).toEqual([8]);
+  });
+
+  it('returns nothing when no receipt here ever carried a heat', async () => {
+    queueFrom({ data: [], error: null });
+    expect(await getRecentHeatNumbersAtLocation('part1', 'loc1')).toEqual([]);
+  });
+});
+
 describe('materializeLocationSpec', () => {
   const spec = [
     {

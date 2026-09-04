@@ -19,6 +19,8 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+  // The heat suggestions a removal offers; empty here, and swallowed on failure by the modal.
+  getRecentHeatNumbersAtLocation: vi.fn(async () => []),
 }));
 // The action modal can now attach a photo, which pulls in storageHelpers -> lib/supabase, and that
 // module builds its client eagerly at import time whenever `window` exists. Stubbed rather than

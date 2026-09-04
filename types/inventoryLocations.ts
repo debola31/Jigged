@@ -145,6 +145,12 @@ export interface DepleteOptions {
   jobId?: string;
   jobOperationId?: string;
   operatorId?: string;
+  /**
+   * The mill heat / lot number read off the bar being taken. With `jobId`, this is what the
+   * job's packing slip will print. Optional; the database upper-cases and trims it, and an
+   * empty string becomes "not recorded" (NULL) rather than a blank heat.
+   */
+  heatNumber?: string;
 }
 
 /**
@@ -166,6 +172,12 @@ export interface StockWriteOptions {
    * column to stay mutable, and evidence that can be swapped afterwards is not evidence.
    */
   photoPath?: string | null;
+  /**
+   * The mill heat / lot number off the tag of the bar being put down — the only place a heat
+   * first enters Jigged. Optional; normalised (upper-case, trimmed, "" → NULL) by the database.
+   * Not a lot key: stock stays a quantity of an item at a place (inventory.md §5.6).
+   */
+  heatNumber?: string;
 }
 
 /** One movement in a place's history, with its author and photo already resolved. */
@@ -182,6 +194,8 @@ export interface LocationHistoryEntry {
   quantity: number;
   unit: string;
   notes: string | null;
+  /** The mill heat on this movement, or null when none was recorded — the normal case. */
+  heatNumber: string | null;
   /** Null when the movement predates operator attribution, or the name could not be read. */
   actorName: string | null;
   /** Signed URL, or null when there is no photo — or the object has gone. */

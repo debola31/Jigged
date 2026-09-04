@@ -58,6 +58,14 @@ export default function OperatorReceivePartModal({
   const [unit, setUnit] = useState('');
   const [notes, setNotes] = useState('');
   /**
+   * The mill heat / lot number, read off the tag on the bar being put down.
+   *
+   * This is the ONLY place a heat first enters Jigged — the take to a job later reads it back
+   * off the same bar. Optional and never nagged: most shops do not record heats, and a blank here
+   * stays blank on every surface downstream (docs/modules/inventory.md §5.6, reopened 2026-09-04).
+   */
+  const [heatNumber, setHeatNumber] = useState('');
+  /**
    * The photo of what was just put down.
    *
    * This is the FIRST time the part lands in this bin, which makes it the drop most worth
@@ -76,6 +84,7 @@ export default function OperatorReceivePartModal({
     setQuantity('');
     setUnit('');
     setNotes('');
+    setHeatNumber('');
     setPhoto(null);
     setError(null);
   };
@@ -112,10 +121,12 @@ export default function OperatorReceivePartModal({
         notes: notes || undefined,
         operatorId: operatorId || undefined,
         photoPath,
+        heatNumber: heatNumber.trim() || undefined,
       });
       // Matches the shape `OperatorLocationActionModal` sends, so both stock-in paths land on one
       // event. `action: 'add'` because that is what this is — the only difference is that the part
       // was not here yet, which `part_id` and the bin's history already tell you.
+      // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
       posthog.capture('stock updated', {
         surface: 'operator_receive',
         action: 'add',
@@ -123,6 +134,7 @@ export default function OperatorReceivePartModal({
         quantity: qty,
         unit,
         location_id: locationId,
+        heat_captured: heatNumber.trim().length > 0,
       });
       await onDone();
       onClose();
@@ -181,6 +193,17 @@ export default function OperatorReceivePartModal({
               ))}
             </TextField>
           </Stack>
+          {/* Between the quantity and the notes, where the four-verb modal puts it too. Upper-case
+              keyboard on a phone because mill tags are upper-case alphanumerics; the database
+              normalises whatever arrives, so this is convenience, not correctness. */}
+          <TextField
+            label="Heat number (optional)"
+            value={heatNumber}
+            onChange={(e) => setHeatNumber(e.target.value)}
+            fullWidth
+            disabled={!part}
+            slotProps={{ htmlInput: { autoCapitalize: 'characters', maxLength: 64 } }}
+          />
           <TextField
             label="Notes (optional)"
             value={notes}

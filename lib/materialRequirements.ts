@@ -84,10 +84,12 @@ export function buildRequirement(args: {
   customFactor: number | null;
   issued: number;
   hasDiscrepancy: boolean;
+  /** Distinct heats on this job's takes of this material. Optional so pure callers stay short. */
+  heatNumbers?: string[];
 }): MaterialRequirement {
   const {
     bomLineId, bomQuantity, bomUnit, consumeWholeUnits, orderQuantity,
-    stock, customFactor, issued, hasDiscrepancy,
+    stock, customFactor, issued, hasDiscrepancy, heatNumbers = [],
   } = args;
 
   const requiredInBomUnit = requiredQuantity(orderQuantity, bomQuantity, consumeWholeUnits);
@@ -117,6 +119,7 @@ export function buildRequirement(args: {
     onHand: stock.onHand,
     issued,
     hasDiscrepancy,
+    heatNumbers,
     remainingToIssue,
     shortBy,
     status,

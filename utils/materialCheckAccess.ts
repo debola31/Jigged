@@ -136,17 +136,26 @@ async function loadConversionFactors(
   return map;
 }
 
+interface IssuedFacts {
+  quantity: number;
+  hasDiscrepancy: boolean;
+  /** Distinct mill heats on those takes, in first-seen order; empty when none was recorded. */
+  heatNumbers: string[];
+}
+
 /**
- * Q5 — what these jobs have already taken, per (job, part).
+ * Q5 — what these jobs have already taken, per (job, part), and which heats it carried.
  *
  * `inventory_transactions` has no `job_part_id`, so this is job-level: a job with two parts
- * drawing the same material sees one shared figure. Surfaced as "issued to this job".
+ * drawing the same material sees one shared figure. Surfaced as "issued to this job". The heats
+ * are the same rows read for a second fact — they are what the job's packing slip will print —
+ * so the job page can show them without a second query.
  */
 async function loadIssued(
   companyId: string,
   jobIds: string[],
-): Promise<Map<string, { quantity: number; hasDiscrepancy: boolean }>> {
-  const out = new Map<string, { quantity: number; hasDiscrepancy: boolean }>();
+): Promise<Map<string, IssuedFacts>> {
+  const out = new Map<string, IssuedFacts>();
   if (jobIds.length === 0) return out;
   const supabase = getSupabase();
 
@@ -154,10 +163,11 @@ async function loadIssued(
     chunk(jobIds, CHUNK_IDS).map(async (ids) => {
       const { data, error } = await supabase
         .from('inventory_transactions')
-        .select('job_id, part_id, converted_quantity, has_discrepancy')
+        .select('job_id, part_id, converted_quantity, has_discrepancy, heat_number')
         .eq('company_id', companyId)
         .eq('type', 'depletion')
-        .in('job_id', ids);
+        .in('job_id', ids)
+        .order('created_at', { ascending: true });
       if (error) {
         console.error('Error loading job consumption:', error);
         throw error;
@@ -169,10 +179,15 @@ async function loadIssued(
   for (const row of pages.flat()) {
     if (!row.job_id || !row.part_id) continue;
     const key = `${row.job_id}:${row.part_id}`;
-    const prev = out.get(key) ?? { quantity: 0, hasDiscrepancy: false };
+    const prev = out.get(key) ?? { quantity: 0, hasDiscrepancy: false, heatNumbers: [] };
+    const heatNumbers =
+      row.heat_number && !prev.heatNumbers.includes(row.heat_number)
+        ? [...prev.heatNumbers, row.heat_number]
+        : prev.heatNumbers;
     out.set(key, {
       quantity: prev.quantity + (Number(row.converted_quantity) || 0),
       hasDiscrepancy: prev.hasDiscrepancy || Boolean(row.has_discrepancy),
+      heatNumbers,
     });
   }
   return out;
@@ -235,6 +250,7 @@ async function buildRequirementsFor(
           customFactor: conversions.get(`${line.child_part_id}:${line.unit}`) ?? null,
           issued: seen?.quantity ?? 0,
           hasDiscrepancy: seen?.hasDiscrepancy ?? false,
+          heatNumbers: seen?.heatNumbers ?? [],
         }),
       ];
     }),

@@ -18,7 +18,9 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
+  getRecentHeatNumbersAtLocation,
 } from '@/utils/inventoryLocationsAccess';
+import HeatNumberField from '@/components/inventory/HeatNumberField';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
@@ -105,6 +107,17 @@ export default function OperatorLocationActionModal({
   const [job, setJob] = useState<JobWithRelations | null>(null);
   const [destination, setDestination] = useState<{ id: string; label: string } | null>(null);
   /**
+   * The mill heat / lot number, on the two actions where a bar changes hands with its tag on:
+   * `add` (typed off the tag as it is put down) and `deplete` (read back off the same bar as it
+   * is taken to a job). Not on `adjust` (a correction to a number) or `move` (the tag travels with
+   * the bar; the receipt already recorded it). On `deplete`, the heats recently received into this
+   * bin for this part are offered as one-tap options, so the common case is a tap, not typing.
+   * Optional everywhere and never nagged — a blank stays blank on every surface downstream.
+   */
+  const [heatNumber, setHeatNumber] = useState('');
+  const [recentHeats, setRecentHeats] = useState<string[]>([]);
+  const showHeat = action === 'add' || action === 'deplete';
+  /**
    * Optional evidence, on the two actions where material physically lands somewhere. Not on
    * `deplete` (nothing to show — the stock left) and not on `adjust` (a correction to a number,
    * whose evidence is the count that produced it).
@@ -120,10 +133,18 @@ export default function OperatorLocationActionModal({
     setJob(null);
     setDestination(null);
     setPhoto(null);
+    setHeatNumber('');
+    setRecentHeats([]);
     if (action !== 'deplete') return;
     setLoadingJobs(true);
-    // loadTaggableJobs swallows failures — the tag is optional and must never block a removal.
-    setJobs(await loadTaggableJobs(companyId));
+    // Both swallow failures — the tag and the suggestions are optional and must never block a
+    // removal. Loaded together: one round trip's wait, not two.
+    const [taggable, heats] = await Promise.all([
+      loadTaggableJobs(companyId),
+      getRecentHeatNumbersAtLocation(partId, locationId).catch(() => [] as string[]),
+    ]);
+    setJobs(taggable);
+    setRecentHeats(heats);
     setLoadingJobs(false);
   };
 
@@ -163,6 +184,7 @@ export default function OperatorLocationActionModal({
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           photoPath,
+          heatNumber: heatNumber.trim() || undefined,
         });
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
@@ -170,6 +192,7 @@ export default function OperatorLocationActionModal({
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           jobId: job?.id || undefined, // tie to the job, not an operation
+          heatNumber: heatNumber.trim() || undefined,
         });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, locationId, qty, unit, {
@@ -183,6 +206,7 @@ export default function OperatorLocationActionModal({
           photoPath,
         });
       }
+      // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
       posthog.capture('stock updated', {
         surface: 'operator',
         action,
@@ -190,6 +214,7 @@ export default function OperatorLocationActionModal({
         quantity: qty,
         unit,
         location_id: locationId,
+        heat_captured: showHeat && heatNumber.trim().length > 0,
       });
       await onDone();
       onClose();
@@ -263,6 +288,14 @@ export default function OperatorLocationActionModal({
           )}
           {action === 'deplete' && (
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+          )}
+          {showHeat && (
+            <HeatNumberField
+              value={heatNumber}
+              onChange={setHeatNumber}
+              suggestions={action === 'deplete' ? recentHeats : []}
+              disabled={saving}
+            />
           )}
           <TextField
             label="Notes (optional)"

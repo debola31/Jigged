@@ -548,6 +548,14 @@ There is no mark-consumed or mark-skipped action.
 one material show the same figure, hence the label *"issued to this job"*. One nullable
 `job_part_id` column plus an index fixes it; omitted to keep Phase 1 migration-free.
 
+**Heat numbers (2026-09-04).** The same depletion rows carry the material's mill heat number when
+the operator typed one on the take (`inventory_transactions.heat_number`, optional), so each
+material row on the card also lists the distinct heats issued — `heatNumbers` on
+`MaterialRequirement`, rendered as chips and as nothing when none was recorded. That list is what
+the job's packing slip prints, frozen onto the shipment when it is created. There is no hand entry
+on the job: material is always received, stocked and consumed, and the heat enters at the receipt.
+Decision and boundaries: [`inventory.md` §5.6](inventory.md#56-lots--resolved-dont-build-them).
+
 <!-- Linked by section number, not an anchor. The old link pointed at a `#### job_materials is
      write-only` heading that the 2026-07-31 condensation folded into §3's data-model table, and a
      heading kept alive purely to satisfy an anchor is the kind of bloat that condensation removes.

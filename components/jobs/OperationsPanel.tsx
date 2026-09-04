@@ -73,6 +73,8 @@ interface OperationsPanelProps {
   disabled?: boolean;
   /** Operator step-tagged notes + photos keyed by job_operation_id. */
   notesByOperation?: Map<string, JobNote[]>;
+  /** The part these operations belong to. Names the part on the outside-send dialog. */
+  partName?: string | null;
 }
 
 interface SnackbarState {
@@ -87,6 +89,7 @@ export default function OperationsPanel({
   onOperationUpdate,
   disabled = false,
   notesByOperation,
+  partName,
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState<SnackbarState>({
@@ -503,7 +506,7 @@ export default function OperationsPanel({
           vendorId={sendOp.vendor_service?.vendor?.id ?? null}
           vendorName={sendOp.vendor_service?.vendor?.name ?? 'the vendor'}
           operationName={sendOp.operation_name}
-          partName={sendOp.vendor_service?.name ?? sendOp.operation_name}
+          partName={partName ?? 'this part'}
           qtyToSend={outsideByOp.get(sendOp.id)?.qty_to_send ?? 0}
           defaultInstructions={sendOp.instructions}
           busy={loading}
@@ -517,7 +520,7 @@ export default function OperationsPanel({
           open
           vendorName={receiveOp.vendor_service?.vendor?.name ?? 'the vendor'}
           operationName={receiveOp.operation_name}
-          partName={receiveOp.vendor_service?.name ?? receiveOp.operation_name}
+          partName={partName ?? 'this part'}
           openSlips={openSlips}
           busy={loading}
           onClose={() => setReceiveOp(null)}

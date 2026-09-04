@@ -130,9 +130,17 @@ export async function receiveOutsideShipment(
   }
 
   const supabase = getSupabase();
+  // getSession(), NOT getUser(). getUser() makes a network round trip to
+  // /auth/v1/user, and supabase-js serialises auth calls behind a
+  // navigator.locks acquisition that gates every other request on the page --
+  // so a slow or failed one does not just cost a hop, it stalls the writes
+  // queued behind it. That is not theoretical: it stalled this insert
+  // indefinitely in the E2E run, with no error anywhere, until the reload
+  // aborted it. getSession() reads the stored session locally.
+  // See the memberFlights docblock in utils/operatorAccess.ts for the same trap.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
   const { data: ship, error: shipErr } = await supabase
     .from('outside_shipments')
@@ -156,7 +164,7 @@ export async function receiveOutsideShipment(
       quantity_good: good,
       quantity_scrapped: scrapped,
       received_at: payload.receivedAt ?? undefined,
-      received_by: user?.id ?? null,
+      received_by: session?.user.id ?? null,
       note: payload.note?.trim() || null,
     })
     .select('id')
@@ -270,17 +278,18 @@ export async function voidOutsideShipment(shipmentId: string): Promise<{ receipt
 /** Void one receipt. The column-scoped UPDATE grant, mirroring voidOperationCompletion. */
 export async function voidOutsideReceipt(receiptId: string): Promise<void> {
   const supabase = getSupabase();
+  // getSession() for the same reason as above: a write path must not make a
+  // network round trip to learn who is signed in.
   const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-  if (userError || !user) {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
     throw new Error('You must be signed in to undo a receipt.');
   }
 
   const { error } = await supabase
     .from('outside_shipment_receipts')
-    .update({ voided_at: new Date().toISOString(), voided_by: user.id })
+    .update({ voided_at: new Date().toISOString(), voided_by: session.user.id })
     .eq('id', receiptId)
     .is('voided_at', null);
   if (error) throw toFriendlyError(error, { entity: 'receipt' });

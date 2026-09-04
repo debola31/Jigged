@@ -161,6 +161,20 @@ including voided ones — the plater is holding a paper `OSP-0141-2`, and reissu
 two shipments become one in a phone call. A distinct advisory-lock namespace from
 `create_shipment_with_line_items`, so a slow outside send never blocks the customer shipping desk.
 
+### `getSession()`, never `getUser()`, in a write path
+
+`receiveOutsideShipment` and `voidOutsideReceipt` read the acting user from
+`supabase.auth.getSession()` — a local read. `getUser()` makes a network round trip to
+`/auth/v1/user`, and `supabase-js` serialises auth calls behind a `navigator.locks` acquisition
+that gates **every other request on the page**. A slow or failed one does not just cost a hop: the
+writes queued behind it stall.
+
+*That is not theoretical. Written with `getUser()`, the receipt insert hung indefinitely in the E2E
+run — no error surfaced anywhere, and the next `page.reload()` aborted the request, so the row
+simply never appeared.* The same trap is documented from the other direction in the `memberFlights`
+docblock in [`utils/operatorAccess.ts`](../../utils/operatorAccess.ts). The customer-side
+`voidShipment` still uses `getUser()`; it was not touched here.
+
 ---
 
 ## Surfaces

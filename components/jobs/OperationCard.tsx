@@ -185,6 +185,10 @@ export default function OperationCard({
   const canReceive =
     isExternal && !!outside &&
     (outside.qty_at_vendor > 0 || (outside.qty_sent === 0 && outside.qty_good === 0));
+  // Names what one press actually reverses. An outside op steps back one
+  // MOVEMENT (the newest receipt, else the newest slip), which is not the same
+  // promise as undoing a completion.
+  const undoLabel = isExternal ? 'Undo last movement' : 'Undo completion';
   const canUndo = isExternal
     ? !!outside && (outside.qty_sent > 0 || outside.qty_good > 0)
     : status === 'completed';
@@ -395,10 +399,15 @@ export default function OperationCard({
           )}
 
           {canUndo && (
-            <Tooltip title="Undo">
+            <Tooltip title={undoLabel}>
               <span>
                 <IconButton
                   size="small"
+                  // The Tooltip's title sits on the wrapper span, not the
+                  // button, so without this the control has NO accessible name
+                  // -- unusable with a screen reader, and invisible to a
+                  // by-role query.
+                  aria-label={undoLabel}
                   onClick={() => onUndo(operation.id)}
                   disabled={disabled}
                   sx={{

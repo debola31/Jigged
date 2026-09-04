@@ -445,6 +445,26 @@ protection. `GET` is deliberate on both: it never reaches the signature path, so
 Sentry events. **Nothing in this repo creates either detector** — they are server-side config like
 everything else in this section, and Trap 2 applies to them equally.
 
+**Trap 3 — an uptime monitor costs a billed seat, and the org has one.** The Intuit detector was
+created on 2026-09-04 (id `10239927`, `javascript-nextjs`, same interval, thresholds and `405`
+assertion as Stripe's) and **is `disabled`**, because activating it is refused:
+
+```
+PUT /api/0/projects/jigged/javascript-nextjs/uptime/10239927/
+{"status": ["You don't have enough pay-as-you-go available to create a new seat"]}
+```
+
+Sentry bills uptime monitors per active monitor; a `disabled` one is free and does not run. The
+included seat is spent on Stripe's, so the second needs pay-as-you-go budget raised in
+Settings → Subscription before `status` can be set to `active`. **A disabled monitor is not a
+degraded monitor — it is no monitor**, and it looks calm in the UI either way, which is the same
+shape as Traps 1 and 2: the thing reports healthy precisely because it is not doing anything.
+
+Two more limits worth knowing before reaching for the CLI here: `PATCH
+/organizations/jigged/detectors/{id}/` answers `403` to the org token (use the project-scoped
+`/projects/jigged/<project>/uptime/{id}/` instead), that `PUT` rejects `mode` as superuser-only, and
+omitting `status` from its body makes it try to activate — which is what surfaces the seat error.
+
 **What is deliberately not alerted.** Only *high* priority fires, and Sentry derives priority from
 level: `error`/`fatal` → high, `warning` → medium, `info`/`debug` → low. So the repo's deliberate
 `captureException(…, { level: 'warning' })` sites raise nothing, by construction. That is the

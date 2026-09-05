@@ -285,12 +285,14 @@ def test_the_take_to_a_job_carries_the_heat_and_the_job(db, shop):
         take(cur, shop, shop["bar"], 10, "8823")  # an ad-hoc removal, no job
         conn.commit()
     with db.cursor() as cur:
+        # Both takes commit in one transaction, so their created_at is identical (now() is
+        # transaction-stable) and row order is arbitrary — compare as a set, not a sequence.
         cur.execute(
             "SELECT heat_number, job_id::text FROM inventory_transactions"
-            " WHERE part_id = %s AND type = 'depletion' ORDER BY created_at",
+            " WHERE part_id = %s AND type = 'depletion'",
             (shop["bar"],),
         )
-        assert cur.fetchall() == [("4471", shop["job"]), ("8823", None)]
+        assert set(cur.fetchall()) == {("4471", shop["job"]), ("8823", None)}
 
 
 # ── Correctable, unlike everything else on the row ─────────────────────────────────────────────

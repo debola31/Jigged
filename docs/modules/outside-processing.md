@@ -166,6 +166,28 @@ including voided ones — the plater is holding a paper `VPS-0141-2`, and reissu
 two shipments become one in a phone call. A distinct advisory-lock namespace from
 `create_shipment_with_line_items`, so a slow outside send never blocks the customer shipping desk.
 
+### Editing an applied migration is a no-op where it already ran
+
+`20260903203741` was edited in place to mint `VPS-` instead of `OSP-`. That works
+on a database seeing it for the first time and does **nothing** everywhere it had
+already run: the version sits in `supabase_migrations.schema_migrations`, the file
+is never replayed, and the old function body survives.
+
+It was caught on this PR's own Supabase preview branch, which had applied the
+original and went on minting `OSP-0057-1` from a tree that said `VPS-` in ten
+places. Production had not applied it, so nothing shipped wrong — but the next
+environment to be a version ahead would have been prod, and the symptom is a
+document that disagrees with its own source.
+
+The fix is [`20260905183520`](../../supabase/migrations/20260905183520_vendor_packing_slip_prefix.sql),
+which `CREATE OR REPLACE`s the function (keeping its ACL and comment) and asserts
+afterwards that the installed body actually mints `VPS-`. **Once a migration has
+been applied anywhere, change it with a new migration.**
+
+Slips issued as `OSP-` are **not renumbered**. A slip number is printed on a
+document that left the building; rewriting one is the same failure as reissuing a
+voided number to a different box.
+
 ### `getSession()`, never `getUser()`, in a write path
 
 `receiveOutsideShipment` and `voidOutsideReceipt` read the acting user from

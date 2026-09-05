@@ -252,6 +252,24 @@ describe('generateOutsideShipmentPdf — the wrap hazard the mock cannot see', (
   });
 });
 
+describe('generateOutsideShipmentPdf — what it deliberately omits', () => {
+  it('has no signature block: a packing slip is a contents list, not a receipt', async () => {
+    // The freight literature calls treating a packing slip as proof of delivery
+    // "a frequent and costly mistake" -- only a BOL or a separate signed receipt
+    // releases cargo. It was useless here anyway: the signed copy stays on the
+    // plater's desk, and the receipt this system actually keeps is the
+    // outside_shipment_receipts row written when the parts come back.
+    await generateOutsideShipmentPdf({
+      shipment: slip({ notes: 'Mask the threads.' }),
+      company, sentBefore: 0, supabase: null,
+    });
+    const t = drawn().map((s) => s.toUpperCase());
+    expect(t.some((s) => s.includes('RECEIVED'))).toBe(false);
+    expect(t).not.toContain('SIGNATURE');
+    expect(t).not.toContain('PRINT NAME');
+  });
+});
+
 describe('generateOutsideShipmentPdf — the footer', () => {
   it('runs after the instructions paginate, so a page they added is not bare', async () => {
     doc.getNumberOfPages.mockReturnValue(2);

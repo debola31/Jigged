@@ -332,24 +332,20 @@ export async function generateOutsideShipmentPdf(
     cursorY += 16;
   }
 
-  // ---------- Received at vendor by ----------
-  const sigLineY = Math.min(cursorY + 30, pageHeight - MARGIN - 40);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('RECEIVED AT VENDOR BY', MARGIN, sigLineY - 14);
-
-  doc.setDrawColor(180);
-  doc.setLineWidth(0.5);
-  doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
-  doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
-  doc.line(MARGIN + 460, sigLineY, pageWidth - MARGIN, sigLineY);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('Signature', MARGIN, sigLineY + 11);
-  doc.text('Print Name', MARGIN + 270, sigLineY + 11);
-  doc.text('Date', MARGIN + 460, sigLineY + 11);
+  // ---------- No signature block, deliberately ----------
+  // A packing slip is a CONTENTS LIST. Proof of delivery is a separate signed
+  // receipt or the bill of lading, and the freight literature is blunt that
+  // treating a packing slip as proof of delivery is "a frequent and costly
+  // mistake" -- it is not a release document and signing it does not make it one.
+  //
+  // It was also useless here in practice: the signed copy stays on the plater's
+  // desk. We print one PDF, nothing comes back, and nothing in Jigged captures
+  // it. The receipt that actually exists in this system is the
+  // outside_shipment_receipts row written when the parts return, which is the
+  // record of what came back and needs no signature to be true.
+  //
+  // (The customer packing slip carries the same block and inherits the same
+  // objection. Changing a customer-facing document is a separate decision.)
 
   // ---------- Footer (every page) ----------
   // AFTER the instructions have paginated, or a page they added prints bare.

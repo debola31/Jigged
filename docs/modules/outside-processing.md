@@ -260,6 +260,13 @@ would be a worse invention than the one it avoided.
   any of this was software.
 - **The title is 22pt, not the customer slip's 26**, sized to sit with the meta line under it rather
   than tower over it.
+- **No signature block.** A packing slip is a *contents list*; proof of delivery is a separate signed
+  receipt or the bill of lading, and the freight literature is blunt that treating a packing slip as
+  proof of delivery is "a frequent and costly mistake". It was also useless in practice — the signed
+  copy stays on the plater's desk, we print one PDF, and nothing here captures it. The receipt this
+  system actually keeps is the `outside_shipment_receipts` row written when the parts come back.
+  *(The customer packing slip carries a `RECEIVED BY` block and inherits the same objection;
+  changing a customer-facing document is a separate decision.)*
 
 **Two defects were found by rendering a real PDF, and neither is visible to the test suite** (it
 mocks jsPDF wholesale, so it cannot observe overflow or wrap width):

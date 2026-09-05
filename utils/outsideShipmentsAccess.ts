@@ -9,7 +9,7 @@
  *
  * The split of responsibilities mirrors the rest of the repo:
  *
- *   - SEND goes through an RPC, because minting `OSP-{jobBase}-{n}` under a
+ *   - SEND goes through an RPC, because minting `VPS-{jobBase}-{n}` under a
  *     per-job advisory lock and freezing the vendor address block is not
  *     something a PostgREST insert can do. `outside_shipments` grants the
  *     browser SELECT and nothing else.

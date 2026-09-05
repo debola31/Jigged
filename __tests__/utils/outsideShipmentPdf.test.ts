@@ -82,7 +82,7 @@ function slip(over: Partial<OutsideShipmentWithRelations> = {}): OutsideShipment
       attention_to: null,
     },
     ship_to_contact: { name: 'Receiving Dock', email: null, phone: null },
-    slip_number: 'OSP-0141-2',
+    slip_number: 'VPS-0141-2',
     quantity: 50,
     shipped_at: '2026-08-14T12:00:00Z',
     due_back_on: '2026-08-21',
@@ -112,8 +112,8 @@ beforeEach(() => {
 
 describe('outsideShipmentPdfFilename', () => {
   it('names the file after the slip, not the job', () => {
-    expect(outsideShipmentPdfFilename({ slip_number: 'OSP-0141-2' }))
-      .toBe('OutsideProcessing-OSP-0141-2.pdf');
+    expect(outsideShipmentPdfFilename({ slip_number: 'VPS-0141-2' }))
+      .toBe('OutsideProcessing-VPS-0141-2.pdf');
   });
 });
 
@@ -121,8 +121,10 @@ describe('generateOutsideShipmentPdf — what the vendor reads', () => {
   it('prints the slip number, the vendor, and the PROCESS rather than the vendor twice', async () => {
     await generateOutsideShipmentPdf({ shipment: slip(), company, sentBefore: 0, supabase: null });
     const t = drawn();
-    expect(t).toContain('OUTSIDE PROCESSING');
-    expect(t.some((s) => s.includes('OSP-0141-2'))).toBe(true);
+    // Titled PACKING SLIP, like the customer document, because that is what it
+    // is to the person opening the box.
+    expect(t).toContain('PACKING SLIP');
+    expect(t.some((s) => s.includes('VPS-0141-2'))).toBe(true);
     expect(t).toContain('ProFinish Anodizing');
     // The operation column carries the SERVICE name. Naming the vendor there is
     // the defect that motivated the vendor-services split.

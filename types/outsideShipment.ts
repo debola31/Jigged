@@ -4,7 +4,7 @@
  * An outside operation sends a QUANTITY of parts to a vendor and gets some back.
  * One `OutsideShipment` is one send of one `job_operations` row, so an operation
  * can have several: send 50 now, 50 next week. Each carries its own
- * `OSP-{jobBase}-{n}` slip, which is the paperwork that travels in the box.
+ * `VPS-{jobBase}-{n}` slip, which is the paperwork that travels in the box.
  *
  * The operation's status is DERIVED from these rows by
  * `compute_job_operation_status` — nothing here is a status you assert. See

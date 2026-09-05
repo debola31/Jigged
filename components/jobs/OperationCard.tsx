@@ -472,7 +472,7 @@ export default function OperationCard({
           {isExternal && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Outside slips
+                Vendor packing slips
               </Typography>
               {slipsLoading ? (
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>

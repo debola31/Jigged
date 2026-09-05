@@ -77,7 +77,7 @@ def outside(supabase_admin: Client, seeded_user_a: dict) -> OutsideJob:
 
     vendor_id = (
         admin.table("vendors")
-        .insert({"company_id": company_id, "name": f"OSP Plater {sfx}"})
+        .insert({"company_id": company_id, "name": f"VPS Plater {sfx}"})
         .execute().data[0]["id"]
     )
     admin.table("vendor_addresses").insert(
@@ -100,18 +100,18 @@ def outside(supabase_admin: Client, seeded_user_a: dict) -> OutsideJob:
     )
     station_id = (
         admin.table("work_centers")
-        .insert({"company_id": company_id, "name": f"OSP Mill {sfx}", "labor_rate": 60})
+        .insert({"company_id": company_id, "name": f"VPS Mill {sfx}", "labor_rate": 60})
         .execute().data[0]["id"]
     )
     part_id = (
         admin.table("parts")
-        .insert({"company_id": company_id, "part_name": f"OSP-{sfx}",
+        .insert({"company_id": company_id, "part_name": f"VPS-{sfx}",
                  "source": "made", "primary_unit": "ea"})
         .execute().data[0]["id"]
     )
     routing_id = (
         admin.table("routings")
-        .insert({"company_id": company_id, "part_id": part_id, "name": f"OSP-{sfx}"})
+        .insert({"company_id": company_id, "part_id": part_id, "name": f"VPS-{sfx}"})
         .execute().data[0]["id"]
     )
     admin.table("routing_operations").insert(
@@ -359,7 +359,7 @@ def test_a_voided_slip_number_is_never_reissued(
 ):
     """The counter runs over ALL rows including voided ones.
 
-    The plater is holding a piece of paper reading OSP-xxxx-1. Handing that
+    The plater is holding a piece of paper reading VPS-xxxx-1. Handing that
     number to a different box is how two shipments become one in a phone call.
     """
     s1 = _send(seeded_user_a, outside.op_id, 10)
@@ -375,14 +375,14 @@ def test_a_voided_slip_number_is_never_reissued(
 def test_the_slip_carries_the_job_base_and_freezes_the_vendor_block(
     supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
 ):
-    """OSP-{jobBase}-{n}, and a ship-to snapshot that a later edit cannot rewrite."""
+    """VPS-{jobBase}-{n}, and a ship-to snapshot that a later edit cannot rewrite."""
     admin = supabase_admin
     job_number = admin.table("jobs").select("job_number").eq(
         "id", outside.job_id).single().execute().data["job_number"]
     base = job_number.split("-", 1)[1]
 
     s1 = _send(seeded_user_a, outside.op_id, 10)
-    assert s1["slip_number"] == f"OSP-{base}-1"
+    assert s1["slip_number"] == f"VPS-{base}-1"
 
     row = admin.table("outside_shipments").select(
         "vendor_name, service_name, ship_to_address, ship_to_contact"
@@ -436,7 +436,7 @@ def test_the_browser_cannot_insert_a_shipment_directly(
                 "company_id": outside.company_id, "job_id": outside.job_id,
                 "job_part_id": outside.job_part_id, "job_operation_id": outside.op_id,
                 "vendor_id": outside.vendor_id, "vendor_name": "x",
-                "service_name": "y", "slip_number": "OSP-FAKE-1", "quantity": 5,
+                "service_name": "y", "slip_number": "VPS-FAKE-1", "quantity": 5,
             }
         ).execute()
 

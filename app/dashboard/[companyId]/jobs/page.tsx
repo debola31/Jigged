@@ -56,6 +56,10 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllJobs, bulkCancelJobs } from '@/utils/jobsAccess';
 import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import { formatDateOnly as formatDate } from '@/lib/localDate';
+import OutsideWorkStrip from '@/components/jobs/OutsideWorkStrip';
+import OutsideWorkDrawer from '@/components/jobs/OutsideWorkDrawer';
+import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 import {
   isJobOverdue,
   isJobClosed,
@@ -293,6 +297,11 @@ export default function JobsPage() {
     [outsideData],
   );
 
+  // The strip is free -- it reads the queue above, already loaded for the chip.
+  // The drawer pays for its own detail, and only when someone opens it.
+  const [outsideDrawerOpen, setOutsideDrawerOpen] = useState(false);
+  const [previewSlipId, setPreviewSlipId] = useState<string | null>(null);
+
   // Narrow to the exact stages the user selected. Stages are derived from
   // (production_status, fulfillment_status), so we match on the same helper the
   // Status column renders. Empty selection ("None") shows no rows — use the
@@ -447,18 +456,8 @@ export default function JobsPage() {
     [visibleJobs, router, companyId],
   );
 
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return '—';
-    // Parse YYYY-MM-DD as local (not UTC) so the displayed date matches
-    // the calendar day the user actually picked — see isJobOverdue for
-    // the same UTC-parsing trap.
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
-    if (m) {
-      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-      return d.toLocaleDateString();
-    }
-    return new Date(dateStr).toLocaleDateString();
-  };
+  // formatDate moved to lib/localDate as formatDateOnly when the outside-work
+  // drawer needed the same UTC-midnight-safe parse. One implementation.
 
   const columnDefs: ColDef<JobWithRelations>[] = [
     {
@@ -637,6 +636,13 @@ export default function JobsPage() {
 
   return (
     <Box>
+      {/* Parts are at a vendor. Renders NOTHING when nothing is out, which is the
+          whole reason it sits above the grid rather than behind a tab. */}
+      <OutsideWorkStrip
+        outsideOps={outsideData ?? []}
+        onOpen={() => setOutsideDrawerOpen(true)}
+      />
+
       {/* Toolbar */}
       <Box
         sx={{
@@ -962,6 +968,22 @@ export default function JobsPage() {
           router.push(`/dashboard/${companyId}/jobs/${jobId}`);
         }}
       />
+      {/* Mounted only while open, so the fetch inside can be a useLoad on mount
+          rather than an effect that sets state on a prop flip. */}
+      {outsideDrawerOpen && (
+      <OutsideWorkDrawer
+        companyId={companyId}
+        onClose={() => setOutsideDrawerOpen(false)}
+        onViewSlip={setPreviewSlipId}
+      />
+      )}
+
+      <OutsideShipmentPreviewDialog
+        open={previewSlipId !== null}
+        shipmentId={previewSlipId}
+        onClose={() => setPreviewSlipId(null)}
+      />
+
     </Box>
   );
 }

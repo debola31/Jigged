@@ -11,9 +11,11 @@
  *   - It carries a **SHIP FROM** block. The customer slip does not need one —
  *     the customer knows who we are. A plater's receiving dock is holding parts
  *     from a dozen shops and has to know whose these are and where they go back.
- *   - The title is **20pt, not the packing slip's 26**. `SHOP_LOGO_MAX_W` lets
- *     the header's left block reach x≈230; "OUTSIDE PROCESSING" is 18 characters
- *     and at 26pt bold would start near x≈292, leaving 62pt of air between them.
+ *   - The title is **22pt, not the customer slip's 26**, sized to sit with the
+ *     meta line under it rather than tower over it. Both documents say
+ *     "PACKING SLIP": that is what each one is, and the reader who matters --
+ *     a plater's receiving clerk -- has no idea what "outside processing" is
+ *     from where they stand. The vendor and the process are named below.
  *
  * WRAP HAZARD, and the suite cannot see it: `splitTextToSize` measures against
  * whatever font the document is CURRENTLY in. The details block leaves it at
@@ -103,10 +105,21 @@ export async function generateOutsideShipmentPdf(
     nameSize: 14,
   });
 
+  // "PACKING SLIP", the same words the customer document uses, because that is
+  // what this IS -- a list of what is in the box, for whoever opens it. The
+  // vendor and the process are named below; the title does not need to carry
+  // them, and "OUTSIDE PROCESSING" described our routing rather than the
+  // document, to a reader who does not have our routing.
+  //
+  // 22pt, not the customer slip's 26: SHOP_LOGO_MAX_W lets the header's left
+  // block reach x=230, and "PACKING SLIP" at 26pt bold starts near x=372, which
+  // is comfortable -- but the meta line below it ("Slip #: VPS-0141-2") is the
+  // widest thing in this column, so the title is sized to sit with it rather
+  // than tower over it.
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
+  doc.setFontSize(22);
   doc.setTextColor(30);
-  doc.text('OUTSIDE PROCESSING', pageWidth - MARGIN, headerTop + 18, { align: 'right' });
+  doc.text('PACKING SLIP', pageWidth - MARGIN, headerTop + 18, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);

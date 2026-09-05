@@ -274,7 +274,7 @@ def test_a_quantity_edit_does_not_reset_a_sent_op(admin: Client, env: OutsideEnv
             "vendor_id": service["vendor_id"],
             "vendor_name": service["vendors"]["name"],
             "service_name": service["name"],
-            "slip_number": f"OSP-HAZARD-{uuid.uuid4().hex[:6]}",
+            "slip_number": f"VPS-HAZARD-{uuid.uuid4().hex[:6]}",
             "quantity": 10,
             "shipped_at": shipped_at,
         }

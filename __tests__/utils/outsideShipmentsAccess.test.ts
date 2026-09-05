@@ -75,12 +75,12 @@ describe('createOutsideShipment', () => {
 
   it('unwraps the RETURNS TABLE row PostgREST hands back as an array', async () => {
     mockRpc.mockResolvedValue({
-      data: [{ shipment_id: 'ship-1', slip_number: 'OSP-0141-2' }],
+      data: [{ shipment_id: 'ship-1', slip_number: 'VPS-0141-2' }],
       error: null,
     });
     await expect(createOutsideShipment({ jobOperationId: 'op-1', quantity: 50 })).resolves.toEqual({
       shipmentId: 'ship-1',
-      slipNumber: 'OSP-0141-2',
+      slipNumber: 'VPS-0141-2',
     });
   });
 

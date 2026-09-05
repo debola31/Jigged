@@ -437,7 +437,7 @@ heat-treat). It is a first-class routing step, not paperwork.
 | `pending` | nothing has gone out |
 
 - **An operation may have MANY shipments.** Send 50 now, 50 next week; each mints its own
-  `OSP-{jobBase}-{n}` slip. That is the whole reason the quantity picker exists.
+  `VPS-{jobBase}-{n}` slip. That is the whole reason the quantity picker exists.
 - **`quantity_scrapped` is separate from `quantity_good` and both are needed.** Together they
   retire the vendor's outstanding balance, so the step stops reading "at the vendor". Only `good`
   counts toward the step being done. 98 + 2 of 100 therefore closes the slip and leaves the op

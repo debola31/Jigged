@@ -130,7 +130,7 @@ visibly two parts light.*
 ## The write surface, and why it is shaped this way
 
 **The browser has exactly one door.** `outside_shipments` grants `authenticated` **SELECT and
-nothing else**: a send must mint `OSP-{jobBase}-{n}` under an advisory lock and freeze the vendor
+nothing else**: a send must mint `VPS-{jobBase}-{n}` under an advisory lock and freeze the vendor
 address block, neither of which a PostgREST insert can do. Receiving IS simple CRUD — an insert plus
 a trigger — so it goes straight through the client, the same shape `createOperationCompletion` uses.
 
@@ -152,12 +152,17 @@ a trigger — so it goes straight through the client, the same shape `createOper
 > so two statements inside a plpgsql body each fire at depth 1 and the rollup lands at 2. A
 > `BEFORE UPDATE OF voided_at` refusal trigger backs it up so a wrong-ordered repair script raises.
 
-**Slip numbers: `OSP-{jobBase}-{n}`**, byte-parallel with the customer slip's `PS-{jobBase}-{n}`.
-*Outside processing* is what the trade calls this — Epicor, JobBOSS and E2 all ship a module by that
-name — so it needs no legend. Rejected: **`OP-`** collides with `OP 10 / OP 20` on the traveler this
-same slip rides with, a real misread on paper by the person least able to check; **`SO-`** reads as
-*sales order*; **`OS-`** is one round letter from `PS-`. The counter runs over **all** rows
-including voided ones — the plater is holding a paper `OSP-0141-2`, and reissuing that number is how
+**Slip numbers: `VPS-{jobBase}-{n}`** — Vendor Packing Slip — byte-parallel with the customer slip's
+`PS-{jobBase}-{n}`.
+
+**Both documents print the title "PACKING SLIP"**, because that is what each one is to the person
+opening the box; a plater's receiving clerk has no idea what "outside processing" means from where
+they stand. That puts the whole burden of saying *which* document this is on the **number**, so it
+names who it is for. Rejected: **`PSV-`** and **`SPS-`** share `PS-`'s opening sound, which is the
+one thing the number now has to avoid; **`OP-`** collides with `OP 10 / OP 20` on the traveler this
+slip rides in the box with — a real misread on paper by the person least able to check;
+**`OPS-`** reads as *operations*; **`SO-`** reads as *sales order*. The counter runs over **all** rows
+including voided ones — the plater is holding a paper `VPS-0141-2`, and reissuing that number is how
 two shipments become one in a phone call. A distinct advisory-lock namespace from
 `create_shipment_with_line_items`, so a slow outside send never blocks the customer shipping desk.
 
@@ -184,13 +189,24 @@ Everything else is read-and-reprint. That is deliberate: a cross-job outside-wor
 deleted in Aug 2026 because a second place to act on the same row is a liability
 ([jobs.md](jobs.md#outside-external-vendor-operations)), and that argument still holds.
 
+**There is no sidebar entry and no standalone page.** A strip on the Jobs page is the door and a
+drawer is the room, which is one entry point rather than two.
+
+*Rejected: adding **“At vendor” to the Jobs status filter.*** It reads as the cheapest option and is
+not: `getJobLifecycleStage` is a total function of exactly two columns returning one **mutually
+exclusive** stage per job, and "at vendor" is neither — it is derived from operations, and a job at a
+vendor is *also* `in_progress`. Dropping it into that multi-select breaks the filter's invariant,
+where selecting everything means showing everything, and leaves "at vendor + in progress" ambiguous
+between AND and OR.
+
 | Surface | What it does |
 |---|---|
 | **Office op card** ([`OperationCard`](../../components/jobs/OperationCard.tsx)) | `Send to {vendor}` (outlined/warning — the sanctioned exception named in `interactionStandardsCheck.ts`) and `Receive {n}` (contained/**primary**, never green). **Gated on quantities, not status**: an op with 50 out and 50 in the shop offers BOTH, which is what makes send-50-now-50-later reachable. Expanding shows **slip history**. |
 | **Send / receive dialogs** | Prefilled to state their own outcome. Over-send **warns, never blocks**. Due back is **empty by default** — no lead-time data exists, and an invented promise on a printed document is worse than a blank line. |
 | **Operator step screen** | One tap survives and gains a fact: the button reads `SEND 50 TO PROFINISH`, the same move the page already makes with `RECORD n FINISHED`. Scrap is **progressively disclosed** — two prefilled numeric fields side by side on a one-handed phone is the shape that gets fat-fingered. |
 | **Slip preview** | Reprint, download, print — and **Void, which lives here and nowhere else**, so the destructive action is only reachable once the document is on screen. |
-| **`/dashboard/{companyId}/outside-work`** | The cross-job register. Slips, not operations. **No send, no receive, no undo.** |
+| **Jobs-page strip** ([`OutsideWorkStrip`](../../components/jobs/OutsideWorkStrip.tsx)) | Renders **only while something is at a vendor** — so on the days nothing is out, most days for a shop with three outside steps, the Jobs page is exactly what it was. Costs no query: every number comes from the outside queue the page already loads for its At-vendor chip. |
+| **Outside-work drawer** ([`OutsideWorkDrawer`](../../components/jobs/OutsideWorkDrawer.tsx)) | Opened by the strip. Grouped **by vendor**, oldest first, because "what has PerformCoat got?" is how the question is actually asked. Rows deep-link to `?op=` on the job. Loaded on open, not with the page. **No send, no receive, no undo.** |
 
 ### Surveillance guardrail
 

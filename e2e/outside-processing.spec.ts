@@ -89,7 +89,7 @@ async function seedOutsideJob(a: SupabaseClient): Promise<Seeded> {
     .insert({
       company_id: companyId,
       customer_id: customer!.id,
-      job_number: `OSP-${suffix}`,
+      job_number: `VPS-${suffix}`,
       production_status: 'not_started',
       fulfillment_status: 'unshipped',
     })
@@ -149,7 +149,7 @@ test.describe('outside processing — shipping & receiving', () => {
 
     // The slip opens straight away — it has to go in the box, and making the
     // shipper hunt for it is how it ends up not printed.
-    const preview = page.getByRole('heading', { name: /Outside processing — OSP-/i });
+    const preview = page.getByRole('heading', { name: /Vendor packing slip — VPS-/i });
     await expect(preview).toBeVisible();
     await expect(page.locator('iframe[title*="preview"]')).toHaveAttribute('src', /.+/);
     await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -186,9 +186,9 @@ test.describe('outside processing — shipping & receiving', () => {
     expect(after!.status).toBe('in_progress');
 
     // ---- 4. The slip is reprintable from the job toolbar ------------------
-    await page.getByRole('button', { name: /Outside slips \(1\)/i }).click();
+    await page.getByRole('button', { name: /Vendor slips \(1\)/i }).click();
     await page.getByRole('menuitem').first().click();
-    await expect(page.getByRole('heading', { name: /Outside processing — OSP-/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Vendor packing slip — VPS-/i })).toBeVisible();
   });
 
   test('undo steps back exactly one movement, not to zero', async ({ page }) => {

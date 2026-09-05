@@ -61,7 +61,7 @@ export default function OutsideShipmentsMenu({
         onClick={(e) => setAnchor(e.currentTarget)}
         disabled={disabled}
       >
-        Outside slips ({slips.length})
+        Vendor slips ({slips.length})
       </Button>
       <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}>
         {slips.map((s) => {

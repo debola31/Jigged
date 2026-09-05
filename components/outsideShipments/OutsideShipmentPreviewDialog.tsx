@@ -185,8 +185,13 @@ export default function OutsideShipmentPreviewDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullScreen>
+      {/* "Vendor packing slip", not "Outside processing", because the document
+          itself says PACKING SLIP -- and two names for one document is exactly
+          what the slip-number rationale argues against. The qualifier is here
+          and not on the paper because the OFFICE is the only reader who sees
+          both families side by side; the plater only ever holds this one. */}
       <DialogTitle sx={{ pr: 6 }}>
-        Outside processing{slipNumber ? ` — ${slipNumber}` : ''}
+        Vendor packing slip{slipNumber ? ` — ${slipNumber}` : ''}
         <IconButton
           aria-label="Close preview"
           onClick={onClose}
@@ -210,7 +215,7 @@ export default function OutsideShipmentPreviewDialog({
           <Box
             component="iframe"
             src={pdfUrl}
-            title={`Outside processing slip ${slipNumber} preview`}
+            title={`Vendor packing slip ${slipNumber} preview`}
             sx={{ width: '100%', height: '100%', border: 0, display: 'block' }}
           />
         )}

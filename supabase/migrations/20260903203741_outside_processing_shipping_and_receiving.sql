@@ -118,7 +118,7 @@ CREATE TABLE public.outside_shipments (
 -- vendor is holding, so a correction is a void plus a new slip.
 
 COMMENT ON TABLE public.outside_shipments IS
-  'One send of a quantity of parts to an outside vendor for ONE job_operations row. An operation may have many: send 50 now, 50 next week. THIS TABLE IS THE SEND -- there is no separate "mark sent out" write, and job_operations.sent_at/sent_by are a trigger-maintained mirror of the first live row here, never a source. Voided, never archived (no deleted_at). Slip numbers are OSP-{jobBase}-{n}, minted in create_outside_shipment under an advisory lock.';
+  'One send of a quantity of parts to an outside vendor for ONE job_operations row. An operation may have many: send 50 now, 50 next week. THIS TABLE IS THE SEND -- there is no separate "mark sent out" write, and job_operations.sent_at/sent_by are a trigger-maintained mirror of the first live row here, never a source. Voided, never archived (no deleted_at). Slip numbers are VPS-{jobBase}-{n}, minted in create_outside_shipment under an advisory lock.';
 
 COMMENT ON COLUMN public.outside_shipments.quantity IS
   'Pieces that physically left the building on this slip. Summed over live rows this is "how many went out"; minus the receipts it is "how many are still at the vendor", which is what makes compute_job_operation_status return ''sent''. Only quantity > 0 is enforced -- over-sending is warned in the UI, never blocked, following shipments rather than invoices.';
@@ -127,7 +127,7 @@ COMMENT ON COLUMN public.outside_shipments.shipped_at IS
   'When the parts left. timestamptz so job_operations.sent_at can mirror it exactly and the /activity feed can sort on it. Backdating writes an earlier value; the printed slip renders shipped_at::date. There is deliberately no separate date column -- two columns for one fact drift.';
 
 COMMENT ON COLUMN public.outside_shipments.slip_number IS
-  'OSP-{jobBase}-{n}. OSP is what the trade calls outside processing (Epicor, JobBOSS and E2 all ship a module by that name), so a shop owner reads it without a legend. Deliberately NOT OP-, which collides with "OP 10 / OP 20" on the traveler this same slip rides with, and deliberately three characters so it cannot be misread as PS- (customer packing slip) on paper or over the phone.';
+  'VPS-{jobBase}-{n} -- Vendor Packing Slip. BOTH documents print the title "PACKING SLIP", because that is what each one is to the person opening the box, so the NUMBER is the only thing that says which is which and it has to carry that alone. V names who it is for, the distinction that actually matters. Deliberately not PSV- or SPS-, which share PS-''s opening sound over a shop phone; not OP-, which collides with "OP 10 / OP 20" on the traveler this slip rides with; not OPS-, which reads as operations.';
 
 COMMENT ON COLUMN public.outside_shipments.ship_to_address IS
   'AddressSnapshot frozen from vendor_addresses at send time. The FIRST consumer of that table, which 20260824022226 created noting "nothing consumes it YET". NULL when the vendor has no address on file: the slip prints "(No address on file)" and the send dialog warns, but neither blocks.';
@@ -135,7 +135,7 @@ COMMENT ON COLUMN public.outside_shipments.ship_to_address IS
 CREATE INDEX idx_outside_shipments_operation
     ON public.outside_shipments (job_operation_id) WHERE voided_at IS NULL;
 -- FULL, not partial: the slip counter does count(*) over ALL rows including
--- voided, so a voided OSP-0141-2 is never reissued to a vendor holding the paper.
+-- voided, so a voided VPS-0141-2 is never reissued to a vendor holding the paper.
 CREATE INDEX idx_outside_shipments_job
     ON public.outside_shipments (job_id);
 CREATE INDEX idx_outside_shipments_open
@@ -242,7 +242,7 @@ REVOKE SELECT ON public.outside_shipment_receipts  FROM jigged_ai_readonly;
 
 -- ---- outside_shipments: SELECT only for the browser -----------------------
 -- NO INSERT, and that is the chokepoint decision #2 needs. A send must mint
--- OSP-{jobBase}-{n} under an advisory lock and freeze the vendor address block;
+-- VPS-{jobBase}-{n} under an advisory lock and freeze the vendor address block;
 -- neither is expressible in a PostgREST insert, so a direct write could only
 -- produce a slip with no number or a snapshot that later rewrites itself.
 -- NO UPDATE either: voiding must void the receipts FIRST (see section 10 and the
@@ -676,7 +676,7 @@ SELECT jp.company_id, o.job_id, o.job_part_id, o.id,
        -- retired model had exactly one sent_at column to record it in. No
        -- advisory lock needed -- this is a single statement in a migration and
        -- nothing else is minting.
-       'OSP-' || regexp_replace(j.job_number, '^[A-Za-z]+-?', '') || '-1',
+       'VPS-' || regexp_replace(j.job_number, '^[A-Za-z]+-?', '') || '-1',
        -- The WHOLE part quantity. The retired model had no partial send, so
        -- "sent" meant all of it; recording anything else would invent a number.
        jp.quantity,
@@ -927,15 +927,15 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('outside_shipment:' || v_job_id::text));
 
     -- jobBase strips the alpha prefix (J-0141 -> 0141), the SAME expression
-    -- 20260621161856 uses, so OSP- and PS- numbers on one job read as siblings.
+    -- 20260621161856 uses, so VPS- and PS- numbers on one job read as siblings.
     v_base := regexp_replace(v_job_number, '^[A-Za-z]+-?', '');
     -- count(*) OVER ALL ROWS INCLUDING VOIDED. This matters more here than for
-    -- packing slips: the plater is holding a piece of paper reading OSP-0141-2,
+    -- packing slips: the plater is holding a piece of paper reading VPS-0141-2,
     -- and reissuing that number to a different box is how two shipments become
     -- one in a phone call.
     SELECT count(*) + 1 INTO v_seq
       FROM public.outside_shipments WHERE job_id = v_job_id;
-    v_slip := 'OSP-' || v_base || '-' || v_seq::text;
+    v_slip := 'VPS-' || v_base || '-' || v_seq::text;
 
     INSERT INTO public.outside_shipments (
         company_id, job_id, job_part_id, job_operation_id,
@@ -970,7 +970,7 @@ GRANT  EXECUTE ON FUNCTION public.create_outside_shipment(uuid, numeric, uuid, u
   TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.create_outside_shipment(uuid, numeric, uuid, uuid, timestamptz, date, text, text) IS
-  'THE send. Mints OSP-{jobBase}-{n} under a per-job advisory lock, freezes the vendor address/contact blocks, and inserts one outside_shipments row; the AFTER INSERT trigger derives the operation status. company_id is derived from the operation, never passed, so a caller cannot name a tenant it does not own. Browser-callable by design: this is the only way an outside operation can be sent.';
+  'THE send. Mints VPS-{jobBase}-{n} under a per-job advisory lock, freezes the vendor address/contact blocks, and inserts one outside_shipments row; the AFTER INSERT trigger derives the operation status. company_id is derived from the operation, never passed, so a caller cannot name a tenant it does not own. Browser-callable by design: this is the only way an outside operation can be sent.';
 
 
 CREATE OR REPLACE FUNCTION public.void_outside_shipment(p_shipment_id uuid)
@@ -1577,7 +1577,7 @@ BEGIN
                                v.id, a.id, c.id, v.name, vs.name,
                                vendor_address_block_snapshot(a.id),
                                vendor_contact_block_snapshot(c.id),
-                               'OSP-' || v_os_base || '-' || v_os_seq::text,
+                               'VPS-' || v_os_base || '-' || v_os_seq::text,
                                jp.quantity,
                                now() - make_interval(days =>
                                        COALESCE((v_leaf->>'days_ago')::integer, 1)),
@@ -1951,7 +1951,7 @@ AS $$
       'next_order_number', 'get_running_operation_ids_for_station',
       -- Added 20260903203741: outside-processing shipping. BOTH are browser
       -- callable on purpose. create_outside_shipment IS the send -- it mints
-      -- OSP-{jobBase}-{n} under a per-job advisory lock and freezes the vendor
+      -- VPS-{jobBase}-{n} under a per-job advisory lock and freezes the vendor
       -- address block, neither of which a PostgREST insert can do, which is why
       -- outside_shipments grants the browser SELECT and nothing else.
       -- void_outside_shipment must void the receipts BEFORE the shipment in one

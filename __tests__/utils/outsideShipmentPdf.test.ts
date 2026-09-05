@@ -132,15 +132,15 @@ describe('generateOutsideShipmentPdf — what the vendor reads', () => {
     expect(table.body[0]).toContain('Anodize Type II Clear');
   });
 
-  it('carries a SHIP FROM block, which the customer packing slip does not', async () => {
+  it('prints the shop ONCE — the letterhead is the ship-from', async () => {
     await generateOutsideShipmentPdf({ shipment: slip(), company, sentBefore: 0, supabase: null });
     const t = drawn();
-    // A plater's dock holds parts from a dozen shops; it has to know whose these
-    // are and where they go back.
-    expect(t).toContain('SHIP FROM');
     expect(t).toContain('SHIP TO');
-    expect(t).toContain('Contour Tool & Machine');
-    expect(t).toContain('123 Shop St');
+    // A SHIP FROM block under the letterhead repeated the name, address and
+    // phone verbatim six lines lower.
+    expect(t).not.toContain('SHIP FROM');
+    expect(t.filter((s) => s === 'Contour Tool & Machine')).toHaveLength(1);
+    expect(t.filter((s) => s === '123 Shop St')).toHaveLength(1);
   });
 
   it('degrades to the shared fallback when the vendor has no address on file', async () => {
@@ -207,10 +207,13 @@ describe('generateOutsideShipmentPdf — the wrap hazard the mock cannot see', (
       company, sentBefore: 0, supabase: null,
     });
 
-    // NOT "the first split" -- the details block measures too, and does so
-    // correctly in the bold 11 it also draws in. The instructions split is the
-    // one at full content width, and it is the one that must be normal 10.
-    const idx = doc.splitTextToSize.mock.calls.findIndex((c) => c[1] === 612 - 40 * 2);
+    // Identified BY ITS CONTENT, not by width or position. The details block
+    // measures too (correctly, in the bold 11 it also draws in), and so does the
+    // ship-to block -- which since SHIP FROM was removed shares the instructions'
+    // full content width, so "the call at 532pt" now finds the wrong one.
+    const idx = doc.splitTextToSize.mock.calls.findIndex((c) =>
+      String(c[0]).includes('Mask the two threaded holes'),
+    );
     expect(idx).toBeGreaterThanOrEqual(0);
     const instructionsSplit = doc.splitTextToSize.mock.invocationCallOrder[idx];
 
@@ -273,8 +276,10 @@ describe('generateOutsideShipmentPdf — the footer', () => {
 describe('generateOutsideShipmentPdf — the address blocks wrap', () => {
   it("measures a vendor's legal name against its column, in the font it is drawn in", async () => {
     // Found by rendering one: at 11pt bold, "PerformCoat of Michigan Limited
-    // Liability Company" is 270pt against a 258pt column, so it ran off the
-    // right edge of a document that leaves the building. Nothing errored.
+    // Liability Company" is 270pt, and it ran off the right edge of a document
+    // that leaves the building. Nothing errored. The block is full-width now,
+    // so an overrun is far less likely -- the wrap stays because "less likely"
+    // is not a guarantee and the failure is silent.
     doc.splitTextToSize.mockImplementation((s: string) => [s]);
     await generateOutsideShipmentPdf({
       shipment: slip({ vendor_name: 'PerformCoat of Michigan Limited Liability Company' }),
@@ -285,8 +290,8 @@ describe('generateOutsideShipmentPdf — the address blocks wrap', () => {
       (c) => c[0] === 'PerformCoat of Michigan Limited Liability Company',
     );
     expect(call).toBeDefined();
-    // (612 - 80) / 2 - 8
-    expect(call![1]).toBe(258);
+    // Full content width now that SHIP FROM is gone: 612 - 40*2.
+    expect(call![1]).toBe(532);
 
     const idx = doc.splitTextToSize.mock.calls.indexOf(call!);
     const order = doc.splitTextToSize.mock.invocationCallOrder[idx];

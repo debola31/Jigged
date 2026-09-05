@@ -8,9 +8,9 @@
  * same header primitive, same grid table, same footer. Two things differ, and
  * both are the point.
  *
- *   - It carries a **SHIP FROM** block. The customer slip does not need one —
- *     the customer knows who we are. A plater's receiving dock is holding parts
- *     from a dozen shops and has to know whose these are and where they go back.
+ *   - There is ONE address block, SHIP TO. The shop's own details are the
+ *     letterhead `drawShopHeaderBlock` already draws; a SHIP FROM block below it
+ *     repeated the name, address and phone verbatim, six lines lower.
  *   - The title is **22pt, not the customer slip's 26**, sized to sit with the
  *     meta line under it rather than tower over it. Both documents say
  *     "PACKING SLIP": that is what each one is, and the reader who matters --
@@ -33,7 +33,6 @@ import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 import {
   attributionLine,
   buildAddressBlockLines,
-  buildShopHeaderLines,
   drawShopHeaderBlock,
   formatDate,
   loadLogoAsDataUrl,
@@ -153,21 +152,19 @@ export async function generateOutsideShipmentPdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- SHIP FROM (left) + SHIP TO (right) ----------
-  // Both from the frozen snapshot, never the live vendor row: renaming a vendor
-  // or archiving a service must not rewrite a slip that already left with a box.
-  const colWidth = (pageWidth - MARGIN * 2) / 2;
-  const leftX = MARGIN;
-  const rightX = MARGIN + colWidth + 8;
-
-  const fromLines = [company.name, ...buildShopHeaderLines(company)];
+  // ---------- SHIP TO ----------
+  // ONE address block, not two. `drawShopHeaderBlock` above already prints the
+  // shop's name, address and phone — a SHIP FROM block underneath it repeated
+  // all three, in the same order, six lines lower. The letterhead IS the
+  // ship-from, which is how every packing slip has worked since long before
+  // any of this was software.
   const toLines = buildAddressBlockLines(
     shipment.vendor_name,
     shipment.ship_to_address,
     shipment.ship_to_contact?.name ?? shipment.ship_to_address?.attention_to ?? null,
   );
   // The shared renderer only emits its "(No address on file)" fallback when it
-  // has NOTHING — and here it always has the vendor name, so a vendor with no
+  // has NOTHING, and here it always has the vendor name, so a vendor with no
   // address on file would print as a lone name that reads like a truncation.
   // Say it plainly instead: the dock should know the line is missing, not
   // wonder whether it got cut off.
@@ -176,40 +173,38 @@ export async function generateOutsideShipmentPdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('SHIP FROM', leftX, cursorY);
-  doc.text('SHIP TO', rightX, cursorY);
+  doc.text('SHIP TO', MARGIN, cursorY);
 
   /**
    * WRAPS, unlike the customer packing slip's equivalent, and it has to.
    *
    * A vendor's name here is its legal name, and those are long: measured at
    * 11pt bold, "PerformCoat of Michigan Limited Liability Company" is 270pt
-   * against a 258pt column, so it runs past the right margin and off the page.
-   * Nothing errors and no test can see it — the suite mocks jsPDF — so this was
-   * found by rendering one and measuring the string.
+   * against the half-width column this used to sit in, so it ran past the
+   * margin and off the page. Nothing errored and no test could see it — the
+   * suite mocks jsPDF — so it was found by rendering one and measuring.
+   *
+   * Now that SHIP FROM is gone the block has the full content width, which
+   * makes an overrun far less likely; the wrap stays because "less likely" is
+   * not a guarantee and the failure is silent.
    *
    * Each line is measured in the font it will be DRAWN in (line 0 is bold), or
    * splitTextToSize wraps the heading against the body metrics and the first
    * line still overruns.
    */
-  const blockWidth = colWidth - 8;
-  const drawBlock = (lines: string[], x: number): number => {
-    let row = 0;
-    for (const [i, line] of lines.entries()) {
-      doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(40);
-      for (const part of doc.splitTextToSize(line, blockWidth) as string[]) {
-        doc.text(part, x, cursorY + 16 + row * 13);
-        row += 1;
-      }
+  const blockWidth = pageWidth - MARGIN * 2;
+  let toRows = 0;
+  for (const [i, line] of toLines.entries()) {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    for (const part of doc.splitTextToSize(line, blockWidth) as string[]) {
+      doc.text(part, MARGIN, cursorY + 16 + toRows * 13);
+      toRows += 1;
     }
-    return row;
-  };
-  const fromRows = drawBlock(fromLines, leftX);
-  const toRows = drawBlock(toLines, rightX);
+  }
 
-  cursorY += 16 + Math.max(fromRows, toRows) * 13 + 14;
+  cursorY += 16 + toRows * 13 + 14;
 
   // ---------- What is in the box ----------
   // One shipment is one operation, so there is only ever one row. A table

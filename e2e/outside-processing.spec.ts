@@ -185,9 +185,13 @@ test.describe('outside processing — shipping & receiving', () => {
       .from('job_operations').select('status').eq('id', opId).single();
     expect(after!.status).toBe('in_progress');
 
-    // ---- 4. The slip is reprintable from the job toolbar ------------------
-    await page.getByRole('button', { name: /Vendor slips \(1\)/i }).click();
-    await page.getByRole('menuitem').first().click();
+    // ---- 4. The slip is reprintable from the OPERATION that produced it ----
+    // Not from a job-toolbar menu: a second packing-slip dropdown beside
+    // "Shipments" meant telling two of them apart by reading the labels, on the
+    // surface where picking the wrong one sends a customer's paperwork to a
+    // plater. The slip lives on the step it came from.
+    await page.getByTestId('operation-expand').first().click();
+    await page.getByRole('button', { name: /^VPS-/ }).first().click();
     await expect(page.getByRole('heading', { name: /Vendor packing slip — VPS-/i })).toBeVisible();
   });
 

@@ -44,7 +44,7 @@ import { isJobClosed } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import type { JobNote } from '@/types/operator';
 import { getJobNotes } from '@/utils/operatorAccess';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, OutsideShipmentsMenu, InvoicesMenu } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
@@ -398,14 +398,15 @@ export default function JobDetailPage() {
               disabled={actionLoading}
             />
           )}
-          {/* Renders nothing when the job has no outside work, so it costs no
-              toolbar room on a shop that does none. */}
-          <OutsideShipmentsMenu
-            jobId={jobId}
-            refreshKey={historyRefreshKey}
-            onVoided={fetchJob}
-            disabled={actionLoading}
-          />
+          {/* NO second slip menu here, deliberately. A "Vendor slips" dropdown
+              sitting beside "Shipments" put two packing-slip menus on one
+              toolbar, and telling them apart meant reading the labels rather
+              than seeing the difference — on the surface where picking the
+              wrong one sends a customer's paperwork to a plater. A job's vendor
+              slips live on the OPERATION that produced them (expand it for the
+              slip history) and in the Jobs-page drawer, which is where "what is
+              out" is actually asked. */
+          }
           {parts.length > 0 && (
             <InvoicesMenu
               companyId={companyId}

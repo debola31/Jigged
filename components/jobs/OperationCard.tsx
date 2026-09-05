@@ -499,15 +499,19 @@ export default function OperationCard({
                           variant="body2"
                           sx={{ flex: 1, textDecoration: voided ? 'line-through' : 'none' }}
                         >
-                          {sl.slip_number} · {sl.quantity} sent {formatDateTime(sl.shipped_at)}
+                          {sl.quantity} sent {formatDateTime(sl.shipped_at)}
                           {good > 0 ? ` · ${good} back` : ''}
                           {scrap > 0 ? `, ${scrap} scrapped` : ''}
                           {!voided && out > 0 ? ` · ${out} still out` : ''}
                           {voided ? ' · voided' : ''}
                         </Typography>
+                        {/* The slip NUMBER is the control, matching the drawer.
+                            It is the thing you read out on the phone, so it is
+                            the thing worth clicking — "View slip" made you find
+                            the number in the sentence beside it first. */}
                         {onViewSlip && (
                           <Button size="small" onClick={() => onViewSlip(sl.id)} sx={{ minWidth: 0 }}>
-                            View slip
+                            {sl.slip_number}
                           </Button>
                         )}
                       </Box>

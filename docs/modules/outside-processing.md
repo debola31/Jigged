@@ -221,19 +221,31 @@ that would turn a count into a rate.
 ## The document
 
 [`utils/outsideShipmentPdf.ts`](../../utils/outsideShipmentPdf.ts), a sibling of the customer
-packing slip sharing its header primitive, grid table and footer. Two differences:
+packing slip sharing its header primitive, grid table and footer.
 
-- **It carries a SHIP FROM block.** The customer knows who we are; a plater's dock is holding parts
-  from a dozen shops and has to know whose these are and where they go back.
-- **The title is 20pt, not 26.** `SHOP_LOGO_MAX_W` lets the header's left block reach x≈230, and
-  `OUTSIDE PROCESSING` at 26pt bold starts near x≈292 — 62pt of air between them.
+**Both documents are titled `PACKING SLIP`, and that follows the industry rather than inventing.**
+Every ERP in this space treats the outbound-to-vendor document as a packing slip and differentiates
+it by **naming the counterparty on the screen and the document**, never by decorating the number:
+Epicor Kinetic ships *Subcontractor Shipment Entry* alongside *Customer Shipment Entry* and calls the
+output a **Subcontract Packing Slip**; Infor SyteLine/CSI calls the same direction a **Vendor Packing
+Slip**. We use *vendor* because that is what the rest of the product calls that party — `vendors`,
+`vendor_services`, the Vendors page — and introducing "subcontractor" as a second noun for one entity
+would be a worse invention than the one it avoided.
+
+- **One address block: SHIP TO.** `drawShopHeaderBlock` already prints the shop's name, address and
+  phone as the letterhead. A SHIP FROM block underneath repeated all three, in the same order, six
+  lines lower — *the letterhead **is** the ship-from*, which is how packing slips worked long before
+  any of this was software.
+- **The title is 22pt, not the customer slip's 26**, sized to sit with the meta line under it rather
+  than tower over it.
 
 **Two defects were found by rendering a real PDF, and neither is visible to the test suite** (it
 mocks jsPDF wholesale, so it cannot observe overflow or wrap width):
 
 1. A vendor's name here is its **legal** name and those are long. At 11pt bold, *"PerformCoat of
-   Michigan Limited Liability Company"* measures 270pt against a 258pt column — it ran past the
-   right margin and off the page. The address blocks now wrap, measuring each line **in the font it
+   Michigan Limited Liability Company"* measures 270pt, and against the half-width column the block
+   sat in before SHIP FROM was removed it ran past the right margin and off the page. The block
+   wraps, measuring each line **in the font it
    is drawn in** (line 0 is bold), or the heading wraps against body metrics and still overruns.
    *The customer packing slip has the same latent bug and was not touched.*
 2. `buildAddressBlockLines` only emits `(No address on file)` when it has **nothing**, and here it

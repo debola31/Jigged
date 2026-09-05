@@ -265,8 +265,9 @@ would be a worse invention than the one it avoided.
   proof of delivery is "a frequent and costly mistake". It was also useless in practice — the signed
   copy stays on the plater's desk, we print one PDF, and nothing here captures it. The receipt this
   system actually keeps is the `outside_shipment_receipts` row written when the parts come back.
-  *(The customer packing slip carries a `RECEIVED BY` block and inherits the same objection;
-  changing a customer-facing document is a separate decision.)*
+  *(The customer packing slip carried a `RECEIVED BY` block and inherited the same objection. It was
+  removed at the same time — on that document the failure is worse, because it invites a **customer**
+  to treat a signed copy as something it legally is not. See [shipments.md](shipments.md).)*
 
 **Two defects were found by rendering a real PDF, and neither is visible to the test suite** (it
 mocks jsPDF wholesale, so it cannot observe overflow or wrap width):

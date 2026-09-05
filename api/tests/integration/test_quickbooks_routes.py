@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1216,5 +1217,147 @@ async def test_invoice_status_is_denied_to_a_non_member(
     try:
         resp = await _post(seeded_user_b["access_token"], _status_path(cid, seed["job_id"]), {})
         assert resp.status_code == 403, resp.text
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+# ───────────────── reconnecting to a different QuickBooks company ─────────────────
+#
+# The authorize screen grants access for whichever Intuit account is signed into
+# the browser, and Intuit offers a brand new trial company to a signer who has
+# none — so the realm coming back is not necessarily the realm that went out.
+# persist_connection overwrites realm_id unconditionally, so before the guard an
+# accidental sign-in silently repointed the shop at an empty company file while
+# every invoice link and customer mapping stayed bound to the old one.
+
+
+def _mint_callback_state(company_id: str, user_id: str) -> str:
+    import routes.quickbooks_routes as qbr
+
+    return qbr._mint_state(company_id, user_id)
+
+
+async def _callback(state: str, realm_id: str):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        return await ac.get(
+            "/api/quickbooks/callback",
+            params={"state": state, "code": "auth-code", "realmId": realm_id},
+            follow_redirects=False,
+        )
+
+
+def _fake_token_exchange(monkeypatch, revoked: list):
+    """Stub the Intuit calls the callback makes, and record any revoke."""
+    import routes.quickbooks_routes as qbr
+
+    bundle = SimpleNamespace(
+        access_token="AT-new",
+        access_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        refresh_token="RT-new",
+        refresh_expires_at=datetime.now(timezone.utc) + timedelta(days=100),
+    )
+    monkeypatch.setattr(qbr.qb, "exchange_code_for_tokens", lambda code: bundle)
+    monkeypatch.setattr(qbr.qb, "revoke_token", lambda token: revoked.append(token))
+    # The company-name lookup is best-effort in the route; make it a no-op so a
+    # test failure can only come from the guard.
+    monkeypatch.setattr(
+        qbr.qb, "qb_request", lambda *a, **k: {"CompanyInfo": {"CompanyName": "Other Co"}}
+    )
+    return bundle
+
+
+async def test_reconnect_to_a_different_realm_is_refused_when_history_exists(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    _map_customer(supabase_admin, cid, seed["customer_id"])
+    revoked: list = []
+    _fake_token_exchange(monkeypatch, revoked)
+    try:
+        resp = await _callback(_mint_callback_state(cid, seeded_user_a["user_id"]), "realm-OTHER")
+
+        assert resp.status_code == 302
+        assert "qb=realm_mismatch" in resp.headers["location"]
+
+        # The connection is untouched: same realm, same tokens. This is the
+        # assertion that matters — a redirect with the right word in it would
+        # still be a bug if the row had already been overwritten.
+        conn = (
+            supabase_admin.table("quickbooks_connections")
+            .select("realm_id, access_token, refresh_token")
+            .eq("company_id", cid)
+            .single()
+            .execute()
+            .data
+        )
+        assert conn["realm_id"] == "realm-rt"
+        assert conn["access_token"] == "AT"
+        assert conn["refresh_token"] == "RT"
+
+        # The grant we decided not to keep is handed back, not left live.
+        assert revoked == ["RT-new"]
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_reconnect_to_a_different_realm_is_allowed_when_there_is_no_history(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    # A shop that connected the WRONG company on its first try must not be
+    # trapped: with nothing bound to the old realm there is nothing to strand,
+    # so the switch goes through.
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    _fake_token_exchange(monkeypatch, [])
+    try:
+        resp = await _callback(_mint_callback_state(cid, seeded_user_a["user_id"]), "realm-OTHER")
+
+        assert resp.status_code == 302
+        assert "qb=connected" in resp.headers["location"]
+        conn = (
+            supabase_admin.table("quickbooks_connections")
+            .select("realm_id")
+            .eq("company_id", cid)
+            .single()
+            .execute()
+            .data
+        )
+        assert conn["realm_id"] == "realm-OTHER"
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_reconnecting_the_same_realm_still_works_with_history(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    # The ordinary case the guard must not break: an expired connection being
+    # renewed against the company it was always bound to.
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    _map_customer(supabase_admin, cid, seed["customer_id"])
+    _fake_token_exchange(monkeypatch, [])
+    try:
+        resp = await _callback(_mint_callback_state(cid, seeded_user_a["user_id"]), "realm-rt")
+
+        assert resp.status_code == 302
+        assert "qb=connected" in resp.headers["location"]
+        conn = (
+            supabase_admin.table("quickbooks_connections")
+            .select("realm_id, access_token, reconnect_required")
+            .eq("company_id", cid)
+            .single()
+            .execute()
+            .data
+        )
+        assert conn["realm_id"] == "realm-rt"
+        assert conn["access_token"] == "AT-new"
+        assert conn["reconnect_required"] is False
     finally:
         _cleanup(supabase_admin, cid)

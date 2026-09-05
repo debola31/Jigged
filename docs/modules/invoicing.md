@@ -151,6 +151,25 @@ company keeps its old invoices exactly as they last read: an Intuit invoice id i
 inside the realm that issued it, and re-querying it against a new realm would attach another
 company's numbers to Jigged's invoice.
 
+**Connecting a different company is refused unless it is deliberate.** The authorize screen grants
+access for whichever Intuit account is signed into that browser, and Intuit offers a brand-new trial
+company to a signer who has none — so an admin reconnecting an expired connection while signed in as
+themselves can land on a different company file without being asked a single question. Found live on
+2026-09-05, while reconnecting Contour Tool & Machine after their grant was revoked upstream.
+
+`persist_connection` overwrites `realm_id` unconditionally and nothing checked it, so that used to
+succeed and the card just said "Connected" — while every invoice link and customer mapping stayed
+bound to the old realm, payment status reported them as belonging to a previous company, and new
+pushes went to the empty one. The callback now compares the returned realm against the stored one
+and refuses when the old realm still has rows in `quickbooks_invoice_links` or
+`quickbooks_customer_map`, redirecting to `?qb=realm_mismatch`. The unused grant is revoked rather
+than left live.
+
+Two deliberate limits. **With no history, the switch is allowed** — a shop that connected the wrong
+company on its first attempt must not be trapped, and there is nothing to strand. And **switching on
+purpose still works**: Disconnect, then connect. That path is explicit, already on the card, and
+leaves the old invoices filed where they are.
+
 ### A void in QuickBooks reopens the quantity
 
 `voided` or `missing` sets `voided_at`, which fires the existing

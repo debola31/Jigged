@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, resetRouterMocks } from '../../test-utils';
+import { render, resetRouterMocks, setSearchParams } from '../../test-utils';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 import type { QuickBooksStatus, QuickBooksPoField } from '@/utils/quickbooksAccess';
 
@@ -237,5 +237,52 @@ describe('QuickBooksIntegrationCard — connecting', () => {
       expect(screen.getByRole('button', { name: /connect quickbooks desktop/i })).toBeEnabled(),
     );
     expect(await screen.findByText(/Conductor is unavailable/i)).toBeInTheDocument();
+  });
+});
+
+
+describe('QuickBooksIntegrationCard — reconnecting to the wrong QuickBooks company', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRouterMocks();
+    mockGetStatus.mockResolvedValue(CONNECTED);
+    mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
+    mockRefreshPoField.mockResolvedValue(NOT_FOUND);
+  });
+
+  afterEach(() => setSearchParams());
+
+  // The failure this guards is silent by nature: the sign-in succeeds, so the
+  // only thing standing between an admin and a repointed connection is this
+  // message. It has to name the company they are already filed in, because
+  // "a different company" does not tell anyone which account to sign in as.
+  it('names the connected company and says nothing was changed', async () => {
+    setSearchParams({ qb: 'realm_mismatch' });
+    render(<QuickBooksIntegrationCard companyId="test-company-id" />);
+
+    const alert = await screen.findByText(/different QuickBooks company/i);
+    expect(alert).toHaveTextContent('Sandbox Company_US_1');
+    expect(alert).toHaveTextContent(/nothing was changed/i);
+    expect(alert).toHaveTextContent(/disconnect first/i);
+  });
+
+  // The name arrives from a separate async status load, so a naive
+  // implementation reads it as undefined and renders "than undefined".
+  it('still reads sensibly before the company name has loaded', async () => {
+    mockGetStatus.mockReturnValue(new Promise(() => {}));
+    setSearchParams({ qb: 'realm_mismatch' });
+    render(<QuickBooksIntegrationCard companyId="test-company-id" />);
+
+    const alert = await screen.findByText(/different QuickBooks company/i);
+    expect(alert).not.toHaveTextContent(/undefined|null/);
+    expect(alert).toHaveTextContent(/your existing company/i);
+  });
+
+  it('shows nothing when the callback reported success', async () => {
+    setSearchParams({ qb: 'connected' });
+    render(<QuickBooksIntegrationCard companyId="test-company-id" />);
+
+    await screen.findByText(/QuickBooks connected/i);
+    expect(screen.queryByText(/different QuickBooks company/i)).toBeNull();
   });
 });

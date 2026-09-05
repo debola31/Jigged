@@ -156,6 +156,29 @@ def _map_qb_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Unexpected error")
 
 
+def _realm_has_history(db: Client, company_id: str, realm_id: str) -> bool:
+    """Does this company already have work bound to that QuickBooks company file?
+
+    A QBO invoice id and a QBO customer id mean nothing outside the company file
+    that issued them, so both of these tables carry realm_id and every read joins
+    on it. Rows here are what makes a silent realm swap destructive rather than
+    merely surprising.
+    """
+    for table in ("quickbooks_invoice_links", "quickbooks_customer_map"):
+        rows = (
+            db.table(table)
+            .select("id")
+            .eq("company_id", company_id)
+            .eq("realm_id", realm_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if rows:
+            return True
+    return False
+
+
 def _is_connected(conn: dict | None) -> bool:
     return bool(conn) and conn.get("environment") == qb._environment()
 
@@ -204,6 +227,50 @@ async def callback(
             .execute()
         )
         connected_by = access.data[0]["id"] if access.data else None
+
+        # ── Refuse a SILENT switch to a different QuickBooks company ──
+        #
+        # The authorize screen grants access for whichever Intuit account is signed
+        # into that browser, and Intuit will happily offer to spin up a brand new
+        # trial company for a signer who has none. So the realm coming back here is
+        # not necessarily the realm that went out: an admin who reconnects while
+        # signed in as themselves can land on a different company file without ever
+        # being asked a question.
+        #
+        # persist_connection overwrites realm_id unconditionally, and nothing else
+        # checked it, so that used to succeed and the card just said "Connected".
+        # What actually happened: every existing invoice link and customer mapping
+        # stayed bound to the OLD realm, so payment status reported them as
+        # belonging to a previous company and new pushes went to the new, empty one.
+        # A QBO invoice id is only meaningful inside its own company file.
+        #
+        # Switching companies on purpose is still allowed — Disconnect, then
+        # connect. That path is explicit, already exists on the card, and keeps the
+        # history where it is. What is refused is doing it by accident, which is
+        # the only way it was happening.
+        existing = qb.get_connection(db, company_id)
+        if (
+            existing
+            and existing.get("realm_id")
+            and existing["realm_id"] != realmId
+            and _realm_has_history(db, company_id, existing["realm_id"])
+        ):
+            logger.warning(
+                "QuickBooks callback for company %s returned realm %s but the "
+                "connection is bound to %s, which has history. Refusing.",
+                company_id,
+                realmId,
+                existing["realm_id"],
+            )
+            # Do not leave a live grant we have decided not to store. Best effort:
+            # failing to revoke is untidy, not harmful, and must not turn a refusal
+            # the user can act on into a generic error they cannot.
+            try:
+                qb.revoke_token(bundle.refresh_token)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Could not revoke the unused QuickBooks grant: %s", exc)
+            return RedirectResponse(f"{settings_url}?qb=realm_mismatch", status_code=302)
+
         qb.persist_connection(db, company_id, realmId, bundle, connected_by=connected_by)
         # Best-effort: store the QBO company name for the UI label.
         try:

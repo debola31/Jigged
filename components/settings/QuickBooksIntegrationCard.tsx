@@ -78,6 +78,11 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   // Without it, a network blip renders "Connect to QuickBooks" to a shop that is
   // already connected -- a failed check shown as a definitive negative.
   const [statusFailed, setStatusFailed] = useState(false);
+  /** The OAuth callback refused a sign-in that named a different QuickBooks
+   *  company. Kept as a flag rather than an error string because the message
+   *  needs `status.qb_company_name`, which is still loading when the redirect
+   *  is read — so it is composed at render, once the name is actually known. */
+  const [realmMismatch, setRealmMismatch] = useState(false);
   const [desktop, setDesktop] = useState<DesktopStatus | null>(null);
   const [pendingLink, setPendingLink] = useState<DesktopLink | null>(null);
   /** WHICH provider is being connected, not merely that something is. Both
@@ -164,6 +169,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     if (!qb) return;
     (async () => {
       if (qb === 'connected') setSuccess('QuickBooks connected.');
+      else if (qb === 'realm_mismatch') setRealmMismatch(true);
       else if (qb === 'error') setError('QuickBooks connection failed. Please try again.');
     })();
     router.replace(`/dashboard/${companyId}/settings`);
@@ -269,6 +275,23 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
+          </Alert>
+        )}
+        {realmMismatch && (
+          // WARNING, not error: nothing was changed and the shop can fix it in
+          // one go. Naming the company they are already filed in is the whole
+          // point of the message — "a different company" is true and useless,
+          // while "something other than Contour Tool Inc." says which account to
+          // sign in as. The disconnect-first escape hatch is mentioned because a
+          // shop genuinely moving to a new QuickBooks company is a real thing,
+          // just not something to do by accident.
+          <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setRealmMismatch(false)}>
+            That sign-in was for a different QuickBooks company
+            {status?.qb_company_name ? ` than ${status.qb_company_name}` : ''}. Nothing was
+            changed. Sign in to QuickBooks as someone with access to{' '}
+            {status?.qb_company_name ?? 'your existing company'} and try again. If you really are
+            moving to a new QuickBooks company, disconnect first — your existing invoices stay
+            filed under the old one either way.
           </Alert>
         )}
         {success && (

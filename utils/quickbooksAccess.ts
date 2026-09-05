@@ -1,5 +1,10 @@
 import { getSupabase } from '@/lib/supabase';
 import { API_BASE_URL } from '@/lib/api';
+import {
+  toInvoiceStatus,
+  type InvoicePaymentFacts,
+  type QuickBooksInvoiceStatus,
+} from '@/utils/invoicePaymentStatus';
 
 /**
  * Frontend access layer for the QuickBooks integration.
@@ -36,18 +41,24 @@ export const QB_ERROR = {
   /** The shop started the setup but never finished it on the QuickBooks
    *  computer. Also a warning with a retry — the action differs, not the tone. */
   desktopNotConnected: 'qbd_not_connected',
+  /** Intuit's API did not answer while we were reading payment status back. The
+   *  stored mirror is still shown as-is — a read we could not make must never be
+   *  written down, and "couldn't check" is never "unpaid". */
+  onlineUnreachable: 'qbo_unreachable',
 } as const;
 
-/** True when QuickBooks Desktop simply is not reachable right now.
+/** True when QuickBooks simply is not reachable right now — the shop PC being off
+ *  for Desktop, Intuit not answering for Online.
  *
- *  Every surface uses this to choose warning-with-retry over error. A shop PC
- *  being switched off is the expected path, not a defect — which is also why this
- *  module reports nothing to Sentry. */
+ *  Every surface uses this to choose warning-with-retry over error. Third-party
+ *  downtime is the expected path, not a defect — which is also why this module
+ *  reports nothing to Sentry. */
 export function isQuickBooksUnreachable(err: unknown): boolean {
   return (
     err instanceof QuickBooksError &&
     (err.code === QB_ERROR.desktopUnreachable ||
-      err.code === QB_ERROR.desktopNotConnected)
+      err.code === QB_ERROR.desktopNotConnected ||
+      err.code === QB_ERROR.onlineUnreachable)
   );
 }
 
@@ -247,13 +258,27 @@ export function pushJobToQuickBooks(
   });
 }
 
-/** Today, in the BROWSER's timezone, as YYYY-MM-DD. `toISOString()` would be UTC
- *  and would misdate roughly one push in thirty for a US shop working past 4pm
- *  Pacific — a real period-cutoff error, not a cosmetic one. */
-function localInvoiceDate(): string {
+/**
+ * Today, in the BROWSER's timezone, as YYYY-MM-DD.
+ *
+ * `toISOString()` would be UTC and would misdate roughly one push in thirty for a
+ * US shop working past 4pm Pacific — a real period-cutoff error, not a cosmetic
+ * one. Exported because two surfaces now depend on the same notion of "today":
+ * the push dialog dates the invoice with it, and the Invoices menu compares it
+ * against `qb_due_date` to decide overdue. Two private copies would be two
+ * definitions of today, and they would disagree for exactly the shops working
+ * late that this function exists for.
+ */
+export function localDateISO(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The date to stamp on a new invoice. A named alias, so the push body reads as
+ *  the accounting decision it is rather than as a generic date helper. */
+function localInvoiceDate(): string {
+  return localDateISO();
 }
 
 /**
@@ -370,8 +395,20 @@ export interface QuickBooksInvoiceLineView {
   totalPrice: number;
 }
 
-/** One created invoice for the job's Invoices card. */
-export interface QuickBooksInvoiceView {
+/**
+ * One created invoice for the job's Invoices card.
+ *
+ * `total` is JIGGED's line total. The inherited `qb*` fields are the read-only
+ * mirror of what QuickBooks Online last said about the same invoice —
+ * tax-inclusive, and therefore NOT comparable with `total`. `qbStatusCheckedAt`
+ * null means Intuit has never answered for this row, which is an explicit state
+ * the UI renders rather than a gap it fills in.
+ *
+ * It EXTENDS InvoicePaymentFacts rather than restating those fields, so
+ * invoicePaymentDisplay() can be handed a view directly and the two definitions
+ * cannot drift — a field renamed on one side stops compiling on the other.
+ */
+export interface QuickBooksInvoiceView extends InvoicePaymentFacts {
   id: string;
   invoiceId: string | null;
   docNumber: string | null;
@@ -379,11 +416,25 @@ export interface QuickBooksInvoiceView {
   createdAt: string;
   lines: QuickBooksInvoiceLineView[];
   total: number;
+  provider: QuickBooksProvider;
+  realmId: string;
+  /** Set when the invoice no longer counts toward invoiced quantity — by the
+   *  mirror (QBO reports it voided or deleted) or by a future in-app void. */
+  voidedAt: string | null;
+  /** The invoice date QuickBooks holds. Mirrored for completeness; the menu shows
+   *  created_at, which is when Jigged issued it. */
+  qbTxnDate: string | null;
 }
 
-/** All created (non-void) invoices for a job, newest first, with their per-part
- * lines — replaces the single-invoice assumption of getQuickBooksInvoiceLinkForJob
- * for the job page's Invoices card. Plain member read (RLS), no backend round-trip. */
+/** All created invoices for a job, newest first, with their per-part lines —
+ * replaces the single-invoice assumption of getQuickBooksInvoiceLinkForJob for the
+ * job page's Invoices card. Plain member read (RLS), no backend round-trip.
+ *
+ * Voided rows are deliberately INCLUDED. They used to be filtered out, which meant
+ * an invoice the shop voided in QuickBooks simply vanished from the menu with no
+ * explanation and the reopened quantity looked like a bug; the chip now says what
+ * happened. The invoiced-quantity maths is unaffected — that is computed in SQL
+ * from voided_at, not from this list. */
 export async function getQuickBooksInvoiceLinksForJob(
   companyId: string,
   jobId: string,
@@ -393,6 +444,8 @@ export async function getQuickBooksInvoiceLinksForJob(
     .from('quickbooks_invoice_links')
     .select(
       `id, qb_invoice_id, qb_invoice_doc_number, qb_invoice_url, created_at,
+       provider, realm_id, voided_at,
+       qb_status, qb_total_amt, qb_balance, qb_due_date, qb_txn_date, qb_status_checked_at,
        quickbooks_invoice_line_items (
          job_part_id, quantity, unit_price, total_price,
          job_part:job_parts ( part:parts ( part_name ) )
@@ -401,28 +454,12 @@ export async function getQuickBooksInvoiceLinksForJob(
     .eq('company_id', companyId)
     .eq('job_id', jobId)
     .eq('status', 'created')
-    .is('voided_at', null)
     .order('created_at', { ascending: false });
   if (error) {
     console.error('Error fetching invoices for job:', error);
     throw new Error('Failed to load invoices.');
   }
-  type LineRow = {
-    job_part_id: string;
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    job_part: { part: { part_name: string } | null } | null;
-  };
-  type LinkRow = {
-    id: string;
-    qb_invoice_id: string | null;
-    qb_invoice_doc_number: string | null;
-    qb_invoice_url: string | null;
-    created_at: string;
-    quickbooks_invoice_line_items: LineRow[];
-  };
-  return ((data ?? []) as unknown as LinkRow[]).map((r) => {
+  return (data ?? []).map((r) => {
     const lines: QuickBooksInvoiceLineView[] = (r.quickbooks_invoice_line_items ?? []).map((li) => ({
       jobPartId: li.job_part_id,
       partName: li.job_part?.part?.part_name ?? 'Part',
@@ -438,8 +475,77 @@ export async function getQuickBooksInvoiceLinksForJob(
       createdAt: r.created_at,
       lines,
       total: lines.reduce((s, l) => s + l.totalPrice, 0),
+      // provider and qb_status are enum-via-CHECK, so the generated types widen
+      // them to `string`; narrowed here rather than asserted, for the reason in
+      // types/customer.ts → toCreditStatus.
+      provider: r.provider === 'qbd' ? 'qbd' : 'qbo',
+      realmId: r.realm_id,
+      voidedAt: r.voided_at,
+      qbStatus: toInvoiceStatus(r.qb_status),
+      qbTotalAmt: nullableNumber(r.qb_total_amt),
+      qbBalance: nullableNumber(r.qb_balance),
+      qbDueDate: r.qb_due_date,
+      qbTxnDate: r.qb_txn_date,
+      qbStatusCheckedAt: r.qb_status_checked_at,
     };
   });
+}
+
+/** `numeric` columns arrive as numbers, but null must stay null: Number(null) is
+ *  0, and a zero balance is the one value that means "paid in full". */
+function nullableNumber(v: number | null): number | null {
+  return v === null ? null : Number(v);
+}
+
+/** One invoice's mirror row as the backend re-read it after writing. Snake_case
+ *  because it is the route's JSON verbatim, like PushResult and PreflightResult. */
+export interface QuickBooksInvoiceStatusRow {
+  link_id: string;
+  qb_invoice_id: string | null;
+  qb_status: QuickBooksInvoiceStatus | null;
+  qb_total_amt: number | null;
+  qb_balance: number | null;
+  qb_due_date: string | null;
+  qb_txn_date: string | null;
+  voided_at: string | null;
+}
+
+export interface QuickBooksInvoiceStatusResult {
+  /** False means nothing was stale, so Intuit was NOT asked — `invoices` still
+   *  carries the stored rows, and they are current enough by definition. */
+  checked: boolean;
+  checked_at: string | null;
+  invoices: QuickBooksInvoiceStatusRow[];
+  /** Invoices belonging to a QuickBooks company this shop is no longer connected
+   *  to. Their stored mirror is left untouched: it was true of a realm we can no
+   *  longer ask, and overwriting it would be inventing an answer. */
+  skipped_other_realm: number;
+}
+
+/**
+ * Bring this job's payment mirror up to date, then hand back what is stored.
+ *
+ * Called when the Invoices menu OPENS — an explicit user action, one backend call
+ * per open, never a mount or a poll. The BACKEND decides whether Intuit is
+ * actually asked (a webhook marked the row stale, it has never been checked, or
+ * the last check is over ten minutes old), which is why there is no "Check
+ * payment status" button: the freshness rule is one rule in one place, and a
+ * button would be a second way to spend an Intuit call that the user has to think
+ * about.
+ *
+ * Rejects with a QuickBooksError carrying `QB_ERROR.onlineUnreachable` when Intuit
+ * did not answer — pass it to isQuickBooksUnreachable and keep showing the stored
+ * mirror with its "as of" date. A read that failed is never written down, so what
+ * is on screen stays the last thing QuickBooks actually said.
+ */
+export function syncQuickBooksInvoiceStatus(
+  companyId: string,
+  jobId: string,
+): Promise<QuickBooksInvoiceStatusResult> {
+  return qbRequest<QuickBooksInvoiceStatusResult>(
+    `/${companyId}/jobs/${jobId}/invoice-status`,
+    { method: 'POST' },
+  );
 }
 
 /**

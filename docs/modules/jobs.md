@@ -338,6 +338,13 @@ defaults each line to shipped-but-unbilled and caps at ordered-but-unbilled — 
 shipping is allowed (a packing slip isn't a delivery) and only softly flagged. Full spec:
 [Invoicing](invoicing.md).
 
+**Each QuickBooks Online invoice in the Invoices menu carries a payment chip** — paid, partly paid,
+open, overdue, voided or deleted in QuickBooks, with the balance. It refreshes when the menu opens,
+and only when something says it is out of date; there is no button, because the person opening the
+menu cannot know whether the number is current. Desktop rows carry no chip. Rules, and what happens
+to invoiced quantity when QuickBooks voids an invoice:
+[Payment status](invoicing.md#payment-status-quickbooks-online-mirror).
+
 **Cancel dialog:** "Every part on the job will be marked cancelled. You can reopen the job later."
 No reason field. *(This doc previously specified a required Cancellation Reason input and the copy
 "This action cannot be undone" — neither is true; `cancelJob(jobId)` takes no reason and Reopen

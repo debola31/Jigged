@@ -27,9 +27,11 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import httpx
+import sentry_sdk
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,22 @@ class QuickBooksValidationError(ValueError):
     """A caller-supplied invoice request is invalid (e.g. billing more than has
     shipped, or a part not on the job) -> HTTP 400. Distinct from
     QuickBooksApiError (a QBO-side rejection -> 502): this is our own guard."""
+
+
+class QuickBooksReadUnavailable(QuickBooksApiError):
+    """We could not get a DEFINITIVE answer out of QuickBooks: the request failed,
+    or the 200 body was not one we can read.
+
+    Exists so the payment mirror can tell "QuickBooks says nothing is owed" apart
+    from "we could not ask" — the distinction the whole read path is built around,
+    because the second one written down reads to a shop owner as the first.
+    Nothing raising this is ever persisted.
+
+    Subclasses QuickBooksApiError so every existing handler still classifies it,
+    but the invoice-status route must catch it BEFORE _map_qb_error: an Intuit
+    outage on a read is expected third-party downtime and belongs at 4xx (the
+    Starlette Sentry integration captures 5xx only), whereas _map_qb_error's 502
+    belongs to the push path, where a failure IS worth an issue."""
 
 
 class _InvalidGrant(RuntimeError):
@@ -440,6 +458,448 @@ def qb_query(db: Client, company_id: str, query: str) -> dict:
     """Run a QBO query. httpx URL-encodes the (already QBO-escaped) query string."""
     resp = qb_request(db, company_id, "GET", "query", params={"query": query})
     return resp.get("QueryResponse", {})
+
+
+# ───────────────────────── Invoice payment mirror (QBO -> Jigged, read-only) ─────────────────────────
+# The one place Jigged reads anything back out of QuickBooks. It answers exactly one
+# question per invoice — what did QBO last say about it — and stores the answer on the
+# link row (migration 20260903203624). It is not an AR subledger: no payment records, no
+# aging, and customers.credit_status is never derived from a balance.
+#
+# Nothing here writes to Intuit, and NOTHING here writes a status we did not definitively
+# receive. Every failure raises; the stored answer and its timestamp stay untouched, so a
+# balance on screen is always dated and always something QuickBooks actually said.
+
+# Invoice ids per batched query. A job's whole invoice list is normally one call; the cap
+# keeps the URL well inside Intuit's limit when a long-running job has accumulated many.
+INVOICE_QUERY_CHUNK = 100
+# QBO pages a query at 100 rows BY DEFAULT and truncates silently — no marker, no count.
+# A truncated page is indistinguishable from "these invoices are gone" to the absence
+# logic in fetch_invoice_facts, which is how a read failure would become a written status.
+INVOICE_QUERY_MAXRESULTS = 1000
+# Belt and braces on exactly that: a chunk can never out-size the page it comes back on,
+# so absence from a successful page can only mean absence. This is the invariant the
+# whole `missing` status rests on, and it is cheaper to assert than to test for.
+assert INVOICE_QUERY_CHUNK <= INVOICE_QUERY_MAXRESULTS
+
+# How long a stored answer is treated as current when no webhook has said otherwise.
+# The webhook is the fast path; this bound is what covers the one that never arrived
+# (wrong host, Intuit retry exhausted, subscription lapsed) without polling anything.
+INVOICE_STATUS_MAX_AGE_MINUTES = 10
+
+# The mirror columns as the route hands them to the browser. Re-selected after the write
+# so the response cannot disagree with what is stored. quickbooks_invoice_links carries no
+# deleted_at (invoices are voided, not archived), so there is no soft-delete filter here.
+_MIRROR_COLUMNS = (
+    "id, qb_invoice_id, qb_status, qb_total_amt, qb_balance, "
+    "qb_due_date, qb_txn_date, voided_at"
+)
+
+
+def qb_query_strict(db: Client, company_id: str, query: str) -> dict:
+    """qb_query, but an unreadable answer RAISES instead of looking empty.
+
+    qb_query returns `resp.get("QueryResponse", {})`, so a 200 carrying a Fault, a
+    proxy's error page, or any body that is not the shape we expect all arrive as
+    "no rows". For reference-data lookups that is harmless — the worst case is
+    creating an item that already existed. For the payment mirror it is precisely
+    the failure mode the house rule forbids: "we couldn't ask" turning into "the
+    invoice was deleted", stored as a status a shop owner acts on.
+
+    Returns the QueryResponse dict (possibly empty — an empty result IS an answer)."""
+    resp = qb_request(db, company_id, "GET", "query", params={"query": query})
+    if not isinstance(resp, dict) or resp.get("Fault") or "QueryResponse" not in resp:
+        # The fault detail goes to the log, not to the caller: the route has its own
+        # wording for this and Intuit's text names internals a shop owner can't act on.
+        logger.warning(
+            "QuickBooks query returned no readable QueryResponse (company %s)", company_id
+        )
+        raise QuickBooksReadUnavailable("QuickBooks returned an unreadable answer to a query.")
+    query_response = resp["QueryResponse"]
+    if not isinstance(query_response, dict):
+        raise QuickBooksReadUnavailable("QuickBooks returned an unreadable answer to a query.")
+    return query_response
+
+
+def _qb_money(value: Any, label: str) -> Decimal:
+    """Parse an amount to 2dp, raising ValueError on anything unreadable.
+
+    Raising rather than defaulting is the point: a missing or junk amount must abort
+    the pass, because every fallback value available here (0, None, "keep the old
+    one") is a claim about money that QuickBooks did not make."""
+    if value is None:
+        raise ValueError(f"QuickBooks returned no {label}.")
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"QuickBooks returned an unreadable {label}: {value!r}") from exc
+
+
+def derive_invoice_status(*, found: bool, total_amt: Any, balance: Any, jigged_total: Any) -> str:
+    """The stored status word for one invoice. Pure: no clock, no I/O, no DB.
+
+    Clock-free on purpose — "overdue" is NOT one of the outcomes. It depends on
+    today's date, so storing it would be stale by tomorrow; the browser derives it
+    from qb_due_date at render (see the column comment in 20260903203624).
+
+    `jigged_total` is the sum of our own line items and is used for the VOID TEST
+    ONLY. QuickBooks totals are tax-inclusive, so a QBO total legitimately exceeds
+    Jigged's line total on any taxed invoice — comparing the two to decide partial
+    vs open would report a fully paid invoice as partly paid on every such shop."""
+    if not found:
+        # Absent from two consecutive SUCCESSFUL queries — see fetch_invoice_facts,
+        # which is the only thing allowed to pass found=False.
+        return "missing"
+
+    total = _qb_money(total_amt, "invoice total")
+    owed = _qb_money(balance, "invoice balance")
+    jigged = Decimal("0") if jigged_total is None else _qb_money(jigged_total, "Jigged line total")
+
+    # QBO does not delete a voided invoice; it zeroes it and keeps the number. So an
+    # invoice Jigged issued with real lines, now reporting a zero total, was voided
+    # there. A 100%-discounted invoice is indistinguishable from that here — accepted
+    # (the outcome, no money owed, is the same either way) and on the sandbox
+    # verification list.
+    if total == 0 and jigged > 0:
+        return "voided"
+    # total == 0 with jigged_total == 0 falls through to `paid`, which is right:
+    # nothing is owed on it, and there is no evidence anyone voided anything.
+    if owed <= 0:
+        return "paid"
+    if owed < total:
+        return "partial"
+    return "open"
+
+
+def _invoice_fact(row: dict) -> dict:
+    """One QBO Invoice -> the facts the mirror stores. Amounts as 2dp strings (they
+    cross a JSON boundary into apply_qbo_invoice_mirror, where a float would round
+    money); dates as the raw YYYY-MM-DD strings QBO sends, which Postgres casts."""
+    return {
+        "total_amt": str(_qb_money(row.get("TotalAmt"), "invoice total")),
+        "balance": str(_qb_money(row.get("Balance"), "invoice balance")),
+        # QBO omits DueDate on an invoice with no terms; such an invoice is simply
+        # never rendered overdue. Omitted is not the same as unreadable.
+        "due_date": row.get("DueDate") or None,
+        "txn_date": row.get("TxnDate") or None,
+    }
+
+
+def _confirm_invoice(db: Client, company_id: str, invoice_id: str) -> dict | None:
+    """Second, single-id read for an invoice the batch query did not return.
+
+    ONE ABSENCE IS NOT EVIDENCE. QBO's query index lags a freshly created invoice by
+    a moment, so an id can be genuinely absent from a batch query and present a
+    second later on its own — and the batch's absence is also what a partial or
+    proxied response looks like. Only an id absent from BOTH successful queries is
+    reported as deleted, which is the only input that produces `missing`.
+
+    Queried with `select *` like every other query in this file, rather than the
+    `select Id` an existence check would suggest: a field projection is unverified
+    against this minor version, and a row that DOES come back has to arrive with its
+    amounts or the pass would have proved the invoice exists and still have nothing
+    to store for it."""
+    query_response = qb_query_strict(
+        db, company_id, f"select * from Invoice where Id = '{_escape_qb_literal(invoice_id)}'"
+    )
+    rows = query_response.get("Invoice") or []
+    if not isinstance(rows, list):
+        raise QuickBooksReadUnavailable("QuickBooks returned an unreadable invoice list.")
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("Id") or "") == invoice_id:
+            return _invoice_fact(row)
+    return None
+
+
+def fetch_invoice_facts(
+    db: Client, company_id: str, invoice_ids: list[str]
+) -> dict[str, dict | None]:
+    """Every requested id -> its facts, or None when the invoice is CONFIRMED absent.
+
+    All or nothing. A partial map would let the caller write a status for some rows
+    and leave others silently un-refreshed at a stale balance, so any failure raises
+    QuickBooksReadUnavailable and nothing is written at all."""
+    # Dedupe while preserving order: two links can point at one QBO invoice after a
+    # re-push, and asking twice would be a wasted call, not a different answer.
+    ids = list(dict.fromkeys(str(i) for i in invoice_ids if i))
+    if not ids:
+        return {}
+
+    # Hermetic test escape hatch, same shape and same production guard as
+    # create_invoice: with QUICKBOOKS_FAKE set (E2E / local) skip Intuit entirely and
+    # report everything paid, so the e2e suite exercises the whole store-and-render
+    # path with no network. Guarded off in production so a stray flag cannot mark
+    # real invoices paid.
+    if os.getenv("QUICKBOOKS_FAKE") and _environment() != "production":
+        today = _now().date().isoformat()
+        return {
+            i: {"total_amt": "1.00", "balance": "0.00", "due_date": None, "txn_date": today}
+            for i in ids
+        }
+
+    out: dict[str, dict | None] = {}
+    try:
+        for start in range(0, len(ids), INVOICE_QUERY_CHUNK):
+            chunk = ids[start : start + INVOICE_QUERY_CHUNK]
+            literals = ", ".join(f"'{_escape_qb_literal(i)}'" for i in chunk)
+            query_response = qb_query_strict(
+                db,
+                company_id,
+                f"select * from Invoice where Id in ({literals}) "
+                f"MAXRESULTS {INVOICE_QUERY_MAXRESULTS}",
+            )
+            rows = query_response.get("Invoice") or []
+            if not isinstance(rows, list):
+                raise QuickBooksReadUnavailable("QuickBooks returned an unreadable invoice list.")
+            # More rows than ids means the `Id in (...)` filter did not apply. Absence
+            # from a page we cannot explain says nothing about whether an invoice
+            # exists, so the pass stops rather than deriving `missing` from it.
+            if len(rows) > len(chunk):
+                raise QuickBooksReadUnavailable(
+                    "QuickBooks returned more invoices than were asked for."
+                )
+            wanted = set(chunk)
+            found: dict[str, dict] = {}
+            for row in rows:
+                row_id = str(row.get("Id") or "") if isinstance(row, dict) else ""
+                if row_id not in wanted:
+                    raise QuickBooksReadUnavailable(
+                        "QuickBooks returned an invoice that was not asked for."
+                    )
+                found[row_id] = _invoice_fact(row)
+            for invoice_id in chunk:
+                out[invoice_id] = (
+                    found[invoice_id]
+                    if invoice_id in found
+                    else _confirm_invoice(db, company_id, invoice_id)
+                )
+    except QuickBooksReadUnavailable:
+        raise
+    except (QuickBooksApiError, httpx.HTTPError) as exc:
+        # An Intuit 4xx/5xx or a network failure. Expected third-party downtime, so it
+        # stays a read failure the route can answer with the stored values.
+        raise QuickBooksReadUnavailable(f"Couldn't read invoices from QuickBooks: {exc}") from exc
+    except ValueError as exc:
+        # A row we could parse as JSON but not as an invoice (no TotalAmt, junk Balance).
+        # Logged with the traceback because it means Intuit's shape moved, but still a
+        # read failure rather than a 500 — the stored mirror is what the user sees.
+        logger.warning("QuickBooks returned a malformed invoice for %s", company_id, exc_info=True)
+        raise QuickBooksReadUnavailable("QuickBooks returned an invoice we couldn't read.") from exc
+    return out
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    """PostgREST hands timestamptz back as an ISO string. None means absent OR
+    unreadable — callers distinguish the two by checking the raw value first, because
+    an unreadable timestamp must force a re-check rather than be ignored."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        return _parse_dt(str(value))
+    except (ValueError, TypeError):
+        return None
+
+
+def _current_realm_links(links: list[dict], conn: dict | None) -> list[dict]:
+    """Only the links belonging to the realm we hold a token for.
+
+    A QBO invoice Id is unique only WITHIN a company file, so querying an id left
+    over from a previous realm against the current one does not come back "not
+    found" — it can come back as a DIFFERENT invoice carrying the same number, and
+    we would store that stranger's balance against this job. The route filters these
+    out to report skipped_other_realm; this repeats the filter because getting it
+    wrong here produces a confidently wrong answer rather than a missing one.
+
+    A link row with no realm_id key at all was already scoped by the caller and is
+    kept — this must not silently drop rows just because of a narrow select."""
+    realm = (conn or {}).get("realm_id")
+    if not realm:
+        return list(links)
+    return [link for link in links if link.get("realm_id", realm) == realm]
+
+
+def links_need_check(links: list[dict], conn: dict, now: datetime) -> bool:
+    """Should this menu-open actually ask Intuit? The BACKEND owns this decision —
+    the browser only ever says "the user opened the invoice list".
+
+    True when anything makes the stored answer untrustworthy:
+      * never checked;
+      * a webhook stamped this invoice stale after our last check;
+      * a Payment/CreditMemo webhook stamped the whole realm stale after it (those
+        events name only the payment, and resolving one to its invoices would need an
+        Intuit call inside the webhook handler, which must stay a pure DB write);
+      * the answer is simply older than INVOICE_STATUS_MAX_AGE_MINUTES, which is what
+        covers a webhook that never arrived.
+
+    An unparseable timestamp counts as "needs checking": asking again costs one call,
+    while showing a stale balance as current is the failure this feature exists to
+    prevent."""
+    now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    scoped = _current_realm_links(links, conn)
+    if not scoped:
+        return False
+
+    conn_stale_raw = (conn or {}).get("qb_invoices_stale_since")
+    conn_stale = _as_datetime(conn_stale_raw)
+    conn_stale_unreadable = conn_stale_raw is not None and conn_stale is None
+    max_age = timedelta(minutes=INVOICE_STATUS_MAX_AGE_MINUTES)
+
+    for link in scoped:
+        checked_raw = link.get("qb_status_checked_at")
+        if checked_raw is None:
+            return True
+        checked = _as_datetime(checked_raw)
+        if checked is None:
+            return True
+        # Per-link rather than "the newest check is older than the bound": one pass
+        # refreshes every link at once, so they normally share a timestamp, and where
+        # they don't (the monotonic guard skipped a row) the older one genuinely is
+        # the stale one. This can only ever ask sooner, never later.
+        if now - checked > max_age:
+            return True
+        stale_raw = link.get("qb_stale_at")
+        if stale_raw is not None:
+            stale = _as_datetime(stale_raw)
+            if stale is None or stale > checked:
+                return True
+        if conn_stale_unreadable or (conn_stale is not None and conn_stale > checked):
+            return True
+    return False
+
+
+def _jigged_line_totals(db: Client, link_ids: list[str]) -> dict[str, Decimal]:
+    """SUM(total_price) per invoice link, in ONE query for the whole job.
+
+    Feeds derive_invoice_status's void test and nothing else. Summed here rather than
+    in SQL because PostgREST cannot group without a view, and one round trip for the
+    job is the property that matters. quickbooks_invoice_line_items has no deleted_at
+    — a line is removed with its invoice — so there is no soft-delete filter."""
+    totals: dict[str, Decimal] = {}
+    rows = (
+        db.table("quickbooks_invoice_line_items")
+        .select("invoice_link_id, total_price")
+        .in_("invoice_link_id", link_ids)
+        .execute()
+        .data
+        or []
+    )
+    for row in rows:
+        link_id = row.get("invoice_link_id")
+        if not link_id:
+            continue
+        line_total = Decimal(str(row.get("total_price") or 0))
+        totals[link_id] = totals.get(link_id, Decimal("0")) + line_total
+    return totals
+
+
+def refresh_invoice_statuses(
+    db: Client,
+    company_id: str,
+    conn: dict,
+    links: list[dict],
+    *,
+    checked_at: datetime,
+) -> list[dict]:
+    """Ask QuickBooks about these invoices, store the answer, return the rows AS STORED.
+
+    `checked_at` is minted by the caller BEFORE the Intuit call and is both the stamp
+    and apply_qbo_invoice_mirror's monotonic guard, so two overlapping passes (two
+    people on the same job, a menu open racing the backfill) settle deterministically
+    on the later read instead of on whichever HTTP response landed last.
+
+    EVERY row is derived before ANYTHING is written: one malformed fact aborts the
+    whole pass with nothing stored, so the ledger never holds a mix of this read's
+    answers and a guess. The returned rows are re-selected after the write, so the
+    caller's response can never disagree with the database — including where the
+    monotonic guard or the human-void filter (voided_by IS NOT NULL) declined a row."""
+    scoped = _current_realm_links(links, conn)
+    link_ids = [link["id"] for link in scoped]
+    if not link_ids:
+        return []
+
+    jigged_totals = _jigged_line_totals(db, link_ids)
+
+    invoice_ids = [link["qb_invoice_id"] for link in scoped if link.get("qb_invoice_id")]
+    facts = fetch_invoice_facts(db, company_id, invoice_ids)
+
+    rows: list[dict] = []
+    for link in scoped:
+        invoice_id = link.get("qb_invoice_id")
+        if not invoice_id:
+            # A 'created' link always carries one; anything else has nothing to ask
+            # about, and inventing a status for it would be a guess.
+            continue
+        if invoice_id not in facts:
+            # fetch_invoice_facts answers for every id it was given, so this is our
+            # own bug rather than Intuit's — but it still must not become a status.
+            raise QuickBooksReadUnavailable("QuickBooks did not answer for every invoice.")
+        fact = facts[invoice_id]
+        try:
+            status = derive_invoice_status(
+                found=fact is not None,
+                total_amt=fact["total_amt"] if fact else None,
+                balance=fact["balance"] if fact else None,
+                jigged_total=jigged_totals.get(link["id"]),
+            )
+        except ValueError as exc:
+            # Amounts were already validated in _invoice_fact, so reaching here means
+            # that guarantee broke. Still classified as a read failure: the user sees
+            # the stored answer, and the traceback is in the log.
+            logger.warning("Couldn't derive a QuickBooks status for %s", company_id, exc_info=True)
+            raise QuickBooksReadUnavailable(
+                "QuickBooks returned an invoice we couldn't read."
+            ) from exc
+        rows.append(
+            {
+                "link_id": link["id"],
+                "status": status,
+                # None on a `missing` invoice, and deliberately so: there are no
+                # amounts to report for an invoice that is not there, and carrying the
+                # last known ones forward would date them wrongly.
+                "total_amt": fact["total_amt"] if fact else None,
+                "balance": fact["balance"] if fact else None,
+                "due_date": fact["due_date"] if fact else None,
+                "txn_date": fact["txn_date"] if fact else None,
+            }
+        )
+
+    if rows:
+        try:
+            db.rpc(
+                "apply_qbo_invoice_mirror",
+                {
+                    "p_company_id": company_id,
+                    "p_realm_id": conn["realm_id"],
+                    "p_checked_at": checked_at.isoformat(),
+                    "p_rows": rows,
+                },
+            ).execute()
+        except Exception as exc:  # noqa: BLE001 - captured, then re-raised unchanged
+            # .rpc() is deliberately outside Sentry's Supabase integration (only the
+            # call site can tell a deliberate raise from a bug), so this is the ONE
+            # capture for this failure rather than a duplicate of an automatic one.
+            # supabase-py raises a real APIError here instead of returning {error}, so
+            # there is no plain-object equivalent of the JS toError trap to guard.
+            # Context is shape only — ids and a count, never invoice amounts.
+            sentry_sdk.set_context(
+                "qbo_invoice_mirror", {"company_id": company_id, "row_count": len(rows)}
+            )
+            sentry_sdk.capture_exception(exc)
+            raise
+
+    stored = (
+        db.table("quickbooks_invoice_links")
+        .select(_MIRROR_COLUMNS)
+        .in_("id", link_ids)
+        .execute()
+        .data
+        or []
+    )
+    by_id = {row["id"]: row for row in stored}
+    # Input order, so the menu renders invoices in the order the caller listed them.
+    return [by_id[link_id] for link_id in link_ids if link_id in by_id]
 
 
 # ───────────────────────── Reference data resolvers ─────────────────────────

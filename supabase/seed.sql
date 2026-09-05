@@ -847,12 +847,53 @@ begin
   end if;
 end $$;
 
-create function pg_temp.add_invoice(p_job uuid, p_quote uuid, p_doc text, p_days int)
+-- p_qb_status seeds the QuickBooks Online payment mirror. NULL leaves the row "never
+-- checked", which is what every invoice looks like until someone opens the job's Invoices
+-- menu, so both states are represented in dev. Line items are inserted too: without them
+-- the invoice has no Jigged total, and the void test (QBO total 0 against a non-zero
+-- Jigged total) cannot be exercised.
+create function pg_temp.add_invoice(p_job uuid, p_quote uuid, p_doc text, p_days int,
+                                    p_qb_status text default null, p_due_days int default null)
 returns void language plpgsql as $$
+declare
+  v_link uuid;
+  v_created timestamptz;
+  v_total numeric(12,2);
 begin
+  v_created := now() - (p_days||' days')::interval;
   insert into public.quickbooks_invoice_links (company_id, job_id, quote_id, realm_id, qb_request_id, qb_invoice_id, qb_invoice_doc_number, qb_invoice_url, status, created_at)
   values ('22222222-2222-2222-2222-222222222222', p_job, p_quote, '9130350000000000', gen_random_uuid(),
-          'INV-'||p_doc, p_doc, 'https://app.qbo.intuit.com/app/invoice?txnId='||p_doc, 'created', now() - (p_days||' days')::interval);
+          'INV-'||p_doc, p_doc, 'https://app.qbo.intuit.com/app/invoice?txnId='||p_doc, 'created', v_created)
+  returning id into v_link;
+
+  insert into public.quickbooks_invoice_line_items (company_id, invoice_link_id, job_part_id, quantity, unit_price, total_price)
+  select '22222222-2222-2222-2222-222222222222', v_link, jp.id, jp.quantity, jp.unit_price,
+         round(jp.quantity * coalesce(jp.unit_price, 0), 4)
+  from public.job_parts jp
+  where jp.job_id = p_job and coalesce(jp.unit_price, 0) > 0;
+
+  if p_qb_status is null then
+    return;
+  end if;
+
+  select coalesce(sum(total_price), 0)::numeric(12,2) into v_total
+  from public.quickbooks_invoice_line_items where invoice_link_id = v_link;
+
+  update public.quickbooks_invoice_links set
+    -- QuickBooks totals are tax-inclusive, so the mirrored total is deliberately a little
+    -- above Jigged's line total: the UI must never treat the two as comparable.
+    qb_status = p_qb_status,
+    qb_total_amt = case when p_qb_status = 'voided' then 0 else round(v_total * 1.0875, 2) end,
+    qb_balance = case p_qb_status
+                   when 'paid'    then 0
+                   when 'voided'  then 0
+                   when 'partial' then round(v_total * 1.0875 * 0.4, 2)
+                   else round(v_total * 1.0875, 2)
+                 end,
+    qb_due_date = (v_created + (coalesce(p_due_days, 30)||' days')::interval)::date,
+    qb_txn_date = v_created::date,
+    qb_status_checked_at = now() - interval '3 minutes'
+  where id = v_link;
 end $$;
 
 -- Convenience: create a quote for a customer (addresses/contact looked up),
@@ -893,7 +934,7 @@ begin
   perform pg_temp.progress_job(j, 'completed', 150);
   perform pg_temp.deplete_job(j, 158);
   perform pg_temp.ship_job(j, '50000000-0000-0000-0000-000000000001', 1, 148);
-  perform pg_temp.add_invoice(j, q, '1001', 147);
+  perform pg_temp.add_invoice(j, q, '1001', 147, 'paid');
   perform pg_temp.add_note(j, 'First article approved by customer QA. Released full lot.', 'user', 165);
   perform pg_temp.add_note(j, 'Lot complete, packed and shipped via UPS.', 'user', 148);
   -- Step-tagged operator notes (Diego = Assembly, Priya = Inspection) so a later
@@ -958,7 +999,8 @@ do $$ declare q uuid; j uuid; begin
   perform pg_temp.progress_job(j, 'completed', 90);
   perform pg_temp.deplete_job(j, 100);
   perform pg_temp.ship_job(j, '50000000-0000-0000-0000-000000000003', 1, 88);
-  perform pg_temp.add_invoice(j, q, '1002', 86);
+  -- Dated 86 days back with 30-day terms, so this one renders Overdue.
+  perform pg_temp.add_invoice(j, q, '1002', 86, 'open');
   perform pg_temp.add_note(j, 'Anodize batch returned from ProFinish, within spec.', 'user', 96);
   perform pg_temp.add_op_note(j, 10, '23000000-0000-0000-0000-000000000005',
     'Manifold: indicate the fixture to 0.001 before the first bore — the pattern walks otherwise.', 100);
@@ -972,6 +1014,9 @@ do $$ declare q uuid; j uuid; begin
   perform pg_temp.progress_job(j, 'in_progress', 20);
   perform pg_temp.deplete_job(j, 18);
   perform pg_temp.ship_job(j, '50000000-0000-0000-0000-000000000002', 0.5, 8);
+  -- No mirror status: "never checked" is the state every invoice sits in until someone
+  -- opens the job's Invoices menu, so dev needs one of those on screen too.
+  perform pg_temp.add_invoice(j, q, '1003', 7);
   perform pg_temp.add_note(j, 'Customer requested 10 ship early; partial slip cut.', 'user', 8);
 end $$;
 

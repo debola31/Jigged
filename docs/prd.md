@@ -10,7 +10,9 @@
 > **The FR table gained a Status column, verified against the code**, because a requirements table
 > with no build status is the thing most likely to mislead. Four rows turned out to describe
 > things that do not exist: shipping-label generation, the invoice aging report, reorder emails,
-> and quote-PDF emailing. **FR-4's acceptance criterion cited `converted_to_job_id`, a column
+> and quote-PDF emailing. *(The aging report is still one of them: FR-10's 2026-09 payment mirror
+> reports a balance per invoice and never buckets it by age.)* **FR-4's acceptance criterion cited
+> `converted_to_job_id`, a column
 > removed in April 2026.**
 >
 > The milestone table was removed. Every row read "Not started" against a 2026-01 date, while the
@@ -106,7 +108,7 @@ states the requirement and links there rather than restating it.
 | FR-7 | File Attachment Support | Jobs accept PDFs; parts accept PDF/STEP/DWG on the workspace Files tab, with in-app PDF and STEP 3D viewing (STEP via `online-3d-viewer`). DWG is download-only — Contour standardises on PDF upstream | Must | **Partial** — office side delivered June 2026. **Operator-on-device viewing is not built**, and closing that is what closes this FR |
 | FR-8 | Job Status Lifecycle | Three **independent** axes, not one linear status: production (`not_started → in_progress → completed`, plus cancelled), fulfillment (`unshipped → partially_shipped → fully_shipped`), invoicing (`uninvoiced → partially_invoiced → fully_invoiced`). Invoicing is **partial**, not a terminal state — you bill what has shipped as it ships. An outside op's `sent` is an **operation-level** state, separate from all three; it simply holds its part at `in_progress` | Must | **Built** |
 | FR-9 | Invoice Generation | **Multiple invoices per job** (progressive billing). The bookkeeper picks the per-part quantity, capped at the **ordered** quantity not yet invoiced; the picker defaults to shipped-but-unbilled and nudges if you bill ahead. See [invoicing.md](modules/invoicing.md) | Must | **Built** |
-| FR-10 | Invoice Payment Tracking | Mark invoices paid with date, amount and method; show an aging report of outstanding invoices | Must | **Not built.** Payment lives in QuickBooks (FR-15), which is the system of record; **no aging report exists in Jigged** |
+| FR-10 | Invoice Payment Tracking | Mark invoices paid with date, amount and method; show an aging report of outstanding invoices | Must | **Partial, and deliberately narrowed.** Each QuickBooks **Online** invoice Jigged created shows the balance and state QuickBooks reports — paid / partly paid / open / overdue / voided / deleted — in the job page's Invoices menu, kept current by Intuit webhooks and reconciled when the menu opens. That is a read-only mirror of one question per invoice, not the tracking this row asked for: **Jigged records no payments** (no date, amount or method — those are QuickBooks' own Payment objects), **sends no statements, and has no aging report**, and a customer's credit hold is never derived from a balance. Payment lives in QuickBooks (FR-15), which stays the system of record. **Desktop invoices show no status**, because a Desktop read is a Web Connector round trip to a PC that may be off. See [invoicing.md](modules/invoicing.md#payment-status-quickbooks-online-mirror) |
 | FR-11 | Routing Templates | A part's routing is a **linear sequence** of operations — no parallel or DAG branching — with estimated setup/run time and the materials consumed, cloned onto each job. See [routings.md](modules/routings.md) | Should | **Built** |
 | FR-12 | ~~Operator Performance Gamification~~ | **Withdrawn, and will not be built.** It specified per-operator metrics — jobs completed, average time per station, on-time streaks, badges. Two things killed it: actual time is **structurally unrepresentable** (`operator_sessions` and `job_operations.actual_*` dropped by [`20260621132129`](../supabase/migrations/20260621132129_drop_operator_time_tracking.sql)), and a **surveillance guardrail** now forbids any operator-facing surface reflecting an operator's pace or standing — asserted by test. What replaced it is *reception*, not performance: an operator sees who read the notes **they wrote**. See [operator-view.md](modules/operator-view.md#surveillance-guardrail-non-negotiable) | — | **Withdrawn** |
 | FR-13 | Inventory Transaction History | Every change logged with timestamp, user, job (where applicable) and quantity; users can filter and export | Should | **Partial** — the ledger records all of it with author and photo; **filtering and exporting are not built** |
@@ -270,7 +272,7 @@ record of what actually exists; there is deliberately no cached prod snapshot.
 
 | System | Direction | Exchanged | Notes |
 |---|---|---|---|
-| QuickBooks Online | Outbound | Invoices, customer records | REST + OAuth 2.0. The invoice system of record (FR-15) |
+| QuickBooks Online | Outbound, plus a read-back | Out: invoices, customer records. Back: each invoice's balance, total, dates and state (FR-10) | REST + OAuth 2.0 for the push; the read-back is prompted by an Intuit webhook, which says only *that* something changed and never carries a number. The invoice system of record (FR-15) |
 | Stripe | Both | Subscriptions, entitlement | Hosted checkout and portal; entitlement enforced in the DB. See [billing.md](modules/billing.md) |
 | USPS / UPS / FedEx | Outbound | Labels, tracking | **Not integrated** (FR-14) |
 | Supabase Storage (S3) | Both | PDFs, CAD files, photos | Job and part attachments, note media |

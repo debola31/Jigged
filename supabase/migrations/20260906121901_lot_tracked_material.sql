@@ -1081,6 +1081,17 @@ AS $$
       'start_operation_interval', 'close_operation_interval',
       'cancel_operation_interval', 'void_open_intervals_for_operation',
       'get_operation_actuals', 'get_open_intervals',
+      -- Added 20260903203741: outside-processing shipping. BOTH are browser
+      -- callable on purpose. create_outside_shipment IS the send -- it mints
+      -- VPS-{jobBase}-{n} under a per-job advisory lock and freezes the vendor
+      -- address block, neither of which a PostgREST insert can do, which is why
+      -- outside_shipments grants the browser SELECT and nothing else.
+      -- void_outside_shipment must void the receipts BEFORE the shipment in one
+      -- transaction, or the op -> part -> job cascade crosses the
+      -- pg_trigger_depth() > 2 bail and freezes the job status silently.
+      -- Both derive company_id from the row rather than taking it as an
+      -- argument, and both call company_can_write by hand.
+      'create_outside_shipment', 'void_outside_shipment',
       -- Added 20260906121901: the part page's heat-tracking toggle
       -- (`setPartLotTracking`). DEFINER because setting the flag and migrating the
       -- part's lot-less balances into a PRE-TRACKING lot must be one transaction.

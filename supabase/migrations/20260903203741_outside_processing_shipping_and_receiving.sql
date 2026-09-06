@@ -672,11 +672,35 @@ SELECT jp.company_id, o.job_id, o.job_part_id, o.id,
          (SELECT c.id FROM public.vendor_contacts c
            WHERE c.vendor_id = v.id AND c.role = 'shipping_receiving'
            ORDER BY c.is_primary DESC, c.created_at LIMIT 1)),
-       -- Always -1: a backfilled op can have at most ONE prior send, because the
-       -- retired model had exactly one sent_at column to record it in. No
-       -- advisory lock needed -- this is a single statement in a migration and
-       -- nothing else is minting.
-       'VPS-' || regexp_replace(j.job_number, '^[A-Za-z]+-?', '') || '-1',
+       -- ONE SLIP PER OPERATION, NUMBERED PER JOB -- and those are different
+       -- things, which is what this got wrong the first time.
+       --
+       -- It minted a literal '-1' for every row, reasoning that a backfilled op
+       -- can have at most ONE prior send (true: the retired model had exactly
+       -- one sent_at column to record it in). But the slip number is scoped to
+       -- the JOB, not the operation, and a job can carry several outside steps
+       -- -- anodize on one part, plating on another. Production has exactly
+       -- that: J-0011 has two outside ops on two job_parts, in three separate
+       -- companies. Both minted VPS-0011-1 and the unique constraint refused
+       -- the statement (23505), which is the only reason this is being read.
+       --
+       -- count(*) + row_number() rather than row_number() alone, so the two
+       -- properties the runtime RPC has also hold here: the number continues
+       -- from whatever the job already has (making a partial re-run safe rather
+       -- than a second collision), and it is the SAME count-per-job rule
+       -- create_outside_shipment applies, so a send made after this migration
+       -- carries on the sequence instead of restarting inside it.
+       --
+       -- Ordered by when the parts actually left, because that is what a slip
+       -- number means to the person holding two of them; sequence and id only
+       -- break ties among ops sent in the same instant.
+       'VPS-' || regexp_replace(j.job_number, '^[A-Za-z]+-?', '') || '-'
+         || ((SELECT count(*) FROM public.outside_shipments s2
+               WHERE s2.job_id = o.job_id)
+             + row_number() OVER (
+                 PARTITION BY o.job_id
+                 ORDER BY COALESCE(o.sent_at, o.completed_at, o.updated_at),
+                          o.sequence, o.id))::text,
        -- The WHOLE part quantity. The retired model had no partial send, so
        -- "sent" meant all of it; recording anything else would invent a number.
        jp.quantity,

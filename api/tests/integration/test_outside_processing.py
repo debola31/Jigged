@@ -406,6 +406,77 @@ def test_a_voided_slip_number_is_never_reissued(
     assert s1["slip_number"] != s2["slip_number"]
 
 
+def test_two_outside_steps_on_one_job_get_two_slip_numbers(
+    supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
+):
+    """A SLIP NUMBER IS SCOPED TO THE JOB, NOT TO THE OPERATION.
+
+    Those are different things, and conflating them is what broke the
+    production migration of 20260903203741: its backfill minted a literal
+    `-1` for every op it touched, reasoning that a backfilled op can have at
+    most one prior send. That much was true. But a job routinely carries
+    several outside steps -- anodize on one part, plating on another -- and in
+    production J-0011 had two, in three separate companies. Both minted
+    VPS-0011-1 and the unique constraint refused the statement.
+
+    The runtime RPC always had this right (`count(*) + 1` over the job), so
+    this test would have passed before the fix. It exists because nothing
+    asserted the property AT ALL, which is why the wrong mental model survived
+    long enough to be written into a backfill. The backfill itself cannot be
+    reached from here -- it runs once, inside a migration, and every gate in
+    this repo replays migrations onto an empty database.
+    """
+    admin = supabase_admin
+    sfx = uuid.uuid4().hex[:8]
+
+    # A SECOND PART on the same job -- `job_parts_job_part_unique (job_id,
+    # part_id)` forbids the same part twice, and two different parts is the
+    # production shape anyway: J-0011 carried its two outside steps on two
+    # job_parts.
+    second_part = (
+        admin.table("parts")
+        .insert({"company_id": outside.company_id, "part_name": f"VPS2-{sfx}",
+                 "source": "made", "primary_unit": "ea"})
+        .execute().data[0]["id"]
+    )
+    routing_id = (
+        admin.table("routings")
+        .insert({"company_id": outside.company_id, "part_id": second_part,
+                 "name": f"VPS2-{sfx}"})
+        .execute().data[0]["id"]
+    )
+    admin.table("routing_operations").insert(
+        {"routing_id": routing_id, "vendor_service_id": outside.service_id,
+         "sequence": 10}
+    ).execute()
+
+    second_jp = (
+        admin.table("job_parts")
+        .insert({"company_id": outside.company_id, "job_id": outside.job_id,
+                 "part_id": second_part, "quantity": 40, "sequence": 2,
+                 "production_status": "not_started",
+                 "fulfillment_status": "unshipped"})
+        .execute().data[0]["id"]
+    )
+    admin.rpc("create_job_part_operations_from_routing",
+              {"p_job_part_id": second_jp, "p_routing_id": routing_id}).execute()
+    second_op = next(
+        o["id"] for o in
+        admin.table("job_operations").select("id, vendor_service_id")
+        .eq("job_part_id", second_jp).execute().data
+        if o["vendor_service_id"]
+    )
+
+    first = _send(seeded_user_a, outside.op_id, 10)
+    second = _send(seeded_user_a, second_op, 5)
+
+    assert first["slip_number"] != second["slip_number"], (
+        "two outside steps on one job took the same slip number"
+    )
+    base = first["slip_number"].rsplit("-", 1)[0]
+    assert {first["slip_number"], second["slip_number"]} == {f"{base}-1", f"{base}-2"}
+
+
 def test_the_slip_carries_the_job_base_and_freezes_the_vendor_block(
     supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
 ):

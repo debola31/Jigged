@@ -1,6 +1,6 @@
 """Golden A/B for the insights surface: Claude vs DeepInfra Qwen3-32B vs local qwen3:8b.
 
-    conda run -n jigged python -m evals.insights_ab --company <uuid> [--arms ...]
+    conda run -n jigged python -m evals.insights_ab --company <uuid> [--db local|prod] [--arms ...]
 
 WHY THIS EXISTS RATHER THAN A JUDGEMENT CALL. Flipping insights to a local model
 changes the answer a shop owner gets. "It seemed fine when I tried it" is not a
@@ -67,6 +67,7 @@ import os
 import statistics
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -75,6 +76,12 @@ from typing import Any
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# CAPTURED BEFORE load_dotenv, WHICH IS THE ONLY MOMENT THE DISTINCTION EXISTS.
+# --db has to lose to an AI_READONLY_DATABASE_URL the operator exported and beat
+# the one .env.local defines -- and one line below this, those are the same
+# os.environ key with no record of which wrote it. None when nothing was exported.
+_EXPORTED_AI_DSN = os.environ.get("AI_READONLY_DATABASE_URL")
 
 # Same reason api/index.py:29 does it, for the same .env.local. This module is a
 # THIRD entry point: neither the FastAPI app nor pytest's conftest is in the import
@@ -476,12 +483,93 @@ def summarise(outcomes: list[Outcome]) -> str:
     return "\n".join(lines)
 
 
+# --db's two values and the variables behind them. Both already exist and already
+# hold exactly these two databases -- WORKER_READONLY_DATABASE_URL is the worker's
+# remote sandbox DSN as jigged_ai_readonly, AI_READONLY_DATABASE_URL is the local
+# stack .env.local defines. The flag adds no new configuration; it spares the
+# operator from exporting one over the other by hand before every run, which is the
+# step that got skipped three times in the week to 2026-09-06.
+_DB_VARS = {"local": "AI_READONLY_DATABASE_URL", "prod": "WORKER_READONLY_DATABASE_URL"}
+
+
+def resolve_dsn(
+    db: str, exported: str | None, env: Mapping[str, str]
+) -> tuple[str | None, str]:
+    """The DSN this run queries, and the name to print for it.
+
+    ORDER: an exported AI_READONLY_DATABASE_URL, then --db, then nothing. The shell
+    winning over the file is the same precedence load_dotenv(override=False) gives
+    every other value in this module, and it is why `exported` arrives as an
+    argument rather than a lookup done here -- by the time this runs, the export and
+    the file are one os.environ key. `db` is consulted only when nothing was
+    exported, so --db beats the file and loses to the shell.
+
+    The second element is provenance, not decoration: it names the variable the DSN
+    came from, and the run prints it beside the host for the same reason it prints
+    the host at all.
+    """
+    if exported:
+        return exported, "AI_READONLY_DATABASE_URL, exported"
+    var = _DB_VARS[db]
+    return env.get(var), f"{var}, via --db {db}"
+
+
+# `deleted_at IS NULL` is redundant under both DSNs as they are configured today --
+# each connects as jigged_ai_readonly, whose ai_readonly_select policy carries the
+# filter already -- and it is written anyway, because the cost is nothing and the
+# failure it covers is silent. AI_READONLY_DATABASE_URL was the local postgres
+# SUPERUSER until recently, and BYPASSRLS turns every per-company policy off; point
+# it back at one and an unfiltered count would report a company whose every job is
+# archived as populated, which is the state this guard exists to catch. A company
+# with nothing but archived jobs is as empty as one that never had a job.
+_JOB_COUNT = "select count(*) from public.jobs where company_id = $1 and deleted_at is null"
+
+
+async def preflight(dsn: str, company_id: str) -> int:
+    """Reachable, AND holding jobs for this company. Both, on one connection.
+
+    THE SECOND HALF IS THE ONE THAT WAS MISSING, and it fails more expensively than
+    the first. An unreachable database at least errors on every turn; a reachable
+    empty one answers "no late jobs" and "no data for that period" fluently, in
+    every arm, raising nothing -- so the run bills in full and produces a table that
+    reads like a finding. Three runs went that way in the week to 2026-09-06 before
+    anyone noticed the shop's data was on the other DSN.
+
+    The company GUC is set the way tools/sql_executor.py sets it -- inside a
+    transaction, because SET LOCAL outside one is a no-op -- so this asks the
+    question the arms will ask under the row scoping they will run under, rather
+    than a differently-scoped question that happens to return a number. set_config()
+    instead of SET LOCAL only because it takes the id as a bound parameter.
+    """
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn, timeout=5)
+    try:
+        async with conn.transaction(readonly=True):
+            await conn.execute(
+                "select set_config('jigged.company_id', $1, true)", company_id
+            )
+            return await conn.fetchval(_JOB_COUNT, company_id) or 0
+    finally:
+        await conn.close()
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--company", required=True, help="company_id to ask about")
     ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
     ap.add_argument("--questions", type=Path, help="newline-delimited file; defaults to the built-in set")
     ap.add_argument("--out", type=Path, default=Path("insights_ab.json"))
+    ap.add_argument(
+        "--db",
+        choices=sorted(_DB_VARS),
+        default="local",
+        help="which database to ask: local (AI_READONLY_DATABASE_URL, the stack "
+             ".env.local points at) or prod (WORKER_READONLY_DATABASE_URL, the "
+             "remote one the worker uses). An AI_READONLY_DATABASE_URL you "
+             "exported wins over both. Default local, which is what this ran as "
+             "before the flag existed.",
+    )
     args = ap.parse_args()
 
     questions = (
@@ -495,35 +583,60 @@ async def main() -> int:
     # stack while the shop's data lives elsewhere, and an arm that scored badly
     # because it queried an empty database looks exactly like an arm that scored
     # badly. FLIP_CONDITION is worth nothing if those two are confusable.
-    dsn = os.getenv("AI_READONLY_DATABASE_URL")
+    dsn, source = resolve_dsn(args.db, _EXPORTED_AI_DSN, os.environ)
     if not dsn:
         # Refuse rather than run: with no SQL tool every arm answers from nowhere,
         # and the run still bills.
-        print("AI_READONLY_DATABASE_URL is not set -- every arm would answer without "
-              "SQL and the comparison would be meaningless. Set it and re-run.")
+        print(f"{_DB_VARS[args.db]} is not set, so --db {args.db} resolves to nothing "
+              f"-- every arm would answer without SQL and the comparison would be "
+              f"meaningless. Set it and re-run.")
         return 2
+
+    # ASSIGNMENT, the way worker/__main__.export_sandbox_dsn does it and for the
+    # same reason. tools/sql_executor.py reads AI_READONLY_DATABASE_URL when it
+    # creates its pool, and load_dotenv has already put the LOCAL stack there -- so
+    # a setdefault, or skipping this line, would leave every query pointed at
+    # 127.0.0.1 while the banner below said prod. A flag that changes only what is
+    # printed is worse than no flag: it makes the wrong run look like the right one.
+    os.environ["AI_READONLY_DATABASE_URL"] = dsn
 
     # SET IS NOT REACHABLE, and the difference cost real money. A run against a
     # stopped local stack billed four questions of Claude before anyone read the
     # output: each one generated SQL, handed the connection error back to the model,
     # and let it try again, which is the self-correction loop working exactly as
     # designed on a database that was never going to open. One second here.
-    import asyncpg
-
     try:
-        conn = await asyncpg.connect(dsn, timeout=5)
-        await conn.execute("select 1")
-        await conn.close()
+        jobs = await preflight(dsn, args.company)
     except Exception as exc:  # noqa: BLE001 - any failure to reach it is fatal here
         print(f"cannot reach {describe_dsn(dsn)}: {type(exc).__name__}: {exc}")
-        print("AI_READONLY_DATABASE_URL is the LOCAL stack in .env.local; "
-              "WORKER_READONLY_DATABASE_URL is the remote one. Export whichever holds "
-              "this company and re-run.")
+        print("--db local is AI_READONLY_DATABASE_URL, the stack .env.local points "
+              "at; --db prod is WORKER_READONLY_DATABASE_URL, the remote one. Re-run "
+              "with whichever holds this company.")
         return 2
-    print(f"company {args.company} via {describe_dsn(dsn)}\n")
 
-    # THE INDEX IS BUILT ONCE, BEFORE ANYTHING BILLS, and its failure is a third
-    # pre-flight refusal alongside the two above. A pipeline arm with no embeddings
+    # AND REACHABLE IS NOT POPULATED, which is the more expensive of the two to get
+    # wrong -- see preflight. Refused here rather than reported afterwards, because
+    # afterwards the credits are spent and the table already looks like a result.
+    if not jobs:
+        other = "prod" if args.db == "local" else "local"
+        print(f"{describe_dsn(dsn)} holds {jobs} jobs for company {args.company}. "
+              f"Every arm would answer from an empty database, and the run would "
+              f"still bill in full.")
+        print(
+            # Naming --db {other} here would be advice that does nothing: the export
+            # outranks the flag, so the move is to drop the export, not to change
+            # the flag. The one they passed is the one that would then take effect.
+            f"AI_READONLY_DATABASE_URL is exported, so --db {args.db} was ignored. "
+            f"Unset it to reach {_DB_VARS[args.db]}."
+            if _EXPORTED_AI_DSN
+            else f"Try --db {other} ({_DB_VARS[other]}), or check the company id."
+        )
+        return 2
+
+    print(f"company {args.company} via {describe_dsn(dsn)} [{source}] -- {jobs} jobs\n")
+
+    # THE INDEX IS BUILT ONCE, BEFORE ANYTHING BILLS, and its failure is a fourth
+    # pre-flight refusal alongside the three above. A pipeline arm with no embeddings
     # would silently degrade to the no-retrieval arm and score as though retrieval
     # had been tested -- the one outcome this run must not produce.
     index = None

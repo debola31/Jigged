@@ -340,10 +340,12 @@ without being summoned is the reason it is a rail rather than an on-demand drawe
 
 **It COLLAPSES; it does not dismiss.** The docked pane's control is a `»` chevron, and what it
 leaves behind is a 44px strip in the rail's own place, labelled `Activity · n`, that restores it.
-The toolbar's Activity button is the other route and shows its state (`contained` while open) —
-but it sits among Print Traveler and the Shipments dropdown, where it reads as "open a thing"
-rather than "this pane is collapsed", so it cannot be the *only* way back. A pane you can dismiss
-but not obviously restore is a dead end.
+**That strip is the only way in, and there is no toolbar button** — one briefly existed and was
+removed: it sat among Print Traveler and the Shipments dropdown, where it read as "open a thing"
+rather than "this region is collapsed", and two controls for one pane is one more than the page
+needs. The strip therefore carries two CSS-gated buttons, because below `lg` it has to open the
+overlay instead; removing the toolbar button without that would leave a narrow screen with no
+route to the feed at all.
 
 The overlay below `lg` genuinely CLOSES (`✕`), because there it is covering the page. **The two
 dismissals are separate handlers on purpose:** they were briefly one that called both, so
@@ -365,10 +367,11 @@ for interval start/finish. Slips, receipts and completions that were taken back 
 through: this is an audit surface, so the rule is show-struck-through rather than the usual
 `filter-it-out`.
 
-**The rail is a panel, not a strip of the page.** It takes the app's Card surface — the same
-`background.paper` fill, hairline and blur every other panel uses — so it reads as its own
-surface against the lit canvas, and the collapsed strip takes the same treatment so collapsing
-looks like the panel narrowing rather than a different control appearing.
+**A divider, not a box.** The rail is separated from the content by a single left rule and
+nothing else. It briefly took the full Card treatment — fill, border, radius — to make it read as
+its own surface, and that read as a panel bolted onto the page: the rail is a REGION of this
+page, not an object sitting on it. The collapsed strip uses the same rule, so collapsing looks
+like the region narrowing.
 
 **The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
 step, which is what the operator traveler renders, so it is a real channel to the floor. Photos

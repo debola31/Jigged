@@ -30,7 +30,6 @@ import PrintIcon from '@mui/icons-material/Print';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
-import HistoryIcon from '@mui/icons-material/History';
 
 import {
   getJobWithRelations,
@@ -375,6 +374,10 @@ export default function JobDetailPage() {
     ? ({ xs: 12, xl: 6 } as const)
     : ({ xs: 12, md: 6 } as const);
 
+  // Fired by the collapsed strip, which is now the only way in — there is no
+  // toolbar button. It sat among Print Traveler and the Shipments dropdown
+  // reading as "open a thing" rather than "this region is collapsed", and two
+  // controls for one pane is one more than the page needs.
   const openRail = () => {
     setRailOpen(true);
     writeRailOpen(true);
@@ -442,37 +445,6 @@ export default function JobDetailPage() {
               Print Traveler
             </Button>
           )}
-          {/* THE ACTIVITY TOGGLE, TWICE, EACH GATED BY CSS.
-              One control conceptually, but the wide screen toggles a docked
-              column and the narrow one opens an overlay — two different pieces
-              of state. Splitting them by breakpoint keeps that honest without a
-              `useMediaQuery`, which would make one branch unrenderable in jsdom
-              (see __tests__/setup.ts on why this repo prefers CSS breakpoints).
-              Only ever one is visible. */}
-          <Button
-            // `contained` while open, so the control LOOKS like a toggle that is
-            // currently on rather than another dropdown sitting beside
-            // Shipments and Invoices. Without the state the button reads as
-            // "open a thing", and a collapsed rail reads as gone for good.
-            variant={railOpen ? 'contained' : 'outlined'}
-            startIcon={<HistoryIcon />}
-            onClick={railOpen ? closeRail : openRail}
-            aria-pressed={railOpen}
-            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
-          >
-            Activity
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<HistoryIcon />}
-            onClick={() => {
-              setMobileRailOpen(true);
-              captureRailToggle(true, false);
-            }}
-            sx={{ display: { xs: 'inline-flex', lg: 'none' } }}
-          >
-            Activity
-          </Button>
           {/* Shipments + invoices are dropdowns (view existing + create) so both are
               reachable from the top without scrolling, and the toolbar doesn't grow a
               separate button per action. Full detail lives in the Fulfillment section. */}
@@ -881,6 +853,10 @@ export default function JobDetailPage() {
         onClose={closeRail}
         onOpen={openRail}
         mobileOpen={mobileRailOpen}
+        onMobileOpen={() => {
+          setMobileRailOpen(true);
+          captureRailToggle(true, false);
+        }}
         onMobileClose={() => {
           setMobileRailOpen(false);
           captureRailToggle(false, false);

@@ -110,6 +110,8 @@ export interface JobActivityRailProps {
   /** The narrow-screen overlay. Always starts false, so its Modal never mounts when docked. */
   mobileOpen: boolean;
   onMobileClose: () => void;
+  /** Open the narrow-screen overlay. The collapsed strip is the only way in. */
+  onMobileOpen: () => void;
   /**
    * Set by a step card's note badge. Null is "the whole job".
    *
@@ -149,6 +151,7 @@ export default function JobActivityRail({
   onOpen,
   mobileOpen,
   onMobileClose,
+  onMobileOpen,
   filter,
   onClearFilter,
   onViewSlip,
@@ -363,24 +366,16 @@ export default function JobActivityRail({
           alignSelf: 'flex-start',
           maxHeight: `calc(100dvh - ${RAIL_CHROME_INSET}px)`,
           /**
-           * A PANEL, not a strip of the page canvas.
+           * A DIVIDER, not a box.
            *
-           * This shipped with only a left hairline and no fill, so it dissolved
-           * into the background and read as part of the page rather than as its
-           * own surface — the one thing the design it was built from was
-           * explicit about.
-           *
-           * The app's Card vocabulary rather than the Drawer gradient the mock
-           * used: this is an in-flow column sitting on the lit canvas, which is
-           * exactly what a Card is here, and taking the tokens means it tracks
-           * the theme instead of pinning two hex values that would drift.
+           * This briefly took the Card treatment — fill, full border, radius —
+           * to make it read as its own surface. It read as a floating panel
+           * bolted onto the page instead. The rail is a REGION of this page,
+           * not an object sitting on it, and a single rule separating it from
+           * the content says that with far less furniture.
            */
-          bgcolor: 'background.paper',
-          backdropFilter: 'blur(15px)',
-          WebkitBackdropFilter: 'blur(15px)',
-          border: '1px solid rgba(255, 255, 255, 0.20)',
-          borderRadius: 2,
-          p: 2,
+          borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          pl: 2,
         }}
       >
         {renderBody({
@@ -390,18 +385,23 @@ export default function JobActivityRail({
         })}
       </Box>
 
-      {/* THE WAY BACK, and it has to live here rather than only in the toolbar.
-          A pane you can dismiss but not obviously restore is a dead end — the
-          toolbar's Activity button sits among Print Traveler and the Shipments
-          dropdown, where it reads as "open a thing" rather than "this pane is
-          collapsed". This strip sits exactly where the rail was, so the way
-          back is where the thing went. */}
+      {/* THE ONLY WAY IN, at every width.
+          There was a toolbar button too; it went, because it sat among Print
+          Traveler and the Shipments dropdown reading as "open a thing" rather
+          than "this region is collapsed", and two controls for one pane is one
+          more than the page needs. This strip sits exactly where the rail was,
+          so the way back is where the thing went.
+
+          It therefore has to work BELOW `lg` as well, where the rail can only
+          be an overlay — hence two buttons inside it, gated the same CSS way
+          the mounts are. Removing the toolbar button without this would leave a
+          narrow screen with no route to the feed at all. */}
       <Box
         component="aside"
         aria-label="Job activity, collapsed"
         data-testid="job-activity-rail-collapsed"
         sx={{
-          display: { xs: 'none', lg: open ? 'none' : 'flex' },
+          display: { xs: 'flex', lg: open ? 'none' : 'flex' },
           flexDirection: 'column',
           alignItems: 'center',
           gap: 1,
@@ -411,19 +411,28 @@ export default function JobActivityRail({
           top: 0,
           alignSelf: 'flex-start',
           py: 1.5,
-          // Same surface as the open rail, so collapsing reads as the panel
-          // narrowing rather than as a different control appearing.
-          bgcolor: 'background.paper',
-          backdropFilter: 'blur(15px)',
-          WebkitBackdropFilter: 'blur(15px)',
-          border: '1px solid rgba(255, 255, 255, 0.20)',
-          borderRadius: 2,
+          // The same divider the open rail uses, so collapsing reads as the
+          // region narrowing rather than as a different object appearing.
+          borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
         }}
       >
-        {/* No Tooltip: the strip already names itself just below, and a tooltip
-            on a control that hides itself on click has no mouseleave to close
-            it — it strands the bubble in the corner of the page. */}
-        <IconButton size="small" aria-label="Show the activity feed" onClick={onOpen}>
+        {/* No Tooltip on either: the strip already names itself just below, and
+            a tooltip on a control that hides itself on click has no mouseleave
+            to close it — it strands the bubble in the corner of the page. */}
+        <IconButton
+          size="small"
+          aria-label="Show the activity feed"
+          onClick={onOpen}
+          sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+        >
+          <KeyboardDoubleArrowLeftIcon fontSize="small" />
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Show the activity feed"
+          onClick={onMobileOpen}
+          sx={{ display: { xs: 'inline-flex', lg: 'none' } }}
+        >
           <KeyboardDoubleArrowLeftIcon fontSize="small" />
         </IconButton>
         <Typography

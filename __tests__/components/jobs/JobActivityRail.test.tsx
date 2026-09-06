@@ -108,6 +108,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof JobActivityRail>> 
     onClose: vi.fn(),
     onOpen: vi.fn(),
     mobileOpen: false,
+    onMobileOpen: vi.fn(),
     onMobileClose: vi.fn(),
     filter: null,
     onClearFilter: vi.fn(),
@@ -378,6 +379,7 @@ describe('collapsing and getting back', () => {
             onClose: vi.fn(),
             onOpen,
             mobileOpen: false,
+            onMobileOpen: vi.fn(),
             onMobileClose: vi.fn(),
             filter: null,
             onClearFilter: vi.fn(),
@@ -388,9 +390,35 @@ describe('collapsing and getting back', () => {
     );
 
     const strip = screen.getByTestId('job-activity-rail-collapsed');
-    await userEvent.click(within(strip).getByRole('button', { name: /Show the activity feed/i }));
+    // Two, one per breakpoint; the first is the wide one.
+    await userEvent.click(
+      within(strip).getAllByRole('button', { name: /Show the activity feed/i })[0],
+    );
 
     expect(onOpen).toHaveBeenCalled();
+  });
+
+  /**
+   * THE STRIP IS THE ONLY WAY IN. The toolbar button was removed, so if this
+   * regressed there would be no route to the feed at all on a narrow screen —
+   * where the rail can never dock and the overlay is the only form it takes.
+   */
+  it('opens the overlay from the strip below lg, not just the docked rail', async () => {
+    const onMobileOpen = vi.fn();
+    const onOpen = vi.fn();
+    renderRail({ open: false, onOpen, onMobileOpen });
+
+    const strip = within(screen.getByTestId('job-activity-rail-collapsed'));
+    const ways = strip.getAllByRole('button', { name: /Show the activity feed/i });
+
+    // Two controls, one per breakpoint, only ever one of them visible.
+    expect(ways).toHaveLength(2);
+
+    await userEvent.click(ways[0]);
+    expect(onOpen).toHaveBeenCalled();
+
+    await userEvent.click(ways[1]);
+    expect(onMobileOpen).toHaveBeenCalled();
   });
 
   it('calls the docked collapse only — never the overlay close', async () => {

@@ -464,6 +464,28 @@ prompts (`"Note about this part…"`).
 
 Enforced — see [Enforcement](#enforcement) above.
 
+### A text button on a TINTED band needs its colour checked
+
+[`lib/theme.ts`](../lib/theme.ts) paints every text button `primary.light`
+(`#6FA3D8`) regardless of its `color` prop — deliberately, because it is tuned for
+the app's own gradient. **On a tinted surface it can fail WCAG AA, silently.**
+
+Measured on the Jobs page's outside-work strip (an amber-tinted band):
+
+| Foreground | At rest | On hover | AA needs |
+|---|---|---|---|
+| `primary.light` #6FA3D8 — the theme default | **3.83:1** | **3.03:1** | 4.5:1 |
+| `warning.light` #fbbf24 | 6.09:1 | 4.81:1 | 4.5:1 |
+
+Hover is the worse case and the easy one to miss: MUI lightens the ground under a
+light foreground, so a button that scrapes past at rest can fail once the cursor
+is on it. **Check both states.**
+
+The fix is an `sx` colour drawn from the band's own semantic — which also ties
+the action to the thing it belongs to. And give it a **persistent underline**:
+without one the only thing marking it as a control is its hue, the same
+colour-alone failure `StatusDot` exists to avoid.
+
 ### Status Badges
 
 **Use [`StatusChip`](../components/common/StatusChip.tsx) for every on/off/lifecycle status badge —

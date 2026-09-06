@@ -87,7 +87,32 @@ export default function OutsideWorkStrip({ outsideOps, onOpen }: OutsideWorkStri
         )}
       </Box>
       <Box sx={{ flex: 1 }} />
-      <Button onClick={onOpen} sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+      {/**
+       * AMBER, not the theme's default text-button blue, and MEASURED rather
+       * than eyeballed.
+       *
+       * `lib/theme.ts` paints every text button `primary.light` (#6FA3D8)
+       * regardless of its `color` prop -- which is right on the app's own
+       * ground and wrong on this one. Against the amber-tinted band it measures
+       * **3.83:1 at rest and 3.03:1 on hover**, where WCAG AA wants 4.5:1 for
+       * normal text; hover is worse because it lightens the ground under a
+       * light foreground. `warning.light` measures 6.09:1 and 4.81:1, passing
+       * in both states, and it ties the action to the band it sits in.
+       *
+       * The underline is not decoration either: without it the only thing
+       * marking this as a control is its hue, which is the same colour-alone
+       * failure `StatusDot` exists to avoid.
+       */}
+      <Button
+        onClick={onOpen}
+        sx={{
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+          color: 'warning.light',
+          textDecoration: 'underline',
+          '&:hover': { color: 'warning.light', textDecoration: 'underline' },
+        }}
+      >
         See what&apos;s out
       </Button>
     </Box>

@@ -100,3 +100,20 @@ describe('OutsideWorkStrip', () => {
     });
   });
 });
+
+describe('OutsideWorkStrip — the action has to be legible on its own band', () => {
+  it('does not take the theme default text-button blue, which fails AA here', () => {
+    // Measured against the amber band: primary.light #6FA3D8 is 3.83:1 at rest
+    // and 3.03:1 on hover, where AA wants 4.5:1. warning.light is 6.09 / 4.81.
+    renderStrip([op()]);
+    const btn = screen.getByRole('button', { name: /See what's out/i });
+    const style = getComputedStyle(btn);
+    expect(style.color).not.toBe('rgb(111, 163, 216)');
+  });
+
+  it('underlines the action, so it does not read as a control by hue alone', () => {
+    renderStrip([op()]);
+    const btn = screen.getByRole('button', { name: /See what's out/i });
+    expect(getComputedStyle(btn).textDecoration).toMatch(/underline/);
+  });
+});

@@ -60,11 +60,24 @@ const childPriceMap = new Map<
 const mockGetPartChargePrice = vi.fn(async (partId: string) =>
   childPriceMap.has(partId) ? childPriceMap.get(partId)! : null,
 );
+// Made nodes in the subtree carrying a routing op with no rate — no labour rate
+// on an internal step, no price per piece on an outside one. Since
+// 20260906170449 the rollup returns NULL for these rather than raising, so
+// missing_op_rates is the only thing that can name them. Keyed by the child the
+// engine asks about; the entry may point at a DEEPER part, which is the case
+// that has to read differently in the warning.
+const childOpRateGaps = new Map<
+  string,
+  Array<{ part_id: string; part_name: string; depth: number }>
+>();
 const mockGetPartCostExplain = vi.fn(async (partId: string, qty: number) => ({
   unit_cost: childCostMap.has(partId) ? childCostMap.get(partId) ?? null : 0,
-  missing_leaves: childCostMap.get(partId) === null
-    ? [{ part_id: partId, part_name: childNameMap.get(partId) ?? 'UNPRICED', depth: 0, qty_required: qty }]
-    : [],
+  missing_leaves:
+    childCostMap.get(partId) === null && !childOpRateGaps.has(partId)
+      ? [{ part_id: partId, part_name: childNameMap.get(partId) ?? 'UNPRICED', depth: 0, qty_required: qty }]
+      : [],
+  missing_markups: [],
+  missing_op_rates: childOpRateGaps.get(partId) ?? [],
 }));
 const childNameMap = new Map<string, string>();
 // getSupabase is invoked when the BOM has unit-mismatch rows that require a
@@ -248,6 +261,7 @@ describe('calculateRoutingCost', () => {
     childNameMap.clear();
     chargeBaseMap.clear();
     childPriceMap.clear();
+    childOpRateGaps.clear();
     mockSupabaseConversions.length = 0;
     mockGetComputedPartCost.mockClear();
   });
@@ -616,6 +630,68 @@ describe('calculateRoutingCost', () => {
       expect(w.detail).not.toMatch(/^UNPRICED-PART:/);
       // message still combines them for legacy callers.
       expect(w.message).toBe(`UNPRICED-PART: ${w.detail}`);
+    });
+
+    it('names an unpriced routing step on the child instead of leaking the SQL error', async () => {
+      // Sentry JAVASCRIPT-NEXTJS-32. compute_part_cost_at_qty used to RAISE for
+      // an outside step with no price, and the catch pasted the Postgres text
+      // into the shop owner's warning box: "cost lookup failed (Cannot compute
+      // cost for part …: outside routing op has no unit price (…))". The rollup
+      // returns NULL now, and missing_op_rates supplies the copy.
+      mockGetRoutingForPart.mockResolvedValue(null);
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({ quantity: 2, childId: 'child-9', childName: 'HAS-LNR323', childCost: null }),
+      ]);
+      childOpRateGaps.set('child-9', [
+        { part_id: 'child-9', part_name: 'HAS-LNR323', depth: 0 },
+      ]);
+
+      const result = await calculateRoutingCost('part-1');
+
+      const w = result!.warnings[0];
+      expect(w.type).toBe('missing_material_cost');
+      expect(w.child_part_name).toBe('HAS-LNR323');
+      expect(w.detail).toBe(
+        'a routing step has no rate — set the labour rate, or the price per piece on the outside step or its vendor service',
+      );
+      expect(w.detail).not.toMatch(/cost lookup failed|Cannot compute cost|routing op/);
+      expect(result!.materials_complete).toBe(false);
+    });
+
+    it('names the deeper part when the unpriced step is below the child', async () => {
+      mockGetRoutingForPart.mockResolvedValue(null);
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({ quantity: 1, childId: 'child-9', childName: 'SUB-ASSY', childCost: null }),
+      ]);
+      childOpRateGaps.set('child-9', [
+        { part_id: 'grandchild-4', part_name: 'PLATED-INSERT', depth: 2 },
+      ]);
+
+      const result = await calculateRoutingCost('part-1');
+
+      expect(result!.warnings[0].detail).toBe(
+        'PLATED-INSERT has a routing step with no rate — set the labour rate, or the price per piece on the outside step or its vendor service',
+      );
+    });
+
+    it('still reports the raised message when nothing in explain accounts for it', async () => {
+      // A missing unit conversion deeper in the tree still RAISES — no gap array
+      // carries it — so the last-resort branch must keep saying something
+      // specific rather than falling through to the generic tier copy.
+      mockGetRoutingForPart.mockResolvedValue(null);
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({ quantity: 1, childId: 'child-9', childName: 'SUB-ASSY', childCost: 5 }),
+      ]);
+      mockGetComputedPartCost.mockImplementationOnce(async () => {
+        throw new Error('No unit conversion from mm to in for part BAR-STOCK');
+      });
+
+      const result = await calculateRoutingCost('part-1');
+
+      expect(result!.warnings[0].detail).toBe(
+        'cost lookup failed (No unit conversion from mm to in for part BAR-STOCK)',
+      );
+      expect(result!.materials_complete).toBe(false);
     });
 
     it('falls back to child.primary_unit when bom.unit is empty', async () => {

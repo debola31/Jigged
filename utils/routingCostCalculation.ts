@@ -319,47 +319,52 @@ export async function calculateRoutingCost(
       // They are the same number until someone sets the toggle somewhere below.
       let childChargeBase: number | null = null;
       let childTrueCost: number | null = null;
+      // Only set when the rollup THREW, which since 20260906170449 means a
+      // missing unit conversion deeper in the subtree, or a genuine fault — a
+      // costing gap comes back as NULL and goes down the same path below. Kept
+      // as the last-resort message so a throw we have no gap array for still
+      // says something specific instead of a shrug.
+      let lookupError: string | null = null;
       try {
         [childChargeBase, childTrueCost] = await Promise.all([
           getComputedPartChargeBase(child.id, childValQty),
           getComputedPartCost(child.id, childValQty),
         ]);
       } catch (err) {
-        const detail = `cost lookup failed (${(err as Error).message})`;
-        warnings.push({
-          type: 'missing_material_cost',
-          message: `${itemName}: ${detail}`,
-          detail,
-          material_id: line.id,
-          child_part_id: child.id,
-          child_part_name: itemName,
-          child_part_source: child.source,
-        });
-        materialsComplete = false;
-        continue;
+        lookupError = (err as Error).message;
       }
 
       if (childChargeBase === null || childTrueCost === null) {
-        // Surface the deepest offending bought leaf via the explain RPC. The
-        // BOM panel uses this to render an actionable tooltip with the leaf's
-        // name + a link to its detail page. Explain at the same valuation qty
-        // the cost function actually used (batch-pinned or consumed).
+        // Surface the offending node via the explain RPC. The BOM panel uses
+        // this to render an actionable tooltip with the node's name + a link to
+        // its detail page. Explain at the same valuation qty the cost function
+        // actually used (batch-pinned or consumed).
         let leafHint = '';
         try {
           const explain = await getPartCostExplain(child.id, childValQty);
           const firstLeaf = explain.missing_leaves[0];
+          const firstOpRate = explain.missing_op_rates[0];
           if (firstLeaf) {
             leafHint =
               firstLeaf.part_id === child.id
                 ? `no priced tier covers qty ${formatQty(childValQty)}`
                 : `no priced tier covers qty ${formatQty(firstLeaf.qty_required)} for ${firstLeaf.part_name}`;
+          } else if (firstOpRate) {
+            // An unpriced routing step used to arrive here as a raised
+            // exception, and its Postgres message was rendered to the shop
+            // owner verbatim. Same words the part's OWN routing already gets.
+            leafHint =
+              firstOpRate.part_id === child.id
+                ? 'a routing step has no rate — set the labour rate, or the price per piece on the outside step or its vendor service'
+                : `${firstOpRate.part_name} has a routing step with no rate — set the labour rate, or the price per piece on the outside step or its vendor service`;
           }
         } catch {
           // If explain itself fails (e.g. cycle), fall back to a generic message.
         }
         if (!leafHint) {
-          leafHint =
-            child.source === 'bought'
+          leafHint = lookupError
+            ? `cost lookup failed (${lookupError})`
+            : child.source === 'bought'
               ? `no priced tier covers qty ${formatQty(childValQty)} — add a procurement tier on the child part`
               : `no priced tier in the BOM subtree covers the cascaded qty — open the child`;
         }

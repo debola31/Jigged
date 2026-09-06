@@ -703,14 +703,18 @@ export default async function globalSetup(): Promise<void> {
     quantity: 0,
     cost_per_unit: null,
   });
-  await ensurePart(supabase, companyId, {
+  const rawPartId = await ensurePart(supabase, companyId, {
     part_name: PART_RAW_NAME,
     description: 'E2E stocked raw material',
     source: 'bought',
     primary_unit: 'lbs',
-    quantity: 100,
+    // Zero, and not by preference: since 20260906182638 a part carrying an opening quantity is
+    // REFUSED at insert. There is no `Unassigned` bucket for it to land in any more, so stock
+    // enters where it always could — at a named place, below.
+    quantity: 0,
     cost_per_unit: 5.5,
   });
+  await ensureStockAt(supabase, companyId, rawPartId, E2E_RAW_SHELF, 100);
   const subPartId = await ensurePart(supabase, companyId, {
     part_name: PART_SUB_NAME,
     description: 'E2E sub-assembly (BOM child of MFG-001)',
@@ -818,6 +822,35 @@ async function ensureLocation(
   return data.id;
 }
 
+/** Where the raw material sits. Its own shelf, so no spec's fixture leans on another's. */
+export const E2E_RAW_SHELF = 'E2E Raw Shelf';
+
+/**
+ * Put an exact quantity of one part at one named place.
+ *
+ * ABSOLUTE, like `ensureSplitStock` below and for the same reason: CI starts clean and a dev
+ * machine does not, so a helper that skipped when a row existed would leave whatever the first run
+ * created and quietly stop reflecting later edits.
+ *
+ * Written straight to the balance rather than through `add_stock_at_location` because that RPC is
+ * a DELTA — running the seeder twice would add 100 twice. The balance is what the fixture is
+ * asserting about, and `parts.quantity` follows through the rollup trigger either way.
+ */
+async function ensureStockAt(
+  supabase: SupabaseClient,
+  companyId: string,
+  partId: string,
+  placeName: string,
+  quantity: number,
+): Promise<void> {
+  const locationId = await ensureLocation(supabase, companyId, placeName);
+  const { error } = await supabase.from('part_location_stock').upsert(
+    [{ company_id: companyId, part_id: partId, location_id: locationId, quantity }],
+    { onConflict: 'part_id,location_id,lot_key' },
+  );
+  if (error) throw new Error(`stock upsert failed (${placeName}): ${error.message}`);
+}
+
 /**
  * One part, stock at two shelves — the fixture for `inventory-count.spec.ts`.
  *
@@ -836,10 +869,10 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
     primary_unit: 'each',
-    // Zero, so no Unassigned row is created at all: `seed_new_part_balance` only seeds a row for
-    // a non-zero quantity, and the table CHECKs `quantity > 0` (20260802144310). The spec then
-    // sees exactly the two shelf rows the upserts below create — naturally, rather than because a
-    // filter was hiding a third.
+    // Zero, which since 20260906182638 is the only quantity a part can be created with: the
+    // `Unassigned` bucket that used to absorb an opening number is gone, and the insert is
+    // refused rather than producing a quantity no balance row supports. The spec then sees
+    // exactly the two shelf rows the upserts below create.
     quantity: 0,
     cost_per_unit: null,
   });

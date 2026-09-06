@@ -402,6 +402,15 @@ export interface ReshapeMove {
   toRef: string;
   quantity: number;
   unit: string;
+  /**
+   * WHICH heat is moving, for a lot-tracked part.
+   *
+   * `transfer_stock` refuses a lot-less move of one — there is no such thing as "move 12 of this
+   * bar" when the shelf holds 8 of one heat and 4 of another — so a reshape of a unit holding
+   * traced material is rejected outright without it. Null for every untracked part, which is the
+   * ordinary case.
+   */
+  lotId?: string | null;
 }
 
 /** Flatten a spec forest to `{ref, parent_ref}` rows, parent before child, as the RPC requires. */
@@ -477,6 +486,7 @@ export async function applyLocationLayout(
         quantity: m.quantity,
         unit: m.unit,
         converted_quantity: convertToBaseUnit(m.quantity, m.unit, primaryUnit, conversions),
+        lot_id: m.lotId ?? null,
       };
     }),
     p_removals: payload.removals,

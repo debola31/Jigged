@@ -128,10 +128,21 @@ function Contents({ locationId }: { locationId: string }) {
           Showing the {contents.length} largest of {num(total)} parts here.
         </Alert>
       )}
+      {/* Keyed by (part, LOT): a heat-tracked bar holding two heats here is two rows, and a
+          part-only key renders them under one React key reading as a duplicate line. */}
       {contents.map((c) => (
-        <Box key={c.part_id} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minHeight: 32 }}>
+        <Box
+          key={`${c.part_id}:${c.lot_id ?? 'none'}`}
+          sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minHeight: 32 }}
+        >
           <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap title={c.part_name}>
             {c.part_name}
+            {c.lot_id && (
+              <Box component="span" sx={{ color: 'text.secondary' }}>
+                {' · '}
+                {c.heat_number ? `Heat ${c.heat_number}` : c.lot_code}
+              </Box>
+            )}
           </Typography>
           <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
             {num(c.quantity)}

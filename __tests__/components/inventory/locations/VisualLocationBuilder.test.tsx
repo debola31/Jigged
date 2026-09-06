@@ -415,6 +415,89 @@ describe('a reshape that empties a loaded location', () => {
     expect(await screen.findByText(/more than one change can re-place/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
   });
+
+  /**
+   * A bin holding two heats of one bar.
+   *
+   * This is one part and two balances, and before the lot joined `sourceKey` the pair shared a
+   * single key — so `isDistributionComplete` measured the SAME assignment against 8 and against 4
+   * and could satisfy neither. Review stayed disabled with nothing on screen explaining why, and
+   * the map that builds the moves dropped one of the two rows, so a reshape that did get through
+   * would have left a heat behind in a bin being deleted.
+   */
+  describe('a bin holding two heats of one part', () => {
+    const TWO_HEATS = [
+      {
+        part_id: 'p1',
+        part_name: 'BAR-4140',
+        quantity: 8,
+        primary_unit: 'in',
+        location_id: 'row3',
+        lot_id: 'lot-1',
+        lot_code: '4471',
+        heat_number: '4471',
+      },
+      {
+        part_id: 'p1',
+        part_name: 'BAR-4140',
+        quantity: 4,
+        primary_unit: 'in',
+        location_id: 'row3',
+        lot_id: 'lot-2',
+        lot_code: '8823',
+        heat_number: '8823',
+      },
+    ];
+
+    beforeEach(() => {
+      (getContentsPageForLocations as Mock).mockResolvedValue({ contents: TWO_HEATS, total: 2 });
+    });
+
+    const reachDistribute = async (user: ReturnType<typeof userEvent.setup>) => {
+      await removeLoadedRow(user);
+      await user.click(await screen.findByRole('button', { name: /where does the stock go/i }));
+    };
+
+    it('lists each heat separately and labels which is which', async () => {
+      const user = userEvent.setup();
+      await reachDistribute(user);
+
+      expect(await screen.findByText('Heat 4471')).toBeInTheDocument();
+      expect(screen.getByText('Heat 8823')).toBeInTheDocument();
+      expect(screen.getAllByText('BAR-4140')).toHaveLength(2);
+    });
+
+    it('lets the reshape be confirmed, rather than deadlocking on a shared key', async () => {
+      const user = userEvent.setup();
+      await reachDistribute(user);
+
+      expect(await screen.findByRole('button', { name: /review changes/i })).toBeDisabled();
+      await user.click(screen.getByLabelText(/send everything to/i));
+      await user.click(screen.getAllByRole('option')[0]);
+
+      expect(screen.getByRole('button', { name: /review changes/i })).toBeEnabled();
+    });
+
+    it('moves BOTH heats, each carrying its own lot', async () => {
+      const user = userEvent.setup();
+      await reachDistribute(user);
+
+      await user.click(screen.getByLabelText(/send everything to/i));
+      await user.click(screen.getAllByRole('option')[0]);
+      await user.click(screen.getByRole('button', { name: /review changes/i }));
+      await user.click(await screen.findByRole('button', { name: /apply changes/i }));
+
+      const [, , moves] = (applyLocationLayout as Mock).mock.calls.at(-1)!;
+      expect(
+        moves
+          .map((m: { lotId: string | null; quantity: number }) => [m.lotId, m.quantity])
+          .sort((a: [string, number], b: [string, number]) => a[1] - b[1]),
+      ).toEqual([
+        ['lot-2', 4],
+        ['lot-1', 8],
+      ]);
+    });
+  });
 });
 
 // ── Create ───────────────────────────────────────────────────────────────────

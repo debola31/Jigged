@@ -546,8 +546,31 @@ describe('applyLocationLayout', () => {
         quantity: 4,
         unit: 'ea',
         converted_quantity: 4,
+        // Explicitly null rather than omitted: the RPC reads `lot_id` off every move, and "no
+        // lot" is a real answer (the untracked part, which is nearly all of them) rather than an
+        // unstated one.
+        lot_id: null,
       },
     ]);
+  });
+
+  /**
+   * A tracked part moves ONE heat at a time, and the move has to say which.
+   *
+   * `transfer_stock` refuses a lot-less move of one — there is no such thing as "move 12 of this
+   * bar" when the shelf holds 8 of one heat and 4 of another — so a reshape of a unit holding
+   * traced material is rejected outright unless this reaches the payload.
+   */
+  it('carries the lot on a move, so a reshape of traced material is not refused', async () => {
+    queueFrom({ data: { primary_unit: 'ea', parts_unit_conversions: [] }, error: null });
+    state.rpc = { data: [loc({ id: 'row1' })], error: null };
+
+    await applyLocationLayout('cab', payload, [
+      { partId: 'p1', fromLocationId: 'row3', toRef: 'new:/1', quantity: 4, unit: 'ea', lotId: 'lot-1' },
+    ]);
+
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(args[1].p_moves).toEqual([expect.objectContaining({ lot_id: 'lot-1' })]);
   });
 
   /**

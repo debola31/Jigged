@@ -653,6 +653,21 @@ anything was ever received leaves nothing to name, and the count is rejected per
 database's own words. Material whose heat has never been recorded is *received*, not counted into
 existence.
 
+**The reshape had to say which heat too**
+([`20260906160314`](../../supabase/migrations/20260906160314_reshape_moves_carry_the_lot.sql)).
+`apply_location_layout` delegates every redistribution to `transfer_stock`, which refuses a lot-less
+move of a tracked part — so reshaping any unit holding traced material raised outright. The move
+payload gains an optional `lot_id`; absent means "no lot", so an existing caller is unaffected.
+
+The client half was worse than the server half, and worth recording as the shape this bug keeps
+taking. `sourceKey` on the distribute step was `part@location`, so a bin holding two heats of one
+bar produced **two content rows sharing one key**: `isDistributionComplete` measured the same
+assignment against 8 and against 4 and could satisfy neither, leaving Confirm disabled with nothing
+on screen to explain why, while the map that builds the moves silently dropped one of the two rows.
+That is the same collapsed-row fault as the count sheet, the part drawer, the operator lookup, the
+bin drawer and the part page's inventory tab — **six surfaces, one cause: a balance row is
+(part, place, lot), and any key or count that stops at the place is wrong.**
+
 **Certs are stored, not yet collected.** The founder's own objection to the obvious flow stands
 unanswered and is recorded rather than designed around: *"are people expected to scan things they
 receive into PDFs and then upload? that sounds like friction upon receiving."* The table exists so

@@ -171,8 +171,10 @@ reading a live `work_centers` row), `status`, `completed_at` / `completed_by`, `
 
 **Materials are not costed per line anywhere.** `job_materials` freezes quantities only. Per-unit material
 cost is `job_parts.true_cost_per_unit` minus the labour summed from the rates above — costing one BOM line
-would mean re-deriving the unit conversion, whole-unit ceiling and made-vs-bought valuation rules that live
-inside `part_rollup_at_qty`, which is a second copy of a money rule.
+would mean re-deriving the unit conversion and made-vs-bought valuation rules that live inside
+`part_rollup_at_qty`, which is a second copy of a money rule. (That list named a whole-unit ceiling too
+until 2026-09-06, when `consume_whole_units` was removed. The argument now rests on two rules rather than
+three; it was re-examined at the time and still holds.)
 
 `(job_part_id, sequence)` is unique — each part has its own independent sequence.
 

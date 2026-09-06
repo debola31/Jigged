@@ -16,13 +16,6 @@ export interface BomLine {
   unit: string;
   sequence: number;
   /**
-   * When true, the consuming order draws `ceil(order_qty × per-part quantity)`
-   * whole units of this material (discrete stock — a steel strip you can't cut
-   * a fraction of). When false (default), consumption is fractional. Drives the
-   * ceiling branch in `compute_part_cost_at_qty` / `calculateRoutingCost`.
-   */
-  consume_whole_units: boolean;
-  /**
    * What this child contributes to the parent's rollup (#727).
    *
    * `'cost'` (default) — our cost of the child, i.e. its charge base.
@@ -77,7 +70,6 @@ export interface BomLineFormData {
   child_part_id: string;
   quantity: string;
   unit: string;
-  consume_whole_units: boolean;
   charge_basis: ChargeBasis;
 }
 
@@ -114,7 +106,6 @@ export const EMPTY_BOM_FORM: BomLineFormData = {
   child_part_id: '',
   quantity: '',
   unit: '',
-  consume_whole_units: false,
   charge_basis: 'cost',
 };
 
@@ -123,7 +114,6 @@ export function bomLineToFormData(bomLine: BomLine): BomLineFormData {
     child_part_id: bomLine.child_part_id,
     quantity: String(bomLine.quantity),
     unit: bomLine.unit,
-    consume_whole_units: bomLine.consume_whole_units,
     charge_basis: bomLine.charge_basis,
   };
 }

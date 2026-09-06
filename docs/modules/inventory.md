@@ -304,7 +304,7 @@ Anyone naming a place as they need it. **Closed (Phase 2, 2026-07-30):** permane
 
 ### J3 — Estimate material cost on a quote
 
-Quoter. **Built** — `parts_bom` + `part_procurement_tiers` + yield (`consume_whole_units`, `costing_batch_quantity`) via `compute_part_cost_at_qty`. Here for the boundary only: quoting reads *cost*, never *availability*, and reserves nothing ([§5.7](#57-quoting-never-touches-stock)).
+Quoter. **Built** — `parts_bom` + `part_procurement_tiers` + made-child batch pinning (`costing_batch_quantity`) via `compute_part_cost_at_qty`. Material consumption is exact; nothing rounds a fractional BOM quantity up. Here for the boundary only: quoting reads *cost*, never *availability*, and reserves nothing ([§5.7](#57-quoting-never-touches-stock)).
 
 ### **J4 — Job kickoff material check**
 

@@ -110,14 +110,17 @@ export function quantityUnitSuffix(unit: string | null | undefined): string | nu
 }
 
 /**
- * Default whether a new BOM material line should consume whole units (ceiling)
- * vs fractional, based on its unit of measure. Count units (each / pieces /
- * dozen — discrete stock you can't cut a fraction of) default to whole-unit;
- * length / weight / volume / area / time default to fractional. Any
- * unrecognized / custom unit falls back to `false` (fractional) — the
- * no-behavior-change side, so the default is never a guess on a money path.
+ * Whether a unit counts discrete things (each / pieces / dozen) rather than a
+ * continuous measure. Unrecognized and custom units answer `false`.
+ *
+ * **Display only.** This used to seed `parts_bom.consume_whole_units`, which
+ * ceilinged material consumption in the cost engine — so a bar of stock held as
+ * "each" silently charged a whole bar for the 0.2 of it a part actually used.
+ * That column is gone; a fractional quantity now means exactly what it says.
+ * The one surviving caller uses this to phrase a fraction as a yield
+ * ("0.05 per ea" → "20 parts per ea"), which is wording, not arithmetic.
  */
-export function defaultConsumeWholeUnits(unit: string | null | undefined): boolean {
+export function isCountUnit(unit: string | null | undefined): boolean {
   if (!unit) return false;
   return STANDARD_UNITS_BY_KEY[unit]?.category === 'count';
 }

@@ -75,6 +75,8 @@ export default function OperatorReceivePartModal({
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set to the part's name when THIS receipt is what started tracing it. Holds the dialog open. */
+  const [startedTracking, setStartedTracking] = useState<string | null>(null);
 
   // Reset each time the dialog opens (house convention: Dialog onEnter, not a
   // setState-in-effect). Nothing is loaded here any more: the picker fetches its own options as
@@ -87,6 +89,7 @@ export default function OperatorReceivePartModal({
     setHeatNumber('');
     setPhoto(null);
     setError(null);
+    setStartedTracking(null);
   };
 
   const unitOptions = useMemo(() => {
@@ -117,7 +120,7 @@ export default function OperatorReceivePartModal({
       // already written for a human, and the catch below renders it verbatim.
       const photoPath = photo ? await uploadMovementPhoto(companyId, locationId, photo) : undefined;
 
-      await addStockAtLocation(part.id, locationId, qty, unit, {
+      const result = await addStockAtLocation(part.id, locationId, qty, unit, {
         notes: notes || undefined,
         operatorId: operatorId || undefined,
         photoPath,
@@ -137,6 +140,26 @@ export default function OperatorReceivePartModal({
         heat_captured: heatNumber.trim().length > 0,
       });
       await onDone();
+
+      /*
+       * The one case this dialog does not close on.
+       *
+       * Writing a heat against a part nobody was tracing turns tracking ON for it, and from here
+       * every removal of that part asks which heat it came from. That is the behaviour the shop
+       * asked for, but it is a change to how the part works from now on — and the person who
+       * caused it is standing here, holding the bar, in the one second where the cause and the
+       * effect are obviously connected. Closing silently would hand them the surprise a week
+       * later at a shelf, with nothing to link it back.
+       *
+       * A read-only statement rather than a confirm: the material is already stocked and the
+       * heat is already recorded, so there is nothing to take back here — undoing it is a
+       * deliberate act on the part page, which is where it says so and offers it. Asking now
+       * would be asking about a write that has already happened.
+       */
+      if (result?.started_tracking) {
+        setStartedTracking(part.part_name);
+        return;
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add stock.');
@@ -153,8 +176,23 @@ export default function OperatorReceivePartModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>Stock a part — {locationName}</DialogTitle>
+      <DialogTitle>
+        {startedTracking ? 'Stocked, and now tracked by heat' : `Stock a part — ${locationName}`}
+      </DialogTitle>
       <DialogContent>
+        {/*
+          The form is REPLACED, not disabled behind a banner.
+          The write has landed; leaving the fields on screen next to a message would read as
+          "here is your form, and also a note", and the obvious next tap would be Add again —
+          against a bin that already has the bar in it. There is one thing to do now.
+        */}
+        {startedTracking ? (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            {startedTracking} is now tracked by heat, because you recorded one for it. Taking any of
+            it will ask which heat it came from. Stock that was already on the shelf is kept
+            separately, marked as having no known heat.
+          </Alert>
+        ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           {/* No `onCreateNew`: creating parts is not an operator's job — same call as
               OperatorPartLookup. `excludeIds` drops what is already on this shelf. */}
@@ -217,14 +255,28 @@ export default function OperatorReceivePartModal({
           <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving} size="large">
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={saving || !part} size="large">
-          Add
-        </Button>
+        {startedTracking ? (
+          <Button onClick={onClose} variant="contained" size="large">
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button onClick={onClose} disabled={saving} size="large">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              variant="contained"
+              disabled={saving || !part}
+              size="large"
+            >
+              Add
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );

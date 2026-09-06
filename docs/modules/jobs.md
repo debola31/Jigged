@@ -27,8 +27,8 @@
 > **Fourteen corrections**, each marked inline as *(This doc previously said …)*. The two largest:
 > a `skipped` operation status described in six places that has never existed in
 > `job_operations_status_check`, and a hard-delete-blocked-by-records-of-value rule that was
-> replaced by unconditional archive. One live defect found and **not** fixed here — see
-> [SUSPECTED CODE BUG](#suspected-code-bug--the-delete-gate-on-the-detail-page).
+> replaced by unconditional archive. One live defect found and left open by that pass, since
+> fixed — see [the delete gate](#the-delete-gate-on-the-detail-page--fixed-2026-09-06).
 
 A **Job** is the project header — customer, due date, aggregate status. Each part on it is a
 child **`job_part`** with its own routing-derived operations + materials, status and timestamps.
@@ -739,17 +739,17 @@ unless stated.
 
 ---
 
-## SUSPECTED CODE BUG — the delete gate on the detail page
+## The delete gate on the detail page — FIXED 2026-09-06
 
 `utils/jobsAccess.ts#deleteJob` archives unconditionally, per CLAUDE.md's *"Deletion is archive
-(soft-delete), and never blocks"*. [`app/dashboard/[companyId]/jobs/[jobId]/page.tsx`](../../app/dashboard/[companyId]/jobs/[jobId]/page.tsx)
-has not followed:
+(soft-delete), and never blocks"*. The job page did not follow, and this section tracked it as a
+suspected bug. Both halves are now gone:
 
-- `handleDeleteClick` refuses when `shipmentCount > 0` or a QuickBooks invoice link exists —
-  *"kept for recordkeeping and can't be deleted"* — so a shipped job can never be archived from
-  the UI, though the access layer and its test say it must be.
-- The confirm dialog then claims the action *"permanently removes the job and all of its parts,
-  operations, notes, and attachments. This cannot be undone."* Nothing is removed and it is
-  reversible by clearing `deleted_at`.
-
-Not fixed here (docs-only change). Both the gate and the copy need to go.
+- `handleDeleteClick` refused when `shipmentCount > 0` or a QuickBooks invoice link existed —
+  *"kept for recordkeeping and can't be deleted"* — so a shipped job could never be archived from
+  the UI. Its stated justification was that a foreign key blocked the delete anyway; **that was
+  never true of a soft delete**, which stamps `deleted_at` and tests no key. The guard, the
+  `countShipmentsForJob` fetch and the QuickBooks link fetch that fed it are all removed.
+- The confirm dialog claimed the action *"permanently removes the job and all of its parts,
+  operations, notes, and attachments. This cannot be undone."* It now says what happens: the job
+  leaves the list and searches, referencing documents keep working, the record is kept.

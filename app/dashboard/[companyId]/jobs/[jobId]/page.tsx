@@ -28,9 +28,6 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PrintIcon from '@mui/icons-material/Print';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import ListItemIcon from '@mui/material/ListItemIcon';
-import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
 
 import {
@@ -39,12 +36,13 @@ import {
   reopenJob,
   deleteJob,
 } from '@/utils/jobsAccess';
-import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
-import JobStatusBlock from '@/components/jobs/JobStatusBlock';
+import JobFulfillmentChip, { formatShipDate } from '@/components/jobs/JobStatusBlock';
+import { ProductionStatusChip } from '@/components/jobs/JobStatusChip';
 import JobAttachmentsInline from '@/components/jobs/JobAttachmentsInline';
 import JobActivityRail, {
   captureRailToggle,
@@ -58,9 +56,7 @@ import { CreateShipmentModal } from '@/components/shipments';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import {
-  getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
-  type QuickBooksInvoiceLink,
   type JobPartInvoiceSummary,
 } from '@/utils/quickbooksAccess';
 
@@ -79,7 +75,6 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -87,8 +82,6 @@ export default function JobDetailPage() {
   const [travelerPart, setTravelerPart] = useState<{ id: string; name: string | null } | null>(null);
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
-  const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
-  const [shipmentCount, setShipmentCount] = useState<number | null>(null);
   const [editMode, setEditMode] = useState(false);
   // Anchor for the top-bar Print-Traveler part picker (shown when a job has
   // more than one part).
@@ -190,36 +183,11 @@ export default function JobDetailPage() {
     };
   }, [companyId]);
 
-  // Surface a "View invoice" deep link if this job already has a QBO invoice.
-  // Plain Supabase read (no AI), safe on mount.
-  useEffect(() => {
-    let cancelled = false;
-    getQuickBooksInvoiceLinkForJob(companyId, jobId)
-      .then((link) => {
-        if (!cancelled) setQbInvoiceLink(link);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, jobId]);
+  // The QuickBooks invoice link used to be fetched here. Its comment claimed it
+  // surfaced a "View invoice" deep link; nothing rendered it, and its only
+  // reader was the delete guard above. Both are gone, and so is a round trip on
+  // every job page load.
 
-  // Deletability depends on having no shipment records (voided included — the FK
-  // blocks either way). Fetch the count so we only OFFER Delete when it can
-  // actually succeed, instead of letting the user confirm and then hit an error.
-  useEffect(() => {
-    let cancelled = false;
-    countShipmentsForJob(jobId)
-      .then((n) => {
-        if (!cancelled) setShipmentCount(n);
-      })
-      .catch(() => {
-        if (!cancelled) setShipmentCount(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId]);
 
   const handleReopen = async () => {
     setActionLoading(true);
@@ -250,21 +218,19 @@ export default function JobDetailPage() {
   // value (a shipment or an invoice), not production status. If either exists,
   // say so immediately rather than opening a confirm dialog that only errors;
   // otherwise confirm + delete (any status).
-  const handleDeleteClick = () => {
-    if (shipmentCount && shipmentCount > 0) {
-      setError(
-        "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
-      );
-      return;
-    }
-    if (qbInvoiceLink) {
-      setError(
-        "This job has been invoiced in QuickBooks, so it's kept for recordkeeping and can't be deleted.",
-      );
-      return;
-    }
-    setDeleteDialogOpen(true);
-  };
+  /**
+   * NO RECORDS-OF-VALUE GUARDS. This refused to delete a job that had shipments
+   * or a QuickBooks invoice, on the stated grounds that "the FK blocks either
+   * way" — and that was simply not true. `deleteJob` is a SOFT delete: it stamps
+   * `deleted_at` and nothing else, so no foreign key is ever tested and its own
+   * comment says as much ("archiving preserves the row and its history, so it
+   * can never orphan a record").
+   *
+   * So the access layer allowed it, the UI refused it, and a comment here
+   * claimed the two agreed. CLAUDE.md's rule is the one to follow: an invoiced
+   * job archives like anything else.
+   */
+  const handleDeleteClick = () => setDeleteDialogOpen(true);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -479,15 +445,14 @@ export default function JobDetailPage() {
             />
           )}
 
-          {/* THE DESTRUCTIVE PAIR MOVES BEHIND AN OVERFLOW.
-              Cancel and Delete are the two rarest things anyone does to a job
-              and the two most expensive to do by accident, and they were sitting
-              at full size next to Print Traveler. Behind a kebab they cost the
-              toolbar nothing and take a deliberate second press.
+          {/* Reopen / Cancel, then Delete last — the destructive control is
+              rightmost and red at rest, per interaction-standards.md.
 
-              Reopen stays out here: it is the opposite of destructive, it only
-              exists on a cancelled job, and on that job it is the ONE thing
-              somebody came to do. */}
+              These were briefly behind a kebab. Delete came back out because it
+              already ends in a confirm dialog, so the overflow was a second
+              guard on an action that was not unguarded — it only made a rare
+              thing slower to find. Cancel came with it: a menu holding one item
+              is worse than no menu. */}
           {canReopen && (
             <Button
               variant="outlined"
@@ -498,49 +463,29 @@ export default function JobDetailPage() {
               Reopen
             </Button>
           )}
-          <Tooltip title="More actions">
+          {canCancel && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<CancelIcon />}
+              onClick={() => setCancelDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+          )}
+          <Tooltip title="Delete job">
             <span>
               <IconButton
-                onClick={(e) => setMoreAnchor(e.currentTarget)}
+                color="error"
+                onClick={handleDeleteClick}
                 disabled={actionLoading}
-                aria-label="More job actions"
-                data-testid="job-more-actions"
+                aria-label="Delete job"
               >
-                <MoreVertIcon />
+                <DeleteIcon />
               </IconButton>
             </span>
           </Tooltip>
-          <Menu
-            anchorEl={moreAnchor}
-            open={moreAnchor !== null}
-            onClose={() => setMoreAnchor(null)}
-          >
-            {canCancel && (
-              <MenuItem
-                onClick={() => {
-                  setMoreAnchor(null);
-                  setCancelDialogOpen(true);
-                }}
-              >
-                <ListItemIcon>
-                  <CancelIcon fontSize="small" color="error" />
-                </ListItemIcon>
-                <ListItemText>Cancel job</ListItemText>
-              </MenuItem>
-            )}
-            {/* Delete sits last, the rule for a destructive list. */}
-            <MenuItem
-              onClick={() => {
-                setMoreAnchor(null);
-                handleDeleteClick();
-              }}
-            >
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" color="error" />
-              </ListItemIcon>
-              <ListItemText>Delete job</ListItemText>
-            </MenuItem>
-          </Menu>
         </Box>
       </Box>
 
@@ -563,67 +508,108 @@ export default function JobDetailPage() {
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              {/* TWO UP, because this card absorbed the status band and became
-                  seven label/value pairs — stacked, that made the page taller
-                  than the arrangement it replaced, which is the opposite of the
-                  point. Billing & Shipping beside it already reads this way. */}
+              {/* TWO EXPLICIT COLUMNS, not a grid the fields flow through.
+                  Auto-flow put them in DOM order — Customer | PO, Source |
+                  Production, Fulfillment | Created — which reads as neither a
+                  list nor a pair of lists. Each column is its own stack now, so
+                  what sits beside what is a decision rather than a consequence
+                  of the order somebody happened to write them in.
+
+                  Left is what the job IS, right is where it STANDS. */}
               <Box
                 sx={{
                   display: 'grid',
                   gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
                   columnGap: 3,
-                  rowGap: 1.5,
                   alignItems: 'start',
                 }}
               >
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Customer
-                  </Typography>
-                  {job.customers ? (
-                    <MuiLink
-                      component={Link}
-                      href={`/dashboard/${companyId}/customers/${job.customer_id}`}
-                      sx={{ display: 'block', fontWeight: 500 }}
-                    >
-                      {job.customers.name}
-                    </MuiLink>
-                  ) : (
-                    <Typography>—</Typography>
-                  )}
-                </Box>
-                {/* UNCONDITIONAL, unlike the other optional fields, because the
-                    paperclip lives here: attachments are the customer's PO PDF,
-                    and hiding the row when there is no PO NUMBER would make a
-                    file on such a job unreachable from this page. One "—" is
-                    cheaper than an orphaned document. */}
-                <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Customer PO
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography fontWeight={500}>{job.customer_po_number || '—'}</Typography>
-                    <JobAttachmentsInline jobId={jobId} />
-                  </Box>
-                </Box>
-                {job.quote_id && job.quotes && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                   <Box>
                     <Typography variant="caption" color="text.secondary">
-                      Source
+                      Customer
                     </Typography>
-                    <MuiLink
-                      component={Link}
-                      href={`/dashboard/${companyId}/quotes/${job.quote_id}`}
-                      sx={{ display: 'block', fontWeight: 500 }}
-                    >
-                      Quote {job.quotes.quote_number}
-                    </MuiLink>
+                    {job.customers ? (
+                      <MuiLink
+                        component={Link}
+                        href={`/dashboard/${companyId}/customers/${job.customer_id}`}
+                        sx={{ display: 'block', fontWeight: 500 }}
+                      >
+                        {job.customers.name}
+                      </MuiLink>
+                    ) : (
+                      <Typography>—</Typography>
+                    )}
                   </Box>
-                )}
-                {/* Status and dates, folded in from what used to be a band of
-                    its own above the cards. Four facts about the job, in the
-                    card whose job is facts about the job. */}
-                <JobStatusBlock job={job} parts={parts} />
+
+                  {job.quote_id && job.quotes && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Source
+                      </Typography>
+                      <MuiLink
+                        component={Link}
+                        href={`/dashboard/${companyId}/quotes/${job.quote_id}`}
+                        sx={{ display: 'block', fontWeight: 500 }}
+                      >
+                        Quote {job.quotes.quote_number}
+                      </MuiLink>
+                    </Box>
+                  )}
+
+                  {job.created_at && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Created
+                      </Typography>
+                      <Typography fontWeight={500}>{formatShipDate(job.created_at)}</Typography>
+                    </Box>
+                  )}
+
+                  {job.due_date && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Due
+                      </Typography>
+                      <Typography fontWeight={500}>{formatShipDate(job.due_date)}</Typography>
+                    </Box>
+                  )}
+                </Box>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {/* UNCONDITIONAL, unlike the other optional fields, because the
+                      paperclip lives here: attachments are the customer's PO
+                      PDF, and hiding the row when there is no PO NUMBER would
+                      make a file on such a job unreachable from this page. One
+                      "—" is cheaper than an orphaned document. */}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Customer PO
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography fontWeight={500}>{job.customer_po_number || '—'}</Typography>
+                      <JobAttachmentsInline jobId={jobId} />
+                    </Box>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Fulfillment
+                    </Typography>
+                    <Box sx={{ mt: 0.25 }}>
+                      <JobFulfillmentChip job={job} parts={parts} />
+                    </Box>
+                  </Box>
+
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Production
+                    </Typography>
+                    <Box sx={{ mt: 0.25 }}>
+                      <ProductionStatusChip status={job.production_status} size="medium" />
+                    </Box>
+                  </Box>
+                </Box>
               </Box>
             </CardContent>
           </Card>
@@ -766,10 +752,17 @@ export default function JobDetailPage() {
       >
         <DialogTitle>Delete Job?</DialogTitle>
         <DialogContent>
+          {/* WHAT IT ACTUALLY DOES. This said the delete "permanently removes
+              the job and all of its parts, operations, notes, and attachments"
+              and "cannot be undone". None of that was true: `deleteJob` stamps
+              `deleted_at` and returns, every shipment and invoice keeps
+              resolving, and clearing the column brings it back. Overstating a
+              consequence is not a safe kind of wrong — it is what stopped
+              people archiving jobs they were entitled to archive. */}
           <Typography>
-            Are you sure you want to delete <strong>{job.job_number}</strong>? This permanently
-            removes the job and all of its parts, operations, notes, and attachments. This
-            cannot be undone.
+            Delete <strong>{job.job_number}</strong>? It comes off the jobs list and out of
+            searches. Shipments, invoices and packing slips that reference it keep working, and
+            the record is kept.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -822,9 +815,6 @@ export default function JobDetailPage() {
           setPushDialogOpen(false);
           setPushSuccess(message);
           setInvoicesRefreshKey((k) => k + 1);
-          getQuickBooksInvoiceLinkForJob(companyId, jobId)
-            .then(setQbInvoiceLink)
-            .catch(() => {});
           // Refresh job (invoicing_status) + per-part invoice summaries so the toolbar,
           // edit-form floor, and per-part breakdown reflect the new invoice.
           fetchJob();

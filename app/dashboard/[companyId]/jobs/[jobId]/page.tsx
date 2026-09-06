@@ -124,6 +124,7 @@ export default function JobDetailPage() {
   const activity = useJobActivity(companyId, jobId, job?.created_at ?? null);
   const { reload: reloadActivity } = activity;
 
+
   const searchParams = useSearchParams();
   const deepLinkedOpId = searchParams.get('op');
 
@@ -156,6 +157,31 @@ export default function JobDetailPage() {
       setLoading(false);
     }
   }, [jobId, companyId]);
+
+  /**
+   * THE ONE THING EVERY WRITE ON THIS PAGE CALLS.
+   *
+   * The page shows the same facts twice — a step card's quantities and status,
+   * and the activity rail's row for the event that produced them — and they are
+   * loaded by different hooks. Refreshing one is always wrong, and it was:
+   * marking a step complete refreshed the cards and left the rail showing
+   * nothing until a manual reload, because `onOperationUpdate` was wired
+   * straight to `fetchJob`.
+   *
+   * There were three near-copies of this before, one per write path, and the
+   * step cards called none of them. One function, called by all of them, is the
+   * only shape where a new write cannot silently forget half the page:
+   *
+   *   - `reloadActivity` re-reads notes, completions and slips for the rail
+   *   - `activityVersion` re-runs OperationsPanel's own quantity ledgers, which
+   *     nothing outside that component can reach
+   *   - `fetchJob` re-reads the job row for the status chips
+   */
+  const refreshAfterWrite = useCallback(async () => {
+    await reloadActivity();
+    setActivityVersion((n) => n + 1);
+    await fetchJob();
+  }, [reloadActivity, fetchJob]);
 
   useEffect(() => {
     // Data-fetch-on-mount false positive: fetchJob's setState all runs after
@@ -670,7 +696,7 @@ export default function JobDetailPage() {
                           <OperationsPanel
                             job={job}
                             operations={part.job_operations}
-                            onOperationUpdate={fetchJob}
+                            onOperationUpdate={refreshAfterWrite}
                             disabled={actionLoading}
                             noteCounts={activity.noteCounts}
                             onShowActivity={(operationId) => {
@@ -851,9 +877,7 @@ export default function JobDetailPage() {
         shipmentId={railSlipId}
         onClose={() => setRailSlipId(null)}
         onVoided={() => {
-          void reloadActivity();
-          setActivityVersion((n) => n + 1);
-          fetchJob();
+          void refreshAfterWrite();
         }}
       />
       </Box>
@@ -864,14 +888,7 @@ export default function JobDetailPage() {
         items={activity.items}
         loading={activity.loading}
         error={activity.error}
-        reload={async () => {
-          await reloadActivity();
-          // The step cards read their quantities through OperationsPanel's own
-          // loads, which fetchJob does not reach. Bumping this is what keeps
-          // the rail and the cards telling the same story.
-          setActivityVersion((n) => n + 1);
-          fetchJob();
-        }}
+        reload={refreshAfterWrite}
         memberId={member?.id ?? null}
         isAdmin={member?.isAdmin ?? false}
         open={railOpen}

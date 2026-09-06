@@ -238,6 +238,36 @@ dialog. Covered by
 [`__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx`](../__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx)
 (`describe`: *PartWorkspace — unsaved-changes exit guard*).
 
+### Invariant 3 — one refresh per page, called by every write
+
+> **A write must refresh every surface that shows what it changed — in place,
+> without a reload.** Where one page renders the same fact twice from two
+> different loaders, the refresh is ONE function that touches both, called by
+> every write path. Not one per call site.
+
+Invariant 1 governs what a refresh signal must not *destroy*. This is the other
+half, and it is the one that gets forgotten: nothing fails when a write refreshes
+only half the page. Nothing throws, no test goes red, and the surface that was
+not refreshed looks exactly like a surface with nothing to show.
+
+The failure it prevents: the job page's activity rail lists the completion
+events, and the step cards above it show the quantities those events produce —
+two hooks, same facts. `onOperationUpdate` was wired straight to `fetchJob`, so
+marking a step complete updated the cards and left the rail empty until a manual
+reload. **The person who reported it reasonably assumed the feed was broken.**
+Three near-copies of the refresh already existed, one per write path, and the
+step cards called none of them.
+
+The fix shape: one `refreshAfterWrite` on the page, listing every loader the
+page owns, handed to every child that writes. A new write path then cannot
+forget half the page, because there is no half to pick.
+
+Two things it must not do. It must not re-enter a loading state — `useLoad`'s
+`refresh()` is stale-while-revalidate and `reload()` is not, and blanking a
+surface the user is reading is worse than the staleness it fixes
+([`hooks/useLoad.ts`](../hooks/useLoad.ts) says so at the `refresh` docstring).
+And it must respect Invariant 1: derived data only, never a draft re-seed.
+
 ### Making "unsaved" visible
 
 A dirty indicator only works if it is seen. The original one — `variant="caption"`

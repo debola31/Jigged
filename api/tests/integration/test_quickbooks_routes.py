@@ -1267,7 +1267,7 @@ def _fake_token_exchange(monkeypatch, revoked: list):
     return bundle
 
 
-async def test_reconnect_to_a_different_realm_is_refused_when_history_exists(
+async def test_reconnect_to_a_different_realm_is_refused(
     supabase_admin, seeded_user_a, monkeypatch
 ):
     cid = seeded_user_a["company_id"]
@@ -1304,30 +1304,76 @@ async def test_reconnect_to_a_different_realm_is_refused_when_history_exists(
         _cleanup(supabase_admin, cid)
 
 
-async def test_reconnect_to_a_different_realm_is_allowed_when_there_is_no_history(
+async def test_reconnect_to_a_different_realm_is_refused_even_with_no_history(
     supabase_admin, seeded_user_a, monkeypatch
 ):
-    # A shop that connected the WRONG company on its first try must not be
-    # trapped: with nothing bound to the old realm there is nothing to strand,
-    # so the switch goes through.
+    # No invoices, no customer mappings -- and still refused. An earlier cut of
+    # this guard allowed the swap here, reasoning there was nothing to strand.
+    # There is: default_item_id and default_income_account_id sit on the
+    # connection row, name objects inside the OLD company file, and are not
+    # cleared by persist_connection. Letting this through points the new company
+    # at another company's item and income account, so the next push files a
+    # wrong invoice rather than failing loudly.
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
     _seed_connection(supabase_admin, cid)
+    supabase_admin.table("quickbooks_connections").update(
+        {"default_item_id": "42", "default_income_account_id": "79"}
+    ).eq("company_id", cid).execute()
     _fake_token_exchange(monkeypatch, [])
     try:
+        resp = await _callback(_mint_callback_state(cid, seeded_user_a["user_id"]), "realm-OTHER")
+
+        assert resp.status_code == 302
+        assert "qb=realm_mismatch" in resp.headers["location"]
+        conn = (
+            supabase_admin.table("quickbooks_connections")
+            .select("realm_id, default_item_id, default_income_account_id")
+            .eq("company_id", cid)
+            .single()
+            .execute()
+            .data
+        )
+        assert conn["realm_id"] == "realm-rt"
+        # The settings that made the "harmless" swap harmful are still where they
+        # belong, pointing at the company that issued them.
+        assert conn["default_item_id"] == "42"
+        assert conn["default_income_account_id"] == "79"
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_a_stale_environment_row_does_not_block_a_new_connection(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    # The one case the realm comparison must NOT catch: a leftover row from the
+    # other Intuit environment. Its realm belongs to a different world, so
+    # comparing them would trap a shop moving from sandbox to production behind a
+    # refusal whose advice (disconnect) they should not need.
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    supabase_admin.table("quickbooks_connections").update({"environment": "production"}).eq(
+        "company_id", cid
+    ).execute()
+    _fake_token_exchange(monkeypatch, [])
+    try:
+        # The route runs as sandbox (see _route_env), so the stored production row
+        # is stale by definition.
         resp = await _callback(_mint_callback_state(cid, seeded_user_a["user_id"]), "realm-OTHER")
 
         assert resp.status_code == 302
         assert "qb=connected" in resp.headers["location"]
         conn = (
             supabase_admin.table("quickbooks_connections")
-            .select("realm_id")
+            .select("realm_id, environment")
             .eq("company_id", cid)
             .single()
             .execute()
             .data
         )
         assert conn["realm_id"] == "realm-OTHER"
+        assert conn["environment"] == "sandbox"
     finally:
         _cleanup(supabase_admin, cid)
 

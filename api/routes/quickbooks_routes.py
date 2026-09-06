@@ -156,29 +156,6 @@ def _map_qb_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Unexpected error")
 
 
-def _realm_has_history(db: Client, company_id: str, realm_id: str) -> bool:
-    """Does this company already have work bound to that QuickBooks company file?
-
-    A QBO invoice id and a QBO customer id mean nothing outside the company file
-    that issued them, so both of these tables carry realm_id and every read joins
-    on it. Rows here are what makes a silent realm swap destructive rather than
-    merely surprising.
-    """
-    for table in ("quickbooks_invoice_links", "quickbooks_customer_map"):
-        rows = (
-            db.table(table)
-            .select("id")
-            .eq("company_id", company_id)
-            .eq("realm_id", realm_id)
-            .limit(1)
-            .execute()
-            .data
-        )
-        if rows:
-            return True
-    return False
-
-
 def _is_connected(conn: dict | None) -> bool:
     return bool(conn) and conn.get("environment") == qb._environment()
 
@@ -228,36 +205,45 @@ async def callback(
         )
         connected_by = access.data[0]["id"] if access.data else None
 
-        # ── Refuse a SILENT switch to a different QuickBooks company ──
+        # ── A reconnect NEVER changes which QuickBooks company this is ──
         #
         # The authorize screen grants access for whichever Intuit account is signed
-        # into that browser, and Intuit will happily offer to spin up a brand new
-        # trial company for a signer who has none. So the realm coming back here is
-        # not necessarily the realm that went out: an admin who reconnects while
-        # signed in as themselves can land on a different company file without ever
-        # being asked a question.
+        # into that browser, and Intuit offers a brand new trial company to a signer
+        # who has none. So the realm coming back here is not necessarily the realm
+        # that went out: an admin reconnecting an expired connection while signed in
+        # as themselves can land on a different company file without being asked a
+        # single question. Seen live on 2026-09-05.
         #
-        # persist_connection overwrites realm_id unconditionally, and nothing else
-        # checked it, so that used to succeed and the card just said "Connected".
-        # What actually happened: every existing invoice link and customer mapping
-        # stayed bound to the OLD realm, so payment status reported them as
-        # belonging to a previous company and new pushes went to the new, empty one.
-        # A QBO invoice id is only meaningful inside its own company file.
+        # persist_connection overwrites realm_id unconditionally and nothing checked
+        # it, so that used to succeed and the card just said "Connected".
         #
-        # Switching companies on purpose is still allowed — Disconnect, then
-        # connect. That path is explicit, already exists on the card, and keeps the
-        # history where it is. What is refused is doing it by accident, which is
-        # the only way it was happening.
+        # This refuses on the realm alone, with no "but it looks harmless" branch.
+        # An earlier cut allowed the switch when no invoice or customer row was
+        # bound to the old realm, on the theory that there was nothing to strand.
+        # That was wrong: FOUR realm-specific settings live on the connection row
+        # itself — default_item_id, default_income_account_id, po_custom_field_id
+        # and po_custom_field_name — and persist_connection does not clear any of
+        # them. A "harmless" swap therefore leaves the new company pointing at an
+        # item and income account belonging to the old one, and the next push files
+        # a WRONG invoice rather than merely failing to read one.
+        #
+        # Switching companies on purpose still works: Disconnect, then connect.
+        # That path DELETES the connection row, which is precisely what makes it
+        # safe — every stale realm-specific setting goes with it — and revoke_token
+        # never raises, so it cannot get stuck. One rule, one escape hatch, no state
+        # a shop owner cannot see deciding which they get.
         existing = qb.get_connection(db, company_id)
         if (
             existing
             and existing.get("realm_id")
             and existing["realm_id"] != realmId
-            and _realm_has_history(db, company_id, existing["realm_id"])
+            # Only meaningful within one Intuit environment: a sandbox row while
+            # running production is stale by definition, not a company to protect.
+            and existing.get("environment") == qb._environment()
         ):
             logger.warning(
                 "QuickBooks callback for company %s returned realm %s but the "
-                "connection is bound to %s, which has history. Refusing.",
+                "connection is bound to %s. Refusing.",
                 company_id,
                 realmId,
                 existing["realm_id"],

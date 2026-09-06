@@ -176,8 +176,14 @@ def env(admin: Client):
         ).execute()
 
     bar_id = make_part("BAR", "bought")
-    admin.table("part_procurement_tiers").insert(
-        {"part_id": bar_id, "min_quantity": 1, "cost_per_unit": 10}
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": bar_id,
+            "company_id": company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "cost_per_unit": 10,
+        }
     ).execute()
 
     bracket_id = make_part("BRACKET", "made")
@@ -237,7 +243,7 @@ def env(admin: Client):
     ).execute()
     admin.table("routings").delete().eq("company_id", company_id).execute()
     admin.table("part_pricing_tiers").delete().eq("company_id", company_id).execute()
-    admin.table("part_procurement_tiers").delete().eq("part_id", bar_id).execute()
+    admin.table("part_pricing_tiers").delete().eq("part_id", bar_id).execute()
     admin.table("parts").delete().eq("company_id", company_id).execute()
     admin.table("work_centers").delete().eq("company_id", company_id).execute()
     admin.table("companies").delete().eq("id", company_id).execute()

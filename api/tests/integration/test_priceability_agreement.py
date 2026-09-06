@@ -311,8 +311,14 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
         .execute()
     )
     bought_id = bought.data[0]["id"]
-    admin.table("part_procurement_tiers").insert(
-        {"part_id": bought_id, "min_quantity": 1, "cost_per_unit": 10}
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": bought_id,
+            "company_id": env.company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "cost_per_unit": 10,
+        }
     ).execute()
     admin.table("parts_bom").update(
         {"child_part_id": bought_id, "charge_basis": "price"}
@@ -344,7 +350,7 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
     finally:
         admin.table("parts_bom").delete().eq("parent_part_id", env.parent_id).execute()
         admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
-        admin.table("part_procurement_tiers").delete().eq("part_id", bought_id).execute()
+        admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
         admin.table("parts").delete().eq("id", bought_id).execute()
 
 

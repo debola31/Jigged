@@ -240,38 +240,19 @@ export default function PartBomPanel({
 
       const breakpointsByChild = new Map<string, number[]>();
       try {
-        if (boughtIds.length > 0) {
-          // All bought children's part-level procurement tiers in one query.
-          // Procurement tiers are part-level now (vendor is a label, not a cost
-          // filter), so every tier's break point applies.
-          const { data: procRows } = await supabase
-            .from('part_procurement_tiers')
-            .select('part_id, min_quantity')
-            .in('part_id', boughtIds);
-          const qtysByChild = new Map<string, number[]>();
-          for (const t of (procRows ?? []) as Array<{
-            part_id: string;
-            min_quantity: number | string;
-          }>) {
-            const arr = qtysByChild.get(t.part_id) ?? [];
-            arr.push(Number(t.min_quantity));
-            qtysByChild.set(t.part_id, arr);
-          }
-          for (const [partId, qtys] of qtysByChild) {
-            breakpointsByChild.set(partId, [...new Set(qtys)].sort((a, b) => a - b));
-          }
-        }
-
-        if (madeIds.length > 0) {
-          // All made children's pricing tiers in one query, ordered by qty so
-          // each child's break points come out ascending (matches the prior
-          // per-child .order('quantity') behavior).
-          const { data: priceRows } = await supabase
+        // One ladder, one query, whatever the child's source. This used to be
+        // two queries picking a table by child.source — bought children read
+        // their procurement breaks, made children their pricing breaks — which
+        // is precisely the split that let one part carry two disagreeing sets of
+        // quantity breaks.
+        const childIds = [...boughtIds, ...madeIds];
+        if (childIds.length > 0) {
+          const { data: tierRows } = await supabase
             .from('part_pricing_tiers')
             .select('part_id, quantity')
-            .in('part_id', madeIds)
+            .in('part_id', childIds)
             .order('quantity', { ascending: true });
-          for (const t of (priceRows ?? []) as Array<{
+          for (const t of (tierRows ?? []) as Array<{
             part_id: string;
             quantity: number | string;
           }>) {
@@ -590,7 +571,7 @@ export default function PartBomPanel({
           </ToggleButtonGroup>
           <Typography variant="caption" color="text.secondary">
             {materialsBasis === 'price'
-              ? 'How much each is marked up comes from its own Pricing card.'
+              ? 'How much each is marked up comes from its own Pricing card, alongside its cost.'
               : materialsBasis === null
                 ? 'These materials are set differently from each other — pick one to align them.'
                 : null}

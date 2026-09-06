@@ -418,18 +418,20 @@ on conflict (id) do nothing;
 -- than runtime-skipping when the list is empty — a skipped spec masked the May 2026 `jobs.status`
 -- regression.
 
--- Part-level procurement tiers for bought parts (so compute_part_cost_at_qty
--- resolves a cost). Vendor is a supplier label on the part
--- (parts.preferred_vendor_id, set above), not a dimension of the cost tiers.
-insert into public.part_procurement_tiers (part_id, min_quantity, cost_per_unit) values
-  ('60000000-0000-0000-0000-000000000001',1,6.4),
-  ('60000000-0000-0000-0000-000000000002',1,4.1),
-  ('60000000-0000-0000-0000-000000000003',1,7.85),
-  ('60000000-0000-0000-0000-000000000004',1,1.25),
-  ('60000000-0000-0000-0000-000000000005',1,0.18),
-  ('60000000-0000-0000-0000-000000000006',1,0.07),
-  ('60000000-0000-0000-0000-000000000007',1,0.09),
-  ('60000000-0000-0000-0000-000000000008',1,14.5)
+-- Cost rows for bought parts (so compute_part_cost_at_qty resolves a cost).
+-- Cost and markup share one ladder, so these are part_pricing_tiers rows with a
+-- cost and no markup yet: these parts are consumed as materials, never sold on
+-- their own. Vendor is a supplier label on the part (parts.preferred_vendor_id,
+-- set above), never a dimension of the tiers.
+insert into public.part_pricing_tiers (part_id, company_id, sequence, quantity, cost_per_unit, markup_percent) values
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',10,1,6.4,null),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222',10,1,4.1,null),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222',10,1,7.85,null),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',10,1,1.25,null),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222',10,1,0.18,null),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222',10,1,0.07,null),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222',10,1,0.09,null),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222',10,1,14.5,null)
 on conflict do nothing;
 
 -- BOM edges (parent_part_id → child_part_id, qty, sequence 10/20/…; unit 'ea').

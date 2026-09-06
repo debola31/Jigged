@@ -2521,6 +2521,7 @@ export type Database = {
       part_pricing_tiers: {
         Row: {
           company_id: string
+          cost_per_unit: number | null
           created_at: string
           id: string
           markup_percent: number | null
@@ -2531,6 +2532,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          cost_per_unit?: number | null
           created_at?: string
           id?: string
           markup_percent?: number | null
@@ -2541,6 +2543,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          cost_per_unit?: number | null
           created_at?: string
           id?: string
           markup_percent?: number | null
@@ -2559,50 +2562,6 @@ export type Database = {
           },
           {
             foreignKeyName: "part_pricing_tiers_part_id_fkey"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      part_procurement_tiers: {
-        Row: {
-          cost_per_unit: number
-          created_at: string
-          expires_at: string | null
-          id: string
-          min_quantity: number
-          notes: string | null
-          part_id: string
-          quoted_at: string | null
-          updated_at: string
-        }
-        Insert: {
-          cost_per_unit: number
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          min_quantity: number
-          notes?: string | null
-          part_id: string
-          quoted_at?: string | null
-          updated_at?: string
-        }
-        Update: {
-          cost_per_unit?: number
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          min_quantity?: number
-          notes?: string | null
-          part_id?: string
-          quoted_at?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "part_procurement_tiers_part_id_fkey"
             columns: ["part_id"]
             isOneToOne: false
             referencedRelation: "parts"
@@ -4560,15 +4519,6 @@ export type Database = {
       get_priceable_part_ids: {
         Args: { p_company_id: string }
         Returns: string[]
-      }
-      get_procurement_cost: {
-        Args: { p_part_id: string; p_qty: number }
-        Returns: {
-          source: string
-          tier_id: string
-          unit_cost: number
-          vendor_id: string
-        }[]
       }
       get_ready_operations_batch: {
         Args: { p_job_ids: string[] }

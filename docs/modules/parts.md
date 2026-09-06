@@ -50,7 +50,8 @@ Quotes snapshot the resolved prices as immutable line items.
 **Priority:** Must Have (Build Second). **Dependencies:** none.
 
 **Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, `parts_bom`,
-`part_procurement_tiers` (bought-part costs), `parts_unit_conversions`, `part_comments`.
+`parts_unit_conversions`, `part_comments`. (Bought-part costs were a separate
+`part_procurement_tiers` sheet until 2026-09-06; they are a column on the tier ladder now.)
 
 > `part_comments` was renamed from `part_notes` in `20260728040701`
 > to free the `notes` name for shop-floor knowledge. The table is unchanged and is **not** the
@@ -475,37 +476,29 @@ the tier table (amber outline on the field + `UnsavedChangesBar` / **Save batch 
 **Withdrawn:** a lone Save button with no unsaved marker — wrong because "some cards prompt you,
 some don't" is the inconsistency the standard exists to remove.
 
-#### Bought-part Cost card (`PartProcurementPricingPanel`)
+#### Bought-part preferred vendor (`PartPreferredVendor`)
 
-A **Preferred vendor** picker plus a **part-level** qty-break cost-tier sheet (Min qty / Unit cost).
+A single auto-saving **Preferred vendor** picker. It used to sit above a second card — a part-level
+qty-break cost sheet with its own explicit Save — inside `PartProcurementPricingPanel`. That cost
+sheet is now a column in the Pricing grid; see
+[Cost build-up + Pricing](#cost-build-up--pricing-partpricing).
 
 > ⚠ *This doc previously described a **per-vendor** tier sheet ("when the selected vendor has no
 > saved tier…"). `part_procurement_tiers.vendor_id` was dropped by
-> `20260714173443_drop_per_vendor_procurement_tiers`,
-> which re-keyed the unique index to `(part_id, min_quantity)`.* **Withdrawn:** cost tiers as a
-> property of the (part, vendor) pair — wrong because it forced a which-vendor-wins resolution step
-> for no gain. Cost is a property of the **part**; the vendor is a pure supplier label
-> (`parts.preferred_vendor_id`) and switching it does **not** swap or discard the sheet. Multi-vendor
-> sheets / RFQ / POs are deferred to a future purchasing module ([#571]).
+> `20260714173443_drop_per_vendor_procurement_tiers`, which re-keyed the unique index to
+> `(part_id, min_quantity)`; the whole table was then folded into `part_pricing_tiers`.*
+> **Withdrawn:** cost tiers as a property of the (part, vendor) pair — wrong because it forced a
+> which-vendor-wins resolution step for no gain. Cost is a property of the **part**; the vendor is a
+> pure supplier label (`parts.preferred_vendor_id`) and switching it does **not** swap or discard the
+> ladder. Multi-vendor sheets / RFQ / POs are deferred to a future purchasing module ([#571]).
 
-- **Preferred vendor lives here only.** It is no longer duplicated on the part-details/identity card
-  — that field renders only in the create flow (`showVendor = source === 'bought' && mode === 'create'`).
-- **Explicit Save (`Save costs`)** — cost is financial data. Deletes and additions are reconciled
-  against the persisted sheet on save. Same amber row accent + `UnsavedChangesBar` as Pricing.
-- **The vendor picker is auto-save, and now looks like it.** Two save models in one card is what
+- **Preferred vendor lives here only.** It is not duplicated on the part-details/identity card —
+  that field renders only in the create flow
+  (`showVendor = source === 'bought' && mode === 'create'`).
+- **Auto-save, and now alone.** Two save models in one card is what
   [interaction-standards §2](../interaction-standards.md#2-saving) forbids *when the user can't tell
-  them apart*. The picker keeps auto-save (a single non-financial label — the right mode) but sits in
-  its own bordered block with its own `SaveStatus` and helper text ("Saved as soon as you pick it.
-  Cost tiers below apply regardless of vendor."), so the two models read as two sections.
-- **No-cost state** — one empty starter row highlighted red plus a short red prompt ("Add at least
-  one cost tier so this part can be priced and quoted."), using the theme `error` palette, never a
-  hardcoded hex. **Withdrawn:** a yellow banner + "Add first tier" bubble.
-  ⚠ *This doc previously said "Save disabled until edited". The Save affordance is **absent** until
-  dirty, not disabled* — with nothing staged the action is genuinely irrelevant, not blocked
-  (interaction-standards §4 rule 3).
-- **Indicator clears on save** — the panel fires `onSaved`, so the workspace re-derives priceability
-  and the "Needs cost" chip clears **without a page reload**. It previously lingered until reload
-  because the panel had no refresh callback.
+  them apart*. It was fenced into a bordered block with its own `SaveStatus` to soften that; moving
+  the cost ladder out removed the collision entirely rather than dressing it.
 
 #### Files tab (`FilesTab`)
 
@@ -735,7 +728,6 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | Create-mode validation (empty name, duplicate name, success) and existing-mode blur auto-save | `__tests__/components/parts/PartIdentitySection.test.tsx` → `PartIdentitySection` |
 | Staged tier edits surviving a `refreshKey` bump from a sibling save | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — staged tier edits survive sibling saves` (13 its) |
 | Starter tier: written once on first cost at the shop's markup for the part's source; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the source caption clearing on a changed markup | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — starter tier from the shop default` |
-| Part-level procurement tiers, explicit Save, red no-cost starter row, vendor pick not discarding staged edits | `__tests__/components/parts/PartProcurementPricingPanel.test.tsx` → `PartProcurementPricingPanel — part-level tiers, explicit save` (3 its) |
 | Priceability / completeness derivation | `__tests__/components/parts/partSetupStatus.test.ts` → `getPartSetupStatus` (5 its) |
 | Completeness banner render | `__tests__/components/parts/workspace/tabs/WorkspaceTab.test.tsx` → `WorkspaceTab completeness banner` (4 its) |
 | Navigating away with unsaved work | `__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx` → `PartWorkspace — unsaved-changes exit guard` (4 its) |

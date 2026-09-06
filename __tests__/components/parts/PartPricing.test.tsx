@@ -54,14 +54,19 @@ const part = {
 } as Part;
 
 /** One persisted tier: 100 @ 25% markup. */
-const savedTier = { id: 't1', sequence: 10, quantity: 100, markup_percent: 25 };
+// Two breaks on purpose. The FIRST row's Min qty is fixed text ("1 +"): whatever
+// number sits there, the engine floors to the lowest break, so row one always
+// applies from 1 up and its quantity could never gate anything. Editing happens
+// on a break the user actually added — row two here.
+const baseTier = { id: 't0', sequence: 10, quantity: 1, cost_per_unit: null, markup_percent: 10 };
+const savedTier = { id: 't1', sequence: 20, quantity: 100, cost_per_unit: null, markup_percent: 25 };
 
 describe('PartPricing — staged tier edits survive sibling saves', () => {
   const user = userEvent.setup();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetTiersForPart.mockResolvedValue([savedTier]);
+    mockGetTiersForPart.mockResolvedValue([baseTier, savedTier]);
     mockCalculateRoutingCost.mockResolvedValue({
       labor_items: [],
       material_items: [],
@@ -81,9 +86,25 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     });
   });
 
-  /** The Min qty box for the first tier row. */
+  /**
+   * The Min qty box for the SECOND tier row — the first row's break is fixed
+   * text, not an input. Row one contributes [Markup, Unit price], so row two's
+   * Min qty is the third textbox.
+   */
   const minQtyInput = async (): Promise<HTMLElement> =>
-    (await screen.findAllByRole('textbox'))[0];
+    (await screen.findAllByRole('textbox'))[2];
+
+  it('does not let the first break be typed into — it cannot gate anything', async () => {
+    // A part shipped with Min qty 200 on its only cost tier and still cost the
+    // same at qty 0.1, because the engine floors to the lowest break. Another had
+    // 0.2 typed in while chasing a different bug. An editable field that cannot
+    // move a number is the defect, not the number.
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    expect(await screen.findByText('1 +')).toBeInTheDocument();
+    // Row 1: Markup + Unit price. Row 2: Min qty + Markup + Unit price.
+    await waitFor(async () => expect(await screen.findAllByRole('textbox')).toHaveLength(5));
+  });
 
   it('keeps a staged Min qty edit when a sibling panel bumps refreshKey', async () => {
     // This is the reported bug: type a Min qty, then save an operation in the
@@ -137,7 +158,8 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await waitFor(() => expect(qty).toHaveValue('100'));
 
     mockGetTiersForPart.mockResolvedValue([
-      { id: 't1', sequence: 10, quantity: 500, markup_percent: 25 },
+      baseTier,
+      { id: 't1', sequence: 20, quantity: 500, cost_per_unit: null, markup_percent: 25 },
     ]);
     rerender(<PartPricing companyId="c1" part={part} refreshKey={1} />);
 
@@ -155,7 +177,8 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await user.type(qty, '250');
 
     mockGetTiersForPart.mockResolvedValue([
-      { id: 't9', sequence: 10, quantity: 42, markup_percent: 30 },
+      baseTier,
+      { id: 't9', sequence: 20, quantity: 42, cost_per_unit: null, markup_percent: 30 },
     ]);
     const otherPart = { ...part, id: 'p2', part_name: 'PLATE-002' } as Part;
     rerender(<PartPricing companyId="c1" part={otherPart} refreshKey={0} />);

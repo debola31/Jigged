@@ -314,12 +314,6 @@ def clear_tables(cur, company_id: str) -> None:
 
     # Other parts-dependent tables that cascade or restrict
     cur.execute("""
-        DELETE FROM part_procurement_tiers
-        WHERE part_id IN (SELECT id FROM parts WHERE company_id = %s)
-    """, (company_id,))
-    log(f"deleted part_procurement_tiers: {cur.rowcount}", indent=1)
-
-    cur.execute("""
         DELETE FROM part_pricing_tiers WHERE company_id = %s
     """, (company_id,))
     log(f"deleted part_pricing_tiers: {cur.rowcount}", indent=1)
@@ -534,7 +528,7 @@ def load_parts(
 
     Bought-part costs are NOT written to parts.cost_per_unit (column dropped in the
     cost-rollup migration). Instead, this function collects costs for bought parts
-    and inserts them as part-level part_procurement_tiers rows (min_quantity=1)
+    and inserts them as part_pricing_tiers rows carrying a cost at quantity 1
     after the parts table insert completes. Tiers are part-level — vendor is a
     supplier label on the part (preferred_vendor_id), not a tier dimension.
     """
@@ -595,15 +589,17 @@ def load_parts(
             source,
         ))
 
-        # Bought parts with a positive cost get a part-level procurement tier at
-        # min_quantity=1. Made parts have their cost computed from routing+BOM by
-        # compute_part_cost_at_qty — no tier row needed.
-        # part_procurement_tiers schema requires cost > 0 (CHECK constraint).
+        # A bought part with a positive cost gets a tier row at quantity 1
+        # carrying that cost and no markup yet. A made part's cost is computed
+        # from routing + BOM by compute_part_cost_at_qty — no row needed.
+        # cost_per_unit > 0 is a CHECK constraint.
         if source == "bought" and cost is not None and cost > 0:
             procurement_tier_records.append((
                 str(uuid.uuid4()),
                 pid,
-                1,           # min_quantity = 1
+                company_id,
+                10,          # sequence
+                1,           # quantity
                 cost,
             ))
 
@@ -626,15 +622,15 @@ def load_parts(
         execute_values(
             cur,
             """
-            INSERT INTO part_procurement_tiers
-                (id, part_id, min_quantity, cost_per_unit)
+            INSERT INTO part_pricing_tiers
+                (id, part_id, company_id, sequence, quantity, cost_per_unit)
             VALUES %s
             """,
             procurement_tier_records,
             page_size=BATCH_SIZE,
         )
         log(
-            f"inserted part_procurement_tiers (part-level, qty=1): "
+            f"inserted part cost rows (qty=1): "
             f"{len(procurement_tier_records)}",
             indent=1,
         )

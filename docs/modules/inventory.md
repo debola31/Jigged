@@ -148,8 +148,12 @@ quoting boundary, J8 remnants — twelve journeys (§4).
 went with it (§5.6); re-confirmed 2026-08-01, Contour does not want it either. Kept on the radar for
 **customer #2**, not for this shop — [#642](https://github.com/debola31/Jigged/issues/642).
 **Reopened 2026-09-04 for heat numbers only** (§5.6): customer #2 needs them, and they ride on the
-ledger rows and a frozen line on the packing slip, optional and hidden when absent — the lot layer
-stays cut.
+ledger rows and a frozen line on the packing slip, optional and hidden when absent.
+**The lot layer followed on 2026-09-06** — `material_lots`, a per-part `lot_tracked` flag, and a
+third key on `part_location_stock` — because a heat you have to *choose* from cannot be free text
+over a list that grows forever and can name material that is not on the shelf. Off per part by
+default, so a shop that ignores it sees the inventory it saw yesterday. Certs are stored, not yet
+collected.
 Customer-supplied material — real and frequent but **never stocked** (arrives with the job, is
 worked, leaves): a job attribute.
 
@@ -324,11 +328,11 @@ Owner/admin: shortages become a vendor-grouped buy list → PO with expected dat
 
 ### J6 — Receive it
 
-Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost or cert — it does take the **heat number** since 2026-09-04, through the same `add_stock_at_location(p_heat_number)` a PO receipt will call; [§5.6](#56-lots--resolved-dont-build-them)). The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
+Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost or cert — it does take the **heat number** since 2026-09-04, through the same `add_stock_at_location(p_heat_number)` a PO receipt will call; [§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 that receipt is also where a **lot** is created — the only place one can be, since a take may not invent one — and `lot_certificates` gives a cert somewhere to live, though nothing collects one yet: the founder's objection to scanning PDFs at the receiving bench is unanswered, not designed around. The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
 
 ### **J7 — Issue material to a job**
 
-**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Since 2026-09-04 the take also carries the bar's **heat number** — optional, picked from the heats received for that part, or typed under *Other…* — which is the figure the job's packing slip prints ([§5.6](#56-lots--resolved-dont-build-them)). Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
+**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Since 2026-09-04 the take also carries the bar's **heat number** — which is the figure the job's packing slip prints ([§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 it is picked from the lots **actually on that shelf** and there is no free-text escape: a take can only name material that is there. Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
 
 **97 of 121** legacy "locations" were job/work-order/part numbers — the link built by hand, in the wrong field, at scale. It proves the *link* is wanted, not where the operator starts.
 
@@ -436,7 +440,7 @@ Two journeys specced, then cut **2026-07-27**; kept without numbers, outside J1�
 
 | Cut | Why | Consequence | Reopen if |
 |---|---|---|---|
-| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. **Widened 2026-08-01** ([#642](https://github.com/debola31/Jigged/issues/642)): also fires on a **prospect** needing it during customer-#2 acquisition, which is likelier to come first and arrives as a deadline rather than a request. Contour itself still does not want it. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. **Fired 2026-09-04 — reopened for heat numbers only**, at the ledger grain ([§5.6](#56-lots--resolved-dont-build-them)); the lot layer and certs remain cut. |
+| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. **Widened 2026-08-01** ([#642](https://github.com/debola31/Jigged/issues/642)): also fires on a **prospect** needing it during customer-#2 acquisition, which is likelier to come first and arrives as a deadline rather than a request. Contour itself still does not want it. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. **Fired 2026-09-04 — reopened for heat numbers only**, at the ledger grain; **the lot layer followed on 2026-09-06** once consumption had to pick a heat rather than type one ([§5.6](#56-lots--resolved-dont-build-them)). Per-part flag, off by default. Cert storage exists; the collection journey does not. |
 | **Customer-supplied material** | Frequent on service one-offs but **never stocked**: arrives with the job, leaves with the part — no balance, nothing to count. A *job* attribute; an ownership flag would have crossed every read path (on-hand, reorder, counts, buy list) for something that never behaves like stock. Same test as job-as-place, [§5.2](#52-is-a-job-a-place--resolved-no). | Survivor in [J4](#j4--job-kickoff-material-check): a service job whose BOM lists customer material shows a false shortage. Whether such lines exist is open in [§9](#9-what-we-know-and-what-we-still-dont); if so, exclude on the BOM line or job — never on stock. Doesn't block Phase 1. | It starts being *stored* between delivery and use. |
 
 ---
@@ -532,6 +536,8 @@ The earlier draft put a lot layer between item and location (heat/lot as a quant
 >    transfer. The heat is text on the movement — `inventory_transactions.heat_number`, written by
 >    `add_stock_at_location` (the receipt) and `deplete_stock_at_location` (the take to a job,
 >    [J7](#j7--issue-material-to-a-job)) — and nothing else.
+>    **Overtaken two days later — see [the lot layer](#the-lot-layer-arrived-anyway--2026-09-06)
+>    below.** Everything else in this list still holds.
 > 3. **Heat number only.** No cert PDF; a later receipt/attachment concept hangs off the same
 >    column, and a PO receipt ([J6](#j6--receive-it)) calls the same parameter.
 > 4. **On for everyone, optional, hidden when absent.** No company setting, no flag. `NULL` is the
@@ -545,10 +551,12 @@ The earlier draft put a lot layer between item and location (heat/lot as a quant
 > What decision 2 buys: the whole class of silent lot-merging the earlier draft would have armed —
 > the count sheet keyed on `(part, place)`, `bulk_put_away`, `transfer_stock`, the importer's
 > `on_conflict` — is untouched, because nothing enters the balance key. [§5.3](#53-the-location-is-the-scan-anchor)
-> holds: tags stay human-readable and nothing scans them. On a take the field is a **list of the
-> heats received for that part** (`getRecentHeatNumbersForParts`, this bin's first) with *Other…*
-> opening a text box — a take names a heat that came in, and free text is the explicit exception,
-> not the default; a receipt, where the heat is new, is a plain box.
+> holds: tags stay human-readable and nothing scans them. On a take the field was a **list of the
+> heats received for that part**, this bin's first, with *Other…* opening a text box — a take names
+> a heat that came in, and free text was the explicit exception rather than the default; a receipt,
+> where the heat is new, is a plain box. **The *Other…* escape is gone since 2026-09-06**: a take
+> now picks from `LotPicker` over the lots actually on that shelf, and there is no free-text path
+> out of it. The receipt is still a plain box, which is the asymmetry the whole lot layer turns on.
 >
 > **The slip freezes what it printed.** `create_shipment_with_line_items` snapshots the DISTINCT
 > (heat, material) pairs onto `shipments.heat_numbers_snapshot`
@@ -563,6 +571,72 @@ The earlier draft put a lot layer between item and location (heat/lot as a quant
 > text on the slip, which was built and then dropped on 2026-06-21
 > ([shipments.md](shipments.md#certificate-of-conformance-text--built-then-dropped-2026-06-21)).
 > [J8](#j8--cut-it-return-the-remnant) remnants still stand alone.
+> **The first two were reversed on 2026-09-06** — see immediately below. The CoC text and J8
+> remnants are unaffected and stay as written.
+
+#### The lot layer arrived anyway — 2026-09-06
+
+[`20260906121901`](../../supabase/migrations/20260906121901_lot_tracked_material.sql). Two days
+after shipping the ledger grain, the founder pushed on the *consumption* half and the ledger-only
+design did not survive the question.
+
+**What broke it.** Free text on a movement is fine while a heat is only ever *written*. The moment
+an operator has to CHOOSE one — "which heat am I taking off this shelf?" — a text box is wrong in
+two ways at once. It grows unbounded, so a picker over every heat ever received gets harder to use
+every month; and it can name material that is not there, because nothing connects the string to a
+balance. Founder's words: *"we should remove the ability to consume a heat that isn't already
+existing, so removing should always require a selectable heat and never an Other or free text
+box."* You cannot select from what is on the shelf unless the shelf knows what is on it. That is
+the third key, and no amount of care on the ledger substitutes for it.
+
+**The shape.**
+
+| | |
+|---|---|
+| `material_lots` | A heat, as a row. Identity is `(part_id, lower(btrim(lot_code)))`; `heat_number` is nullable and is **not** the same as the code — NULL says the material arrived without a heat we could read, and such a lot gets a minted code so untagged bar is still storable. Soft-deletes like everything else. |
+| `parts.lot_tracked` | Per part, default **false**. A shop holds ~9,000 parts and a handful of bar and plate is what needs tracing — the same call JobBOSS makes. Never set directly: `set_part_lot_tracking()` flips it **and** migrates existing lot-less balances into a `PRE-TRACKING` lot in the same statement. |
+| `part_location_stock.lot_id` + `lot_key` | The third key. `lot_key` is a **stored generated column** collapsing NULL to the zero uuid, so `UNIQUE (part_id, location_id, lot_key)` is FULL and an upsert can infer it. Without it the NULL-lot rows would compare distinct from one another and one part could hold several balances at one place — no error, just `parts.quantity` counting the same steel twice. |
+| `lot_certificates` | The mill cert, attached to the **lot** and not to a movement. Schema only; no upload UI yet. |
+
+**Enforcement is asymmetric, and that is the whole design.** `resolve_lot()` takes two separate
+permissions rather than one: `p_create` (may this call bring a lot into existence?) and `p_mint`
+(may it invent a code for untagged material?). Inbound gets both; **outbound gets neither**. So a
+receipt may name a heat we have never seen — that is where a heat enters Jigged at all — and a take
+may only name one that already exists. A first pass had a single flag, and a smoke test caught the
+consequence: a heat nobody ever received was consumable, which is exactly the fiction the founder
+asked to remove.
+
+**Why `set_part_lot_tracking` migrates rather than just flipping.** Stock already on the shelf has
+no heat. Enforcement that begins mid-life would refuse the first operator to touch it — a rule about
+material that predates the rule. The `PRE-TRACKING` lot is named for what it is rather than given an
+invented heat, because a made-up number on a packing slip is worse than an honest "not known". This
+is [CLAUDE.md's no-silent-runtime-fallbacks rule](../../CLAUDE.md): the invariant holds at rest
+instead of being patched by an `IF lot IS NULL` branch on every read.
+
+**Turning it OFF leaves the balances split.** Merging them back would have to pick a survivor and
+silently add the others to it, destroying the record of what is physically on the shelf. The flag
+stops future *enforcement*; it is not an instruction to forget what has been traced. Readers must
+therefore drive off the balance rows, never off the flag — the two legitimately disagree.
+
+**The count sheet was the one surface that had to change shape.** Every other verb is relative:
+adding 20 and taking 6 are true whatever else sits beside them. An adjustment is **absolute**, and
+"there are 12 here" is a claim about the whole bin — meaningless where there is 8 of one heat and 4
+of another. So `adjust_stock_at_location` refuses a lot-less count of a tracked part, and a count
+row became `(part, place, heat)`: `countRowKey` carries the lot, `readPlaceBalances` (formerly
+`refreshLocationQuantities`) returns one entry per (part, lot), and a bin holding none of a tracked
+part offers a row per lot at 0 — because *heat 4471 is recorded on Shelf A and I have just found it
+on Shelf B* is precisely what a stocktake exists to record, and a balance-scoped list cannot say it.
+
+**A tracked part with no lots at all is refused, deliberately.** Tracking switched on before
+anything was ever received leaves nothing to name, and the count is rejected per line in the
+database's own words. Material whose heat has never been recorded is *received*, not counted into
+existence.
+
+**Certs are stored, not yet collected.** The founder's own objection to the obvious flow stands
+unanswered and is recorded rather than designed around: *"are people expected to scan things they
+receive into PDFs and then upload? that sounds like friction upon receiving."* The table exists so
+the seam is real; the journey does not, and a receiving screen that demands a scan before stock can
+be put away would be worse than no cert at all.
 
 ### 5.7 Quoting never touches stock
 
@@ -765,7 +839,7 @@ Filed: ~~**#618**~~ **fixed 2026-08-10**: `materializeLocationSpec` was sequenti
 
 **Filed 2026-08-01:** **#645** every location-stock RPC bypassed the billing write-gate — `SECURITY DEFINER` runs as the owner, no table sets `FORCE ROW LEVEL SECURITY`, and `part_location_stock` was exempt on the false rationale *"writes never come from the browser"*. Entitlement therefore depended on a feature flag. Fixed the same day across seven functions, plus `definer_writers_missing_write_gate()` and a CI test, because the existing guard checks whether a *policy exists* and cannot see a definer function walking past one. · **#649** `create_shipment_with_line_items` has the identical bug; left open because whether a lapsed shop may ship an order it will invoice for is a billing policy call. · **#646** / **#647** / **#648** the counting, owner-ledger and board-vs-table work from that audit.
 
-**Phase 3 — purchasing:** J5 · J6 · J10 = **#571**; merge, don't parallelise. **Phase 4:** traceability and lots cut (no certs, heat, regulated customers), halving it — heat numbers alone returned 2026-09-04 at the ledger grain (§5.6), lots still cut — left: J8 remnants (*confirm they reuse drops first*), reconciliation (unspecced until real drift shows; J9 covers correctness), J4's customer-material exclusion *only if* service jobs carry such BOM lines, §5.4 engine collapse + §5.9 `job_materials` drop (stop writing, drop table, un-gate billing).
+**Phase 3 — purchasing:** J5 · J6 · J10 = **#571**; merge, don't parallelise. **Phase 4:** traceability and lots cut (no certs, heat, regulated customers), halving it — heat numbers returned 2026-09-04 at the ledger grain and the lot layer with them on 2026-09-06, per part and off by default (§5.6); cert collection is still cut — left: J8 remnants (*confirm they reuse drops first*), reconciliation (unspecced until real drift shows; J9 covers correctness), J4's customer-material exclusion *only if* service jobs carry such BOM lines, §5.4 engine collapse + §5.9 `job_materials` drop (stop writing, drop table, un-gate billing).
 
 ---
 
@@ -786,7 +860,7 @@ Twelve journeys plus the two cut. "Docs said" = this doc **before the rewrite** 
 | J9 count | metric: 100% accuracy | silent | ✅ 2026-07-28, place-scoped 2026-07-30 (§5.11's actual ask) |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, proposed hiding | ⚠️ badge only |
 | J11 find it | *absent* | AC only | ✅ 2026-07-31 — operator part lookup; the office half predated it |
-| Traceability *(cut)* | *absent* | silent | ⛔ lots and certs cut — no regulated customers; ✅ **heat numbers 2026-09-04**, ledger grain, optional (§5.6) |
+| Traceability *(cut)* | *absent* | silent | ✅ **heat numbers 2026-09-04** (ledger) + **lots 2026-09-06** (per-part flag, off by default, balances by heat); ⛔ cert collection — the table exists, the receiving journey does not (§5.6) |
 | Customer-supplied *(cut)* | *absent* | *absent* | ⛔ cut — frequent, never stocked |
 
 Three structural misses, costliest first:
@@ -851,7 +925,7 @@ Founder observation, **Contour Tool & Machine**, 2026-07-27 — reliable on stru
 | **Operator** moves material | J7 on the operator path |
 | **Mixed units** — `each`, ft/in | FR-1 conversion load-bearing |
 | **Balances start at zero**; legacy *"questionable"* | J1 out of Phase 1; J9 = onboarding |
-| **No certs/heat/regulated** *(2026-07-27, re-confirmed 2026-08-01 — they do not want it either)* | Traceability + lots cut. Live only as a **customer-#2** consideration ([#642](https://github.com/debola31/Jigged/issues/642)), not a Contour need. **Customer #2 arrived 2026-09-04 needing heat numbers** — built as optional text on the movement, lots still cut ([§5.6](#56-lots--resolved-dont-build-them)). |
+| **No certs/heat/regulated** *(2026-07-27, re-confirmed 2026-08-01 — they do not want it either)* | Traceability + lots cut. Live only as a **customer-#2** consideration ([#642](https://github.com/debola31/Jigged/issues/642)), not a Contour need. **Customer #2 arrived 2026-09-04 needing heat numbers** — built as optional text on the movement; **the lot layer came back 2026-09-06**, per part and off by default, when consuming a heat had to mean picking one that is actually there ([§5.6](#56-lots--resolved-dont-build-them)). |
 | **Customer-supplied: lots, never stocked** | Job attribute; no ownership flag |
 | **~10 ±4 places** (cabinets, shelving) | Wizard's 16 over-built |
 | **Tried counting before** | J9 rescues a lapsed practice |

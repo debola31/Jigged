@@ -35,6 +35,7 @@
     "vendor_services": "A process an outside vendor performs, such as anodising, plating or heat treat.",
     "routings": "The manufacturing plan for a part: the ordered set of operations that make it.",
     "routing_operations": "One step in a part's standing routing: its sequence, the work centre that runs it, and standard times.",
-    "inventory_transactions": "Stock movements against a part: material taken in, issued to jobs, and adjusted after a count."
+    "inventory_transactions": "Stock movements against a part: material taken in, issued to jobs, and adjusted after a count.",
+    "material_lots": "One mill heat of one raw material, created when the material is received. Answers traceability questions -- which heats a part has held, when they came in, and which vendor supplied them. Only parts with lot_tracked = true have lots at all, and most do not."
   }
 }

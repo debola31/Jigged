@@ -52,7 +52,7 @@ import type { AuthChangeEvent } from '@supabase/supabase-js';
  * Mobile-first layout with:
  * - Top header with station picker and (for non-operators) a dashboard shortcut. Deliberately
  *   exactly one icon button — see the note where the second one used to be.
- * - Bottom navigation: Jobs · Inventory · Scan · Maintenance · Me. Five is the ceiling, which is
+ * - Bottom navigation: Jobs · Storage · Scan · Maintenance · Me. Five is the ceiling, which is
  *   why Scan took Profile's slot and Profile's contents moved into Me.
  * - No sidebar (unlike admin dashboard)
  * - Uses Supabase Auth for session management
@@ -743,7 +743,7 @@ function OperatorShell({
         >
           {/*
             ⚠️ This bar is FULL. Once a station is selected it carries five slots —
-            Jobs · Inventory · Scan · Maintenance · Me — which is the documented Material Design
+            Jobs · Storage · Scan · Maintenance · Me — which is the documented Material Design
             ceiling for bottom navigation (3–5). Maintenance is the only conditional one, so every
             shop sees four before a station is picked and five after. That used to be three or four
             for most shops, when Inventory and Maintenance were both flag-gated; the flags are gone.
@@ -759,7 +759,7 @@ function OperatorShell({
                        also an ACTION rather than a destination, which is the conventional use of
                        a centre slot.
               Me     — rightmost, the near-universal home for account/self.
-              Inventory / Maintenance fill the remaining two; only Maintenance is conditional.
+              Storage / Maintenance fill the remaining two; only Maintenance is conditional.
 
             ⚠️ minWidth: 0 on every action is LOAD-BEARING, not tidying. MUI defaults
             `BottomNavigationAction` to `minWidth: 80` with `flex: 1`, and `min-width` blocks
@@ -809,7 +809,7 @@ function OperatorShell({
               sx={{ minHeight: 56 }}
             />
             <BottomNavigationAction
-              label="Inventory"
+              label="Storage"
               value="inventory"
               icon={<WarehouseOutlinedIcon />}
               sx={{ minHeight: 56 }}

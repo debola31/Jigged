@@ -1467,6 +1467,15 @@ declare
   v_shelf_b    constant uuid := '71000000-0000-0000-0000-000000000003';
   v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
   v_company    constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_cabinet    constant uuid := '71000000-0000-0000-0000-000000000001';
+  v_unit       uuid;
+  v_child      uuid;
+  v_bin        uuid;
+  v_targets    uuid[];
+  v_order      int;
+  i            int;
+  j            int;
+  u            record;
 begin
   -- transfer_stock authorises against get_user_company_ids(), i.e. auth.uid(), which is
   -- null in a seed. Impersonate the dev user for this block so the put-aways go through
@@ -1498,6 +1507,80 @@ begin
     (v_yard,    v_company, null, 'Yard', 2)
   on conflict (id) do nothing;
 
+  -- -------------------------------------------------------------------------
+  -- The rest of the shop — 2026-09-04.
+  -- -------------------------------------------------------------------------
+  -- Four locations was a fixture, not a shop. Every storage surface is sized by how many places
+  -- there are and how deep they nest: the unit list, the drawn grid and its `sections`/`nested`
+  -- layouts, the put-away picker, the count sheet's pagination, the search that has to be worth
+  -- typing into. All of them looked fine against a cabinet with two shelves and told you nothing
+  -- about what they do against a real one. Contour's own export ran to 237 rows.
+  --
+  -- Deliberately MIXED DEPTHS, because that is what the grid renderer branches on:
+  --   flat leaf          Yard, Receiving Dock, Saw Area Floor    -> a unit with no grid at all
+  --   one level          Plate Rack, Tool Crib, Cabinet 3        -> `grid`
+  --   two levels         Bar Stock Rack, Shelving 1 & 2, Small Parts  -> `sections` / `nested`
+  -- and mixed WIDTHS, from a 6-slot rack to a 4x12 small-parts cabinet, so a layout that only
+  -- works at one size shows up here rather than at a pilot.
+  --
+  -- Generated rather than written out: 190 literal rows is a wall nobody reads or maintains, and
+  -- the shape is the point. Ids are random — nothing outside this block refers to them. The four
+  -- rows above keep their fixed ids and their names, because the put-aways below and the
+  -- count-sheet cases they set up are cited by name in this file's own comments.
+  insert into public.inventory_locations (company_id, parent_id, name, sort_order) values
+    (v_company, v_cabinet, 'Shelf C', 3),
+    (v_company, v_cabinet, 'Shelf D', 4)
+  on conflict do nothing;
+
+  v_order := 2;
+  for u in
+    select * from (values
+      -- name,                        child_label, child_n, grandchild_label, grandchild_n
+      ('Bar Stock Rack',              'Bay',       6,  'Level',    4),
+      ('Plate Rack',                  'Slot',      8,  null,       0),
+      ('Shelving 1',                  'Shelf',     5,  'Bin',      6),
+      ('Shelving 2',                  'Shelf',     4,  'Bin',      8),
+      ('Small Parts Cabinet',         'Row',       4,  'Position', 12),
+      ('Tool Crib',                   'Drawer',    10, null,       0),
+      ('Finished Goods Staging',      'Pallet',    6,  null,       0),
+      ('Receiving Dock',              null,        0,  null,       0),
+      ('Inspection Bench',            null,        0,  null,       0),
+      ('Outside Processing Staging',  null,        0,  null,       0),
+      ('Saw Area Floor',              null,        0,  null,       0)
+    ) as t(unit_name, child_label, child_n, grandchild_label, grandchild_n)
+  loop
+    v_order := v_order + 1;
+
+    insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+    values (v_company, null, u.unit_name, v_order)
+    on conflict do nothing
+    returning id into v_unit;
+    -- `on conflict do nothing` returns no row on a re-run, so re-find rather than skipping:
+    -- a second `supabase db reset` against a warm stack must land on the same tree.
+    if v_unit is null then
+      select id into v_unit from public.inventory_locations
+       where company_id = v_company and parent_id is null and name = u.unit_name;
+    end if;
+
+    for i in 1 .. u.child_n loop
+      insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+      values (v_company, v_unit, u.child_label || ' ' || i, i)
+      on conflict do nothing
+      returning id into v_child;
+      if v_child is null then
+        select id into v_child from public.inventory_locations
+         where company_id = v_company and parent_id = v_unit
+           and name = u.child_label || ' ' || i;
+      end if;
+
+      for j in 1 .. u.grandchild_n loop
+        insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+        values (v_company, v_child, u.grandchild_label || ' ' || j, j)
+        on conflict do nothing;
+      end loop;
+    end loop;
+  end loop;
+
   -- Spread stock so all three count-sheet write targets exist in dev data. The
   -- count resolves a part's target by how many locations hold stock, so without
   -- this every part sits at Unassigned and only one branch is ever reachable.
@@ -1515,6 +1598,72 @@ begin
   -- live example: 60% to A, then everything still loose to B.
   perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_a, 0.6, 'Shelf A');
   perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_b, 1.0, 'Shelf B');
+
+  -- Fill state across the new tree, which is what the grid is FOR.
+  --
+  -- Every bin empty and the drawn unit is a uniform blank; every bin full and it is a uniform
+  -- block. Neither tells you whether the empty-vs-has-stock signal reads at a glance, which is
+  -- the one thing decision 5 in inventory.md 5.5 asks of it. A scatter across a handful of the
+  -- ~165 leaves leaves most of them empty, which is also true of a real shop.
+  --
+  -- DATA-DRIVEN on both sides, and it has to be. A first cut named eight part ids and eight bins
+  -- in a literal list; three landed. Most seeded parts are made goods or have already been
+  -- consumed by the jobs above, so they hold nothing loose to put away, and `put_away` correctly
+  -- did nothing for the other five -- silently, because doing nothing is its contract when a
+  -- share rounds to zero. Reading the parts that actually have stock keeps the scatter true
+  -- however the job seeding above changes.
+  --
+  -- Parts 2, 4 and 5 are deliberately excluded: their single-bin and split-bin placements above
+  -- are the count sheet's three write targets, cited by name in the comment on that block, and a
+  -- third location would quietly retire one of the cases. `offset 3` leaves three more parts in
+  -- the pile, so the fourth case -- "everything else -> Unassigned" -- keeps live examples too.
+  select array_agg(id order by ord) into v_targets
+    from (
+      select l.id, t.ord
+        from (values
+          ('Bar Stock Rack',         'Bay A',    'Level 1',    1),
+          ('Bar Stock Rack',         'Bay C',    'Level 2',    2),
+          ('Bar Stock Rack',         'Bay F',    'Level 4',    3),
+          ('Shelving 1',             'Shelf 2',  'Bin 3',      4),
+          ('Shelving 1',             'Shelf 5',  'Bin 1',      5),
+          ('Shelving 2',             'Shelf 1',  'Bin 5',      6),
+          ('Small Parts Cabinet',    'Row 2',    'Position 7', 7),
+          ('Small Parts Cabinet',    'Row 4',    'Position 11',8),
+          ('Plate Rack',             'Slot 3',   null,         9),
+          ('Tool Crib',              'Drawer 4', null,        10),
+          ('Finished Goods Staging', 'Pallet 2', null,        11),
+          ('Cabinet 3',              'Shelf C',  null,        12)
+        ) as t(unit_name, child_name, leaf_name, ord)
+        join public.inventory_locations p
+          on p.company_id = v_company
+         and p.name = case when t.leaf_name is null then t.unit_name else t.child_name end
+        join public.inventory_locations l
+          on l.parent_id = p.id
+         and l.name = coalesce(t.leaf_name, t.child_name)
+        left join public.inventory_locations g on g.id = p.parent_id
+       where t.leaf_name is null or g.name = t.unit_name
+    ) as found;
+
+  i := 0;
+  for u in
+    select ps.part_id
+      from public.part_location_stock ps
+      join public.parts pt on pt.id = ps.part_id
+     where ps.company_id = v_company
+       and ps.location_id = v_unassigned
+       and ps.quantity >= 4          -- a share of 3 floors to 0 and would move nothing
+       and ps.part_id not in ('60000000-0000-0000-0000-000000000002',
+                              '60000000-0000-0000-0000-000000000004',
+                              '60000000-0000-0000-0000-000000000005')
+     order by pt.part_name
+     offset 3
+  loop
+    exit when i >= coalesce(array_length(v_targets, 1), 0);
+    i := i + 1;
+    -- A share, never all of it: a part in the pile AND on a shelf is the ordinary state of a
+    -- shop mid-put-away, and it is the one that exercises both readings of "where is this?".
+    perform pg_temp.put_away(u.part_id, v_unassigned, v_targets[i], 0.5, 'seed scatter');
+  end loop;
 end $$;
 
 -- ---------------------------------------------------------------------------

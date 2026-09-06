@@ -37,6 +37,7 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import StorageSearch, { type StorageHit } from './StorageSearch';
+import StorageActivity from './StorageActivity';
 import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
@@ -780,6 +781,10 @@ export default function LocationsManager({
           setToast(message);
         }}
       />
+
+      {/* What has moved anywhere lately — the shop floor's feed, on the office's own home for
+          storage, so the same question is answered on both surfaces rather than only one. */}
+      <StorageActivity companyId={companyId} onOpenPlace={openPlaceFromPart} />
 
       {/* A whole unit, bin by bin, without leaving the page it belongs to. */}
       <UnitAdjustDrawer

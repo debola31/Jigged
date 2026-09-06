@@ -118,6 +118,8 @@ import {
   getLocationContents,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import { getRecentHeatNumbersForParts } from '@/utils/inventoryLocationsAccess';
+import HeatNumberField from '@/components/inventory/HeatNumberField';
 import { useLoad } from '@/hooks/useLoad';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
@@ -279,6 +281,19 @@ export default function PlaceStockActionForm({
   /** Best-effort author: a failed lookup writes no name rather than blocking a stock correction. */
   const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
   const operatorId = member?.id ?? null;
+
+  /**
+   * Remove only: the heats received for every part on screen, in ONE query, so each row's heat
+   * field is a list of what actually came in (with *Other…*) rather than a box that accepts any
+   * number. Best-effort — with no list a row falls back to the plain box, never to no field.
+   */
+  const { data: heatsByPart } = useLoad(async () => {
+    if (action !== 'deplete' || !data || data.kind !== 'contents') return new Map<string, string[]>();
+    const partIds = restrictTo ? [restrictTo.partId] : data.page.contents.map((c) => c.part_id);
+    return getRecentHeatNumbersForParts(partIds, { preferLocationId: locationId }).catch(
+      () => new Map<string, string[]>(),
+    );
+  }, [action, data, locationId, restrictTo]);
 
 
   /** Everything that could be picked for an `add`, minus what is already a row. */
@@ -696,22 +711,20 @@ export default function PlaceStockActionForm({
                       ))}
                     </TextField>
                     {showHeat && (
-                      <TextField
-                        size="small"
-                        placeholder="Heat"
-                        value={heatFor[row.partId] ?? ''}
-                        onChange={(e) =>
-                          setHeatFor((s) => ({ ...s, [row.partId]: e.target.value }))
-                        }
-                        sx={{ width: 110 }}
-                        slotProps={{
-                          htmlInput: {
-                            maxLength: 64,
-                            autoCapitalize: 'characters',
-                            'aria-label': `Heat number for ${row.partName}`,
-                          },
-                        }}
-                      />
+                      <Box sx={{ width: 160 }}>
+                        {/* On a removal this is a LIST of the heats received for the part (this
+                            bin's first) with Other…; on an add, where the heat is new, a box. */}
+                        <HeatNumberField
+                          size="small"
+                          label="Heat"
+                          value={heatFor[row.partId] ?? ''}
+                          onChange={(v) => setHeatFor((s) => ({ ...s, [row.partId]: v }))}
+                          suggestions={
+                            action === 'deplete' ? (heatsByPart?.get(row.partId) ?? []) : []
+                          }
+                          disabled={saving}
+                        />
+                      </Box>
                     )}
                     {row.onHand != null && (
                       <Button

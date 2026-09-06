@@ -22,7 +22,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
   // The heat suggestions a removal offers once a location is picked; empty here.
-  getRecentHeatNumbersAtLocation: vi.fn(async () => []),
+  getRecentHeatNumbersForPart: vi.fn(async () => []),
 }));
 
 /** The modal resolves the acting member so owner-side writes carry an author. */

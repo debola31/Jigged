@@ -21,7 +21,7 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
-  getRecentHeatNumbersAtLocation,
+  getRecentHeatNumbersForPart,
 } from '@/utils/inventoryLocationsAccess';
 import HeatNumberField from '@/components/inventory/HeatNumberField';
 import { compareLocationNames } from '@/lib/locationTree';
@@ -116,27 +116,14 @@ export default function PartLocationActionModal({
   /**
    * The mill heat / lot number, on the two actions where a bar changes hands with its tag on:
    * `add` (typed off the tag) and `deplete` (read back off the bar being taken to a job). Not on
-   * `adjust` or `move`. On `deplete` the heats recently received into the chosen location for
-   * this part are offered as options — loaded when the location is picked, since that is what
-   * they depend on. Optional and never nagged; a blank stays blank downstream.
+   * `adjust` or `move`. On `deplete` the heats received for this part are the list to pick from,
+   * with *Other…* for a bar the list has never seen — loaded on open, per part, because a moved
+   * bar keeps its tag wherever it now sits. Optional and never nagged; a blank stays blank
+   * downstream.
    */
   const [heatNumber, setHeatNumber] = useState('');
   const [recentHeats, setRecentHeats] = useState<string[]>([]);
   const showHeat = action === 'add' || action === 'deplete';
-
-  const loadRecentHeats = (loc: LocationOption | null) => {
-    setRecentHeats([]);
-    if (action !== 'deplete' || !loc) return;
-    // Suggestions only — a failure must never block a removal.
-    getRecentHeatNumbersAtLocation(partId, loc.id)
-      .then(setRecentHeats)
-      .catch(() => setRecentHeats([]));
-  };
-
-  const pickLocation = (loc: LocationOption | null) => {
-    setLocation(loc);
-    loadRecentHeats(loc);
-  };
 
   /**
    * Who is doing this, so the ledger can name them.
@@ -163,8 +150,13 @@ export default function PartLocationActionModal({
     setError(null);
     setJob(null);
     setHeatNumber('');
-    // The only-one-place case picked the location above without going through the picker.
-    loadRecentHeats(locations.length === 1 ? locations[0] : null);
+    setRecentHeats([]);
+    if (action === 'deplete') {
+      // The list only — a failure must never block a removal.
+      getRecentHeatNumbersForPart(partId)
+        .then(setRecentHeats)
+        .catch(() => setRecentHeats([]));
+    }
     setOperatorId(null);
     // ABOVE the deplete-only return: all four actions write a ledger row, and an earlier draft
     // that put this after it would have attributed removals and nothing else.
@@ -356,7 +348,7 @@ export default function PartLocationActionModal({
               label="Location"
               options={locationOptions}
               value={location}
-              onChange={pickLocation}
+              onChange={setLocation}
               unit={primaryUnit}
               required
               onCreate={onCreateLocation}

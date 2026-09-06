@@ -18,7 +18,7 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
-  getRecentHeatNumbersAtLocation,
+  getRecentHeatNumbersForPart,
 } from '@/utils/inventoryLocationsAccess';
 import HeatNumberField from '@/components/inventory/HeatNumberField';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
@@ -110,8 +110,9 @@ export default function OperatorLocationActionModal({
    * The mill heat / lot number, on the two actions where a bar changes hands with its tag on:
    * `add` (typed off the tag as it is put down) and `deplete` (read back off the same bar as it
    * is taken to a job). Not on `adjust` (a correction to a number) or `move` (the tag travels with
-   * the bar; the receipt already recorded it). On `deplete`, the heats recently received into this
-   * bin for this part are offered as one-tap options, so the common case is a tap, not typing.
+   * the bar; the receipt already recorded it). On `deplete`, the heats received for this part are
+   * the LIST to pick from (this bin's first), with *Other…* for a bar the list has never seen — a
+   * take names a heat that came in, not a number typed from memory.
    * Optional everywhere and never nagged — a blank stays blank on every surface downstream.
    */
   const [heatNumber, setHeatNumber] = useState('');
@@ -141,7 +142,9 @@ export default function OperatorLocationActionModal({
     // removal. Loaded together: one round trip's wait, not two.
     const [taggable, heats] = await Promise.all([
       loadTaggableJobs(companyId),
-      getRecentHeatNumbersAtLocation(partId, locationId).catch(() => [] as string[]),
+      getRecentHeatNumbersForPart(partId, { preferLocationId: locationId }).catch(
+        () => [] as string[],
+      ),
     ]);
     setJobs(taggable);
     setRecentHeats(heats);

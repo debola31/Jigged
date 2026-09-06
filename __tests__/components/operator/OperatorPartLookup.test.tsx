@@ -41,6 +41,23 @@ vi.mock('@/components/parts/PartAutocomplete', () => ({
   },
 }));
 
+/**
+ * Stub the destination picker, for the same reason the part picker is stubbed: what matters here
+ * is what happens once a place is CHOSEN, not MUI's Autocomplete, which `LocationPicker` owns and
+ * the office side exercises. The stub picks the first option it is handed.
+ */
+vi.mock('@/components/inventory/locations/LocationPicker', () => ({
+  __esModule: true,
+  default: (props: {
+    options: Array<{ id: string; label: string }>;
+    onChange: (o: { id: string; label: string }) => void;
+  }) => (
+    <button type="button" onClick={() => props.onChange(props.options[0])}>
+      pick-place
+    </button>
+  ),
+}));
+
 import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
 import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 
@@ -140,14 +157,20 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
    * The wording is a stock statement, not a placement one. It used to read "None in any place
    * right now.", which sounds like something that exists and has not been put away — the state the
    * blue "not put away yet" alert reports. No balance rows means the shop holds none of it at all.
+   *
+   * And since 2026-09-04 it is a NUMBER, in the same line and shape as every other answer, not a
+   * warning Alert reading "None available": zero is an ordinary quantity, and being out of
+   * something is the most routine finding this screen has.
    */
-  it('says a part with no stock anywhere is simply not available', async () => {
+  it('answers zero, in the same shape as any other quantity, when the shop holds none', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([]);
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText('None available')).toBeInTheDocument();
+    expect(await screen.findByText(/0\s*ea/)).toBeInTheDocument();
+    expect(screen.getByText(/in any location/i)).toBeInTheDocument();
+    expect(screen.queryByText(/none available/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/not stored yet/i)).not.toBeInTheDocument();
   });
 
@@ -247,7 +270,7 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     expect(screen.getByText(/not stored yet/i)).toBeInTheDocument();
   });
 
-  it('still says not available when every row is a zero', async () => {
+  it('still answers zero when every row is a zero', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       shelf({ quantity: 0 }),
@@ -256,7 +279,8 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText('None available')).toBeInTheDocument();
+    expect(await screen.findByText(/0\s*ea/)).toBeInTheDocument();
+    expect(screen.queryByText(/none available/i)).not.toBeInTheDocument();
   });
 });
 
@@ -267,7 +291,7 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
  */
 describe('OperatorPartLookup — the add-to-location picker', () => {
   const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(await screen.findByRole('button', { name: /add to new location/i }));
+    await user.click(await screen.findByRole('button', { name: /add at another location/i }));
   };
 
   it('loads the locations only when asked, not on every lookup', async () => {
@@ -283,7 +307,7 @@ describe('OperatorPartLookup — the add-to-location picker', () => {
     await openPicker(user);
     expect(mockLocations).toHaveBeenCalledWith('co1');
     expect(await screen.findByRole('dialog')).toHaveTextContent(
-      'Add RAW-AL6061-BLANK to a new location',
+      'Add RAW-AL6061-BLANK at another location',
     );
   });
 
@@ -296,9 +320,33 @@ describe('OperatorPartLookup — the add-to-location picker', () => {
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByRole('button', { name: /add to new location/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /add at another location/i })).toBeInTheDocument();
   });
 
+
+  /**
+   * THE FIX, 2026-09-04. Choosing a place used to NAVIGATE there, and the bin view keeps only the
+   * place — so you re-found, among everything on that shelf, the part you had arrived holding.
+   * It now opens Add against a row for the chosen place, right here, and never calls the
+   * navigate. `Open this location` inside the section is still there for whoever wants to walk.
+   */
+  it('stocks the chosen place in place, rather than sending you there to re-find the part', async () => {
+    const user = userEvent.setup();
+    mockLocations.mockResolvedValue([
+      { id: 'l9', company_id: 'co1', parent_id: null, name: 'Bay A', kind: 'shelf', sort_order: 0, created_at: '', updated_at: '' },
+    ]);
+    renderLookup();
+    await pick(user);
+    await openPicker(user);
+
+    await user.click(await screen.findByRole('button', { name: 'pick-place' }));
+    await user.click(await screen.findByRole('button', { name: 'Add here' }));
+
+    // The place is now a row on the answer, with the Add form open on it...
+    expect(await screen.findByText('Bay A')).toBeInTheDocument();
+    // ...and nothing navigated.
+    expect(onOpenLocation).not.toHaveBeenCalled();
+  });
 
   it('reports a failed location load instead of opening an empty picker', async () => {
     const user = userEvent.setup();

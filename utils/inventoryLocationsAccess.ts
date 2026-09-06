@@ -1042,48 +1042,88 @@ export async function depleteStockAtLocation(
   return data as unknown as StockMutationResult;
 }
 
+export interface RecentHeatsOptions {
+  /**
+   * The place the take is happening. Heats that were ever received INTO it sort first — the bar
+   * on this shelf is most likely one of those — but a heat received elsewhere stays on the list,
+   * because a moved bar keeps its tag and a transfer row carries no heat of its own.
+   */
+  preferLocationId?: string;
+  /** Distinct heats per part. */
+  limit?: number;
+}
+
 /**
- * The mill heats recently RECEIVED into one place for one part, newest first, distinct.
+ * The mill heats RECEIVED for each of these parts, distinct, newest first, this place's first.
  *
- * The suggestion list for the take-to-job dialog: the bar on the shelf almost always carries a
- * heat that was typed when it was put down, so the operator taps rather than transcribes a mill
- * tag on a phone in bright light. Additions only — a depletion's heat is a copy of one of these,
- * and an adjustment carries none. Typing still wins when the bar is not among them; the list is
- * a convenience, never a constraint, and stock is not tracked per heat (inventory.md §5.6).
+ * What a take picks from: a heat must exist on a receipt before it can be named on a removal, so
+ * the removal dialogs render this as a list with an *Other…* escape for the bar the list has never
+ * seen (a delivery stocked without its heat, corrected on the spot). Additions only — a depletion's
+ * heat is a copy of one of these, and an adjustment carries none. Stock is still not tracked per
+ * heat (inventory.md §5.6): this narrows what gets typed, it does not decrement a lot.
  *
- * Read-only and small; a failure here must never block a removal, which is why callers catch.
+ * One query for N parts, because the Storage tab's batch form shows a bin's whole contents and a
+ * query per row would be forty round trips for one shelf. Read-only; a failure here must never
+ * block a removal, which is why callers catch.
  */
-export async function getRecentHeatNumbersAtLocation(
-  partId: string,
-  locationId: string,
-  limit = 5,
-): Promise<string[]> {
+export async function getRecentHeatNumbersForParts(
+  partIds: string[],
+  { preferLocationId, limit = 25 }: RecentHeatsOptions = {},
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const ids = [...new Set(partIds)];
+  if (ids.length === 0) return out;
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('inventory_transactions')
-    .select('heat_number, created_at')
-    .eq('part_id', partId)
-    .eq('location_id', locationId)
+    .select('part_id, location_id, heat_number, created_at')
+    .in('part_id', ids)
     .eq('type', 'addition')
     .not('heat_number', 'is', null)
     .order('created_at', { ascending: false })
-    // Over-fetch: the same bar is often received in several deliveries, and distinct-ing
-    // afterwards would otherwise shrink the list below what was asked for.
-    .limit(limit * 4);
+    // Over-fetch: the same bar is received in several deliveries, and distinct-ing afterwards
+    // would otherwise shrink a part's list below what was asked for. Capped under PostgREST's
+    // default max_rows so a long ledger cannot silently truncate the newest receipts.
+    .limit(Math.min(1000, ids.length * limit * 4));
   if (error) {
     console.error('Error loading recent heat numbers:', error);
     throw error;
   }
-  const seen = new Set<string>();
-  const out: string[] = [];
+
+  type Seen = { heat: string; newest: string; here: boolean };
+  const perPart = new Map<string, Map<string, Seen>>();
   for (const row of data ?? []) {
-    const heat = row.heat_number;
-    if (!heat || seen.has(heat)) continue;
-    seen.add(heat);
-    out.push(heat);
-    if (out.length >= limit) break;
+    if (!row.part_id || !row.heat_number) continue;
+    const heats = perPart.get(row.part_id) ?? new Map<string, Seen>();
+    const seen = heats.get(row.heat_number);
+    const here = Boolean(preferLocationId) && row.location_id === preferLocationId;
+    if (seen) {
+      seen.here = seen.here || here;
+    } else {
+      heats.set(row.heat_number, { heat: row.heat_number, newest: row.created_at, here });
+    }
+    perPart.set(row.part_id, heats);
+  }
+  for (const [partId, heats] of perPart) {
+    out.set(
+      partId,
+      [...heats.values()]
+        // Rows arrived newest-first, so insertion order is already by recency; a stable sort
+        // by "received here" keeps that order within each half.
+        .sort((a, b) => Number(b.here) - Number(a.here))
+        .slice(0, limit)
+        .map((s) => s.heat),
+    );
   }
   return out;
+}
+
+/** One part's list — see `getRecentHeatNumbersForParts`. Empty when no receipt ever carried a heat. */
+export async function getRecentHeatNumbersForPart(
+  partId: string,
+  opts: RecentHeatsOptions = {},
+): Promise<string[]> {
+  return (await getRecentHeatNumbersForParts([partId], opts)).get(partId) ?? [];
 }
 
 export async function adjustStockAtLocation(

@@ -89,7 +89,8 @@ import {
   resolveScan,
   getRecentActivity,
   getLocationHistory,
-  getRecentHeatNumbersAtLocation,
+  getRecentHeatNumbersForParts,
+  getRecentHeatNumbersForPart,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { ID_CHUNK } from '@/lib/queryLimits';
@@ -366,33 +367,50 @@ describe('RPC wrappers', () => {
  * halfway left a partial tree with no rollback. `create_location_tree` does the whole subtree in
  * one statement, so the assertions worth having are the REQUEST COUNT and the payload shape.
  */
-describe('getRecentHeatNumbersAtLocation', () => {
-  // The suggestion list for a take: receipts only, this part at this place, newest first,
-  // distinct — a bar delivered three times under one heat is one option, not three.
-  it('reads additions with a heat at this place, dedupes, and keeps newest-first order', async () => {
+describe('getRecentHeatNumbersForParts', () => {
+  // The list a take picks from: receipts only, one query for every part on screen, distinct per
+  // part, newest first — and the heats ever received INTO this place ahead of the rest, because
+  // the bar on this shelf is most likely one of those while a moved bar still keeps its tag.
+  it('groups received heats per part, distinct, this place first, then newest first', async () => {
     queueFrom({
       data: [
-        { heat_number: '8823', created_at: '2026-09-03T10:00:00Z' },
-        { heat_number: '4471', created_at: '2026-09-02T10:00:00Z' },
-        { heat_number: '8823', created_at: '2026-09-01T10:00:00Z' },
-        { heat_number: '1100', created_at: '2026-08-30T10:00:00Z' },
+        { part_id: 'p1', location_id: 'loc2', heat_number: '8823', created_at: '2026-09-03T10:00:00Z' },
+        { part_id: 'p1', location_id: 'loc1', heat_number: '4471', created_at: '2026-09-02T10:00:00Z' },
+        { part_id: 'p2', location_id: 'loc1', heat_number: '9000', created_at: '2026-09-02T09:00:00Z' },
+        { part_id: 'p1', location_id: 'loc1', heat_number: '4471', created_at: '2026-09-01T10:00:00Z' },
+        { part_id: 'p1', location_id: 'loc2', heat_number: '1100', created_at: '2026-08-30T10:00:00Z' },
       ],
       error: null,
     });
-    const heats = await getRecentHeatNumbersAtLocation('part1', 'loc1', 2);
-    expect(heats).toEqual(['8823', '4471']);
+    const byPart = await getRecentHeatNumbersForParts(['p1', 'p2', 'p1'], { preferLocationId: 'loc1' });
+    expect(byPart.get('p1')).toEqual(['4471', '8823', '1100']);
+    expect(byPart.get('p2')).toEqual(['9000']);
 
-    const seen = state.calls[0];
-    expect(seen.eq).toBeDefined();
+    expect(state.calls[0].in).toEqual(['part_id', ['p1', 'p2']]);
+    expect(state.calls[0].eq).toEqual(['type', 'addition']);
     expect(state.calls[0].not).toEqual(['heat_number', 'is', null]);
     expect(state.calls[0].order).toEqual(['created_at', { ascending: false }]);
-    // Over-fetched so that dedupe cannot shrink the list below what was asked for.
-    expect(state.calls[0].limit).toEqual([8]);
+    // Over-fetched so that dedupe cannot shrink a part's list below what was asked for.
+    expect(state.calls[0].limit).toEqual([200]);
   });
 
-  it('returns nothing when no receipt here ever carried a heat', async () => {
+  it('caps each part at the requested number of distinct heats', async () => {
+    queueFrom({
+      data: ['a', 'b', 'c'].map((h, i) => ({
+        part_id: 'p1', location_id: null, heat_number: h, created_at: `2026-09-0${3 - i}T10:00:00Z`,
+      })),
+      error: null,
+    });
+    const byPart = await getRecentHeatNumbersForParts(['p1'], { limit: 2 });
+    expect(byPart.get('p1')).toEqual(['a', 'b']);
+  });
+
+  it('asks nothing for no parts, and answers [] for a part that never had a heat', async () => {
+    expect((await getRecentHeatNumbersForParts([])).size).toBe(0);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+
     queueFrom({ data: [], error: null });
-    expect(await getRecentHeatNumbersAtLocation('part1', 'loc1')).toEqual([]);
+    expect(await getRecentHeatNumbersForPart('p1')).toEqual([]);
   });
 });
 

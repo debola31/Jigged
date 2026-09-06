@@ -120,16 +120,17 @@ describe('AddToLocationDialog — the fallback when you cannot scan the label', 
   });
 
   /**
-   * It navigates; it does not write. A remote write is a claim that you put something somewhere
-   * you may not have reached, and an inventory of unverifiable claims is worse than one with gaps.
+   * It hands the chosen place BACK, and the lookup opens Add on it — changed 2026-09-04. It used
+   * to navigate to the bin, which threw away the part you had arrived holding and made you re-find
+   * it among everything on that shelf.
    */
-  it('takes you to the chosen bin rather than recording the move from here', async () => {
+  it('hands the chosen place back to the caller and closes', async () => {
     const user = userEvent.setup();
     renderDialog([loc({ id: 'l1', name: 'Shelf A' })]);
 
     const [option] = await openList(user);
     await user.click(option);
-    await user.click(screen.getByRole('button', { name: /go there/i }));
+    await user.click(screen.getByRole('button', { name: /add here/i }));
 
     expect(onChoose).toHaveBeenCalledWith('l1');
     expect(onClose).toHaveBeenCalled();
@@ -137,6 +138,6 @@ describe('AddToLocationDialog — the fallback when you cannot scan the label', 
 
   it('cannot be confirmed until somewhere is chosen', () => {
     renderDialog([loc({ id: 'l1', name: 'Shelf A' })]);
-    expect(screen.getByRole('button', { name: /go there/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /add here/i })).toBeDisabled();
   });
 });

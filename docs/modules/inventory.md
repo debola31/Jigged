@@ -328,7 +328,7 @@ Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no s
 
 ### **J7 — Issue material to a job**
 
-**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Since 2026-09-04 the take also carries the bar's **heat number** — optional, offered from what was received into that bin, typed otherwise — which is the figure the job's packing slip prints ([§5.6](#56-lots--resolved-dont-build-them)). Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
+**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Since 2026-09-04 the take also carries the bar's **heat number** — optional, picked from the heats received for that part, or typed under *Other…* — which is the figure the job's packing slip prints ([§5.6](#56-lots--resolved-dont-build-them)). Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
 
 **97 of 121** legacy "locations" were job/work-order/part numbers — the link built by hand, in the wrong field, at scale. It proves the *link* is wanted, not where the operator starts.
 
@@ -337,6 +337,24 @@ Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no s
 #### This journey *is* consumption tracking
 
 The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-view.md`](operator-view.md#status-model)). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
+
+#### Two flow fixes on the way in — 2026-09-04
+
+**A part you found is a part you can act on, everywhere.** `Add at another location…` on the
+operator lookup used to NAVIGATE to the chosen bin, on the rule that *a remote write claims you put
+something somewhere you may not be standing*. That rule was real but it was kept by one control
+alone — every other verb on the same screen, and the whole office side, already writes to a place
+you are not standing in — so its only effect was to make you re-find, among everything on that
+shelf, the part you had arrived holding. It is the identical fault this module fixed for the
+location rows in Aug 2026 and left here. It now opens the Add form in place, against a row
+synthesised for the chosen place at quantity 0; the row drops out on its own once the write lands
+and the balance read returns it for real. `Open this location` still sits inside the expanded
+section for whoever does want to walk there.
+
+**Zero is a quantity, not an alarm.** A part the shop holds none of rendered as a warning
+`None available`. Founder's call: it says `0 ea in any location`, in the same line and the same
+shape as `40 ea in 2 locations`, so there is one place to read the answer instead of two layouts —
+and being out of something is the most routine finding this screen has.
 
 ### J8 — Cut it, return the remnant
 
@@ -527,8 +545,10 @@ The earlier draft put a lot layer between item and location (heat/lot as a quant
 > What decision 2 buys: the whole class of silent lot-merging the earlier draft would have armed —
 > the count sheet keyed on `(part, place)`, `bulk_put_away`, `transfer_stock`, the importer's
 > `on_conflict` — is untouched, because nothing enters the balance key. [§5.3](#53-the-location-is-the-scan-anchor)
-> holds: tags stay human-readable, and the take dialog *suggests* the heats recently received into
-> that bin (`getRecentHeatNumbersAtLocation`) rather than scanning them.
+> holds: tags stay human-readable and nothing scans them. On a take the field is a **list of the
+> heats received for that part** (`getRecentHeatNumbersForParts`, this bin's first) with *Other…*
+> opening a text box — a take names a heat that came in, and free text is the explicit exception,
+> not the default; a receipt, where the heat is new, is a plain box.
 >
 > **The slip freezes what it printed.** `create_shipment_with_line_items` snapshots the DISTINCT
 > (heat, material) pairs onto `shipments.heat_numbers_snapshot`
@@ -651,7 +671,7 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 | Routes stay `/inventory/*` | Churn for no user-visible gain; QR payloads encode `/operator/...`. |
 | ~~Flag off (`inventory_locations`) hides the **Storage** nav~~ → **flag retired Aug 2026** | It went opt-out with the `is_stocked` removal and then away entirely, on the same reasoning both times: `Count Inventory` sat on the Parts toolbar precisely because gating counting on this flag had once taken the entry point away, and that button is gone — leaving Storage as the only door, which every tenant must therefore have. A kill-switch on the only door is not a kill-switch. |
 | One module writes, reads and routes every Jigged QR — [`lib/jiggedScan.ts`](../../lib/jiggedScan.ts) | Two shapes, `/L/{code}` and `/T/{code}`, differing only by the kind letter; before, a traveler sent the operator out to the phone camera. **Redesigned August 2026** because the old codes did not scan — payloads were 120–157 chars at QR version 8–10. Now 77 chars of uppercase base32 at version 4/6. **Trap:** the whole scheme rests on every character staying inside the QR *alphanumeric* charset — one lowercase letter silently costs a version, which is 9% of module size on a shelf label. [`qrVersionCeiling.test.ts`](../../__tests__/utils/qrVersionCeiling.test.ts) fails CI on it. Refusals: anything that is not exactly one of the two shapes, including a bare UUID (it names no company, so the offline tenant check could not run). |
-| Operator tabs **Jobs · Inventory · Scan · Maintenance · Me** (PR #636) | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. It had to take a slot: Material caps bottom nav at 3–5 and, with both optional tabs showing, the bar was already at five. ⚠ Since the flags were retired (Aug 2026) Inventory is unconditional and **Maintenance is gated on a selected station alone**, so the bar has two shapes rather than four. `Me` merges My work + Profile and **leads with work**, identity demoted to one compact row and Logout last — Material disallows a settings tab outright, NN/g measured hidden nav at 44–56% usage vs 89% visible, and YouTube's "You" / Strava's "You" are the exact precedent (both also pulled the avatar out of the header). The earlier withdrawal ("burying work behind settings") was right about the risk and wrong about the only fix.
+| Operator tabs **Jobs · Storage · Scan · Maintenance · Me** (PR #636; the second tab was `Inventory` until 2026-09-04 — see below) | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. It had to take a slot: Material caps bottom nav at 3–5 and, with both optional tabs showing, the bar was already at five. ⚠ Since the flags were retired (Aug 2026) Inventory is unconditional and **Maintenance is gated on a selected station alone**, so the bar has two shapes rather than four. `Me` merges My work + Profile and **leads with work**, identity demoted to one compact row and Logout last — Material disallows a settings tab outright, NN/g measured hidden nav at 44–56% usage vs 89% visible, and YouTube's "You" / Strava's "You" are the exact precedent (both also pulled the avatar out of the header). The earlier withdrawal ("burying work behind settings") was right about the risk and wrong about the only fix.
 | ~~The board draws nothing on a flat shop~~ → **board deleted 2026-08-01, replaced by a table** | The measurement that forced it: `unitKind` has exactly ONE consumer (`boardChrome.tsx:278`), and for a childless node the only thing `kind` changes is the rack border — the whole body is behind `children.length > 0`, whose own comment says *"most real locations are flat (118 of 121 in their legacy export), so that was the common case looking broken."* So the board was already a grid of labels for almost every real place, with worse density than a table and no sorting, multi-select or bulk anything. The sentence that had killed the list — *"Cabinet 1 alone exploded into 15 rows"* — was a **wizard artefact**: the cabinet template generates 1 × 5 × 2 = 16 nodes in one pass. Stop making that the default and a flat shop's table is 12–18 rows total. **Withdrawn 2026-08-10 — this is the sentence that was wrong.** It is the founding claim of the table, and the shop then deliberately built a 12 × 15 cabinet: 237 locations, 180 bins in one of them. The generator was never the reason storage got big; a shop with real storage is big. Measuring the default and not the ceiling is the mistake worth remembering. Twelve of twelve surveyed tools present locations as a tree or table; none draws them — convergent evolution, **not** user evidence, and no user has ever been observed using any storage UI here. Also deleted: the icon palettes (`STORAGE_TYPES` was unreachable for its entire life), `LocationBoardPreview`, `specToBoard`, `BoardNode`, `unitKind`. The generator survives as the valuable half. #421 (3D) closed, not deferred. |
 | ~~Operators render the same `LocationBoard`~~ → **operator board removed 2026-07-31** | The reasoning that put it there was sound (whoever most needs to *recognise* a place stands in front of it, and `CAB3-A` isn't recognisable) and it still holds — for the **owner's** Storage page, which keeps the board. What it never established is that an operator needs a *map of places* at all. Industry usage is consistent: *inventory* = items and quantities, *storage* = places, and every operator action here is an item action. The tab was Storage content under an Inventory label. It also competed with Scan, which reaches a place faster **and** proves you are standing at it — and with 12–18 places you are among, walking beats scrolling a picture of furniture three feet away. Replaced by a part lookup (J11) over a shop-wide activity feed; the one thing the board did that nothing else did — reach a bin whose label came off — survives as the tap target on every activity row. |
 | ~~**`Move into…`** re-parents a unit~~ → **removed 2026-08-10** | Founder call, on the grounds that configure-on-creation plus `Change layout` covers the reshaping people actually do. It never had strong evidence behind it: 118 of 121 legacy locations were flat and Contour's five real units nest under nothing, so re-parenting answered a shape the shop has never built. **What it does not cover, said plainly:** `Change layout` reshapes a unit's *inside*; nothing now moves an existing cabinet under another. `moveLocation` and `locationParentOptions` are kept — cycle-guarded and tested — and are **unreferenced again**, which is the state that made a mis-parented cabinet permanent before 2026-08-01. Deliberate this time, and recorded here so the next reader does not mistake it for an oversight. |
@@ -677,6 +697,32 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 | **Three scopes, three places** — 2026-08-11 | The top row held `Find a place` and `Add storage` (which act on the LIST) beside `Print all labels` (which acts on the SHOP), while the unit's own actions sat down in the pane. Straddling two scopes is why the page read flat. The page bar now holds only what belongs to neither column — the search and `Print all labels` — and `Add` moved into the list's own header, beside the thing it adds to. It shows `Add` because the heading beside it says Storage; its accessible name is `Add storage`, which also stops it colliding with the drawer's `Add` verb. |
 
 ---
+
+#### Amended 2026-09-04 — **one noun, on both surfaces: Storage**
+
+The row above split the vocabulary deliberately: *inventory* = the items and quantities, *storage*
+= where they live. That reading is correct about the English and it still cost more than it bought.
+The office sidebar said **Storage** and the operator tab said **Inventory** for the same feature,
+and nobody who uses both surfaces meets one feature under two names and concludes it is one
+feature. Founder's call, and the cheaper half of the trade: **Storage everywhere.**
+
+What survives unchanged from the original decision, because it was never about the label:
+
+- **Parts is the item master and holds no quantities.** `Parts` beside `Storage` still reads right.
+- **Routes stay `/inventory/*`** — now for a second reason. Every QR label a shop has printed
+  encodes one, and reprinting a shop's labels to rename a tab is a cost with no reader.
+- **The operator tab is still item-first** — find a part, store one, take one out. The read-only
+  map of furniture that used to be there is still gone; the argument against it was about content,
+  not about its name.
+
+**Parity, not just a label.** Renaming two things to match while they do different jobs is worse
+than leaving them apart, so the gap that made the split visible closed with it: the shop floor's
+home *is* a feed of what moved, and the office's home is a grid of furniture, so *"what changed
+while I was not looking?"* could only be answered from the office by leaving for `/activity` — a
+mixed feed of jobs, quotes and notes where stock is one filter of six.
+[`StorageActivity`](../../components/inventory/locations/StorageActivity.tsx) puts the same feed on
+the office page, collapsed and read only when opened (the rule `PlaceHistory` set one level down),
+reusing `BinHistory` verbatim rather than growing a second row renderer.
 
 ### 5.13 `Change layout` changes the layout — 2026-08-15
 

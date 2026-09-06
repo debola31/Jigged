@@ -332,17 +332,12 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
         assert bought_id in {g["part_id"] for g in explain["missing_markups"]}
         assert env.parent_id not in _list_priceable(admin, env.company_id)
 
-        # Its own tier — the thing the starter tier writes — unblocks it, on
-        # both views.
-        admin.table("part_pricing_tiers").insert(
-            {
-                "part_id": bought_id,
-                "company_id": env.company_id,
-                "sequence": 10,
-                "quantity": 1,
-                "markup_percent": 25,
-            }
-        ).execute()
+        # Its own markup — the thing the starter tier writes — unblocks it, on
+        # both views. An UPDATE, not an insert: the cost above already created
+        # this part's one tier row, and cost and markup share it.
+        admin.table("part_pricing_tiers").update({"markup_percent": 25}).eq(
+            "part_id", bought_id
+        ).eq("quantity", 1).execute()
         explain = _detail_explain(admin, env.parent_id)
         assert explain["is_priceable"] is True
         assert explain["missing_markups"] == []

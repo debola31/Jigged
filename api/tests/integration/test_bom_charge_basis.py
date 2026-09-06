@@ -254,6 +254,38 @@ def env(admin: Client):
 # single existing number.
 
 
+def _set_markup(admin: Client, part_id: str, company_id: str, markup: float) -> None:
+    """
+    Give a part a markup at quantity 1.
+
+    Cost and markup share one tier row, so a BOUGHT part that has a cost already
+    HAS the row — its markup is an UPDATE, not a second insert. Inserting would
+    collide on the (part_id, sequence) unique index, which is exactly how the
+    ladder stays one ladder.
+    """
+    existing = (
+        admin.table("part_pricing_tiers")
+        .select("id")
+        .eq("part_id", part_id)
+        .eq("quantity", 1)
+        .execute()
+    ).data
+    if existing:
+        admin.table("part_pricing_tiers").update({"markup_percent": markup}).eq(
+            "id", existing[0]["id"]
+        ).execute()
+    else:
+        admin.table("part_pricing_tiers").insert(
+            {
+                "part_id": part_id,
+                "company_id": company_id,
+                "sequence": 10,
+                "quantity": 1,
+                "markup_percent": markup,
+            }
+        ).execute()
+
+
 def test_all_cost_lines_are_a_no_op(admin: Client, env: ChargeBasisEnv):
     _set_basis(admin, env.bracket_bom_id, "cost")
 
@@ -267,15 +299,7 @@ def test_starter_markups_never_move_a_rollup(admin: Client, env: ChargeBasisEnv)
     # be — and every number stays put, on cost lines AND price lines. This is the
     # test that would fail if a read-time fallback ever crept back into the
     # rollup, which is the failure mode that got markup_rates deleted.
-    admin.table("part_pricing_tiers").insert(
-        {
-            "part_id": env.bar_id,
-            "company_id": env.company_id,
-            "sequence": 10,
-            "quantity": 1,
-            "markup_percent": 10,
-        }
-    ).execute()
+    _set_markup(admin, env.bar_id, env.company_id, 10)
     parts = (env.bar_id, env.bracket_id, env.assembly_id)
 
     _set_starter_markups(admin, env.company_id, made=0, bought=0)
@@ -300,15 +324,7 @@ def test_child_with_no_tier_has_no_price_even_with_starter_markups_set(
 
 def test_price_comes_from_the_child_own_tier(admin: Client, env: ChargeBasisEnv):
     # Give BAR a 10% tier. That, not the shop's 25%, is what the parent pays.
-    admin.table("part_pricing_tiers").insert(
-        {
-            "part_id": env.bar_id,
-            "company_id": env.company_id,
-            "sequence": 10,
-            "quantity": 1,
-            "markup_percent": 10,
-        }
-    ).execute()
+    _set_markup(admin, env.bar_id, env.company_id, 10)
 
     priced = _price(admin, env.bar_id, 1)
     assert priced is not None
@@ -333,15 +349,7 @@ def test_no_tier_is_unpriceable_never_cost(admin: Client, env: ChargeBasisEnv):
 def _price_bar_at_25(admin: Client, env: ChargeBasisEnv) -> None:
     """BAR's own 25% tier. It used to get this number from a shop-wide default;
     now it carries it itself, which is the whole point of the revision."""
-    admin.table("part_pricing_tiers").insert(
-        {
-            "part_id": env.bar_id,
-            "company_id": env.company_id,
-            "sequence": 10,
-            "quantity": 1,
-            "markup_percent": 25,
-        }
-    ).execute()
+    _set_markup(admin, env.bar_id, env.company_id, 25)
 
 
 def test_cost_line_carries_the_child_charge_base_exactly_once(
@@ -367,15 +375,7 @@ def test_stacking_is_allowed_and_visible(admin: Client, env: ChargeBasisEnv):
     # BRACKET charged at price into ASSEMBLY, with its own 15% tier: material
     # 25% + bracket 15% + assembly 40% all compound, deliberately.
     _price_bar_at_25(admin, env)
-    admin.table("part_pricing_tiers").insert(
-        {
-            "part_id": env.bracket_id,
-            "company_id": env.company_id,
-            "sequence": 10,
-            "quantity": 1,
-            "markup_percent": 15,
-        }
-    ).execute()
+    _set_markup(admin, env.bracket_id, env.company_id, 15)
     _set_basis(admin, env.asm_bom_id, "price")
 
     bracket_priced = _price(admin, env.bracket_id, 1)

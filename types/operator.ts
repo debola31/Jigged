@@ -110,6 +110,15 @@ export interface OperatorJobDetail {
    *  suppress the station-mismatch guard (they have no operator station). Null
    *  when the work center was deleted. */
   operation_work_center_kind: 'internal' | 'external' | null;
+  /**
+   * THE discriminator, same column the office reads. `operation_work_center_kind`
+   * above is derived from this one and survives only for the printed traveler;
+   * branch on this. `operation_vendor_id` is here because the send button names
+   * the vendor -- "SEND 50 TO PROFINISH" -- and a second query for one string on
+   * a phone on cellular is not worth it.
+   */
+  operation_vendor_service_id: string | null;
+  operation_vendor_id: string | null;
   /** Vendor name for an external op (from work_centers.vendor_id). */
   operation_vendor_name: string | null;
   /** job_operations.sent_at — when an external op left for the vendor. */

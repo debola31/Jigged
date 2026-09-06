@@ -464,6 +464,46 @@ prompts (`"Note about this part…"`).
 
 Enforced — see [Enforcement](#enforcement) above.
 
+### A text button on a TINTED band needs its colour checked
+
+[`lib/theme.ts`](../lib/theme.ts) paints every text button `primary.light`
+(`#6FA3D8`) regardless of its `color` prop — deliberately, because it is tuned for
+the app's own gradient. **On a tinted surface it can fail WCAG AA, silently.**
+
+Measured on the Jobs page's outside-work strip (an amber-tinted band):
+
+| Foreground | At rest | On hover | AA needs |
+|---|---|---|---|
+| `primary.light` #6FA3D8 — the theme default | **3.83:1** | **3.03:1** | 4.5:1 |
+| `warning.light` #fbbf24 | 5.27:1 | 4.93:1 | 4.5:1 |
+
+Hover is the worse case and the easy one to miss: lightening the ground under a
+light foreground costs contrast, whether it comes from MUI's own overlay or from
+your `&:hover` background. **Check both states.**
+
+**Sample the LIGHTEST pixel of the band, not its nominal colour.** The page
+ground is a `135deg` gradient with an ambient radial glow on top, so a band's
+real background varies across its own width — the numbers above come from its
+right end, which is both the brightest point and where the action sits. The
+first measurement of this band read 6.09/4.81 because it sampled the middle.
+
+The fix is an `sx` colour drawn from the band's own semantic — which also ties
+the action to the thing it belongs to — and a non-hue cue (an underline on a
+text button, a chevron on a band), because hue alone is the same failure
+`StatusDot` exists to avoid.
+
+**A band that says one thing and does one thing should be one button.** The
+strip started as a small text link parked at the far right of a ~1400px band;
+it is now a single `ButtonBase` wrapping the whole row, so the target is the
+band and there is no invisible boundary between a clickable region and an inert
+one. Two conditions come with that, and they are what make it an improvement
+rather than a bigger hit area: it must be a real `<button>` (a `Box` with an
+`onClick` looks identical and is unreachable from the keyboard), and **nothing
+inside it may be interactive** — a nested button is invalid HTML and splits the
+row's accessible name. `ButtonBase` also ships no focus ring, so give it an
+explicit `&:focus-visible` outline. If a second action is ever wanted on such a
+band, it stops being a button first.
+
 ### Status Badges
 
 **Use [`StatusChip`](../components/common/StatusChip.tsx) for every on/off/lifecycle status badge —
@@ -478,6 +518,24 @@ outlined):
 
 Pass the semantic `color`; `size="small"` is the default. Enforcement is the component itself
 (`variant` is not an accepted prop) — `automation-pending (#367)` for a lint against raw `<Chip>`.
+
+**In a LIST, use [`StatusDot`](../components/common/StatusDot.tsx) instead** — a 7px semantic dot
+plus the plain label, taking the same `label` + `color` so the two forms can never disagree about
+what green means. Chips stay on **detail** surfaces, where one status is the subject of the screen
+rather than one cell in a scan.
+
+*Why the split.* A filled pill is a **button-shaped object**. In a grid it appears once per row, a
+dozen times down a page, on rows where the actual click target is the row itself — it reads as
+something to press and stops the eye at every line. It also caps what a second fact can look like:
+the jobs list briefly carried an "At vendor" chip beside the lifecycle one, and two chips in a 200px
+cell wrapped onto a second line, making the busiest-looking rows the ones with the least to say.
+
+*Why the label is not optional.* The dot's hue is the shortcut for someone scanning; **the word is
+what survives when the hue does not land.** A colour-only treatment was considered and rejected on
+exactly that: roughly one man in twelve has some red-green deficiency, and these lists are read
+almost entirely by men over fifty, often under shop lighting. `default` renders **hollow**, mirroring
+the chip's outlined neutral. `nowrap` means a status must fit its column — sizing one for a chip and
+then dropping a dot in front clips the longest label.
 
 **Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a bespoke palette for a
 domain reason — work-centre kind, the Made/Bought source chip on the Parts grid — and the `HOT` rush

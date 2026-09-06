@@ -3,6 +3,7 @@
 import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
+import { daysAtVendorBucket } from '@/components/jobs/outsideWorkMetrics';
 import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -11,7 +12,9 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
+import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
@@ -29,9 +32,14 @@ import {
   getOperatorOperationDetail,
   getCurrentMember,
   revertOperationCompletion,
-  markOperationSent,
-  markOperationReceived,
 } from '@/utils/operatorAccess';
+import type { OutsideOperationSummary } from '@/types/outsideShipment';
+import {
+  createOutsideShipment,
+  getOutsideSummariesForPart,
+  receiveOutsideOperation,
+  undoLastOutsideMovement,
+} from '@/utils/outsideShipmentsAccess';
 import {
   CompletionConflictError,
   createOperationCompletion,
@@ -85,6 +93,7 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
  * and a way back to the traveler.
  */
 const OP_DETAILS_KEY = 'jigged:op-details-expanded';
+
 
 
 export default function OperatorOperationActionPage() {
@@ -152,6 +161,11 @@ export default function OperatorOperationActionPage() {
   // then defaults to the remaining balance (dialled down for a partial).
   const [qtyInput, setQtyInput] = useState('');
   const [qtyDirty, setQtyDirty] = useState(false);
+  // "That is everything we are getting" -- one checkbox, not a second number.
+  // A short return is settled by closing the slip, the way Sage and Oracle do
+  // it, rather than by reconciling a scrap quantity on a phone.
+  const [closeSlip, setCloseSlip] = useState(false);
+  const [slipNotice, setSlipNotice] = useState<string | null>(null);
   // Bumped after every step action — start, complete, cancel — so the feed below
   // reloads and shows the row it created. It is also what makes the composer
   // down there warn about a draft still sitting unposted when one of those
@@ -237,8 +251,24 @@ export default function OperatorOperationActionPage() {
   // like the shipment form's prefill) until the operator edits it — derived, not
   // an effect, so there's no setState-in-effect cascade. A successful record
   // clears the dirty flag, snapping the value back to the new remaining.
-  const isExternal = job?.operation_work_center_kind === 'external';
+  // ONE PREDICATE, shared with the office. This read `operation_work_center_kind
+  // === 'external'` -- the same column under a different name, derived a second
+  // way. `work_centers.kind` is dropped; the vendor service IS the discriminator.
+  const isExternal = Boolean(job?.operation_vendor_service_id);
   const isCompleted = job?.operation_status === 'completed';
+
+  // The outside quantity ledger for THIS step. It is what the button label, the
+  // prefill and the at-vendor line all read from -- one derivation, so the
+  // number on the button is the number that gets sent.
+  const { data: outsideRows, reload: reloadOutside } = useLoad(
+    () =>
+      jobPartId
+        ? getOutsideSummariesForPart(jobPartId)
+        : Promise.resolve([] as OutsideOperationSummary[]),
+    [jobPartId],
+  );
+  const outside =
+    outsideRows?.find((r) => r.job_operation_id === jobOperationId) ?? null;
 
   // THIS PAGE DOES NOT OWN CAPTURE, on any branch. Notes, photos and clips are
   // written by the feed's composer below, with its own Post button, and this
@@ -260,7 +290,35 @@ export default function OperatorOperationActionPage() {
     [jobPartId, jobOperationId],
   );
 
-  const qtyValue = qtyDirty ? qtyInput : remaining > 0 ? String(remaining) : '';
+  /**
+   * OUTSIDE STEPS ARE NOW A SEND OR A RECEIVE, and the field means a different
+   * thing in each. Prefer receiving when anything is at the vendor: parts coming
+   * back is the event somebody is standing at the bench for.
+   */
+  const outsideMode: 'send' | 'receive' =
+    outside && outside.qty_at_vendor > 0 ? 'receive' : 'send';
+  const outsideDefault = isExternal
+    ? outsideMode === 'receive'
+      ? (outside?.qty_at_vendor ?? 0)
+      : (outside?.qty_to_send ?? 0)
+    : 0;
+
+  const qtyValue = qtyDirty
+    ? qtyInput
+    : isExternal
+      ? outsideDefault > 0
+        ? String(outsideDefault)
+        : ''
+      : remaining > 0
+        ? String(remaining)
+        : '';
+
+  const outsideQty = Number(qtyValue) || 0;
+  // Same rule as the office dialog: the close only exists when there is
+  // something to write off. The field is prefilled with everything at the
+  // vendor, so on the common path there is nothing to ask.
+  const canCloseSlip = outsideMode === 'receive' && outsideQty < (outside?.qty_at_vendor ?? 0);
+  const willCloseSlip = canCloseSlip && closeSlip;
 
   const canComplete = Number(qtyValue) > 0;
 
@@ -295,7 +353,11 @@ export default function OperatorOperationActionPage() {
    * single action.
    */
   const reloadAll = async () => {
-    await Promise.all([loadJob(), loadSummary()]);
+    // The outside ledger is reloaded here rather than only in the outside
+    // handlers: a part-quantity change or an internal completion moves what is
+    // left to send, and a stale ledger would leave the phone offering to send
+    // pieces that have already gone.
+    await Promise.all([loadJob(), loadSummary(), reloadOutside()]);
   };
 
   // Record a specific good quantity. Over-completion is allowed (warned, not
@@ -467,7 +529,13 @@ export default function OperatorOperationActionPage() {
     setActionLoading(true);
     setError(null);
     try {
-      await revertOperationCompletion(jobOperationId);
+      // A completed OUTSIDE op is undone by voiding its newest movement, not by
+      // writing a status back -- the database refuses the latter now.
+      if (isExternal) {
+        await undoLastOutsideMovement(jobOperationId);
+      } else {
+        await revertOperationCompletion(jobOperationId);
+      }
       setQtyDirty(false);
       // The feed has to be told, exactly as recording tells it. Undo voids the
       // completion AND — through the cascade trigger — the time intervals it
@@ -483,14 +551,35 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  // Outside (external-vendor) op actions — the part leaves the shop for a vendor
-  // (Mark Sent Out) and comes back (Mark Received). Distinct from Mark Complete.
+  /**
+   * Outside op: the part leaves the shop and comes back, and BOTH legs now carry
+   * a quantity.
+   *
+   * ONE TAP SURVIVES, and gains a fact. The button reads SEND 50 TO PROFINISH
+   * because the field beside it is prefilled with everything still to go — the
+   * same move the page already makes with RECORD n FINISHED. Nobody has to type
+   * to do the common thing; the number is just no longer a guess the office
+   * makes later.
+   */
   const handleSend = async () => {
     setActionLoading(true);
     setError(null);
     try {
-      await markOperationSent(jobOperationId);
-      await loadJob();
+      const { slipNumber } = await createOutsideShipment({
+        jobOperationId,
+        quantity: outsideQty,
+      });
+      posthog.capture('outside shipment created', {
+        surface: 'operator',
+        is_partial: outsideQty < (outside?.qty_to_send ?? outsideQty),
+        shipment_index: (outside?.open_slip_count ?? 0) + 1,
+        has_due_back_date: false,
+        has_instructions: false,
+        has_ship_to_address: true,
+      });
+      setSlipNotice(`Sent ${outsideQty} — slip ${slipNumber}`);
+      setQtyDirty(false);
+      await reloadAll();
     } catch (err) {
       setError(err);
     } finally {
@@ -502,8 +591,20 @@ export default function OperatorOperationActionPage() {
     setActionLoading(true);
     setError(null);
     try {
-      await markOperationReceived(jobOperationId);
-      await loadJob();
+      const result = await receiveOutsideOperation(jobOperationId, {
+        quantityGood: outsideQty,
+        closeShipment: willCloseSlip,
+      });
+      posthog.capture('outside shipment received', {
+        surface: 'operator',
+        is_full: outsideQty >= (outside?.qty_at_vendor ?? 0),
+        short_closed: willCloseSlip,
+        was_backfilled: result.wasBackfilled,
+        days_at_vendor_bucket: daysAtVendorBucket(outside?.oldest_open_shipped_at ?? null),
+      });
+      setQtyDirty(false);
+      setCloseSlip(false);
+      await reloadAll();
     } catch (err) {
       setError(err);
     } finally {
@@ -511,7 +612,21 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  const isSent = job?.operation_status === 'sent';
+  /** Steps back exactly one movement — the newest receipt, else the newest slip. */
+  const handleUndoOutside = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await undoLastOutsideMovement(jobOperationId);
+      setQtyDirty(false);
+      await reloadAll();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const consequence = operationCompletionConsequence(qtyValue, remaining);
 
   // Wait for BOTH the job fetch and the station context's one-time init before
@@ -760,26 +875,49 @@ export default function OperatorOperationActionPage() {
         // while Files and Playbook are reference. Three controls on one line is
         // what buys back the vertical space that pinning used to provide.
         leading={
-          !isCompleted && !isExternal ? (
+          // NO LONGER SUPPRESSED FOR AN OUTSIDE STEP. Outside work used to be
+          // whole-quantity, so a field would have been a lie; it carries a real
+          // quantity now, and the value here is the one the button below sends.
+          !isCompleted ? (
         <TextField
-          label="Parts finished"
+          label={
+            isExternal
+              ? outsideMode === 'receive'
+                ? 'Parts back'
+                : 'Parts to send'
+              : 'Parts finished'
+          }
           type="number"
           value={qtyValue}
           onChange={(e) => {
             setQtyDirty(true);
             setQtyInput(e.target.value);
           }}
-          inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Parts finished' }}
+          inputProps={{
+            min: 0,
+            inputMode: 'numeric',
+            'aria-label': isExternal
+              ? outsideMode === 'receive'
+                ? 'Parts back'
+                : 'Parts to send'
+              : 'Parts finished',
+          }}
           fullWidth
           size="small"
           // Matched to the 48px reference buttons beside it: a taller control
           // reads as a different KIND of thing and pulls the eye for no reason.
           sx={{ '& .MuiOutlinedInput-root': { minHeight: 48 } }}
-          error={consequence.kind === 'over'}
+          error={!isExternal && consequence.kind === 'over'}
           helperText={
-            consequence.kind === 'none'
-              ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
-              : completionConsequenceCaption(consequence)
+            isExternal
+              ? outsideMode === 'receive'
+                ? `${outside?.qty_at_vendor ?? 0} at the vendor`
+                : `Order qty ${outside?.qty_ordered ?? target}${
+                    (outside?.qty_sent ?? 0) > 0 ? ` · ${outside?.qty_sent} already sent` : ''
+                  }`
+              : consequence.kind === 'none'
+                ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
+                : completionConsequenceCaption(consequence)
           }
           FormHelperTextProps={{
             sx: {
@@ -829,21 +967,42 @@ export default function OperatorOperationActionPage() {
           </Box>
         </Button>
       ) : isExternal ? (
-        // Outside op: send/receive, never Mark Complete. A pending op offers both
-        // (received directly from pending is allowed — sent is optional); a sent
-        // op shows "at vendor" + Mark Received + Undo send.
+        /**
+         * Outside step. ONE TAP STILL DOES THE COMMON THING -- the field above
+         * is prefilled, so the button carries the number rather than asking for
+         * it, exactly as RECORD n FINISHED does on an in-house step.
+         *
+         * GUARDRAIL: every number on this screen is derived from ONE
+         * job_operation_id -- it describes the job in front of the operator,
+         * which the rule permits. What is deliberately absent, and must stay
+         * absent: any tally of slips this person has sent or received, anything
+         * on /my-work, and any window ("this week") that would turn a count into
+         * a rate. See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
+         */
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {isSent && job.operation_sent_at && (
+          {outside && outside.qty_at_vendor > 0 && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, color: 'warning.main' }}>
               <LocalShippingIcon fontSize="small" sx={{ flexShrink: 0 }} />
               <Typography variant="body2" color="inherit">
-                At the vendor since{' '}
-                <strong>{new Date(job.operation_sent_at).toLocaleDateString()}</strong>. Mark
-                received when the parts come back.
+                <strong>{outside.qty_at_vendor}</strong> at{' '}
+                {job.operation_vendor_name ?? 'the vendor'} since{' '}
+                <strong>
+                  {outside.oldest_open_shipped_at
+                    ? new Date(outside.oldest_open_shipped_at).toLocaleDateString()
+                    : '—'}
+                </strong>
+                {outside.qty_to_send > 0 ? `. ${outside.qty_to_send} still to send.` : '.'}
               </Typography>
             </Box>
           )}
-          {!isSent && (
+
+          {slipNotice && (
+            <Typography variant="body2" sx={{ px: 0.5, color: 'success.main' }}>
+              {slipNotice}
+            </Typography>
+          )}
+
+          {outsideMode === 'send' && outsideDefault > 0 && (
             <Button
               fullWidth
               variant="outlined"
@@ -851,35 +1010,89 @@ export default function OperatorOperationActionPage() {
               color="warning"
               startIcon={<LocalShippingIcon />}
               onClick={handleSend}
-              disabled={actionLoading}
+              disabled={actionLoading || outsideQty <= 0}
               sx={{ minHeight: 56, fontWeight: 600 }}
             >
-              {actionLoading ? <CircularProgress size={22} /> : 'MARK SENT OUT'}
+              {actionLoading ? (
+                <CircularProgress size={22} />
+              ) : (
+                `SEND ${outsideQty} TO ${(job.operation_vendor_name ?? 'VENDOR').toUpperCase()}`
+              )}
             </Button>
           )}
-          <Button
-            fullWidth
-            variant="contained"
-            size="large"
-            color="primary"
-            startIcon={<Inventory2Icon />}
-            onClick={handleReceive}
-            disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
-          >
-            {actionLoading ? <CircularProgress size={24} /> : 'MARK RECEIVED'}
-          </Button>
-          {isSent && (
+
+          {outsideMode === 'receive' && (
+            <>
+              <Button
+                fullWidth
+                variant="contained"
+                size="large"
+                color="primary"
+                startIcon={<Inventory2Icon />}
+                onClick={handleReceive}
+                disabled={actionLoading || (outsideQty <= 0 && !willCloseSlip)}
+                sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+              >
+                {actionLoading ? <CircularProgress size={24} /> : `RECEIVE ${outsideQty}`}
+              </Button>
+              {/* ONE CHECKBOX, not a second number, and only when the operator
+                  has typed a smaller figure than what is out -- which is the
+                  moment "is the rest coming?" becomes a real question. A short
+                  return is settled by closing the slip (Sage's short-close,
+                  Oracle's quantity-cancelled) rather than by reconciling a scrap
+                  quantity on a phone. The pieces stay missing from the good
+                  total either way; what this settles is the paperwork. */}
+              {canCloseSlip && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={closeSlip}
+                      onChange={(e) => setCloseSlip(e.target.checked)}
+                      sx={{ minWidth: 44, minHeight: 44 }}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" color="text.secondary">
+                      That&apos;s everything we&apos;re getting —{' '}
+                      {(outside?.qty_at_vendor ?? 0) - outsideQty} written off
+                    </Typography>
+                  }
+                  sx={{ mx: 0 }}
+                />
+              )}
+            </>
+          )}
+
+          {/* The after-the-fact path: nothing was ever sent, and the parts are
+              back. Kept reachable rather than requiring a send first, because
+              that is how this actually happens on a floor. */}
+          {outsideMode === 'send' && outside && outside.qty_sent === 0 && (
+            <Button
+              fullWidth
+              variant="text"
+              size="small"
+              color="inherit"
+              startIcon={<Inventory2Icon />}
+              onClick={handleReceive}
+              disabled={actionLoading || outsideQty <= 0}
+              sx={{ minHeight: 44 }}
+            >
+              They already came back — record {outsideQty} received
+            </Button>
+          )}
+
+          {outside && (outside.qty_sent > 0 || outside.qty_good > 0) && (
             <Button
               fullWidth
               variant="text"
               size="small"
               color="inherit"
               startIcon={<UndoIcon />}
-              onClick={handleRevert}
+              onClick={handleUndoOutside}
               disabled={actionLoading}
+              sx={{ minHeight: 44 }}
             >
-              Undo send
+              Undo last
             </Button>
           )}
         </Box>

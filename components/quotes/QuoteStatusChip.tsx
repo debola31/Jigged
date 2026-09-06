@@ -1,4 +1,4 @@
-import StatusChip from '@/components/common/StatusChip';
+import StatusChip, { type StatusChipColor } from '@/components/common/StatusChip';
 import type { QuoteStatus } from '@/types/quote';
 import { QUOTE_STATUS_CONFIG } from '@/types/quote';
 
@@ -18,13 +18,25 @@ interface QuoteStatusChipProps {
   size?: 'small' | 'medium';
 }
 
-export default function QuoteStatusChip({ status, convertedAt, size = 'small' }: QuoteStatusChipProps) {
-  // Converted beats the column: it is the more specific truth about the quote,
-  // and it is the word the list's Status filter uses for the same set.
-  const config = convertedAt
-    ? { label: 'Converted', color: 'success' as const }
-    : QUOTE_STATUS_CONFIG[status] || { label: status, color: 'default' as const };
+/**
+ * What a quote's status READS as, independent of how it is drawn.
+ *
+ * Extracted so the chip (detail surfaces) and the dot (the quotes list) resolve
+ * it once. The "converted beats the column" rule above is the whole reason this
+ * cannot be inlined at each call site -- a second copy would eventually keep
+ * saying "Active" about a quote the shop had already won, which is the exact bug
+ * it exists to prevent.
+ */
+export function resolveQuoteStatus(
+  status: QuoteStatus,
+  convertedAt?: string | null,
+): { label: string; color: StatusChipColor } {
+  if (convertedAt) return { label: 'Converted', color: 'success' };
+  return QUOTE_STATUS_CONFIG[status] || { label: status, color: 'default' };
+}
 
+export default function QuoteStatusChip({ status, convertedAt, size = 'small' }: QuoteStatusChipProps) {
+  const config = resolveQuoteStatus(status, convertedAt);
   return (
     <StatusChip label={config.label} color={config.color} size={size} sx={{ fontWeight: 500 }} />
   );

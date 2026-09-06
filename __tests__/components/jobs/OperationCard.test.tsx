@@ -6,6 +6,7 @@ import jiggedTheme from '@/lib/theme';
 
 import OperationCard from '@/components/jobs/OperationCard';
 import type { JobOperation } from '@/types/job';
+import type { OutsideOperationSummary } from '@/types/outsideShipment';
 import type { JobNote } from '@/types/operator';
 
 // OperationNotes → jobNoteMediaAccess imports the Supabase client at module load
@@ -131,7 +132,32 @@ describe('OperationCard — external (outside-vendor) operations', () => {
       ...over,
     } as Partial<JobOperation>);
 
-  const renderExternal = (operation: JobOperation, over: Partial<typeof baseProps> = {}) =>
+  /**
+   * The outside quantity ledger. The buttons are gated on THIS, not on
+   * operation.status, which is the change that makes send-50-now-50-later
+   * reachable at all -- so every case here states its quantities.
+   */
+  const ledger = (over: Partial<OutsideOperationSummary> = {}): OutsideOperationSummary => ({
+    job_operation_id: 'op-1',
+    qty_ordered: 100,
+    qty_sent: 0,
+    qty_good: 0,
+    qty_at_vendor: 0,
+    qty_to_send: 100,
+    oldest_open_shipped_at: null,
+    earliest_due_back_on: null,
+    open_slip_count: 0,
+    ...over,
+  });
+
+  const renderExternal = (
+    operation: JobOperation,
+    over: Partial<typeof baseProps> & {
+      onSend?: () => void;
+      onReceive?: () => void;
+      outside?: OutsideOperationSummary;
+    } = {},
+  ) =>
     render(
       <ThemeProvider theme={jiggedTheme}>
         <OperationCard
@@ -144,33 +170,63 @@ describe('OperationCard — external (outside-vendor) operations', () => {
       </ThemeProvider>,
     );
 
-  it('a pending external op shows Mark Sent Out + Mark Received, never Complete', () => {
-    renderExternal(externalOp({ status: 'pending' }));
-    expect(screen.getByRole('button', { name: /Mark Sent Out/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Mark Received/i })).toBeInTheDocument();
+  it('a pending outside op offers Send to the vendor by name, and Receive for the after-the-fact case', () => {
+    renderExternal(externalOp({ status: 'pending' }), { outside: ledger() });
+    expect(screen.getByRole('button', { name: /Send to AcmeCoat/i })).toBeInTheDocument();
+    // Receive stays available with nothing sent: the common case is that nobody
+    // made a slip and the parts came back anyway.
+    expect(screen.getByRole('button', { name: /Receive/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Complete$/i })).not.toBeInTheDocument();
-    // Outside identity + vendor chip.
     expect(screen.getByText(/Outside · AcmeCoat/i)).toBeInTheDocument();
   });
 
-  it('a sent (at-vendor) external op shows Mark Received but not Mark Sent Out', () => {
-    renderExternal(externalOp({ status: 'sent', sent_at: '2026-07-15T00:00:00Z' }));
-    expect(screen.getByRole('button', { name: /Mark Received/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Complete$/i })).not.toBeInTheDocument();
+  it('a PART-SENT op offers BOTH Send and Receive — the whole point of the quantity picker', () => {
+    // 50 out, 50 still in the shop. Gating on status === 'pending' (what this
+    // did) hides Send the moment the first slip exists, and send-50-now-50-later
+    // becomes unreachable.
+    renderExternal(externalOp({ status: 'sent', sent_at: '2026-07-15T00:00:00Z' }), {
+      outside: ledger({ qty_sent: 50, qty_at_vendor: 50, qty_to_send: 50, open_slip_count: 1 }),
+    });
+    expect(screen.getByRole('button', { name: /Send to AcmeCoat/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Receive 50/i })).toBeInTheDocument();
   });
 
-  it('calls onSend with the op id when Mark Sent Out is clicked', async () => {
+  it('offers neither once everything is back', () => {
+    renderExternal(externalOp({ status: 'completed', completed_at: '2026-07-20T00:00:00Z' }), {
+      outside: ledger({ qty_sent: 100, qty_good: 100, qty_at_vendor: 0, qty_to_send: 0 }),
+    });
+    expect(screen.queryByRole('button', { name: /Send to/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Receive/i })).not.toBeInTheDocument();
+  });
+
+  it('reads the ledger back in the shop\'s own words, dropping every zero clause', () => {
+    renderExternal(externalOp({ status: 'sent' }), {
+      outside: ledger({ qty_sent: 100, qty_good: 48, qty_at_vendor: 50, qty_to_send: 2 }),
+    });
+    expect(screen.getByText(/48 \/ 100 back · 50 at vendor · 2 to send/)).toBeInTheDocument();
+  });
+
+  it('keeps Receive as a filled PRIMARY button, never green', async () => {
+    // scripts/interactionStandardsCheck.ts fails a contained success/warning
+    // button; asserting it structurally here fails the regression twice.
+    renderExternal(externalOp({ status: 'sent' }), {
+      outside: ledger({ qty_sent: 50, qty_at_vendor: 50, qty_to_send: 50 }),
+    });
+    const receive = screen.getByRole('button', { name: /Receive 50/i });
+    expect(receive.className).toMatch(/MuiButton-containedPrimary/);
+  });
+
+  it('calls onSend with the op id when Send is clicked', async () => {
     const onSend = vi.fn();
-    renderExternal(externalOp({ status: 'pending' }), { onSend });
-    await userEvent.click(screen.getByRole('button', { name: /Mark Sent Out/i }));
+    renderExternal(externalOp({ status: 'pending' }), { onSend, outside: ledger() });
+    await userEvent.click(screen.getByRole('button', { name: /Send to AcmeCoat/i }));
     expect(onSend).toHaveBeenCalledWith('op-1');
   });
 
   it('an internal op shows Mark Complete (no send/receive) and no Pending chip', () => {
     renderExternal(op({ status: 'pending', vendor_service_id: null, vendor_service: null, work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50 } }));
     expect(screen.getByRole('button', { name: /Mark Complete/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Send to/i })).not.toBeInTheDocument();
     // A pending op reads as "not done" from the Mark Complete button, so the
     // grey "Pending" chip is omitted (it made the row look finished).
     expect(screen.queryByText(/^Pending$/i)).not.toBeInTheDocument();

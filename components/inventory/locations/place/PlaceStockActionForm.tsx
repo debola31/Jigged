@@ -118,9 +118,7 @@ import {
   getLocationContents,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
-import { getLotsAtLocation, type LotOnHand } from '@/utils/inventoryLocationsAccess';
 import HeatNumberField from '@/components/inventory/HeatNumberField';
-import LotPicker from '@/components/inventory/LotPicker';
 import { useLoad } from '@/hooks/useLoad';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
@@ -152,13 +150,39 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 /** Rows above which a filter earns its place. Matches the unit-level drawer's own threshold. */
 const FILTER_FROM = 8;
 
-/** One line of the form: a part, and how much of it. `onHand` is null when it is not here yet. */
+/**
+ * One line of the form: a part, of one lot, and how much of it. `onHand` is null when it is not
+ * here yet.
+ *
+ * **The lot is part of the line's identity, not an attribute of it.** `getLocationContents`
+ * returns one row per (part, location, lot), so a bin holding three heats of one bar produces
+ * three lines — and every one of them is about a different pile of steel that happens to share a
+ * name.
+ */
 interface Row {
   partId: string;
   partName: string;
   primaryUnit: string;
   onHand: number | null;
+  /** Which lot this line is, or null for a part that is not heat-tracked. */
+  lotId: string | null;
+  lotCode: string | null;
+  heatNumber: string | null;
 }
+
+/**
+ * What every piece of this form's per-line state is keyed by.
+ *
+ * **Not the part id.** Keyed by part, the three lines of one bar shared a quantity box (typing 40
+ * into the first filled all three), shared a React key, shared a lot, and compared their
+ * over-removal warning against an arbitrary one of the three balances. That is the exact fault
+ * `countRowKey` was written to end, in a form that had not been told about it yet.
+ */
+const rowKey = (row: Pick<Row, 'partId' | 'lotId'>) => `${row.partId}::${row.lotId ?? 'none'}`;
+
+/** The heat to show on a line's identity, or null when the part is not tracked. */
+const rowHeat = (row: Pick<Row, 'lotId' | 'lotCode' | 'heatNumber'>) =>
+  row.lotId ? (row.heatNumber ? `Heat ${row.heatNumber}` : row.lotCode) : null;
 
 export interface PlaceStockActionFormProps {
   action: PlaceStockAction;
@@ -224,10 +248,14 @@ export default function PlaceStockActionForm({
    * the tag on the bar. Optional everywhere; a blank stays blank downstream.
    */
   const [heatFor, setHeatFor] = useState<Record<string, string>>({});
-  /** part id -> the lot chosen for that row, on the two verbs that take material off this shelf. */
-  const [lotFor, setLotFor] = useState<Record<string, string>>({});
+  /**
+   * `add` only — and there is no matching `showLotPicker`.
+   *
+   * A heat is TYPED on the way in, because a receipt is where a lot is created. On the way out
+   * there is nothing to ask: the line already is a lot, so the two verbs that take material off
+   * this shelf read `row.lotId` and show the heat on the line's name.
+   */
   const showHeatField = action === 'add';
-  const showLotPicker = action !== 'add';
   /** `add` only: the rows built by picking. The catalogue is unbounded, so rows are chosen. */
   const [picked, setPicked] = useState<Row[]>([]);
   /**
@@ -286,17 +314,13 @@ export default function PlaceStockActionForm({
   const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
   const operatorId = member?.id ?? null;
 
-  /**
-   * Remove only: the heats received for every part on screen, in ONE query, so each row's heat
-   * field is a list of what actually came in (with *Other…*) rather than a box that accepts any
-   * number. Best-effort — with no list a row falls back to the plain box, never to no field.
+  /*
+   * The extra per-row lot read is GONE, and with it a whole query.
+   *
+   * It fed a picker that has since become redundant: the contents read already returns a row per
+   * (part, lot), so every line knows its own heat and there is nothing left to look up. One less
+   * request each time this form opens on a bin.
    */
-  const { data: lotsHere } = useLoad(async () => {
-    const empty = { lots: new Map<string, LotOnHand[]>(), tracked: new Set<string>() };
-    if (!showLotPicker || !data || data.kind !== 'contents') return empty;
-    const partIds = restrictTo ? [restrictTo.partId] : data.page.contents.map((c) => c.part_id);
-    return getLotsAtLocation(partIds, locationId).catch(() => empty);
-  }, [showLotPicker, data, locationId, restrictTo]);
 
 
   /** Everything that could be picked for an `add`, minus what is already a row. */
@@ -310,6 +334,11 @@ export default function PlaceStockActionForm({
         partName: p.part_name,
         primaryUnit: p.primary_unit || 'ea',
         onHand: null as number | null,
+        // An `add` names its heat by typing it — the receipt is where a lot is CREATED, so there
+        // is nothing to have picked yet.
+        lotId: null,
+        lotCode: null,
+        heatNumber: null,
       }));
   }, [data, picked]);
 
@@ -322,6 +351,9 @@ export default function PlaceStockActionForm({
             partName: c.part_name,
             primaryUnit: c.primary_unit || 'ea',
             onHand: c.quantity as number | null,
+            lotId: c.lot_id,
+            lotCode: c.lot_code,
+            heatNumber: c.heat_number,
           }))
         : [];
 
@@ -334,13 +366,17 @@ export default function PlaceStockActionForm({
        * part itself with a null `onHand` is what makes the row appear at all — and null is the
        * right value, since "we have no record here" is not the same as "there are zero".
        */
-      const found = here.find((r) => r.partId === restrictTo.partId);
+      const found = here.filter((r) => r.partId === restrictTo.partId);
+      if (found.length > 0) return found;
       return [
-        found ?? {
+        {
           partId: restrictTo.partId,
           partName: restrictTo.partName,
           primaryUnit: restrictTo.primaryUnit || 'ea',
           onHand: null,
+          lotId: null,
+          lotCode: null,
+          heatNumber: null,
         },
       ];
     }
@@ -357,13 +393,13 @@ export default function PlaceStockActionForm({
       Boolean,
     );
 
-  const unitOf = (row: Row) => unitFor[row.partId] ?? row.primaryUnit;
+  const unitOf = (row: Row) => unitFor[rowKey(row)] ?? row.primaryUnit;
 
   /** Rows carrying a usable quantity. A blank, a stray minus, a half-typed decimal are not lines. */
   const lines = useMemo(
     () =>
       rows
-        .map((row) => ({ row, value: parseFloat(qty[row.partId] ?? '') }))
+        .map((row) => ({ row, value: parseFloat(qty[rowKey(row)] ?? '') }))
         .filter((l) => Number.isFinite(l.value) && l.value > 0),
     [rows, qty],
   );
@@ -371,8 +407,8 @@ export default function PlaceStockActionForm({
   /** Put this row's whole on-hand in its quantity box, in the part's own unit. */
   const fillRow = (row: Row) => {
     if (row.onHand == null) return;
-    setQty((q) => ({ ...q, [row.partId]: String(row.onHand) }));
-    setUnitFor((u) => ({ ...u, [row.partId]: row.primaryUnit }));
+    setQty((q) => ({ ...q, [rowKey(row)]: String(row.onHand) }));
+    setUnitFor((u) => ({ ...u, [rowKey(row)]: row.primaryUnit }));
   };
 
   /*
@@ -428,12 +464,12 @@ export default function PlaceStockActionForm({
   const fillAllVisible = () => {
     setQty((q) => {
       const next = { ...q };
-      for (const row of visible) if (row.onHand != null) next[row.partId] = String(row.onHand);
+      for (const row of visible) if (row.onHand != null) next[rowKey(row)] = String(row.onHand);
       return next;
     });
     setUnitFor((u) => {
       const next = { ...u };
-      for (const row of visible) if (row.onHand != null) next[row.partId] = row.primaryUnit;
+      for (const row of visible) if (row.onHand != null) next[rowKey(row)] = row.primaryUnit;
       return next;
     });
   };
@@ -459,13 +495,16 @@ export default function PlaceStockActionForm({
      * put-away was protecting against.
      */
     const failed: Array<{ partName: string; message: string }> = [];
+    /** Row keys, not part ids: three lines of one bar succeed or fail independently. */
     const succeeded: string[] = [];
     for (let i = 0; i < lines.length; i += 1) {
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
       const unit = unitOf(row);
-      const heatNumber = showHeatField ? heatFor[row.partId]?.trim() || undefined : undefined;
-      const rowLot = showLotPicker ? lotFor[row.partId] || undefined : undefined;
+      const heatNumber = showHeatField ? heatFor[rowKey(row)]?.trim() || undefined : undefined;
+      // The line IS the lot. Read off the row rather than a control, so what is written can
+      // never disagree with what the line says it is about.
+      const rowLot = row.lotId ?? undefined;
       try {
         if (action === 'add') {
           await addStockAtLocation(row.partId, locationId, value, unit, {
@@ -503,7 +542,7 @@ export default function PlaceStockActionForm({
           location_id: locationId,
           heat_captured: Boolean(heatNumber) || Boolean(rowLot),
         });
-        succeeded.push(row.partId);
+        succeeded.push(rowKey(row));
       } catch (e) {
         failed.push({
           partName: row.partName,
@@ -540,14 +579,12 @@ export default function PlaceStockActionForm({
         for (const id of succeeded) delete next[id];
         return next;
       });
-      setLotFor((l) => {
-        const next = { ...l };
-        for (const id of succeeded) delete next[id];
-        return next;
-      });
       // A picked `add` row that landed is done with; leaving it would put a zero-quantity row back
       // in a list whose whole purpose is the parts you are still adding.
-      if (action === 'add') setPicked((p) => p.filter((r) => !succeeded.includes(r.partId)));
+      // `picked` is keyed by part (an `add` row has no lot yet), so compare on the row key an
+      // `add` row actually produces rather than on the bare id.
+      if (action === 'add')
+        setPicked((p) => p.filter((r) => !succeeded.includes(rowKey(r))));
       setSaved(succeeded.length);
       setFailures(failed);
       return;
@@ -662,7 +699,7 @@ export default function PlaceStockActionForm({
               />
             )}
             {visible.map((row) => {
-              const typed = qty[row.partId] ?? '';
+              const typed = qty[rowKey(row)] ?? '';
               const value = parseFloat(typed);
               const over = row.onHand != null && Number.isFinite(value) && value > row.onHand;
               /*
@@ -682,7 +719,7 @@ export default function PlaceStockActionForm({
                */
               return (
                 <Stack
-                  key={row.partId}
+                  key={rowKey(row)}
                   direction={{ xs: 'column', sm: 'row' }}
                   spacing={{ xs: 0.5, sm: 1.5 }}
                   useFlexGap
@@ -696,12 +733,38 @@ export default function PlaceStockActionForm({
                       {row.partName}
                     </Typography>
                     {/* What is on hand, on the row the quantity is typed into — so "remove 40"
-                        from a bin holding 12 is caught by the person, not by an RPC afterwards. */}
-                    <Typography variant="caption" color={over ? 'error.main' : 'text.secondary'}>
-                      {row.onHand == null
-                        ? row.primaryUnit
-                        : `${num(row.onHand)} ${row.primaryUnit} here${over ? ' — more than that' : ''}`}
-                    </Typography>
+                        from a bin holding 12 is caught by the person, not by an RPC afterwards.
+
+                        Nothing at all when there is nothing here, which is every row of an `add`
+                        for a part this bin has never held. It used to print a bare `ea`, which is
+                        the unit the dropdown beside it already shows and the bin header shows
+                        again — three statements of one fact, none of them the quantity this line
+                        is about. The caption exists to say how much is here; with none here there
+                        is nothing for it to say. */}
+                    {/*
+                      The heat goes on this line, not appended to the part name above.
+
+                      It was on the name first, and the name is `noWrap` — so at this width three
+                      lines of one bar all truncated to `RAW-STEEL-BLANK · Heat H…`, cutting off
+                      the only characters that told them apart. Putting it on the caption gives it
+                      room to wrap, and puts the identity next to the balance it belongs to.
+                    */}
+                    {(rowHeat(row) || row.onHand != null) && (
+                      <Typography
+                        variant="caption"
+                        component="div"
+                        color={over ? 'error.main' : 'text.secondary'}
+                      >
+                        {[
+                          rowHeat(row),
+                          row.onHand != null
+                            ? `${num(row.onHand)} ${row.primaryUnit} here${over ? ' — more than that' : ''}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Typography>
+                    )}
                   </Box>
 
                   {/* The controls travel together and keep their widths — they are the things
@@ -719,7 +782,7 @@ export default function PlaceStockActionForm({
                       size="small"
                       type="number"
                       value={typed}
-                      onChange={(e) => setQty((s) => ({ ...s, [row.partId]: e.target.value }))}
+                      onChange={(e) => setQty((s) => ({ ...s, [rowKey(row)]: e.target.value }))}
                       sx={{ width: 96 }}
                       error={over}
                       slotProps={{
@@ -727,8 +790,12 @@ export default function PlaceStockActionForm({
                           min: 0,
                           step: 'any',
                           // The heading is a column away on a phone, and forty rows sharing the
-                          // name "Quantity" name none of them.
-                          'aria-label': `Quantity for ${row.partName}`,
+                          // name "Quantity" name none of them. The heat joins for the same reason
+                          // it is on screen: three lines of one bar would otherwise announce
+                          // themselves identically to a screen reader, and be untestable by role.
+                          'aria-label': rowHeat(row)
+                            ? `Quantity for ${row.partName}, ${rowHeat(row)}`
+                            : `Quantity for ${row.partName}`,
                         },
                       }}
                     />
@@ -737,7 +804,7 @@ export default function PlaceStockActionForm({
                       size="small"
                       value={unitOf(row)}
                       onChange={(e) =>
-                        setUnitFor((s) => ({ ...s, [row.partId]: e.target.value }))
+                        setUnitFor((s) => ({ ...s, [rowKey(row)]: e.target.value }))
                       }
                       sx={{ width: 92 }}
                       slotProps={{ htmlInput: { 'aria-label': `Unit for ${row.partName}` } }}
@@ -755,30 +822,27 @@ export default function PlaceStockActionForm({
                         <HeatNumberField
                           size="small"
                           label="Heat"
-                          value={heatFor[row.partId] ?? ''}
-                          onChange={(v) => setHeatFor((s) => ({ ...s, [row.partId]: v }))}
+                          value={heatFor[rowKey(row)] ?? ''}
+                          onChange={(v) => setHeatFor((s) => ({ ...s, [rowKey(row)]: v }))}
                           disabled={saving}
                         />
                       </Box>
                     )}
-                    {showLotPicker &&
-                      (lotsHere?.tracked.has(row.partId) ||
-                        (lotsHere?.lots.get(row.partId)?.length ?? 0) > 0) && (
-                        <Box sx={{ width: 150 }}>
-                          <LotPicker
-                            size="small"
-                            label="Heat"
-                            options={lotsHere?.lots.get(row.partId) ?? []}
-                            value={lotFor[row.partId] ?? null}
-                            onChange={(v) =>
-                              setLotFor((s) => ({ ...s, [row.partId]: v ?? '' }))
-                            }
-                            unit={row.primaryUnit}
-                            required={lotsHere?.tracked.has(row.partId) ?? false}
-                            disabled={saving}
-                          />
-                        </Box>
-                      )}
+                    {/*
+                      There is deliberately NO lot picker on the way out.
+
+                      There was one, and it was redundant in a way that could do damage. `Remove`
+                      and `Move` list the bin's contents, and since heat tracking landed those are
+                      one row per (part, lot) — so a bar held as three heats is three lines, and
+                      each line already IS a heat. A picker on top of that asked which heat a line
+                      about heat 4471 was about, defaulted to nothing, and would happily have taken
+                      the material out of heat 8823 while the line above it read `180 ea here`.
+
+                      The heat moved onto the line's identity instead, beside the part name, where
+                      it distinguishes the three lines rather than sitting inside a closed dropdown
+                      on each of them. `All` fills that line's own balance, and the write below
+                      sends that line's own `lotId`.
+                    */}
                     {row.onHand != null && (
                       <Button
                         size="small"

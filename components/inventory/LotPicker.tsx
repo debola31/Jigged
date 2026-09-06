@@ -101,13 +101,16 @@ export default function LotPicker({
           {...params}
           label={label}
           required={required}
-          helperText={
-            empty
-              ? 'None of this part is recorded here yet.'
-              : required
-                ? 'Pick the heat you are taking from.'
-                : undefined
-          }
+          /*
+           * Only the state you could not work out by looking.
+           *
+           * "Pick the heat you are taking from" used to sit under every removal, and it told a
+           * required, labelled dropdown to be a required, labelled dropdown — a sentence per row
+           * on a form that can hold forty of them. The empty case stays, because "there is nothing
+           * to pick" is a fact about the shelf that an empty dropdown states ambiguously: it looks
+           * the same as one that has not loaded.
+           */
+          helperText={empty ? 'None of this part is recorded here yet.' : undefined}
           slotProps={{ input: params.InputProps }}
         />
       )}

@@ -1003,6 +1003,7 @@ export async function addStockAtLocation(
     p_operator_id: opts.operatorId ?? undefined,
     p_photo_path: opts.photoPath ?? undefined,
     p_heat_number: opts.heatNumber ?? undefined,
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error adding stock at location:', error);
@@ -1034,6 +1035,7 @@ export async function depleteStockAtLocation(
     p_job_operation_id: opts.jobOperationId,
     p_operator_id: opts.operatorId,
     p_heat_number: opts.heatNumber ?? undefined,
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error depleting stock at location:', error);
@@ -1042,88 +1044,128 @@ export async function depleteStockAtLocation(
   return data as unknown as StockMutationResult;
 }
 
-export interface RecentHeatsOptions {
-  /**
-   * The place the take is happening. Heats that were ever received INTO it sort first — the bar
-   * on this shelf is most likely one of those — but a heat received elsewhere stays on the list,
-   * because a moved bar keeps its tag and a transfer row carries no heat of its own.
-   */
-  preferLocationId?: string;
-  /** Distinct heats per part. */
-  limit?: number;
+/** One lot of a material, with how much of it is at the place being asked about. */
+export interface LotOnHand {
+  lotId: string;
+  lotCode: string;
+  heatNumber: string | null;
+  /** Quantity of THIS lot at the location asked about, in the part's primary unit. */
+  quantity: number;
 }
 
 /**
- * The mill heats RECEIVED for each of these parts, distinct, newest first, this place's first.
+ * The lots of a part that are ACTUALLY AT a location, with their balances.
  *
- * What a take picks from: a heat must exist on a receipt before it can be named on a removal, so
- * the removal dialogs render this as a list with an *Other…* escape for the bar the list has never
- * seen (a delivery stocked without its heat, corrected on the spot). Additions only — a depletion's
- * heat is a copy of one of these, and an adjustment carries none. Stock is still not tracked per
- * heat (inventory.md §5.6): this narrows what gets typed, it does not decrement a lot.
+ * This is what a take, a move and a count pick from, and "actually at" is the whole point. The
+ * version this replaced offered every heat ever RECEIVED for the part, which after a year of
+ * deliveries is mostly heats long since consumed — a list that got harder to search as it grew
+ * and could still be used to name material that is not on the shelf. Reading balances instead
+ * makes the list short by construction, and picking from it cannot claim what isn't there.
  *
- * One query for N parts, because the Storage tab's batch form shows a bin's whole contents and a
- * query per row would be forty round trips for one shelf. Read-only; a failure here must never
- * block a removal, which is why callers catch.
+ * One query for every part on screen, because the Storage tab's batch form shows a whole bin and
+ * a query per row would be forty round trips for one shelf.
+ *
+ * Empty for an untracked part, which is correct: its stock sits in a single lot-less row and the
+ * dialogs show no lot control at all.
  */
-export async function getRecentHeatNumbersForParts(
+export interface LotsAtLocation {
+  /** Part id → the lots of it held here, most stock first. Absent when the part has none here. */
+  lots: Map<string, LotOnHand[]>;
+  /**
+   * The part ids that are lot-tracked.
+   *
+   * Carried beside the lots because "no lots here" and "this part does not use lots" look
+   * identical in the map and must not look identical on screen: the first is a tracked part whose
+   * shelf is empty (say so, and refuse the take), the second is an ordinary part that should show
+   * no lot control at all.
+   */
+  tracked: Set<string>;
+}
+
+export async function getLotsAtLocation(
   partIds: string[],
-  { preferLocationId, limit = 25 }: RecentHeatsOptions = {},
-): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
+  locationId: string,
+): Promise<LotsAtLocation> {
+  const out = new Map<string, LotOnHand[]>();
+  const tracked = new Set<string>();
   const ids = [...new Set(partIds)];
-  if (ids.length === 0) return out;
+  if (ids.length === 0) return { lots: out, tracked };
+
   const supabase = getSupabase();
+  const { data: parts, error: partsError } = await supabase
+    .from('parts')
+    .select('id, lot_tracked')
+    .in('id', ids);
+  if (partsError) {
+    console.error('Error loading lot tracking flags:', partsError);
+    throw partsError;
+  }
+  for (const row of parts ?? []) if (row.lot_tracked) tracked.add(row.id);
+
   const { data, error } = await supabase
-    .from('inventory_transactions')
-    .select('part_id, location_id, heat_number, created_at')
+    .from('part_location_stock')
+    .select('part_id, quantity, lot_id, material_lots (id, lot_code, heat_number)')
     .in('part_id', ids)
-    .eq('type', 'addition')
-    .not('heat_number', 'is', null)
-    .order('created_at', { ascending: false })
-    // Over-fetch: the same bar is received in several deliveries, and distinct-ing afterwards
-    // would otherwise shrink a part's list below what was asked for. Capped under PostgREST's
-    // default max_rows so a long ledger cannot silently truncate the newest receipts.
-    .limit(Math.min(1000, ids.length * limit * 4));
+    .eq('location_id', locationId)
+    .not('lot_id', 'is', null);
   if (error) {
-    console.error('Error loading recent heat numbers:', error);
+    console.error('Error loading lots at location:', error);
     throw error;
   }
 
-  type Seen = { heat: string; here: boolean };
-  const perPart = new Map<string, Map<string, Seen>>();
-  for (const row of data ?? []) {
-    if (!row.part_id || !row.heat_number) continue;
-    const heats = perPart.get(row.part_id) ?? new Map<string, Seen>();
-    const seen = heats.get(row.heat_number);
-    const here = Boolean(preferLocationId) && row.location_id === preferLocationId;
-    if (seen) {
-      seen.here = seen.here || here;
-    } else {
-      heats.set(row.heat_number, { heat: row.heat_number, here });
-    }
-    perPart.set(row.part_id, heats);
+  type Row = {
+    part_id: string;
+    quantity: number;
+    lot_id: string | null;
+    material_lots: { id: string; lot_code: string; heat_number: string | null } | null;
+  };
+  for (const row of (data ?? []) as unknown as Row[]) {
+    const lot = row.material_lots;
+    if (!lot) continue;
+    const list = out.get(row.part_id) ?? [];
+    list.push({
+      lotId: lot.id,
+      lotCode: lot.lot_code,
+      heatNumber: lot.heat_number,
+      quantity: Number(row.quantity) || 0,
+    });
+    out.set(row.part_id, list);
   }
-  for (const [partId, heats] of perPart) {
-    out.set(
-      partId,
-      [...heats.values()]
-        // Rows arrived newest-first, so insertion order is already by recency; a stable sort
-        // by "received here" keeps that order within each half.
-        .sort((a, b) => Number(b.here) - Number(a.here))
-        .slice(0, limit)
-        .map((s) => s.heat),
-    );
-  }
-  return out;
+  // Most stock first: the bar you are most likely reaching for is the one there is most of, and
+  // an operator scanning a list on a phone should not have to read every row to find it.
+  for (const list of out.values()) list.sort((a, b) => b.quantity - a.quantity);
+  return { lots: out, tracked };
 }
 
-/** One part's list — see `getRecentHeatNumbersForParts`. Empty when no receipt ever carried a heat. */
-export async function getRecentHeatNumbersForPart(
+/** One part's lots at one place — see `getLotsAtLocation`. */
+export async function getLotsAtLocationForPart(
   partId: string,
-  opts: RecentHeatsOptions = {},
-): Promise<string[]> {
-  return (await getRecentHeatNumbersForParts([partId], opts)).get(partId) ?? [];
+  locationId: string,
+): Promise<{ lots: LotOnHand[]; tracked: boolean }> {
+  const { lots, tracked } = await getLotsAtLocation([partId], locationId);
+  return { lots: lots.get(partId) ?? [], tracked: tracked.has(partId) };
+}
+
+/**
+ * Turn heat tracking on or off for a part.
+ *
+ * Goes through the RPC rather than an UPDATE, because switching ON also has to move every
+ * lot-less balance into a PRE-TRACKING lot in the same transaction — otherwise the first operator
+ * to remove pre-existing stock is refused by a rule about material that predates it. Returns how
+ * many balances moved, so the UI can say what just happened rather than only that a flag flipped.
+ */
+export async function setPartLotTracking(partId: string, tracked: boolean): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('set_part_lot_tracking', {
+    p_part_id: partId,
+    p_tracked: tracked,
+  });
+  if (error) {
+    console.error('Error setting lot tracking:', error);
+    throw toFriendlyError(error, { entity: 'part' });
+  }
+  const result = data as unknown as { balances_migrated?: number } | null;
+  return Number(result?.balances_migrated ?? 0);
 }
 
 export async function adjustStockAtLocation(
@@ -1147,6 +1189,9 @@ export async function adjustStockAtLocation(
     p_converted_new_quantity: converted,
     p_notes: opts.notes,
     p_operator_id: opts.operatorId ?? undefined,
+    // Which lot was counted. Required by the RPC for a tracked part, because "there are 12 here"
+    // has no meaning when a bin holds two heats.
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error adjusting stock at location:', error);
@@ -1178,6 +1223,9 @@ export async function transferStock(
     // Both halves of the pair get the same author and the same photo — one person moved it.
     p_operator_id: opts.operatorId ?? undefined,
     p_photo_path: opts.photoPath ?? undefined,
+    // One lot per move: the tag travels with the bar, and splitting a move across whatever lots
+    // happen to be at the source would be a guess about which bars were carried.
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error transferring stock:', error);

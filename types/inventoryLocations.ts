@@ -149,8 +149,14 @@ export interface DepleteOptions {
    * The mill heat / lot number read off the bar being taken. With `jobId`, this is what the
    * job's packing slip will print. Optional; the database upper-cases and trims it, and an
    * empty string becomes "not recorded" (NULL) rather than a blank heat.
+   *
+   * On the way OUT this can only name a heat that already exists: an unknown one resolves to
+   * nothing and the take is refused for a lot-tracked part. Prefer `lotId`, which the pickers
+   * supply; this stays for callers that only have a string.
    */
   heatNumber?: string;
+  /** The lot being taken, picked from what is actually at this location. */
+  lotId?: string;
 }
 
 /**
@@ -175,9 +181,29 @@ export interface StockWriteOptions {
   /**
    * The mill heat / lot number off the tag of the bar being put down — the only place a heat
    * first enters Jigged. Optional; normalised (upper-case, trimmed, "" → NULL) by the database.
-   * Not a lot key: stock stays a quantity of an item at a place (inventory.md §5.6).
+   *
+   * On the way IN this may name a heat we have never seen: the lot is created on first sight,
+   * and a lot-tracked part with no heat at all gets a minted code so untagged material is still
+   * storable. That asymmetry with a removal is deliberate — see `resolve_lot`.
    */
   heatNumber?: string;
+  /** An existing lot to add to, when the caller already knows which. Wins over `heatNumber`. */
+  lotId?: string;
+}
+
+/** A lot of material — in a machine shop, one mill heat. Mirrors `material_lots`. */
+export interface MaterialLot {
+  id: string;
+  company_id: string;
+  part_id: string;
+  /** The handle: the mill heat when known, else a minted code. Never blank. */
+  lot_code: string;
+  /** The mill's own heat number, or null when the material arrived without one. */
+  heat_number: string | null;
+  vendor_id: string | null;
+  received_at: string;
+  notes: string | null;
+  created_at: string;
 }
 
 /** One movement in a place's history, with its author and photo already resolved. */

@@ -89,8 +89,8 @@ import {
   resolveScan,
   getRecentActivity,
   getLocationHistory,
-  getRecentHeatNumbersForParts,
-  getRecentHeatNumbersForPart,
+  getLotsAtLocation,
+  getLotsAtLocationForPart,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { ID_CHUNK } from '@/lib/queryLimits';
@@ -367,50 +367,49 @@ describe('RPC wrappers', () => {
  * halfway left a partial tree with no rollback. `create_location_tree` does the whole subtree in
  * one statement, so the assertions worth having are the REQUEST COUNT and the payload shape.
  */
-describe('getRecentHeatNumbersForParts', () => {
-  // The list a take picks from: receipts only, one query for every part on screen, distinct per
-  // part, newest first — and the heats ever received INTO this place ahead of the rest, because
-  // the bar on this shelf is most likely one of those while a moved bar still keeps its tag.
-  it('groups received heats per part, distinct, this place first, then newest first', async () => {
+describe('getLotsAtLocation', () => {
+  // What a take, a move and a count pick from: the lots that are ACTUALLY AT this place, with
+  // their balances. The version this replaced read every heat ever RECEIVED for the part, which
+  // after a year of deliveries is mostly heats long consumed — a list that grew without bound and
+  // could still be used to name material that is not on the shelf.
+  it('groups the lots held here per part, most stock first', async () => {
+    queueFrom({ data: [{ id: 'p1', lot_tracked: true }, { id: 'p2', lot_tracked: false }], error: null });
     queueFrom({
       data: [
-        { part_id: 'p1', location_id: 'loc2', heat_number: '8823', created_at: '2026-09-03T10:00:00Z' },
-        { part_id: 'p1', location_id: 'loc1', heat_number: '4471', created_at: '2026-09-02T10:00:00Z' },
-        { part_id: 'p2', location_id: 'loc1', heat_number: '9000', created_at: '2026-09-02T09:00:00Z' },
-        { part_id: 'p1', location_id: 'loc1', heat_number: '4471', created_at: '2026-09-01T10:00:00Z' },
-        { part_id: 'p1', location_id: 'loc2', heat_number: '1100', created_at: '2026-08-30T10:00:00Z' },
+        { part_id: 'p1', quantity: 5, lot_id: 'l-a', material_lots: { id: 'l-a', lot_code: '4471', heat_number: '4471' } },
+        { part_id: 'p1', quantity: 30, lot_id: 'l-b', material_lots: { id: 'l-b', lot_code: '8823', heat_number: '8823' } },
+        { part_id: 'p2', quantity: 2, lot_id: 'l-c', material_lots: { id: 'l-c', lot_code: 'LOT-1', heat_number: null } },
       ],
       error: null,
     });
-    const byPart = await getRecentHeatNumbersForParts(['p1', 'p2', 'p1'], { preferLocationId: 'loc1' });
-    expect(byPart.get('p1')).toEqual(['4471', '8823', '1100']);
-    expect(byPart.get('p2')).toEqual(['9000']);
 
-    expect(state.calls[0].in).toEqual(['part_id', ['p1', 'p2']]);
-    expect(state.calls[0].eq).toEqual(['type', 'addition']);
-    expect(state.calls[0].not).toEqual(['heat_number', 'is', null]);
-    expect(state.calls[0].order).toEqual(['created_at', { ascending: false }]);
-    // Over-fetched so that dedupe cannot shrink a part's list below what was asked for.
-    expect(state.calls[0].limit).toEqual([200]);
+    const { lots, tracked } = await getLotsAtLocation(['p1', 'p2', 'p1'], 'loc1');
+
+    // Most stock first — the bar you are most likely reaching for.
+    expect(lots.get('p1')?.map((l) => l.lotCode)).toEqual(['8823', '4471']);
+    expect(lots.get('p2')?.[0]).toMatchObject({ lotCode: 'LOT-1', heatNumber: null, quantity: 2 });
+
+    // Tracked is carried separately, because "no lots here" and "this part does not use lots"
+    // look identical in the map and must not look identical on screen.
+    expect(tracked.has('p1')).toBe(true);
+    expect(tracked.has('p2')).toBe(false);
+
+    // Balances at THIS place, deduped ids, and never a lot-less row.
+    expect(state.calls[1].in).toEqual(['part_id', ['p1', 'p2']]);
+    expect(state.calls[1].eq).toEqual(['location_id', 'loc1']);
+    expect(state.calls[1].not).toEqual(['lot_id', 'is', null]);
   });
 
-  it('caps each part at the requested number of distinct heats', async () => {
-    queueFrom({
-      data: ['a', 'b', 'c'].map((h, i) => ({
-        part_id: 'p1', location_id: null, heat_number: h, created_at: `2026-09-0${3 - i}T10:00:00Z`,
-      })),
-      error: null,
-    });
-    const byPart = await getRecentHeatNumbersForParts(['p1'], { limit: 2 });
-    expect(byPart.get('p1')).toEqual(['a', 'b']);
-  });
-
-  it('asks nothing for no parts, and answers [] for a part that never had a heat', async () => {
-    expect((await getRecentHeatNumbersForParts([])).size).toBe(0);
+  it('asks nothing for no parts, and answers empty for a part with none here', async () => {
+    const empty = await getLotsAtLocation([], 'loc1');
+    expect(empty.lots.size).toBe(0);
     expect(mockSupabase.from).not.toHaveBeenCalled();
 
+    queueFrom({ data: [{ id: 'p1', lot_tracked: true }], error: null });
     queueFrom({ data: [], error: null });
-    expect(await getRecentHeatNumbersForPart('p1')).toEqual([]);
+    const one = await getLotsAtLocationForPart('p1', 'loc1');
+    // Tracked with nothing here: the picker says the shelf is empty rather than showing no field.
+    expect(one).toEqual({ lots: [], tracked: true });
   });
 });
 

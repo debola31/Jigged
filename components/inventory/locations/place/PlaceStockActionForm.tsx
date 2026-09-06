@@ -118,8 +118,9 @@ import {
   getLocationContents,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
-import { getRecentHeatNumbersForParts } from '@/utils/inventoryLocationsAccess';
+import { getLotsAtLocation, type LotOnHand } from '@/utils/inventoryLocationsAccess';
 import HeatNumberField from '@/components/inventory/HeatNumberField';
+import LotPicker from '@/components/inventory/LotPicker';
 import { useLoad } from '@/hooks/useLoad';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
@@ -223,7 +224,10 @@ export default function PlaceStockActionForm({
    * the tag on the bar. Optional everywhere; a blank stays blank downstream.
    */
   const [heatFor, setHeatFor] = useState<Record<string, string>>({});
-  const showHeat = action !== 'move';
+  /** part id -> the lot chosen for that row, on the two verbs that take material off this shelf. */
+  const [lotFor, setLotFor] = useState<Record<string, string>>({});
+  const showHeatField = action === 'add';
+  const showLotPicker = action !== 'add';
   /** `add` only: the rows built by picking. The catalogue is unbounded, so rows are chosen. */
   const [picked, setPicked] = useState<Row[]>([]);
   /**
@@ -287,13 +291,12 @@ export default function PlaceStockActionForm({
    * field is a list of what actually came in (with *Other…*) rather than a box that accepts any
    * number. Best-effort — with no list a row falls back to the plain box, never to no field.
    */
-  const { data: heatsByPart } = useLoad(async () => {
-    if (action !== 'deplete' || !data || data.kind !== 'contents') return new Map<string, string[]>();
+  const { data: lotsHere } = useLoad(async () => {
+    const empty = { lots: new Map<string, LotOnHand[]>(), tracked: new Set<string>() };
+    if (!showLotPicker || !data || data.kind !== 'contents') return empty;
     const partIds = restrictTo ? [restrictTo.partId] : data.page.contents.map((c) => c.part_id);
-    return getRecentHeatNumbersForParts(partIds, { preferLocationId: locationId }).catch(
-      () => new Map<string, string[]>(),
-    );
-  }, [action, data, locationId, restrictTo]);
+    return getLotsAtLocation(partIds, locationId).catch(() => empty);
+  }, [showLotPicker, data, locationId, restrictTo]);
 
 
   /** Everything that could be picked for an `add`, minus what is already a row. */
@@ -461,7 +464,8 @@ export default function PlaceStockActionForm({
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
       const unit = unitOf(row);
-      const heatNumber = showHeat ? heatFor[row.partId]?.trim() || undefined : undefined;
+      const heatNumber = showHeatField ? heatFor[row.partId]?.trim() || undefined : undefined;
+      const rowLot = showLotPicker ? lotFor[row.partId] || undefined : undefined;
       try {
         if (action === 'add') {
           await addStockAtLocation(row.partId, locationId, value, unit, {
@@ -475,12 +479,13 @@ export default function PlaceStockActionForm({
             notes: notes || undefined,
             operatorId: operatorId || undefined,
             jobId: job?.id,
-            heatNumber,
+            lotId: rowLot,
           });
         } else {
           await transferStock(row.partId, locationId, destination!.id, value, unit, {
             notes: notes || undefined,
             operatorId: operatorId || undefined,
+            lotId: rowLot,
           });
         }
         /*
@@ -496,7 +501,7 @@ export default function PlaceStockActionForm({
           quantity: value,
           unit,
           location_id: locationId,
-          heat_captured: Boolean(heatNumber),
+          heat_captured: Boolean(heatNumber) || Boolean(rowLot),
         });
         succeeded.push(row.partId);
       } catch (e) {
@@ -532,6 +537,11 @@ export default function PlaceStockActionForm({
       // The heat goes with the quantity: a landed line's heat re-sent would be a second bar.
       setHeatFor((h) => {
         const next = { ...h };
+        for (const id of succeeded) delete next[id];
+        return next;
+      });
+      setLotFor((l) => {
+        const next = { ...l };
         for (const id of succeeded) delete next[id];
         return next;
       });
@@ -710,22 +720,37 @@ export default function PlaceStockActionForm({
                         </MenuItem>
                       ))}
                     </TextField>
-                    {showHeat && (
-                      <Box sx={{ width: 160 }}>
-                        {/* On a removal this is a LIST of the heats received for the part (this
-                            bin's first) with Other…; on an add, where the heat is new, a box. */}
+                    {/* In: a box, because the heat is new. Out: a picker over what is on this
+                        shelf, shown once there is something to pick or the part is tracked. */}
+                    {showHeatField && (
+                      <Box sx={{ width: 150 }}>
                         <HeatNumberField
                           size="small"
                           label="Heat"
                           value={heatFor[row.partId] ?? ''}
                           onChange={(v) => setHeatFor((s) => ({ ...s, [row.partId]: v }))}
-                          suggestions={
-                            action === 'deplete' ? (heatsByPart?.get(row.partId) ?? []) : []
-                          }
                           disabled={saving}
                         />
                       </Box>
                     )}
+                    {showLotPicker &&
+                      (lotsHere?.tracked.has(row.partId) ||
+                        (lotsHere?.lots.get(row.partId)?.length ?? 0) > 0) && (
+                        <Box sx={{ width: 170 }}>
+                          <LotPicker
+                            size="small"
+                            label="Heat"
+                            options={lotsHere?.lots.get(row.partId) ?? []}
+                            value={lotFor[row.partId] ?? null}
+                            onChange={(v) =>
+                              setLotFor((s) => ({ ...s, [row.partId]: v ?? '' }))
+                            }
+                            unit={row.primaryUnit}
+                            required={lotsHere?.tracked.has(row.partId) ?? false}
+                            disabled={saving}
+                          />
+                        </Box>
+                      )}
                     {row.onHand != null && (
                       <Button
                         size="small"

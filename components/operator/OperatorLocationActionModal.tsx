@@ -18,9 +18,11 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
-  getRecentHeatNumbersForPart,
+  getLotsAtLocationForPart,
 } from '@/utils/inventoryLocationsAccess';
 import HeatNumberField from '@/components/inventory/HeatNumberField';
+import LotPicker from '@/components/inventory/LotPicker';
+import type { LotOnHand } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
@@ -107,17 +109,25 @@ export default function OperatorLocationActionModal({
   const [job, setJob] = useState<JobWithRelations | null>(null);
   const [destination, setDestination] = useState<{ id: string; label: string } | null>(null);
   /**
-   * The mill heat / lot number, on the two actions where a bar changes hands with its tag on:
-   * `add` (typed off the tag as it is put down) and `deplete` (read back off the same bar as it
-   * is taken to a job). Not on `adjust` (a correction to a number) or `move` (the tag travels with
-   * the bar; the receipt already recorded it). On `deplete`, the heats received for this part are
-   * the LIST to pick from (this bin's first), with *Other…* for a bar the list has never seen — a
-   * take names a heat that came in, not a number typed from memory.
-   * Optional everywhere and never nagged — a blank stays blank on every surface downstream.
+   * The heat, captured two different ways depending on which direction the material is going.
+   *
+   * **In** (`add`): a text box. The bar is in front of you with the number stencilled on it and
+   * there is nothing to pick from — typing it creates the lot.
+   *
+   * **Out** (`deplete`, `move`): a picker over the lots actually on this shelf. A take names
+   * material that is here; it cannot invent one. For a lot-tracked part the database refuses a
+   * movement that names no lot, so the picker is required rather than merely offered.
+   *
+   * Not on `adjust` here: the operator's "set the true quantity" is a whole-bin correction, and
+   * counting per heat belongs on the office count sheet where there is room to show them.
    */
   const [heatNumber, setHeatNumber] = useState('');
-  const [recentHeats, setRecentHeats] = useState<string[]>([]);
-  const showHeat = action === 'add' || action === 'deplete';
+  const [lotId, setLotId] = useState<string | null>(null);
+  const [lots, setLots] = useState<LotOnHand[]>([]);
+  const [tracked, setTracked] = useState(false);
+  /** Typed on the way in; picked on the way out. */
+  const showHeatField = action === 'add';
+  const showLotPicker = action === 'deplete' || action === 'move';
   /**
    * Optional evidence, on the two actions where material physically lands somewhere. Not on
    * `deplete` (nothing to show — the stock left) and not on `adjust` (a correction to a number,
@@ -135,19 +145,28 @@ export default function OperatorLocationActionModal({
     setDestination(null);
     setPhoto(null);
     setHeatNumber('');
-    setRecentHeats([]);
+    setLotId(null);
+    setLots([]);
+    setTracked(false);
+
+    // What is on this shelf, for anything that takes material off it. A failure leaves the picker
+    // empty rather than blocking: the RPC is the thing that actually enforces, and it will say so.
+    if (action === 'deplete' || action === 'move') {
+      const here = await getLotsAtLocationForPart(partId, locationId).catch(() => ({
+        lots: [] as LotOnHand[],
+        tracked: false,
+      }));
+      setLots(here.lots);
+      setTracked(here.tracked);
+      // One lot on the shelf is not a choice. Pre-selecting it saves a tap on the commonest case
+      // and still shows what was chosen, so nothing is decided invisibly.
+      if (here.lots.length === 1) setLotId(here.lots[0].lotId);
+    }
+
     if (action !== 'deplete') return;
     setLoadingJobs(true);
-    // Both swallow failures — the tag and the suggestions are optional and must never block a
-    // removal. Loaded together: one round trip's wait, not two.
-    const [taggable, heats] = await Promise.all([
-      loadTaggableJobs(companyId),
-      getRecentHeatNumbersForPart(partId, { preferLocationId: locationId }).catch(
-        () => [] as string[],
-      ),
-    ]);
-    setJobs(taggable);
-    setRecentHeats(heats);
+    // Swallows failures — the job tag is optional and must never block a removal.
+    setJobs(await loadTaggableJobs(companyId));
     setLoadingJobs(false);
   };
 
@@ -161,6 +180,12 @@ export default function OperatorLocationActionModal({
     }
     if (action === 'move' && !destination) {
       setError('Choose where it\'s going.');
+      return;
+    }
+    // Caught here as well as in the database, so a tracked part names what is missing before the
+    // round trip rather than after it. The RPC is still the authority — this is only courtesy.
+    if (tracked && showLotPicker && !lotId) {
+      setError('Pick which heat this is coming from.');
       return;
     }
     setSaving(true);
@@ -195,7 +220,7 @@ export default function OperatorLocationActionModal({
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           jobId: job?.id || undefined, // tie to the job, not an operation
-          heatNumber: heatNumber.trim() || undefined,
+          lotId: lotId ?? undefined,
         });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, locationId, qty, unit, {
@@ -207,6 +232,8 @@ export default function OperatorLocationActionModal({
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           photoPath,
+          // The tag travels with the bar, so a move carries its lot to the new shelf.
+          lotId: lotId ?? undefined,
         });
       }
       // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
@@ -217,7 +244,7 @@ export default function OperatorLocationActionModal({
         quantity: qty,
         unit,
         location_id: locationId,
-        heat_captured: showHeat && heatNumber.trim().length > 0,
+        heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
       onClose();
@@ -292,11 +319,18 @@ export default function OperatorLocationActionModal({
           {action === 'deplete' && (
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           )}
-          {showHeat && (
-            <HeatNumberField
-              value={heatNumber}
-              onChange={setHeatNumber}
-              suggestions={action === 'deplete' ? recentHeats : []}
+          {showHeatField && (
+            <HeatNumberField value={heatNumber} onChange={setHeatNumber} disabled={saving} />
+          )}
+          {/* Shown once the shelf actually holds lots, or whenever the part is tracked — in which
+              case an empty picker is the answer ("none of this is recorded here"), not a gap. */}
+          {showLotPicker && (tracked || lots.length > 0) && (
+            <LotPicker
+              options={lots}
+              value={lotId}
+              onChange={setLotId}
+              unit={primaryUnit}
+              required={tracked}
               disabled={saving}
             />
           )}

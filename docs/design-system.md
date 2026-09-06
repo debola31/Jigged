@@ -479,6 +479,24 @@ outlined):
 Pass the semantic `color`; `size="small"` is the default. Enforcement is the component itself
 (`variant` is not an accepted prop) — `automation-pending (#367)` for a lint against raw `<Chip>`.
 
+**In a LIST, use [`StatusDot`](../components/common/StatusDot.tsx) instead** — a 7px semantic dot
+plus the plain label, taking the same `label` + `color` so the two forms can never disagree about
+what green means. Chips stay on **detail** surfaces, where one status is the subject of the screen
+rather than one cell in a scan.
+
+*Why the split.* A filled pill is a **button-shaped object**. In a grid it appears once per row, a
+dozen times down a page, on rows where the actual click target is the row itself — it reads as
+something to press and stops the eye at every line. It also caps what a second fact can look like:
+the jobs list briefly carried an "At vendor" chip beside the lifecycle one, and two chips in a 200px
+cell wrapped onto a second line, making the busiest-looking rows the ones with the least to say.
+
+*Why the label is not optional.* The dot's hue is the shortcut for someone scanning; **the word is
+what survives when the hue does not land.** A colour-only treatment was considered and rejected on
+exactly that: roughly one man in twelve has some red-green deficiency, and these lists are read
+almost entirely by men over fifty, often under shop lighting. `default` renders **hollow**, mirroring
+the chip's outlined neutral. `nowrap` means a status must fit its column — sizing one for a chip and
+then dropping a dot in front clips the longest label.
+
 **Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a bespoke palette for a
 domain reason — work-centre kind, the Made/Bought source chip on the Parts grid — and the `HOT` rush
 badge ([`JobHotBadge`](../components/jobs/JobHotBadge.tsx)), which deliberately mutes to outlined for

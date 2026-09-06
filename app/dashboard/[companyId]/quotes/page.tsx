@@ -43,7 +43,8 @@ import {
 } from '@/utils/quotesAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
 import { getCompanyMembers } from '@/utils/companyAccess';
-import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
+import { resolveQuoteStatus } from '@/components/quotes/QuoteStatusChip';
+import StatusDot from '@/components/common/StatusDot';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type {
@@ -296,15 +297,14 @@ export default function QuotesPage() {
     {
       field: 'status',
       headerName: 'Status',
-      width: 110,
+      // 140, not the 110 a chip needed: the dot and its gap add ~15px ahead of
+      // the label, and "Converted" clipped at the old width. nowrap means it
+      // would clip rather than wrap, so the column has to fit the longest label.
+      width: 140,
       cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
         if (!params.data) return null;
-        return (
-          <QuoteStatusChip
-            status={params.data.status}
-            convertedAt={params.data.converted_at}
-          />
-        );
+        const cfg = resolveQuoteStatus(params.data.status, params.data.converted_at);
+        return <StatusDot label={cfg.label} color={cfg.color} />;
       },
     },
     {

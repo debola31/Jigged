@@ -30,7 +30,7 @@ import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import Divider from '@mui/material/Divider';
-import StatusChip from '@/components/common/StatusChip';
+import StatusDot from '@/components/common/StatusDot';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
@@ -529,7 +529,7 @@ export default function JobsPage() {
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
         const cfg = JOB_LIFECYCLE_STAGE_CONFIG[getJobLifecycleStage(params.data)];
-        return <StatusChip label={cfg.label} color={cfg.color} />;
+        return <StatusDot label={cfg.label} color={cfg.color} />;
       },
     },
     {

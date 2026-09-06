@@ -450,7 +450,11 @@ export default function JobDetailPage() {
               (see __tests__/setup.ts on why this repo prefers CSS breakpoints).
               Only ever one is visible. */}
           <Button
-            variant="outlined"
+            // `contained` while open, so the control LOOKS like a toggle that is
+            // currently on rather than another dropdown sitting beside
+            // Shipments and Invoices. Without the state the button reads as
+            // "open a thing", and a collapsed rail reads as gone for good.
+            variant={railOpen ? 'contained' : 'outlined'}
             startIcon={<HistoryIcon />}
             onClick={railOpen ? closeRail : openRail}
             aria-pressed={railOpen}
@@ -875,6 +879,7 @@ export default function JobDetailPage() {
         isAdmin={member?.isAdmin ?? false}
         open={railOpen}
         onClose={closeRail}
+        onOpen={openRail}
         mobileOpen={mobileRailOpen}
         onMobileClose={() => {
           setMobileRailOpen(false);

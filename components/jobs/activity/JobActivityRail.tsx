@@ -8,9 +8,12 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CancelIcon from '@mui/icons-material/Cancel';
 import CloseIcon from '@mui/icons-material/Close';
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight';
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft';
 
 import JobActivityComposer from './JobActivityComposer';
 import JobActivityList from './JobActivityList';
@@ -99,6 +102,11 @@ export interface JobActivityRailProps {
   /** The docked column's state, owned by the page because the Grid spans read it. */
   open: boolean;
   onClose: () => void;
+  /**
+   * Re-open the docked column. The rail owns the way back — see the collapsed
+   * tab at the bottom of this file for why it cannot only live in the toolbar.
+   */
+  onOpen: () => void;
   /** The narrow-screen overlay. Always starts false, so its Modal never mounts when docked. */
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -138,6 +146,7 @@ export default function JobActivityRail({
   isAdmin,
   open,
   onClose,
+  onOpen,
   mobileOpen,
   onMobileClose,
   filter,
@@ -215,7 +224,25 @@ export default function JobActivityRail({
     }
   };
 
-  const body = (
+  /**
+   * The body, built PER MOUNT so each owns its own dismiss.
+   *
+   * These used to share one handler that called both `onMobileClose()` and
+   * `onClose()`, on the theory that only one mount is ever reachable. That was
+   * wrong, and silently so: dismissing the narrow OVERLAY also wrote the DOCKED
+   * column's remembered state to closed, so a phone-width dismiss collapsed the
+   * desktop rail on a screen the person had not even opened yet.
+   *
+   * They also differ in meaning, not just in wiring. The docked column
+   * COLLAPSES — it is a pane you set aside and bring back, which is what the
+   * chevron says. The overlay CLOSES, because on a narrow screen it is covering
+   * the page and getting rid of it is the whole intent.
+   */
+  const renderBody = (dismiss: {
+    onDismiss: () => void;
+    label: string;
+    icon: React.ReactNode;
+  }) => (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
@@ -229,17 +256,11 @@ export default function JobActivityRail({
           </Typography>
         )}
         <Box sx={{ ml: 'auto', display: 'flex' }}>
-          <IconButton
-            size="small"
-            aria-label="Close the activity feed"
-            onClick={() => {
-              // Whichever mount is visible, only one of these is reachable.
-              onMobileClose();
-              onClose();
-            }}
-          >
-            <CloseIcon fontSize="small" />
-          </IconButton>
+          <Tooltip title={dismiss.label}>
+            <IconButton size="small" aria-label={dismiss.label} onClick={dismiss.onDismiss}>
+              {dismiss.icon}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -342,7 +363,57 @@ export default function JobActivityRail({
           pl: 2,
         }}
       >
-        {body}
+        {renderBody({
+          onDismiss: onClose,
+          label: 'Collapse the activity feed',
+          icon: <KeyboardDoubleArrowRightIcon fontSize="small" />,
+        })}
+      </Box>
+
+      {/* THE WAY BACK, and it has to live here rather than only in the toolbar.
+          A pane you can dismiss but not obviously restore is a dead end — the
+          toolbar's Activity button sits among Print Traveler and the Shipments
+          dropdown, where it reads as "open a thing" rather than "this pane is
+          collapsed". This strip sits exactly where the rail was, so the way
+          back is where the thing went. */}
+      <Box
+        component="aside"
+        aria-label="Job activity, collapsed"
+        data-testid="job-activity-rail-collapsed"
+        sx={{
+          display: { xs: 'none', lg: open ? 'none' : 'flex' },
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 1,
+          flexShrink: 0,
+          width: 44,
+          position: 'sticky',
+          top: 0,
+          alignSelf: 'flex-start',
+          py: 1,
+          borderLeft: '1px solid rgba(255,255,255,0.14)',
+        }}
+      >
+        {/* No Tooltip: the strip already names itself just below, and a tooltip
+            on a control that hides itself on click has no mouseleave to close
+            it — it strands the bubble in the corner of the page. */}
+        <IconButton size="small" aria-label="Show the activity feed" onClick={onOpen}>
+          <KeyboardDoubleArrowLeftIcon fontSize="small" />
+        </IconButton>
+        <Typography
+          variant="caption"
+          sx={{
+            // Vertical, so the strip stays narrow enough to cost the page
+            // almost nothing while still naming itself.
+            writingMode: 'vertical-rl',
+            transform: 'rotate(180deg)',
+            color: 'text.secondary',
+            letterSpacing: '0.08em',
+            userSelect: 'none',
+          }}
+        >
+          Activity {items.length > 0 ? `· ${items.length}` : ''}
+        </Typography>
       </Box>
 
       {/* OVERLAY — below lg. `mobileOpen` is only ever set by the narrow-screen
@@ -369,7 +440,11 @@ export default function JobActivityRail({
           data-testid="job-activity-rail-overlay"
           sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}
         >
-          {body}
+          {renderBody({
+            onDismiss: onMobileClose,
+            label: 'Close the activity feed',
+            icon: <CloseIcon fontSize="small" />,
+          })}
         </Box>
       </Drawer>
 

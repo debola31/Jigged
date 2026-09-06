@@ -338,6 +338,18 @@ default**, remembered per browser under `jigged-job-activity-rail-open`: being d
 without being summoned is the reason it is a rail rather than an on-demand drawer, and
 `activity rail toggled` is the number that says whether that was right.
 
+**It COLLAPSES; it does not dismiss.** The docked pane's control is a `»` chevron, and what it
+leaves behind is a 44px strip in the rail's own place, labelled `Activity · n`, that restores it.
+The toolbar's Activity button is the other route and shows its state (`contained` while open) —
+but it sits among Print Traveler and the Shipments dropdown, where it reads as "open a thing"
+rather than "this pane is collapsed", so it cannot be the *only* way back. A pane you can dismiss
+but not obviously restore is a dead end.
+
+The overlay below `lg` genuinely CLOSES (`✕`), because there it is covering the page. **The two
+dismissals are separate handlers on purpose:** they were briefly one that called both, so
+dismissing the phone-width overlay also wrote the docked column's remembered state to closed —
+collapsing the desktop rail on a screen the person had not yet opened.
+
 Three row kinds, merged by a pure module
 ([`jobActivityTimeline.ts`](../../components/jobs/activity/jobActivityTimeline.ts)):
 

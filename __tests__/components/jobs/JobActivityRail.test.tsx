@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -106,6 +106,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof JobActivityRail>> 
     isAdmin: false,
     open: true,
     onClose: vi.fn(),
+    onOpen: vi.fn(),
     mobileOpen: false,
     onMobileClose: vi.fn(),
     filter: null,
@@ -341,6 +342,93 @@ describe('the remembered open state', () => {
   it('stays open on an unrecognised stored value rather than failing shut', () => {
     localStorage.setItem(RAIL_OPEN_STORAGE_KEY, 'yes');
     expect(readRailOpen()).toBe(true);
+  });
+});
+
+describe('collapsing and getting back', () => {
+  /**
+   * THE DEAD END THIS EXISTS TO PREVENT. A pane you can dismiss but not
+   * obviously restore is worse than one that never collapsed: the toolbar's
+   * Activity button sits among Print Traveler and the Shipments dropdown, where
+   * it reads as "open a thing" rather than "this pane is collapsed".
+   */
+  it('offers a way back, where the rail was, once collapsed', async () => {
+    const onOpen = vi.fn();
+    render(
+      <ThemeProvider theme={jiggedTheme}>
+        <JobActivityRail
+          {...{
+            companyId: 'co-1',
+            jobId: 'job-1',
+            items: ITEMS,
+            loading: false,
+            error: null,
+            reload: vi.fn().mockResolvedValue(undefined),
+            memberId: 'member-1',
+            isAdmin: false,
+            open: false,
+            onClose: vi.fn(),
+            onOpen,
+            mobileOpen: false,
+            onMobileClose: vi.fn(),
+            filter: null,
+            onClearFilter: vi.fn(),
+            onViewSlip: vi.fn(),
+          }}
+        />
+      </ThemeProvider>,
+    );
+
+    const strip = screen.getByTestId('job-activity-rail-collapsed');
+    await userEvent.click(within(strip).getByRole('button', { name: /Show the activity feed/i }));
+
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it('calls the docked collapse only — never the overlay close', async () => {
+    /**
+     * These shared one handler that fired BOTH, on the theory that only one
+     * mount is reachable at a time. It was wrong and silent: dismissing the
+     * narrow overlay also wrote the DOCKED column's remembered state to closed,
+     * so a phone-width dismiss collapsed the desktop rail on a screen the
+     * person had not opened yet.
+     */
+    const onClose = vi.fn();
+    const onMobileClose = vi.fn();
+    const { rail } = renderRail({ onClose, onMobileClose });
+
+    await userEvent.click(rail.getByRole('button', { name: /Collapse the activity feed/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(onMobileClose).not.toHaveBeenCalled();
+  });
+
+  it('calls the overlay close only — never the docked collapse', async () => {
+    const onClose = vi.fn();
+    const onMobileClose = vi.fn();
+    renderRail({ onClose, onMobileClose, mobileOpen: true });
+
+    const overlay = within(screen.getByTestId('job-activity-rail-overlay'));
+    await userEvent.click(overlay.getByRole('button', { name: /Close the activity feed/i }));
+
+    expect(onMobileClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('says collapse on the docked pane and close on the overlay — they mean different things', () => {
+    // Asserted in separate renders on purpose: with the overlay open, MUI's
+    // Modal marks the rest of the page aria-hidden, so the docked pane is
+    // correctly invisible to a by-role query. That inertness is the behaviour
+    // we want, not something to query around.
+    const { rail } = renderRail();
+    expect(rail.getByRole('button', { name: /Collapse the activity feed/i })).toBeInTheDocument();
+    expect(rail.queryByRole('button', { name: /Close the activity feed/i })).not.toBeInTheDocument();
+
+    cleanup();
+
+    renderRail({ mobileOpen: true });
+    const overlay = within(screen.getByTestId('job-activity-rail-overlay'));
+    expect(overlay.getByRole('button', { name: /Close the activity feed/i })).toBeInTheDocument();
   });
 });
 

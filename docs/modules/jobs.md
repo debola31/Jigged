@@ -381,6 +381,13 @@ no border-all-round, no radius. Each of those is load-bearing:
   full Card treatment produced when it was tried. A region needs both, and only both.
 - **The bleed matches `p: { xs: 2, md: 3 }` exactly.** A bleed wider than the padding it cancels
   is overflow, not bleed — and the collapsed strip renders at `xs`, where the padding is 16px.
+- **The bleed is sideways only; the top is painted.** A negative `margin-top` cannot close the
+  gap under the page header, because `position: sticky` with `top: 0` is a constraint at *every*
+  scroll position rather than only once you scroll: the margin lifts the box above the scrollport,
+  `top: 0` forbids exactly that, and sticky pushes it back down. The property sits in the styles
+  looking correct while the gap survives. A `::before` band carrying the same wash and rule fills
+  that space instead — `<main>` clips it at the header, and it scrolls away with its sticky parent,
+  so there is no second state to keep in sync and no phantom scroll height.
 
 The collapsed strip takes the same height, wash and rule, so collapsing reads as the region
 narrowing rather than as a different thing appearing in its place.

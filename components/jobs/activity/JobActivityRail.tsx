@@ -386,10 +386,20 @@ export default function JobActivityRail({
            * happens to be tall", which is the thing the full height was meant
            * to stop.
            */
-          // MATCHES `<main>`'s padding exactly — `p: { xs: 2, md: 3 }` — because
-          // a bleed wider than the padding it cancels is overflow, not bleed.
-          mt: { xs: -2, md: -3 },
-          mb: { xs: -2, md: -3 },
+          /**
+           * SIDEWAYS ONLY. `mr` matches `<main>`'s padding exactly — a bleed
+           * wider than the padding it cancels is overflow, not bleed — and it
+           * works because nothing constrains the box horizontally.
+           *
+           * A NEGATIVE `mt` DOES NOT WORK HERE, and the reason is worth writing
+           * down: `position: sticky` with `top: 0` is a constraint at EVERY
+           * scroll position, not only once you scroll. The margin puts the box
+           * 24px above the scrollport, `top: 0` says it may never be above the
+           * scrollport, and sticky pushes it straight back down. The two fight,
+           * `top` wins, and the gap survives while the property meant to close
+           * it sits in the styles looking correct. The top is PAINTED instead —
+           * see `&::before` below.
+           */
           mr: { xs: -2, md: -3 },
           /**
            * A REGION, not a box — a tint and one rule, no border-all-round and
@@ -407,6 +417,24 @@ export default function JobActivityRail({
            */
           bgcolor: 'rgba(0, 0, 0, 0.16)',
           borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          /**
+           * The top gap, PAINTED rather than fought over: a band carrying the
+           * same wash and rule, sitting in `<main>`'s padding above the box.
+           * `<main>` clips it at exactly the page header, which is where the
+           * region should stop, and because it travels with a sticky parent it
+           * scrolls out of view the moment the rail pins — no second state to
+           * keep in sync, and no phantom scroll height.
+           */
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            left: -1,
+            right: 0,
+            top: { xs: -16, md: -24 },
+            height: { xs: 16, md: 24 },
+            bgcolor: 'inherit',
+            borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          },
           // Restores the inset the negative margins just cancelled, so the
           // content keeps the page's rhythm even though the surface does not.
           pl: 2,
@@ -451,13 +479,41 @@ export default function JobActivityRail({
           // reads as the region narrowing rather than as a different thing
           // appearing in its place.
           height: `calc(100dvh - ${RAIL_HEADER_INSET}px)`,
-          // MATCHES `<main>`'s padding exactly — `p: { xs: 2, md: 3 }` — because
-          // a bleed wider than the padding it cancels is overflow, not bleed.
-          mt: { xs: -2, md: -3 },
-          mb: { xs: -2, md: -3 },
+          /**
+           * SIDEWAYS ONLY. `mr` matches `<main>`'s padding exactly — a bleed
+           * wider than the padding it cancels is overflow, not bleed — and it
+           * works because nothing constrains the box horizontally.
+           *
+           * A NEGATIVE `mt` DOES NOT WORK HERE, and the reason is worth writing
+           * down: `position: sticky` with `top: 0` is a constraint at EVERY
+           * scroll position, not only once you scroll. The margin puts the box
+           * 24px above the scrollport, `top: 0` says it may never be above the
+           * scrollport, and sticky pushes it straight back down. The two fight,
+           * `top` wins, and the gap survives while the property meant to close
+           * it sits in the styles looking correct. The top is PAINTED instead —
+           * see `&::before` below.
+           */
           mr: { xs: -2, md: -3 },
           bgcolor: 'rgba(0, 0, 0, 0.16)',
           borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          /**
+           * The top gap, PAINTED rather than fought over: a band carrying the
+           * same wash and rule, sitting in `<main>`'s padding above the box.
+           * `<main>` clips it at exactly the page header, which is where the
+           * region should stop, and because it travels with a sticky parent it
+           * scrolls out of view the moment the rail pins — no second state to
+           * keep in sync, and no phantom scroll height.
+           */
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            left: -1,
+            right: 0,
+            top: { xs: -16, md: -24 },
+            height: { xs: 16, md: 24 },
+            bgcolor: 'inherit',
+            borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          },
         }}
       >
         {/* No Tooltip on either: the strip already names itself just below, and

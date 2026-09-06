@@ -118,7 +118,7 @@ export default function OperatorPartLookup({
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   /** Which location's verbs are open, and which verb. One at a time. */
-  const [open, setOpen] = useState<{ locationId: string; action: PlaceStockAction | 'adjust' } | null>(
+  const [open, setOpen] = useState<{ rowKey: string; locationId: string; action: PlaceStockAction | 'adjust' } | null>(
     null,
   );
   /**
@@ -156,8 +156,8 @@ export default function OperatorPartLookup({
    * never expand a row at all, so paying for the whole tree on every part would be waste. Failing
    * that read does not block the other three verbs; only Move's destination list comes up empty.
    */
-  const toggleLocation = (locationId: string) => {
-    setOpen((cur) => (cur?.locationId === locationId ? null : { locationId, action: 'deplete' }));
+  const toggleLocation = (rowKey: string, locationId: string) => {
+    setOpen((cur) => (cur?.rowKey === rowKey ? null : { rowKey, locationId, action: 'deplete' }));
     if (locations.length > 0 || loadingPlaces) return;
     setLoadingPlaces(true);
     getLocations(companyId)
@@ -236,6 +236,14 @@ export default function OperatorPartLookup({
     () => places.reduce((n, b) => n + Number(b.quantity ?? 0), 0),
     [places],
   );
+  /**
+   * PLACES, not rows. A row is one (place, lot), so a part under two heats on one shelf produces
+   * two — and counting rows told an operator it was in two locations when it is in one.
+   */
+  const placeCount = useMemo(
+    () => new Set(places.map((b) => b.location_id)).size,
+    [places],
+  );
 
   /**
    * What the list renders: everywhere the part IS, plus the one place just chosen to put it.
@@ -266,7 +274,7 @@ export default function OperatorPartLookup({
       quantity: 0,
       kind: null,
     } as PartLocationBalanceWithLocation);
-    setOpen({ locationId, action: 'add' });
+    setOpen({ rowKey: `${locationId}:none`, locationId, action: 'add' });
   };
 
   /**
@@ -349,7 +357,7 @@ export default function OperatorPartLookup({
                 ) : (
                   <>
                     {num(total)} {selected.primary_unit ?? ''} in{' '}
-                    {places.length === 1 ? '1 location' : `${places.length} locations`}
+                    {placeCount === 1 ? '1 location' : `${placeCount} locations`}
                   </>
                 )}
               </Typography>
@@ -369,17 +377,31 @@ export default function OperatorPartLookup({
               <Stack spacing={1}>
                 {rows.map((b) => {
                   const path = b.path.join(' › ') || b.location_name;
-                  const here = open?.locationId === b.location_id ? open.action : null;
+                  // One row is one (place, lot). Keyed by place alone, two heats on one shelf
+                  // shared a React key and expanded together.
+                  const rowKey = `${b.location_id}:${b.lot_id ?? 'none'}`;
+                  const here = open?.rowKey === rowKey ? open.action : null;
                   return (
-                    <Card key={b.location_id} elevation={2}>
+                    <Card key={rowKey} elevation={2}>
                       <CardActionArea
-                        onClick={() => toggleLocation(b.location_id)}
+                        onClick={() => toggleLocation(rowKey, b.location_id)}
                         aria-expanded={Boolean(here)}
                         sx={{ minHeight: 56 }}
                       >
                         <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
                           <Box sx={{ flex: 1, minWidth: 0 }}>
                             <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
+                            {/* WHICH heat is on this shelf — without it two lots read as the
+                                same place listed twice. */}
+                            {b.lot_code && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ display: 'block' }}
+                              >
+                                {b.heat_number ? `Heat ${b.heat_number}` : `${b.lot_code} · no mill heat`}
+                              </Typography>
+                            )}
                             {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
                             {b.path.length > 1 && (
                               <Typography variant="caption" color="text.secondary">
@@ -415,7 +437,7 @@ export default function OperatorPartLookup({
                               <Button
                                 key={v}
                                 variant={here === v ? 'contained' : 'outlined'}
-                                onClick={() => setOpen({ locationId: b.location_id, action: v })}
+                                onClick={() => setOpen({ rowKey, locationId: b.location_id, action: v })}
                                 sx={{ minHeight: 48 }}
                               >
                                 {label}

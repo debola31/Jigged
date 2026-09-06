@@ -75,13 +75,25 @@ export interface LocationSpecNode {
   children: LocationSpecNode[];
 }
 
-/** A part's balance at a location, with the location's full path for display. */
+/**
+ * A part's balance at a location, with the location's full path for display.
+ *
+ * **One row is one (location, lot), not one location.** Since lots landed a part can hold two
+ * heats on one shelf, and a caller that keys or counts by `location_id` alone will render the
+ * same place twice and call it two locations — which is exactly what the part drawer did.
+ */
 export interface PartLocationBalanceWithLocation {
   location_id: string;
   location_name: string;
   /** Full path, root → leaf, e.g. ['Cabinet 1', 'Row 3', 'Left']. */
   path: string[];
   quantity: number;
+  /** The lot this balance is, or null for a part that is not lot-tracked. */
+  lot_id: string | null;
+  /** The lot's handle — the mill heat when there is one, else a minted code. */
+  lot_code: string | null;
+  /** The mill's own heat number, or null when the material arrived without one. */
+  heat_number: string | null;
   /**
    * The location's kind. `'system'` marks the `Unassigned` bucket, which is NOT a place — it is
    * the put-away pile. A caller answering "where does this live?" must not present it as a shelf.

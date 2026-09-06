@@ -53,6 +53,11 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ButtonBase from '@mui/material/ButtonBase';
 import CloseIcon from '@mui/icons-material/Close';
+import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
 import { useState } from 'react';
@@ -62,7 +67,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { useLoad } from '@/hooks/useLoad';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
-import type { LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
+import LocationPicker, { type LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
 import PlaceViewHeader from './PlaceViewHeader';
 import PlaceStockActionForm, { type PlaceStockAction } from './PlaceStockActionForm';
 import PlaceAdjustForm from './PlaceAdjustForm';
@@ -83,7 +88,13 @@ export interface PartPlacesDrawerProps {
 }
 
 /** Which verb is open, on which place. One at a time across the whole list. */
-type OpenAction = { locationId: string; action: PlaceStockAction | 'adjust' } | null;
+/**
+ * Which verb is open, on which ROW. One at a time across the whole list.
+ *
+ * Keyed by `${location}:${lot}` rather than by location: two heats on one shelf are two rows, and
+ * keying by place expanded both at once — so the form you typed into was ambiguous.
+ */
+type OpenAction = { rowKey: string; action: PlaceStockAction | 'adjust' } | null;
 
 function PartPlacesBody({
   part,
@@ -106,10 +117,54 @@ function PartPlacesBody({
     await onChanged();
   };
 
-  const rows = data ?? [];
+  const balances = data ?? [];
   // Safe to add: balances are stored in the part's primary unit, so these are the same unit by
   // construction. It is the one number on this screen that is a sum rather than an observation.
-  const total = rows.reduce((sum, r) => sum + Number(r.quantity), 0);
+  const total = balances.reduce((sum, r) => sum + Number(r.quantity), 0);
+  /**
+   * PLACES, not rows.
+   *
+   * A row is one (location, lot), so a part holding two heats on one shelf produces two — and
+   * counting rows made the header read "3,633 ea across 2 locations" for a part that is in one
+   * place, under two heats. The same conflation gave both rows the key `location_id` and rendered
+   * `Unassigned` twice with nothing to tell them apart.
+   */
+  const placeCount = new Set(balances.map((r) => r.location_id)).size;
+
+  /**
+   * A place chosen from the picker that the part is NOT in yet, shown as a row so it can be
+   * stocked without leaving. The office half of the fix the operator lookup got: you arrived
+   * holding a PART, and being sent to a bin to re-find it among everything on that shelf throws
+   * away half of what you came with.
+   */
+  const [extraPlace, setExtraPlace] = useState<{ id: string; label: string } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerChoice, setPickerChoice] = useState<LocationPickerOption | null>(null);
+
+  const rows: typeof balances = extraPlace && !balances.some((b) => b.location_id === extraPlace.id)
+    ? [
+        ...balances,
+        {
+          location_id: extraPlace.id,
+          location_name: extraPlace.label.split(' › ').at(-1) ?? extraPlace.label,
+          path: extraPlace.label.split(' › ').filter(Boolean),
+          quantity: 0,
+          kind: null,
+          lot_id: null,
+          lot_code: null,
+          heat_number: null,
+        },
+      ]
+    : balances;
+
+  /** Stock it at a place it is not in yet, here rather than by navigating to the bin. */
+  const stockSomewhereElse = (locationId: string) => {
+    const option = moveDestinations.find((o) => o.id === locationId);
+    setPickerOpen(false);
+    setPickerChoice(null);
+    setExtraPlace({ id: locationId, label: option?.label ?? 'Location' });
+    setOpen({ rowKey: `${locationId}:none`, action: 'add' });
+  };
 
   return (
     <>
@@ -118,9 +173,9 @@ function PartPlacesBody({
         subtitle={
           loading
             ? 'Looking…'
-            : rows.length === 0
+            : balances.length === 0
               ? 'Not in any location'
-              : `${num(total)} ${part.unit ?? ''} across ${rows.length} ${rows.length === 1 ? 'location' : 'locations'}`.trim()
+              : `${num(total)} ${part.unit ?? ''} across ${placeCount} ${placeCount === 1 ? 'location' : 'locations'}`.trim()
         }
         action={
           <IconButton aria-label="Close" onClick={onClose} sx={{ width: 48, height: 48 }}>
@@ -150,14 +205,18 @@ function PartPlacesBody({
           <Stack spacing={0.5} sx={{ mt: 0.5 }}>
             {rows.map((r) => {
               const isPile = r.kind === SYSTEM_KIND;
-              const here = open?.locationId === r.location_id ? open.action : null;
+              // Keyed and opened by (place, lot). Keyed by place alone, two heats on one shelf
+              // shared a React key AND expanded together, so acting on one acted on the row you
+              // could not tell apart from it.
+              const rowKey = `${r.location_id}:${r.lot_id ?? 'none'}`;
+              const here = open?.rowKey === rowKey ? open.action : null;
               const path = r.path.join(' › ') || r.location_name;
               return (
-                <Box key={r.location_id}>
+                <Box key={rowKey}>
                   <ButtonBase
-                    onClick={() => setOpen(here ? null : { locationId: r.location_id, action: 'deplete' })}
+                    onClick={() => setOpen(here ? null : { rowKey, action: 'deplete' })}
                     aria-expanded={Boolean(here)}
-                    aria-label={`${path} — ${num(r.quantity)} ${part.unit ?? ''}`.trim()}
+                    aria-label={`${path}${r.lot_code ? ` heat ${r.lot_code}` : ''} — ${num(r.quantity)} ${part.unit ?? ''}`.trim()}
                     sx={{
                       width: '100%',
                       minHeight: 48,
@@ -174,6 +233,22 @@ function PartPlacesBody({
                       <Typography variant="body2" noWrap>
                         {path}
                       </Typography>
+                      {/* WHICH heat, on the row. Without it two lots on one shelf render as the
+                          same place twice, with no way to tell which one you are acting on — the
+                          state that made this drawer show "Unassigned" over "Unassigned". */}
+                      {r.lot_code && (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          noWrap
+                          // `display: block`, because Typography's caption variant renders a
+                          // <span>: inline, it shared a line with the "Not stored yet" chip and
+                          // `noWrap` clipped the heat under it.
+                          sx={{ display: 'block' }}
+                        >
+                          {r.heat_number ? `Heat ${r.heat_number}` : `${r.lot_code} · no mill heat`}
+                        </Typography>
+                      )}
                       {/* Said, not hidden: a part sitting in the pile has not been put away, and
                           showing it as a shelf would send someone looking for a shelf. */}
                       {isPile && (
@@ -212,7 +287,7 @@ function PartPlacesBody({
                             key={v}
                             size="small"
                             variant={here === v ? 'contained' : 'outlined'}
-                            onClick={() => setOpen({ locationId: r.location_id, action: v })}
+                            onClick={() => setOpen({ rowKey, action: v })}
                           >
                             {label}
                           </Button>
@@ -259,7 +334,58 @@ function PartPlacesBody({
             })}
           </Stack>
         )}
+
+        {/*
+          Put it somewhere it is not yet — the office half of what the shop floor already had.
+          Available on every part, not only homeless ones: more of what is already on a shelf is
+          the ordinary case, and "add it to a second place" was the one thing this drawer could
+          not do without navigating away and re-finding the part in a bin.
+        */}
+        {!loading && !error && (
+          <Button
+            startIcon={<PlaceOutlinedIcon />}
+            onClick={() => setPickerOpen(true)}
+            disabled={moveDestinations.length === 0}
+            sx={{ mt: 1.5 }}
+          >
+            Add at another location&hellip;
+          </Button>
+        )}
       </Box>
+
+      {/*
+        Picks a place; it does not write. Choosing hands the place back to the list above, which
+        shows it as a row and opens Add on it -- so the part you arrived holding is never
+        discarded. Same shape as the operator lookup, and deliberately NOT that component: it
+        takes raw locations and rebuilds the option list, while this drawer is already handed the
+        prepared destinations (leaves only, never the put-away pile).
+      */}
+      <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Add {part.name} at another location</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <LocationPicker
+              label="Location"
+              options={moveDestinations}
+              value={pickerChoice}
+              onChange={setPickerChoice}
+              unit={part.unit ?? undefined}
+              excludeSystem
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPickerOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!pickerChoice}
+            onClick={() => pickerChoice && stockSomewhereElse(pickerChoice.id)}
+          >
+            Add here
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }

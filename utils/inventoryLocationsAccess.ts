@@ -550,33 +550,48 @@ export async function getBalancesForPart(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('part_location_stock')
-    .select('company_id, location_id, quantity')
+    .select('company_id, location_id, quantity, lot_id, material_lots (lot_code, heat_number)')
     .eq('part_id', partId);
   if (error) {
     console.error('Error fetching part balances:', error);
     throw error;
   }
-  const rows = (data ?? []) as Array<{ company_id: string; location_id: string; quantity: number }>;
+  type Row = {
+    company_id: string;
+    location_id: string;
+    quantity: number;
+    lot_id: string | null;
+    material_lots: { lot_code: string; heat_number: string | null } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
   if (rows.length === 0) return [];
 
   const locations = await getLocations(rows[0].company_id);
   const byId = new Map(locations.map((l) => [l.id, l] as const));
 
   return rows
-    .map((r) => {
-      const loc = byId.get(r.location_id);
-      return {
-        location_id: r.location_id,
-        location_name: loc?.name ?? 'Unknown',
-        path: computePathNames(r.location_id, byId),
-        quantity: Number(r.quantity),
-        // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,
-        // "where does this part live?" answers "Unassigned" — which is precisely the answer
-        // "nowhere yet", presented as though it were a place.
-        kind: loc?.kind ?? null,
-      };
-    })
-    .sort((a, b) => compareLocationNames(a.path.join(' / '), b.path.join(' / ')));
+    .map((r) => ({
+      location_id: r.location_id,
+      location_name: byId.get(r.location_id)?.name ?? 'Unknown',
+      path: computePathNames(r.location_id, byId),
+      quantity: Number(r.quantity),
+      // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,
+      // "where does this part live?" answers "Unassigned" — which is precisely the answer
+      // "nowhere yet", presented as though it were a place.
+      kind: byId.get(r.location_id)?.kind ?? null,
+      // A row is one (location, lot). Two heats on one shelf are two rows, and a caller that
+      // renders only the location name shows the same place twice — which is what the part
+      // drawer did until this was carried.
+      lot_id: r.lot_id,
+      lot_code: r.material_lots?.lot_code ?? null,
+      heat_number: r.material_lots?.heat_number ?? null,
+    }))
+    .sort(
+      (a, b) =>
+        compareLocationNames(a.path.join(' / '), b.path.join(' / ')) ||
+        // Within one place, most stock first — the same order the lot picker uses.
+        b.quantity - a.quantity,
+    );
 }
 
 /**

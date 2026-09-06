@@ -2,29 +2,31 @@
 
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
-import Stack from '@mui/material/Stack';
-import Typography from '@mui/material/Typography';
 
 import type { Job, JobPart } from '@/types/job';
-import { ProductionStatusChip, FulfillmentStatusChip } from './JobStatusChip';
+import { FulfillmentStatusChip } from './JobStatusChip';
 import { getJobShipmentSummary } from '@/utils/shipmentsAccess';
 import type { JobShipmentSummary } from '@/types/shipment';
 
-interface JobStatusBlockProps {
-  job: Pick<Job, 'id' | 'production_status' | 'fulfillment_status' | 'created_at' | 'due_date'>;
+interface JobFulfillmentChipProps {
+  job: Pick<Job, 'id' | 'fulfillment_status'>;
   parts: Array<Pick<JobPart, 'id' | 'quantity' | 'fulfillment_status'>>;
 }
 
 /**
- * Job-level status block rendered between the header (job_number + actions)
- * and the rest of the page. Two badges — production and fulfillment — side
- * by side with a sub-row when at least one shipment exists.
+ * The fulfillment chip, and only that.
  *
- * Loads the shipment summary lazily on mount. The badges render
- * immediately from the job row so the layout is stable before the
- * shipment fetch completes (FR-NEW-2: status block under 200ms).
+ * NARROWED FROM A BLOCK OF FOUR FIELDS. It began as a band above the page, then
+ * became four rows inside the Job Details card — but the card lays its fields
+ * out in two explicit columns now, and a component that renders four of them in
+ * a fixed order cannot be split across columns. Production, Created and Due are
+ * plain values the page renders itself; this is the one that is NOT plain.
+ *
+ * `Partially Shipped — 25 of 100` needs the shipment summary, which is fetched
+ * lazily here. The chip renders immediately from the job row so the card's
+ * layout is stable before that lands.
  */
-export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
+export default function JobFulfillmentChip({ job, parts }: JobFulfillmentChipProps) {
   const [summary, setSummary] = useState<JobShipmentSummary | null>(null);
 
   useEffect(() => {
@@ -34,7 +36,7 @@ export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
         const s = await getJobShipmentSummary(job.id);
         if (!cancelled) setSummary(s);
       } catch (err) {
-        console.warn('JobStatusBlock: failed to load shipment summary', err);
+        console.warn('JobFulfillmentChip: failed to load shipment summary', err);
       }
     })();
     return () => {
@@ -58,56 +60,21 @@ export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
       ? `Partially Shipped — ${shipped} of ${totals.ordered}`
       : undefined;
 
-  return (
-    <Box sx={{ mb: 3 }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Production
-          </Typography>
-          <ProductionStatusChip status={job.production_status} size="medium" />
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Fulfillment
-          </Typography>
-          {fulfillmentLabel ? (
-            // Override the chip label when we have a quantity breakdown.
-            <FulfillmentStatusChipWithLabel
-              status={job.fulfillment_status}
-              label={fulfillmentLabel}
-            />
-          ) : (
-            <FulfillmentStatusChip status={job.fulfillment_status} size="medium" />
-          )}
-        </Box>
-      </Stack>
-
-      {(job.created_at || job.due_date) && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {job.created_at && (
-            <>
-              Created{' '}
-              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                {formatShipDate(job.created_at)}
-              </Box>
-            </>
-          )}
-          {job.due_date && (
-            <>
-              {job.created_at ? ' · ' : ''}Due{' '}
-              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                {formatShipDate(job.due_date)}
-              </Box>
-            </>
-          )}
-        </Typography>
-      )}
-    </Box>
+  return fulfillmentLabel ? (
+    // Override the chip label when we have a quantity breakdown.
+    <FulfillmentStatusChipWithLabel status={job.fulfillment_status} label={fulfillmentLabel} />
+  ) : (
+    <FulfillmentStatusChip status={job.fulfillment_status} size="medium" />
   );
 }
 
-function formatShipDate(value: string): string {
+/**
+ * Dates as the shop reads them, and a DATE-ONLY string is not a moment.
+ * `due_date` is a plain `YYYY-MM-DD`; handing that to `new Date()` parses it as
+ * UTC midnight and prints the day before for anyone west of Greenwich.
+ * Exported because the job page prints Created and Due itself now.
+ */
+export function formatShipDate(value: string): string {
   const ymd = /^\d{4}-\d{2}-\d{2}$/.exec(value);
   if (ymd) {
     const [y, m, d] = value.split('-').map((n) => parseInt(n, 10));

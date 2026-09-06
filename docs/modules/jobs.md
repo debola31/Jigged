@@ -27,8 +27,8 @@
 > **Fourteen corrections**, each marked inline as *(This doc previously said …)*. The two largest:
 > a `skipped` operation status described in six places that has never existed in
 > `job_operations_status_check`, and a hard-delete-blocked-by-records-of-value rule that was
-> replaced by unconditional archive. One live defect found and **not** fixed here — see
-> [SUSPECTED CODE BUG](#suspected-code-bug--the-delete-gate-on-the-detail-page).
+> replaced by unconditional archive. One live defect found and left open by that pass, since
+> fixed — see [the delete gate](#the-delete-gate-on-the-detail-page--fixed-2026-09-06).
 
 A **Job** is the project header — customer, due date, aggregate status. Each part on it is a
 child **`job_part`** with its own routing-derived operations + materials, status and timestamps.
@@ -317,18 +317,125 @@ combined multi-select, the single stage chip, and "No jobs found".)*
 
 ### Job detail — `/dashboard/{companyId}/jobs/{id}`
 
-Header: job number, `JobStatusBlock` (production chip + fulfillment chip with a shipped-quantity
-breakdown, created date, due date), overdue badge. Body: Job Details card (customer,
-customer PO, source — quote link or "Direct PO" — and Attachments), billing/shipping card, and
-per-part cards with operations, live materials and shipment/invoice summaries.
+Header: job number, overdue badge. Body: **Job Details card** — customer, customer PO,
+source (quote link or "Direct PO"), the production + fulfillment chips and the due date, laid
+out in two explicit columns — left is what the job IS, right is where it STANDS — then the billing/shipping card, then the part with its operations and
+live materials.
+
+*Simplified 2026-09-06, when the activity rail arrived and the page needed to give something
+back:* `JobStatusBlock` was a band of its own holding four facts, directly above a card whose job
+is facts about the job, and now renders as rows inside it. The **Production** collapsible section
+went with the count beside it — a job carries one part, so the header was a count of one over a
+control that only ever hid the thing people came for. **Attachments** left the card; they are job
+attachments (customer PO PDFs), not part files, and remain viewable and editable on the Edit
+screen — reachable from the job page as a **paperclip beside the Customer PO**, which is what the
+files actually are. It renders nothing when there are none, opens a single file directly, and asks
+which one when there are several. The Customer PO row is unconditional for that reason: hiding it
+when a job has no PO *number* would strand a file that a job has.
 
 Actions, left to right: Edit · Print Traveler (per part; acts directly on a
 single-part job, opens a picker otherwise) · **Shipments** and **Invoices** dropdowns (view
-existing + create, so both are reachable without scrolling) · Reopen *or* Cancel · Delete.
+existing + create, so both are reachable without scrolling) · Reopen, when the job is cancelled ·
+and an **overflow** holding Cancel and Delete. Those two are the rarest things anyone does to a
+job and the most expensive to do by accident, and they were sitting full-size beside Print
+Traveler; behind a kebab they cost the toolbar nothing and take a deliberate second press. Reopen
+stays out in the open — it is the opposite of destructive, and on a cancelled job it is the one
+thing somebody came to do. There is no Activity button: the rail's own collapsed strip is the way
+in.
 Cancel is offered while production is neither `completed` nor `cancelled`; Reopen only when
 `cancelled`; shipping is gated by `canShip` (not cancelled, not fully shipped, has parts).
 *(This doc previously gave a per-status action table gating Edit and Create shipment/invoice on
 production status; only Cancel, Reopen and `canShip` are status-gated.)*
+
+**The activity rail.** Everything that has happened to the job, newest first, in a column docked
+to the right of the page from `lg` up and an overlay drawer below it
+([`JobActivityRail`](../../components/jobs/activity/JobActivityRail.tsx)). **It is open by
+default**, remembered per browser under `jigged-job-activity-rail-open`: being discoverable
+without being summoned is the reason it is a rail rather than an on-demand drawer, and
+`activity rail toggled` is the number that says whether that was right.
+
+**It COLLAPSES; it does not dismiss.** The docked pane's control is a `»` chevron, and what it
+leaves behind is a 44px strip in the rail's own place, labelled `Activity · n`, that restores it.
+**That strip is the only way in, and there is no toolbar button** — one briefly existed and was
+removed: it sat among Print Traveler and the Shipments dropdown, where it read as "open a thing"
+rather than "this region is collapsed", and two controls for one pane is one more than the page
+needs. The strip therefore carries two CSS-gated buttons, because below `lg` it has to open the
+overlay instead; removing the toolbar button without that would leave a narrow screen with no
+route to the feed at all.
+
+The overlay below `lg` genuinely CLOSES (`✕`), because there it is covering the page. **The two
+dismissals are separate handlers on purpose:** they were briefly one that called both, so
+dismissing the phone-width overlay also wrote the docked column's remembered state to closed —
+collapsing the desktop rail on a screen the person had not yet opened.
+
+Three row kinds, merged by a pure module
+([`jobActivityTimeline.ts`](../../components/jobs/activity/jobActivityTimeline.ts)):
+
+| Row | Source | On the row |
+|---|---|---|
+| **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
+| **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Undo** — not "void", which is document language for slips and invoices; the step card has always said `Undo completion`, and the column being `voided_at` is the schema's word rather than the user's. The note typed into the Complete dialog renders here, on the event it describes |
+| **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
+| **Job created** | `jobs.created_at`, derived | Nothing — it is the feed's oldest row and its beginning |
+
+One slip fans out to a `sent` row, one `received` row per receipt, and a `short_closed` row when
+something was retired — never one row that rewrites itself, the same call the operator feed makes
+for interval start/finish. Slips, receipts and completions that were taken back stay in the list struck
+through: this is an audit surface, so the rule is show-struck-through rather than the usual
+`filter-it-out`.
+
+**A region, not a box.** The rail is one screen tall, bleeds through `<main>`'s padding to the
+edges, carries a faint darkening wash, and is separated from the content by a single left rule —
+no border-all-round, no radius. Each of those is load-bearing:
+
+- **`height`, not `maxHeight`.** With a max the column was only as tall as its rows, so the rule
+  grew and shrank with the feed and read as the edge of a floating block. Matching the *content*
+  column would be worse — production plus materials runs to thousands of pixels, so the rule
+  would continue for screens past the last row, drawn beside nothing. Pinned to the viewport is
+  the third option and the right one.
+- **The wash and the rule together.** A boundary with no surface reads as a stray line; a surface
+  with a closed outline and a radius reads as an object bolted onto the page, which is what the
+  full Card treatment produced when it was tried. A region needs both, and only both.
+- **The bleed matches `p: { xs: 2, md: 3 }` exactly.** A bleed wider than the padding it cancels
+  is overflow, not bleed — and the collapsed strip renders at `xs`, where the padding is 16px.
+- **The bleed is sideways only; the top is painted.** A negative `margin-top` cannot close the
+  gap under the page header, because `position: sticky` with `top: 0` is a constraint at *every*
+  scroll position rather than only once you scroll: the margin lifts the box above the scrollport,
+  `top: 0` forbids exactly that, and sticky pushes it back down. The property sits in the styles
+  looking correct while the gap survives. A `::before` band carrying the same wash and rule fills
+  that space instead — `<main>` clips it at the header, and it scrolls away with its sticky parent,
+  so there is no second state to keep in sync and no phantom scroll height.
+
+The collapsed strip takes the same height, wash and rule, so collapsing reads as the region
+narrowing rather than as a different thing appearing in its place.
+
+**A job's feed is never empty.** `jobs.created_at` becomes the oldest row, `Job created`, derived
+the same way movements are rather than stored as an event. Before it, an untouched job read
+"Nothing has been recorded on this job yet" — true, and useless, since it left the reader unsure
+whether the feed was broken or the job was simply new. The date also stopped being a field on the
+details card, where it was a fact with no neighbours; here it is the start of a sequence.
+
+**The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
+step, which is what the operator traveler renders, so it is a real channel to the floor. Photos
+are deliberately absent: that pipeline solves a phone-camera problem the office does not have.
+
+**What the rail deliberately cannot show is recorded TIME.** `job_operation_intervals` has no
+admin SELECT policy at all — [`20260816203641`](../../supabase/migrations/20260816203641_job_operation_intervals.sql)
+argues a row-returning policy exposing `operator_id` would *be* a per-person report — and
+[`20260825170421`](../../supabase/migrations/20260825170421_drop_per_person_time_reporting.sql)
+removed the one audited exception. The operator feed has start/finish rows; this one has none, and
+that asymmetry is the guardrail rather than an oversight. Office time stays aggregate and
+identity-free on the step card (`get_operation_actuals`).
+
+**A `?op=` deep link** scroll-highlights the step *and* narrows the rail to it, so arriving from
+the outside-work drawer lands on a highlighted step with its history already showing.
+
+**Step cards carry a note count, not a history.** Completion history, vendor slips and operator
+notes all used to live behind an expand chevron on
+[`OperationCard`](../../components/jobs/OperationCard.tsx) — three chronological histories sorted
+into per-step buckets, only one of which could be open at a time. They moved here; the chevron is
+gone, and the count that remains is a control that filters the rail to that step
+(`activity step filtered`).
 
 **Attachments.** Customer PO PDFs and reference files. **View** opens the file in a dialog
 (`<iframe>` for PDFs, `<img>` for images) off a fresh signed URL, so the PO is readable without
@@ -496,6 +603,11 @@ reload — same as internal-completion undo. The slip itself keeps its number, m
 vendor may still be holding the printed copy. Operator notes + photos stay fully
 enabled on outside ops; they are real user notes, no longer polluted by auto-events.
 
+The **job activity rail** derives its own `sent` / `received` / `short_closed` rows from the same
+`outside_shipments` columns, in a pure function rather than by writing `note_type = 'event'` rows:
+the ledger already owns those facts, and a second copy in `notes` would eventually disagree with
+it.
+
 **Deferred:** vendor lead-time → due-date math, per-op cost actuals, and scheduling.
 *(⚠ Two items left this list on 2026-09-03. **Partial/split sends** shipped — that is what the
 whole outside-processing module is. **PO generation** was not deferred but* dropped: *the slip is
@@ -634,17 +746,17 @@ unless stated.
 
 ---
 
-## SUSPECTED CODE BUG — the delete gate on the detail page
+## The delete gate on the detail page — FIXED 2026-09-06
 
 `utils/jobsAccess.ts#deleteJob` archives unconditionally, per CLAUDE.md's *"Deletion is archive
-(soft-delete), and never blocks"*. [`app/dashboard/[companyId]/jobs/[jobId]/page.tsx`](../../app/dashboard/[companyId]/jobs/[jobId]/page.tsx)
-has not followed:
+(soft-delete), and never blocks"*. The job page did not follow, and this section tracked it as a
+suspected bug. Both halves are now gone:
 
-- `handleDeleteClick` refuses when `shipmentCount > 0` or a QuickBooks invoice link exists —
-  *"kept for recordkeeping and can't be deleted"* — so a shipped job can never be archived from
-  the UI, though the access layer and its test say it must be.
-- The confirm dialog then claims the action *"permanently removes the job and all of its parts,
-  operations, notes, and attachments. This cannot be undone."* Nothing is removed and it is
-  reversible by clearing `deleted_at`.
-
-Not fixed here (docs-only change). Both the gate and the copy need to go.
+- `handleDeleteClick` refused when `shipmentCount > 0` or a QuickBooks invoice link existed —
+  *"kept for recordkeeping and can't be deleted"* — so a shipped job could never be archived from
+  the UI. Its stated justification was that a foreign key blocked the delete anyway; **that was
+  never true of a soft delete**, which stamps `deleted_at` and tests no key. The guard, the
+  `countShipmentsForJob` fetch and the QuickBooks link fetch that fed it are all removed.
+- The confirm dialog claimed the action *"permanently removes the job and all of its parts,
+  operations, notes, and attachments. This cannot be undone."* It now says what happens: the job
+  leaves the list and searches, referencing documents keep working, the record is kept.

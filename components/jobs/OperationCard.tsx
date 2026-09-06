@@ -1,37 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
-import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
 import UndoIcon from '@mui/icons-material/Undo';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 import { isOutsideOperation } from '@/types/job';
-import type { OutsideOperationSummary, OutsideShipmentWithRelations } from '@/types/outsideShipment';
-import { getOutsideShipmentsForOperation, outstandingOn } from '@/utils/outsideShipmentsAccess';
+import type { OutsideOperationSummary } from '@/types/outsideShipment';
 import type { JobOperation, OperationStatus } from '@/types/job';
-import type { JobNote } from '@/types/operator';
-import type { OperationCompletionSummary, OperationCompletionEvent } from '@/types/operationCompletion';
-import {
-  getOperationCompletionEvents,
-  voidOperationCompletion,
-} from '@/utils/operationCompletionsAccess';
+import type { OperationCompletionSummary } from '@/types/operationCompletion';
 import type { OperationActuals } from '@/types/operationInterval';
 import { formatTime } from '@/types/routings';
 import { formatDuration } from '@/lib/duration';
 import OperationStatusChip from './OperationStatusChip';
-import OperationNotes from './OperationNotes';
 
 interface OperationCardProps {
   operation: JobOperation;
@@ -41,12 +30,18 @@ interface OperationCardProps {
    * which is a different fact from zero and must render differently.
    */
   actuals?: OperationActuals;
-  companyId: string;
   /** Good/target/remaining for this op (from completion events). */
   summary?: OperationCompletionSummary;
   disabled?: boolean;
-  /** Operator step-tagged notes + photos for this operation (from the activity feed). */
-  stepNotes?: JobNote[];
+  /**
+   * How many notes the activity rail holds for this step. 0 hides the badge.
+   *
+   * A count, not the notes: the card no longer renders them. Completion
+   * history, vendor slips and notes all moved into the job's activity rail,
+   * which is chronological — the thing all three of them already were before
+   * being sorted into per-step buckets.
+   */
+  noteCount?: number;
   onComplete: (operationId: string) => void;
   onUndo: (operationId: string) => void;
   /** Outside-op actions. Required in practice when the op is external; the panel
@@ -57,12 +52,13 @@ interface OperationCardProps {
    * stay disabled rather than guessing a quantity.
    */
   outside?: OutsideOperationSummary;
-  /** Open the slip preview. Omitted on surfaces that should not reprint. */
-  onViewSlip?: (shipmentId: string) => void;
   onSend?: (operationId: string) => void;
   onReceive?: (operationId: string) => void;
-  /** Called after a per-event void so the panel can refresh summaries + parent. */
-  onCompletionsChanged?: () => void;
+  /**
+   * Narrow the activity rail to this step. Absent on a surface with no rail,
+   * which is what hides the badge there rather than showing a dead control.
+   */
+  onShowActivity?: (operationId: string, stepName: string) => void;
 }
 
 // Background and border colors for each status
@@ -89,24 +85,16 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
 export default function OperationCard({
   operation,
   actuals,
-  companyId,
   summary,
   disabled = false,
-  stepNotes = [],
+  noteCount = 0,
   onComplete,
   onUndo,
   outside,
-  onViewSlip,
   onSend,
   onReceive,
-  onCompletionsChanged,
+  onShowActivity,
 }: OperationCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [slips, setSlips] = useState<OutsideShipmentWithRelations[]>([]);
-  const [slipsLoading, setSlipsLoading] = useState(false);
-  const [events, setEvents] = useState<OperationCompletionEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [voidingId, setVoidingId] = useState<string | null>(null);
 
   const status = operation.status as OperationStatus;
   const styles = STATUS_STYLES[status];
@@ -122,54 +110,6 @@ export default function OperationCard({
   const target = summary?.target ?? 0;
   const qtyGood = summary?.qty_good ?? 0;
   const qtyRemaining = summary?.qty_remaining ?? 0;
-
-  const loadEvents = async () => {
-    setEventsLoading(true);
-    try {
-      setEvents(await getOperationCompletionEvents(operation.id, companyId));
-    } catch {
-      setEvents([]);
-    } finally {
-      setEventsLoading(false);
-    }
-  };
-
-  // Load the completion history lazily on expand (in the click handler, not an
-  // effect, so there's no setState-in-effect cascade). External ops have no
-  // completion events, so skip the fetch.
-  const loadSlips = async () => {
-    setSlipsLoading(true);
-    try {
-      setSlips(await getOutsideShipmentsForOperation(operation.id));
-    } catch {
-      setSlips([]);
-    } finally {
-      setSlipsLoading(false);
-    }
-  };
-
-  // Loaded in the click handler, not an effect, so there is no
-  // setState-in-effect cascade. An outside op has no completion events -- it has
-  // SLIPS, which is a different history and the primary answer to "what has been
-  // shipped out" without inventing a new surface for it.
-  const handleToggleExpand = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (!next) return;
-    if (isExternal) loadSlips();
-    else loadEvents();
-  };
-
-  const handleVoidEvent = async (completionId: string) => {
-    setVoidingId(completionId);
-    try {
-      await voidOperationCompletion(completionId);
-      await loadEvents();
-      onCompletionsChanged?.();
-    } finally {
-      setVoidingId(null);
-    }
-  };
 
   // Internal: any not-done op shows Complete; a completed op shows Undo. Outside
   // ops never show Complete.
@@ -188,25 +128,33 @@ export default function OperationCard({
   // Names what one press actually reverses. An outside op steps back one
   // MOVEMENT (the newest receipt, else the newest slip), which is not the same
   // promise as undoing a completion.
-  const undoLabel = isExternal ? 'Undo last movement' : 'Undo completion';
+  const undoLabel = isExternal
+    ? 'Undo last movement'
+    : 'Undo everything recorded on this step';
+  /**
+   * ANYTHING RECORDED CAN BE TAKEN BACK, not only a finished step.
+   *
+   * This gated on `status === 'completed'`, so a step with 10 of 14 good — a
+   * mistyped quantity, the commonest thing to want back — offered no control at
+   * all. `undoJobOperation` has always voided every completion on the step
+   * regardless of status; only the gate was wrong.
+   *
+   * Distinct from the activity rail's Undo, which takes back ONE recorded
+   * event. This one clears the step, which is why the label says so.
+   */
   const canUndo = isExternal
     ? !!outside && (outside.qty_sent > 0 || outside.qty_good > 0)
-    : status === 'completed';
+    : qtyGood > 0;
 
   const formatDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleString();
   };
 
-  // The expand chevron is ALWAYS shown so an operation never looks like it
-  // lacks the feature. When notes exist, a note icon + count sits inside the
-  // button to say how much there is to reveal; at zero we show only the
-  // chevron (a bare "0" reads as a meaningless stray number). A "note" is the
-  // admin completion note (0 or 1) plus each operator step-note. This is
-  // independent of completion status — a pending operation with floor notes is
-  // expandable too. Timestamps aren't counted: the completed time already
-  // shows inline on the collapsed row.
-  const noteCount = (operation.notes ? 1 : 0) + stepNotes.length;
+  // The note badge counts NOTES ONLY, and only ones tagged to this step. The
+  // admin completion note is no longer counted: it renders on its completion's
+  // row in the rail, and the badge navigates to a step filter that shows notes —
+  // counting a row the filter will not show would overpromise.
 
   return (
     <Box
@@ -219,17 +167,26 @@ export default function OperationCard({
         transition: 'all 0.2s ease',
       }}
     >
-      {/* Main Row */}
+      {/* Main Row.
+          WRAPS, AND THE FLEX-BASIS BELOW IS WHAT MAKES THAT WORK. With the
+          activity rail docked, a 1200px viewport leaves this row ~504px, and a
+          partially-shipped outside op wants `Outside · vendor` + `At Vendor` +
+          `Send to <vendor>` + `Receive N` + undo on one line. `flexWrap` alone
+          would do nothing: the info column was `flex: 1`, i.e. basis 0%, and a
+          wrap only fires when the items' BASES overflow the line — so it would
+          shrink toward zero, truncating the operation name away while the
+          buttons stayed put. An explicit basis makes the wrap point real. */}
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
           gap: 2,
           p: 2,
+          flexWrap: 'wrap',
         }}
       >
         {/* Operation Info */}
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ flex: '1 1 280px', minWidth: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
             <Typography fontWeight={500} noWrap>
               {operation.operation_name}
@@ -241,7 +198,13 @@ export default function OperationCard({
                 variant="outlined"
                 icon={<LocalShippingIcon />}
                 label={vendorName ? `Outside · ${vendorName}` : 'Outside'}
-                sx={{ flexShrink: 0 }}
+                // Shrinkable, unlike before: a long vendor name held a ~173px
+                // floor under the whole info column, which is width this row
+                // cannot spare once the activity rail is docked.
+                sx={{
+                  minWidth: 0,
+                  '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+                }}
               />
             )}
           </Box>
@@ -295,15 +258,12 @@ export default function OperationCard({
               </Typography>
             </Box>
           )}
-          {status === 'completed' && operation.completed_at && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-              <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
-              <Typography variant="caption" color="text.secondary">
-                {isExternal ? 'Received' : 'Completed'} {formatDateTime(operation.completed_at)}
-                {operation.completed_by_name ? ` by ${operation.completed_by_name}` : ''}
-              </Typography>
-            </Box>
-          )}
+          {/* WHO FINISHED IT AND WHEN is not here any more. The activity rail
+              three inches to the right says "Completed Final Inspection · Dev
+              Seed User · 10 pcs" with a timestamp, and it says it for every
+              completion rather than only the last one. This line was the same
+              sentence, less complete, on the surface people act from. The chip
+              still says the step is done; the feed says who and when. */}
           {/* Quantity progress: good pieces vs the part's order qty. Shown when
               there's a target and either work has started or it's not yet done.
               Not for external ops (vendor work — no quantity completions). */}
@@ -344,8 +304,46 @@ export default function OperationCard({
             completed / at-vendor, where it carries real state. */}
         {status !== 'pending' && <OperationStatusChip status={status} />}
 
-        {/* Action Buttons */}
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+        {/* Action Buttons — never squashed. `ml: auto` keeps them right-aligned
+            whether they share the line or drop below it.
+
+            THE NOTE BADGE LIVES IN HERE, not beside this cluster: as a sibling
+            after an `ml: auto` box it was pushed onto a line of its own at the
+            far left, which read as a stray control. */}
+        <Box
+          sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0, ml: 'auto' }}
+        >
+          {/* The count used to sit inside the expand chevron. With completion
+              history, vendor slips and notes all living in the activity rail,
+              the chevron had nothing left to reveal and the count became the
+              whole affordance: press it and the rail narrows to this step.
+
+              Hidden at zero — a bare "0" reads as a stray number — and hidden
+              without `onShowActivity`, so a surface with no rail shows no dead
+              control. */}
+          {noteCount > 0 && onShowActivity && (
+            <Tooltip
+              title={`Show ${noteCount === 1 ? 'this note' : 'these notes'} in the activity feed`}
+            >
+              <Button
+                size="small"
+                startIcon={<ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />}
+                onClick={() => {
+                  posthog.capture('activity step filtered', {
+                    surface: 'office_job',
+                    note_count: noteCount,
+                    cleared: false,
+                  });
+                  onShowActivity(operation.id, operation.operation_name);
+                }}
+                data-testid="operation-note-count"
+                aria-label={`Show ${noteCount} ${noteCount === 1 ? 'note' : 'notes'} for ${operation.operation_name} in the activity feed`}
+                sx={{ minWidth: 0, px: 1, flexShrink: 0, color: 'text.secondary' }}
+              >
+                {noteCount}
+              </Button>
+            </Tooltip>
+          )}
           {canComplete && (
             <Tooltip title="Complete Operation">
               <span>
@@ -421,180 +419,8 @@ export default function OperationCard({
           )}
         </Box>
 
-        {/* Expand toggle — the chevron is always shown so the affordance never
-            looks absent. When notes exist, a note icon + count sits inside the
-            button (tooltip spells it out); at zero we show only the chevron,
-            keeping note-less rows clean and scannable for ops that have notes. */}
-        <Tooltip title={noteCount > 0 ? `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}>
-          <IconButton
-            size="small"
-            onClick={handleToggleExpand}
-            sx={{ color: 'text.secondary', borderRadius: 1, gap: 0.5 }}
-            data-testid="operation-expand"
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} operation details (${noteCount} ${noteCount === 1 ? 'note' : 'notes'})`}
-          >
-            {noteCount > 0 && (
-              <>
-                <ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />
-                <Typography
-                  variant="caption"
-                  component="span"
-                  sx={{ lineHeight: 1, fontWeight: 600 }}
-                  data-testid="operation-note-count"
-                >
-                  {noteCount}
-                </Typography>
-              </>
-            )}
-            {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-          </IconButton>
-        </Tooltip>
       </Box>
 
-      {/* Expanded Details */}
-      <Collapse in={expanded}>
-        <Box
-          sx={{
-            px: 2,
-            pb: 2,
-            pt: 0,
-            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-            mt: 0,
-          }}
-        >
-          {/* Slip history — an outside op has no completion events; it has
-              DOCUMENTS. Numbered, printable and voidable, which is why this is
-              the primary answer to "what has been shipped out" and costs no new
-              surface to give. Void is deliberately NOT here: it lives inside the
-              slip preview, so the destructive action is only reachable once the
-              document is on screen. */}
-          {isExternal && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Vendor packing slips
-              </Typography>
-              {slipsLoading ? (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Loading…
-                </Typography>
-              ) : slips.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Nothing has gone out for this step yet
-                </Typography>
-              ) : (
-                <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  {slips.map((sl) => {
-                    const voided = sl.voided_at !== null;
-                    const live = (sl.receipts ?? []).filter((r) => !r.voided_at);
-                    const good = live.reduce((n, r) => n + Number(r.quantity_good), 0);
-                    const out = outstandingOn(sl);
-                    return (
-                      <Box
-                        key={sl.id}
-                        sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: voided ? 0.5 : 1 }}
-                      >
-                        <Typography
-                          variant="body2"
-                          sx={{ flex: 1, textDecoration: voided ? 'line-through' : 'none' }}
-                        >
-                          {sl.quantity} sent {formatDateTime(sl.shipped_at)}
-                          {good > 0 ? ` · ${good} back` : ''}
-                          {!voided && out > 0 ? ` · ${out} still out` : ''}
-                          {sl.closed_at ? ' · closed short' : ''}
-                          {voided ? ' · voided' : ''}
-                        </Typography>
-                        {/* The slip NUMBER is the control, matching the drawer.
-                            It is the thing you read out on the phone, so it is
-                            the thing worth clicking — "View slip" made you find
-                            the number in the sentence beside it first. */}
-                        {onViewSlip && (
-                          <Button size="small" onClick={() => onViewSlip(sl.id)} sx={{ minWidth: 0 }}>
-                            {sl.slip_number}
-                          </Button>
-                        )}
-                      </Box>
-                    );
-                  })}
-                </Box>
-              )}
-            </Box>
-          )}
-
-          {/* Completion history — who completed how many, when. Voided events
-              stay on record (struck through) so corrections are auditable. */}
-          {!isExternal && <Box sx={{ mt: 2 }}>
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>
-              Completion history
-            </Typography>
-            {eventsLoading ? (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                Loading…
-              </Typography>
-            ) : events.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                No completions recorded yet
-              </Typography>
-            ) : (
-              <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                {events.map((e) => {
-                  const voided = e.voided_at !== null;
-                  return (
-                    <Box
-                      key={e.id}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: voided ? 0.5 : 1 }}
-                    >
-                      <Typography
-                        variant="body2"
-                        sx={{ flex: 1, textDecoration: voided ? 'line-through' : 'none' }}
-                      >
-                        {e.quantity_good} good
-                        {e.completed_by_name ? ` · ${e.completed_by_name}` : ''}
-                        {' · '}
-                        {formatDateTime(e.completed_at)}
-                        {voided ? ' · voided' : ''}
-                      </Typography>
-                      {!voided && (
-                        <Button
-                          size="small"
-                          color="error"
-                          disabled={disabled || voidingId === e.id}
-                          onClick={() => handleVoidEvent(e.id)}
-                          sx={{ minWidth: 0 }}
-                        >
-                          Void
-                        </Button>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Box>
-            )}
-          </Box>}
-
-          {/* Admin note captured at completion (Complete modal). */}
-          {operation.notes && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Notes
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.5 }}>
-                {operation.notes}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Operator step-tagged notes + photos (from the activity feed). */}
-          <OperationNotes notes={stepNotes} />
-
-          {/* With zero notes the two blocks above render nothing; show an
-              explicit empty state so expanding always reveals something. */}
-          {noteCount === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              No notes yet
-            </Typography>
-          )}
-        </Box>
-      </Collapse>
     </Box>
   );
 }

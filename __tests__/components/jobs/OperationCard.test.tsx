@@ -7,22 +7,13 @@ import jiggedTheme from '@/lib/theme';
 import OperationCard from '@/components/jobs/OperationCard';
 import type { JobOperation } from '@/types/job';
 import type { OutsideOperationSummary } from '@/types/outsideShipment';
-import type { JobNote } from '@/types/operator';
+import type { OperationCompletionSummary } from '@/types/operationCompletion';
 
-// OperationNotes → jobNoteMediaAccess imports the Supabase client at module load
-// (which needs env creds absent in the unit env). We render notes with no media,
-// so a no-op stub for the signed-URL fetch is all that's needed.
-vi.mock('@/utils/jobNoteMediaAccess', () => ({
-  getJobNoteMediaUrl: vi.fn().mockResolvedValue(null),
-}));
-
-// OperationCard pulls in operationCompletionsAccess (completion history + void),
-// which imports the Supabase client at module load — stub it so the unit env
-// needs no creds. Events default to empty (no history rendered unless expanded).
-vi.mock('@/utils/operationCompletionsAccess', () => ({
-  getOperationCompletionEvents: vi.fn().mockResolvedValue([]),
-  voidOperationCompletion: vi.fn().mockResolvedValue(undefined),
-}));
+// The card reads no data of its own any more — completion history, vendor slips
+// and notes all moved to the job activity rail — so the Supabase-importing
+// stubs this file used to need are gone with them. `posthog-js` is stubbed
+// because the note badge reports `activity step filtered`.
+vi.mock('posthog-js', () => ({ default: { capture: vi.fn() } }));
 
 const op = (over: Partial<JobOperation> = {}): JobOperation =>
   ({
@@ -44,21 +35,8 @@ const op = (over: Partial<JobOperation> = {}): JobOperation =>
     ...over,
   }) as unknown as JobOperation;
 
-const note = (over: Partial<JobNote> = {}): JobNote =>
-  ({
-    id: 'n-1',
-    job_id: 'job-1',
-    job_operation_id: 'op-1',
-    operation_label: 'Op 10 · Mill',
-    body: 'floor note',
-    created_at: '2026-06-01T00:00:00Z',
-    author_name: 'Sam',
-    media: [], // no media → OperationNotes' signed-URL effect is a no-op, no mocking needed
-    ...over,
-  }) as unknown as JobNote;
-
 // A pending op with isNextReady=false renders no Start/Complete/Undo button, so
-// the expand control is the only button in the card — keeps role queries simple.
+// the note badge is the only button in the card — keeps role queries simple.
 const baseProps = {
   hasInProgressOperation: false,
   isNextReady: false,
@@ -67,59 +45,111 @@ const baseProps = {
   onUndo: vi.fn(),
 };
 
-const renderCard = (operation: JobOperation, stepNotes: JobNote[] = []) =>
+const renderCard = (
+  operation: JobOperation,
+  extra: {
+    noteCount?: number;
+    onShowActivity?: (id: string, name: string) => void;
+    summary?: OperationCompletionSummary;
+  } = {},
+) =>
   render(
     <ThemeProvider theme={jiggedTheme}>
-      <OperationCard operation={operation} stepNotes={stepNotes} {...baseProps} />
+      <OperationCard operation={operation} {...baseProps} {...extra} />
     </ThemeProvider>,
   );
 
-describe('OperationCard — always-expandable + note count', () => {
-  it('always renders the expand control, with no count shown when there are no notes', () => {
-    renderCard(op(), []);
-    expect(screen.getByTestId('operation-expand')).toBeInTheDocument();
-    // A bare "0" reads as a stray number, so note-less rows show only the chevron.
+describe('OperationCard — the note badge', () => {
+  /**
+   * The expand chevron is GONE. Completion history, vendor packing slips and
+   * operator notes all moved into the job's activity rail — chronological,
+   * which is what all three already were — so the card had nothing left to
+   * reveal. What survives is the count, and it is now a control: pressing it
+   * narrows the rail to this step.
+   */
+  it('renders no badge when the step has no notes', () => {
+    renderCard(op(), { noteCount: 0, onShowActivity: vi.fn() });
+    // A bare "0" reads as a stray number.
     expect(screen.queryByTestId('operation-note-count')).not.toBeInTheDocument();
   });
 
-  it('counts operator step-notes', () => {
-    renderCard(op(), [note({ id: 'a' }), note({ id: 'b' })]);
+  it('renders no badge on a surface with no rail, rather than a dead control', () => {
+    renderCard(op(), { noteCount: 3 });
+    expect(screen.queryByTestId('operation-note-count')).not.toBeInTheDocument();
+  });
+
+  it('shows the count it was given', () => {
+    renderCard(op(), { noteCount: 2, onShowActivity: vi.fn() });
     expect(screen.getByTestId('operation-note-count')).toHaveTextContent('2');
   });
 
-  it('counts the admin completion note alongside operator notes', () => {
-    renderCard(op({ notes: 'setup dialed in' }), [note({ id: 'a' })]);
-    expect(screen.getByTestId('operation-note-count')).toHaveTextContent('2');
-  });
-
-  it('encodes the note count in the button accessible name', () => {
-    renderCard(op(), [note({ id: 'a' }), note({ id: 'b' })]);
+  it('names the step and the count in the accessible name', () => {
+    renderCard(op(), { noteCount: 2, onShowActivity: vi.fn() });
     expect(
-      screen.getByRole('button', { name: /Expand operation details \(2 notes\)/i }),
+      screen.getByRole('button', { name: /Show 2 notes for Mill in the activity feed/i }),
     ).toBeInTheDocument();
   });
 
-  it('reveals a "No notes yet" empty state for an operation with no notes', async () => {
-    renderCard(op(), []);
-    // MUI Collapse keeps children mounted, so the empty state sits in the DOM
-    // ready to reveal — expanding shows it instead of a blank panel.
-    await userEvent.click(screen.getByTestId('operation-expand'));
-    expect(screen.getByText(/No notes yet/i)).toBeInTheDocument();
+  it('singularises a lone note', () => {
+    renderCard(op(), { noteCount: 1, onShowActivity: vi.fn() });
+    expect(
+      screen.getByRole('button', { name: /Show 1 note for Mill in the activity feed/i }),
+    ).toBeInTheDocument();
   });
 
-  it('does not render the empty state when the operation has notes', () => {
-    renderCard(op({ notes: 'done' }), [note()]);
-    expect(screen.queryByText(/No notes yet/i)).not.toBeInTheDocument();
+  it('asks the rail for this step when pressed', async () => {
+    const onShowActivity = vi.fn();
+    renderCard(op(), { noteCount: 2, onShowActivity });
+
+    await userEvent.click(screen.getByTestId('operation-note-count'));
+
+    expect(onShowActivity).toHaveBeenCalledWith('op-1', 'Mill');
   });
 
-  it('reveals both the admin note and operator notes when expanded', async () => {
-    renderCard(op({ notes: 'admin completion note' }), [note({ body: 'operator floor note' })]);
+  it('no longer offers an expand control', () => {
+    renderCard(op({ notes: 'admin completion note' }), { noteCount: 2, onShowActivity: vi.fn() });
+    expect(screen.queryByTestId('operation-expand')).not.toBeInTheDocument();
+    // The admin completion note renders on its completion's row in the rail,
+    // not here — which is also why it is not counted in the badge.
+    expect(screen.queryByText('admin completion note')).not.toBeInTheDocument();
+  });
+});
 
-    await userEvent.click(screen.getByTestId('operation-expand'));
+describe('OperationCard — undoing an internal step', () => {
+  /**
+   * THE GATE WAS `status === 'completed'`, so a step with 10 of 14 good — a
+   * mistyped quantity, the commonest thing to want back — offered no control at
+   * all. `undoJobOperation` has always voided every completion on the step
+   * regardless of status; only the gate was wrong.
+   */
+  it('offers undo on a partially completed step, not just a finished one', () => {
+    renderCard(op({ status: 'in_progress' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 10, qty_remaining: 4 },
+    });
 
-    expect(screen.getByText('admin completion note')).toBeInTheDocument();
-    expect(screen.getByText('operator floor note')).toBeInTheDocument();
-    expect(screen.queryByText(/No notes yet/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Undo everything recorded on this step/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers no undo when nothing has been recorded', () => {
+    renderCard(op({ status: 'pending' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 0, qty_remaining: 14 },
+    });
+
+    expect(screen.queryByRole('button', { name: /Undo/i })).not.toBeInTheDocument();
+  });
+
+  it('names the step-clearing undo apart from the rail\u2019s per-event one', () => {
+    // The rail says "Undo the completion of N pieces on X"; this one clears the
+    // whole step, and the label has to say which is which.
+    renderCard(op({ status: 'completed' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 14, qty_remaining: 0 },
+    });
+
+    expect(
+      screen.getByRole('button', { name: /Undo everything recorded on this step/i }),
+    ).toBeInTheDocument();
   });
 });
 

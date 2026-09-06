@@ -40,7 +40,7 @@ import type {
 } from '@/types/outsideShipment';
 
 /** numeric(12,2)-ish money-free rounding. See `roundQty` usage notes below. */
-function roundQty(n: number): number {
+export function roundQty(n: number): number {
   return Math.round(n * 100) / 100;
 }
 

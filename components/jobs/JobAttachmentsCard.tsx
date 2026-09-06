@@ -13,16 +13,11 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
 import Tooltip from '@mui/material/Tooltip';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DownloadIcon from '@mui/icons-material/Download';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import CloseIcon from '@mui/icons-material/Close';
 import {
   listJobAttachments,
   uploadJobAttachment,
@@ -31,6 +26,9 @@ import {
   validateAttachmentFile,
 } from '@/utils/jobAttachmentsAccess';
 import type { JobAttachment } from '@/types/job';
+import JobAttachmentViewerDialog, {
+  isViewableAttachment as isViewable,
+} from './JobAttachmentViewerDialog';
 
 // Stable empty fallback so derived data doesn't churn while the first load runs.
 const EMPTY_ATTACHMENTS: JobAttachment[] = [];
@@ -60,16 +58,7 @@ function formatBytes(bytes: number | null): string {
 
 /** Can this attachment be previewed inline (PDF or image)? Falls back to the
  *  filename extension when mime_type is missing. */
-function isImageAttachment(att: JobAttachment): boolean {
-  const mime = att.mime_type ?? '';
-  const name = att.file_name.toLowerCase();
-  return mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/.test(name);
-}
-function isViewable(att: JobAttachment): boolean {
-  const mime = att.mime_type ?? '';
-  const name = att.file_name.toLowerCase();
-  return mime === 'application/pdf' || name.endsWith('.pdf') || isImageAttachment(att);
-}
+
 
 /**
  * Attachments panel for the job — the customer PO PDF and any other reference
@@ -92,8 +81,6 @@ export default function JobAttachmentsCard({
   const inputRef = useRef<HTMLInputElement | null>(null);
   // Inline preview state: the attachment being viewed + its fresh signed URL.
   const [viewing, setViewing] = useState<JobAttachment | null>(null);
-  const [viewUrl, setViewUrl] = useState<string | null>(null);
-  const [viewLoading, setViewLoading] = useState(false);
 
   const {
     data: attachmentsData,
@@ -139,24 +126,8 @@ export default function JobAttachmentsCard({
 
   // Open the inline viewer: fetch a fresh signed URL and show it in a dialog
   // (iframe for PDFs, <img> for images). Keeps the user on the job page.
-  const handleView = async (att: JobAttachment) => {
-    setViewing(att);
-    setViewUrl(null);
-    setViewLoading(true);
-    try {
-      setViewUrl(await getJobAttachmentUrl(att.storage_path));
-    } catch {
-      setError('Could not open the file.');
-      setViewing(null);
-    } finally {
-      setViewLoading(false);
-    }
-  };
-
-  const handleCloseViewer = () => {
-    setViewing(null);
-    setViewUrl(null);
-  };
+  // The viewer owns its own signed-URL fetch — see JobAttachmentViewerDialog.
+  const handleView = (att: JobAttachment) => setViewing(att);
 
   const handleDelete = async (att: JobAttachment) => {
     try {
@@ -265,49 +236,7 @@ export default function JobAttachmentsCard({
 
       {/* Inline preview — keeps the user on the job page instead of forcing a
           download. PDFs render in an iframe, images in an <img>. */}
-      <Dialog open={!!viewing} onClose={handleCloseViewer} fullScreen>
-        <DialogTitle sx={{ pr: 6 }}>
-          {viewing?.file_name ?? 'Attachment'}
-          <IconButton
-            aria-label="Close"
-            onClick={handleCloseViewer}
-            sx={{ position: 'absolute', right: 12, top: 12 }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 0, bgcolor: 'background.default' }}>
-          {viewLoading || !viewUrl ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-              <CircularProgress />
-            </Box>
-          ) : viewing && isImageAttachment(viewing) ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', p: 2 }}>
-              <Box
-                component="img"
-                src={viewUrl}
-                alt={viewing.file_name}
-                sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-              />
-            </Box>
-          ) : (
-            <Box
-              component="iframe"
-              src={viewUrl}
-              title={viewing?.file_name ?? 'Attachment'}
-              sx={{ width: '100%', height: '100%', border: 0, display: 'block' }}
-            />
-          )}
-        </DialogContent>
-        <DialogActions>
-          {viewing && (
-            <Button startIcon={<DownloadIcon />} onClick={() => handleDownload(viewing)}>
-              Download
-            </Button>
-          )}
-          <Button onClick={handleCloseViewer}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      <JobAttachmentViewerDialog attachment={viewing} onClose={() => setViewing(null)} />
     </>
   );
 }

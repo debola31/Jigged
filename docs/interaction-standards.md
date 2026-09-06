@@ -115,7 +115,7 @@ Two facts that keep those rows from being re-litigated:
 > exist; its helper is `reviveArchivedCustomerByName`, private to
 > `utils/customerAccess.ts`, not an exported `reviveArchivedCustomer`.)*
 
-### Note surfaces — the one place the standard splits by device, not stakes
+### Note surfaces — the one place the standard splits by available width, not stakes
 
 Note / comment **edit + delete** affordances are shaped per surface:
 
@@ -123,6 +123,7 @@ Note / comment **edit + delete** affordances are shaped per surface:
 |---|---|---|
 | **Operator** — job feed, Playbook sheet, machine logbook | One 48px overflow (kebab) → Edit / Delete ([`NoteActionsMenu`](../components/notes/NoteActionsMenu.tsx)) | Note headers already carry author + optional step chip + timestamp and already wrap at 375px; two more 48px targets push every header onto a third line. MUI `MenuItem`s clear 48px, so the touch floor is met at the point of *choice* — which is where it matters, since a mis-tap on a kebab is harmless and a mis-tap on a bare trash icon is not. |
 | **Office** — part Activity ([`HistoryTab`](../components/parts/workspace/tabs/HistoryTab.tsx)) | Destructive control **shown at rest** as an error-coloured trash icon, plain edit icon beside it, delete rightmost | Burying delete in a kebab here would regress the red-at-rest and delete-sits-last rules above. Desktop has the width and the hover; the phone constraint does not apply. |
+| **Office** — the job activity rail ([`JobActivityNoteRow`](../components/jobs/activity/JobActivityNoteRow.tsx)) | The kebab, **not** the office icons-at-rest shape | The exception that proves the split is about WIDTH, not about who is looking. This is an office surface with a phone's constraint: the rail is 320px at `lg`, so a note's content column is ~288px and two 48px targets at rest would take a sixth of it on every row. The rule below settles it — the kebab is the default for a new note surface, and icons-at-rest is what a wide pane earns. |
 | **The operator's own work list** (`/operator/[companyId]/my-work`) | Same kebab, **plus: the row body must stay inert** | See below. |
 
 The work list is the only note surface whose row also has to disclose *content* —
@@ -237,6 +238,36 @@ never produces the false positive that trains users to click through
 dialog. Covered by
 [`__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx`](../__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx)
 (`describe`: *PartWorkspace — unsaved-changes exit guard*).
+
+### Invariant 3 — one refresh per page, called by every write
+
+> **A write must refresh every surface that shows what it changed — in place,
+> without a reload.** Where one page renders the same fact twice from two
+> different loaders, the refresh is ONE function that touches both, called by
+> every write path. Not one per call site.
+
+Invariant 1 governs what a refresh signal must not *destroy*. This is the other
+half, and it is the one that gets forgotten: nothing fails when a write refreshes
+only half the page. Nothing throws, no test goes red, and the surface that was
+not refreshed looks exactly like a surface with nothing to show.
+
+The failure it prevents: the job page's activity rail lists the completion
+events, and the step cards above it show the quantities those events produce —
+two hooks, same facts. `onOperationUpdate` was wired straight to `fetchJob`, so
+marking a step complete updated the cards and left the rail empty until a manual
+reload. **The person who reported it reasonably assumed the feed was broken.**
+Three near-copies of the refresh already existed, one per write path, and the
+step cards called none of them.
+
+The fix shape: one `refreshAfterWrite` on the page, listing every loader the
+page owns, handed to every child that writes. A new write path then cannot
+forget half the page, because there is no half to pick.
+
+Two things it must not do. It must not re-enter a loading state — `useLoad`'s
+`refresh()` is stale-while-revalidate and `reload()` is not, and blanking a
+surface the user is reading is worse than the staleness it fixes
+([`hooks/useLoad.ts`](../hooks/useLoad.ts) says so at the `refresh` docstring).
+And it must respect Invariant 1: derived data only, never a draft re-seed.
 
 ### Making "unsaved" visible
 

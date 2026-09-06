@@ -56,8 +56,10 @@ const NUM_SX = { fontVariantNumeric: 'tabular-nums' as const };
  * Two honesty constraints are deliberate:
  *
  *  - **Top-level materials only.** `parts_bom` is recursive but this compares one level, so a
- *    pump job says "needs 1 pump core" and not the aluminium inside it. Captioned on screen
- *    rather than left for someone to discover from a wrong number.
+ *    pump job says "needs 1 pump core" and not the aluminium inside it. This used to carry a
+ *    caption saying so; it was removed as page furniture, so the limitation now lives here and
+ *    nowhere the reader can see. If the one-level comparison ever produces a number somebody
+ *    acts on wrongly, the caption is the fix to reach for first.
  *  - **Units that can't be converted show an em dash, never a zero.** A 0 in Short by reads as
  *    "you're fine", which is the one answer we must not give when we can't actually compare.
  *
@@ -153,10 +155,6 @@ export default function JobPartMaterialsCard({
                 </TableBody>
               </Table>
             </TableContainer>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-              Top-level materials only — sub-assemblies are not exploded. On-hand is the whole
-              shop&apos;s stock; other open jobs may want the same material.
-            </Typography>
           </>
         )}
       </CardContent>

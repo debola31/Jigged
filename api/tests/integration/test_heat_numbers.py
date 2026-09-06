@@ -279,10 +279,17 @@ def test_a_heat_longer_than_a_mill_tag_is_refused(db, shop):
 
 
 def test_the_take_to_a_job_carries_the_heat_and_the_job(db, shop):
+    """A take records the heat it named, and refuses to record one that never came in.
+
+    The second half is the rule 20260906121901 added, and it is the whole point of the picker
+    that replaced the free-text box. `8823` was never received for this part, so `resolve_lot`
+    returns nothing on the way out and the row records no heat -- rather than minting a lot to
+    consume, which is how a mistyped 4417 used to become a real record and print on a slip.
+    """
     with user_session(shop["user"]) as (conn, cur):
         receive(cur, shop, shop["bar"], 100, "4471")
         take(cur, shop, shop["bar"], 40, "4471", job=shop["job"])
-        take(cur, shop, shop["bar"], 10, "8823")  # an ad-hoc removal, no job
+        take(cur, shop, shop["bar"], 10, "8823")  # a heat nobody ever received
         conn.commit()
     with db.cursor() as cur:
         # Both takes commit in one transaction, so their created_at is identical (now() is
@@ -292,7 +299,15 @@ def test_the_take_to_a_job_carries_the_heat_and_the_job(db, shop):
             " WHERE part_id = %s AND type = 'depletion'",
             (shop["bar"],),
         )
-        assert set(cur.fetchall()) == {("4471", shop["job"]), ("8823", None)}
+        assert set(cur.fetchall()) == {("4471", shop["job"]), (None, None)}
+
+    # And no lot was invented for it, which is the durable half of the same rule.
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM material_lots WHERE part_id = %s AND lot_code = '8823'",
+            (shop["bar"],),
+        )
+        assert cur.fetchone()[0] == 0
 
 
 # ── Correctable, unlike everything else on the row ─────────────────────────────────────────────
@@ -344,8 +359,12 @@ def test_exactly_one_overload_reachable_by_authenticated_and_not_by_anon(db, nam
     assert rows[0] == (True, False)
 
 
-def test_the_two_stock_rpcs_take_the_heat_as_their_trailing_defaulted_parameter(db):
-    """PostgREST resolves by the names supplied: a caller that omits p_heat_number must still match."""
+def test_the_two_stock_rpcs_take_the_lot_as_their_trailing_defaulted_parameter(db):
+    """PostgREST resolves by the names supplied, so every added parameter must trail and default.
+
+    p_lot_id joined behind p_heat_number in 20260906121901. A caller that supplies neither -- which
+    every untracked-part write does -- has to still match the one overload.
+    """
     with db.cursor() as cur:
         cur.execute(
             """
@@ -358,8 +377,9 @@ def test_the_two_stock_rpcs_take_the_heat_as_their_trailing_defaulted_parameter(
         )
         rows = cur.fetchall()
     for name, args, defaults in rows:
-        assert args.endswith("p_heat_number text"), (name, args)
-        assert defaults >= 1, (name, defaults)
+        assert args.endswith("p_lot_id uuid"), (name, args)
+        assert "p_heat_number text" in args, (name, args)
+        assert defaults >= 2, (name, defaults)
 
 
 # ── The slip freezes the job's heats ───────────────────────────────────────────────────────────

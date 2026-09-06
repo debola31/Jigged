@@ -891,7 +891,14 @@ async def execute_import(
                         supabase.table("part_location_stock")
                         .upsert(
                             balance_rows[batch_start : batch_start + BATCH_SIZE],
-                            on_conflict="part_id,location_id",
+                            # `lot_key` joined the key in 20260906121901, so a part can hold
+                            # two heats in one bin. It is a generated column and is never
+                            # written -- but it has to be NAMED, or PostgREST cannot infer the
+                            # index and every row fails with "no unique or exclusion constraint
+                            # matching the ON CONFLICT specification". An import carries no
+                            # heats, so these land as lot-less rows, which is exactly what an
+                            # untracked part is.
+                            on_conflict="part_id,location_id,lot_key",
                         )
                         .execute()
                     )

@@ -1010,7 +1010,162 @@ COMMENT ON FUNCTION public.bulk_put_away(uuid, uuid, uuid[]) IS
 
 
 -- ============================================================================
--- 14. Guards -- one overload each, browser-reachable, anon shut out
+-- 14. The two CI allowlists this migration has to join
+-- ============================================================================
+-- Both are rebuilt from their NEWEST definitions -- function_execute_leaks from
+-- 20260828124806, tenant_tables_missing_ai_decision from 20260826103645 -- and NOT
+-- from the migrations that created them. Rebuilding one of these from its creating
+-- migration silently drops every entry added since, which has happened four times
+-- in this repo. Each list below is the newest body verbatim, plus one line.
+
+-- `set_part_lot_tracking` is SECURITY DEFINER and granted to `authenticated` on
+-- purpose: the part page's own toggle calls it (`setPartLotTracking` in
+-- utils/inventoryLocationsAccess.ts). It cannot be decomposed into a plain UPDATE,
+-- which is the whole reason it is DEFINER -- flipping the flag must also move every
+-- lot-less balance into a PRE-TRACKING lot in the SAME transaction, or the "a take
+-- must name its heat" rule turns on while stock that predates it is still
+-- unnameable. It re-checks membership and the billing gate itself.
+CREATE OR REPLACE FUNCTION public.function_execute_leaks()
+RETURNS TABLE(function_name text, role_name text)
+LANGUAGE sql
+STABLE
+SET search_path TO 'public', 'pg_temp'
+AS $$
+  SELECT p.proname::text, r.rolname::text
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  CROSS JOIN (VALUES ('anon'), ('authenticated')) AS r(rolname)
+  WHERE n.nspname = 'public'
+    AND p.prosecdef
+    AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')
+    AND p.proname NOT IN (
+      -- Named in an RLS policy: the browser cannot query the table without it.
+      'company_can_write', 'get_operator_access_id', 'get_user_company_ids',
+      'is_company_admin', 'is_system_admin',
+      -- Called directly from application code (utils/*Access.ts, app/, hooks/).
+      -- NB: enable_location_tracking / disable_location_tracking are deliberately absent.
+      -- 20260802015101 dropped both RPCs; re-listing them here would leave the allowlist
+      -- naming functions that no longer exist, which is how this list rots.
+      'accept_invitation', 'add_stock_at_location', 'adjust_stock_at_location',
+      'create_demo_company', 'create_shipment_with_line_items', 'delete_location',
+      'deplete_stock_at_location', 'log_note_views', 'log_operator_event',
+      'note_viewers', 'reset_demo_company', 'sync_demo_access', 'transfer_stock',
+      -- Added 20260801181116: the count sheet's put-away calls it directly
+      -- (`bulkPutAway` in utils/inventoryLocationsAccess.ts).
+      'bulk_put_away',
+      -- Added 20260803043406: the Me tab dismisses its recognition block through it
+      -- (`markHelpfulSeen` in utils/operatorAccess.ts).
+      'mark_reactions_seen',
+      -- Added 20260810142715: the Storage page's create/duplicate path calls it
+      -- directly (`materializeLocationSpec` in utils/inventoryLocationsAccess.ts).
+      -- Atomicity IS the feature — the loop it replaces could leave a partial
+      -- tree behind an opaque error (#618) — so it cannot be decomposed either.
+      'create_location_tree',
+      -- Added 20260815192344: the Storage page's `Change layout` calls it directly
+      -- (`applyLocationLayout` in utils/inventoryLocationsAccess.ts). Create,
+      -- rename, re-parent, move stock and delete must be ONE transaction, and two
+      -- of those steps are illegal outside one that defers the container/bin
+      -- invariant. `subdivide_location` left the list in the same migration: it is
+      -- dropped there, and an allowlist naming functions that no longer exist is
+      -- how this list rots.
+      'apply_location_layout',
+      -- Added 20260816203641: operator cycle-time capture. That migration added
+      -- FIVE; get_operator_time_detail was the fifth and is dropped in
+      -- 20260825170421, so it leaves this list for the subdivide_location reason --
+      -- an allowlist naming functions that no longer exist is how the list rots.
+      -- cancel_operation_interval joined the group in 20260826105251: the step
+      -- screen calls it directly to discard a running timer.
+      -- void_open_intervals_for_operation joined in 20260828124806: the OFFICE
+      -- discards someone else's, from the job page's Complete and the Still-running
+      -- card's Stop.
+      'start_operation_interval', 'close_operation_interval',
+      'cancel_operation_interval', 'void_open_intervals_for_operation',
+      'get_operation_actuals', 'get_open_intervals',
+      -- Added 20260906121901: the part page's heat-tracking toggle
+      -- (`setPartLotTracking`). DEFINER because setting the flag and migrating the
+      -- part's lot-less balances into a PRE-TRACKING lot must be one transaction.
+      'set_part_lot_tracking',
+      -- Called BY a browser-callable SECURITY INVOKER function, which runs as the
+      -- caller — so the caller genuinely needs EXECUTE on this one.
+      -- (generate_quote_number / generate_direct_job_number -> next_order_number)
+      -- (get_ready_operations_for_station -> get_running_operation_ids_for_station,
+      --  added 20260826010648)
+      'next_order_number', 'get_running_operation_ids_for_station'
+    )
+  ORDER BY 1, 2;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.function_execute_leaks()
+  FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.function_execute_leaks() TO service_role;
+
+-- `lot_certificates` joins the uploads group, for that group's reason: it is a
+-- document store, and what a mill cert PDF actually contains deserves its own look
+-- before any of it can reach a prompt. `material_lots` is NOT here -- it is opened
+-- to the sandbox above, because "which heats went into this job" is exactly the
+-- kind of question the insights surface should be able to answer.
+CREATE OR REPLACE FUNCTION public.tenant_tables_missing_ai_decision()
+RETURNS TABLE(table_name text)
+LANGUAGE sql
+STABLE
+AS $fn$
+  SELECT c.relname::text
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a
+    ON a.attrelid = c.oid AND a.attname = 'company_id' AND NOT a.attisdropped
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+    AND c.relname NOT IN (
+      -- Third-party credentials and customer account numbers. Never.
+      'quickbooks_connections', 'quickbooks_customer_map', 'quickbooks_desktop_connections',
+      'quickbooks_invoice_line_items', 'quickbooks_invoice_links', 'quickbooks_terms_cache',
+      'customer_carrier_accounts',
+      -- Authentication, authorisation, and the legal record. Never.
+      'user_company_access', 'invitations', 'auth_audit_log', 'terms_acceptances',
+      -- Billing state. "Am I paid up" is a support question rather than an
+      -- analytics one, and this table backs the write gate.
+      'company_billing',
+      -- Per-operator pace and attention data. Excluded on the surveillance
+      -- guardrail in docs/modules/operator-view.md: an owner able to ask "rank my
+      -- operators by speed" is the reporting layer that document forbids, even
+      -- though the guardrail's letter covers operator-FACING surfaces only.
+      'operator_events', 'job_operation_completions', 'job_operation_intervals',
+      'note_views', 'note_reactions',
+      -- The AI's own plumbing. Feeding a model its own logs, config and queue
+      -- invites it to answer questions about itself instead of about the shop.
+      'ai_chat_queries', 'ai_config', 'ai_jobs', 'saved_insights',
+      -- Free text and uploads: note bodies, attachments, comments. Readable in
+      -- principle, but each wants its own look at what the text contains before
+      -- it lands in a prompt. `lot_certificates` added 20260906121901 -- a mill
+      -- cert is a supplier's PDF, and its contents deserve that same look.
+      'notes', 'note_media', 'job_attachments', 'part_attachments',
+      'work_center_attachments', 'part_comments', 'lot_certificates',
+      -- Closed today with no objection known. Opening one is a single
+      -- apply_ai_read_access call plus a schema_context.py entry, so that the
+      -- model is also told the table exists.
+      'company_custom_units', 'company_order_counters', 'feedback',
+      'inventory_locations', 'part_location_stock', 'part_customer_references',
+      'job_fulfillment_audit'
+    )
+    -- BOTH layers. has_any_column_privilege rather than has_table_privilege so a
+    -- column-level grant still counts as a decision (see `shipments`).
+    AND NOT (
+      has_any_column_privilege('jigged_ai_readonly', c.oid, 'SELECT')
+      AND EXISTS (
+        SELECT 1 FROM pg_policy p
+        WHERE p.polrelid = c.oid AND p.polname = 'ai_readonly_select'
+      )
+    )
+  ORDER BY 1;
+$fn$;
+
+REVOKE EXECUTE ON FUNCTION public.tenant_tables_missing_ai_decision() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.tenant_tables_missing_ai_decision() TO service_role;
+
+
+-- ============================================================================
+-- 15. Guards -- one overload each, browser-reachable, anon shut out
 -- ============================================================================
 -- Five functions were dropped and recreated here. `DROP FUNCTION IF EXISTS` against
 -- a signature that does not match the live one SUCCEEDS AND DOES NOTHING, leaving a

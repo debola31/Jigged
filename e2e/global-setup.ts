@@ -852,7 +852,12 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
       { company_id: companyId, part_id: partId, location_id: shelfA, quantity: 40 },
       { company_id: companyId, part_id: partId, location_id: shelfB, quantity: 12 },
     ],
-    { onConflict: 'part_id,location_id' },
+    // `lot_key` joined the key in 20260906121901 so a part can hold two heats in one bin. It is a
+    // generated column (lot_id, with NULL collapsed to a sentinel), so it is never written here —
+    // but it MUST be named, or PostgREST cannot infer the index and every upsert fails with
+    // "no unique or exclusion constraint matching the ON CONFLICT specification". This fixture is
+    // lot-less, which is what an untracked part looks like.
+    { onConflict: 'part_id,location_id,lot_key' },
   );
   if (error) throw new Error(`split stock upsert failed: ${error.message}`);
 }

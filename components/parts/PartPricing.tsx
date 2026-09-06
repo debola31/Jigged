@@ -279,6 +279,40 @@ export default function PartPricing({
   const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
   const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
 
+  /**
+   * Which row currently holds the LOWEST break.
+   *
+   * Derived from what is typed, not from position, so it follows an edit without
+   * the rows jumping around under the cursor — they reorder on save, not on
+   * every keystroke. The lowest break is the one the engine floors to when no
+   * break covers the quantity, so it also applies to everything beneath it; the
+   * caption on that cell says so instead of the field being taken away.
+   */
+  const lowestBreakIdx = rows.reduce<number>((best, r, i) => {
+    const q = parseNumber(r.quantity);
+    if (q === null || q <= 0) return best;
+    const bestQ = best === -1 ? null : parseNumber(rows[best].quantity);
+    return bestQ === null || q < bestQ ? i : best;
+  }, -1);
+
+  /**
+   * Breaks typed twice. `part_pricing_tiers` is unique on (part_id, quantity) —
+   * one break, one row — so this would come back as a raw 23505. Saying it here
+   * beats surfacing a constraint name.
+   */
+  const duplicateQuantities = (() => {
+    const seen = new Map<number, number>();
+    const dupes: number[] = [];
+    rows.forEach((r) => {
+      const q = parseNumber(r.quantity);
+      if (q === null || q <= 0) return;
+      const n = (seen.get(q) ?? 0) + 1;
+      seen.set(q, n);
+      if (n === 2) dupes.push(q);
+    });
+    return dupes;
+  })();
+
   // Costing lot size — the production run this part's cost amortizes over, and
   // the quantity it's valued at when consumed as a component. Drives the live
   // Cost breakdown below (setup / N). Made parts only.
@@ -354,6 +388,10 @@ export default function PartPricing({
       // A never-configured part shows a single unfilled row to fill in — NOT
       // dirty, so Save stays disabled until the user actually edits it.
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
+      // A ladder reads low-to-high. Rows arrive ordered by `sequence`, which
+      // tracks the break after a save but need not on rows written by an
+      // importer or a migration, so sort on the number the user actually reads.
+      seeded.sort((a, b) => (parseNumber(a.quantity) ?? 0) - (parseNumber(b.quantity) ?? 0));
       const recomputed = seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current, isBought));
       setRows(recomputed);
       // These rows now mirror the database, so they become the clean baseline.
@@ -531,13 +569,32 @@ export default function PartPricing({
       setError('Every tier needs a quantity greater than 0.');
       return;
     }
+    if (duplicateQuantities.length > 0) {
+      setError(
+        `Two tiers share the same min qty (${duplicateQuantities.join(', ')}). ` +
+          'One break, one row — give them different quantities or remove one.',
+      );
+      return;
+    }
     setSaveState('saving');
     setError(null);
     try {
-      const sortedRows = [...rows].sort((a, b) => a.sequence - b.sequence);
-      const payload = sortedRows.map((r, i) => ({
+      // Ascending by BREAK, not by the old sequence. A ladder reads bottom-up,
+      // and sequence is renumbered to match so the next load comes back in the
+      // same order. Sorting here rather than on every keystroke is deliberate:
+      // reordering as somebody types would move the row out from under them.
+      const sortedRows = [...rows].sort(
+        (a, b) => (parseNumber(a.quantity) ?? 0) - (parseNumber(b.quantity) ?? 0),
+      );
+      // Each row KEEPS its own sequence. Renumbering by position used to be
+      // harmless because the sort was by sequence; sorting by break can swap two
+      // rows, and `replaceTiersForPart` updates one row at a time against
+      // UNIQUE (part_id, sequence) — so a swap would collide halfway through.
+      // Display order comes from the break now, which is what a reader sorts by
+      // anyway, so sequence has nothing left to encode.
+      const payload = sortedRows.map((r) => ({
         id: r.id,
-        sequence: (i + 1) * 10,
+        sequence: r.sequence,
         quantity: parseNumber(r.quantity) as number,
         // Made parts store no cost — their base is the routing + BOM rollup.
         cost_per_unit: isBought ? parseNumber(r.costPerUnit) : null,
@@ -1001,26 +1058,21 @@ export default function PartPricing({
                         },
                       }}
                     >
-                      {/* The FIRST break is fixed. Whatever number sits there,
-                          the engine floors to the lowest break when nothing
-                          covers the quantity, so row one always applies from 1
-                          up — its "Min qty" could never gate anything. Leaving
-                          it editable is what produced a part with Min qty 200
-                          that still cost the same at qty 0.1, and one with 0.2
-                          typed in while chasing a different bug. */}
+                      {/* Every break is editable, including the lowest. It is
+                          still true that the lowest one cannot gate anything —
+                          the engine floors to it when no break covers the
+                          quantity — but that is a fact to STATE, not a field to
+                          confiscate. A shop that prices from 0.5 up has to be
+                          able to say 0.5. The caption below says what the lowest
+                          break actually does. */}
                       <TableCell sx={{ minWidth: 90 }}>
-                        {idx === 0 ? (
-                          <Typography variant="body2" color="text.secondary">
-                            1 +
-                          </Typography>
-                        ) : (
-                          <TextField
-                            size="small"
-                            value={row.quantity}
-                            onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                            inputMode="decimal"
-                          />
-                        )}
+                        <TextField
+                          size="small"
+                          value={row.quantity}
+                          onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                          inputMode="decimal"
+                          helperText={idx === lowestBreakIdx ? 'and below' : undefined}
+                        />
                       </TableCell>
                       <TableCell align="right" sx={{ minWidth: 120 }}>
                         {isBought ? (

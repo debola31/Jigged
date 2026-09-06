@@ -543,7 +543,7 @@ async def execute_import(
 
         rows_to_upsert: list[dict] = []
         # parts.cost_per_unit was dropped in migration 20260514. For bought rows with a CSV
-        # cost, stage NULL-vendor procurement tiers (min_quantity=1) and write them after the
+        # cost, stage the tier rows (quantity=1) and write them after the
         # parts commit. Each entry is (part_name, cost_val) — resolved to part_id by part_name
         # once the rows are persisted.
         pending_procurement_tiers: list[tuple[str, float]] = []
@@ -975,9 +975,7 @@ async def execute_import(
         # ── Procurement tiers for bought rows ──────────────────────────────
         # CSV imports historically wrote cost into parts.cost_per_unit. With
         # that column dropped, route the same value into a NULL-vendor
-        # procurement tier (min_quantity=1) on each imported bought row. The
-        # tier lookup at quote time prefers vendor-specific tiers when the
-        # user later adds them.
+        # cost onto the tier row at quantity 1 for each imported bought row.
         if pending_procurement_tiers:
             try:
                 tier_rows: list[dict] = []
@@ -987,30 +985,54 @@ async def execute_import(
                         # Row was skipped/conflicted earlier; just drop the
                         # tier — the parent write never happened.
                         continue
-                    tier_rows.append(
-                        {
-                            "part_id": part_id,
-                            "min_quantity": 1,
-                            "cost_per_unit": cost,
-                        }
-                    )
+                    tier_rows.append({"part_id": part_id, "cost_per_unit": cost})
 
                 if tier_rows:
-                    # Upsert on (part_id, min_quantity) so re-importing the same
-                    # CSV updates the imported cost instead of failing with a
-                    # duplicate-key error. (Was keyed on vendor_id too until the
-                    # per-vendor tier model was collapsed — migration
-                    # 20260714173443 dropped the column.)
-                    for batch_start in range(0, len(tier_rows), BATCH_SIZE):
-                        batch = tier_rows[batch_start : batch_start + BATCH_SIZE]
-                        (
-                            supabase.table("part_procurement_tiers")
-                            .upsert(
-                                batch,
-                                on_conflict="part_id,min_quantity",
-                            )
+                    # Cost and markup share one row now, so this cannot be a
+                    # blind upsert: replacing the row would wipe a markup the
+                    # shop chose. Update the cost where a row exists, insert a
+                    # markup-less row where it does not, and let the starter
+                    # block below fill the markup in.
+                    existing_ids: set[str] = set()
+                    ids = [r["part_id"] for r in tier_rows]
+                    for batch_start in range(0, len(ids), BATCH_SIZE):
+                        res = (
+                            supabase.table("part_pricing_tiers")
+                            .select("part_id")
+                            .in_("part_id", ids[batch_start : batch_start + BATCH_SIZE])
+                            .eq("quantity", 1)
                             .execute()
                         )
+                        for r in res.data or []:
+                            existing_ids.add(r["part_id"])
+
+                    inserts = [
+                        {
+                            "part_id": r["part_id"],
+                            "company_id": request.company_id,
+                            "sequence": 10,
+                            "quantity": 1,
+                            "cost_per_unit": r["cost_per_unit"],
+                            "markup_percent": None,
+                        }
+                        for r in tier_rows
+                        if r["part_id"] not in existing_ids
+                    ]
+                    for batch_start in range(0, len(inserts), BATCH_SIZE):
+                        (
+                            supabase.table("part_pricing_tiers")
+                            .insert(inserts[batch_start : batch_start + BATCH_SIZE])
+                            .execute()
+                        )
+                    for r in tier_rows:
+                        if r["part_id"] in existing_ids:
+                            (
+                                supabase.table("part_pricing_tiers")
+                                .update({"cost_per_unit": r["cost_per_unit"]})
+                                .eq("part_id", r["part_id"])
+                                .eq("quantity", 1)
+                                .execute()
+                            )
             except Exception as e:
                 logger.error(
                     f"Parts import procurement-tier insert error: {str(e)}",
@@ -1056,11 +1078,11 @@ async def execute_import(
                 ).data or {}
                 starter_markup = company.get("default_markup_bought_percent") or 0
 
-                # Belt and braces: a part created by THIS run should have no
-                # tiers, but a concurrent import or a revived archived part could
-                # mean otherwise, and silently rewriting a markup is the one
-                # thing this must never do.
-                already_priced: set[str] = set()
+                # Silently rewriting a markup is the one thing this must never
+                # do. The cost block above has already made the row exist, so
+                # "not priced yet" is now markup_percent IS NULL on that row —
+                # not the absence of a row.
+                unpriced: list[str] = []
                 for batch_start in range(0, len(newly_created_with_cost), BATCH_SIZE):
                     res = (
                         supabase.table("part_pricing_tiers")
@@ -1069,31 +1091,23 @@ async def execute_import(
                             "part_id",
                             newly_created_with_cost[batch_start : batch_start + BATCH_SIZE],
                         )
+                        .is_("markup_percent", "null")
                         .execute()
                     )
                     for r in res.data or []:
-                        already_priced.add(r["part_id"])
+                        unpriced.append(r["part_id"])
 
-                starter_rows = [
-                    {
-                        "part_id": part_id,
-                        "company_id": request.company_id,
-                        "sequence": 10,
-                        "quantity": 1,
-                        "markup_percent": starter_markup,
-                    }
-                    for part_id in newly_created_with_cost
-                    if part_id not in already_priced
-                ]
-                for batch_start in range(0, len(starter_rows), BATCH_SIZE):
+                for batch_start in range(0, len(unpriced), BATCH_SIZE):
                     (
                         supabase.table("part_pricing_tiers")
-                        .insert(starter_rows[batch_start : batch_start + BATCH_SIZE])
+                        .update({"markup_percent": starter_markup})
+                        .in_("part_id", unpriced[batch_start : batch_start + BATCH_SIZE])
+                        .is_("markup_percent", "null")
                         .execute()
                     )
-                if starter_rows:
+                if unpriced:
                     logger.info(
-                        f"Parts import: seeded {len(starter_rows)} starter pricing tiers "
+                        f"Parts import: seeded {len(unpriced)} starter markups "
                         f"at {starter_markup}%"
                     )
             except Exception as e:

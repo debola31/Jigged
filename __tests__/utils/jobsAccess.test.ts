@@ -891,29 +891,6 @@ describe('jobsAccess', () => {
       expect(patch.customer_po_number).toBe('PO-1');
     });
 
-    it('sets is_hot true (the Hot toggle) without touching other fields', async () => {
-      mockQueryBuilder.data = { id: 'j1', is_hot: true };
-      await updateJobDetails('j1', 'co-1', { is_hot: true });
-      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(patch.is_hot).toBe(true);
-      expect(patch).not.toHaveProperty('customer_po_number');
-      expect(patch).not.toHaveProperty('due_date');
-    });
-
-    it('clears is_hot when passed false (unmark Hot)', async () => {
-      mockQueryBuilder.data = { id: 'j1', is_hot: false };
-      await updateJobDetails('j1', 'co-1', { is_hot: false });
-      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(patch.is_hot).toBe(false);
-    });
-
-    it('leaves is_hot untouched when the key is omitted', async () => {
-      mockQueryBuilder.data = { id: 'j1' };
-      await updateJobDetails('j1', 'co-1', { customer_po_number: 'PO-1' });
-      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(patch).not.toHaveProperty('is_hot');
-    });
-
     it('throws a friendly (non-raw) error when supabase fails', async () => {
       mockQueryBuilder.error = { message: 'permission denied' };
       await expect(
@@ -966,14 +943,15 @@ describe('jobsAccess', () => {
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
     });
 
-    it('orders hot jobs first (is_hot desc) as a primary tier, before the caller sort', async () => {
+    it("applies the caller's sort as the only ordering tier", async () => {
       mockQueryBuilder.data = [];
       await getAllJobs('co-1', {}, 'created_at', 'desc');
       const orderCalls = (mockQueryBuilder.order as ReturnType<typeof vi.fn>).mock.calls;
-      // is_hot desc must be requested before the user's chosen column sort so hot
-      // rows float to the top with the sort applied within each tier.
-      expect(orderCalls[0]).toEqual(['is_hot', { ascending: false }]);
-      expect(orderCalls[1]).toEqual(['created_at', { ascending: false }]);
+      // A rush tier used to be requested ahead of this one. Asserting the LENGTH,
+      // not just the first call, is the point: a re-added primary tier would
+      // otherwise slide in unnoticed and silently re-order every jobs list.
+      expect(orderCalls).toHaveLength(1);
+      expect(orderCalls[0]).toEqual(['created_at', { ascending: false }]);
     });
   });
 

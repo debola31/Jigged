@@ -20,7 +20,7 @@
     "vendors": "Suppliers and outside-process providers the shop buys from. Identity only.",
     "vendor_addresses": "A vendor's postal addresses, one row per address.",
     "parts": "Parts and part numbers: every part the shop makes, buys or stocks, with its description, pricing and stock level.",
-    "part_pricing_tiers": "Volume price breaks per part: what a part costs at each quantity band.",
+    "part_pricing_tiers": "One tier ladder per part: at each quantity break, what a bought part costs us (cost_per_unit) and the markup applied on top. Made parts carry markup only \u2014 their cost is the routing + BOM rollup.",
     "parts_bom": "Bill of materials: which child parts and raw stock go into making a parent part.",
     "parts_unit_conversions": "How a part's purchase unit converts to its stocking or usage unit.",
     "quotes": "Prices offered to customers: status, expiry, and whether one turned into a job.",

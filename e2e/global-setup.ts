@@ -293,8 +293,8 @@ interface PartSpec {
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
-  /** Persisted as a NULL-vendor procurement tier at min_quantity=1 for
-   *  bought parts. Ignored for made parts. */
+  /** Persisted onto the part's tier row at quantity 1 for bought parts.
+   *  Ignored for made parts, whose cost is the routing + BOM rollup. */
   cost_per_unit: number | null;
 }
 
@@ -333,20 +333,33 @@ async function ensurePart(
 
   if (spec.source === 'bought' && spec.cost_per_unit !== null && spec.cost_per_unit > 0) {
     const { data: existingTier, error: tierLookupErr } = await supabase
-      .from('part_procurement_tiers')
+      .from('part_pricing_tiers')
       .select('id')
       .eq('part_id', partId)
-      .eq('min_quantity', 1)
+      .eq('quantity', 1)
       .maybeSingle();
     if (tierLookupErr) {
       throw new Error(`tier lookup failed (${spec.part_name}): ${tierLookupErr.message}`);
     }
-    if (!existingTier) {
-      // Part-level tier sheet — vendor is a label on the part, not a tier column.
-      const { error: tierErr } = await supabase.from('part_procurement_tiers').insert({
+    if (existingTier) {
+      // The markup half may already be there; only the cost is ours to set.
+      const { error: costErr } = await supabase
+        .from('part_pricing_tiers')
+        .update({ cost_per_unit: spec.cost_per_unit })
+        .eq('id', existingTier.id);
+      if (costErr) {
+        throw new Error(`tier cost update failed (${spec.part_name}): ${costErr.message}`);
+      }
+    } else {
+      // One ladder: cost and markup on the same row. Vendor is a label on the
+      // part, never a tier column.
+      const { error: tierErr } = await supabase.from('part_pricing_tiers').insert({
         part_id: partId,
-        min_quantity: 1,
+        company_id: companyId,
+        sequence: 10,
+        quantity: 1,
         cost_per_unit: spec.cost_per_unit,
+        markup_percent: null,
       });
       if (tierErr) {
         throw new Error(`tier insert failed (${spec.part_name}): ${tierErr.message}`);

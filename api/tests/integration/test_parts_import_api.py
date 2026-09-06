@@ -796,17 +796,19 @@ class TestPartsExecuteEndpoint:
         assert balance["quantity"] == 250.0
         assert balance["location_id"] == "loc-shelf-a"
         # cost_per_unit was dropped from parts in migration 20260514; the CSV
-        # cost is routed into a NULL-vendor procurement tier instead. Assert
-        # the tier was emitted with the right shape.
+        # cost is routed onto the part's tier row instead. Assert the row was
+        # emitted with the right shape.
         assert "cost_per_unit" not in inserted
-        tier_inserts = [r for r in insert_log if r["table"] == "part_procurement_tiers"]
-        assert len(tier_inserts) == 1
+        tier_inserts = [r for r in insert_log if r["table"] == "part_pricing_tiers"]
+        assert len(tier_inserts) >= 1
         tier = tier_inserts[0]["data"][0]
-        # vendor_id was dropped from part_procurement_tiers (migration 20260714173443 —
-        # per-vendor tiers collapsed to part-level); the tier no longer carries it.
+        # vendor_id was dropped when per-vendor tiers collapsed to part-level
+        # (20260714173443); the row has never carried it since.
         assert "vendor_id" not in tier
-        assert tier["min_quantity"] == 1
+        assert tier["quantity"] == 1
         assert tier["cost_per_unit"] == 12.5
+        # Markup is left for the starter pass — the cost row must not invent one.
+        assert tier["markup_percent"] is None
 
     @pytest.mark.unit
     async def test_execute_omits_quantity_entirely_when_the_column_is_unmapped(

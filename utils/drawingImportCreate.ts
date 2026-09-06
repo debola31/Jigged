@@ -420,11 +420,16 @@ async function attachMaterials(
 
         if (material.costPerUnit !== null) {
           // What the shop PAYS. Not a markup — a markup over an unknown cost is
-          // still unknown, which is why this is asked for at all.
-          const { error } = await supabase.from('part_procurement_tiers').insert({
+          // still unknown, which is why this is asked for at all. Cost and markup
+          // share one row now, so this seeds the row markup-less; the caller's
+          // `ensureStarterPricingTier` fills the shop default in afterwards.
+          const { error } = await supabase.from('part_pricing_tiers').insert({
             part_id: childId,
-            min_quantity: 1,
+            company_id: companyId,
+            sequence: 10,
+            quantity: 1,
             cost_per_unit: material.costPerUnit,
+            markup_percent: null,
           });
           if (error) throw error;
         }

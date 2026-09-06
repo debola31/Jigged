@@ -1,6 +1,12 @@
 /**
- * Part pricing tier — the "estimate" layer. Lives on the Part (not the Quote).
- * Each tier represents a quantity break-point with its own markup.
+ * A part's tier — ONE quantity break, carrying both what the part costs us and
+ * what we mark it up by. Lives on the Part (not the Quote).
+ *
+ * There used to be a second ladder, `part_procurement_tiers`, holding the cost
+ * side on its own `min_quantity` column. Nothing kept the two sets of breaks
+ * aligned and six independent writers set them separately, so the Cost card and
+ * the Pricing card could disagree on the same screen with no way to see why.
+ * One row, one break, one answer.
  *
  * `base_cost_per_unit` was dropped in migration 20260514 — the base is no
  * longer stored. `unit_price` was dropped at the same time. Both derive
@@ -14,6 +20,12 @@ export interface PartPricingTier {
   company_id: string;
   sequence: number;
   quantity: number;
+  /**
+   * What a BOUGHT part costs us at this break. `null` for a made part, whose
+   * base is the routing + BOM rollup rather than a stored number — the same
+   * asymmetry the grid shows, where a made part's base is derived and read-only.
+   */
+  cost_per_unit: number | null;
   markup_percent: number | null;
   created_at: string;
   updated_at: string;
@@ -41,5 +53,7 @@ export interface PartPricingTierInput {
   id?: string;
   sequence: number;
   quantity: number;
+  /** Omit (or pass `null`) for a made part; its base is computed, not stored. */
+  cost_per_unit?: number | null;
   markup_percent: number | null;
 }

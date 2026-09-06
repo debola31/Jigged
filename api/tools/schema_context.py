@@ -84,7 +84,8 @@ SCHEMA_CONTEXT = """
 - quantity: NUMERIC (default 0; current stock-on-hand, >= 0)
 - (Cost is computed live by compute_part_cost_at_qty(part_id, qty); no
   cost column on parts. For bought parts the cost comes from
-  part_procurement_tiers; for made parts it's labor + setup/qty + BOM rollup.)
+  part_pricing_tiers.cost_per_unit; for made parts it's labor + setup/qty + BOM
+  rollup.)
 - reorder_point: NUMERIC (nullable; reorder when quantity drops to this)
 - preferred_vendor_id: UUID (FK -> vendors.id, nullable)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
@@ -92,18 +93,22 @@ SCHEMA_CONTEXT = """
   "is this part stocked" is answered by quantity > 0, never by a flag. `source` is the only
   classification axis: 'made' parts are produced in-shop, 'bought' parts are procured.
 
-### part_pricing_tiers (volume-pricing tiers per part)
+### part_pricing_tiers (one tier ladder per part: cost AND markup per quantity band)
 - id: UUID (PK)
 - part_id: UUID (FK -> parts.id)
 - company_id: UUID -- ALWAYS filter with $1
 - sequence: INTEGER (unique per part)
-- quantity: INTEGER (>0; tier breakpoint)
-- markup_percent: NUMERIC(5,2)
+- quantity: NUMERIC (>0; tier breakpoint, unique per part)
+- cost_per_unit: NUMERIC (nullable) -- what a BOUGHT part costs US at this break.
+  NULL for made parts, whose base is the routing + BOM rollup instead.
+- markup_percent: NUMERIC(5,2) (nullable; NULL means nobody has priced it yet)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: there is NO unit_price column and no base_cost_per_unit column, stored or
   otherwise. A tier's price is markup_percent applied to a base recomputed live
   via compute_part_cost_at_qty(part_id, tier.quantity). Selecting unit_price here
   fails; derive it or answer from markup_percent.
+- A bought part's cost sheet used to be a separate part_procurement_tiers table
+  with its own min_quantity ladder. That table is GONE; both halves are here.
 
 ### parts_bom (Bill-Of-Materials — REPLACES routing_materials; NO company_id, join via parts)
 - id: UUID (PK)

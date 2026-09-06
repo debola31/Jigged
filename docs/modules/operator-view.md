@@ -65,7 +65,7 @@ and doubly so now; the bar's shape depends on the station, not on the tenant.
 | I want to… | Where | How |
 |---|---|---|
 | Start work at the machine I'm standing at | `jobs` | Tap the work centre in the station picker. Remembered on the device, so every later visit lands straight on the queue. |
-| See what's ready here | `jobs` | One row per (job, part) with an operation ready or in progress at this station. **Hot first, then whatever is running, then by job number** — not by due date, whatever this row said until 2026-09-02: `get_ready_operations_for_station` orders `is_hot DESC, has_open_interval DESC, job_number` and does not return `due_date` at all. |
+| See what's ready here | `jobs` | One row per (job, part) with an operation ready or in progress at this station. **Whatever is running first, then by job number** — not by due date, whatever this row said until 2026-09-02: `get_ready_operations_for_station` orders `has_open_interval DESC, job_number` and does not return `due_date` at all. A rush tier outranked both until 2026-09-06. |
 | Find work when my station is idle | `jobs` → **All Stations** | The whole plant, grouped by station. Tapping a row at another station works — the mismatch only warns. |
 | Find a named job on the floor | `jobs` → the find field | Type a job number, part or customer; narrows whichever lens is showing, from rows already in memory. See [Finding one job](#finding-one-job). |
 | Check something I already finished | `jobs` → **Show completed** | Completed work at the current lens, so a step can be reopened and undone. |

@@ -1611,7 +1611,6 @@ export type Database = {
           fulfillment_status: string
           id: string
           invoicing_status: string
-          is_hot: boolean
           job_number: string
           payment_terms: string | null
           production_status: string
@@ -1643,7 +1642,6 @@ export type Database = {
           fulfillment_status: string
           id?: string
           invoicing_status?: string
-          is_hot?: boolean
           job_number: string
           payment_terms?: string | null
           production_status: string
@@ -1675,7 +1673,6 @@ export type Database = {
           fulfillment_status?: string
           id?: string
           invoicing_status?: string
-          is_hot?: boolean
           job_number?: string
           payment_terms?: string | null
           production_status?: string
@@ -2675,6 +2672,7 @@ export type Database = {
       part_pricing_tiers: {
         Row: {
           company_id: string
+          cost_per_unit: number | null
           created_at: string
           id: string
           markup_percent: number | null
@@ -2685,6 +2683,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          cost_per_unit?: number | null
           created_at?: string
           id?: string
           markup_percent?: number | null
@@ -2695,6 +2694,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          cost_per_unit?: number | null
           created_at?: string
           id?: string
           markup_percent?: number | null
@@ -2713,50 +2713,6 @@ export type Database = {
           },
           {
             foreignKeyName: "part_pricing_tiers_part_id_fkey"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      part_procurement_tiers: {
-        Row: {
-          cost_per_unit: number
-          created_at: string
-          expires_at: string | null
-          id: string
-          min_quantity: number
-          notes: string | null
-          part_id: string
-          quoted_at: string | null
-          updated_at: string
-        }
-        Insert: {
-          cost_per_unit: number
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          min_quantity: number
-          notes?: string | null
-          part_id: string
-          quoted_at?: string | null
-          updated_at?: string
-        }
-        Update: {
-          cost_per_unit?: number
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          min_quantity?: number
-          notes?: string | null
-          part_id?: string
-          quoted_at?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "part_procurement_tiers_part_id_fkey"
             columns: ["part_id"]
             isOneToOne: false
             referencedRelation: "parts"
@@ -4726,15 +4682,6 @@ export type Database = {
         Args: { p_company_id: string }
         Returns: string[]
       }
-      get_procurement_cost: {
-        Args: { p_part_id: string; p_qty: number }
-        Returns: {
-          source: string
-          tier_id: string
-          unit_cost: number
-          vendor_id: string
-        }[]
-      }
       get_ready_operations_batch: {
         Args: { p_job_ids: string[] }
         Returns: {
@@ -4747,7 +4694,6 @@ export type Database = {
         Args: { p_company_id: string; p_work_center_id: string }
         Returns: {
           has_open_interval: boolean
-          is_hot: boolean
           job_id: string
           job_number: string
           job_operation_id: string

@@ -90,10 +90,6 @@ export interface Job {
   contact_id: string | null;
   production_status: ProductionStatus;
   fulfillment_status: FulfillmentStatus;
-  // "Hot" (rush) marker — the digital pink-paper / red-pen "HOT" signal. Pure
-  // visibility: no scheduling behavior. Sorts hot jobs first in the admin list
-  // and the operator station queue. Set at creation and toggleable by office staff.
-  is_hot: boolean;
   // Freight instruction as the customer's PO stated it, for THIS order. The
   // middle of three grains — customer default resolves onto the job at
   // conversion, the job resolves onto the shipment at pack time. Without this

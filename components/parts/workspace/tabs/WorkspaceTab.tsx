@@ -21,7 +21,7 @@ import type {
 import PartPricing from '@/components/parts/PartPricing';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
 import PartBomPanel from '@/components/parts/PartBomPanel';
-import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
+import PartPreferredVendor from '@/components/parts/PartPreferredVendor';
 import PartIdentitySection from '../PartIdentitySection';
 import type { PartSetupStatus } from '../partSetupStatus';
 
@@ -70,14 +70,11 @@ export default function WorkspaceTab({
   pricingGaps,
   onDirtyChange,
 }: WorkspaceTabProps) {
-  // Stable per-panel reporters — PartPricing publishes dirty state from an
-  // effect, so an inline arrow would re-fire it on every render.
+  // Stable reporter — PartPricing publishes dirty state from an effect, so an
+  // inline arrow would re-fire it on every render. There used to be a second
+  // 'procurement' key for the Cost card; one ladder means one staged section.
   const reportPricingDirty = useCallback(
     (dirty: boolean) => onDirtyChange?.('pricing', dirty),
-    [onDirtyChange],
-  );
-  const reportProcurementDirty = useCallback(
-    (dirty: boolean) => onDirtyChange?.('procurement', dirty),
     [onDirtyChange],
   );
   // Turn the structural gaps into a flat, prioritised list of "what to fix"
@@ -236,13 +233,11 @@ export default function WorkspaceTab({
               <Grid size={{ xs: 12 }}>
                 <Card elevation={2}>
                   <CardContent>
-                    <PartProcurementPricingPanel
+                    <PartPreferredVendor
                       partId={partId}
                       companyId={companyId}
-                      primaryUnit={part.primary_unit}
                       preferredVendorId={part.preferred_vendor_id}
                       onSaved={() => refreshAfterMutation()}
-                      onDirtyChange={reportProcurementDirty}
                     />
                   </CardContent>
                 </Card>
@@ -250,8 +245,10 @@ export default function WorkspaceTab({
             )}
 
             <Grid size={{ xs: 12 }}>
-              {/* PartPricing renders its own Pricing card (bought parts: just
-                  the markup tiers; the Cost card is the procurement panel above). */}
+              {/* One Pricing card for both sources. A bought part's cost is an
+                  editable column in the same ladder as its markup — it used to
+                  be a second card over a second table, and nothing kept the two
+                  sets of quantity breaks aligned. */}
               <PartPricing
                 companyId={companyId}
                 part={part}

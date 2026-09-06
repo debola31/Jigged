@@ -74,6 +74,20 @@ const givenExistingTiers = (rows: unknown[]) => {
 const insertedTier = () =>
   (mockBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
 
+/**
+ * A bought part's cost lives ON its tier row, so such a part already HAS a row
+ * the moment anyone records a cost. The starter fills the missing markup into
+ * it — an UPDATE, not an INSERT — and must leave the id, quantity and row count
+ * alone, because a quote line's drift check compares exactly those.
+ */
+const updatedTier = () =>
+  (mockBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+
+const givenCostedRowWithNoMarkup = () =>
+  givenExistingTiers([
+    { id: 't-cost', sequence: 10, quantity: 1, cost_per_unit: 4.5, markup_percent: null },
+  ]);
+
 /** A breakdown with a real priced operation — there is a cost to mark up. */
 const pricedBreakdown = {
   labor_items: [{ operation_name: 'Mill', cost: 10, setup_cost: 0 }],
@@ -117,8 +131,9 @@ describe('ensureStarterPricingTier', () => {
     expect(insertedTier()).toMatchObject({ markup_percent: 35 });
 
     (mockBuilder.insert as ReturnType<typeof vi.fn>).mockClear();
+    givenCostedRowWithNoMarkup();
     await ensureStarterPricingTier('c1', 'p2', 'bought');
-    expect(insertedTier()).toMatchObject({ markup_percent: 12 });
+    expect(updatedTier()).toMatchObject({ markup_percent: 12 });
   });
 
   it('leaves an audit note saying the app wrote it, not a person', async () => {
@@ -157,13 +172,36 @@ describe('ensureStarterPricingTier', () => {
     expect(insertedTier()).toBeUndefined();
   });
 
-  it('fires for a bought part only once its vendor cost resolves', async () => {
-    mockGetComputedPartCost.mockResolvedValue(null);
+  it('fires for a bought part only once a cost has been recorded', async () => {
+    // No row at all, or a row with no cost on it, means there is nothing to mark
+    // up yet — a markup over an unknown cost is still unknown.
     expect(await ensureStarterPricingTier('c1', 'p1', 'bought')).toBe(false);
     expect(insertedTier()).toBeUndefined();
 
-    mockGetComputedPartCost.mockResolvedValue(4.5);
+    givenExistingTiers([
+      { id: 't1', sequence: 10, quantity: 1, cost_per_unit: null, markup_percent: null },
+    ]);
+    expect(await ensureStarterPricingTier('c1', 'p1', 'bought')).toBe(false);
+
+    givenCostedRowWithNoMarkup();
     expect(await ensureStarterPricingTier('c1', 'p1', 'bought')).toBe(true);
+  });
+
+  it('leaves a bought part alone once it already has a markup', async () => {
+    // Re-running must not overwrite a markup the shop chose.
+    givenExistingTiers([
+      { id: 't1', sequence: 10, quantity: 1, cost_per_unit: 4.5, markup_percent: 40 },
+    ]);
+    expect(await ensureStarterPricingTier('c1', 'p1', 'bought')).toBe(false);
+    expect(insertedTier()).toBeUndefined();
+  });
+
+  it('fills the markup without disturbing the row identity a quote drifts against', async () => {
+    givenCostedRowWithNoMarkup();
+    await ensureStarterPricingTier('c1', 'p1', 'bought');
+    // Same row, same break, same cost — only the markup arrives.
+    expect(updatedTier()).toMatchObject({ quantity: 1, cost_per_unit: 4.5, markup_percent: 0 });
+    expect(insertedTier()).toBeUndefined();
   });
 
   it('writes nothing when the company row cannot be read', async () => {

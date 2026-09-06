@@ -54,7 +54,7 @@ const part = {
 } as Part;
 
 /** One persisted tier: 100 @ 25% markup. */
-const savedTier = { id: 't1', sequence: 10, quantity: 100, markup_percent: 25 };
+const savedTier = { id: 't1', sequence: 10, quantity: 100, cost_per_unit: null, markup_percent: 25 };
 
 describe('PartPricing — staged tier edits survive sibling saves', () => {
   const user = userEvent.setup();
@@ -84,6 +84,80 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
   /** The Min qty box for the first tier row. */
   const minQtyInput = async (): Promise<HTMLElement> =>
     (await screen.findAllByRole('textbox'))[0];
+
+  it('renders the ladder low break first, whatever order the rows arrive in', async () => {
+    // A ladder reads bottom-up. Rows come back ordered by `sequence`, which need
+    // not track the break on rows an importer or a migration wrote — so the
+    // sort is on the number the user actually reads.
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 'hi', sequence: 10, quantity: 100, cost_per_unit: null, markup_percent: 25 },
+      { id: 'lo', sequence: 20, quantity: 0.5, cost_per_unit: null, markup_percent: 2 },
+    ]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const qtys = await screen.findAllByRole('textbox');
+    await waitFor(() => expect(qtys[0]).toHaveValue('0.5'));
+    expect(qtys[3]).toHaveValue('100');
+  });
+
+  it('lets the lowest break be edited, and says once that it covers anything below', async () => {
+    // It was briefly fixed text ("1 +") on the grounds that the engine floors to
+    // the lowest break, so its number cannot gate anything. True, and still the
+    // wrong remedy: a shop pricing from 0.5 up has to be able to say 0.5. State
+    // the fact, don't confiscate the field.
+    //
+    // And state it BELOW the table, not as helper text under one cell — that
+    // reserved space under a single field and knocked its row out of alignment
+    // with the others.
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const qty = await minQtyInput();
+    await waitFor(() => expect(qty).toHaveValue('100'));
+    await user.clear(qty);
+    await user.type(qty, '0.5');
+    expect(qty).toHaveValue('0.5');
+    expect(screen.getByText(/lowest break also applies to any smaller quantity/i))
+      .toBeInTheDocument();
+  });
+
+  it('reorders the ladder on save without renumbering the rows', async () => {
+    // Two rows swapping places must not renumber their sequences:
+    // replaceTiersForPart updates one row at a time against
+    // UNIQUE (part_id, sequence), so a swap would collide halfway through.
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 'a', sequence: 10, quantity: 1, cost_per_unit: null, markup_percent: 25 },
+      { id: 'b', sequence: 20, quantity: 100, cost_per_unit: null, markup_percent: 15 },
+    ]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    // Make row 'a' the HIGHER break, so the saved order flips.
+    const qty = await minQtyInput();
+    await waitFor(() => expect(qty).toHaveValue('1'));
+    await user.clear(qty);
+    await user.type(qty, '500');
+    await user.click(screen.getByRole('button', { name: /Save pricing/i }));
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalled());
+    const payload = mockReplaceTiersForPart.mock.calls[0][2];
+    // Ascending by break...
+    expect(payload.map((t: { quantity: number }) => t.quantity)).toEqual([100, 500]);
+    // ...and each row still carries the sequence it arrived with.
+    expect(payload.find((t: { id?: string }) => t.id === 'a').sequence).toBe(10);
+    expect(payload.find((t: { id?: string }) => t.id === 'b').sequence).toBe(20);
+  });
+
+  it('refuses two tiers on the same break instead of surfacing a 23505', async () => {
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+    await waitFor(async () => expect(await minQtyInput()).toHaveValue('100'));
+
+    await user.click(screen.getByRole('button', { name: /Add tier/i }));
+    const boxes = await screen.findAllByRole('textbox');
+    await user.type(boxes[3], '100'); // the new row's Min qty
+    await user.click(screen.getByRole('button', { name: /Save pricing/i }));
+
+    expect(await screen.findByText(/same min qty/i)).toBeInTheDocument();
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
+  });
 
   it('keeps a staged Min qty edit when a sibling panel bumps refreshKey', async () => {
     // This is the reported bug: type a Min qty, then save an operation in the
@@ -137,7 +211,7 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await waitFor(() => expect(qty).toHaveValue('100'));
 
     mockGetTiersForPart.mockResolvedValue([
-      { id: 't1', sequence: 10, quantity: 500, markup_percent: 25 },
+      { id: 't1', sequence: 10, quantity: 500, cost_per_unit: null, markup_percent: 25 },
     ]);
     rerender(<PartPricing companyId="c1" part={part} refreshKey={1} />);
 
@@ -155,7 +229,7 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await user.type(qty, '250');
 
     mockGetTiersForPart.mockResolvedValue([
-      { id: 't9', sequence: 10, quantity: 42, markup_percent: 30 },
+      { id: 't9', sequence: 10, quantity: 42, cost_per_unit: null, markup_percent: 30 },
     ]);
     const otherPart = { ...part, id: 'p2', part_name: 'PLATE-002' } as Part;
     rerender(<PartPricing companyId="c1" part={otherPart} refreshKey={0} />);

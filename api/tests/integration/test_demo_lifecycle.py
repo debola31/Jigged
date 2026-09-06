@@ -98,7 +98,7 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
     if part_ids:
         supabase_admin.table("parts_bom").delete().in_("parent_part_id", part_ids).execute()
         supabase_admin.table("parts_bom").delete().in_("child_part_id", part_ids).execute()
-        supabase_admin.table("part_procurement_tiers").delete().in_("part_id", part_ids).execute()
+        supabase_admin.table("part_pricing_tiers").delete().in_("part_id", part_ids).execute()
         supabase_admin.table("parts_unit_conversions").delete().in_("part_id", part_ids).execute()
     # vendor_services before vendors: vendor_services.vendor_id RESTRICTs, so a
     # vendor that performs a service cannot be deleted while the service stands.

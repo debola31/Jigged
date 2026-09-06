@@ -280,22 +280,6 @@ export default function PartPricing({
   const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
 
   /**
-   * Which row currently holds the LOWEST break.
-   *
-   * Derived from what is typed, not from position, so it follows an edit without
-   * the rows jumping around under the cursor — they reorder on save, not on
-   * every keystroke. The lowest break is the one the engine floors to when no
-   * break covers the quantity, so it also applies to everything beneath it; the
-   * caption on that cell says so instead of the field being taken away.
-   */
-  const lowestBreakIdx = rows.reduce<number>((best, r, i) => {
-    const q = parseNumber(r.quantity);
-    if (q === null || q <= 0) return best;
-    const bestQ = best === -1 ? null : parseNumber(rows[best].quantity);
-    return bestQ === null || q < bestQ ? i : best;
-  }, -1);
-
-  /**
    * Breaks typed twice. `part_pricing_tiers` is unique on (part_id, quantity) —
    * one break, one row — so this would come back as a raw 23505. Saying it here
    * beats surfacing a constraint name.
@@ -1071,7 +1055,6 @@ export default function PartPricing({
                           value={row.quantity}
                           onChange={(e) => handleQuantityChange(idx, e.target.value)}
                           inputMode="decimal"
-                          helperText={idx === lowestBreakIdx ? 'and below' : undefined}
                         />
                       </TableCell>
                       <TableCell align="right" sx={{ minWidth: 120 }}>
@@ -1151,9 +1134,23 @@ export default function PartPricing({
               flexWrap: 'wrap',
             }}
           >
-            <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
-              Add tier
-            </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
+                Add tier
+              </Button>
+              {/* Said once, below the rows. It was briefly a helperText on the
+                  lowest row's field, which reserved space under that one cell and
+                  knocked the row out of alignment with its neighbours. The fact
+                  belongs to the ladder anyway, not to a row: the engine floors to
+                  the lowest break, so a quantity under it still prices. Worth
+                  stating — silent flooring is how a part ended up with Min qty
+                  200 and no visible effect at qty 0.1. */}
+              {rows.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  The lowest break also applies to any smaller quantity.
+                </Typography>
+              )}
+            </Box>
             {!dirty && <SaveStatus state={saveState} />}
           </Box>
 

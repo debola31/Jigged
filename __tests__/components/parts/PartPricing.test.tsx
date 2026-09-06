@@ -100,11 +100,15 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     expect(qtys[3]).toHaveValue('100');
   });
 
-  it('lets the lowest break be edited, and says it also covers anything below', async () => {
+  it('lets the lowest break be edited, and says once that it covers anything below', async () => {
     // It was briefly fixed text ("1 +") on the grounds that the engine floors to
     // the lowest break, so its number cannot gate anything. True, and still the
     // wrong remedy: a shop pricing from 0.5 up has to be able to say 0.5. State
     // the fact, don't confiscate the field.
+    //
+    // And state it BELOW the table, not as helper text under one cell — that
+    // reserved space under a single field and knocked its row out of alignment
+    // with the others.
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     const qty = await minQtyInput();
@@ -112,7 +116,8 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await user.clear(qty);
     await user.type(qty, '0.5');
     expect(qty).toHaveValue('0.5');
-    expect(screen.getByText('and below')).toBeInTheDocument();
+    expect(screen.getByText(/lowest break also applies to any smaller quantity/i))
+      .toBeInTheDocument();
   });
 
   it('reorders the ladder on save without renumbering the rows', async () => {

@@ -207,6 +207,27 @@ describe('JobActivityRail — the three row kinds', () => {
 
     expect(onViewSlip).toHaveBeenCalledWith('s-1');
   });
+
+  /**
+   * THE E2E'S LOCATOR, ASSERTED HERE SO IT CANNOT DRIFT SILENTLY.
+   *
+   * The slip button carries an aria-label, which OVERRIDES its visible text as
+   * the accessible name — so `/^VPS-/`, the anchored matcher inherited from the
+   * step card's unlabelled button, does not match it. That mismatch shipped and
+   * cost a 16-minute CI round trip, because the unit test that covered this
+   * button used an unanchored regex and passed either way.
+   *
+   * e2e/outside-processing.spec.ts matches on this exact pattern. Changing the
+   * label without changing that locator fails here first, in seconds.
+   */
+  it('names the slip button the way the E2E locator expects', () => {
+    const { rail } = renderRail();
+
+    expect(
+      rail.getByRole('button', { name: /vendor packing slip VPS-/i }),
+    ).toBeInTheDocument();
+    expect(rail.queryByRole('button', { name: /^VPS-/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('JobActivityRail — the step filter', () => {

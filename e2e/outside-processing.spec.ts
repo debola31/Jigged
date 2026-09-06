@@ -208,9 +208,15 @@ test.describe('outside processing — shipping & receiving', () => {
     // 1280×720, which is above `lg`, so the DOCKED branch is the one exercised
     // here — and 1280 is also where the operation row wraps its action cluster,
     // so this run covers that too.
+    // MATCHED ON THE ACCESSIBLE NAME, which is the button's aria-label and not
+    // its visible text. The old anchored /^VPS-/ was written against the step
+    // card's slip button, which carried no label and so was named by its
+    // content; this one says "Open vendor packing slip VPS-…", because a screen
+    // reader announcing a bare slip number says nothing about what pressing it
+    // does.
     const rail = page.getByTestId('job-activity-rail');
     await expect(rail).toBeVisible();
-    await rail.getByRole('button', { name: /^VPS-/ }).first().click();
+    await rail.getByRole('button', { name: /vendor packing slip VPS-/i }).first().click();
     await expect(page.getByRole('heading', { name: /Vendor packing slip — VPS-/i })).toBeVisible();
   });
 

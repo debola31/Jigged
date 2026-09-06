@@ -107,10 +107,10 @@ describe('getAllStationsOperatorJobs', () => {
     expect(result).toEqual([]);
   });
 
-  it('carries is_hot onto each row and preserves the RPC hot-first order', async () => {
-    // The RPC orders hot jobs first (ORDER BY is_hot DESC); buildOperatorJobs is
-    // a 1:1 map that preserves that order, and must surface is_hot so the station
-    // card can badge the row.
+  it('preserves the order the RPC returned rows in', async () => {
+    // The RPC does the ordering (running steps first, then job number) and
+    // buildOperatorJobs is a 1:1 map. Re-sorting here — or losing the order to a
+    // map/filter that does not preserve it — would silently contradict the SQL.
     const readyRow = (over: Record<string, unknown>) => ({
       job_id: 'j-x',
       job_part_id: 'jp-x',
@@ -122,13 +122,12 @@ describe('getAllStationsOperatorJobs', () => {
       part_name: 'Widget',
       part_description: null,
       part_quantity: 5,
-      is_hot: false,
       ...over,
     });
     mockSupabase.rpc.mockResolvedValueOnce({
       data: [
-        readyRow({ job_id: 'j-hot', job_part_id: 'jp-hot', job_operation_id: 'op-hot', job_number: 'J-HOT', is_hot: true }),
-        readyRow({ job_id: 'j-cold', job_part_id: 'jp-cold', job_operation_id: 'op-cold', job_number: 'J-COLD', is_hot: false }),
+        readyRow({ job_id: 'j-b', job_part_id: 'jp-b', job_operation_id: 'op-b', job_number: 'J-200' }),
+        readyRow({ job_id: 'j-a', job_part_id: 'jp-a', job_operation_id: 'op-a', job_number: 'J-100' }),
       ],
       error: null,
     });
@@ -136,10 +135,7 @@ describe('getAllStationsOperatorJobs', () => {
     const result = await getAllStationsOperatorJobs('c1', [{ id: 'wc1', name: 'Lathe' }]);
 
     expect(result).toHaveLength(2);
-    expect(result[0].job_number).toBe('J-HOT');
-    expect(result[0].is_hot).toBe(true);
-    expect(result[1].job_number).toBe('J-COLD');
-    expect(result[1].is_hot).toBe(false);
+    expect(result.map((r) => r.job_number)).toEqual(['J-200', 'J-100']);
   });
 
   it('carries has_open_interval onto each row so the card can mark a running step', async () => {
@@ -160,7 +156,6 @@ describe('getAllStationsOperatorJobs', () => {
       part_name: 'Widget',
       part_description: null,
       part_quantity: 5,
-      is_hot: false,
       has_open_interval: false,
       ...over,
     });
@@ -503,7 +498,7 @@ describe('getOutsideOpsForCompany', () => {
     vendor_service_id: 'vs-1',
     vendor_service: { name: 'Anodize', vendor: { name: 'AcmeCoat' } },
     job_part: { parts: { part_name: 'Bracket' } },
-    jobs: { job_number: 'J-1', due_date: '2026-07-20', is_hot: false, company_id: 'c1', production_status: 'in_progress', deleted_at: null },
+    jobs: { job_number: 'J-1', due_date: '2026-07-20', company_id: 'c1', production_status: 'in_progress', deleted_at: null },
     ...over,
   });
 
@@ -529,13 +524,17 @@ describe('getOutsideOpsForCompany', () => {
     expect(result.find((o) => o.id === 'op-sent')!.status).toBe('sent');
   });
 
-  it('orders hot jobs first', async () => {
+  it('orders by due date, soonest first, with undated ops last', async () => {
+    // A rush tier used to outrank the date here. Due date is now the whole
+    // answer to "what goes out today", so an undated op must not float above a
+    // dated one on a null comparing as empty string.
     mockQueryBuilder.data = [
-      outsideRow({ id: 'cold', jobs: { job_number: 'J-COLD', due_date: '2026-07-01', is_hot: false, company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
-      outsideRow({ id: 'hot', jobs: { job_number: 'J-HOT', due_date: '2026-08-01', is_hot: true, company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
+      outsideRow({ id: 'undated', jobs: { job_number: 'J-NONE', due_date: null, company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
+      outsideRow({ id: 'later', jobs: { job_number: 'J-LATER', due_date: '2026-08-01', company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
+      outsideRow({ id: 'sooner', jobs: { job_number: 'J-SOON', due_date: '2026-07-01', company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
     ];
     const result = await getOutsideOpsForCompany('c1');
-    expect(result[0].id).toBe('hot');
+    expect(result.map((o) => o.id)).toEqual(['sooner', 'later', 'undated']);
   });
 
   it('returns [] on query error', async () => {

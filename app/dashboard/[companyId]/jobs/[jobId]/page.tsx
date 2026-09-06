@@ -40,15 +40,11 @@ import {
 } from '@/utils/jobsAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
-import { isJobClosed } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import type { JobNote } from '@/types/operator';
 import { getJobNotes } from '@/utils/operatorAccess';
 import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
-import JobHotBadge from '@/components/jobs/JobHotBadge';
-import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
-import LocalFireDepartmentOutlinedIcon from '@mui/icons-material/LocalFireDepartmentOutlined';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import { CreateShipmentModal } from '@/components/shipments';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
@@ -182,20 +178,6 @@ export default function JobDetailPage() {
       await fetchJob();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reopen job');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleToggleHot = async () => {
-    if (!job) return;
-    setActionLoading(true);
-    try {
-      const updated = await updateJobDetails(jobId, companyId, { is_hot: !job.is_hot });
-      // Merge onto the hydrated job so we keep the joined relations fetchJob loaded.
-      setJob((prev) => (prev ? { ...prev, is_hot: updated.is_hot } : prev));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update Hot status');
     } finally {
       setActionLoading(false);
     }
@@ -349,22 +331,10 @@ export default function JobDetailPage() {
           >
             {job.job_number}
           </Typography>
-          <JobHotBadge job={job} size="medium" muted={isJobClosed(job)} />
           <JobOverdueBadge job={job} size="medium" />
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Button
-            variant={job.is_hot ? 'contained' : 'outlined'}
-            color="error"
-            startIcon={
-              job.is_hot ? <LocalFireDepartmentOutlinedIcon /> : <LocalFireDepartmentIcon />
-            }
-            onClick={handleToggleHot}
-            disabled={actionLoading}
-          >
-            {job.is_hot ? 'Unmark Hot' : 'Mark Hot'}
-          </Button>
           {parts.length > 0 && (
             <Button
               variant="outlined"

@@ -70,8 +70,8 @@ Each `job_part` records `source_quote_line_item_id`, and a line converts **once*
 on a live job is skipped).
 
 Because each part is its own job, **each carries its own due date** — the Convert-to-Job modal
-collects one per part, with a set-all field for the common case. The PO, the Hot flag and the
-addresses are shared by every job the pass creates.
+collects one per part, with a set-all field for the common case. The PO and the addresses are
+shared by every job the pass creates.
 
 **Every job off a quote keeps the quote's index** — the first is the mirror `Q-NNNN → J-NNNN`,
 the rest take suffixes (`J-NNNN-2`, `J-NNNN-3`, …) via `nextQuoteJobNumber`, whether they came
@@ -467,7 +467,7 @@ the quote. Quoting an in-between quantity like 3 snaps to the qty-2 price.
 
 ## `convertQuoteToJobs`
 
-`convertQuoteToJobs(quoteId, { dueDate, customerPoNumber, selectedLineItemIds, lineOverrides, hot, onProgress })`
+`convertQuoteToJobs(quoteId, { dueDate, customerPoNumber, selectedLineItemIds, lineOverrides, onProgress })`
 — callable **many times per quote**, once per customer PO, creating **one job per part**:
 
 1. Refuse only if the quote has no line items. **`converted_at` being set does not block.**

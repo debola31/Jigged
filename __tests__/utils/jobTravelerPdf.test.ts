@@ -89,7 +89,6 @@ function traveler(operations: JobTravelerOperation[]): JobTraveler {
     due_date: '2026-07-20',
     customer_po_number: null,
     production_status: 'in_progress',
-    is_hot: false,
     job_part_count: 1,
     operations,
   };

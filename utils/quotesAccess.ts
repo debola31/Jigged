@@ -1029,8 +1029,6 @@ export interface ConvertQuoteToJobsOptions {
     string,
     { quantity: number; useTierPrice?: boolean; dueDate?: string }
   >;
-  /** Mark the new jobs "Hot" (rush) at conversion. Visibility only. Defaults to false. */
-  hot?: boolean;
   /**
    * Called after each part finishes (created or failed), so a caller can show
    * "Creating job 2 of 3…". A fan-out is ~3 sequential round trips per part,
@@ -1424,7 +1422,6 @@ export async function convertQuoteToJobs(
     customer_id: quote.customer_id,
     production_status: 'not_started',
     fulfillment_status: 'unshipped',
-    is_hot: options.hot ?? false,
     customer_po_number: customerPoNumber,
     // The commercial term this order was sold on, frozen onto the job.
     // Unlike freight below, this IS carried: the quote genuinely stated it,

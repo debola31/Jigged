@@ -32,7 +32,6 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
 import StationSelector from '@/components/operator/StationSelector';
 import NoteUsageBanner from '@/components/operator/NoteUsageBanner';
 import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
-import JobHotBadge from '@/components/jobs/JobHotBadge';
 import { filterOperatorJobs } from '@/lib/operatorJobSearch';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
 
@@ -245,12 +244,6 @@ function OperatorJobsPageContent() {
       sx={{
         bgcolor: 'rgba(26, 31, 74, 0.55)',
         backdropFilter: 'blur(8px)',
-        // Hot jobs get a red wash + left accent bar so a rush job is unmissable
-        // at the station, echoing pink-paper travelers.
-        ...(row.is_hot && {
-          bgcolor: 'rgba(239, 68, 68, 0.16)',
-          borderLeft: '4px solid #ef4444',
-        }),
       }}
     >
       <CardActionArea onClick={() => handlePartClick(row)} sx={{ minHeight: 100 }}>
@@ -272,20 +265,10 @@ function OperatorJobsPageContent() {
                 Order qty {row.part_quantity}
               </Typography>
             </Box>
-            {/* Right slot: the HOT badge (always, when hot) sits above the
-                completed timestamp. Completed rows show WHEN they were finished
-                where the (removed) status chip used to sit; active rows convey
-                state via the bar. */}
+            {/* Right slot: completed rows show WHEN they were finished where the
+                (removed) status chip used to sit; active rows convey state via
+                the bar. */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-              <JobHotBadge
-                job={row}
-                size="small"
-                muted={
-                  !!row.completed_at ||
-                  row.production_status === 'completed' ||
-                  row.production_status === 'cancelled'
-                }
-              />
               {row.completed_at && (
                 <Typography
                   variant="caption"
@@ -314,7 +297,7 @@ function OperatorJobsPageContent() {
               </Typography>
               {/* Beside the step it describes, not in the card's top-right slot:
                   the fact is about THIS operation, and the top-right belongs to
-                  HOT (the whole job) and the completed stamp.
+                  the completed stamp.
 
                   ONE WORD, AND THE OMISSIONS ARE THE DESIGN. No name, no start
                   time, no elapsed clock — "OP 30 at EDM is running" is a fact

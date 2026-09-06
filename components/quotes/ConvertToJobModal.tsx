@@ -18,7 +18,6 @@ import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
-import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import BusyButton from '@/components/common/BusyButton';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
@@ -133,9 +132,6 @@ export default function ConvertToJobModal({
   // never carries one. REQUIRED to convert (the work-order authorization).
   // ONE PO authorizes the whole pass, however many jobs it creates.
   const [customerPoInput, setCustomerPoInput] = useState<string>('');
-  // "Hot" (rush) marker for the new jobs. Off by default; office staff can also
-  // toggle it later on a job's detail page.
-  const [hot, setHot] = useState<boolean>(false);
   // Optional PO PDF, staged here and attached to every job the pass creates.
   const [attachment, setAttachment] = useState<File | null>(null);
 
@@ -371,7 +367,6 @@ export default function ConvertToJobModal({
         customerPoNumber: customerPoInput,
         selectedLineItemIds,
         lineOverrides,
-        hot,
         onProgress: (done, total) => setProgress({ done, total }),
       });
 
@@ -396,7 +391,6 @@ export default function ConvertToJobModal({
         quote_id: quote.id,
         part_count: includedGroups.length,
         failed_count: converted.failures.length,
-        is_hot: hot,
       });
 
       setAttachmentFailedJobIds(failedAttachments);
@@ -803,19 +797,6 @@ export default function ConvertToJobModal({
                   value={customerPoInput}
                   onChange={(e) => setCustomerPoInput(e.target.value)}
                   disabled={loading}
-                />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={hot}
-                      onChange={(e) => setHot(e.target.checked)}
-                      disabled={loading}
-                      color="error"
-                      icon={<LocalFireDepartmentIcon />}
-                      checkedIcon={<LocalFireDepartmentIcon />}
-                    />
-                  }
-                  label="Mark as Hot (rush)"
                 />
                 <AttachmentUploadField
                   file={attachment}

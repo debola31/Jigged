@@ -1712,6 +1712,66 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- One heat-tracked material, so the feature is visible without setting it up
+-- ---------------------------------------------------------------------------
+-- Every other part in this seed is untracked, which is right -- a shop holds
+-- thousands and a handful of bar and plate is what needs tracing. But with none
+-- tracked at all, nobody running the app locally ever sees a lot picker, a
+-- per-heat count row or a heat on a packing slip, and the whole layer is
+-- invisible until someone hand-builds the state.
+--
+-- RAW-STEEL-BLANK because raw bar is exactly what a real shop traces, and
+-- because it is already sitting whole in the Yard -- which makes this the
+-- INSTRUCTIVE case rather than the tidy one. Recording the first heat turns
+-- tracking on (20260906153732) and migrates that existing balance into a
+-- PRE-TRACKING lot, so the Yard ends up holding three lots:
+--
+--   PRE-TRACKING  -- was here before anyone recorded a heat; no known number
+--   HT-24-4471    -- received after
+--   HT-24-8823    -- and again
+--
+-- That is precisely what a shop turning tracking on mid-life sees, and it
+-- exercises every path at once: the take picker has a real choice to make, the
+-- count sheet has to ask per heat, and the reshape has to say which one moves.
+do $$
+declare
+  v_company    constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
+  v_steel      constant uuid := '60000000-0000-0000-0000-000000000002';
+begin
+  -- Same impersonation as the put-away block above, and for the same reason:
+  -- add_stock_at_location authorises against auth.uid(), which is null in a seed.
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', '11111111-1111-1111-1111-111111111111',
+                      'role', 'authenticated')::text,
+    true);
+
+  -- Guard rather than assume. The scatter above is data-driven and the Yard's
+  -- contents depend on what the job depletions left behind, so a future edit
+  -- could legitimately leave this part somewhere else. Seeding a heat against a
+  -- part that is not there would still "work" -- it would just create a lot
+  -- nobody can see, which is worse than skipping.
+  if not exists (
+    select 1 from public.part_location_stock
+     where part_id = v_steel and location_id = v_yard and quantity > 0
+  ) then
+    raise notice 'Skipping heat seed: RAW-STEEL-BLANK is not in the Yard.';
+    return;
+  end if;
+
+  perform public.add_stock_at_location(
+    v_steel, v_yard, 40, 'each', 40,
+    p_notes => 'Received from the mill',
+    p_heat_number => 'HT-24-4471');
+
+  perform public.add_stock_at_location(
+    v_steel, v_yard, 25, 'each', 25,
+    p_notes => 'Received from the mill',
+    p_heat_number => 'HT-24-8823');
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- Clickwrap acceptances for every seeded login
 -- ---------------------------------------------------------------------------
 -- Without these, TermsGate raises a blocking modal over the first page a seeded

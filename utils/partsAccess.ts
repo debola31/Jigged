@@ -1089,13 +1089,17 @@ export async function ensurePartUnitConversion(
  * and is the honest denominator for effective margin. The number a PRICE is
  * built on is `getComputedPartChargeBase`.
  *
- * Returns `null` when any bought leaf in the subtree has no matching
- * procurement tier. Callers that need to surface *which* leaf is missing
- * should use `getPartCostExplain` instead.
+ * Returns `null` for any COSTING GAP: a bought leaf in the subtree with no
+ * matching procurement tier, or a routing operation with no labour rate / no
+ * outside unit price. Callers that need to surface *which* node is missing
+ * should use `getPartCostExplain` — its `missing_leaves` and `missing_op_rates`
+ * name them, and every gap here appears in one of the two.
  *
- * Throws when a made part has a routing operation with no labor rate or
- * no external pricing, or when a BOM line uses a unit with no conversion
- * to the child's primary unit.
+ * Still throws when a BOM line uses a unit with no conversion to the child's
+ * primary unit: no gap array carries that yet, so a bare null would be a part
+ * with no cost and no stated reason. The rate gaps stopped throwing in
+ * `20260906170449_costing_rate_gaps_return_null` — an unpriced step is
+ * something the shop fixes on the page, not an exception.
  */
 export async function getComputedPartCost(
   partId: string,

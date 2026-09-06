@@ -121,8 +121,10 @@ export async function insertLineItemForPart(
       getComputedPartCost(partId, basisQuantity),
     ]);
   } catch {
-    // Cost RAISES on missing labor rates / external pricing / unit
-    // conversions. Snapshot a null so the breakdown view can fall through
+    // A costing GAP (no tier, no labour rate, no outside unit price) already
+    // arrives as null through the normal return — this catches what still
+    // raises: a BOM line whose unit has no conversion to the child's primary
+    // unit. Snapshot a null either way so the breakdown view can fall through
     // to its computed-live fallback rather than persisting wrong data.
     baseCost = null;
     trueCost = null;

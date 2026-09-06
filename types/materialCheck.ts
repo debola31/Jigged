@@ -58,6 +58,10 @@ export interface MaterialLocation {
   /** Ancestor names, root first — rendered as "Cabinet 3 › Shelf A". */
   path: string[];
   quantity: number;
+  /** The lot this balance is, or null when the part is not lot-tracked. */
+  lotId: string | null;
+  lotCode: string | null;
+  heatNumber: string | null;
 }
 
 /** One material line for one job part: what it needs, what's there, what's already gone. */

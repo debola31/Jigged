@@ -101,12 +101,21 @@ export interface PartLocationBalanceWithLocation {
   kind: string | null;
 }
 
-/** A part stored at a given location, for the bin/scan view contents list. */
+/**
+ * A part stored at a given location, for the bin/scan view contents list.
+ *
+ * **One row is one (part, location, lot).** A lot-tracked part holding two heats in one bin
+ * produces two rows, and a caller that keys by part alone will collapse them.
+ */
 export interface LocationContent {
   part_id: string;
   part_name: string;
   primary_unit: string | null;
   quantity: number;
+  /** The lot this row is, or null for a part that is not lot-tracked. */
+  lot_id: string | null;
+  lot_code: string | null;
+  heat_number: string | null;
   /**
    * Which bin this row is in.
    *

@@ -633,11 +633,17 @@ export async function getBalancesForParts(
    * successive ranges can repeat or skip rows.
    */
   const readChunk = async (ids: string[]) => {
-    const out: Array<{ part_id: string; location_id: string; quantity: number }> = [];
+    const out: Array<{
+      part_id: string;
+      location_id: string;
+      quantity: number;
+      lot_id: string | null;
+      material_lots: { lot_code: string; heat_number: string | null } | null;
+    }> = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await supabase
         .from('part_location_stock')
-        .select('part_id, location_id, quantity')
+        .select('part_id, location_id, quantity, lot_id, material_lots (lot_code, heat_number)')
         .in('part_id', ids)
         // No `quantity > 0` filter any more, and that is not an omission. It used to hide the
         // residue `transfer_stock` and `bulk_put_away` left behind; 20260802144310 deleted that
@@ -645,12 +651,21 @@ export async function getBalancesForParts(
         // are now the same fact. Filtering would be restating the constraint.
         .order('part_id')
         .order('location_id')
+        // Third key: a part with two lots in one bin has two rows sharing (part, location), and
+        // without a total order a range boundary landing between them can repeat or skip one.
+        .order('lot_key')
         .range(offset, offset + PAGE - 1);
       if (error) {
         console.error('Error loading location balances:', error);
         throw error;
       }
-      const rows = (data ?? []) as Array<{ part_id: string; location_id: string; quantity: number }>;
+      const rows = (data ?? []) as unknown as Array<{
+        part_id: string;
+        location_id: string;
+        quantity: number;
+        lot_id: string | null;
+        material_lots: { lot_code: string; heat_number: string | null } | null;
+      }>;
       out.push(...rows);
       if (rows.length < PAGE) return out;
     }
@@ -671,6 +686,9 @@ export async function getBalancesForParts(
       locationName: byId.get(row.location_id)?.name ?? 'Unknown location',
       path: full.slice(0, -1), // ancestors only; the leaf is locationName
       quantity: Number(row.quantity) || 0,
+      lotId: row.lot_id,
+      lotCode: row.material_lots?.lot_code ?? null,
+      heatNumber: row.material_lots?.heat_number ?? null,
     });
     byPart.set(row.part_id, list);
   }
@@ -720,7 +738,8 @@ export async function getLocationContents(
   const { data, error, count } = await supabase
     .from('part_location_stock')
     .select(
-      'location_id, quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      'location_id, quantity, lot_id, material_lots (lot_code, heat_number), ' +
+        'part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
     )
     .eq('location_id', locationId)
@@ -742,6 +761,8 @@ export async function getLocationContents(
 type ContentRow = {
   location_id: string;
   quantity: number;
+  lot_id: string | null;
+  material_lots: { lot_code: string; heat_number: string | null } | null;
   part:
     | { id: string; part_name: string; primary_unit: string | null }
     | Array<{ id: string; part_name: string; primary_unit: string | null }>
@@ -760,6 +781,9 @@ function toLocationContents(data: unknown): LocationContent[] {
         primary_unit: part.primary_unit,
         quantity: Number(row.quantity),
         location_id: row.location_id,
+        lot_id: row.lot_id,
+        lot_code: row.material_lots?.lot_code ?? null,
+        heat_number: row.material_lots?.heat_number ?? null,
       } as LocationContent;
     })
     .filter((r): r is LocationContent => r !== null);
@@ -827,7 +851,7 @@ export async function getContentsPageForLocations(
   let query = supabase
     .from('part_location_stock')
     .select(
-      'location_id, quantity, ' +
+      'location_id, quantity, lot_id, material_lots (lot_code, heat_number), ' +
         'place:inventory_locations!inner(id, name, sort_order), ' +
         'part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
@@ -1159,6 +1183,92 @@ export async function getLotsAtLocationForPart(
 ): Promise<{ lots: LotOnHand[]; tracked: boolean }> {
   const { lots, tracked } = await getLotsAtLocation([partId], locationId);
   return { lots: lots.get(partId) ?? [], tracked: tracked.has(partId) };
+}
+
+/**
+ * EVERY lot of a part, wherever its stock is — deliberately not the same read as
+ * `getLotsAtLocation`, and used in exactly one place.
+ *
+ * A take and a move pick from what is on the shelf in front of you, which is why the reader above
+ * is balance-scoped. A COUNT is the one job that starts from the opposite premise: the system is
+ * wrong about where something is. "Heat 4471 is supposed to be on Shelf A and I have just found it
+ * on Shelf B" is unrepresentable from a balance-scoped list, because at Shelf B that lot has no
+ * balance to read — which is precisely the discovery a stocktake exists to record.
+ *
+ * `quantity` is 0 on every row: this says the lot EXISTS, never that any of it is anywhere.
+ *
+ * Newest received first. A lot list grows for the life of the part and the heat someone is holding
+ * is far more often this month's delivery than one from four years ago.
+ */
+export async function getLotsForPart(partId: string): Promise<LotOnHand[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('material_lots')
+    .select('id, lot_code, heat_number')
+    .eq('part_id', partId)
+    .is('deleted_at', null)
+    .order('received_at', { ascending: false });
+
+  if (error) {
+    console.error('Error loading the lots of a part:', error);
+    throw error;
+  }
+  return (data ?? []).map((row) => ({
+    lotId: row.id,
+    lotCode: row.lot_code,
+    heatNumber: row.heat_number,
+    quantity: 0,
+  }));
+}
+
+/**
+ * The lots of many parts at once, for the TRACKED ones only — two queries, never one per part.
+ *
+ * The batch form of `getLotsForPart`, and it filters on the flag for a reason that is easy to get
+ * backwards: **having lots and being tracked are different facts.** Turning tracking off leaves
+ * every existing lot and every split balance in place on purpose (collapsing them would have to
+ * pick a survivor and silently merge quantities under it), so a part can carry a shelf of history
+ * while no longer enforcing anything. Emitting lot rows for one of those would split a count that
+ * the database is perfectly happy to take as a single number.
+ *
+ * A tracked part absent from the result has no lots at all — possible, if tracking was switched on
+ * before anything was ever received. Callers must not read that as "untracked".
+ */
+export async function getLotsForTrackedParts(partIds: string[]): Promise<Map<string, LotOnHand[]>> {
+  const out = new Map<string, LotOnHand[]>();
+  const ids = [...new Set(partIds)];
+  if (ids.length === 0) return out;
+
+  const supabase = getSupabase();
+  const { data: parts, error: partsError } = await supabase
+    .from('parts')
+    .select('id, lot_tracked')
+    .in('id', ids);
+  if (partsError) {
+    console.error('Error loading lot tracking flags:', partsError);
+    throw partsError;
+  }
+
+  const tracked = (parts ?? []).filter((p) => p.lot_tracked).map((p) => p.id);
+  if (tracked.length === 0) return out;
+
+  const { data, error } = await supabase
+    .from('material_lots')
+    .select('id, part_id, lot_code, heat_number')
+    .in('part_id', tracked)
+    .is('deleted_at', null)
+    .order('received_at', { ascending: false });
+  if (error) {
+    console.error('Error loading the lots of several parts:', error);
+    throw error;
+  }
+
+  for (const row of data ?? []) {
+    const list = out.get(row.part_id) ?? [];
+    list.push({ lotId: row.id, lotCode: row.lot_code, heatNumber: row.heat_number, quantity: 0 });
+    out.set(row.part_id, list);
+  }
+  return out;
 }
 
 /**

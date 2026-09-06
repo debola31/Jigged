@@ -17,6 +17,10 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
   description: null,
   unit: 'ea',
   systemQuantity: 0,
+  // Untracked by default — what nearly every part is, and the shape every pre-lot test assumed.
+  lotId: null,
+  lotCode: null,
+  heatNumber: null,
   target: {
     locationId: 'loc-unassigned',
     locationName: 'Unassigned',
@@ -243,7 +247,26 @@ describe('countRowKey', () => {
    * an invitation to reintroduce the exact bug the key was created to fix.
    */
   it('always carries the place, so no two rows of one part can collide', () => {
-    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a');
+    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a::none');
+  });
+
+  /**
+   * The same collision one grain down, and the reason `none` is spelled rather than left empty.
+   *
+   * Two heats of one bar in one bin share a part AND a place, so a (part, place) key made them one
+   * row: typing 8 for heat 4471 committed 8 to heat 8823 as well. `none` is what an untracked
+   * part's single row carries, and it cannot collide with a uuid.
+   */
+  it('keeps two heats in one bin from sharing a number', () => {
+    const first = { ...at('shelf-a'), lotId: 'lot-1', lotCode: '4471', heatNumber: '4471' };
+    const second = { ...at('shelf-a'), lotId: 'lot-2', lotCode: '8823', heatNumber: '8823' };
+
+    expect(countRowKey(first)).toBe('p1::shelf-a::lot-1');
+    expect(countRowKey(first)).not.toBe(countRowKey(second));
+
+    const entries = { [countRowKey(first)]: 8, [countRowKey(second)]: 4 };
+    expect(rowDelta(first, entries)).toBe(8 - first.systemQuantity);
+    expect(rowDelta(second, entries)).toBe(4 - second.systemQuantity);
   });
 
   /**

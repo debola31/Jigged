@@ -3,10 +3,15 @@
 WHAT THIS GUARDS. Material traceability was cut on 2026-07-27 and re-confirmed 2026-08-01; a second
 customer reopened it on 2026-09-04 for heat numbers ONLY, at the ledger grain: the heat is text on the
 movement that received the bar and the movement that took it to a job, and the shipment freezes the
-job's heats when the slip is created. Stock is NOT tracked per heat — `part_location_stock` is
-untouched — so nothing here asserts a balance by heat, on purpose (docs/modules/inventory.md §5.6).
+job's heats when the slip is created.
 
-Five things only the database can prove:
+**The ledger grain was not the end of it.** 20260906121901 added the lot layer the first pass cut:
+`material_lots`, a per-part `lot_tracked` flag, and a third key on `part_location_stock`, so a
+tracked part holds a balance per heat. Everything below still holds — the lot layer added to these
+rules rather than replacing them — and the count cases at the end assert the one place the two meet:
+an adjustment is an ABSOLUTE, and "there are 12 here" means nothing at a bin holding two heats.
+
+Six things only the database can prove:
 
   * **Normalisation happens in one place, for every writer.** `trg_normalize_heat_number` upper-cases,
     trims, and turns an empty string into NULL, so "" can never print as a blank heat and two dialogs
@@ -24,6 +29,9 @@ Five things only the database can prove:
     alone (Document Snapshot Standard, docs/architecture.md §15).
   * **Absent is `[]`, not NULL** — the explicit "nothing recorded" state every existing slip already
     satisfies at rest.
+  * **A count of a tracked part names its heat, and touches only that heat.** Lot-blind, an
+    adjustment would have set one number over a bin holding several and deleted every other heat in
+    it on a count of zero — one wrong row, no error, and the split gone.
 
 Runs as `authenticated` with real JWT claims, the way PostgREST does per request, so the EXECUTE
 grants, `get_user_company_ids()` and the billing gate are genuinely exercised.
@@ -436,3 +444,157 @@ def test_the_snapshot_is_an_array_by_constraint(db, shop):
                 "UPDATE shipments SET heat_numbers_snapshot = '{}'::jsonb WHERE id = %s",
                 (shipment,),
             )
+
+
+# ── Counting a heat-tracked part (20260906121901) ──────────────────────────────────────────────
+#
+# The count sheet is the surface that had to change shape for lots, and the reason is worth
+# stating once: every other verb is RELATIVE. Adding puts 20 more on the shelf, taking removes 6 —
+# both are true regardless of how many heats sit beside them. An adjustment is ABSOLUTE. "There
+# are 12 here" is a claim about the whole bin, and at a bin holding 8 of heat 4471 and 4 of heat
+# 8823 there is no number it can be. So the RPC refuses a lot-less count of a tracked part, and
+# the app answers by making the sheet one row per (part, place, heat).
+
+
+def count(cur, shop, part, qty, lot=None):
+    """Set the true quantity of one lot at the shelf, the way the count sheet commits a line."""
+    cur.execute(
+        """
+        SELECT adjust_stock_at_location(%s::uuid, %s::uuid, %s, 'in', %s,
+                                        p_notes => 'Inventory count',
+                                        p_lot_id => %s::uuid)
+        """,
+        (part, shop["shelf"], qty, qty, lot),
+    )
+
+
+def lot_id(db, part, heat):
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM material_lots WHERE part_id = %s AND heat_number = %s", (part, heat)
+        )
+        return cur.fetchone()[0]
+
+
+def balances(db, part):
+    """(heat, quantity) at the shelf, ordered — one row per lot, which is the whole point."""
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT l.heat_number, s.quantity
+              FROM part_location_stock s
+              LEFT JOIN material_lots l ON l.id = s.lot_id
+             WHERE s.part_id = %s
+             ORDER BY l.heat_number NULLS FIRST
+            """,
+            (part,),
+        )
+        return [(r[0], float(r[1])) for r in cur.fetchall()]
+
+
+@pytest.fixture
+def two_heats(db, shop):
+    """A tracked bar holding two heats on one shelf — the state the whole section is about."""
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 8, "4471")
+        receive(cur, shop, shop["bar"], 4, "8823")
+        cur.execute("SELECT set_part_lot_tracking(%s::uuid, true)", (shop["bar"],))
+        conn.commit()
+    return shop
+
+
+def test_a_count_of_a_tracked_part_is_refused_when_it_does_not_say_which_heat(db, two_heats):
+    """The break this section exists for.
+
+    Before the sheet grew a lot column it committed every line through this RPC with no lot at
+    all, so counting a tracked part raised — which is the RIGHT failure, and far better than the
+    alternative below, but it is a failure the app must not be able to reach.
+    """
+    with user_session(two_heats["user"]) as (conn, cur):
+        with pytest.raises(errors.CheckViolation) as exc:
+            count(cur, two_heats, two_heats["bar"], 12)
+    assert "heat" in str(exc.value).lower()
+
+
+def test_counting_one_heat_leaves_every_other_heat_in_the_bin_untouched(db, two_heats):
+    """The silent corruption a lot-blind adjustment would have caused.
+
+    Setting 6 without a lot would have written ONE row for the whole bin: 12 becomes 6, and the
+    fact that 8 of it was heat 4471 and 4 was heat 8823 is gone. Nothing raises — the shop just
+    stops being able to say which heat shipped.
+    """
+    with user_session(two_heats["user"]) as (conn, cur):
+        count(cur, two_heats, two_heats["bar"], 6, lot_id(db, two_heats["bar"], "4471"))
+        conn.commit()
+
+    assert balances(db, two_heats["bar"]) == [("4471", 6.0), ("8823", 4.0)]
+
+
+def test_counting_one_heat_empty_removes_that_heat_and_not_the_bin(db, two_heats):
+    """Zero is the case that would have taken the others with it.
+
+    The RPC DELETEs at zero rather than storing 0 (20260802144310), so lot-blind this would have
+    deleted the part's whole balance at the shelf on a count of one heat as empty.
+    """
+    with user_session(two_heats["user"]) as (conn, cur):
+        count(cur, two_heats, two_heats["bar"], 0, lot_id(db, two_heats["bar"], "4471"))
+        conn.commit()
+
+    assert balances(db, two_heats["bar"]) == [("8823", 4.0)]
+    # And the rollup follows the surviving heat, not the deleted one.
+    with db.cursor() as cur:
+        cur.execute("SELECT quantity FROM parts WHERE id = %s", (two_heats["bar"],))
+        assert float(cur.fetchone()[0]) == 4.0
+
+
+def test_a_count_of_an_untracked_part_still_needs_no_heat(db, shop):
+    """The ordinary shop is unchanged, which is the other half of the promise.
+
+    A part nobody has turned tracking on for counts exactly as it did before lots existed: one
+    lot-less balance row, one number, no heat anywhere.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["plate"], 20, None)
+        count(cur, shop, shop["plate"], 17)
+        conn.commit()
+
+    assert balances(db, shop["plate"]) == [(None, 17.0)]
+
+
+def test_switching_tracking_on_moves_the_existing_balance_into_a_named_lot(db, shop):
+    """Why turning the flag on is an RPC and not an UPDATE.
+
+    Stock already on the shelf has no heat, and enforcement that starts mid-life would refuse the
+    first person who touched it. `set_part_lot_tracking` migrates those balances into a lot whose
+    code says exactly what it is, so the invariant holds at rest rather than being patched by an
+    "if the lot is missing" branch on every read (CLAUDE.md, no silent runtime fallbacks).
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["plate"], 30, None)
+        cur.execute("SELECT set_part_lot_tracking(%s::uuid, true)", (shop["plate"],))
+        migrated = cur.fetchone()[0]
+        conn.commit()
+
+    assert migrated["balances_migrated"] == 1
+    # Named PRE-TRACKING rather than given an invented heat: a made-up number on a packing slip is
+    # worse than an honest "not known".
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT l.lot_code, l.heat_number, s.quantity FROM part_location_stock s"
+            " JOIN material_lots l ON l.id = s.lot_id WHERE s.part_id = %s",
+            (shop["plate"],),
+        )
+        code, heat, qty = cur.fetchone()
+    assert (code, heat, float(qty)) == ("PRE-TRACKING", None, 30.0)
+
+    # And it is countable straight away — the point of migrating rather than just flipping a flag.
+    with user_session(shop["user"]) as (conn, cur):
+        count(cur, shop, shop["plate"], 28, lot_id_by_code(db, shop["plate"], "PRE-TRACKING"))
+        conn.commit()
+    assert balances(db, shop["plate"]) == [(None, 28.0)]
+
+
+def lot_id_by_code(db, part, code):
+    with db.cursor() as cur:
+        cur.execute("SELECT id FROM material_lots WHERE part_id = %s AND lot_code = %s", (part, code))
+        return cur.fetchone()[0]

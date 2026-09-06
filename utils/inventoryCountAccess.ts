@@ -19,8 +19,15 @@ import {
   getBalancesForParts,
   getContentsPageForLocations,
   getLocations,
+  getLotsForPart,
+  getLotsForTrackedParts,
 } from '@/utils/inventoryLocationsAccess';
-import { resolveFallbackPlace, countNote } from '@/lib/inventoryCountPlan';
+import {
+  resolveFallbackPlace,
+  countNote,
+  refreshedKey,
+  rowHeatLabel,
+} from '@/lib/inventoryCountPlan';
 import { compareLocationNames } from '@/lib/locationTree';
 import type {
   CountCandidate,
@@ -87,6 +94,17 @@ export async function loadCountCandidates(
 
   const fallback = resolveFallbackPlace(locations);
 
+  /*
+   * The stock-nowhere rows need a lot too, when their part is tracked.
+   *
+   * One batched read for every part holding nothing, not one per part: at an opening count that
+   * set is the whole catalogue, and a query each would be thousands of round trips for a sheet.
+   * `getLotsForTrackedParts` returns nothing for an untracked part, so the ordinary shop — every
+   * part untracked — pays two queries that come back empty and the rows below are unchanged.
+   */
+  const emptyPartIds = parts.filter((p) => (balances.get(p.id) ?? []).length === 0).map((p) => p.id);
+  const lotsForEmpty = await getLotsForTrackedParts(emptyPartIds);
+
   return parts.flatMap((part) => {
     const base = {
       partId: part.id,
@@ -99,15 +117,34 @@ export async function loadCountCandidates(
 
     const held = balances.get(part.id) ?? [];
     if (held.length === 0) {
+      const target = {
+        locationId: fallback.id,
+        locationName: fallback.name,
+        locationPath: fallback.name,
+      };
+      const lots = lotsForEmpty.get(part.id) ?? [];
+      // A tracked part with lots gets a row per heat: "there are 12 here" is not a statement you
+      // can make about a part whose material is told apart by heat. With no lots — tracking
+      // switched on before anything was ever received — there is no heat to name and the single
+      // row stands, which is also every untracked part.
+      if (lots.length > 0) {
+        return lots.map((lot) => ({
+          ...base,
+          systemQuantity: 0,
+          lotId: lot.lotId,
+          lotCode: lot.lotCode,
+          heatNumber: lot.heatNumber,
+          target,
+        }));
+      }
       return [
         {
           ...base,
           systemQuantity: 0,
-          target: {
-            locationId: fallback.id,
-            locationName: fallback.name,
-            locationPath: fallback.name,
-          },
+          lotId: null,
+          lotCode: null,
+          heatNumber: null,
+          target,
         },
       ];
     }
@@ -115,6 +152,9 @@ export async function loadCountCandidates(
     return held.map((b) => ({
       ...base,
       systemQuantity: b.quantity,
+      lotId: b.lotId,
+      lotCode: b.lotCode,
+      heatNumber: b.heatNumber,
       target: {
         locationId: b.locationId,
         locationName: b.locationName,
@@ -197,6 +237,9 @@ export async function loadCountCandidatesForPlaces(
         description: null,
         unit: c.primary_unit ?? 'ea',
         systemQuantity: c.quantity,
+        lotId: c.lot_id,
+        lotCode: c.lot_code,
+        heatNumber: c.heat_number,
         target: {
           locationId: c.location_id,
           locationName: place?.name ?? '',
@@ -230,13 +273,21 @@ export async function loadCountCandidatesForPlaces(
  * counting 12 against an assumed 0 works, but counting **0** against a real balance of 12 would
  * compute a delta of −12 correctly, while counting 0 against an assumed 0 computes 0 and commits
  * nothing at all. The count that confirms an empty shelf has to be able to write.
+ *
+ * ## Why it returns a LIST
+ *
+ * One part at one place is one row only while the part is untracked. A heat-tracked part holding
+ * two heats in a bin is two numbers — there is 8 of one and 4 of the other — and
+ * `adjust_stock_at_location` refuses a count that does not say which. Returning a single lot-less
+ * candidate for such a part would build a sheet you can fill in and only then be told the database
+ * will not take, after the walk, which is the one moment a person is least willing to redo.
  */
-export async function loadPartAtLocationCandidate(
+export async function loadPartAtLocationCandidates(
   companyId: string,
   partId: string,
   locationId: string,
   locationName: string,
-): Promise<CountCandidate> {
+): Promise<CountCandidate[]> {
   const supabase = getSupabase();
 
   // Its own read rather than `getPartsForSelectByIds`, which filters neither by company nor by
@@ -244,7 +295,7 @@ export async function loadPartAtLocationCandidate(
   // count here, and it closes both gaps.
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_name, description, primary_unit')
+    .select('id, part_name, description, primary_unit, lot_tracked')
     .eq('id', partId)
     .eq('company_id', companyId)
     .is('deleted_at', null)
@@ -256,16 +307,61 @@ export async function loadPartAtLocationCandidate(
   }
   if (!data) throw new Error('That part no longer exists.');
 
-  const balances = await refreshLocationQuantities(locationId, [partId]);
+  const balances = await readPlaceBalances(locationId, [partId]);
 
-  return {
+  const base = {
     partId,
     partName: data.part_name,
     description: data.description,
     unit: data.primary_unit ?? 'ea',
-    systemQuantity: balances.get(partId) ?? 0,
     target: { locationId, locationName, locationPath: locationName },
   };
+
+  /*
+   * A row per balance ROW here, whatever the flag says.
+   *
+   * Driven by what `part_location_stock` holds rather than by `lot_tracked`, because the two can
+   * legitimately disagree: switching tracking off leaves the split balances alone (merging them
+   * would have to pick a survivor and silently add the others to it), so a no-longer-tracked part
+   * can still sit here as three heats. Offering that part ONE lot-less line would write a fourth
+   * balance row beside the three, and `parts.quantity` — a trigger rollup summing these rows —
+   * would then count the same steel twice with no error anywhere.
+   */
+  const here = [...balances.values()];
+  if (here.length > 0) {
+    return here.map((b) => ({
+      ...base,
+      systemQuantity: b.quantity,
+      lotId: b.lotId,
+      lotCode: b.lotCode,
+      heatNumber: b.heatNumber,
+    }));
+  }
+
+  /*
+   * Nothing here. For an ordinary part that is the single most valuable line on any sheet — *the
+   * system says zero and I am holding twelve* — so it gets its row at 0.
+   *
+   * For a TRACKED part the same row would be refused, because an absolute count of heat-tracked
+   * material has to say which heat. So every lot of the part becomes a row at 0 instead, which is
+   * also the honest shape of the discovery: a bin holding none of this part on paper is exactly
+   * where a mis-shelved heat turns up, and until you name one you have not said what you found.
+   *
+   * A tracked part with no lots at all — tracking switched on before anything was received — falls
+   * through to the plain row and is refused at commit, per line, in the database's own words. That
+   * is correct: material whose heat has never been recorded is received, not counted into being.
+   */
+  const lots = data.lot_tracked ? await getLotsForPart(partId) : [];
+  if (lots.length === 0) {
+    return [{ ...base, systemQuantity: 0, lotId: null, lotCode: null, heatNumber: null }];
+  }
+  return lots.map((lot) => ({
+    ...base,
+    systemQuantity: 0,
+    lotId: lot.lotId,
+    lotCode: lot.lotCode,
+    heatNumber: lot.heatNumber,
+  }));
 }
 
 /**
@@ -303,7 +399,7 @@ export async function loadPartEverywhereCandidates(
 
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_name, description, primary_unit')
+    .select('id, part_name, description, primary_unit, lot_tracked')
     .eq('id', partId)
     .eq('company_id', companyId)
     .is('deleted_at', null)
@@ -331,46 +427,87 @@ export async function loadPartEverywhereCandidates(
   // description — and a row can show both.
   const base = { partId, partName: data.part_name, description: data.description, unit };
 
+  /*
+   * The stock-nowhere row has to name a lot too, when the part is tracked.
+   *
+   * `resolveFallbackPlace` puts one row at the system bucket so a part with no balance anywhere is
+   * still countable — the opening count, and the most valuable line on the sheet. For a tracked
+   * part that row is only writable if it says which heat, so it becomes one row per lot.
+   *
+   * A tracked part with NO lots is possible and gets the plain row: tracking switched on before
+   * anything was ever received leaves nothing to name. That count is refused at commit with the
+   * database's own sentence about naming a heat, per line and without touching the others — the
+   * honest answer, because material whose heat has never been recorded cannot be counted into
+   * existence. It is received, which is where a heat enters Jigged at all.
+   */
+  const nowhere = async (): Promise<CountCandidate[]> => {
+    const target = {
+      locationId: fallback.id,
+      locationName: fallback.name,
+      locationPath: fallback.name,
+    };
+    const lots = data.lot_tracked ? await getLotsForPart(partId) : [];
+    if (lots.length === 0) {
+      return [{ ...base, systemQuantity: 0, target, lotId: null, lotCode: null, heatNumber: null }];
+    }
+    return lots.map((lot) => ({
+      ...base,
+      systemQuantity: 0,
+      target,
+      lotId: lot.lotId,
+      lotCode: lot.lotCode,
+      heatNumber: lot.heatNumber,
+    }));
+  };
+
   const candidates: CountCandidate[] =
     held.length === 0
-      ? [
-          {
-            ...base,
-            systemQuantity: 0,
-            target: {
-              locationId: fallback.id,
-              locationName: fallback.name,
-              locationPath: fallback.name,
-            },
-          },
-        ]
+      ? await nowhere()
       : held
           .map((b) => ({
             ...base,
             systemQuantity: Number(b.quantity ?? 0),
+            lotId: b.lot_id,
+            lotCode: b.lot_code,
+            heatNumber: b.heat_number,
             target: {
               locationId: b.location_id,
               locationName: b.location_name,
               locationPath: [...b.path, b.location_name].join(' › ') || b.location_name,
             },
           }))
-          .sort((a, b) => compareLocationNames(a.target.locationPath, b.target.locationPath));
+          // Place first, then heat within it — the row order is a walking route, and the two heats
+          // of one bar are two labels you read off tags while standing in the same spot.
+          .sort(
+            (a, b) =>
+              compareLocationNames(a.target.locationPath, b.target.locationPath) ||
+              (a.lotCode ?? '').localeCompare(b.lotCode ?? ''),
+          );
 
   return { partName: data.part_name, candidates };
 }
 
 /**
- * Re-read the balances AT ONE LOCATION before committing a place-scoped count.
+ * What a bin actually holds of some parts — the per-place read, lot by lot.
  *
  * The company-wide sibling below reads `parts.quantity`, which is the roll-up across every bin —
  * using it here would compare a shelf count against the whole shop's total and report a variance
  * on every line.
+ *
+ * **One entry per (part, lot), which is one row of `part_location_stock`.** Never per part: a bar
+ * holding two heats on one shelf is two balances, and collapsing them would both hide a heat and
+ * measure every count against whichever row came back last. It is also what makes the count safe
+ * to WRITE — `adjust_stock_at_location` sets one balance row absolutely, so a sheet line has to
+ * correspond to one of these or it is setting a number nobody can point at.
+ *
+ * (Renamed from `refreshLocationQuantities` in 2026-09, when a quantity stopped being enough to
+ * describe what is at a place.)
  */
-export async function refreshLocationQuantities(
+export async function readPlaceBalances(
   locationId: string,
   partIds: string[],
-): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+): Promise<Map<string, PlaceBalance>> {
+  const out = new Map<string, PlaceBalance>();
   if (partIds.length === 0) return out;
 
   const supabase = getSupabase();
@@ -379,21 +516,41 @@ export async function refreshLocationQuantities(
   for (let i = 0; i < partIds.length; i += CHUNK) {
     const { data, error } = await supabase
       .from('part_location_stock')
-      .select('part_id, quantity')
+      .select('part_id, quantity, lot_id, material_lots (lot_code, heat_number)')
       .eq('location_id', locationId)
       .in('part_id', partIds.slice(i, i + CHUNK));
 
     if (error) {
-      console.error('Error refreshing location quantities for count:', error);
+      console.error('Error reading the balances at a place:', error);
       throw error;
     }
-    for (const row of data ?? []) out.set(row.part_id, Number(row.quantity) || 0);
+
+    type Row = {
+      part_id: string;
+      quantity: number;
+      lot_id: string | null;
+      material_lots: { lot_code: string; heat_number: string | null } | null;
+    };
+    for (const row of (data ?? []) as unknown as Row[]) {
+      out.set(refreshedKey(row.part_id, row.lot_id), {
+        quantity: Number(row.quantity) || 0,
+        lotId: row.lot_id,
+        lotCode: row.material_lots?.lot_code ?? null,
+        heatNumber: row.material_lots?.heat_number ?? null,
+      });
+    }
   }
-  // A part whose row vanished (moved away mid-count) reads 0 rather than going missing, so the
-  // sheet shows "0 here now" instead of silently keeping the opening number.
-  for (const id of partIds) if (!out.has(id)) out.set(id, 0);
   return out;
 }
+
+/** One balance row at a place: how much, and of which lot. */
+export interface PlaceBalance {
+  quantity: number;
+  lotId: string | null;
+  lotCode: string | null;
+  heatNumber: string | null;
+}
+
 
 /**
  * Commit counted lines, one at a time, reporting progress.
@@ -434,15 +591,21 @@ export async function commitCount(
         v.candidate.target.locationId,
         v.counted,
         v.candidate.unit,
-        { notes: countNote(v), operatorId },
+        // Which heat was counted. Required by the RPC for a lot-tracked part, because setting an
+        // absolute at a bin holding two heats has to say which one it is setting.
+        { notes: countNote(v), operatorId, lotId: v.candidate.lotId ?? undefined },
       );
       committed += 1;
     } catch (e) {
+      const heat = rowHeatLabel(v.candidate);
       failures.push({
         partName: v.candidate.partName,
         // Without the place, "BUY-ORING-214 could not be saved" leaves someone who counted it at
-        // three shelves with no idea which number to re-enter.
-        locationName: v.candidate.target.locationPath,
+        // three shelves with no idea which number to re-enter. The heat is the same problem one
+        // grain down, where two failed lines share a part AND a shelf.
+        locationName: heat
+          ? `${v.candidate.target.locationPath} · ${heat}`
+          : v.candidate.target.locationPath,
         message: e instanceof Error ? e.message : 'Could not save this count.',
       });
     }

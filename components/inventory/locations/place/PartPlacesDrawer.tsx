@@ -374,7 +374,6 @@ function PartPlacesBody({
               value={pickerChoice}
               onChange={setPickerChoice}
               unit={part.unit ?? undefined}
-              excludeSystem
               required
             />
           </Box>

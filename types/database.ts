@@ -4773,10 +4773,6 @@ export type Database = {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
       }
-      inv_get_or_create_unassigned: {
-        Args: { p_company_id: string }
-        Returns: string
-      }
       inv_location_path_label: {
         Args: { p_location_id: string }
         Returns: string

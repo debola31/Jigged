@@ -363,7 +363,6 @@ export default function PartLocationActionModal({
                 value={toLocation}
                 onChange={setToLocation}
                 excludeId={sourceLoc?.id ?? null}
-                excludeSystem
                 unit={primaryUnit}
                 required
                 onCreate={onCreateLocation}

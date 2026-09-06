@@ -7,7 +7,6 @@ import {
   commonUnit,
   contestedParts,
   groupByPart,
-  resolveFallbackPlace,
   rowDelta,
 } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
@@ -39,42 +38,14 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
 const entriesFor = (...pairs: [CountCandidate, number][]): CountEntries =>
   Object.fromEntries(pairs.map(([c, n]) => [countRowKey(c), n]));
 
-describe('resolveFallbackPlace', () => {
-  const SYSTEM = { id: 'loc-unassigned', name: 'Unassigned', kind: 'system' };
-  const SHELF = { id: 'loc-a', name: 'Shelf A', kind: 'shelf' };
-
-  /**
-   * The opening-count invariant, re-homed rather than deleted.
-   *
-   * It used to live on `resolveCountTarget`'s zero-arm. Four of that function's cases went with
-   * the exclusion (a split part is now several rows, not a notice), but this one survives and is
-   * the single thing PR B was most likely to break: `trg_auto_track_stocked_part` seeds every
-   * stocked part at Unassigned with 0, so a shop counting for the first time has its whole
-   * catalogue holding stock nowhere. A rule that emitted rows only for places with stock would
-   * make every one of them uncountable.
-   */
-  it('sends a part holding stock nowhere to the system bucket', () => {
-    expect(resolveFallbackPlace([SHELF, SYSTEM])).toEqual({
-      id: 'loc-unassigned',
-      name: 'Unassigned',
-    });
-  });
-
-  /** `isReservedKind` stops anyone typing `system` into a kind; nothing stops them renaming one. */
-  it('resolves by kind, not by the name "Unassigned"', () => {
-    const renamed = { id: 'loc-x', name: 'Not Yet Put Away', kind: 'system' };
-    expect(resolveFallbackPlace([SHELF, renamed]).id).toBe('loc-x');
-  });
-
-  /**
-   * Not a fallback and not a silent drop. Every company has had a system bucket since
-   * 20260802015837 created and asserted one, so its absence is a data fault — and dropping the
-   * part would hide it behind a shorter list nobody counts.
-   */
-  it('throws rather than silently dropping the part when there is no system bucket', () => {
-    expect(() => resolveFallbackPlace([SHELF])).toThrow(/Unassigned/i);
-  });
-});
+/*
+ * `resolveFallbackPlace` had three cases here and they are all gone with it — 20260906182638.
+ *
+ * They asserted where a part holding stock NOWHERE got counted: the company's `Unassigned` system
+ * bucket, resolved by kind rather than by name, and a loud throw if a company somehow had none.
+ * The bucket is removed and a quantity cannot exist without a location, so there is no such part
+ * state to place — the question the function answered is no longer asked.
+ */
 
 describe('groupByPart', () => {
   const at = (partId: string, locationId: string, path: string, quantity: number): CountCandidate => ({

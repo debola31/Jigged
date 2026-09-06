@@ -12,38 +12,20 @@ import type {
   CountVariance,
 } from '@/types/inventoryCount';
 
-/**
- * The place a part is counted at when it holds stock **nowhere**.
+/*
+ * `resolveFallbackPlace` is GONE, with the bucket it resolved — 20260906182638.
  *
- * This is all that survives of `resolveCountTarget`, which used to pick one target per part from
- * four arms. Three of them are gone: `aggregate` with `is_location_tracked` (20260802015837), and
- * both `excluded` arms with the sheet's move to one row per place. What remains is a single
- * decision — where does a part with no stock anywhere get counted? — and the answer is the
- * company's system bucket.
+ * It answered one question: where does a part with stock nowhere get counted? The answer was the
+ * company's `Unassigned` system bucket, and it was load-bearing while a part could carry a
+ * quantity without a place — a shop counting for the first time had its whole catalogue there.
  *
- * **This is the opening count, not an edge case.** `trg_auto_track_stocked_part` seeds every
- * stocked part at `Unassigned` with 0, so a shop counting for the first time has its entire
- * catalogue here. It is also the most valuable count there is: *the system says zero and I am
- * holding twelve*. A rule that emitted rows only for places with stock would delete exactly that.
- *
- * Resolved by `kind`, not by the literal name "Unassigned": `isReservedKind` stops anyone typing
- * `system` into a location's kind, while nothing stops them renaming one.
+ * A quantity cannot exist without a location any more, so the question is not answered
+ * differently, it is never posed: a part with no stock has no row to count. Finding twelve of
+ * something the system thinks is nowhere is still the most valuable thing a count discovers, and
+ * it is now recorded where it actually happened — "add a part here" on the bin you are standing
+ * at (`addPartHere`), or "count it somewhere else" on a part-scoped sheet (`addPartAtPlace`).
+ * Both existed already, and both name a real shelf, which the bucket never did.
  */
-export function resolveFallbackPlace(
-  locations: { id: string; name: string; kind: string | null }[],
-): { id: string; name: string } {
-  const system = locations.find((l) => l.kind === 'system');
-  if (!system) {
-    // Not a fallback and not a silent drop. Every company has had a system bucket since
-    // 20260802015837 created one for all of them and asserted it, so its absence is a real data
-    // fault — and dropping the part from the sheet would hide it behind a shorter list nobody
-    // counts. Fail loudly enough to diagnose.
-    throw new Error(
-      'This company has no "Unassigned" location, so there is nowhere to record a count for a part that is not on a shelf. This is a data fault — please report it.',
-    );
-  }
-  return { id: system.id, name: system.name };
-}
 
 /**
  * A part and every row of it on this sheet.

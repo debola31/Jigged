@@ -389,15 +389,15 @@ describe('loadCountCandidates — one row per (part, place)', () => {
    * 0, and `getBalancesForParts` filters those out — so without the fallback the entire catalogue
    * of a shop counting for the first time would be missing from its own count sheet.
    */
-  it('still emits a row for a part holding stock nowhere, at the system bucket', async () => {
+  it('emits NO row for a part holding stock nowhere', async () => {
     asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
     asMock(getBalancesForParts).mockResolvedValue(new Map());
 
-    const rows = await loadCountCandidates('co1');
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0].target.locationId).toBe('loc-unassigned');
-    expect(rows[0].systemQuantity).toBe(0);
+    // The inverse of what this asserted until 20260906182638, when it got one row at the
+    // `Unassigned` bucket. With no bucket and no quantity without a location, "this part is
+    // nowhere" is a complete answer rather than a line to type a number into — and a sheet that
+    // offered one would be asking someone to count a pile that does not exist.
+    expect(await loadCountCandidates('co1')).toEqual([]);
   });
 
   /**
@@ -427,11 +427,4 @@ describe('loadCountCandidates — one row per (part, place)', () => {
     expect(rows[0].target.locationPath).toBe('Cabinet 3 › Shelf A');
   });
 
-  it('throws rather than quietly shortening the sheet when there is no system bucket', async () => {
-    asMock(getLocations).mockResolvedValue([SHELF_A]);
-    asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
-    asMock(getBalancesForParts).mockResolvedValue(new Map());
-
-    await expect(loadCountCandidates('co1')).rejects.toThrow(/Unassigned/i);
-  });
 });

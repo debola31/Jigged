@@ -78,7 +78,6 @@ import PlaceStockActionForm, {
 import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation } from '@/types/inventoryLocations';
-import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -224,12 +223,16 @@ export default function OperatorPartLookup({
   // Each memo depends on `balances` directly. A shared `const all = balances ?? []` reads better
   // but defeats the point: the `?? []` mints a new array identity every render, so both memos
   // would recompute on every one.
+  /*
+   * Every balance is a place now — 20260906182638.
+   *
+   * This used to split the list in two: real shelves, and the `Unassigned` bucket, which was
+   * called out above them as "N not stored yet" because rendering it as a row would have sent an
+   * operator walking to a pile that is not anywhere. The bucket is gone and a quantity cannot
+   * exist without a location, so there is no second kind of row to separate out.
+   */
   const places = useMemo(
-    () => (balances ?? []).filter((b) => b.kind !== SYSTEM_KIND && Number(b.quantity ?? 0) > 0),
-    [balances],
-  );
-  const unassigned = useMemo(
-    () => (balances ?? []).find((b) => b.kind === SYSTEM_KIND && Number(b.quantity ?? 0) > 0) ?? null,
+    () => (balances ?? []).filter((b) => Number(b.quantity ?? 0) > 0),
     [balances],
   );
   const total = useMemo(
@@ -331,17 +334,6 @@ export default function OperatorPartLookup({
             </Box>
           ) : (
             <>
-              {/* Stock sitting in the put-away pile is called out FIRST and separately. It is the
-                  one state that tells an operator holding this part what to do — and the previous
-                  version rendered it as though `Unassigned` were a shelf they could walk to. */}
-              {unassigned && (
-                <Alert severity="info" sx={{ mb: 1.5 }}>
-                  <strong>
-                    {num(unassigned.quantity)} {selected.primary_unit ?? ''}
-                  </strong>{' '}
-                  not stored yet.
-                </Alert>
-              )}
               {/* Always a quantity, zero included — a part the shop is out of gets the same
                   sentence as one it has, not a warning flag (2026-09-04). "on 1 shelf" was wrong
                   for most of this shop's storage: a bin inside Cabinet 3 is not a shelf, and

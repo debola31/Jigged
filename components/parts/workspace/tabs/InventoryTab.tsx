@@ -76,7 +76,7 @@ export default function InventoryTab({
           so the same screen behaved structurally differently for two shops.
 
           The column is gone (20260802015837) and so is the second engine. A shop that does not
-          manage places still sees Add / Remove / Adjust here — they just land in Unassigned,
+          manage places still sees Add / Remove / Adjust here — they just name the one place there is,
           through the same RPC as everyone else, with the same history.
         */}
         <Box sx={{ mt: 4 }}>

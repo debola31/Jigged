@@ -312,7 +312,6 @@ export default function OperatorLocationActionModal({
               value={destination}
               onChange={setDestination}
               excludeId={locationId}
-              excludeSystem
               required
             />
           )}

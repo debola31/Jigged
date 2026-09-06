@@ -73,6 +73,10 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     { key: 'preferred_vendor_name', label: 'Preferred vendor', required: false },
     { key: 'cost_per_unit', label: 'Cost / price', required: false },
     { key: 'quantity', label: 'Quantity on hand', required: false },
+    // Where that quantity IS. Optional as a column, but a quantity without one is
+    // refused at import: since 20260906182638 stock cannot exist without a location,
+    // so a CSV that says "we have 240" and not where has not said enough to record.
+    { key: 'location_name', label: 'Location (needed with a quantity)', required: false },
     { key: 'reorder_point', label: 'Reorder point', required: false },
   ],
   vendors: [{ key: 'name', label: 'Vendor name', required: true }],

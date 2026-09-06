@@ -86,14 +86,14 @@ every tenant: the `inventory_locations` flag that used to gate Storage was retir
 | **Change a unit's layout** | Storage → pick a unit → `Change layout` | Opens on the unit's REAL subtree and writes a **diff** — creates, renames, re-parents, removes — through one `apply_location_layout` call. Anything it removes that holds stock has to be re-placed first, and anything it divides up moves its stock down. **Was an append until 2026-08-15** ([§5.13](#513-change-layout-changes-the-layout--2026-08-15)): the same dialog, seeded with five default rows and told to number PAST what was already there, so asking a five-row cabinet for three rows gave you eight. |
 | **Reorganise a place** | Storage → pick it in the list, or a cell in the grid | `Rename`, `Duplicate`, `Add one inside`, `Delete` (empty subtrees only). ~~`Move into…` (re-parent)~~ **removed 2026-08-10** — see [§5.12](#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30). |
 | Print labels | Storage toolbar / place drawer | `Print all labels` for setup, or `Print QR` for one place **and everything under it**. There is no row selection: bulk-print-a-subset is the only job those checkboxes served, nobody has asked for it twice, and a checkbox column charges every row on every visit for it. |
-| **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for `Unassigned` too. |
+| **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for every place. |
 | **See stock moving across the whole shop** | `/activity` → `Inventory` | Every movement, newest first, transfers folded to one row. Each row links to that part's ledger. Added 2026-08-01 — `getRecentActivity` already existed and its only caller was the operator's phone. |
 | **Move stock at a place** | Storage → click a cell → drawer → `Add` · `Remove` · `Move` | **A quantity per row, several parts at a time.** Fixes the *place* and picks the *parts* — the inverse of the part page, and the information you actually have standing at a cabinet. [`PlaceStockActionForm`](../../components/inventory/locations/place/PlaceStockActionForm.tsx), **new 2026-08-10**: before it, Storage could not put anything into a bin at all. |
 | Audit ONE place | Storage → click a cell → drawer → `Adjust` | [`PlaceAdjustForm`](../../components/inventory/locations/place/PlaceAdjustForm.tsx): everything at that place under **recorded · counted · changed**, variance as you type. **A blank is not a zero** — untouched rows keep their balance, and a typed 0 is an assertion that the bin is empty. |
 | Audit a whole cabinet | Storage → pick a unit → `Bulk Adjust` | [`UnitAdjustDrawer`](../../components/inventory/locations/place/UnitAdjustDrawer.tsx) — every bin under the unit in one drawer, a row per **(part, place)**, recorded · counted · changed. Was `Count or put away`, then `Adjust`, then a page; see §5.12. |
 | **Count one part at one place** | `/parts/{id}` → Inventory tab → the icon on a balance row | Offered on **every** row including zeros. |
 | **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |
-| Put stray parts away | Place worksheet, at `Unassigned` | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. |
+| Put stray parts away | Place worksheet, at any bin | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. The tool is unchanged; the pile it was built to empty is gone (§5.14). |
 | **"Where is my o-ring?" — and take five off the shelf** | Storage → the page search | [`StorageSearch`](../../components/inventory/locations/StorageSearch.tsx) matches **places and parts in one box**, grouped, **one row per part**. Picking a part opens [`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — every place it is, with quantities and a total — and each row **expands into the four verbs scoped to that part at that place**, so the job finishes where the answer was. `Open bin` is inside the expanded section for when you want the whole shelf. |
 | Count the whole shop | **Storage**, or a part's Inventory tab → `/inventory/count` | One door, and now the worksheet's **only** browsing entry: Storage stopped navigating there entirely 2026-08-10. The page keeps its place-scoped mode for a part's own balance row (`?location=…&part=…` from [`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)). |
 | **Add a part the bin read didn't return** | Place worksheet → `Found something not listed?` | The "system says zero, I'm holding twelve" case. |
@@ -186,7 +186,7 @@ worked, leaves): a job attribute.
 | `parts` | `primary_unit` is required by a **CHECK** (`parts_requires_unit`), not a NOT NULL column — `types/database.ts` types it `string | null`, so an insert omitting it compiles and then fails at runtime; `quantity` **written only by a stock function, never the part form**; `reorder_point` NULL disables status; `preferred_vendor_id` is a **label only, not a cost gate** (`20260714173443`). |
 | `parts_unit_conversions` | FR-1. `(part_id, from_unit)` UNIQUE, `to_primary_factor` > 0 — bar in lbs: `inches` × 0.166. Custom/cross-category only; names in `company_custom_units`. |
 | `inventory_transactions` | FR-13. `quantity` always positive, direction in `type`; `has_discrepancy` = clamped-to-zero depletion; `transfer_group_id` pairs a transfer's two rows; `notes` the only mutable column (`restrict_transaction_update_to_notes`). |
-| `inventory_locations` | `parent_id` self-FK RESTRICT; `code` **not unique**; **no `path`/`level`/ltree** — depth recomputed client-side each read. The partial unique index `(company_id) WHERE name='Unassigned'` *is* the auto-bucket mechanism, resolved **by name**. Traps: re-parent cycle check is client-side only; Unassigned is that string in SQL but `kind==='system'` in TS. |
+| `inventory_locations` | `parent_id` self-FK RESTRICT; `code` **not unique**; **no `path`/`level`/ltree** — depth recomputed client-side each read. The auto-bucket mechanism (a partial unique index on `name='Unassigned'`, resolved by name in SQL and by `kind==='system'` in TS) is **gone — 2026-09-06, §5.14**; `kind = 'system'` is now refused by CHECK. Trap that remains: the re-parent cycle check is client-side only. |
 | `part_location_stock` | `(part_id, location_id)` UNIQUE, both FKs RESTRICT, RLS **SELECT-only**. A row exists only while the part is actually there — `CHECK (quantity > 0)`, emptying deletes. **Never at a location with children** — see below. |
 
 ### A place is a container or a bin, never both
@@ -246,7 +246,7 @@ Per part by `is_location_tracked`; unification is intent (§5.4).
 | How | Client read-modify-write of `parts.quantity`, then a **separate** ledger insert | Balance upsert + ledger insert in one transaction, `SELECT … FOR UPDATE` |
 | Atomicity | **None** — concurrent writes lose updates | Atomic, row-locked; `parts.quantity` is a `trg_recompute_part_quantity` rollup |
 
-`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to `PartLocationInventory`. `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrols every new part at Unassigned unconditionally, hence no per-part opt-in UI. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
+`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to `PartLocationInventory`. `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrolled every new part at Unassigned unconditionally, hence no per-part opt-in UI. **Both the trigger and the bucket were removed 2026-09-06 (§5.14):** a part is created at 0 or the insert is refused, and stock enters only through `add_stock_at_location`. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
 
 **Nothing decrements automatically** — not on operation complete, job complete, shipment or invoice; zero stock calls in the jobs, operator, shipments or operation-completions access files. Deliberate, still true after Phase 1: consumption is recorded when an operator depletes at a bin and tags the job, which J4 reads back. The tag stays **optional** — accepted risk (J7).
 
@@ -277,7 +277,7 @@ Supabase + RLS via `getSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventory
 - `occupancyFor` **zero-defaults** so render code never branches on `undefined` — an optional `?.hasStock` reads an *unknown* location as "empty", which is exactly how the roll-up bug comes back.
 - `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `readPlaceBalances` is the per-place one. It returns **one entry per (part, lot)**, not per part — a bar holding two heats on one shelf is two balance rows, and a count line has to correspond to one of them because `adjust_stock_at_location` sets a single row absolutely. (Called `refreshLocationQuantities` until 2026-09, when a quantity stopped being enough to describe what is at a place.)
 - **`code` is gone (20260803034616).** The founder asked why a label printed a code when it already printed the name, and there was no answer that survived contact. `locationLabelPdf` laid out the QR, then the full path at 11pt black, then the code at 10pt grey — a second human-readable identifier one line under the first. And **nothing in the app could look one up**: no search, no filter, no `eq('code')`, and the scanner parses the UUID. The three defences all failed — "short enough to say out loud" (you would say *Shelf A*, and nothing accepts a spoken code), "survives a rename" (the QR carries the UUID, so it already did), and "matches codes stencilled on the rack" (a shop with that scheme would simply *name* the place `A-12`). Safe to drop rather than deprecate because no one had printed a label yet. The parent-prefixed zero-padded scheme in `locationSpec` (`CAB1` → `CAB1-R03` → `CAB1-R03-L`) went with it; the builder keeps its **name** planning, which is the half anyone reads.
-- **`kind` left the UI in the same pass**, for the same reason one step earlier: its only consumer was the board's `unitKind`, which chose a drawing, and the board became a table. The column stays because `kind = 'system'` marks the `Unassigned` pile and `resolveFallbackPlace`, `excludeSystem`, the operator put-away split and the panel's action gate all key off it — but it is now set only by `inv_get_or_create_unassigned`, never by a person.
+- **`kind` left the UI in the same pass**, for the same reason one step earlier: its only consumer was the board's `unitKind`, which chose a drawing, and the board became a table. The column stayed because `kind = 'system'` marked the `Unassigned` pile and four surfaces keyed off it. **All four are gone with the bucket (2026-09-06, §5.14)** — `kind` is now free text describing what a place IS, with `system` refused by CHECK so the branches cannot return.
 - `LocationScanner` is wired into the operator Scan tab and the put-away destination picker on the place-scoped count worksheet. **Not the owner's Storage board** — an earlier revision of this line said it was; grep says two references, both above. It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
 
 ### Archive · dead code
@@ -376,7 +376,7 @@ Whoever is assigned, on a schedule or on distrust of a number. **Built 2026-07-2
 
 The two steps are deliberately **different grains**, which is the one judgement in this change worth arguing with. The *picker* stays one row per part ("count this one wherever it is") — it is unbounded, unvirtualised and filtered in the browser, so one row per (part, place) would have multiplied it for no gain, and made a 20-part shop read *"Count 40 parts"*, which is the same species of nonsense as the notice it replaced. The *sheet* is place-grained, grouped under a part header carrying a read-only subtotal. **The header has no input, on purpose** — a total field there would rebuild the 38-against-10+20+10 bug behind a UI now promising it works.
 
-**The row rule, and the two simpler rules that were both wrong.** One row per place holding stock, plus exactly one row at the system bucket when a part holds stock nowhere. Emitting a row per balance *row* used to fill the sheet with the zero residue `transfer_stock` and `bulk_put_away` left behind forever — a live absolute write target on a shelf the part had left, which makes a count worse than not counting. Filtering to `> 0` alone deletes the opening count, because every stocked part was seeded at `Unassigned` with 0, so a first-time count would find its whole catalogue missing — and *"the system says zero and I am holding twelve"* is the count that matters most. On the seed's 14 stocked parts the three rules gave 18, 11 and 15 rows; the middle one dropped 4 parts.
+**The row rule, and the two simpler rules that were both wrong.** One row per place holding stock, plus exactly one row at the system bucket when a part holds stock nowhere. **The second half went with the bucket on 2026-09-06 (§5.14): a part holding stock nowhere now yields no row at all.** Emitting a row per balance *row* used to fill the sheet with the zero residue `transfer_stock` and `bulk_put_away` left behind forever — a live absolute write target on a shelf the part had left, which makes a count worse than not counting. Filtering to `> 0` alone deletes the opening count, because every stocked part was seeded at `Unassigned` with 0, so a first-time count would find its whole catalogue missing — and *"the system says zero and I am holding twelve"* is the count that matters most. On the seed's 14 stocked parts the three rules gave 18, 11 and 15 rows; the middle one dropped 4 parts.
 
 **Half of that is now moot, and deliberately so — 20260802144310 (#657).** The residue is deleted, every producer deletes-at-zero instead of parking a 0, and `part_location_stock` CHECKs `quantity > 0`. **A row means the part is there**, so "rows that exist" and "places holding stock" are the same set and the four `.gt('quantity', 0)` filters that stood between them are gone. CLAUDE.md's *no silent runtime fallbacks for data-at-rest issues* is what forced it: one of those filters said in its own comment that it was papering over bad data, and four filters over one unfixed invariant is exactly the accumulation that rule warns about.
 
@@ -400,7 +400,7 @@ The same PR fixed **live data loss**: `save()` built variances by mapping over `
 
 **Wrong twice:** built literally as three screens (*Scope → Sheet → Review*) — design a journey, not a data flow; then over-corrected by dropping **scope** too, when that critique was about *ordering* and took the *bounding* value with it ("these five, then I'm done" versus a wall of inputs reading as a form to complete).
 
-Two deviations from spec: **no count-session table** (localStorage, so Phase 1 adds none — giving up assignment and cross-device resume, which Sortly built a server lifecycle for citing *"lack of accountability"*, a multi-counter problem this shop lacks); and **item-scoped**, since `inventory_locations` was then default-off and place-scoping would have made Phase 1 depend on Phase 2 — resolved since by `?location=`. Both deviations are now closed. `resolveCountTarget`'s four-way commitment is gone with them: the `untracked → parts.quantity via adjustPartStock` arm died with `is_location_tracked` (20260802015837) and the `excluded` arms with the (part, place) row above, leaving one decision — where does a part holding stock nowhere get counted? — as [`resolveFallbackPlace`](../../lib/inventoryCountPlan.ts). It resolves the system bucket by **`kind`, not the name "Unassigned"**: `isReservedKind` stops anyone typing `system` into a kind, while nothing stops them renaming one. A company without one **throws** rather than quietly shortening the sheet — every company has had one since 20260802015837 created and asserted it, so its absence is a data fault, and a dropped part hides behind a shorter list nobody counts.
+Two deviations from spec: **no count-session table** (localStorage, so Phase 1 adds none — giving up assignment and cross-device resume, which Sortly built a server lifecycle for citing *"lack of accountability"*, a multi-counter problem this shop lacks); and **item-scoped**, since `inventory_locations` was then default-off and place-scoping would have made Phase 1 depend on Phase 2 — resolved since by `?location=`. Both deviations are now closed. `resolveCountTarget`'s four-way commitment is gone with them: the `untracked → parts.quantity via adjustPartStock` arm died with `is_location_tracked` (20260802015837) and the `excluded` arms with the (part, place) row above, leaving one decision — where does a part holding stock nowhere get counted? — as `resolveFallbackPlace`. **That function is gone too (2026-09-06, §5.14): with no bucket and no quantity without a location, the question is never posed.** What it used to do: It resolves the system bucket by **`kind`, not the name "Unassigned"**: `isReservedKind` stops anyone typing `system` into a kind, while nothing stops them renaming one. A company without one **throws** rather than quietly shortening the sheet — every company has had one since 20260802015837 created and asserted it, so its absence is a data fault, and a dropped part hides behind a shorter list nobody counts.
 
 **Nothing judges the size of a change.** A 50% proportional threshold, on the finding that [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/), fired on nearly every line at small-shop quantities (7 on hand, 3 found) and stopped informing. The finding is probably sound; **percentage-of-quantity is what failed** — value moved (`cost_per_unit × delta`) would scale across a $2 bearing and a $2,000 casting, but the figure is **open for discovery**. Safety doesn't rest on it: recount to fix, and every line writes an `adjustment` row naming both numbers. Quantities are re-read just before the write — not as a gate (adjust sets absolutes) but because the note records *"system said X"*; mid-count movement is reported after.
 
@@ -864,6 +864,71 @@ re-configurated."* Both halves were exactly right.
 | **A pre-existing bug this walked into** | `delete_location` has been unable to delete any location with ledger history since **20260731235450**. `inventory_transactions.location_id` is `ON DELETE SET NULL`, and 20260622034847 removed that column from the notes-only immutability guard for exactly that reason, saying so in a section header. The photo migration rebuilt the guard, read the absence as an oversight — *"the other three were mutable by omission"* — and put it back. Every removal here is a bin whose stock has just moved out, so the reshape cannot ship over it. **Same trap the execute-grant allowlist has sprung three times: an allowlist by omission, rebuilt from a stale copy, silently reverts a decision.** |
 
 ---
+
+### 5.14 Stock always names a location — `Unassigned` removed, 2026-09-06
+
+[`20260906182638`](../../supabase/migrations/20260906182638_stock_always_names_a_location.sql).
+Founder's call, on seeing 3,626 of a screw reported as *"not stored yet"* beside 4 on a shelf:
+
+> *"we should never show 'not stored yet', just show it as being in the unassigned location. And
+> technically unassigned should not exist at all since once this feature is added, we should reset
+> all counts to 0 and so anything that is added as a quantity should have to be added to a
+> location."*
+
+**What the bucket was.** A per-company location with `kind = 'system'`, minted on demand by
+`inv_get_or_create_unassigned()`. Every part created carrying an opening quantity was dropped into
+it by `trg_seed_new_part_balance`; the CSV importer wrote its quantities there; the put-away flow
+existed to empty it. It was the answer to *"this part has stock but nobody has said where"* — a
+state that existed **only because a quantity could be recorded without a place**.
+
+**Why removing the state beat improving the label.** The bucket was a second kind of location that
+every reader had to know about and exclude. It was not a destination in the pickers
+(`excludeSystem`), not a shelf in the operator lookup (called out as *"N not stored yet"*), a
+special first row in the part drawer, the fallback target of the count sheet
+(`resolveFallbackPlace`), sorted last on the Storage board (`orderUnits`), the one unit that could
+not be reshaped or subdivided, and a `kind` nobody was allowed to type. **Nine surfaces carried a
+branch for it.** Deleting the concept deleted all nine, which is the founder's point exactly: if a
+quantity cannot exist without a location, there is nothing for the bucket to hold.
+
+**The reset was deliberate and destructive.** Every balance row was deleted, taking `parts.quantity`
+to 0 through the existing rollup trigger. That was 2,409 units across 57 parts for the pilot shop —
+effectively their whole recorded inventory, since they had put 9 units on shelves and left the rest
+in the bucket. Those figures were put to the founder before the migration was written and confirmed
+twice. The shop re-counts from a clean slate, which is also the honest state: a number nobody could
+point at a shelf for was never a fact about the shop.
+
+**The ledger was not touched.** `inventory_transactions` is append-only and explicitly
+non-authoritative ([§5.8](#58-the-ledger-is-append-only-and-non-authoritative)) — it is history, not
+the balance, and the history of a real movement stays true after a recount. Its `location_id` FK is
+`ON DELETE SET NULL` and every row carries a `location_name` snapshot, so rows that pointed at a
+deleted bucket still read correctly.
+
+**What enforces it now.** `enforce_tracked_part_quantity` grew an INSERT arm: a part is created at 0
+or the insert is refused. It used to be `BEFORE UPDATE` only, which is exactly why an INSERT
+carrying a quantity could slip past and produce a `parts.quantity` no balance row supported. Stock
+enters through `add_stock_at_location`, which has always named a location. `kind = 'system'` is
+refused by a CHECK constraint so the branches cannot come back.
+
+**Knock-ons, each of which is the removal of a special case rather than a new rule:**
+
+| Surface | Before | Now |
+|---|---|---|
+| Count sheet | one row at the bucket for a part holding stock nowhere | **no row** — "this part is nowhere" is a complete answer. Finding some is recorded at the bin you found it in (`addPartHere`), which names a real shelf |
+| Operator lookup | balances split into shelves and *"N not stored yet"* | one list; every balance is a place |
+| Destination pickers | `excludeSystem` dropped the bucket | the prop is gone; every place is offered |
+| Storage board | `orderUnits` floated the bucket last | the shop's own `sort_order` is the whole rule |
+| Reshape / subdivide | the bucket refused to be divided | an ordinary root, divided like any other |
+| CSV import | quantities landed in the bucket | a **`location_name` column**; a quantity whose location is missing, unknown or ambiguous is reported as skipped rather than filed somewhere nobody will look |
+| Part creation | an opening quantity was parked in the bucket | `createPart` never wrote `quantity` anyway, so this path simply became enforceable |
+
+**The seed changed shape, not just content.** Locations and opening stock moved to the TOP of
+`seed.sql`, beside the parts they belong to: places have to exist before anything can be stocked
+into them. Stock is placed through `add_stock_at_location` by **path** (`unit / child / leaf`)
+rather than by bare name, because names repeat by design — `Bay 1` is in two racks, `Drawer 1` in
+two cabinets, `Level 1` forty times — and that repetition is exactly what the pickers must cope
+with. The tree is 16 units and ~300 places at mixed depths and widths, from a flat yard to a 10×5
+pallet bay and a 4×12 small-parts cabinet.
+
 
 ## 6. Sequencing
 

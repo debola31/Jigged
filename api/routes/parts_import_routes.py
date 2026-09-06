@@ -215,6 +215,7 @@ async def validate_import(
         part_name_column = reverse_mappings.get("part_name")
         primary_unit_column = reverse_mappings.get("primary_unit")
         quantity_column = reverse_mappings.get("quantity")
+        location_column = reverse_mappings.get("location_name")
         cost_column = reverse_mappings.get("cost_per_unit")
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
@@ -522,6 +523,7 @@ async def execute_import(
         description_column = reverse_mappings.get("description")
         primary_unit_column = reverse_mappings.get("primary_unit")
         quantity_column = reverse_mappings.get("quantity")
+        location_column = reverse_mappings.get("location_name")
         cost_column = reverse_mappings.get("cost_per_unit")
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
@@ -711,8 +713,15 @@ async def execute_import(
             existing = existing_by_name.get(part_name.lower())
             if quantity_val is not None:
                 prior_qty = float(existing.get("quantity") or 0) if existing else 0.0
+                # WHERE the quantity is, carried alongside it. Stock cannot exist without a
+                # location since 20260906182638, so a CSV that says how much and not where has
+                # not said enough — the resolution below refuses the row rather than inventing
+                # a home for it, which is what the `Unassigned` bucket used to do.
+                place_name = (
+                    row.get(location_column, "").strip() if location_column else ""
+                )
                 pending_balances.append(
-                    (part_name, prior_qty, float(quantity_val), resolved_unit)
+                    (part_name, prior_qty, float(quantity_val), resolved_unit, place_name)
                 )
             # parts.cost_per_unit was dropped (migration 20260514). For bought
             # rows we stage a NULL-vendor procurement tier post-insert; made
@@ -810,23 +819,39 @@ async def execute_import(
         # `is_location_tracked` check made, on the condition that actually matters.
         if pending_balances:
             try:
-                unassigned_id = supabase.rpc(
-                    "inv_get_or_create_unassigned", {"p_company_id": request.company_id}
-                ).execute().data
-
                 staged = [
-                    (name, prior_qty, new_qty, unit)
-                    for name, prior_qty, new_qty, unit in pending_balances
+                    (name, prior_qty, new_qty, unit, place)
+                    for name, prior_qty, new_qty, unit, place in pending_balances
                     if name in id_by_part_name
                 ]
-                part_ids = [id_by_part_name[name] for name, _, _, _ in staged]
+                part_ids = [id_by_part_name[name] for name, _, _, _, _ in staged]
 
-                # Any stock at a place that isn't the Unassigned bucket makes the CSV number
-                # ambiguous. The `.gt("quantity", 0)` is KEPT after 20260802144310 deleted the
-                # zero-row residue: here it is a business predicate ("is this actually placed
-                # somewhere?"), not residue-hiding, so it stays correct under either data state
-                # and states its own intent at the point of use.
-                placed: set[str] = set()
+                # Resolve the named places to ids, in one read.
+                #
+                # LEAVES only: since 20260806160053 a container holds no stock of its own, so
+                # resolving "Cabinet 3" would stage a row the database refuses. Matched
+                # case-insensitively on the leaf name because that is what a shop types into a
+                # spreadsheet, and ambiguity is REFUSED rather than guessed -- `Bin 1` under four
+                # different shelves is four answers, and picking one silently files a shop's stock
+                # somewhere they will not find it.
+                wanted = {place.lower() for _, _, _, _, place in staged if place}
+                by_name: dict[str, list[str]] = {}
+                if wanted:
+                    res = (
+                        supabase.table("inventory_locations")
+                        .select("id, name, parent_id")
+                        .eq("company_id", request.company_id)
+                        .execute()
+                    )
+                    rows = res.data or []
+                    parents = {r["parent_id"] for r in rows if r["parent_id"]}
+                    for r in rows:
+                        key = (r["name"] or "").strip().lower()
+                        if key in wanted and r["id"] not in parents:
+                            by_name.setdefault(key, []).append(r["id"])
+
+                # Where each part already holds stock, so a CSV cannot silently double a total.
+                held_at: dict[str, set[str]] = {}
                 for batch_start in range(0, len(part_ids), BATCH_SIZE):
                     res = (
                         supabase.table("part_location_stock")
@@ -836,31 +861,47 @@ async def execute_import(
                         .execute()
                     )
                     for r in res.data or []:
-                        if r["location_id"] != unassigned_id:
-                            placed.add(r["part_id"])
+                        held_at.setdefault(r["part_id"], set()).add(r["location_id"])
 
                 balance_rows: list[dict] = []
-                zeroed_part_ids: list[str] = []
+                zeroed: list[tuple[str, str]] = []
                 ledger_rows: list[dict] = []
-                for name, prior_qty, new_qty, unit in staged:
+                for name, prior_qty, new_qty, unit, place in staged:
                     part_id = id_by_part_name[name]
-                    if part_id in placed:
+
+                    matches = by_name.get(place.lower(), []) if place else []
+                    if len(matches) != 1:
+                        # No column, an unknown place, or a name that is not unique. All three
+                        # mean the same thing: this row has not said WHERE the stock is, and
+                        # since 20260906182638 there is nowhere to put stock that has no place.
+                        # Reported rather than dropped, so a shop is told which rows need a
+                        # location instead of finding the quantities missing later.
                         already_placed_skips.append(name)
                         continue
-                    # Unchanged numbers need no write and no ledger row — re-importing the same
+                    location_id = matches[0]
+
+                    # Already somewhere ELSE. "240 on hand" from a spreadsheet cannot say which of
+                    # two shelves to correct, and writing it at the named one would leave the
+                    # other standing and inflate the total. A row naming the shelf the stock is
+                    # already on is unambiguous and goes through.
+                    if held_at.get(part_id, set()) - {location_id}:
+                        already_placed_skips.append(name)
+                        continue
+
+                    # Unchanged numbers need no write and no ledger row -- re-importing the same
                     # file twice should be a no-op, not a wall of zero-delta "adjustments".
                     if prior_qty == new_qty:
                         continue
                     # A zero opening balance is a DELETE, not an upsert: `part_location_stock`
                     # CHECKs `quantity > 0` since 20260802144310, so writing a 0 raises.
                     if new_qty == 0:
-                        zeroed_part_ids.append(part_id)
+                        zeroed.append((part_id, location_id))
                     else:
                         balance_rows.append(
                             {
                                 "company_id": request.company_id,
                                 "part_id": part_id,
-                                "location_id": unassigned_id,
+                                "location_id": location_id,
                                 "quantity": new_qty,
                             }
                         )
@@ -878,9 +919,9 @@ async def execute_import(
                             "quantity": delta,
                             "unit": unit,
                             "converted_quantity": delta,
-                            "location_id": unassigned_id,
+                            "location_id": location_id,
                             "notes": (
-                                f"Opening balance from import — set from {prior_qty} "
+                                f"Opening balance from import \u2014 set from {prior_qty} "
                                 f"to {new_qty} {unit}"
                             ),
                         }
@@ -891,25 +932,25 @@ async def execute_import(
                         supabase.table("part_location_stock")
                         .upsert(
                             balance_rows[batch_start : batch_start + BATCH_SIZE],
-                            # `lot_key` joined the key in 20260906121901, so a part can hold
-                            # two heats in one bin. It is a generated column and is never
-                            # written -- but it has to be NAMED, or PostgREST cannot infer the
-                            # index and every row fails with "no unique or exclusion constraint
-                            # matching the ON CONFLICT specification". An import carries no
-                            # heats, so these land as lot-less rows, which is exactly what an
-                            # untracked part is.
+                            # `lot_key` joined the key in 20260906121901, so a part can hold two
+                            # heats in one bin. It is a generated column and is never written --
+                            # but it has to be NAMED, or PostgREST cannot infer the index and
+                            # every row fails with "no unique or exclusion constraint matching the
+                            # ON CONFLICT specification". An import carries no heats, so these
+                            # land as lot-less rows, which is exactly what an untracked part is.
                             on_conflict="part_id,location_id,lot_key",
                         )
                         .execute()
                     )
 
                 # "The CSV says this part is at zero" removes its row rather than storing a 0.
-                for batch_start in range(0, len(zeroed_part_ids), BATCH_SIZE):
+                # Per (part, place), because a part may legitimately hold stock elsewhere.
+                for zero_part_id, zero_location_id in zeroed:
                     (
                         supabase.table("part_location_stock")
                         .delete()
-                        .eq("location_id", unassigned_id)
-                        .in_("part_id", zeroed_part_ids[batch_start : batch_start + BATCH_SIZE])
+                        .eq("part_id", zero_part_id)
+                        .eq("location_id", zero_location_id)
                         .execute()
                     )
             except Exception as e:

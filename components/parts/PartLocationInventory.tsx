@@ -86,17 +86,16 @@ export default function PartLocationInventory({
   const balances = inventoryData?.[0] ?? EMPTY_BALANCES;
   const locations = inventoryData?.[1] ?? EMPTY_LOCATIONS;
 
-  /**
-   * One-place mode: the shop has never built a place, so the auto-managed `Unassigned` bucket is
-   * the only one there is.
+  /*
+   * No-storage mode: the shop has never built a place.
    *
-   * This is a DATA condition, not a flag — since 20260802015837 every part has a place, and the
-   * `inventory_locations` flag that used to also gate this tab was retired Aug 2026. What it must
-   * not do is show a places UI with nothing behind it: a "Move" button with nowhere to move to,
-   * and a dropdown containing exactly one option. A shop that has never built a place still hits
-   * this branch, which is the case that matters.
+   * This is a DATA condition, not a flag. It used to read "exactly one location and it is the
+   * system bucket", because every company was minted an `Unassigned` whether or not anyone had
+   * built storage. With the bucket gone (20260906182638) a shop that has built nothing has no
+   * locations at all, and that is the state this must not show a places UI for: a "Move" button
+   * with nowhere to move to, and a dropdown containing nothing.
    */
-  const onePlace = locations.length === 1 && locations[0].kind === 'system';
+  const onePlace = locations.length === 0;
 
   // Leaves only: since 20260806160053 a place with sub-locations cannot hold stock, so offering a
   // cabinet here would put an error behind a legitimate-looking choice. `kind` rides along so the

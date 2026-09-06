@@ -18,12 +18,9 @@ import {
   getBalancesForPart,
   getBalancesForParts,
   getContentsPageForLocations,
-  getLocations,
   getLotsForPart,
-  getLotsForTrackedParts,
 } from '@/utils/inventoryLocationsAccess';
 import {
-  resolveFallbackPlace,
   countNote,
   refreshedKey,
   rowHeatLabel,
@@ -85,25 +82,11 @@ export async function loadCountCandidates(
   const parts = [...found].sort((a, b) => a.part_name.localeCompare(b.part_name));
   if (parts.length === 0) return [];
 
-  // `getBalancesForParts` already filters `quantity > 0`, pages past PostgREST's max_rows, and
-  // computes each location's ancestor path — so the row rule above needs no query of its own.
-  const [balances, locations] = await Promise.all([
-    getBalancesForParts(companyId, parts.map((p) => p.id)),
-    getLocations(companyId),
-  ]);
-
-  const fallback = resolveFallbackPlace(locations);
-
-  /*
-   * The stock-nowhere rows need a lot too, when their part is tracked.
-   *
-   * One batched read for every part holding nothing, not one per part: at an opening count that
-   * set is the whole catalogue, and a query each would be thousands of round trips for a sheet.
-   * `getLotsForTrackedParts` returns nothing for an untracked part, so the ordinary shop — every
-   * part untracked — pays two queries that come back empty and the rows below are unchanged.
-   */
-  const emptyPartIds = parts.filter((p) => (balances.get(p.id) ?? []).length === 0).map((p) => p.id);
-  const lotsForEmpty = await getLotsForTrackedParts(emptyPartIds);
+  // ONE read. `getBalancesForParts` already filters `quantity > 0`, pages past PostgREST's
+  // max_rows, and computes each location's ancestor path — so the row rule above needs no query of
+  // its own. The locations read that used to sit beside it went with the `Unassigned` bucket: it
+  // existed only to find the system location to put stock-nowhere rows at.
+  const balances = await getBalancesForParts(companyId, parts.map((p) => p.id));
 
   return parts.flatMap((part) => {
     const base = {
@@ -115,39 +98,19 @@ export async function loadCountCandidates(
       unit: part.primary_unit ?? 'ea',
     };
 
+    /*
+     * A part holding stock NOWHERE contributes no rows, and that is the change of 20260906182638.
+     *
+     * It used to get one row at the company's `Unassigned` bucket — the opening count, and while a
+     * quantity could exist without a place it was the most valuable line on the sheet. There is no
+     * such quantity now, so there is no number to put in front of anyone: the honest sheet lists
+     * the places stock actually is.
+     *
+     * Finding twelve of something the system thinks is nowhere is still the point of counting. It
+     * is recorded at the bin you found it in — "add a part here" — which names a real shelf, where
+     * the bucket row named a pile that did not exist.
+     */
     const held = balances.get(part.id) ?? [];
-    if (held.length === 0) {
-      const target = {
-        locationId: fallback.id,
-        locationName: fallback.name,
-        locationPath: fallback.name,
-      };
-      const lots = lotsForEmpty.get(part.id) ?? [];
-      // A tracked part with lots gets a row per heat: "there are 12 here" is not a statement you
-      // can make about a part whose material is told apart by heat. With no lots — tracking
-      // switched on before anything was ever received — there is no heat to name and the single
-      // row stands, which is also every untracked part.
-      if (lots.length > 0) {
-        return lots.map((lot) => ({
-          ...base,
-          systemQuantity: 0,
-          lotId: lot.lotId,
-          lotCode: lot.lotCode,
-          heatNumber: lot.heatNumber,
-          target,
-        }));
-      }
-      return [
-        {
-          ...base,
-          systemQuantity: 0,
-          lotId: null,
-          lotCode: null,
-          heatNumber: null,
-          target,
-        },
-      ];
-    }
 
     return held.map((b) => ({
       ...base,
@@ -411,12 +374,8 @@ export async function loadPartEverywhereCandidates(
   }
   if (!data) throw new Error('That part no longer exists.');
 
-  const [balances, locations] = await Promise.all([
-    getBalancesForPart(partId),
-    getLocations(companyId),
-  ]);
+  const balances = await getBalancesForPart(partId);
   const unit = data.primary_unit ?? 'ea';
-  const fallback = resolveFallbackPlace(locations);
 
   // `getBalancesForPart` is the unfiltered read, but since 20260802144310 there is nothing to
   // filter: a row exists only where the part actually is.
@@ -428,41 +387,17 @@ export async function loadPartEverywhereCandidates(
   const base = { partId, partName: data.part_name, description: data.description, unit };
 
   /*
-   * The stock-nowhere row has to name a lot too, when the part is tracked.
+   * A part holding stock nowhere yields NO rows — 20260906182638.
    *
-   * `resolveFallbackPlace` puts one row at the system bucket so a part with no balance anywhere is
-   * still countable — the opening count, and the most valuable line on the sheet. For a tracked
-   * part that row is only writable if it says which heat, so it becomes one row per lot.
-   *
-   * A tracked part with NO lots is possible and gets the plain row: tracking switched on before
-   * anything was ever received leaves nothing to name. That count is refused at commit with the
-   * database's own sentence about naming a heat, per line and without touching the others — the
-   * honest answer, because material whose heat has never been recorded cannot be counted into
-   * existence. It is received, which is where a heat enters Jigged at all.
+   * There used to be one at the `Unassigned` bucket, plus one per heat for a tracked part, so this
+   * sheet was never reachable-but-empty. The bucket is gone and a quantity cannot exist without a
+   * place, so "this part is nowhere" is now a true and complete answer rather than a row to type
+   * into. The page renders the empty case and offers "count it somewhere else", which names a real
+   * shelf — the thing the bucket row could never do.
    */
-  const nowhere = async (): Promise<CountCandidate[]> => {
-    const target = {
-      locationId: fallback.id,
-      locationName: fallback.name,
-      locationPath: fallback.name,
-    };
-    const lots = data.lot_tracked ? await getLotsForPart(partId) : [];
-    if (lots.length === 0) {
-      return [{ ...base, systemQuantity: 0, target, lotId: null, lotCode: null, heatNumber: null }];
-    }
-    return lots.map((lot) => ({
-      ...base,
-      systemQuantity: 0,
-      target,
-      lotId: lot.lotId,
-      lotCode: lot.lotCode,
-      heatNumber: lot.heatNumber,
-    }));
-  };
-
   const candidates: CountCandidate[] =
     held.length === 0
-      ? await nowhere()
+      ? []
       : held
           .map((b) => ({
             ...base,

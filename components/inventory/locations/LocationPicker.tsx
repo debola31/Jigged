@@ -23,7 +23,6 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 
-import { SYSTEM_KIND } from '@/lib/locationKinds';
 
 export interface LocationPickerOption {
   id: string;
@@ -51,8 +50,6 @@ export interface LocationPickerProps {
   onChange: (value: LocationPickerOption | null) => void;
   /** The source location, excluded so you can't move something to where it already is. */
   excludeId?: string | null;
-  /** Hide the auto-managed `Unassigned` bucket. True for any destination picker. */
-  excludeSystem?: boolean;
   /** Unit for the quantity caption. Omit and quantities stay hidden. */
   unit?: string;
   required?: boolean;
@@ -82,7 +79,6 @@ export default function LocationPicker({
   value,
   onChange,
   excludeId,
-  excludeSystem = false,
   unit,
   required = false,
   disabled = false,
@@ -95,7 +91,7 @@ export default function LocationPicker({
   const [createError, setCreateError] = useState<string | null>(null);
 
   const selectable = options.filter(
-    (o) => o.id !== excludeId && !(excludeSystem && o.kind === SYSTEM_KIND),
+    (o) => o.id !== excludeId,
   );
 
   const handleChange = async (option: LocationPickerOption | null) => {

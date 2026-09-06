@@ -115,7 +115,13 @@ def shop(db):
             "INSERT INTO user_company_access (user_id, company_id, role) VALUES (%s, %s, 'admin')",
             (user, company),
         )
-        cur.execute("SELECT inv_get_or_create_unassigned(%s)", (company,))
+        # An ordinary root, not the old auto-minted bucket (gone in 20260906182638). These
+        # cases only ever needed "a place outside the unit being reshaped".
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, name) VALUES (%s, 'Put-away')"
+            " RETURNING id",
+            (company,),
+        )
         unassigned = cur.fetchone()[0]
 
         def location(name, parent=None, sort_order=0, cid=company):
@@ -508,7 +514,7 @@ def test_a_ref_naming_a_location_outside_the_unit_is_refused(db, shop):
 
     with db.cursor() as cur:
         cur.execute("SELECT name FROM inventory_locations WHERE id = %s", (shop["unassigned"],))
-        assert cur.fetchone()[0] == "Unassigned"
+        assert cur.fetchone()[0] == "Put-away"
 
 
 def test_a_duplicate_sibling_name_reads_as_a_sentence(db, shop):
@@ -524,12 +530,20 @@ def test_a_duplicate_sibling_name_reads_as_a_sentence(db, shop):
     assert "both called" in str(exc.value)
 
 
-def test_the_put_away_pile_has_no_layout_to_change(db, shop):
+def test_a_plain_root_reshapes_like_any_other(db, shop):
+    """What used to be `the put-away pile has no layout to change`.
+
+    That refusal existed because `Unassigned` was a system bucket every surface had to special-case
+    — you could not divide it, and the RPC said so. 20260906182638 removed the concept, so the same
+    location is now an ordinary root and dividing it is an ordinary reshape. The test is kept
+    pointing at the same fixture on purpose: it is the one that proves the special case is gone
+    rather than merely unreferenced.
+    """
     with user_session(shop["user"]) as (conn, cur):
-        with pytest.raises(errors.CheckViolation) as exc:
-            apply_layout(cur, shop["unassigned"], [create("new:a", "Left", 0)])
-        conn.rollback()
-    assert "no layout to change" in str(exc.value)
+        apply_layout(cur, shop["unassigned"], [create("new:a", "Left", 0)])
+        conn.commit()
+
+    assert names_under(db, shop["unassigned"]) == ["Left"]
 
 
 def test_a_non_member_cannot_reshape_a_foreign_cabinet(db, shop):

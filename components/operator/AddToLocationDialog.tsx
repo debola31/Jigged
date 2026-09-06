@@ -122,7 +122,6 @@ export default function AddToLocationDialog({
           value={choice}
           onChange={setChoice}
           // The pile is what you are emptying, never a destination.
-          excludeSystem
           unit={unit ?? undefined}
         />
       </DialogContent>

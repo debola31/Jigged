@@ -1328,7 +1328,6 @@ export default function InventoryCountPage() {
                         value={moveTo}
                         onChange={setMoveTo}
                         excludeId={locationId}
-                        excludeSystem
                         disabled={moving}
                         onCreate={createDestination}
                         helperText={

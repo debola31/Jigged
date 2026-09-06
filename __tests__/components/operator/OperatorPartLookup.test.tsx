@@ -230,35 +230,47 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     kind: 'shelf',
     ...over,
   });
+  /**
+   * A second ordinary place.
+   *
+   * This was the `Unassigned` system bucket until 20260906182638 removed the concept. The cases
+   * that used it only ever needed "a place that is not Shelf A", so it keeps its name and stops
+   * being special.
+   */
   const pile = (qty = 240) => ({
-    location_id: 'sys',
-    location_name: 'Unassigned',
+    location_id: 'l9',
+    location_name: 'Put-away',
     location_code: null,
-    path: ['Unassigned'],
+    path: ['Put-away'],
     quantity: qty,
-    kind: 'system',
-    ...{},
+    kind: null,
   });
 
-  it('calls the pile what it is, never a location the part lives in', async () => {
+  /**
+   * The inverse of what this asserted until 20260906182638.
+   *
+   * `Unassigned` was a pile, not a shelf, so the lookup called it out separately as "N not stored
+   * yet" rather than listing it — sending an operator to walk to it would have been sending them
+   * nowhere. The bucket is gone and every balance is a real place, so the same row is listed like
+   * any other and the special sentence is gone with the state it described.
+   */
+  it('lists every balance as a place, with no "not stored yet" state left', async () => {
     const user = userEvent.setup();
-    mockBalances.mockResolvedValue([pile(240)]);
+    mockBalances.mockResolvedValue([shelf({ quantity: 240 })]);
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText(/not stored yet/i)).toBeInTheDocument();
-    // The old copy. "Unassigned" must never be presented as a shelf to walk to.
-    expect(screen.queryByText(/across 1 place/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/on 1 shelf/i)).not.toBeInTheDocument();
+    expect(await screen.findByText('Shelf A')).toBeInTheDocument();
+    expect(screen.getByText(/240 ea in 1 location/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not stored yet/i)).not.toBeInTheDocument();
   });
 
-  it('counts only real locations in the total, so nobody is sent to an empty one', async () => {
+  it('leaves a zero row out of the total, so nobody is sent to an empty place', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       shelf({ quantity: 40 }),
       // Passed through here once; the row survives at zero forever.
       shelf({ location_id: 'l2', location_name: 'Yard', path: ['Yard'], quantity: 0 }),
-      pile(200),
     ]);
     renderLookup();
     await pick(user);
@@ -266,8 +278,6 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     expect(await screen.findByText(/40 ea in 1 location/i)).toBeInTheDocument();
     expect(screen.getByText('Shelf A')).toBeInTheDocument();
     expect(screen.queryByText('Yard')).not.toBeInTheDocument();
-    // Both states shown, not merged: 40 shelved AND 200 still to put away.
-    expect(screen.getByText(/not stored yet/i)).toBeInTheDocument();
   });
 
   it('still answers zero when every row is a zero', async () => {

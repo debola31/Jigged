@@ -120,7 +120,6 @@ def shop(db):
             "INSERT INTO user_company_access (user_id, company_id, role) VALUES (%s, %s, 'admin')",
             (user, company),
         )
-        cur.execute("SELECT inv_get_or_create_unassigned(%s)", (company,))
         cur.execute(
             "INSERT INTO inventory_locations (company_id, name, kind) VALUES (%s, 'Shelf A', 'shelf')"
             " RETURNING id",

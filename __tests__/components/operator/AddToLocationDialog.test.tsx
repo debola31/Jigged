@@ -98,17 +98,14 @@ describe('AddToLocationDialog — the fallback when you cannot scan the label', 
   });
 
   /** `Unassigned` is the pile you are emptying, never a destination. */
-  it('never offers the pile it is emptying', async () => {
-    const user = userEvent.setup();
-    renderDialog([
-      loc({ id: 'l1', name: 'Shelf A' }),
-      loc({ id: 'sys', name: 'Unassigned', kind: 'system' }),
-    ]);
+  /*
+   * `never offers the pile it is emptying` is gone with the pile — 20260906182638.
+   *
+   * It asserted that the destination picker hid the `Unassigned` bucket, because putting
+   * something away INTO the put-away pile is not putting it away. Every location is an
+   * ordinary place now, so there is nothing to hide and no rule to assert.
+   */
 
-    const options = await openList(user);
-    expect(options).toHaveLength(1);
-    expect(options[0]).toHaveTextContent('Shelf A');
-  });
 
   /** Creating places is an owner's job — the same call the board makes by withholding it. */
   it('offers no way to create a place', async () => {

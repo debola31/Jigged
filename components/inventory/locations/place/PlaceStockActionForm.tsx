@@ -930,7 +930,6 @@ export default function PlaceStockActionForm({
             // Cannot move something to where it already is, and the put-away pile is a holding
             // area rather than a destination you would choose on purpose.
             excludeId={locationId}
-            excludeSystem
             required
           />
         )}

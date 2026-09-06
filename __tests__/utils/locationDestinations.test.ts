@@ -52,9 +52,6 @@ describe('stockDestinationOptions', () => {
     expect(ids(options)).toEqual(expect.arrayContaining(['shelf-a', 'shelf-b', 'yard']));
   });
 
-  it('never offers the put-away pile', () => {
-    expect(ids(stockDestinationOptions(TREE))).not.toContain('pile');
-  });
 
   it('excludes the source location', () => {
     expect(ids(stockDestinationOptions(TREE, { excludeId: 'shelf-a' }))).not.toContain('shelf-a');
@@ -125,9 +122,6 @@ describe('locationParentOptions', () => {
     expect(options).not.toContain('shelf-b');
   });
 
-  it('never offers the put-away pile', () => {
-    expect(ids(locationParentOptions(TREE, { nodeId: 'yard', occupancy }))).not.toContain('pile');
-  });
 });
 
 /**

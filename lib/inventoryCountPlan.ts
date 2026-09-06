@@ -12,38 +12,20 @@ import type {
   CountVariance,
 } from '@/types/inventoryCount';
 
-/**
- * The place a part is counted at when it holds stock **nowhere**.
+/*
+ * `resolveFallbackPlace` is GONE, with the bucket it resolved — 20260906182638.
  *
- * This is all that survives of `resolveCountTarget`, which used to pick one target per part from
- * four arms. Three of them are gone: `aggregate` with `is_location_tracked` (20260802015837), and
- * both `excluded` arms with the sheet's move to one row per place. What remains is a single
- * decision — where does a part with no stock anywhere get counted? — and the answer is the
- * company's system bucket.
+ * It answered one question: where does a part with stock nowhere get counted? The answer was the
+ * company's `Unassigned` system bucket, and it was load-bearing while a part could carry a
+ * quantity without a place — a shop counting for the first time had its whole catalogue there.
  *
- * **This is the opening count, not an edge case.** `trg_auto_track_stocked_part` seeds every
- * stocked part at `Unassigned` with 0, so a shop counting for the first time has its entire
- * catalogue here. It is also the most valuable count there is: *the system says zero and I am
- * holding twelve*. A rule that emitted rows only for places with stock would delete exactly that.
- *
- * Resolved by `kind`, not by the literal name "Unassigned": `isReservedKind` stops anyone typing
- * `system` into a location's kind, while nothing stops them renaming one.
+ * A quantity cannot exist without a location any more, so the question is not answered
+ * differently, it is never posed: a part with no stock has no row to count. Finding twelve of
+ * something the system thinks is nowhere is still the most valuable thing a count discovers, and
+ * it is now recorded where it actually happened — "add a part here" on the bin you are standing
+ * at (`addPartHere`), or "count it somewhere else" on a part-scoped sheet (`addPartAtPlace`).
+ * Both existed already, and both name a real shelf, which the bucket never did.
  */
-export function resolveFallbackPlace(
-  locations: { id: string; name: string; kind: string | null }[],
-): { id: string; name: string } {
-  const system = locations.find((l) => l.kind === 'system');
-  if (!system) {
-    // Not a fallback and not a silent drop. Every company has had a system bucket since
-    // 20260802015837 created one for all of them and asserted it, so its absence is a real data
-    // fault — and dropping the part from the sheet would hide it behind a shorter list nobody
-    // counts. Fail loudly enough to diagnose.
-    throw new Error(
-      'This company has no "Unassigned" location, so there is nowhere to record a count for a part that is not on a shelf. This is a data fault — please report it.',
-    );
-  }
-  return { id: system.id, name: system.name };
-}
 
 /**
  * A part and every row of it on this sheet.
@@ -128,9 +110,50 @@ export function commonUnit(candidates: CountCandidate[]): string | null {
  * Unconditional since every row has a place. The `partId`-only branch that used to serve the
  * placeless `aggregate` and `excluded` rows is deliberately not kept "just in case": a second key
  * format nobody produces is an invitation to reintroduce the exact bug the key was created to fix.
+ *
+ * **The lot joined the key in 2026-09**, on the same argument one level down: a lot-tracked part
+ * holding two heats in one bin is two rows, and keyed by (part, place) they shared a number — so
+ * typing 8 for heat 4471 would have committed 8 to heat 8823 as well, which is precisely the
+ * 828-to-both-shelves bug this key was created to end. `none` for an untracked part, which has
+ * exactly one row per place and so cannot collide with itself.
  */
 export function countRowKey(candidate: CountCandidate): string {
-  return `${candidate.partId}::${candidate.target.locationId}`;
+  return `${candidate.partId}::${candidate.target.locationId}::${candidate.lotId ?? 'none'}`;
+}
+
+/**
+ * The same key WITHOUT the place — one balance row of `part_location_stock`.
+ *
+ * What `readPlaceBalances` is keyed by, and what any form standing at a single bin keys its typed
+ * numbers by. The place is dropped because it is already fixed: every row shares it, so including
+ * it would be a constant repeated down the map.
+ *
+ * Two callers, one definition, deliberately. Written out by hand in either place it would be two
+ * string formats that agree until someone changes one, and a disagreement here does not throw — it
+ * silently reads back "not counted" for a row that was counted.
+ */
+export function refreshedKey(partId: string, lotId: string | null): string {
+  return `${partId}::${lotId ?? 'none'}`;
+}
+
+/**
+ * How a row names its heat, or null when the part is not tracked.
+ *
+ * The counterpart to `countRowKey`: the key stops two heats sharing a number, and this stops them
+ * sharing a LABEL. Keyed apart but rendered identically, a sheet showing "1.25″ 4140 BAR · Rack 2"
+ * twice with different Recorded figures is a worse trap than the collision was — two controls, no
+ * way to tell which bar either is about, and no reason to believe the numbers are not a duplicate.
+ *
+ * Falls back to the lot code, which is what a lot minted for untagged material carries. A
+ * tracked row always has one of the two, so this returns null only for an untracked part.
+ */
+export function rowHeatLabel(candidate: {
+  lotId: string | null;
+  lotCode: string | null;
+  heatNumber: string | null;
+}): string | null {
+  if (!candidate.lotId) return null;
+  return candidate.heatNumber ? `Heat ${candidate.heatNumber}` : (candidate.lotCode ?? null);
 }
 
 export function rowDelta(candidate: CountCandidate, entries: CountEntries): number | null {
@@ -243,7 +266,15 @@ export function countNote(v: CountVariance): string {
   // The place is named because one part can now be counted at several of them in one session, and
   // the ledger would otherwise carry three notes about one part each quoting a different "recorded
   // as" figure — which reads as three contradictory statements rather than three shelves.
-  return `Inventory count at ${v.candidate.target.locationPath} — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
+  //
+  // The heat is named for the same reason one level down: two heats of one bar counted in one bin
+  // write two adjustment rows against the same part at the same place, and without the heat the
+  // bin's history shows "set to 8" and "set to 4" about what looks like one pile of material.
+  const heat = rowHeatLabel(v.candidate);
+  const where = heat
+    ? `${v.candidate.target.locationPath} (${heat.toLowerCase()})`
+    : v.candidate.target.locationPath;
+  return `Inventory count at ${where} — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
 }
 
 // ── Draft persistence: REMOVED 2026-08-01 ────────────────────────────────────

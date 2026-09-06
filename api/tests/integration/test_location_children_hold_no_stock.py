@@ -93,7 +93,14 @@ def shop(db):
             "INSERT INTO user_company_access (user_id, company_id, role) VALUES (%s, %s, 'admin')",
             (user, company),
         )
-        cur.execute("SELECT inv_get_or_create_unassigned(%s)", (company,))
+        # An ordinary top-level place. This used to be the auto-minted `Unassigned` bucket,
+        # which was special-cased everywhere; since 20260906182638 there is no such thing,
+        # and what these cases actually need is simply a root that holds stock.
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, name) VALUES (%s, 'Put-away')"
+            " RETURNING id",
+            (company,),
+        )
         unassigned = cur.fetchone()[0]
 
         def location(name, parent=None):
@@ -226,15 +233,13 @@ def test_location_cannot_be_reparented_into_a_stocked_location(db, shop):
             )
 
 
-def test_the_put_away_pile_can_never_be_divided(db, shop):
-    """`Unassigned` is where the importer and auto-track put homeless stock. Children would make it
-    unwritable and strand them, so it is refused even while empty."""
-    with pytest.raises(errors.CheckViolation, match="put-away pile"):
-        with db.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inventory_locations (company_id, parent_id, name) VALUES (%s, %s, %s)",
-                (shop["company"], shop["unassigned"], "Nope"),
-            )
+# `test_the_put_away_pile_can_never_be_divided` is GONE — 20260906182638.
+#
+# It asserted that `Unassigned` refused to be subdivided, which was true because the bucket was a
+# system location every surface special-cased. The concept is removed: there is no location that
+# behaves differently from any other, so there is no rule left to assert. The general cases above
+# (a container holds no stock; a stocked leaf cannot gain children) cover what remains, and they
+# cover it for every place rather than for one privileged one.
 
 
 def test_child_under_an_empty_container_still_works(db, shop):

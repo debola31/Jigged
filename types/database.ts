@@ -860,12 +860,14 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           has_discrepancy: boolean
+          heat_number: string | null
           id: string
           item_name: string
           job_id: string | null
           job_operation_id: string | null
           location_id: string | null
           location_name: string | null
+          lot_id: string | null
           notes: string | null
           operator_id: string | null
           part_id: string | null
@@ -881,12 +883,14 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           has_discrepancy?: boolean
+          heat_number?: string | null
           id?: string
           item_name: string
           job_id?: string | null
           job_operation_id?: string | null
           location_id?: string | null
           location_name?: string | null
+          lot_id?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
@@ -902,12 +906,14 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           has_discrepancy?: boolean
+          heat_number?: string | null
           id?: string
           item_name?: string
           job_id?: string | null
           job_operation_id?: string | null
           location_id?: string | null
           location_name?: string | null
+          lot_id?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
@@ -944,6 +950,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_transactions_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "material_lots"
             referencedColumns: ["id"]
           },
           {
@@ -1724,6 +1737,131 @@ export type Database = {
           },
         ]
       }
+      lot_certificates: {
+        Row: {
+          company_id: string
+          file_name: string
+          file_path: string
+          id: string
+          lot_id: string
+          mime_type: string | null
+          size_bytes: number | null
+          uploaded_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          company_id: string
+          file_name: string
+          file_path: string
+          id?: string
+          lot_id: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          file_name?: string
+          file_path?: string
+          id?: string
+          lot_id?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lot_certificates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lot_certificates_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "material_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lot_certificates_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      material_lots: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          heat_number: string | null
+          id: string
+          lot_code: string
+          notes: string | null
+          part_id: string
+          received_at: string
+          updated_at: string
+          vendor_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          heat_number?: string | null
+          id?: string
+          lot_code: string
+          notes?: string | null
+          part_id: string
+          received_at?: string
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          heat_number?: string | null
+          id?: string
+          lot_code?: string
+          notes?: string | null
+          part_id?: string
+          received_at?: string
+          updated_at?: string
+          vendor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_lots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_lots_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_lots_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       note_media: {
         Row: {
           company_id: string
@@ -2475,6 +2613,8 @@ export type Database = {
           created_at: string
           id: string
           location_id: string
+          lot_id: string | null
+          lot_key: string | null
           part_id: string
           quantity: number
         }
@@ -2483,6 +2623,8 @@ export type Database = {
           created_at?: string
           id?: string
           location_id: string
+          lot_id?: string | null
+          lot_key?: string | null
           part_id: string
           quantity?: number
         }
@@ -2491,6 +2633,8 @@ export type Database = {
           created_at?: string
           id?: string
           location_id?: string
+          lot_id?: string | null
+          lot_key?: string | null
           part_id?: string
           quantity?: number
         }
@@ -2507,6 +2651,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "material_lots"
             referencedColumns: ["id"]
           },
           {
@@ -2577,6 +2728,7 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
+          lot_tracked: boolean
           part_name: string
           preferred_vendor_id: string | null
           primary_unit: string | null
@@ -2592,6 +2744,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
+          lot_tracked?: boolean
           part_name: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -2607,6 +2760,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
+          lot_tracked?: boolean
           part_name?: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -3557,6 +3711,7 @@ export type Database = {
           customer_name: string | null
           freight_account_snapshot: Json | null
           freight_terms: string | null
+          heat_numbers_snapshot: Json
           id: string
           job_id: string
           one_time_address: Json | null
@@ -3579,6 +3734,7 @@ export type Database = {
           customer_name?: string | null
           freight_account_snapshot?: Json | null
           freight_terms?: string | null
+          heat_numbers_snapshot?: Json
           id?: string
           job_id: string
           one_time_address?: Json | null
@@ -3601,6 +3757,7 @@ export type Database = {
           customer_name?: string | null
           freight_account_snapshot?: Json | null
           freight_terms?: string | null
+          heat_numbers_snapshot?: Json
           id?: string
           job_id?: string
           one_time_address?: Json | null
@@ -4180,7 +4337,9 @@ export type Database = {
       add_stock_at_location: {
         Args: {
           p_converted_quantity: number
+          p_heat_number?: string
           p_location_id: string
+          p_lot_id?: string
           p_notes?: string
           p_operator_id?: string
           p_part_id: string
@@ -4195,6 +4354,7 @@ export type Database = {
         Args: {
           p_converted_new_quantity: number
           p_location_id: string
+          p_lot_id?: string
           p_new_quantity: number
           p_notes?: string
           p_operator_id?: string
@@ -4463,9 +4623,11 @@ export type Database = {
         Args: {
           p_converted_quantity: number
           p_graceful?: boolean
+          p_heat_number?: string
           p_job_id?: string
           p_job_operation_id?: string
           p_location_id: string
+          p_lot_id?: string
           p_notes?: string
           p_operator_id?: string
           p_part_id: string
@@ -4557,10 +4719,6 @@ export type Database = {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
       }
-      inv_get_or_create_unassigned: {
-        Args: { p_company_id: string }
-        Returns: string
-      }
       inv_location_path_label: {
         Args: { p_location_id: string }
         Returns: string
@@ -4592,6 +4750,10 @@ export type Database = {
       mark_reactions_seen: {
         Args: { p_company_id: string; p_seen_through: string }
         Returns: undefined
+      }
+      mint_lot_code: {
+        Args: { p_part_id: string; p_prefix?: string }
+        Returns: string
       }
       my_note_digest: {
         Args: never
@@ -4691,6 +4853,17 @@ export type Database = {
         Args: { p_source_company_id: string; p_user_id: string }
         Returns: undefined
       }
+      resolve_lot: {
+        Args: {
+          p_company_id: string
+          p_create: boolean
+          p_heat_number: string
+          p_lot_id: string
+          p_mint: boolean
+          p_part_id: string
+        }
+        Returns: string
+      }
       search_jobs_by_identifier: {
         Args: {
           p_company_id: string
@@ -4714,6 +4887,10 @@ export type Database = {
           p_user_id: string
         }
         Returns: undefined
+      }
+      set_part_lot_tracking: {
+        Args: { p_part_id: string; p_tracked: boolean }
+        Returns: Json
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
@@ -4763,6 +4940,7 @@ export type Database = {
         Args: {
           p_converted_quantity: number
           p_from_location_id: string
+          p_lot_id?: string
           p_notes?: string
           p_operator_id?: string
           p_part_id: string

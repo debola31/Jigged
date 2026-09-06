@@ -89,6 +89,8 @@ import {
   resolveScan,
   getRecentActivity,
   getLocationHistory,
+  getLotsAtLocation,
+  getLotsAtLocationForPart,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { ID_CHUNK } from '@/lib/queryLimits';
@@ -286,6 +288,37 @@ describe('RPC wrappers', () => {
     expect(res.shortfall).toBe(3);
   });
 
+  // The heat is optional on both writes. It travels as `p_heat_number` and is OMITTED (undefined,
+  // so JSON drops the key) rather than sent as null when nothing was typed — the RPC's default is
+  // what "not recorded" means, and the database normalises whatever does arrive.
+  it('addStockAtLocation forwards the heat number as p_heat_number', async () => {
+    queueFrom(partCtx());
+    state.rpc = { data: { location_balance: 12, part_quantity: 12 }, error: null };
+    await addStockAtLocation('part1', 'loc1', 12, 'ft', { heatNumber: '4471' });
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'add_stock_at_location',
+      expect.objectContaining({ p_heat_number: '4471' }),
+    );
+  });
+
+  it('depleteStockAtLocation forwards the heat number, and omits it when none was typed', async () => {
+    queueFrom(partCtx());
+    state.rpc = { data: { location_balance: 4, part_quantity: 4 }, error: null };
+    await depleteStockAtLocation('part1', 'loc1', 8, 'ft', { jobId: 'job1', heatNumber: '8823' });
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'deplete_stock_at_location',
+      expect.objectContaining({ p_job_id: 'job1', p_heat_number: '8823' }),
+    );
+
+    queueFrom(partCtx());
+    await depleteStockAtLocation('part1', 'loc1', 8, 'ft', {});
+    const args = (mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(args.p_heat_number).toBeUndefined();
+  });
+
   it('adjustStockAtLocation calls adjust with the new converted quantity', async () => {
     queueFrom(partCtx());
     state.rpc = { data: { location_balance: 5, part_quantity: 5 }, error: null };
@@ -334,6 +367,52 @@ describe('RPC wrappers', () => {
  * halfway left a partial tree with no rollback. `create_location_tree` does the whole subtree in
  * one statement, so the assertions worth having are the REQUEST COUNT and the payload shape.
  */
+describe('getLotsAtLocation', () => {
+  // What a take, a move and a count pick from: the lots that are ACTUALLY AT this place, with
+  // their balances. The version this replaced read every heat ever RECEIVED for the part, which
+  // after a year of deliveries is mostly heats long consumed — a list that grew without bound and
+  // could still be used to name material that is not on the shelf.
+  it('groups the lots held here per part, most stock first', async () => {
+    queueFrom({ data: [{ id: 'p1', lot_tracked: true }, { id: 'p2', lot_tracked: false }], error: null });
+    queueFrom({
+      data: [
+        { part_id: 'p1', quantity: 5, lot_id: 'l-a', material_lots: { id: 'l-a', lot_code: '4471', heat_number: '4471' } },
+        { part_id: 'p1', quantity: 30, lot_id: 'l-b', material_lots: { id: 'l-b', lot_code: '8823', heat_number: '8823' } },
+        { part_id: 'p2', quantity: 2, lot_id: 'l-c', material_lots: { id: 'l-c', lot_code: 'LOT-1', heat_number: null } },
+      ],
+      error: null,
+    });
+
+    const { lots, tracked } = await getLotsAtLocation(['p1', 'p2', 'p1'], 'loc1');
+
+    // Most stock first — the bar you are most likely reaching for.
+    expect(lots.get('p1')?.map((l) => l.lotCode)).toEqual(['8823', '4471']);
+    expect(lots.get('p2')?.[0]).toMatchObject({ lotCode: 'LOT-1', heatNumber: null, quantity: 2 });
+
+    // Tracked is carried separately, because "no lots here" and "this part does not use lots"
+    // look identical in the map and must not look identical on screen.
+    expect(tracked.has('p1')).toBe(true);
+    expect(tracked.has('p2')).toBe(false);
+
+    // Balances at THIS place, deduped ids, and never a lot-less row.
+    expect(state.calls[1].in).toEqual(['part_id', ['p1', 'p2']]);
+    expect(state.calls[1].eq).toEqual(['location_id', 'loc1']);
+    expect(state.calls[1].not).toEqual(['lot_id', 'is', null]);
+  });
+
+  it('asks nothing for no parts, and answers empty for a part with none here', async () => {
+    const empty = await getLotsAtLocation([], 'loc1');
+    expect(empty.lots.size).toBe(0);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+
+    queueFrom({ data: [{ id: 'p1', lot_tracked: true }], error: null });
+    queueFrom({ data: [], error: null });
+    const one = await getLotsAtLocationForPart('p1', 'loc1');
+    // Tracked with nothing here: the picker says the shelf is empty rather than showing no field.
+    expect(one).toEqual({ lots: [], tracked: true });
+  });
+});
+
 describe('materializeLocationSpec', () => {
   const spec = [
     {
@@ -467,8 +546,31 @@ describe('applyLocationLayout', () => {
         quantity: 4,
         unit: 'ea',
         converted_quantity: 4,
+        // Explicitly null rather than omitted: the RPC reads `lot_id` off every move, and "no
+        // lot" is a real answer (the untracked part, which is nearly all of them) rather than an
+        // unstated one.
+        lot_id: null,
       },
     ]);
+  });
+
+  /**
+   * A tracked part moves ONE heat at a time, and the move has to say which.
+   *
+   * `transfer_stock` refuses a lot-less move of one — there is no such thing as "move 12 of this
+   * bar" when the shelf holds 8 of one heat and 4 of another — so a reshape of a unit holding
+   * traced material is rejected outright unless this reaches the payload.
+   */
+  it('carries the lot on a move, so a reshape of traced material is not refused', async () => {
+    queueFrom({ data: { primary_unit: 'ea', parts_unit_conversions: [] }, error: null });
+    state.rpc = { data: [loc({ id: 'row1' })], error: null };
+
+    await applyLocationLayout('cab', payload, [
+      { partId: 'p1', fromLocationId: 'row3', toRef: 'new:/1', quantity: 4, unit: 'ea', lotId: 'lot-1' },
+    ]);
+
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(args[1].p_moves).toEqual([expect.objectContaining({ lot_id: 'lot-1' })]);
   });
 
   /**

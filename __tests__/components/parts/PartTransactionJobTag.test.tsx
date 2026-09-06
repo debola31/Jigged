@@ -23,6 +23,8 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+  // Nothing on this shelf: the lot picker stays hidden and these specs test the rest.
+  getLotsAtLocationForPart: vi.fn(async () => ({ lots: [], tracked: false })),
 }));
 /** New: the modal resolves the acting member so owner-side writes carry an author. */
 vi.mock('@/utils/operatorAccess', () => ({

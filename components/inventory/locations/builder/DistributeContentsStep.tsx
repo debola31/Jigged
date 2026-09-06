@@ -101,14 +101,30 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 const EPSILON = 1e-9;
 
 /**
- * One row of the table: a part AND the location it is leaving.
+ * One row of the table: a part, the location it is leaving, AND which heat.
  *
- * Keyed by both because a part sitting in three bins that are all being removed is three separate
+ * Keyed by place because a part sitting in three bins that are all being removed is three separate
  * decisions with three separate quantities. Keying by part alone would have them share one number,
  * which is the same defect the count sheet fixed when it moved to `partId::locationId`.
+ *
+ * The lot joined in 2026-09, and here it was not a cosmetic collision — it deadlocked the step.
+ * A bin holding 8 of heat 4471 and 4 of heat 8823 is two content rows sharing one key, so
+ * `isDistributionComplete` checked the SAME assignment total against 8 and against 4 and could
+ * never satisfy both: Confirm stayed disabled with no way to make it enable and nothing on screen
+ * explaining why. `runReshape`'s `byKey` map dropped one of the two rows on top of that, so a
+ * reshape that did get through would have moved one heat and left the other in a bin being
+ * deleted.
  */
-export function sourceKey(content: Pick<LocationContent, 'part_id' | 'location_id'>): string {
-  return `${content.part_id}@${content.location_id}`;
+export function sourceKey(
+  content: Pick<LocationContent, 'part_id' | 'location_id' | 'lot_id'>,
+): string {
+  return `${content.part_id}@${content.location_id}@${content.lot_id ?? 'none'}`;
+}
+
+/** The heat to show beside a row's part name, or null when the part is not tracked. */
+export function sourceHeat(content: Pick<LocationContent, 'lot_id' | 'lot_code' | 'heat_number'>) {
+  if (!content.lot_id) return null;
+  return content.heat_number ? `Heat ${content.heat_number}` : content.lot_code;
 }
 
 export function assignedTotal(lines: Assignment[] = []): number {
@@ -272,6 +288,13 @@ export default function DistributeContentsStep({
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
                           {content.part_name}
                         </Typography>
+                        {/* What tells two rows of one part in one bin apart. Without it they read
+                            as a duplicate line asking the same question twice. */}
+                        {sourceHeat(content) && (
+                          <Typography variant="caption" color="text.secondary">
+                            {sourceHeat(content)}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell align="right">
                         <Typography variant="body2">

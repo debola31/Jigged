@@ -107,12 +107,13 @@ import {
   type CountGroup,
   commonUnit,
   rowDelta,
+  rowHeatLabel,
 } from '@/lib/inventoryCountPlan';
 import {
   commitCount,
   loadCountCandidates,
   loadCountCandidatesForPlaces,
-  loadPartAtLocationCandidate,
+  loadPartAtLocationCandidates,
   loadPartEverywhereCandidates,
   type CountPlace,
 } from '@/utils/inventoryCountAccess';
@@ -427,26 +428,33 @@ export default function InventoryCountPage() {
           setAllLocations(locations);
           setLocationName(here.name);
 
-          // One part at one place: skip the picker entirely and go straight to a one-row sheet.
-          // There is nothing to choose, so making someone tick a single checkbox first would be
-          // a step that exists only because the other mode has one.
+          // One part at one place: skip the picker entirely and go straight to the sheet. There is
+          // nothing to choose, so making someone tick a single checkbox first would be a step that
+          // exists only because the other mode has one.
+          //
+          // Usually one row. A heat-tracked part is one row per heat, because "there are 12 here"
+          // is not a statement you can make about a bin holding two of them.
           if (partIdParam) {
-            const only = await loadPartAtLocationCandidate(
+            const only = await loadPartAtLocationCandidates(
               companyId,
               partIdParam,
               locationId,
               here.name,
             );
             if (cancelled) return;
-            setPartName(only.partName);
-            setCandidates([only]);
-            setHereTotal(1);
+            if (only.length === 0) {
+              setLoadError('That part can no longer be counted here.');
+              return;
+            }
+            setPartName(only[0].partName);
+            setCandidates(only);
+            setHereTotal(only.length);
             // `countRowKey`, not the bare part id: every other writer and every reader of
             // `selected` keys by row. A part-id key is invisible while this sheet has one row,
             // and becomes a duplicate (part, place) the moment a place can be added to it.
-            setSelected(new Map([[countRowKey(only), only]]));
+            setSelected(new Map(only.map((c) => [countRowKey(c), c])));
             setEntries({});
-            rememberOpenedWith([only]);
+            rememberOpenedWith(only);
             setStep(1);
             return;
           }
@@ -718,8 +726,9 @@ export default function InventoryCountPage() {
      * morning: rejecting the second would make the more thorough count the one the software
      * refuses to record. Row-scoped, matching `countRowKey`, which is what `selected` is keyed by.
      */
-    const dupKey = `${option.id}::${target.id}`;
-    if ([...selected.values()].some((c) => countRowKey(c) === dupKey)) {
+    if (
+      [...selected.values()].some((c) => c.partId === option.id && c.target.locationId === target.id)
+    ) {
       setSnack({
         msg: `${option.part_name} is already on the sheet at ${target.label}.`,
         severity: 'success',
@@ -728,14 +737,31 @@ export default function InventoryCountPage() {
     }
     setAddingPart(true);
     try {
-      const c = await loadPartAtLocationCandidate(companyId, option.id, target.id, target.label);
-      setSelected((prev) => new Map(prev).set(countRowKey(c), c));
+      // Compared on (part, place) above rather than on the row key, because for a tracked part
+      // this returns SEVERAL rows and a key comparison would have to guess which heat to test.
+      // "Is this part already on the sheet here?" is the question being asked either way.
+      const added = await loadPartAtLocationCandidates(
+        companyId,
+        option.id,
+        target.id,
+        target.label,
+      );
+      if (added.length === 0) {
+        setSnack({ msg: `${option.part_name} cannot be counted here.`, severity: 'error' });
+        return;
+      }
+      const addedKeys = new Set(added.map(countRowKey));
+      setSelected((prev) => {
+        const next = new Map(prev);
+        for (const c of added) next.set(countRowKey(c), c);
+        return next;
+      });
       // Prepend so it is visible without hunting: it is not on this page of the server list, and
       // may not be on any page.
       // Dedupe by ROW, not by part: a part legitimately appears once per place, so dropping
       // every row that shares a part id would delete its other shelves from the list.
-      setCandidates((prev) => [c, ...prev.filter((x) => countRowKey(x) !== countRowKey(c))]);
-      rememberOpenedWith([c]);
+      setCandidates((prev) => [...added, ...prev.filter((x) => !addedKeys.has(countRowKey(x)))]);
+      rememberOpenedWith(added);
       // Not cleared: on a subtree sheet you are standing at one bin working through it, so the
       // next thing you find is far more likely to be in the same place than in a different one.
     } catch (e) {
@@ -811,28 +837,44 @@ export default function InventoryCountPage() {
       const countedPartIds = [...new Set(countedRows.map((c) => c.partId))];
       const freshByPart = await getBalancesForParts(companyId, countedPartIds);
 
-      const freshAt = (partId: string, locationId: string): number | undefined =>
-        freshByPart.get(partId)?.find((b) => b.locationId === locationId)?.quantity;
+      // Matched on (place, lot), not on place alone. A bin holding two heats of one bar returns
+      // two balances for that place, and taking the first would measure both lines against
+      // whichever the server happened to order first — the stale-figure bug below, but silent.
+      const freshAt = (c: CountCandidate): number | undefined =>
+        freshByPart
+          .get(c.partId)
+          ?.find((b) => b.locationId === c.target.locationId && (b.lotId ?? null) === c.lotId)
+          ?.quantity;
 
       const updated = sheet.map((c) => {
         if (entries[countRowKey(c)] === undefined) return c;
         // A bin emptied since the sheet loaded has no row at all (20260802144310 deletes rather
         // than zeroes), so an absent row means zero — not "unknown". Reading it as unknown would
         // keep the stale figure and silently mis-report the variance.
-        return { ...c, systemQuantity: freshAt(c.partId, c.target.locationId) ?? 0 };
+        return { ...c, systemQuantity: freshAt(c) ?? 0 };
       });
 
-      // Places a counted part has acquired since the sheet loaded. Not on anyone's sheet, so not
+      // Stock a counted part has acquired since the sheet loaded. Not on anyone's sheet, so not
       // committed — but named after the save, because "I counted that part" and "that part has
       // stock I never saw" is exactly the gap a stocktake exists to close.
+      //
+      // Compared by (place, lot). A heat that arrived at a shelf already on the sheet is just as
+      // invisible to the counter as a whole new shelf is, and a place-only comparison would have
+      // said nothing about it — while the count committed a number that never included it.
       unseenPlaces = countedPartIds.flatMap((partId) => {
         const onSheet = new Set(
-          countedRows.filter((c) => c.partId === partId).map((c) => c.target.locationId),
+          countedRows
+            .filter((c) => c.partId === partId)
+            .map((c) => `${c.target.locationId}::${c.lotId ?? 'none'}`),
         );
         const partName = countedRows.find((c) => c.partId === partId)?.partName ?? '';
         return (freshByPart.get(partId) ?? [])
-          .filter((b) => !onSheet.has(b.locationId))
-          .map((b) => `${partName} also has stock at ${[...b.path, b.locationName].join(' › ')}`);
+          .filter((b) => !onSheet.has(`${b.locationId}::${b.lotId ?? 'none'}`))
+          .map((b) => {
+            const where = [...b.path, b.locationName].join(' › ');
+            const heat = b.heatNumber ? ` (heat ${b.heatNumber})` : '';
+            return `${partName} also has stock at ${where}${heat}`;
+          });
       });
       setSelected(new Map(updated.map((c) => [countRowKey(c), c])));
       // Kept whole: `committableVariances` drops zero-delta lines, and a zero delta is precisely
@@ -892,7 +934,10 @@ export default function InventoryCountPage() {
         // not say which shelf to go back and look at.
         const moved = toCommit
           .filter((v) => v.movedSinceOpened)
-          .map((v) => `${v.candidate.partName} at ${v.candidate.target.locationPath}`);
+          .map((v) => {
+            const heat = rowHeatLabel(v.candidate);
+            return `${v.candidate.partName} at ${v.candidate.target.locationPath}${heat ? ` (${heat.toLowerCase()})` : ''}`;
+          });
         setSnack({
           msg:
             `Counted ${result.committed} ${result.committed === 1 ? 'item' : 'items'}.` +
@@ -1009,9 +1054,17 @@ export default function InventoryCountPage() {
       return;
     }
     try {
-      const c = await loadPartAtLocationCandidate(companyId, part.id, place.id, place.label);
-      setSelected((prev) => new Map(prev).set(countRowKey(c), c));
-      rememberOpenedWith([c]);
+      const added = await loadPartAtLocationCandidates(companyId, part.id, place.id, place.label);
+      if (added.length === 0) {
+        setSnack({ msg: `${part.name} cannot be counted at ${place.label}.`, severity: 'error' });
+        return;
+      }
+      setSelected((prev) => {
+        const next = new Map(prev);
+        for (const c of added) next.set(countRowKey(c), c);
+        return next;
+      });
+      rememberOpenedWith(added);
     } catch (e) {
       setSnack({
         msg: e instanceof Error ? e.message : 'Could not add that location.',
@@ -1275,7 +1328,6 @@ export default function InventoryCountPage() {
                         value={moveTo}
                         onChange={setMoveTo}
                         excludeId={locationId}
-                        excludeSystem
                         disabled={moving}
                         onCreate={createDestination}
                         helperText={
@@ -1542,8 +1594,10 @@ export default function InventoryCountPage() {
                             */}
                             <Typography variant="caption" color="text.secondary">
                               {multi
-                                ? c.target.locationPath
-                                : [c.description, c.target.locationPath]
+                                ? [c.target.locationPath, rowHeatLabel(c)]
+                                    .filter(Boolean)
+                                    .join(' · ')
+                                : [c.description, c.target.locationPath, rowHeatLabel(c)]
                                     .filter(Boolean)
                                     .join(' · ')}
                             </Typography>
@@ -1566,8 +1620,14 @@ export default function InventoryCountPage() {
                                 inputMode: 'decimal',
                                 // The place is part of the name: without it a part on three
                                 // shelves has three controls sharing one accessible name, which
-                                // is unusable by screen reader and untestable by role.
-                                'aria-label': `Counted quantity for ${c.partName} in ${c.target.locationPath}`,
+                                // is unusable by screen reader and untestable by role. The heat
+                                // joins it for the same reason where a bin holds two of them.
+                                'aria-label': [
+                                  `Counted quantity for ${c.partName} in ${c.target.locationPath}`,
+                                  rowHeatLabel(c),
+                                ]
+                                  .filter(Boolean)
+                                  .join(', '),
                                 style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
                               }}
                               sx={{ width: 108 }}
@@ -1780,7 +1840,10 @@ export default function InventoryCountPage() {
                   color="text.secondary"
                   sx={{ display: 'block' }}
                 >
-                  {v.candidate.target.locationPath}: you counted {num(v.counted)}
+                  {[v.candidate.target.locationPath, rowHeatLabel(v.candidate)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  : you counted {num(v.counted)}
                   {v.movedSinceOpened
                     ? ` — now reads ${num(v.candidate.systemQuantity)}, changed since you looked`
                     : ''}

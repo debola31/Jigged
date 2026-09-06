@@ -7,7 +7,6 @@ import {
   commonUnit,
   contestedParts,
   groupByPart,
-  resolveFallbackPlace,
   rowDelta,
 } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
@@ -17,6 +16,10 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
   description: null,
   unit: 'ea',
   systemQuantity: 0,
+  // Untracked by default — what nearly every part is, and the shape every pre-lot test assumed.
+  lotId: null,
+  lotCode: null,
+  heatNumber: null,
   target: {
     locationId: 'loc-unassigned',
     locationName: 'Unassigned',
@@ -35,42 +38,14 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
 const entriesFor = (...pairs: [CountCandidate, number][]): CountEntries =>
   Object.fromEntries(pairs.map(([c, n]) => [countRowKey(c), n]));
 
-describe('resolveFallbackPlace', () => {
-  const SYSTEM = { id: 'loc-unassigned', name: 'Unassigned', kind: 'system' };
-  const SHELF = { id: 'loc-a', name: 'Shelf A', kind: 'shelf' };
-
-  /**
-   * The opening-count invariant, re-homed rather than deleted.
-   *
-   * It used to live on `resolveCountTarget`'s zero-arm. Four of that function's cases went with
-   * the exclusion (a split part is now several rows, not a notice), but this one survives and is
-   * the single thing PR B was most likely to break: `trg_auto_track_stocked_part` seeds every
-   * stocked part at Unassigned with 0, so a shop counting for the first time has its whole
-   * catalogue holding stock nowhere. A rule that emitted rows only for places with stock would
-   * make every one of them uncountable.
-   */
-  it('sends a part holding stock nowhere to the system bucket', () => {
-    expect(resolveFallbackPlace([SHELF, SYSTEM])).toEqual({
-      id: 'loc-unassigned',
-      name: 'Unassigned',
-    });
-  });
-
-  /** `isReservedKind` stops anyone typing `system` into a kind; nothing stops them renaming one. */
-  it('resolves by kind, not by the name "Unassigned"', () => {
-    const renamed = { id: 'loc-x', name: 'Not Yet Put Away', kind: 'system' };
-    expect(resolveFallbackPlace([SHELF, renamed]).id).toBe('loc-x');
-  });
-
-  /**
-   * Not a fallback and not a silent drop. Every company has had a system bucket since
-   * 20260802015837 created and asserted one, so its absence is a data fault — and dropping the
-   * part would hide it behind a shorter list nobody counts.
-   */
-  it('throws rather than silently dropping the part when there is no system bucket', () => {
-    expect(() => resolveFallbackPlace([SHELF])).toThrow(/Unassigned/i);
-  });
-});
+/*
+ * `resolveFallbackPlace` had three cases here and they are all gone with it — 20260906182638.
+ *
+ * They asserted where a part holding stock NOWHERE got counted: the company's `Unassigned` system
+ * bucket, resolved by kind rather than by name, and a loud throw if a company somehow had none.
+ * The bucket is removed and a quantity cannot exist without a location, so there is no such part
+ * state to place — the question the function answered is no longer asked.
+ */
 
 describe('groupByPart', () => {
   const at = (partId: string, locationId: string, path: string, quantity: number): CountCandidate => ({
@@ -243,7 +218,26 @@ describe('countRowKey', () => {
    * an invitation to reintroduce the exact bug the key was created to fix.
    */
   it('always carries the place, so no two rows of one part can collide', () => {
-    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a');
+    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a::none');
+  });
+
+  /**
+   * The same collision one grain down, and the reason `none` is spelled rather than left empty.
+   *
+   * Two heats of one bar in one bin share a part AND a place, so a (part, place) key made them one
+   * row: typing 8 for heat 4471 committed 8 to heat 8823 as well. `none` is what an untracked
+   * part's single row carries, and it cannot collide with a uuid.
+   */
+  it('keeps two heats in one bin from sharing a number', () => {
+    const first = { ...at('shelf-a'), lotId: 'lot-1', lotCode: '4471', heatNumber: '4471' };
+    const second = { ...at('shelf-a'), lotId: 'lot-2', lotCode: '8823', heatNumber: '8823' };
+
+    expect(countRowKey(first)).toBe('p1::shelf-a::lot-1');
+    expect(countRowKey(first)).not.toBe(countRowKey(second));
+
+    const entries = { [countRowKey(first)]: 8, [countRowKey(second)]: 4 };
+    expect(rowDelta(first, entries)).toBe(8 - first.systemQuantity);
+    expect(rowDelta(second, entries)).toBe(4 - second.systemQuantity);
   });
 
   /**

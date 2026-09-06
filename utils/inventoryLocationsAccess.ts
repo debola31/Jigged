@@ -402,6 +402,15 @@ export interface ReshapeMove {
   toRef: string;
   quantity: number;
   unit: string;
+  /**
+   * WHICH heat is moving, for a lot-tracked part.
+   *
+   * `transfer_stock` refuses a lot-less move of one — there is no such thing as "move 12 of this
+   * bar" when the shelf holds 8 of one heat and 4 of another — so a reshape of a unit holding
+   * traced material is rejected outright without it. Null for every untracked part, which is the
+   * ordinary case.
+   */
+  lotId?: string | null;
 }
 
 /** Flatten a spec forest to `{ref, parent_ref}` rows, parent before child, as the RPC requires. */
@@ -477,6 +486,7 @@ export async function applyLocationLayout(
         quantity: m.quantity,
         unit: m.unit,
         converted_quantity: convertToBaseUnit(m.quantity, m.unit, primaryUnit, conversions),
+        lot_id: m.lotId ?? null,
       };
     }),
     p_removals: payload.removals,
@@ -550,33 +560,48 @@ export async function getBalancesForPart(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('part_location_stock')
-    .select('company_id, location_id, quantity')
+    .select('company_id, location_id, quantity, lot_id, material_lots (lot_code, heat_number)')
     .eq('part_id', partId);
   if (error) {
     console.error('Error fetching part balances:', error);
     throw error;
   }
-  const rows = (data ?? []) as Array<{ company_id: string; location_id: string; quantity: number }>;
+  type Row = {
+    company_id: string;
+    location_id: string;
+    quantity: number;
+    lot_id: string | null;
+    material_lots: { lot_code: string; heat_number: string | null } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
   if (rows.length === 0) return [];
 
   const locations = await getLocations(rows[0].company_id);
   const byId = new Map(locations.map((l) => [l.id, l] as const));
 
   return rows
-    .map((r) => {
-      const loc = byId.get(r.location_id);
-      return {
-        location_id: r.location_id,
-        location_name: loc?.name ?? 'Unknown',
-        path: computePathNames(r.location_id, byId),
-        quantity: Number(r.quantity),
-        // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,
-        // "where does this part live?" answers "Unassigned" — which is precisely the answer
-        // "nowhere yet", presented as though it were a place.
-        kind: loc?.kind ?? null,
-      };
-    })
-    .sort((a, b) => compareLocationNames(a.path.join(' / '), b.path.join(' / ')));
+    .map((r) => ({
+      location_id: r.location_id,
+      location_name: byId.get(r.location_id)?.name ?? 'Unknown',
+      path: computePathNames(r.location_id, byId),
+      quantity: Number(r.quantity),
+      // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,
+      // "where does this part live?" answers "Unassigned" — which is precisely the answer
+      // "nowhere yet", presented as though it were a place.
+      kind: byId.get(r.location_id)?.kind ?? null,
+      // A row is one (location, lot). Two heats on one shelf are two rows, and a caller that
+      // renders only the location name shows the same place twice — which is what the part
+      // drawer did until this was carried.
+      lot_id: r.lot_id,
+      lot_code: r.material_lots?.lot_code ?? null,
+      heat_number: r.material_lots?.heat_number ?? null,
+    }))
+    .sort(
+      (a, b) =>
+        compareLocationNames(a.path.join(' / '), b.path.join(' / ')) ||
+        // Within one place, most stock first — the same order the lot picker uses.
+        b.quantity - a.quantity,
+    );
 }
 
 /**
@@ -618,11 +643,17 @@ export async function getBalancesForParts(
    * successive ranges can repeat or skip rows.
    */
   const readChunk = async (ids: string[]) => {
-    const out: Array<{ part_id: string; location_id: string; quantity: number }> = [];
+    const out: Array<{
+      part_id: string;
+      location_id: string;
+      quantity: number;
+      lot_id: string | null;
+      material_lots: { lot_code: string; heat_number: string | null } | null;
+    }> = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await supabase
         .from('part_location_stock')
-        .select('part_id, location_id, quantity')
+        .select('part_id, location_id, quantity, lot_id, material_lots (lot_code, heat_number)')
         .in('part_id', ids)
         // No `quantity > 0` filter any more, and that is not an omission. It used to hide the
         // residue `transfer_stock` and `bulk_put_away` left behind; 20260802144310 deleted that
@@ -630,12 +661,21 @@ export async function getBalancesForParts(
         // are now the same fact. Filtering would be restating the constraint.
         .order('part_id')
         .order('location_id')
+        // Third key: a part with two lots in one bin has two rows sharing (part, location), and
+        // without a total order a range boundary landing between them can repeat or skip one.
+        .order('lot_key')
         .range(offset, offset + PAGE - 1);
       if (error) {
         console.error('Error loading location balances:', error);
         throw error;
       }
-      const rows = (data ?? []) as Array<{ part_id: string; location_id: string; quantity: number }>;
+      const rows = (data ?? []) as unknown as Array<{
+        part_id: string;
+        location_id: string;
+        quantity: number;
+        lot_id: string | null;
+        material_lots: { lot_code: string; heat_number: string | null } | null;
+      }>;
       out.push(...rows);
       if (rows.length < PAGE) return out;
     }
@@ -656,6 +696,9 @@ export async function getBalancesForParts(
       locationName: byId.get(row.location_id)?.name ?? 'Unknown location',
       path: full.slice(0, -1), // ancestors only; the leaf is locationName
       quantity: Number(row.quantity) || 0,
+      lotId: row.lot_id,
+      lotCode: row.material_lots?.lot_code ?? null,
+      heatNumber: row.material_lots?.heat_number ?? null,
     });
     byPart.set(row.part_id, list);
   }
@@ -705,7 +748,8 @@ export async function getLocationContents(
   const { data, error, count } = await supabase
     .from('part_location_stock')
     .select(
-      'location_id, quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      'location_id, quantity, lot_id, material_lots (lot_code, heat_number), ' +
+        'part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
     )
     .eq('location_id', locationId)
@@ -727,6 +771,8 @@ export async function getLocationContents(
 type ContentRow = {
   location_id: string;
   quantity: number;
+  lot_id: string | null;
+  material_lots: { lot_code: string; heat_number: string | null } | null;
   part:
     | { id: string; part_name: string; primary_unit: string | null }
     | Array<{ id: string; part_name: string; primary_unit: string | null }>
@@ -745,6 +791,9 @@ function toLocationContents(data: unknown): LocationContent[] {
         primary_unit: part.primary_unit,
         quantity: Number(row.quantity),
         location_id: row.location_id,
+        lot_id: row.lot_id,
+        lot_code: row.material_lots?.lot_code ?? null,
+        heat_number: row.material_lots?.heat_number ?? null,
       } as LocationContent;
     })
     .filter((r): r is LocationContent => r !== null);
@@ -812,7 +861,7 @@ export async function getContentsPageForLocations(
   let query = supabase
     .from('part_location_stock')
     .select(
-      'location_id, quantity, ' +
+      'location_id, quantity, lot_id, material_lots (lot_code, heat_number), ' +
         'place:inventory_locations!inner(id, name, sort_order), ' +
         'part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
@@ -1002,6 +1051,8 @@ export async function addStockAtLocation(
     // immutable except for notes. See StockWriteOptions.
     p_operator_id: opts.operatorId ?? undefined,
     p_photo_path: opts.photoPath ?? undefined,
+    p_heat_number: opts.heatNumber ?? undefined,
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error adding stock at location:', error);
@@ -1032,12 +1083,224 @@ export async function depleteStockAtLocation(
     p_job_id: opts.jobId,
     p_job_operation_id: opts.jobOperationId,
     p_operator_id: opts.operatorId,
+    p_heat_number: opts.heatNumber ?? undefined,
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error depleting stock at location:', error);
     throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as StockMutationResult;
+}
+
+/** One lot of a material, with how much of it is at the place being asked about. */
+export interface LotOnHand {
+  lotId: string;
+  lotCode: string;
+  heatNumber: string | null;
+  /** Quantity of THIS lot at the location asked about, in the part's primary unit. */
+  quantity: number;
+}
+
+/**
+ * The lots of a part that are ACTUALLY AT a location, with their balances.
+ *
+ * This is what a take, a move and a count pick from, and "actually at" is the whole point. The
+ * version this replaced offered every heat ever RECEIVED for the part, which after a year of
+ * deliveries is mostly heats long since consumed — a list that got harder to search as it grew
+ * and could still be used to name material that is not on the shelf. Reading balances instead
+ * makes the list short by construction, and picking from it cannot claim what isn't there.
+ *
+ * One query for every part on screen, because the Storage tab's batch form shows a whole bin and
+ * a query per row would be forty round trips for one shelf.
+ *
+ * Empty for an untracked part, which is correct: its stock sits in a single lot-less row and the
+ * dialogs show no lot control at all.
+ */
+export interface LotsAtLocation {
+  /** Part id → the lots of it held here, most stock first. Absent when the part has none here. */
+  lots: Map<string, LotOnHand[]>;
+  /**
+   * The part ids that are lot-tracked.
+   *
+   * Carried beside the lots because "no lots here" and "this part does not use lots" look
+   * identical in the map and must not look identical on screen: the first is a tracked part whose
+   * shelf is empty (say so, and refuse the take), the second is an ordinary part that should show
+   * no lot control at all.
+   */
+  tracked: Set<string>;
+}
+
+export async function getLotsAtLocation(
+  partIds: string[],
+  locationId: string,
+): Promise<LotsAtLocation> {
+  const out = new Map<string, LotOnHand[]>();
+  const tracked = new Set<string>();
+  const ids = [...new Set(partIds)];
+  if (ids.length === 0) return { lots: out, tracked };
+
+  const supabase = getSupabase();
+  const { data: parts, error: partsError } = await supabase
+    .from('parts')
+    .select('id, lot_tracked')
+    .in('id', ids);
+  if (partsError) {
+    console.error('Error loading lot tracking flags:', partsError);
+    throw partsError;
+  }
+  for (const row of parts ?? []) if (row.lot_tracked) tracked.add(row.id);
+
+  const { data, error } = await supabase
+    .from('part_location_stock')
+    .select('part_id, quantity, lot_id, material_lots (id, lot_code, heat_number)')
+    .in('part_id', ids)
+    .eq('location_id', locationId)
+    .not('lot_id', 'is', null);
+  if (error) {
+    console.error('Error loading lots at location:', error);
+    throw error;
+  }
+
+  type Row = {
+    part_id: string;
+    quantity: number;
+    lot_id: string | null;
+    material_lots: { id: string; lot_code: string; heat_number: string | null } | null;
+  };
+  for (const row of (data ?? []) as unknown as Row[]) {
+    const lot = row.material_lots;
+    if (!lot) continue;
+    const list = out.get(row.part_id) ?? [];
+    list.push({
+      lotId: lot.id,
+      lotCode: lot.lot_code,
+      heatNumber: lot.heat_number,
+      quantity: Number(row.quantity) || 0,
+    });
+    out.set(row.part_id, list);
+  }
+  // Most stock first: the bar you are most likely reaching for is the one there is most of, and
+  // an operator scanning a list on a phone should not have to read every row to find it.
+  for (const list of out.values()) list.sort((a, b) => b.quantity - a.quantity);
+  return { lots: out, tracked };
+}
+
+/** One part's lots at one place — see `getLotsAtLocation`. */
+export async function getLotsAtLocationForPart(
+  partId: string,
+  locationId: string,
+): Promise<{ lots: LotOnHand[]; tracked: boolean }> {
+  const { lots, tracked } = await getLotsAtLocation([partId], locationId);
+  return { lots: lots.get(partId) ?? [], tracked: tracked.has(partId) };
+}
+
+/**
+ * EVERY lot of a part, wherever its stock is — deliberately not the same read as
+ * `getLotsAtLocation`, and used in exactly one place.
+ *
+ * A take and a move pick from what is on the shelf in front of you, which is why the reader above
+ * is balance-scoped. A COUNT is the one job that starts from the opposite premise: the system is
+ * wrong about where something is. "Heat 4471 is supposed to be on Shelf A and I have just found it
+ * on Shelf B" is unrepresentable from a balance-scoped list, because at Shelf B that lot has no
+ * balance to read — which is precisely the discovery a stocktake exists to record.
+ *
+ * `quantity` is 0 on every row: this says the lot EXISTS, never that any of it is anywhere.
+ *
+ * Newest received first. A lot list grows for the life of the part and the heat someone is holding
+ * is far more often this month's delivery than one from four years ago.
+ */
+export async function getLotsForPart(partId: string): Promise<LotOnHand[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('material_lots')
+    .select('id, lot_code, heat_number')
+    .eq('part_id', partId)
+    .is('deleted_at', null)
+    .order('received_at', { ascending: false });
+
+  if (error) {
+    console.error('Error loading the lots of a part:', error);
+    throw error;
+  }
+  return (data ?? []).map((row) => ({
+    lotId: row.id,
+    lotCode: row.lot_code,
+    heatNumber: row.heat_number,
+    quantity: 0,
+  }));
+}
+
+/**
+ * The lots of many parts at once, for the TRACKED ones only — two queries, never one per part.
+ *
+ * The batch form of `getLotsForPart`, and it filters on the flag for a reason that is easy to get
+ * backwards: **having lots and being tracked are different facts.** Turning tracking off leaves
+ * every existing lot and every split balance in place on purpose (collapsing them would have to
+ * pick a survivor and silently merge quantities under it), so a part can carry a shelf of history
+ * while no longer enforcing anything. Emitting lot rows for one of those would split a count that
+ * the database is perfectly happy to take as a single number.
+ *
+ * A tracked part absent from the result has no lots at all — possible, if tracking was switched on
+ * before anything was ever received. Callers must not read that as "untracked".
+ */
+export async function getLotsForTrackedParts(partIds: string[]): Promise<Map<string, LotOnHand[]>> {
+  const out = new Map<string, LotOnHand[]>();
+  const ids = [...new Set(partIds)];
+  if (ids.length === 0) return out;
+
+  const supabase = getSupabase();
+  const { data: parts, error: partsError } = await supabase
+    .from('parts')
+    .select('id, lot_tracked')
+    .in('id', ids);
+  if (partsError) {
+    console.error('Error loading lot tracking flags:', partsError);
+    throw partsError;
+  }
+
+  const tracked = (parts ?? []).filter((p) => p.lot_tracked).map((p) => p.id);
+  if (tracked.length === 0) return out;
+
+  const { data, error } = await supabase
+    .from('material_lots')
+    .select('id, part_id, lot_code, heat_number')
+    .in('part_id', tracked)
+    .is('deleted_at', null)
+    .order('received_at', { ascending: false });
+  if (error) {
+    console.error('Error loading the lots of several parts:', error);
+    throw error;
+  }
+
+  for (const row of data ?? []) {
+    const list = out.get(row.part_id) ?? [];
+    list.push({ lotId: row.id, lotCode: row.lot_code, heatNumber: row.heat_number, quantity: 0 });
+    out.set(row.part_id, list);
+  }
+  return out;
+}
+
+/**
+ * Turn heat tracking on or off for a part.
+ *
+ * Goes through the RPC rather than an UPDATE, because switching ON also has to move every
+ * lot-less balance into a PRE-TRACKING lot in the same transaction — otherwise the first operator
+ * to remove pre-existing stock is refused by a rule about material that predates it. Returns how
+ * many balances moved, so the UI can say what just happened rather than only that a flag flipped.
+ */
+export async function setPartLotTracking(partId: string, tracked: boolean): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('set_part_lot_tracking', {
+    p_part_id: partId,
+    p_tracked: tracked,
+  });
+  if (error) {
+    console.error('Error setting lot tracking:', error);
+    throw toFriendlyError(error, { entity: 'part' });
+  }
+  const result = data as unknown as { balances_migrated?: number } | null;
+  return Number(result?.balances_migrated ?? 0);
 }
 
 export async function adjustStockAtLocation(
@@ -1061,6 +1324,9 @@ export async function adjustStockAtLocation(
     p_converted_new_quantity: converted,
     p_notes: opts.notes,
     p_operator_id: opts.operatorId ?? undefined,
+    // Which lot was counted. Required by the RPC for a tracked part, because "there are 12 here"
+    // has no meaning when a bin holds two heats.
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error adjusting stock at location:', error);
@@ -1092,6 +1358,9 @@ export async function transferStock(
     // Both halves of the pair get the same author and the same photo — one person moved it.
     p_operator_id: opts.operatorId ?? undefined,
     p_photo_path: opts.photoPath ?? undefined,
+    // One lot per move: the tag travels with the bar, and splitting a move across whatever lots
+    // happen to be at the source would be a guess about which bars were carried.
+    p_lot_id: opts.lotId ?? undefined,
   });
   if (error) {
     console.error('Error transferring stock:', error);
@@ -1180,7 +1449,7 @@ export async function bulkPutAway(
  */
 /** Columns every movement view needs. One literal — a concatenation defeats the typed client. */
 const MOVEMENT_COLUMNS =
-  'id, created_at, type, part_id, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
+  'id, created_at, type, part_id, item_name, quantity, unit, notes, heat_number, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
 
 interface MovementRow {
   id: string;
@@ -1191,6 +1460,7 @@ interface MovementRow {
   quantity: number;
   unit: string;
   notes: string | null;
+  heat_number: string | null;
   operator_id: string | null;
   photo_path: string | null;
   has_discrepancy: boolean;
@@ -1221,6 +1491,7 @@ async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEnt
     quantity: Number(r.quantity ?? 0),
     unit: r.unit,
     notes: r.notes,
+    heatNumber: r.heat_number ?? null,
     actorName: r.operator_id ? nameById.get(r.operator_id) ?? null : null,
     photoUrl: r.photo_path ? urlByPath.get(r.photo_path) ?? null : null,
     hasDiscrepancy: Boolean(r.has_discrepancy),

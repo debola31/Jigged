@@ -169,6 +169,16 @@ export default function BinHistory({
                       {e.notes}
                     </Typography>
                   )}
+                  {/* The heat this movement carried — only when one was recorded. The bar's own
+                      tag, read back; never a count of heats or of anything else (operator surface). */}
+                  {e.heatNumber && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Heat ${e.heatNumber}`}
+                      sx={{ mt: 0.5, mr: 0.5 }}
+                    />
+                  )}
                   {e.hasDiscrepancy && (
                     <Chip
                       size="small"

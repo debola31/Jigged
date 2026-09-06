@@ -44,11 +44,13 @@
  * It used to read *"None in any place right now."*, which sounds like a part that exists somewhere
  * and has not been put away — the very state the blue alert below reports as "not put away yet".
  * It is not. `parts.quantity` is a pure roll-up of `part_location_stock`, so no rows anywhere means
- * the shop holds **none of this part at all**, Unassigned included. An operator reading the old
- * wording would go looking for something that is not in the building.
+ * the shop holds **none of this part at all**, Unassigned included.
  *
- * Hence **"None available"**: it answers the question the operator actually has, which is whether
- * they can get one, and it stops promising a location hunt that would find nothing.
+ * **It is now the same sentence as every other answer: `0 ea`** — 2026-09-04, founder's call. It
+ * was a warning Alert reading *"None available"*, which is a flag where a number belongs: zero is
+ * an ordinary quantity, not an alarm, and a part the shop is simply out of is the most routine
+ * finding this screen has. Saying it in the same line and the same shape as `40 ea in 2 locations`
+ * means an operator reads one place for the answer instead of learning two layouts.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -76,7 +78,6 @@ import PlaceStockActionForm, {
 import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation } from '@/types/inventoryLocations';
-import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -116,15 +117,28 @@ export default function OperatorPartLookup({
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   /** Which location's verbs are open, and which verb. One at a time. */
-  const [open, setOpen] = useState<{ locationId: string; action: PlaceStockAction | 'adjust' } | null>(
+  const [open, setOpen] = useState<{ rowKey: string; locationId: string; action: PlaceStockAction | 'adjust' } | null>(
     null,
   );
+  /**
+   * A place the part is NOT in yet, chosen from the picker, shown as a row so it can be stocked
+   * right here.
+   *
+   * Before 2026-09-04 choosing a place NAVIGATED to that bin, and the bin view keeps only the
+   * place — so you re-found, in a list of everything on that shelf, the part you had arrived
+   * holding. That is the identical fault this screen's own doc calls out for the location rows,
+   * fixed there and left here. The old rationale was that a remote write claims you put something
+   * somewhere you may not be standing; but the same claim is made by every other verb on this
+   * screen, and by the whole office side, so it was a rule this one control kept alone.
+   */
+  const [extraPlace, setExtraPlace] = useState<PartLocationBalanceWithLocation | null>(null);
 
   const pick = (part: PartSelectOption | null) => {
     setSelected(part);
     setBalances(null);
     setError(null);
     setOpen(null);
+    setExtraPlace(null);
     onSelectionChange?.(part);
     if (!part) return;
     setLoadingBalances(true);
@@ -141,8 +155,8 @@ export default function OperatorPartLookup({
    * never expand a row at all, so paying for the whole tree on every part would be waste. Failing
    * that read does not block the other three verbs; only Move's destination list comes up empty.
    */
-  const toggleLocation = (locationId: string) => {
-    setOpen((cur) => (cur?.locationId === locationId ? null : { locationId, action: 'deplete' }));
+  const toggleLocation = (rowKey: string, locationId: string) => {
+    setOpen((cur) => (cur?.rowKey === rowKey ? null : { rowKey, locationId, action: 'deplete' }));
     if (locations.length > 0 || loadingPlaces) return;
     setLoadingPlaces(true);
     getLocations(companyId)
@@ -209,18 +223,62 @@ export default function OperatorPartLookup({
   // Each memo depends on `balances` directly. A shared `const all = balances ?? []` reads better
   // but defeats the point: the `?? []` mints a new array identity every render, so both memos
   // would recompute on every one.
+  /*
+   * Every balance is a place now — 20260906182638.
+   *
+   * This used to split the list in two: real shelves, and the `Unassigned` bucket, which was
+   * called out above them as "N not stored yet" because rendering it as a row would have sent an
+   * operator walking to a pile that is not anywhere. The bucket is gone and a quantity cannot
+   * exist without a location, so there is no second kind of row to separate out.
+   */
   const places = useMemo(
-    () => (balances ?? []).filter((b) => b.kind !== SYSTEM_KIND && Number(b.quantity ?? 0) > 0),
-    [balances],
-  );
-  const unassigned = useMemo(
-    () => (balances ?? []).find((b) => b.kind === SYSTEM_KIND && Number(b.quantity ?? 0) > 0) ?? null,
+    () => (balances ?? []).filter((b) => Number(b.quantity ?? 0) > 0),
     [balances],
   );
   const total = useMemo(
     () => places.reduce((n, b) => n + Number(b.quantity ?? 0), 0),
     [places],
   );
+  /**
+   * PLACES, not rows. A row is one (place, lot), so a part under two heats on one shelf produces
+   * two — and counting rows told an operator it was in two locations when it is in one.
+   */
+  const placeCount = useMemo(
+    () => new Set(places.map((b) => b.location_id)).size,
+    [places],
+  );
+
+  /**
+   * What the list renders: everywhere the part IS, plus the one place just chosen to put it.
+   *
+   * The chosen place drops out of its own accord — once stock lands there the balance read that
+   * follows the write returns it as a real row, and the filter below stops adding a duplicate.
+   */
+  const rows = useMemo(() => {
+    if (!extraPlace || places.some((p) => p.location_id === extraPlace.location_id)) return places;
+    return [...places, extraPlace];
+  }, [places, extraPlace]);
+
+  /**
+   * Stock the part at a place it is not in yet — chosen from the picker, done HERE.
+   *
+   * The row is synthesised from the picker's own option, whose label is the full path, so it reads
+   * exactly like the rows beside it. `quantity: 0` is honest: nothing of this part is there yet,
+   * and `PlaceStockActionForm` renders an add row against a zero balance without complaint.
+   */
+  const stockAtNewPlace = (locationId: string) => {
+    setAddToLocationOpen(false);
+    const option = stockDestinationOptions(locations).find((o) => o.id === locationId);
+    const path = (option?.label ?? '').split(' › ').filter(Boolean);
+    setExtraPlace({
+      location_id: locationId,
+      location_name: path[path.length - 1] ?? 'Location',
+      path,
+      quantity: 0,
+      kind: null,
+    } as PartLocationBalanceWithLocation);
+    setOpen({ rowKey: `${locationId}:none`, locationId, action: 'add' });
+  };
 
   /**
    * Loaded on demand — most lookups end at a shelf card and never open the picker — and the
@@ -274,29 +332,27 @@ export default function OperatorPartLookup({
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
               <CircularProgress size={24} />
             </Box>
-          ) : places.length === 0 && !unassigned ? (
-            <Alert severity="warning">None available</Alert>
           ) : (
             <>
-              {/* Stock sitting in the put-away pile is called out FIRST and separately. It is the
-                  one state that tells an operator holding this part what to do — and the previous
-                  version rendered it as though `Unassigned` were a shelf they could walk to. */}
-              {unassigned && (
-                <Alert severity="info" sx={{ mb: 1.5 }}>
-                  <strong>
-                    {num(unassigned.quantity)} {selected.primary_unit ?? ''}
-                  </strong>{' '}
-                  not stored yet.
-                </Alert>
-              )}
-              {places.length > 0 && (
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  {/* "on 1 shelf" was wrong for most of this shop's storage: a bin inside
-                      Cabinet 3 is not a shelf, and neither is the yard. */}
-                  {num(total)} {selected.primary_unit ?? ''} in{' '}
-                  {places.length === 1 ? '1 location' : `${places.length} locations`}
-                </Typography>
-              )}
+              {/* Always a quantity, zero included — a part the shop is out of gets the same
+                  sentence as one it has, not a warning flag (2026-09-04). "on 1 shelf" was wrong
+                  for most of this shop's storage: a bin inside Cabinet 3 is not a shelf, and
+                  neither is the yard. */}
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                {places.length === 0 ? (
+                  <>
+                    <strong>
+                      0 {selected.primary_unit ?? ''}
+                    </strong>{' '}
+                    in any location
+                  </>
+                ) : (
+                  <>
+                    {num(total)} {selected.primary_unit ?? ''} in{' '}
+                    {placeCount === 1 ? '1 location' : `${placeCount} locations`}
+                  </>
+                )}
+              </Typography>
               {/*
                 ACT ON THE PART WHERE YOU FOUND IT — the same rule the office side already follows.
 
@@ -311,19 +367,33 @@ export default function OperatorPartLookup({
                 rule and the job-list narrowing are fixed in one place for both surfaces.
               */}
               <Stack spacing={1}>
-                {places.map((b) => {
+                {rows.map((b) => {
                   const path = b.path.join(' › ') || b.location_name;
-                  const here = open?.locationId === b.location_id ? open.action : null;
+                  // One row is one (place, lot). Keyed by place alone, two heats on one shelf
+                  // shared a React key and expanded together.
+                  const rowKey = `${b.location_id}:${b.lot_id ?? 'none'}`;
+                  const here = open?.rowKey === rowKey ? open.action : null;
                   return (
-                    <Card key={b.location_id} elevation={2}>
+                    <Card key={rowKey} elevation={2}>
                       <CardActionArea
-                        onClick={() => toggleLocation(b.location_id)}
+                        onClick={() => toggleLocation(rowKey, b.location_id)}
                         aria-expanded={Boolean(here)}
                         sx={{ minHeight: 56 }}
                       >
                         <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
                           <Box sx={{ flex: 1, minWidth: 0 }}>
                             <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
+                            {/* WHICH heat is on this shelf — without it two lots read as the
+                                same place listed twice. */}
+                            {b.lot_code && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ display: 'block' }}
+                              >
+                                {b.heat_number ? `Heat ${b.heat_number}` : `${b.lot_code} · no mill heat`}
+                              </Typography>
+                            )}
                             {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
                             {b.path.length > 1 && (
                               <Typography variant="caption" color="text.secondary">
@@ -359,7 +429,7 @@ export default function OperatorPartLookup({
                               <Button
                                 key={v}
                                 variant={here === v ? 'contained' : 'outlined'}
-                                onClick={() => setOpen({ locationId: b.location_id, action: v })}
+                                onClick={() => setOpen({ rowKey, locationId: b.location_id, action: v })}
                                 sx={{ minHeight: 48 }}
                               >
                                 {label}
@@ -374,6 +444,9 @@ export default function OperatorPartLookup({
                               locationId={b.location_id}
                               locationName={path}
                               restrictToPartId={selected.id}
+                              // The row IS a heat, so the form opens on that heat rather than on
+                              // every heat of the bar sitting here.
+                              restrictToLotId={b.lot_id}
                               onCancel={() => setOpen(null)}
                               onDone={afterWrite}
                             />
@@ -389,6 +462,7 @@ export default function OperatorPartLookup({
                                 partId: selected.id,
                                 partName: selected.part_name,
                                 primaryUnit: selected.primary_unit,
+                                lotId: b.lot_id,
                               }}
                               // The shop floor's removal has always been graceful: the material is
                               // already off the shelf, so a stale count must not refuse the write.
@@ -428,7 +502,7 @@ export default function OperatorPartLookup({
               disabled={loadingPlaces}
               sx={{ mt: 1.5, minHeight: 48 }}
             >
-              Add to new location&hellip;
+              Add at another location&hellip;
             </Button>
           )}
         </Box>
@@ -442,7 +516,8 @@ export default function OperatorPartLookup({
           locations={locations}
           balances={balances ?? []}
           onClose={() => setAddToLocationOpen(false)}
-          onChoose={onOpenLocation}
+          // Acts here, rather than navigating and making you re-find the part in the bin.
+          onChoose={stockAtNewPlace}
         />
       )}
     </Box>

@@ -22,12 +22,21 @@
  * - labels are not printed, or one has come off;
  * - the phone has no usable camera.
  *
- * ## It navigates; it does not write
+ * ## It picks a place; the Add form opens on it, here — changed 2026-09-04
  *
- * Choosing a place takes you TO that bin, where the existing Add flow records the movement. It
- * deliberately does not write from here. A remote write is a claim that you put something somewhere
- * you may not have reached — and an inventory full of confident, unverifiable claims is worse than
- * one with gaps, because nobody can tell which rows to trust.
+ * It used to NAVIGATE to the chosen bin and let the Add flow there record the movement, on the
+ * rule that *a remote write is a claim that you put something somewhere you may not have reached,
+ * and an inventory full of confident, unverifiable claims is worse than one with gaps.*
+ *
+ * That rule is sound and this control was the only place still keeping it. Every other verb on the
+ * lookup writes to a place you are not standing in, and so does the whole office side — so the one
+ * thing the navigation actually achieved was to throw away half of what you arrived with. You hold
+ * a PART and now a PLACE; the bin view keeps only the place, so you re-find your part among
+ * everything else on that shelf. That is the identical fault the lookup's own location rows had,
+ * fixed there in Aug 2026 and left here.
+ *
+ * So: choosing hands the place back to the lookup, which shows it as a row and opens **Add** on it.
+ * `Open this location` still sits inside that row for whoever does want to walk over.
  *
  * ## Reuses the shared picker, quantities and all
  *
@@ -101,7 +110,7 @@ export default function AddToLocationDialog({
 
   return (
     <Dialog open={open} onClose={close} fullWidth maxWidth="xs">
-      <DialogTitle>Add {partName} to a new location</DialogTitle>
+      <DialogTitle>Add {partName} at another location</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Pick where it&apos;s going and we&apos;ll take you there. Scanning the label is
@@ -113,7 +122,6 @@ export default function AddToLocationDialog({
           value={choice}
           onChange={setChoice}
           // The pile is what you are emptying, never a destination.
-          excludeSystem
           unit={unit ?? undefined}
         />
       </DialogContent>
@@ -128,7 +136,7 @@ export default function AddToLocationDialog({
             close();
           }}
         >
-          Go there
+          Add here
         </Button>
       </DialogActions>
     </Dialog>

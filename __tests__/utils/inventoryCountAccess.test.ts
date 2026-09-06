@@ -16,11 +16,12 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
   getBalancesForParts: vi.fn(),
   getLocations: vi.fn(),
+  getLotsForPart: vi.fn(),
+  getLotsForTrackedParts: vi.fn(),
 }));
 /**
- * A chainable stub rather than `{}`: `loadPartAtLocationCandidate` and
- * `refreshLocationQuantities` both go through `.from()`, and each test queues the results its
- * reads should see, in order.
+ * A chainable stub rather than `{}`: `loadPartAtLocationCandidates` and `readPlaceBalances` both
+ * go through `.from()`, and each test queues the results its reads should see, in order.
  */
 const { sbState, sbMock } = vi.hoisted(() => {
   type Result = { data: unknown; error: unknown };
@@ -53,13 +54,15 @@ vi.mock('@/lib/supabase', () => ({
 import {
   commitCount,
   loadCountCandidates,
-  loadPartAtLocationCandidate,
+  loadPartAtLocationCandidates,
 } from '@/utils/inventoryCountAccess';
 import { searchPartsForSelect } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
   getBalancesForParts,
   getLocations,
+  getLotsForPart,
+  getLotsForTrackedParts,
 } from '@/utils/inventoryLocationsAccess';
 import type { CountVariance } from '@/types/inventoryCount';
 
@@ -71,7 +74,18 @@ const variance = (
   target: CountVariance['candidate']['target'],
   systemQuantity = 0,
 ): CountVariance => ({
-  candidate: { partId, partName: partId.toUpperCase(), description: null, unit: 'ft', systemQuantity, target },
+  candidate: {
+    partId,
+    partName: partId.toUpperCase(),
+    description: null,
+    unit: 'ft',
+    systemQuantity,
+    // Untracked, which is what nearly every part is and what every case here is about.
+    lotId: null,
+    lotCode: null,
+    heatNumber: null,
+    target,
+  },
   counted,
   delta: counted - systemQuantity,
   movedSinceOpened: false,
@@ -154,24 +168,26 @@ describe('commitCount resilience', () => {
  * "Count here" from the part page. The interesting case is the one the ordinary bin read cannot
  * reach: the system says zero, and you are standing there holding twelve.
  */
-describe('loadPartAtLocationCandidate', () => {
+describe('loadPartAtLocationCandidates', () => {
   const part = (over: Record<string, unknown> = {}) => ({
     id: 'p1',
     part_name: 'RAW-AL6061-BLANK',
     description: 'Aluminium blank',
     primary_unit: 'ea',
+    lot_tracked: false,
     ...over,
   });
 
   it('reads the balance rather than assuming zero', async () => {
     sbState.queue = [
       { data: part(), error: null },
-      { data: [{ part_id: 'p1', quantity: 12 }], error: null },
+      { data: [{ part_id: 'p1', quantity: 12, lot_id: null, material_lots: null }], error: null },
     ];
 
-    const c = await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
+    const [c] = await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A');
 
     expect(c.systemQuantity).toBe(12);
+    expect(c.lotId).toBeNull();
     expect(c.target).toEqual({ locationId: 'l1', locationName: 'Shelf A', locationPath: 'Shelf A' });
   });
 
@@ -182,14 +198,102 @@ describe('loadPartAtLocationCandidate', () => {
   it('still returns a candidate when the part has no balance here', async () => {
     sbState.queue = [{ data: part(), error: null }, { data: [], error: null }];
 
-    const c = await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
-    expect(c.systemQuantity).toBe(0);
+    const rows = await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].systemQuantity).toBe(0);
+  });
+
+  /**
+   * Two heats in one bin are two lines, because an absolute count of one of them says nothing
+   * about the other — and `adjust_stock_at_location` refuses a count that does not name a heat.
+   */
+  it('gives a heat-tracked part one row per heat on the shelf', async () => {
+    sbState.queue = [
+      { data: part({ lot_tracked: true }), error: null },
+      {
+        data: [
+          {
+            part_id: 'p1',
+            quantity: 8,
+            lot_id: 'lot-1',
+            material_lots: { lot_code: '4471', heat_number: '4471' },
+          },
+          {
+            part_id: 'p1',
+            quantity: 4,
+            lot_id: 'lot-2',
+            material_lots: { lot_code: '8823', heat_number: '8823' },
+          },
+        ],
+        error: null,
+      },
+    ];
+
+    const rows = await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A');
+    expect(rows.map((r) => [r.lotId, r.heatNumber, r.systemQuantity])).toEqual([
+      ['lot-1', '4471', 8],
+      ['lot-2', '8823', 4],
+    ]);
+  });
+
+  /**
+   * The discovery this whole loader exists for, at the lot grain: heat 4471 is recorded on Shelf A
+   * and you have just found it on Shelf B. Scoped to balances here there is nothing to type into,
+   * because at Shelf B that lot has no row at all.
+   */
+  it('offers every heat of a tracked part when the shelf holds none of it', async () => {
+    sbState.queue = [
+      { data: part({ lot_tracked: true }), error: null },
+      { data: [], error: null },
+    ];
+    asMock(getLotsForPart).mockResolvedValue([
+      { lotId: 'lot-1', lotCode: '4471', heatNumber: '4471', quantity: 0 },
+      { lotId: 'lot-2', lotCode: 'PRE-TRACKING', heatNumber: null, quantity: 0 },
+    ]);
+
+    const rows = await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf B');
+    expect(rows.map((r) => [r.lotId, r.lotCode, r.systemQuantity])).toEqual([
+      ['lot-1', '4471', 0],
+      ['lot-2', 'PRE-TRACKING', 0],
+    ]);
+  });
+
+  /**
+   * Driven by the balance rows, not by the flag. Turning tracking off leaves the split balances
+   * alone on purpose, so this part still sits here as two heats — and offering it one lot-less
+   * line would add a THIRD balance row beside them, double-counting into the `parts.quantity`
+   * rollup with no error anywhere.
+   */
+  it('keeps the split when tracking was switched off but the heats remain', async () => {
+    sbState.queue = [
+      { data: part({ lot_tracked: false }), error: null },
+      {
+        data: [
+          {
+            part_id: 'p1',
+            quantity: 8,
+            lot_id: 'lot-1',
+            material_lots: { lot_code: '4471', heat_number: '4471' },
+          },
+          {
+            part_id: 'p1',
+            quantity: 4,
+            lot_id: 'lot-2',
+            material_lots: { lot_code: '8823', heat_number: '8823' },
+          },
+        ],
+        error: null,
+      },
+    ];
+
+    const rows = await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A');
+    expect(rows.map((r) => r.lotId)).toEqual(['lot-1', 'lot-2']);
   });
 
   /** Archive is a soft delete; a by-id read that ignores it resurrects deleted parts. */
   it('scopes the read to the company and skips archived parts', async () => {
     sbState.queue = [{ data: part(), error: null }, { data: [], error: null }];
-    await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
+    await loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A');
 
     const read = sbState.calls[0];
     expect(read.eq).toBeDefined();
@@ -198,7 +302,7 @@ describe('loadPartAtLocationCandidate', () => {
 
   it('says so when the part is gone', async () => {
     sbState.queue = [{ data: null, error: null }];
-    await expect(loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
+    await expect(loadPartAtLocationCandidates('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
       /no longer exists/i,
     );
   });
@@ -251,10 +355,15 @@ describe('loadCountCandidates — one row per (part, place)', () => {
     locationName,
     path,
     quantity,
+    lotId: null,
+    lotCode: null,
+    heatNumber: null,
   });
 
   beforeEach(() => {
     asMock(getLocations).mockResolvedValue([SYSTEM, SHELF_A, SHELF_B]);
+    // No heat-tracked parts unless a case says otherwise — the ordinary shop.
+    asMock(getLotsForTrackedParts).mockResolvedValue(new Map());
   });
 
   it("emits one row per place holding stock, each carrying THAT place's balance", async () => {
@@ -280,15 +389,15 @@ describe('loadCountCandidates — one row per (part, place)', () => {
    * 0, and `getBalancesForParts` filters those out — so without the fallback the entire catalogue
    * of a shop counting for the first time would be missing from its own count sheet.
    */
-  it('still emits a row for a part holding stock nowhere, at the system bucket', async () => {
+  it('emits NO row for a part holding stock nowhere', async () => {
     asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
     asMock(getBalancesForParts).mockResolvedValue(new Map());
 
-    const rows = await loadCountCandidates('co1');
-
-    expect(rows).toHaveLength(1);
-    expect(rows[0].target.locationId).toBe('loc-unassigned');
-    expect(rows[0].systemQuantity).toBe(0);
+    // The inverse of what this asserted until 20260906182638, when it got one row at the
+    // `Unassigned` bucket. With no bucket and no quantity without a location, "this part is
+    // nowhere" is a complete answer rather than a line to type a number into — and a sheet that
+    // offered one would be asking someone to count a pile that does not exist.
+    expect(await loadCountCandidates('co1')).toEqual([]);
   });
 
   /**
@@ -318,11 +427,4 @@ describe('loadCountCandidates — one row per (part, place)', () => {
     expect(rows[0].target.locationPath).toBe('Cabinet 3 › Shelf A');
   });
 
-  it('throws rather than quietly shortening the sheet when there is no system bucket', async () => {
-    asMock(getLocations).mockResolvedValue([SHELF_A]);
-    asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
-    asMock(getBalancesForParts).mockResolvedValue(new Map());
-
-    await expect(loadCountCandidates('co1')).rejects.toThrow(/Unassigned/i);
-  });
 });

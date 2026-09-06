@@ -21,7 +21,11 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
+  getLotsAtLocationForPart,
 } from '@/utils/inventoryLocationsAccess';
+import HeatNumberField from '@/components/inventory/HeatNumberField';
+import LotPicker from '@/components/inventory/LotPicker';
+import type { LotOnHand } from '@/utils/inventoryLocationsAccess';
 import { compareLocationNames } from '@/lib/locationTree';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import LocationPicker, {
@@ -112,6 +116,45 @@ export default function PartLocationActionModal({
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
   /**
+   * The heat, captured by direction: typed on the way IN (`add`), picked from what is on the
+   * shelf on the way OUT (`deplete`, `move`).
+   *
+   * Unlike the operator's dialog this one chooses its own location, so the lots have to be
+   * re-read whenever that choice changes — a heat list for the wrong shelf is worse than none,
+   * because every row on it looks pickable.
+   */
+  const [heatNumber, setHeatNumber] = useState('');
+  const [lotId, setLotId] = useState<string | null>(null);
+  const [lots, setLots] = useState<LotOnHand[]>([]);
+  const [tracked, setTracked] = useState(false);
+  const showHeatField = action === 'add';
+  const showLotPicker = action === 'deplete' || action === 'move';
+
+  /** What is on the chosen shelf. Best-effort: the RPC is what actually enforces. */
+  const loadLots = (locId: string | null) => {
+    setLotId(null);
+    setLots([]);
+    if (!showLotPicker || !locId) return;
+    getLotsAtLocationForPart(partId, locId)
+      .then(({ lots: here, tracked: isTracked }) => {
+        setLots(here);
+        setTracked(isTracked);
+        if (here.length === 1) setLotId(here[0].lotId);
+      })
+      .catch(() => setLots([]));
+  };
+
+  const pickLocation = (loc: LocationOption | null) => {
+    setLocation(loc);
+    loadLots(loc?.id ?? null);
+  };
+
+  const pickSource = (loc: LocationBalanceOption | null) => {
+    setSourceLoc(loc);
+    loadLots(loc?.id ?? null);
+  };
+
+  /**
    * Who is doing this, so the ledger can name them.
    *
    * `operator_id` is a `user_company_access.id`. The RPCs also stamp `created_by = auth.uid()`,
@@ -135,6 +178,15 @@ export default function PartLocationActionModal({
     setNotes('');
     setError(null);
     setJob(null);
+    setHeatNumber('');
+    setTracked(false);
+    // The single-place shortcuts above bypass the pickers, so seed the lots from whatever they
+    // just chose rather than waiting for a change event that will never fire.
+    loadLots(
+      action === 'move'
+        ? (sourceBalances.length === 1 ? sourceBalances[0].id : null)
+        : (locations.length === 1 ? locations[0].id : null),
+    );
     setOperatorId(null);
     // ABOVE the deplete-only return: all four actions write a ledger row, and an earlier draft
     // that put this after it would have attributed removals and nothing else.
@@ -225,6 +277,7 @@ export default function PartLocationActionModal({
         await addStockAtLocation(partId, location!.id, qty, unit, {
           notes: notes || undefined,
           operatorId,
+          heatNumber: heatNumber.trim() || undefined,
         });
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
@@ -236,6 +289,7 @@ export default function PartLocationActionModal({
           operatorId: operatorId ?? undefined,
           notes: notes || undefined,
           jobId: job?.id || undefined,
+          lotId: lotId ?? undefined,
         });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, location!.id, qty, unit, {
@@ -246,14 +300,18 @@ export default function PartLocationActionModal({
         await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, {
           notes: notes || undefined,
           operatorId,
+          // The tag travels with the bar.
+          lotId: lotId ?? undefined,
         });
       }
+      // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
       posthog.capture('stock updated', {
         surface: 'office',
         action,
         part_id: partId,
         quantity: qty,
         unit,
+        heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
       onClose();
@@ -290,7 +348,7 @@ export default function PartLocationActionModal({
                 <Autocomplete
                   options={sourceBalances}
                   value={sourceLoc}
-                  onChange={(_, v) => setSourceLoc(v)}
+                  onChange={(_, v) => pickSource(v)}
                   getOptionLabel={(o) => `${o.label} — ${num(o.quantity)} ${primaryUnit}`}
                   isOptionEqualToValue={(o, v) => o.id === v.id}
                   renderInput={(params) => <TextField {...params} label="From location" required />}
@@ -305,7 +363,6 @@ export default function PartLocationActionModal({
                 value={toLocation}
                 onChange={setToLocation}
                 excludeId={sourceLoc?.id ?? null}
-                excludeSystem
                 unit={primaryUnit}
                 required
                 onCreate={onCreateLocation}
@@ -322,7 +379,7 @@ export default function PartLocationActionModal({
               label="Location"
               options={locationOptions}
               value={location}
-              onChange={setLocation}
+              onChange={pickLocation}
               unit={primaryUnit}
               required
               onCreate={onCreateLocation}
@@ -370,6 +427,19 @@ export default function PartLocationActionModal({
               would mean nothing. Issue #59. */}
           {action === 'deplete' && (
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+          )}
+          {showHeatField && (
+            <HeatNumberField value={heatNumber} onChange={setHeatNumber} disabled={saving} />
+          )}
+          {showLotPicker && (tracked || lots.length > 0) && (
+            <LotPicker
+              options={lots}
+              value={lotId}
+              onChange={setLotId}
+              unit={primaryUnit}
+              required={tracked}
+              disabled={saving}
+            />
           )}
           <TextField
             label="Notes (optional)"

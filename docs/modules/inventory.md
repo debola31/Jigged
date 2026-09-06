@@ -86,14 +86,14 @@ every tenant: the `inventory_locations` flag that used to gate Storage was retir
 | **Change a unit's layout** | Storage → pick a unit → `Change layout` | Opens on the unit's REAL subtree and writes a **diff** — creates, renames, re-parents, removes — through one `apply_location_layout` call. Anything it removes that holds stock has to be re-placed first, and anything it divides up moves its stock down. **Was an append until 2026-08-15** ([§5.13](#513-change-layout-changes-the-layout--2026-08-15)): the same dialog, seeded with five default rows and told to number PAST what was already there, so asking a five-row cabinet for three rows gave you eight. |
 | **Reorganise a place** | Storage → pick it in the list, or a cell in the grid | `Rename`, `Duplicate`, `Add one inside`, `Delete` (empty subtrees only). ~~`Move into…` (re-parent)~~ **removed 2026-08-10** — see [§5.12](#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30). |
 | Print labels | Storage toolbar / place drawer | `Print all labels` for setup, or `Print QR` for one place **and everything under it**. There is no row selection: bulk-print-a-subset is the only job those checkboxes served, nobody has asked for it twice, and a checkbox column charges every row on every visit for it. |
-| **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for `Unassigned` too. |
+| **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for every place. |
 | **See stock moving across the whole shop** | `/activity` → `Inventory` | Every movement, newest first, transfers folded to one row. Each row links to that part's ledger. Added 2026-08-01 — `getRecentActivity` already existed and its only caller was the operator's phone. |
 | **Move stock at a place** | Storage → click a cell → drawer → `Add` · `Remove` · `Move` | **A quantity per row, several parts at a time.** Fixes the *place* and picks the *parts* — the inverse of the part page, and the information you actually have standing at a cabinet. [`PlaceStockActionForm`](../../components/inventory/locations/place/PlaceStockActionForm.tsx), **new 2026-08-10**: before it, Storage could not put anything into a bin at all. |
 | Audit ONE place | Storage → click a cell → drawer → `Adjust` | [`PlaceAdjustForm`](../../components/inventory/locations/place/PlaceAdjustForm.tsx): everything at that place under **recorded · counted · changed**, variance as you type. **A blank is not a zero** — untouched rows keep their balance, and a typed 0 is an assertion that the bin is empty. |
 | Audit a whole cabinet | Storage → pick a unit → `Bulk Adjust` | [`UnitAdjustDrawer`](../../components/inventory/locations/place/UnitAdjustDrawer.tsx) — every bin under the unit in one drawer, a row per **(part, place)**, recorded · counted · changed. Was `Count or put away`, then `Adjust`, then a page; see §5.12. |
 | **Count one part at one place** | `/parts/{id}` → Inventory tab → the icon on a balance row | Offered on **every** row including zeros. |
 | **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |
-| Put stray parts away | Place worksheet, at `Unassigned` | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. |
+| Put stray parts away | Place worksheet, at any bin | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. The tool is unchanged; the pile it was built to empty is gone (§5.14). |
 | **"Where is my o-ring?" — and take five off the shelf** | Storage → the page search | [`StorageSearch`](../../components/inventory/locations/StorageSearch.tsx) matches **places and parts in one box**, grouped, **one row per part**. Picking a part opens [`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — every place it is, with quantities and a total — and each row **expands into the four verbs scoped to that part at that place**, so the job finishes where the answer was. `Open bin` is inside the expanded section for when you want the whole shelf. |
 | Count the whole shop | **Storage**, or a part's Inventory tab → `/inventory/count` | One door, and now the worksheet's **only** browsing entry: Storage stopped navigating there entirely 2026-08-10. The page keeps its place-scoped mode for a part's own balance row (`?location=…&part=…` from [`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)). |
 | **Add a part the bin read didn't return** | Place worksheet → `Found something not listed?` | The "system says zero, I'm holding twelve" case. |
@@ -147,6 +147,13 @@ quoting boundary, J8 remnants — twelve journeys (§4).
 **Cut, as decisions:** traceability — no certs, heat numbers or regulated customers, so the lot layer
 went with it (§5.6); re-confirmed 2026-08-01, Contour does not want it either. Kept on the radar for
 **customer #2**, not for this shop — [#642](https://github.com/debola31/Jigged/issues/642).
+**Reopened 2026-09-04 for heat numbers only** (§5.6): customer #2 needs them, and they ride on the
+ledger rows and a frozen line on the packing slip, optional and hidden when absent.
+**The lot layer followed on 2026-09-06** — `material_lots`, a per-part `lot_tracked` flag, and a
+third key on `part_location_stock` — because a heat you have to *choose* from cannot be free text
+over a list that grows forever and can name material that is not on the shelf. Off per part by
+default, so a shop that ignores it sees the inventory it saw yesterday. Certs are stored, not yet
+collected.
 Customer-supplied material — real and frequent but **never stocked** (arrives with the job, is
 worked, leaves): a job attribute.
 
@@ -179,7 +186,7 @@ worked, leaves): a job attribute.
 | `parts` | `primary_unit` is required by a **CHECK** (`parts_requires_unit`), not a NOT NULL column — `types/database.ts` types it `string | null`, so an insert omitting it compiles and then fails at runtime; `quantity` **written only by a stock function, never the part form**; `reorder_point` NULL disables status; `preferred_vendor_id` is a **label only, not a cost gate** (`20260714173443`). |
 | `parts_unit_conversions` | FR-1. `(part_id, from_unit)` UNIQUE, `to_primary_factor` > 0 — bar in lbs: `inches` × 0.166. Custom/cross-category only; names in `company_custom_units`. |
 | `inventory_transactions` | FR-13. `quantity` always positive, direction in `type`; `has_discrepancy` = clamped-to-zero depletion; `transfer_group_id` pairs a transfer's two rows; `notes` the only mutable column (`restrict_transaction_update_to_notes`). |
-| `inventory_locations` | `parent_id` self-FK RESTRICT; `code` **not unique**; **no `path`/`level`/ltree** — depth recomputed client-side each read. The partial unique index `(company_id) WHERE name='Unassigned'` *is* the auto-bucket mechanism, resolved **by name**. Traps: re-parent cycle check is client-side only; Unassigned is that string in SQL but `kind==='system'` in TS. |
+| `inventory_locations` | `parent_id` self-FK RESTRICT; `code` **not unique**; **no `path`/`level`/ltree** — depth recomputed client-side each read. The auto-bucket mechanism (a partial unique index on `name='Unassigned'`, resolved by name in SQL and by `kind==='system'` in TS) is **gone — 2026-09-06, §5.14**; `kind = 'system'` is now refused by CHECK. Trap that remains: the re-parent cycle check is client-side only. |
 | `part_location_stock` | `(part_id, location_id)` UNIQUE, both FKs RESTRICT, RLS **SELECT-only**. A row exists only while the part is actually there — `CHECK (quantity > 0)`, emptying deletes. **Never at a location with children** — see below. |
 
 ### A place is a container or a bin, never both
@@ -239,7 +246,7 @@ Per part by `is_location_tracked`; unification is intent (§5.4).
 | How | Client read-modify-write of `parts.quantity`, then a **separate** ledger insert | Balance upsert + ledger insert in one transaction, `SELECT … FOR UPDATE` |
 | Atomicity | **None** — concurrent writes lose updates | Atomic, row-locked; `parts.quantity` is a `trg_recompute_part_quantity` rollup |
 
-`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to `PartLocationInventory`. `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrols every new part at Unassigned unconditionally, hence no per-part opt-in UI. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
+`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to `PartLocationInventory`. `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrolled every new part at Unassigned unconditionally, hence no per-part opt-in UI. **Both the trigger and the bucket were removed 2026-09-06 (§5.14):** a part is created at 0 or the insert is refused, and stock enters only through `add_stock_at_location`. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
 
 **Nothing decrements automatically** — not on operation complete, job complete, shipment or invoice; zero stock calls in the jobs, operator, shipments or operation-completions access files. Deliberate, still true after Phase 1: consumption is recorded when an operator depletes at a bin and tags the job, which J4 reads back. The tag stays **optional** — accepted risk (J7).
 
@@ -268,9 +275,9 @@ Supabase + RLS via `getSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventory
 - `getLocationContents` caps at 200 (`LOCATION_CONTENTS_LIMIT`) and shows the exact total: uncapped, PostgREST `max_rows` clipped it silently — invisible on a 14-row seed, wrong on a 9,428-part shop. Archived parts excluded, matching the `inventory_location_occupancy` view.
 - `bulkPutAway` — **one atomic RPC, never chunked** (a half-moved pile is worse than none); it moves whole balances, so N parts cost one request, not 2N — every *other* location-stock wrapper first loads the part's conversion context and sends **both** display and converted quantities, which is the second read that makes an ordinary stock write cost 2; the 1000-part cap sits in the RPC, not the UI.
 - `occupancyFor` **zero-defaults** so render code never branches on `undefined` — an optional `?.hasStock` reads an *unknown* location as "empty", which is exactly how the roll-up bug comes back.
-- `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `refreshLocationQuantities` is the per-place one.
+- `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `readPlaceBalances` is the per-place one. It returns **one entry per (part, lot)**, not per part — a bar holding two heats on one shelf is two balance rows, and a count line has to correspond to one of them because `adjust_stock_at_location` sets a single row absolutely. (Called `refreshLocationQuantities` until 2026-09, when a quantity stopped being enough to describe what is at a place.)
 - **`code` is gone (20260803034616).** The founder asked why a label printed a code when it already printed the name, and there was no answer that survived contact. `locationLabelPdf` laid out the QR, then the full path at 11pt black, then the code at 10pt grey — a second human-readable identifier one line under the first. And **nothing in the app could look one up**: no search, no filter, no `eq('code')`, and the scanner parses the UUID. The three defences all failed — "short enough to say out loud" (you would say *Shelf A*, and nothing accepts a spoken code), "survives a rename" (the QR carries the UUID, so it already did), and "matches codes stencilled on the rack" (a shop with that scheme would simply *name* the place `A-12`). Safe to drop rather than deprecate because no one had printed a label yet. The parent-prefixed zero-padded scheme in `locationSpec` (`CAB1` → `CAB1-R03` → `CAB1-R03-L`) went with it; the builder keeps its **name** planning, which is the half anyone reads.
-- **`kind` left the UI in the same pass**, for the same reason one step earlier: its only consumer was the board's `unitKind`, which chose a drawing, and the board became a table. The column stays because `kind = 'system'` marks the `Unassigned` pile and `resolveFallbackPlace`, `excludeSystem`, the operator put-away split and the panel's action gate all key off it — but it is now set only by `inv_get_or_create_unassigned`, never by a person.
+- **`kind` left the UI in the same pass**, for the same reason one step earlier: its only consumer was the board's `unitKind`, which chose a drawing, and the board became a table. The column stayed because `kind = 'system'` marked the `Unassigned` pile and four surfaces keyed off it. **All four are gone with the bucket (2026-09-06, §5.14)** — `kind` is now free text describing what a place IS, with `system` refused by CHECK so the branches cannot return.
 - `LocationScanner` is wired into the operator Scan tab and the put-away destination picker on the place-scoped count worksheet. **Not the owner's Storage board** — an earlier revision of this line said it was; grep says two references, both above. It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
 
 ### Archive · dead code
@@ -321,11 +328,11 @@ Owner/admin: shortages become a vendor-grouped buy list → PO with expected dat
 
 ### J6 — Receive it
 
-Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost, lot, cert). The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
+Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost or cert — it does take the **heat number** since 2026-09-04, through the same `add_stock_at_location(p_heat_number)` a PO receipt will call; [§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 that receipt is also where a **lot** is created — the only place one can be, since a take may not invent one — and `lot_certificates` gives a cert somewhere to live, though nothing collects one yet: the founder's objection to scanning PDFs at the receiving bench is unanswered, not designed around. The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
 
 ### **J7 — Issue material to a job**
 
-**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
+**The operator, on the floor** (validated 2026-07-27 — not owner, not admin). **Built:** consumption recorded **at the bin, tagged to the job** ([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)) — over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator; J4 reads it back as "issued". Since 2026-09-04 the take also carries the bar's **heat number** — which is the figure the job's packing slip prints ([§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 it is picked from the lots **actually on that shelf** and there is no free-text escape: a take can only name material that is there. Issue **#59**'s regressed job selector was restored 2026-07-28 on both stock engines, with the test that should have existed in March.
 
 **97 of 121** legacy "locations" were job/work-order/part numbers — the link built by hand, in the wrong field, at scale. It proves the *link* is wanted, not where the operator starts.
 
@@ -334,6 +341,24 @@ Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no s
 #### This journey *is* consumption tracking
 
 The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-view.md`](operator-view.md#status-model)). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
+
+#### Two flow fixes on the way in — 2026-09-04
+
+**A part you found is a part you can act on, everywhere.** `Add at another location…` on the
+operator lookup used to NAVIGATE to the chosen bin, on the rule that *a remote write claims you put
+something somewhere you may not be standing*. That rule was real but it was kept by one control
+alone — every other verb on the same screen, and the whole office side, already writes to a place
+you are not standing in — so its only effect was to make you re-find, among everything on that
+shelf, the part you had arrived holding. It is the identical fault this module fixed for the
+location rows in Aug 2026 and left here. It now opens the Add form in place, against a row
+synthesised for the chosen place at quantity 0; the row drops out on its own once the write lands
+and the balance read returns it for real. `Open this location` still sits inside the expanded
+section for whoever does want to walk there.
+
+**Zero is a quantity, not an alarm.** A part the shop holds none of rendered as a warning
+`None available`. Founder's call: it says `0 ea in any location`, in the same line and the same
+shape as `40 ea in 2 locations`, so there is one place to read the answer instead of two layouts —
+and being out of something is the most routine finding this screen has.
 
 ### J8 — Cut it, return the remnant
 
@@ -351,7 +376,7 @@ Whoever is assigned, on a schedule or on distrust of a number. **Built 2026-07-2
 
 The two steps are deliberately **different grains**, which is the one judgement in this change worth arguing with. The *picker* stays one row per part ("count this one wherever it is") — it is unbounded, unvirtualised and filtered in the browser, so one row per (part, place) would have multiplied it for no gain, and made a 20-part shop read *"Count 40 parts"*, which is the same species of nonsense as the notice it replaced. The *sheet* is place-grained, grouped under a part header carrying a read-only subtotal. **The header has no input, on purpose** — a total field there would rebuild the 38-against-10+20+10 bug behind a UI now promising it works.
 
-**The row rule, and the two simpler rules that were both wrong.** One row per place holding stock, plus exactly one row at the system bucket when a part holds stock nowhere. Emitting a row per balance *row* used to fill the sheet with the zero residue `transfer_stock` and `bulk_put_away` left behind forever — a live absolute write target on a shelf the part had left, which makes a count worse than not counting. Filtering to `> 0` alone deletes the opening count, because every stocked part was seeded at `Unassigned` with 0, so a first-time count would find its whole catalogue missing — and *"the system says zero and I am holding twelve"* is the count that matters most. On the seed's 14 stocked parts the three rules gave 18, 11 and 15 rows; the middle one dropped 4 parts.
+**The row rule, and the two simpler rules that were both wrong.** One row per place holding stock, plus exactly one row at the system bucket when a part holds stock nowhere. **The second half went with the bucket on 2026-09-06 (§5.14): a part holding stock nowhere now yields no row at all.** Emitting a row per balance *row* used to fill the sheet with the zero residue `transfer_stock` and `bulk_put_away` left behind forever — a live absolute write target on a shelf the part had left, which makes a count worse than not counting. Filtering to `> 0` alone deletes the opening count, because every stocked part was seeded at `Unassigned` with 0, so a first-time count would find its whole catalogue missing — and *"the system says zero and I am holding twelve"* is the count that matters most. On the seed's 14 stocked parts the three rules gave 18, 11 and 15 rows; the middle one dropped 4 parts.
 
 **Half of that is now moot, and deliberately so — 20260802144310 (#657).** The residue is deleted, every producer deletes-at-zero instead of parking a 0, and `part_location_stock` CHECKs `quantity > 0`. **A row means the part is there**, so "rows that exist" and "places holding stock" are the same set and the four `.gt('quantity', 0)` filters that stood between them are gone. CLAUDE.md's *no silent runtime fallbacks for data-at-rest issues* is what forced it: one of those filters said in its own comment that it was papering over bad data, and four filters over one unfixed invariant is exactly the accumulation that rule warns about.
 
@@ -375,7 +400,7 @@ The same PR fixed **live data loss**: `save()` built variances by mapping over `
 
 **Wrong twice:** built literally as three screens (*Scope → Sheet → Review*) — design a journey, not a data flow; then over-corrected by dropping **scope** too, when that critique was about *ordering* and took the *bounding* value with it ("these five, then I'm done" versus a wall of inputs reading as a form to complete).
 
-Two deviations from spec: **no count-session table** (localStorage, so Phase 1 adds none — giving up assignment and cross-device resume, which Sortly built a server lifecycle for citing *"lack of accountability"*, a multi-counter problem this shop lacks); and **item-scoped**, since `inventory_locations` was then default-off and place-scoping would have made Phase 1 depend on Phase 2 — resolved since by `?location=`. Both deviations are now closed. `resolveCountTarget`'s four-way commitment is gone with them: the `untracked → parts.quantity via adjustPartStock` arm died with `is_location_tracked` (20260802015837) and the `excluded` arms with the (part, place) row above, leaving one decision — where does a part holding stock nowhere get counted? — as [`resolveFallbackPlace`](../../lib/inventoryCountPlan.ts). It resolves the system bucket by **`kind`, not the name "Unassigned"**: `isReservedKind` stops anyone typing `system` into a kind, while nothing stops them renaming one. A company without one **throws** rather than quietly shortening the sheet — every company has had one since 20260802015837 created and asserted it, so its absence is a data fault, and a dropped part hides behind a shorter list nobody counts.
+Two deviations from spec: **no count-session table** (localStorage, so Phase 1 adds none — giving up assignment and cross-device resume, which Sortly built a server lifecycle for citing *"lack of accountability"*, a multi-counter problem this shop lacks); and **item-scoped**, since `inventory_locations` was then default-off and place-scoping would have made Phase 1 depend on Phase 2 — resolved since by `?location=`. Both deviations are now closed. `resolveCountTarget`'s four-way commitment is gone with them: the `untracked → parts.quantity via adjustPartStock` arm died with `is_location_tracked` (20260802015837) and the `excluded` arms with the (part, place) row above, leaving one decision — where does a part holding stock nowhere get counted? — as `resolveFallbackPlace`. **That function is gone too (2026-09-06, §5.14): with no bucket and no quantity without a location, the question is never posed.** What it used to do: It resolves the system bucket by **`kind`, not the name "Unassigned"**: `isReservedKind` stops anyone typing `system` into a kind, while nothing stops them renaming one. A company without one **throws** rather than quietly shortening the sheet — every company has had one since 20260802015837 created and asserted it, so its absence is a data fault, and a dropped part hides behind a shorter list nobody counts.
 
 **Nothing judges the size of a change.** A 50% proportional threshold, on the finding that [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/), fired on nearly every line at small-shop quantities (7 on hand, 3 found) and stopped informing. The finding is probably sound; **percentage-of-quantity is what failed** — value moved (`cost_per_unit × delta`) would scale across a $2 bearing and a $2,000 casting, but the figure is **open for discovery**. Safety doesn't rest on it: recount to fix, and every line writes an `adjustment` row naming both numbers. Quantities are re-read just before the write — not as a gate (adjust sets absolutes) but because the note records *"system said X"*; mid-count movement is reported after.
 
@@ -415,7 +440,7 @@ Two journeys specced, then cut **2026-07-27**; kept without numbers, outside J1�
 
 | Cut | Why | Consequence | Reopen if |
 |---|---|---|---|
-| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. **Widened 2026-08-01** ([#642](https://github.com/debola31/Jigged/issues/642)): also fires on a **prospect** needing it during customer-#2 acquisition, which is likelier to come first and arrives as a deadline rather than a request. Contour itself still does not want it. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. |
+| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. **Widened 2026-08-01** ([#642](https://github.com/debola31/Jigged/issues/642)): also fires on a **prospect** needing it during customer-#2 acquisition, which is likelier to come first and arrives as a deadline rather than a request. Contour itself still does not want it. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. **Fired 2026-09-04 — reopened for heat numbers only**, at the ledger grain; **the lot layer followed on 2026-09-06** once consumption had to pick a heat rather than type one ([§5.6](#56-lots--resolved-dont-build-them)). Per-part flag, off by default. Cert storage exists; the collection journey does not. |
 | **Customer-supplied material** | Frequent on service one-offs but **never stocked**: arrives with the job, leaves with the part — no balance, nothing to count. A *job* attribute; an ownership flag would have crossed every read path (on-hand, reorder, counts, buy list) for something that never behaves like stock. Same test as job-as-place, [§5.2](#52-is-a-job-a-place--resolved-no). | Survivor in [J4](#j4--job-kickoff-material-check): a service job whose BOM lists customer material shows a false shortage. Whether such lines exist is open in [§9](#9-what-we-know-and-what-we-still-dont); if so, exclude on the BOM line or job — never on stock. Doesn't block Phase 1. | It starts being *stored* between delivery and use. |
 
 ---
@@ -496,6 +521,159 @@ The earlier draft put a lot layer between item and location (heat/lot as a quant
 > `UNIQUE(part_id, location_id)` today) belonging with **[J6 Receive](#j6--receive-it)**, where
 > heat/lot and the cert PDF are captured. Nothing shipped forecloses it; every addition is additive.
 
+> **Reopened 2026-09-04 — heat numbers only. Lots and certs stay cut. Closes
+> [#642](https://github.com/debola31/Jigged/issues/642).**
+>
+> The widened trigger fired exactly as written: a **second customer**, not Contour, requires the
+> heat number of the material on what they receive, and it arrived as a deadline. Five decisions,
+> taken with the founder on 2026-09-03/04, bound the build
+> ([`20260904063844`](../../supabase/migrations/20260904063844_heat_numbers_on_material.sql)):
+>
+> 1. **Heat on the packing slip** — captured at stock-in, carried through the job, printed for the
+>    shipped parts.
+> 2. **The operator reads it off the bar.** Stock stays *a quantity of an item at a place*: no
+>    third key on `part_location_stock`, no per-lot balance, no lot-aware count, put-away or
+>    transfer. The heat is text on the movement — `inventory_transactions.heat_number`, written by
+>    `add_stock_at_location` (the receipt) and `deplete_stock_at_location` (the take to a job,
+>    [J7](#j7--issue-material-to-a-job)) — and nothing else.
+>    **Overtaken two days later — see [the lot layer](#the-lot-layer-arrived-anyway--2026-09-06)
+>    below.** Everything else in this list still holds.
+> 3. **Heat number only.** No cert PDF; a later receipt/attachment concept hangs off the same
+>    column, and a PO receipt ([J6](#j6--receive-it)) calls the same parameter.
+> 4. **On for everyone, optional, hidden when absent.** No company setting, no flag. `NULL` is the
+>    explicit "not recorded" state — true today for every existing row and for every shop that does
+>    not record heats — and history, the job page and the slip render a heat only when one exists.
+>    Contour sees one optional field and nothing printed; its 2026-08-01 answer is unchanged.
+> 5. **Material is always received, stocked and consumed**, even in quick series — so the ledger is
+>    the only source and there is no job-side hand entry. A job's heats are the distinct heats on
+>    its depletion rows.
+>
+> What decision 2 buys: the whole class of silent lot-merging the earlier draft would have armed —
+> the count sheet keyed on `(part, place)`, `bulk_put_away`, `transfer_stock`, the importer's
+> `on_conflict` — is untouched, because nothing enters the balance key. [§5.3](#53-the-location-is-the-scan-anchor)
+> holds: tags stay human-readable and nothing scans them. On a take the field was a **list of the
+> heats received for that part**, this bin's first, with *Other…* opening a text box — a take names
+> a heat that came in, and free text was the explicit exception rather than the default; a receipt,
+> where the heat is new, is a plain box. **The *Other…* escape is gone since 2026-09-06**: a take
+> now picks from `LotPicker` over the lots actually on that shelf, and there is no free-text path
+> out of it. The receipt is still a plain box, which is the asymmetry the whole lot layer turns on.
+>
+> **The slip freezes what it printed.** `create_shipment_with_line_items` snapshots the DISTINCT
+> (heat, material) pairs onto `shipments.heat_numbers_snapshot`
+> ([Document Snapshot Standard](../architecture.md#15-document-snapshot-standard)); a typo corrected
+> on the ledger afterwards never rewrites a slip in a customer's hands — void and reissue.
+> `heat_number` is, with `notes`, one of the two mutable columns on the ledger
+> ([§5.8](#58-the-ledger-is-append-only-and-non-authoritative)): a transcription, not a balance fact.
+>
+> **Still cut, and why:** the lot layer (balances by heat, FIFO, counts by heat) — no customer asks
+> for it, and it is the design that breaks the five `ON CONFLICT (part_id, location_id)` clauses
+> loudly and three `SELECT … INTO` balance reads silently; cert PDFs; and Certificate-of-Conformance
+> text on the slip, which was built and then dropped on 2026-06-21
+> ([shipments.md](shipments.md#certificate-of-conformance-text--built-then-dropped-2026-06-21)).
+> [J8](#j8--cut-it-return-the-remnant) remnants still stand alone.
+> **The first two were reversed on 2026-09-06** — see immediately below. The CoC text and J8
+> remnants are unaffected and stay as written.
+
+#### The lot layer arrived anyway — 2026-09-06
+
+[`20260906121901`](../../supabase/migrations/20260906121901_lot_tracked_material.sql). Two days
+after shipping the ledger grain, the founder pushed on the *consumption* half and the ledger-only
+design did not survive the question.
+
+**What broke it.** Free text on a movement is fine while a heat is only ever *written*. The moment
+an operator has to CHOOSE one — "which heat am I taking off this shelf?" — a text box is wrong in
+two ways at once. It grows unbounded, so a picker over every heat ever received gets harder to use
+every month; and it can name material that is not there, because nothing connects the string to a
+balance. Founder's words: *"we should remove the ability to consume a heat that isn't already
+existing, so removing should always require a selectable heat and never an Other or free text
+box."* You cannot select from what is on the shelf unless the shelf knows what is on it. That is
+the third key, and no amount of care on the ledger substitutes for it.
+
+**The shape.**
+
+| | |
+|---|---|
+| `material_lots` | A heat, as a row. Identity is `(part_id, lower(btrim(lot_code)))`; `heat_number` is nullable and is **not** the same as the code — NULL says the material arrived without a heat we could read, and such a lot gets a minted code so untagged bar is still storable. Soft-deletes like everything else. |
+| `parts.lot_tracked` | Per part, default **false**. A shop holds ~9,000 parts and a handful of bar and plate is what needs tracing — the same call JobBOSS makes. Turned on by **recording a heat on a receipt**, not by a setting (see below). Never set directly: `set_part_lot_tracking()` flips it **and** migrates existing lot-less balances into a `PRE-TRACKING` lot in the same statement. |
+| `part_location_stock.lot_id` + `lot_key` | The third key. `lot_key` is a **stored generated column** collapsing NULL to the zero uuid, so `UNIQUE (part_id, location_id, lot_key)` is FULL and an upsert can infer it. Without it the NULL-lot rows would compare distinct from one another and one part could hold several balances at one place — no error, just `parts.quantity` counting the same steel twice. |
+| `lot_certificates` | The mill cert, attached to the **lot** and not to a movement. Schema only; no upload UI yet. |
+
+**Enforcement is asymmetric, and that is the whole design.** `resolve_lot()` takes two separate
+permissions rather than one: `p_create` (may this call bring a lot into existence?) and `p_mint`
+(may it invent a code for untagged material?). Inbound gets both; **outbound gets neither**. So a
+receipt may name a heat we have never seen — that is where a heat enters Jigged at all — and a take
+may only name one that already exists. A first pass had a single flag, and a smoke test caught the
+consequence: a heat nobody ever received was consumable, which is exactly the fiction the founder
+asked to remove.
+
+**Why `set_part_lot_tracking` migrates rather than just flipping.** Stock already on the shelf has
+no heat. Enforcement that begins mid-life would refuse the first operator to touch it — a rule about
+material that predates the rule. The `PRE-TRACKING` lot is named for what it is rather than given an
+invented heat, because a made-up number on a packing slip is worse than an honest "not known". This
+is [CLAUDE.md's no-silent-runtime-fallbacks rule](../../CLAUDE.md): the invariant holds at rest
+instead of being patched by an `IF lot IS NULL` branch on every read.
+
+**Nobody turns the flag on. Recording a heat does**
+([`20260906153732`](../../supabase/migrations/20260906153732_heat_on_receipt_starts_tracking.sql)).
+The founder's words were *"once someone adds a heat number to it, then it becomes a tracked part so
+we only enforce things as necessary"*, and read literally that is not a setting at all — it is a
+consequence. Nobody goes looking for a preference; they write down the number off the mill tag
+because this is the bar they will have to account for, and the software notices. So
+`add_stock_at_location` calls `set_part_lot_tracking(part, true)` when a **non-blank** heat arrives
+for an untraced part, before its own insert, and returns `started_tracking` so the surface that
+caused it can say so.
+
+It lives in the RPC and not in a dialog because two writers would be two answers: a browser that
+flipped the flag first would leave a part tracked when the receipt then failed, and would never fire
+for the CSV importer or a future PO receipt, both of which already call this function with a heat.
+It does **not** fire on a lot id alone (that is a restatement about a part already tracked, not a new
+assertion), it does not fire on whitespace, and it never turns tracking **off** — untagged material
+still arrives against a tracked part and mints a code rather than quietly ending traceability.
+
+The one trap this creates is a heat typed by mistake, which would otherwise leave a part demanding
+heats forever with no visible reason. So the part page's inventory tab states the fact and carries
+the way back out ([`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)).
+
+**Turning it OFF leaves the balances split.** Merging them back would have to pick a survivor and
+silently add the others to it, destroying the record of what is physically on the shelf. The flag
+stops future *enforcement*; it is not an instruction to forget what has been traced. Readers must
+therefore drive off the balance rows, never off the flag — the two legitimately disagree.
+
+**The count sheet was the one surface that had to change shape.** Every other verb is relative:
+adding 20 and taking 6 are true whatever else sits beside them. An adjustment is **absolute**, and
+"there are 12 here" is a claim about the whole bin — meaningless where there is 8 of one heat and 4
+of another. So `adjust_stock_at_location` refuses a lot-less count of a tracked part, and a count
+row became `(part, place, heat)`: `countRowKey` carries the lot, `readPlaceBalances` (formerly
+`refreshLocationQuantities`) returns one entry per (part, lot), and a bin holding none of a tracked
+part offers a row per lot at 0 — because *heat 4471 is recorded on Shelf A and I have just found it
+on Shelf B* is precisely what a stocktake exists to record, and a balance-scoped list cannot say it.
+
+**A tracked part with no lots at all is refused, deliberately.** Tracking switched on before
+anything was ever received leaves nothing to name, and the count is rejected per line in the
+database's own words. Material whose heat has never been recorded is *received*, not counted into
+existence.
+
+**The reshape had to say which heat too**
+([`20260906160314`](../../supabase/migrations/20260906160314_reshape_moves_carry_the_lot.sql)).
+`apply_location_layout` delegates every redistribution to `transfer_stock`, which refuses a lot-less
+move of a tracked part — so reshaping any unit holding traced material raised outright. The move
+payload gains an optional `lot_id`; absent means "no lot", so an existing caller is unaffected.
+
+The client half was worse than the server half, and worth recording as the shape this bug keeps
+taking. `sourceKey` on the distribute step was `part@location`, so a bin holding two heats of one
+bar produced **two content rows sharing one key**: `isDistributionComplete` measured the same
+assignment against 8 and against 4 and could satisfy neither, leaving Confirm disabled with nothing
+on screen to explain why, while the map that builds the moves silently dropped one of the two rows.
+That is the same collapsed-row fault as the count sheet, the part drawer, the operator lookup, the
+bin drawer and the part page's inventory tab — **six surfaces, one cause: a balance row is
+(part, place, lot), and any key or count that stops at the place is wrong.**
+
+**Certs are stored, not yet collected.** The founder's own objection to the obvious flow stands
+unanswered and is recorded rather than designed around: *"are people expected to scan things they
+receive into PDFs and then upload? that sounds like friction upon receiving."* The table exists so
+the seam is real; the journey does not, and a receiving screen that demands a scan before stock can
+be put away would be worse than no cert at all.
+
 ### 5.7 Quoting never touches stock
 
 Quotes read material *cost* only — never availability, never a reservation. Reserving against
@@ -504,7 +682,10 @@ speculative work would corrupt on-hand. Recorded so nobody "fixes" it.
 ### 5.8 The ledger is append-only and non-authoritative
 
 `inventory_transactions` is truly append-only (`restrict_transaction_update_to_notes` leaves `notes`
-the only mutable column) but is **never replayed**; `parts.quantity` and
+— and, since 2026-09-04, `heat_number` — the only mutable columns: both are transcriptions of what
+someone wrote down, never a balance fact, and a typo on a mill tag has to be correctable from the
+part's history; the trigger is an allowlist *by omission*, so the column was left un-named rather
+than the function rebuilt) but is **never replayed**; `parts.quantity` and
 `part_location_stock.quantity` are the authoritative balances, written alongside. It reads like event
 sourcing and isn't — authoritative ledger = deliberate re-architecture with a reconciliation job, not
 a drift.
@@ -600,7 +781,7 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 | Routes stay `/inventory/*` | Churn for no user-visible gain; QR payloads encode `/operator/...`. |
 | ~~Flag off (`inventory_locations`) hides the **Storage** nav~~ → **flag retired Aug 2026** | It went opt-out with the `is_stocked` removal and then away entirely, on the same reasoning both times: `Count Inventory` sat on the Parts toolbar precisely because gating counting on this flag had once taken the entry point away, and that button is gone — leaving Storage as the only door, which every tenant must therefore have. A kill-switch on the only door is not a kill-switch. |
 | One module writes, reads and routes every Jigged QR — [`lib/jiggedScan.ts`](../../lib/jiggedScan.ts) | Two shapes, `/L/{code}` and `/T/{code}`, differing only by the kind letter; before, a traveler sent the operator out to the phone camera. **Redesigned August 2026** because the old codes did not scan — payloads were 120–157 chars at QR version 8–10. Now 77 chars of uppercase base32 at version 4/6. **Trap:** the whole scheme rests on every character staying inside the QR *alphanumeric* charset — one lowercase letter silently costs a version, which is 9% of module size on a shelf label. [`qrVersionCeiling.test.ts`](../../__tests__/utils/qrVersionCeiling.test.ts) fails CI on it. Refusals: anything that is not exactly one of the two shapes, including a bare UUID (it names no company, so the offline tenant check could not run). |
-| Operator tabs **Jobs · Inventory · Scan · Maintenance · Me** (PR #636) | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. It had to take a slot: Material caps bottom nav at 3–5 and, with both optional tabs showing, the bar was already at five. ⚠ Since the flags were retired (Aug 2026) Inventory is unconditional and **Maintenance is gated on a selected station alone**, so the bar has two shapes rather than four. `Me` merges My work + Profile and **leads with work**, identity demoted to one compact row and Logout last — Material disallows a settings tab outright, NN/g measured hidden nav at 44–56% usage vs 89% visible, and YouTube's "You" / Strava's "You" are the exact precedent (both also pulled the avatar out of the header). The earlier withdrawal ("burying work behind settings") was right about the risk and wrong about the only fix.
+| Operator tabs **Jobs · Storage · Scan · Maintenance · Me** (PR #636; the second tab was `Inventory` until 2026-09-04 — see below) | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. It had to take a slot: Material caps bottom nav at 3–5 and, with both optional tabs showing, the bar was already at five. ⚠ Since the flags were retired (Aug 2026) Inventory is unconditional and **Maintenance is gated on a selected station alone**, so the bar has two shapes rather than four. `Me` merges My work + Profile and **leads with work**, identity demoted to one compact row and Logout last — Material disallows a settings tab outright, NN/g measured hidden nav at 44–56% usage vs 89% visible, and YouTube's "You" / Strava's "You" are the exact precedent (both also pulled the avatar out of the header). The earlier withdrawal ("burying work behind settings") was right about the risk and wrong about the only fix.
 | ~~The board draws nothing on a flat shop~~ → **board deleted 2026-08-01, replaced by a table** | The measurement that forced it: `unitKind` has exactly ONE consumer (`boardChrome.tsx:278`), and for a childless node the only thing `kind` changes is the rack border — the whole body is behind `children.length > 0`, whose own comment says *"most real locations are flat (118 of 121 in their legacy export), so that was the common case looking broken."* So the board was already a grid of labels for almost every real place, with worse density than a table and no sorting, multi-select or bulk anything. The sentence that had killed the list — *"Cabinet 1 alone exploded into 15 rows"* — was a **wizard artefact**: the cabinet template generates 1 × 5 × 2 = 16 nodes in one pass. Stop making that the default and a flat shop's table is 12–18 rows total. **Withdrawn 2026-08-10 — this is the sentence that was wrong.** It is the founding claim of the table, and the shop then deliberately built a 12 × 15 cabinet: 237 locations, 180 bins in one of them. The generator was never the reason storage got big; a shop with real storage is big. Measuring the default and not the ceiling is the mistake worth remembering. Twelve of twelve surveyed tools present locations as a tree or table; none draws them — convergent evolution, **not** user evidence, and no user has ever been observed using any storage UI here. Also deleted: the icon palettes (`STORAGE_TYPES` was unreachable for its entire life), `LocationBoardPreview`, `specToBoard`, `BoardNode`, `unitKind`. The generator survives as the valuable half. #421 (3D) closed, not deferred. |
 | ~~Operators render the same `LocationBoard`~~ → **operator board removed 2026-07-31** | The reasoning that put it there was sound (whoever most needs to *recognise* a place stands in front of it, and `CAB3-A` isn't recognisable) and it still holds — for the **owner's** Storage page, which keeps the board. What it never established is that an operator needs a *map of places* at all. Industry usage is consistent: *inventory* = items and quantities, *storage* = places, and every operator action here is an item action. The tab was Storage content under an Inventory label. It also competed with Scan, which reaches a place faster **and** proves you are standing at it — and with 12–18 places you are among, walking beats scrolling a picture of furniture three feet away. Replaced by a part lookup (J11) over a shop-wide activity feed; the one thing the board did that nothing else did — reach a bin whose label came off — survives as the tap target on every activity row. |
 | ~~**`Move into…`** re-parents a unit~~ → **removed 2026-08-10** | Founder call, on the grounds that configure-on-creation plus `Change layout` covers the reshaping people actually do. It never had strong evidence behind it: 118 of 121 legacy locations were flat and Contour's five real units nest under nothing, so re-parenting answered a shape the shop has never built. **What it does not cover, said plainly:** `Change layout` reshapes a unit's *inside*; nothing now moves an existing cabinet under another. `moveLocation` and `locationParentOptions` are kept — cycle-guarded and tested — and are **unreferenced again**, which is the state that made a mis-parented cabinet permanent before 2026-08-01. Deliberate this time, and recorded here so the next reader does not mistake it for an oversight. |
@@ -626,6 +807,32 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 | **Three scopes, three places** — 2026-08-11 | The top row held `Find a place` and `Add storage` (which act on the LIST) beside `Print all labels` (which acts on the SHOP), while the unit's own actions sat down in the pane. Straddling two scopes is why the page read flat. The page bar now holds only what belongs to neither column — the search and `Print all labels` — and `Add` moved into the list's own header, beside the thing it adds to. It shows `Add` because the heading beside it says Storage; its accessible name is `Add storage`, which also stops it colliding with the drawer's `Add` verb. |
 
 ---
+
+#### Amended 2026-09-04 — **one noun, on both surfaces: Storage**
+
+The row above split the vocabulary deliberately: *inventory* = the items and quantities, *storage*
+= where they live. That reading is correct about the English and it still cost more than it bought.
+The office sidebar said **Storage** and the operator tab said **Inventory** for the same feature,
+and nobody who uses both surfaces meets one feature under two names and concludes it is one
+feature. Founder's call, and the cheaper half of the trade: **Storage everywhere.**
+
+What survives unchanged from the original decision, because it was never about the label:
+
+- **Parts is the item master and holds no quantities.** `Parts` beside `Storage` still reads right.
+- **Routes stay `/inventory/*`** — now for a second reason. Every QR label a shop has printed
+  encodes one, and reprinting a shop's labels to rename a tab is a cost with no reader.
+- **The operator tab is still item-first** — find a part, store one, take one out. The read-only
+  map of furniture that used to be there is still gone; the argument against it was about content,
+  not about its name.
+
+**Parity, not just a label.** Renaming two things to match while they do different jobs is worse
+than leaving them apart, so the gap that made the split visible closed with it: the shop floor's
+home *is* a feed of what moved, and the office's home is a grid of furniture, so *"what changed
+while I was not looking?"* could only be answered from the office by leaving for `/activity` — a
+mixed feed of jobs, quotes and notes where stock is one filter of six.
+[`StorageActivity`](../../components/inventory/locations/StorageActivity.tsx) puts the same feed on
+the office page, collapsed and read only when opened (the rule `PlaceHistory` set one level down),
+reusing `BinHistory` verbatim rather than growing a second row renderer.
 
 ### 5.13 `Change layout` changes the layout — 2026-08-15
 
@@ -658,6 +865,71 @@ re-configurated."* Both halves were exactly right.
 
 ---
 
+### 5.14 Stock always names a location — `Unassigned` removed, 2026-09-06
+
+[`20260906182638`](../../supabase/migrations/20260906182638_stock_always_names_a_location.sql).
+Founder's call, on seeing 3,626 of a screw reported as *"not stored yet"* beside 4 on a shelf:
+
+> *"we should never show 'not stored yet', just show it as being in the unassigned location. And
+> technically unassigned should not exist at all since once this feature is added, we should reset
+> all counts to 0 and so anything that is added as a quantity should have to be added to a
+> location."*
+
+**What the bucket was.** A per-company location with `kind = 'system'`, minted on demand by
+`inv_get_or_create_unassigned()`. Every part created carrying an opening quantity was dropped into
+it by `trg_seed_new_part_balance`; the CSV importer wrote its quantities there; the put-away flow
+existed to empty it. It was the answer to *"this part has stock but nobody has said where"* — a
+state that existed **only because a quantity could be recorded without a place**.
+
+**Why removing the state beat improving the label.** The bucket was a second kind of location that
+every reader had to know about and exclude. It was not a destination in the pickers
+(`excludeSystem`), not a shelf in the operator lookup (called out as *"N not stored yet"*), a
+special first row in the part drawer, the fallback target of the count sheet
+(`resolveFallbackPlace`), sorted last on the Storage board (`orderUnits`), the one unit that could
+not be reshaped or subdivided, and a `kind` nobody was allowed to type. **Nine surfaces carried a
+branch for it.** Deleting the concept deleted all nine, which is the founder's point exactly: if a
+quantity cannot exist without a location, there is nothing for the bucket to hold.
+
+**The reset was deliberate and destructive.** Every balance row was deleted, taking `parts.quantity`
+to 0 through the existing rollup trigger. That was 2,409 units across 57 parts for the pilot shop —
+effectively their whole recorded inventory, since they had put 9 units on shelves and left the rest
+in the bucket. Those figures were put to the founder before the migration was written and confirmed
+twice. The shop re-counts from a clean slate, which is also the honest state: a number nobody could
+point at a shelf for was never a fact about the shop.
+
+**The ledger was not touched.** `inventory_transactions` is append-only and explicitly
+non-authoritative ([§5.8](#58-the-ledger-is-append-only-and-non-authoritative)) — it is history, not
+the balance, and the history of a real movement stays true after a recount. Its `location_id` FK is
+`ON DELETE SET NULL` and every row carries a `location_name` snapshot, so rows that pointed at a
+deleted bucket still read correctly.
+
+**What enforces it now.** `enforce_tracked_part_quantity` grew an INSERT arm: a part is created at 0
+or the insert is refused. It used to be `BEFORE UPDATE` only, which is exactly why an INSERT
+carrying a quantity could slip past and produce a `parts.quantity` no balance row supported. Stock
+enters through `add_stock_at_location`, which has always named a location. `kind = 'system'` is
+refused by a CHECK constraint so the branches cannot come back.
+
+**Knock-ons, each of which is the removal of a special case rather than a new rule:**
+
+| Surface | Before | Now |
+|---|---|---|
+| Count sheet | one row at the bucket for a part holding stock nowhere | **no row** — "this part is nowhere" is a complete answer. Finding some is recorded at the bin you found it in (`addPartHere`), which names a real shelf |
+| Operator lookup | balances split into shelves and *"N not stored yet"* | one list; every balance is a place |
+| Destination pickers | `excludeSystem` dropped the bucket | the prop is gone; every place is offered |
+| Storage board | `orderUnits` floated the bucket last | the shop's own `sort_order` is the whole rule |
+| Reshape / subdivide | the bucket refused to be divided | an ordinary root, divided like any other |
+| CSV import | quantities landed in the bucket | a **`location_name` column**; a quantity whose location is missing, unknown or ambiguous is reported as skipped rather than filed somewhere nobody will look |
+| Part creation | an opening quantity was parked in the bucket | `createPart` never wrote `quantity` anyway, so this path simply became enforceable |
+
+**The seed changed shape, not just content.** Locations and opening stock moved to the TOP of
+`seed.sql`, beside the parts they belong to: places have to exist before anything can be stocked
+into them. Stock is placed through `add_stock_at_location` by **path** (`unit / child / leaf`)
+rather than by bare name, because names repeat by design — `Bay 1` is in two racks, `Drawer 1` in
+two cabinets, `Level 1` forty times — and that repetition is exactly what the pickers must cope
+with. The tree is 16 units and ~300 places at mixed depths and widths, from a flat yard to a 10×5
+pallet bay and a 4×12 small-parts cabinet.
+
+
 ## 6. Sequencing
 
 **Phase 1 ✅ 2026-07-28** — J1 (closes FR-16), J9, J4, then J7 issue-to-job **job-first on the operator surface** (an earlier draft aimed it at the owner), plus the #59 patch. **Zero new tables, migrations or flags**: the figures already existed on `parts_bom`, `parts`, `inventory_transactions` — the gap was never schema. §5.2 resolved: a job is not a place. Carried: recursive BOM explode (J4), `job_part_id` on the ledger (J7), atomicity debt (§5.4).
@@ -668,7 +940,7 @@ Filed: ~~**#618**~~ **fixed 2026-08-10**: `materializeLocationSpec` was sequenti
 
 **Filed 2026-08-01:** **#645** every location-stock RPC bypassed the billing write-gate — `SECURITY DEFINER` runs as the owner, no table sets `FORCE ROW LEVEL SECURITY`, and `part_location_stock` was exempt on the false rationale *"writes never come from the browser"*. Entitlement therefore depended on a feature flag. Fixed the same day across seven functions, plus `definer_writers_missing_write_gate()` and a CI test, because the existing guard checks whether a *policy exists* and cannot see a definer function walking past one. · **#649** `create_shipment_with_line_items` has the identical bug; left open because whether a lapsed shop may ship an order it will invoice for is a billing policy call. · **#646** / **#647** / **#648** the counting, owner-ledger and board-vs-table work from that audit.
 
-**Phase 3 — purchasing:** J5 · J6 · J10 = **#571**; merge, don't parallelise. **Phase 4:** traceability and lots cut (no certs, heat, regulated customers), halving it — left: J8 remnants (*confirm they reuse drops first*), reconciliation (unspecced until real drift shows; J9 covers correctness), J4's customer-material exclusion *only if* service jobs carry such BOM lines, §5.4 engine collapse + §5.9 `job_materials` drop (stop writing, drop table, un-gate billing).
+**Phase 3 — purchasing:** J5 · J6 · J10 = **#571**; merge, don't parallelise. **Phase 4:** traceability and lots cut (no certs, heat, regulated customers), halving it — heat numbers returned 2026-09-04 at the ledger grain and the lot layer with them on 2026-09-06, per part and off by default (§5.6); cert collection is still cut — left: J8 remnants (*confirm they reuse drops first*), reconciliation (unspecced until real drift shows; J9 covers correctness), J4's customer-material exclusion *only if* service jobs carry such BOM lines, §5.4 engine collapse + §5.9 `job_materials` drop (stop writing, drop table, un-gate billing).
 
 ---
 
@@ -689,7 +961,7 @@ Twelve journeys plus the two cut. "Docs said" = this doc **before the rewrite** 
 | J9 count | metric: 100% accuracy | silent | ✅ 2026-07-28, place-scoped 2026-07-30 (§5.11's actual ask) |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, proposed hiding | ⚠️ badge only |
 | J11 find it | *absent* | AC only | ✅ 2026-07-31 — operator part lookup; the office half predated it |
-| Traceability *(cut)* | *absent* | silent | ⛔ cut — no regulated customers |
+| Traceability *(cut)* | *absent* | silent | ✅ **heat numbers 2026-09-04** (ledger) + **lots 2026-09-06** (per-part flag, off by default, balances by heat); ⛔ cert collection — the table exists, the receiving journey does not (§5.6) |
 | Customer-supplied *(cut)* | *absent* | *absent* | ⛔ cut — frequent, never stocked |
 
 Three structural misses, costliest first:
@@ -754,7 +1026,7 @@ Founder observation, **Contour Tool & Machine**, 2026-07-27 — reliable on stru
 | **Operator** moves material | J7 on the operator path |
 | **Mixed units** — `each`, ft/in | FR-1 conversion load-bearing |
 | **Balances start at zero**; legacy *"questionable"* | J1 out of Phase 1; J9 = onboarding |
-| **No certs/heat/regulated** *(2026-07-27, re-confirmed 2026-08-01 — they do not want it either)* | Traceability + lots cut. Live only as a **customer-#2** consideration ([#642](https://github.com/debola31/Jigged/issues/642)), not a Contour need. |
+| **No certs/heat/regulated** *(2026-07-27, re-confirmed 2026-08-01 — they do not want it either)* | Traceability + lots cut. Live only as a **customer-#2** consideration ([#642](https://github.com/debola31/Jigged/issues/642)), not a Contour need. **Customer #2 arrived 2026-09-04 needing heat numbers** — built as optional text on the movement; **the lot layer came back 2026-09-06**, per part and off by default, when consuming a heat had to mean picking one that is actually there ([§5.6](#56-lots--resolved-dont-build-them)). |
 | **Customer-supplied: lots, never stocked** | Job attribute; no ownership flag |
 | **~10 ±4 places** (cabinets, shelving) | Wizard's 16 over-built |
 | **Tried counting before** | J9 rescues a lapsed practice |

@@ -52,7 +52,11 @@ import {
   generatePackingSlipPdf,
   type PackingSlipQtyLine,
 } from '@/utils/packingSlipPdf';
-import type { ShipmentWithRelations } from '@/types/shipment';
+import {
+  describeHeatNumbers,
+  parseHeatNumbersSnapshot,
+  type ShipmentWithRelations,
+} from '@/types/shipment';
 import type { Company } from '@/utils/companyAccess';
 
 const company: Company = { id: 'c1', name: 'Vanguard Precision Works' };
@@ -113,6 +117,7 @@ function shipment(over: Partial<ShipmentWithRelations> = {}): ShipmentWithRelati
     freight_terms: null,
     customer_carrier_account_id: null,
     freight_account_snapshot: null,
+    heat_numbers_snapshot: [],
     shipment_line_items: [line({ quantity: 10, ordered: 40 })],
     ...over,
   };
@@ -127,6 +132,34 @@ function tableConfig() {
   };
   return { ...config, headers: config.head[0] };
 }
+
+describe('heat number snapshot', () => {
+  // The column is jsonb; the CHECK only promises an array. Anything that is not the RPC's
+  // {heat_number, material_name} shape is dropped rather than printed as garbage.
+  it('parses the RPC shape and drops anything else', () => {
+    expect(
+      parseHeatNumbersSnapshot([
+        { heat_number: '4471', material_name: 'BAR' },
+        { heat_number: '', material_name: 'BLANK' },
+        { heat_number: 4471, material_name: 'NUMBER' },
+        'not an object',
+        null,
+      ]),
+    ).toEqual([{ heat_number: '4471', material_name: 'BAR' }]);
+    expect(parseHeatNumbersSnapshot(null)).toEqual([]);
+    expect(parseHeatNumbersSnapshot({ heat_number: '4471' })).toEqual([]);
+  });
+
+  it('describes nothing as null so the caller omits the row', () => {
+    expect(describeHeatNumbers({ heat_numbers_snapshot: [] })).toBeNull();
+    expect(describeHeatNumbers({ heat_numbers_snapshot: 'garbage' })).toBeNull();
+    expect(
+      describeHeatNumbers({
+        heat_numbers_snapshot: [{ heat_number: '4471', material_name: '1.25 4140 BAR' }],
+      }),
+    ).toBe('4471 — 1.25 4140 BAR');
+  });
+});
 
 describe('computePackingSlipQuantities', () => {
   const lines = (over: Partial<PackingSlipQtyLine>[]): PackingSlipQtyLine[] =>
@@ -227,6 +260,39 @@ describe('computePackingSlipQuantities', () => {
 describe('generatePackingSlipPdf — the quantity table', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  // The heat line is a SHIPMENT DETAILS row, not a table column (the fixed widths leave
+  // Description 140pt at worst), and it exists only when a heat was recorded — most shops
+  // record none, and a blank "Material heat no(s).: —" reads as a missing value on a dock.
+  it('prints no heat line when the snapshot is empty', async () => {
+    await generatePackingSlipPdf({
+      shipment: shipment(),
+      company,
+      shippedBeforeByJobPart: new Map(),
+      supabase: null,
+    });
+    expect(textMock.mock.calls.some((c) => String(c[0]).startsWith('Material heat'))).toBe(false);
+  });
+
+  it('prints the frozen heat numbers, one per material, when the snapshot has them', async () => {
+    await generatePackingSlipPdf({
+      shipment: shipment({
+        heat_numbers_snapshot: [
+          { heat_number: '4471', material_name: '1.25 4140 BAR' },
+          { heat_number: '8823', material_name: '6061 PLATE' },
+        ],
+      }),
+      company,
+      shippedBeforeByJobPart: new Map(),
+      supabase: null,
+    });
+    expect(textMock.mock.calls.some((c) => String(c[0]) === 'Material heat no(s).:')).toBe(true);
+    const doc = jsPDFCtor.mock.results[0].value as { splitTextToSize: ReturnType<typeof vi.fn> };
+    expect(doc.splitTextToSize).toHaveBeenCalledWith(
+      '4471 — 1.25 4140 BAR; 8823 — 6061 PLATE',
+      expect.any(Number),
+    );
   });
 
   it('drops the Job # column, keeping the job number in the meta block', async () => {

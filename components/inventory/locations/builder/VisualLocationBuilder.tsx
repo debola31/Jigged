@@ -376,6 +376,9 @@ export default function VisualLocationBuilder({
           toRef: l.toRef === PARENT_REF ? PARENT_REF : l.toRef,
           quantity: l.quantity,
           unit: content.primary_unit || 'ea',
+          // WHICH heat. `transfer_stock` refuses a lot-less move of a tracked part, so a reshape
+          // of any unit holding traced material is rejected outright without this.
+          lotId: content.lot_id,
         }));
     });
 

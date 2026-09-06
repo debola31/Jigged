@@ -20,9 +20,9 @@ vi.mock('@/utils/operatorAccess', () => ({
 vi.mock('@/utils/inventoryCountAccess', () => ({
   loadCountCandidates: vi.fn(),
   loadCountCandidatesForPlaces: vi.fn(),
-  loadPartAtLocationCandidate: vi.fn(),
+  loadPartAtLocationCandidates: vi.fn(),
   loadPartEverywhereCandidates: vi.fn(),
-  refreshLocationQuantities: vi.fn(),
+  readPlaceBalances: vi.fn(),
   commitCount: vi.fn(),
 }));
 
@@ -62,9 +62,9 @@ import InventoryCountPage from '@/app/dashboard/[companyId]/inventory/count/page
 import {
   loadCountCandidates,
   loadCountCandidatesForPlaces,
-  refreshLocationQuantities,
+  readPlaceBalances,
   commitCount,
-  loadPartAtLocationCandidate,
+  loadPartAtLocationCandidates,
   loadPartEverywhereCandidates,
 } from '@/utils/inventoryCountAccess';
 import {
@@ -86,12 +86,31 @@ const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
  */
 const freshBalances = (rows: Record<string, number>) =>
   asMock(getBalancesForParts).mockImplementation(async (_co: string, ids: string[]) => {
-    const out = new Map<string, { locationId: string; locationName: string; path: string[]; quantity: number }[]>();
+    type Bal = {
+      locationId: string;
+      locationName: string;
+      path: string[];
+      quantity: number;
+      lotId: string | null;
+      lotCode: string | null;
+      heatNumber: string | null;
+    };
+    const out = new Map<string, Bal[]>();
     for (const [key, quantity] of Object.entries(rows)) {
-      const [partId, locationId] = key.split('::');
+      // `part::place` or `part::place::lot` — the lot is optional because these rows are
+      // untracked unless a case is specifically about heats.
+      const [partId, locationId, lotId] = key.split('::');
       if (!ids.includes(partId)) continue;
       const list = out.get(partId) ?? [];
-      list.push({ locationId, locationName: locationId, path: [], quantity });
+      list.push({
+        locationId,
+        locationName: locationId,
+        path: [],
+        quantity,
+        lotId: lotId ?? null,
+        lotCode: lotId ?? null,
+        heatNumber: lotId ?? null,
+      });
       out.set(partId, list);
     }
     return out;
@@ -126,6 +145,11 @@ const cand = (over: Partial<CountCandidate> & { partId: string }): CountCandidat
   description: null,
   unit: 'ft',
   systemQuantity: 40,
+  // Not heat-tracked, which is what nearly every part is: one row per place, no heat on screen.
+  // The tracked shape is one row per (place, heat) and is exercised where it matters.
+  lotId: null,
+  lotCode: null,
+  heatNumber: null,
   // Every part has a place since 20260802015837, so the company-wide sheet's default row is
   // an Unassigned row — there is no longer a target that writes `parts.quantity`.
   target: { locationId: 'loc-unassigned', locationName: 'Unassigned', locationPath: 'Unassigned' },
@@ -851,7 +875,7 @@ describe('counting one place — the sheet outlives the search', () => {
       candidates: [hereRow('SOMETHING-ELSE', 5)],
       total: 1,
     });
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['BUY-ORING-214', 828]]));
+    asMock(readPlaceBalances).mockResolvedValue(new Map());
 
     await user.click(screen.getByRole('button', { name: /save|commit|finish/i }));
 
@@ -899,7 +923,7 @@ describe('counting one place — adding a part that is not listed', () => {
     ]);
     asMock(loadCountCandidatesForPlaces).mockResolvedValue({ candidates: [], total: 0 });
     nextAddPick = { id: 'p-missing', part_name: 'BUY-DOWEL-3MM' };
-    asMock(loadPartAtLocationCandidate).mockResolvedValue(
+    asMock(loadPartAtLocationCandidates).mockResolvedValue([
       cand({
         partId: 'p-missing',
         quantity: undefined,
@@ -907,7 +931,7 @@ describe('counting one place — adding a part that is not listed', () => {
         unit: 'ea',
         target: { locationId: LOC3, locationName: 'Shelf A', locationPath: 'Shelf A' },
       } as Partial<CountCandidate> & { partId: string }),
-    );
+    ]);
   });
 
   afterEach(() => searchParams.delete('location'));
@@ -920,7 +944,7 @@ describe('counting one place — adding a part that is not listed', () => {
     await user.click(screen.getByRole('button', { name: 'add-part' }));
 
     await waitFor(() =>
-      expect(loadPartAtLocationCandidate).toHaveBeenCalledWith('co1', 'p-missing', LOC3, 'Shelf A'),
+      expect(loadPartAtLocationCandidates).toHaveBeenCalledWith('co1', 'p-missing', LOC3, 'Shelf A'),
     );
     // Ticked on arrival: you added it because you are holding it.
     expect(await screen.findByRole('button', { name: /count 1 part$/i })).toBeEnabled();
@@ -941,7 +965,7 @@ describe('counting one place — adding a part that is not listed', () => {
 
   it('says so when the part cannot be added, rather than failing silently', async () => {
     const user = userEvent.setup();
-    asMock(loadPartAtLocationCandidate).mockRejectedValue(
+    asMock(loadPartAtLocationCandidates).mockRejectedValue(
       new Error("BUY-DOWEL-3MM isn't tracked by place, so it can't be counted at one."),
     );
     renderPage();
@@ -983,7 +1007,7 @@ describe('counting one part at one place', () => {
     asMock(getLocations).mockResolvedValue([
       { id: LOC4, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
     ]);
-    asMock(loadPartAtLocationCandidate).mockResolvedValue(
+    asMock(loadPartAtLocationCandidates).mockResolvedValue([
       cand({
         partId: 'p1',
         partName: '4140 bar',
@@ -992,7 +1016,7 @@ describe('counting one part at one place', () => {
         unit: 'ea',
         target: { locationId: LOC4, locationName: 'Shelf A', locationPath: 'Shelf A' },
       } as Partial<CountCandidate> & { partId: string }),
-    );
+    ]);
   });
 
   afterEach(() => {
@@ -1029,7 +1053,7 @@ describe('counting one part at one place', () => {
   });
 
   it('surfaces a part that cannot be counted here instead of an empty sheet', async () => {
-    asMock(loadPartAtLocationCandidate).mockRejectedValue(
+    asMock(loadPartAtLocationCandidates).mockRejectedValue(
       new Error("4140 bar isn't tracked by place, so it can't be counted at one."),
     );
     renderPage();

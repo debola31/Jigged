@@ -190,6 +190,13 @@ function MaterialRow({ row, companyId }: { row: MaterialRequirement; companyId: 
           {row.hasDiscrepancy && (
             <Chip size="small" color="warning" variant="outlined" label="Shortfall recorded" />
           )}
+          {/* The heats issued to this job for this material — what the packing slip will print.
+              One chip per heat, only when one was recorded; nothing is the normal state. */}
+          {row.heatNumbers.map((heat) => (
+            <Tooltip key={heat} title="Heat number on the material issued to this job">
+              <Chip size="small" variant="outlined" label={`Heat ${heat}`} />
+            </Tooltip>
+          ))}
         </Box>
       </TableCell>
 

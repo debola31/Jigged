@@ -47,7 +47,6 @@
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
 import { compareLocationNames } from '@/lib/locationTree';
-import { SYSTEM_KIND } from '@/lib/locationKinds';
 
 /** One tappable place in the grid. Always a real location row, never a virtual coordinate. */
 export interface GridCell {
@@ -301,16 +300,14 @@ export function countOccupiedPlaces(
 }
 
 /**
- * The units to list on the Storage home screen — roots, with the put-away pile last.
+ * The units to list on the Storage home screen — roots, in the shop's own order.
  *
- * `Unassigned` sorts last for the reason the deleted board recorded and the table kept: the pile
- * you are trying to empty should not lead the page.
+ * The `Unassigned`-sorts-last arm went with the bucket (20260906182638). It existed because the
+ * pile you are trying to empty should not lead the page; there is no pile, and every root is now
+ * a place someone named and can therefore order deliberately.
  */
 export function orderUnits(roots: InventoryLocationNode[]): InventoryLocationNode[] {
-  return [...roots].sort((a, b) => {
-    const aSys = a.kind === SYSTEM_KIND ? 1 : 0;
-    const bSys = b.kind === SYSTEM_KIND ? 1 : 0;
-    if (aSys !== bSys) return aSys - bSys;
-    return a.sort_order - b.sort_order || compareLocationNames(a.name, b.name);
-  });
+  return [...roots].sort(
+    (a, b) => a.sort_order - b.sort_order || compareLocationNames(a.name, b.name),
+  );
 }

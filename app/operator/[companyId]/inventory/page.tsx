@@ -1,14 +1,24 @@
 'use client';
 
 /**
- * The operator Inventory tab — item-first, which is what makes its own label true.
+ * The operator Storage tab — item-first: find a part, store one, take one out.
+ *
+ * ## One word on both surfaces, 2026-09-04
+ *
+ * This tab was called **Inventory** while the office called the same job **Storage**, on the
+ * reading that *inventory* means items and quantities while *storage* means where they are. True
+ * of the words, and it still cost more than it bought: nobody who uses both surfaces meets one
+ * feature under two names and concludes they are one feature. The founder's call is **Storage**
+ * everywhere, and the argument that survives is the one this file already made about its own
+ * content — a read-only map of furniture was the wrong thing here, and it is still gone.
+ *
+ * **The routes stay `/inventory/…`.** Every printed QR label points into them, and reprinting a
+ * shop's labels to rename a tab is a cost with no reader.
  *
  * ## What it used to be, and why that was wrong
  *
- * It rendered the owner's `LocationBoard`: a drawn map of *locations*, read-only. That is Storage
- * content under an Inventory label, and industry usage is consistent — *inventory* means items and
- * quantities, *storage* means where they are. Every action an operator actually takes here is an
- * **item** action: find one, store one, take one out. The tab now matches the noun.
+ * It rendered the owner's `LocationBoard`: a drawn map of *locations*, read-only. Every action an
+ * operator actually takes here is an **item** action: find one, store one, take one out.
  *
  * Dropping the board cost less than it looks. With 12–18 locations you are standing among, walking
  * beats scrolling a picture of furniture three feet away — and Scan already reaches one faster
@@ -104,7 +114,7 @@ function OperatorWarehouseHomeContent() {
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
         <WarehouseOutlinedIcon color="primary" />
         <Typography variant="h5" sx={{ fontWeight: 700 }}>
-          Inventory
+          Storage
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

@@ -360,26 +360,26 @@ on conflict (id) do nothing;
 -- part uuid: 60000000-…-0000000000NN  (NN 01..18). Made-part routing uuid: 70000000-…-NN.
 -- Bought parts (raw blanks + components), with a preferred vendor.
 insert into public.parts (id, company_id, part_name, description, source, primary_unit, quantity, reorder_point, preferred_vendor_id) values
-  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought','ea',240,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought','ea',180,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought','ea',120,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought','ea',600,10,'30000000-0000-0000-0000-000000000004'),
-  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought','ea',1500,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought','ea',5000,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought','ea',2200,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought','ea',0,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought','ea',0,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought','ea',0,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought','ea',0,10,'30000000-0000-0000-0000-000000000004'),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought','ea',0,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought','ea',0,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought','ea',0,10,'30000000-0000-0000-0000-000000000002'),
   -- reorder_point 75 against 60 on hand, so this part sits in the LOW band. Deliberate: see the
   -- note below the insert.
-  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought','ea',60,75,'30000000-0000-0000-0000-000000000005'),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought','ea',0,75,'30000000-0000-0000-0000-000000000005'),
   -- Machined sub-components (made).
-  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made','ea',25,10,null),
-  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made','ea',40,10,null),
-  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made','ea',30,10,null),
+  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made','ea',0,10,null),
+  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made','ea',0,10,null),
+  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made','ea',0,10,null),
   -- Second LOW-band part (35 on hand, reorder at 50), so the filter shows a list rather than a
   -- single row.
-  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made','ea',35,50,null),
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made','ea',0,50,null),
   -- Sub-assemblies (made).
-  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made','ea',12,10,null),
-  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made','ea',8,10,null),
+  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made','ea',0,10,null),
+  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made','ea',0,10,null),
   -- Top-level sellable products (made, no opening stock -- they are built to order).
   ('60000000-0000-0000-0000-000000000015','22222222-2222-2222-2222-222222222222','PROD-PUMP-100','Hydraulic Pump P-100','made','ea',0,null,null),
   ('60000000-0000-0000-0000-000000000016','22222222-2222-2222-2222-222222222222','PROD-ACTUATOR-200','Linear Actuator A-200','made','ea',0,null,null),
@@ -417,6 +417,207 @@ on conflict (id) do nothing;
 -- If you add a `low`-dependent spec, assert against these two (BUY-MOTOR-12V, SUB-BRACKET) rather
 -- than runtime-skipping when the list is empty — a skipped spec masked the May 2026 `jobs.status`
 -- regression.
+
+-- ---------------------------------------------------------------------------
+-- The shop's storage, and the opening stock that sits in it
+-- ---------------------------------------------------------------------------
+-- THIS BLOCK MOVED UP, and the move is the point. Stock used to be an opening
+-- `parts.quantity` that a trigger dropped into a magic `Unassigned` bucket, and
+-- the locations were built at the very END of this file to redistribute it
+-- afterwards. `Unassigned` is gone (20260906182638): a quantity cannot exist
+-- without a location any more, so the places have to exist before any stock
+-- does. Everything below therefore runs before the first job consumes anything.
+--
+-- SIZED LIKE A SHOP, NOT A FIXTURE. Every storage surface is driven by how many
+-- places there are and how deep they nest: the unit list, the drawn grid and its
+-- `sections`/`nested` layouts, the destination pickers, the count sheet's
+-- pagination, the search that has to be worth typing into. Against a cabinet
+-- with two shelves they all look fine and tell you nothing. Contour's own export
+-- ran to 237 rows.
+--
+-- Deliberately MIXED DEPTHS, because that is what the grid renderer branches on:
+--   flat leaf    Yard, Receiving Dock, Saw Area Floor   -> a unit with no grid
+--   one level    Plate Rack, Tool Crib, Pallet Racking  -> `grid`
+--   two levels   Bar Stock Rack, Shelving, Small Parts  -> `sections` / `nested`
+-- and mixed WIDTHS on purpose, from a 6-slot rack to a 10x5 pallet bay and a
+-- 4x12 small-parts cabinet, so a layout that only works at one size shows up
+-- here rather than at a pilot. Both extremes matter: the widest row tests
+-- horizontal overflow, the deepest tests the nested renderer, and the flat
+-- leaves test the no-grid branch.
+--
+-- Generated rather than written out: ~300 literal rows is a wall nobody reads or
+-- maintains, and the SHAPE is the point. Ids are random except the four cited by
+-- name elsewhere in this file.
+do $$
+declare
+  v_company    constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_cabinet    constant uuid := '71000000-0000-0000-0000-000000000001';
+  v_shelf_a    constant uuid := '71000000-0000-0000-0000-000000000002';
+  v_shelf_b    constant uuid := '71000000-0000-0000-0000-000000000003';
+  v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
+  v_unit       uuid;
+  v_child      uuid;
+  v_order      int;
+  i            int;
+  j            int;
+  u            record;
+begin
+  -- Four fixed ids, because the stock placement below and several comments in
+  -- this file cite them by name.
+  insert into public.inventory_locations (id, company_id, parent_id, name, sort_order) values
+    (v_cabinet, v_company, null, 'Cabinet 3', 1),
+    (v_shelf_a, v_company, v_cabinet, 'Shelf A', 1),
+    (v_shelf_b, v_company, v_cabinet, 'Shelf B', 2),
+    (v_yard,    v_company, null, 'Yard', 2)
+  on conflict (id) do nothing;
+
+  insert into public.inventory_locations (company_id, parent_id, name, sort_order) values
+    (v_company, v_cabinet, 'Shelf C', 3),
+    (v_company, v_cabinet, 'Shelf D', 4)
+  on conflict do nothing;
+
+  v_order := 2;
+  for u in
+    select * from (values
+      -- name,                        child_label, child_n, grandchild_label, grandchild_n
+      ('Bar Stock Rack',              'Bay',       6,  'Level',    4),
+      ('Pallet Racking',              'Bay',       10, 'Level',    5),
+      ('Plate Rack',                  'Slot',      8,  null,       0),
+      ('Shelving 1',                  'Shelf',     5,  'Bin',      6),
+      ('Shelving 2',                  'Shelf',     4,  'Bin',      8),
+      ('Shelving 3',                  'Shelf',     3,  'Bin',      3),
+      ('Small Parts Cabinet',         'Row',       4,  'Position', 12),
+      ('Hardware Wall',               'Panel',     2,  'Hook',     15),
+      ('Tool Crib',                   'Drawer',    10, null,       0),
+      ('Finished Goods Staging',      'Pallet',    6,  null,       0),
+      ('Gauge Cabinet',               'Drawer',    5,  null,       0),
+      ('Receiving Dock',              null,        0,  null,       0),
+      ('Inspection Bench',            null,        0,  null,       0),
+      ('Outside Processing Staging',  null,        0,  null,       0),
+      ('Saw Area Floor',              null,        0,  null,       0),
+      ('Shipping Bench',              null,        0,  null,       0)
+    ) as t(unit_name, child_label, child_n, grandchild_label, grandchild_n)
+  loop
+    v_order := v_order + 1;
+
+    insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+    values (v_company, null, u.unit_name, v_order)
+    on conflict do nothing
+    returning id into v_unit;
+    -- `on conflict do nothing` returns no row on a re-run, so re-find rather than
+    -- skipping: a second `supabase db reset` must land on the same tree.
+    if v_unit is null then
+      select id into v_unit from public.inventory_locations
+       where company_id = v_company and parent_id is null and name = u.unit_name;
+    end if;
+
+    for i in 1 .. u.child_n loop
+      insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+      values (v_company, v_unit, u.child_label || ' ' || i, i)
+      on conflict do nothing
+      returning id into v_child;
+      if v_child is null then
+        select id into v_child from public.inventory_locations
+         where company_id = v_company and parent_id = v_unit
+           and name = u.child_label || ' ' || i;
+      end if;
+
+      for j in 1 .. u.grandchild_n loop
+        insert into public.inventory_locations (company_id, parent_id, name, sort_order)
+        values (v_company, v_child, u.grandchild_label || ' ' || j, j)
+        on conflict do nothing;
+      end loop;
+    end loop;
+  end loop;
+end $$;
+
+
+-- Opening stock, placed the way the app places it.
+--
+-- Through `add_stock_at_location`, not an INSERT: that RPC is the only way stock
+-- enters now, it writes the `addition` ledger rows a real shop would have, and
+-- it is what `parts.quantity` rolls up from. A seed that wrote balances directly
+-- would be exercising a path the product does not have.
+--
+-- Addressed by PATH — unit / child / leaf — rather than by bare name, because
+-- names repeat by design: `Bay 1` is in both racks, `Drawer 1` in both cabinets,
+-- and `Level 1` forty times over. That repetition is realistic and is exactly
+-- what the pickers have to cope with, so the seed must not depend on a name
+-- being unique.
+--
+-- WHERE things go is chosen, not scattered, because three count-sheet shapes
+-- have to exist in dev data or only one branch is ever reachable:
+--   BUY-BEARING-608ZZ  -> one bin    : the ordinary single-place count
+--   BUY-ORING-214      -> two bins   : the split part, counted per place
+--   RAW-STEEL-BLANK    -> the Yard   : and later, three heats in it
+-- The rest are spread across the tree so the grid, the search and the pickers
+-- have something to show at more than one address, at more than one depth.
+do $$
+declare
+  v_company constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_at      uuid;
+  r         record;
+begin
+  -- add_stock_at_location authorises against auth.uid(), which is null in a
+  -- seed. Transaction-local, so it expires with this block.
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', '11111111-1111-1111-1111-111111111111',
+                      'role', 'authenticated')::text,
+    true);
+
+  for r in
+    select * from (values
+      -- part id,                              unit,                     child,      leaf,         qty
+      ('60000000-0000-0000-0000-000000000001', 'Bar Stock Rack',         'Bay 1',    'Level 1',    240),
+      ('60000000-0000-0000-0000-000000000002', 'Yard',                   null,       null,         180),
+      ('60000000-0000-0000-0000-000000000003', 'Bar Stock Rack',         'Bay 2',    'Level 3',    120),
+      ('60000000-0000-0000-0000-000000000004', 'Cabinet 3',              'Shelf A',  null,         600),
+      -- Split across two bins on purpose: the count sheet's per-place rows.
+      ('60000000-0000-0000-0000-000000000005', 'Cabinet 3',              'Shelf A',  null,         900),
+      ('60000000-0000-0000-0000-000000000005', 'Cabinet 3',              'Shelf B',  null,         600),
+      ('60000000-0000-0000-0000-000000000006', 'Small Parts Cabinet',    'Row 1',    'Position 1', 5000),
+      ('60000000-0000-0000-0000-000000000007', 'Small Parts Cabinet',    'Row 1',    'Position 2', 2200),
+      ('60000000-0000-0000-0000-000000000008', 'Tool Crib',              'Drawer 1', null,         60),
+      ('60000000-0000-0000-0000-000000000009', 'Cabinet 3',              'Shelf C',  null,         25),
+      ('60000000-0000-0000-0000-000000000010', 'Cabinet 3',              'Shelf C',  null,         40),
+      ('60000000-0000-0000-0000-000000000011', 'Cabinet 3',              'Shelf D',  null,         30),
+      ('60000000-0000-0000-0000-000000000012', 'Cabinet 3',              'Shelf D',  null,         35),
+      -- On the 10x5 bay, so the widest unit in the shop is not drawn empty.
+      ('60000000-0000-0000-0000-000000000013', 'Pallet Racking',         'Bay 7',    'Level 2',    12),
+      ('60000000-0000-0000-0000-000000000014', 'Finished Goods Staging', 'Pallet 2', null,         8)
+    ) as t(part_id, unit, child, leaf, qty)
+  loop
+    -- Walked a level at a time rather than joined, so a typo names the level it
+    -- failed at instead of returning null from a three-way join.
+    select id into v_at from public.inventory_locations
+     where company_id = v_company and parent_id is null and name = r.unit;
+    if v_at is null then
+      raise exception 'Seed: no storage unit named %', r.unit;
+    end if;
+
+    if r.child is not null then
+      select id into v_at from public.inventory_locations
+       where parent_id = v_at and name = r.child;
+      if v_at is null then
+        raise exception 'Seed: % has no child named %', r.unit, r.child;
+      end if;
+    end if;
+
+    if r.leaf is not null then
+      select id into v_at from public.inventory_locations
+       where parent_id = v_at and name = r.leaf;
+      if v_at is null then
+        raise exception 'Seed: % / % has no child named %', r.unit, r.child, r.leaf;
+      end if;
+    end if;
+
+    perform public.add_stock_at_location(
+      r.part_id::uuid, v_at, r.qty, 'ea', r.qty,
+      p_notes => 'Opening stock');
+  end loop;
+end $$;
+
 
 -- Cost rows for bought parts (so compute_part_cost_at_qty resolves a cost).
 -- Cost and markup share one ladder, so these are part_pricing_tiers rows with a
@@ -743,7 +944,7 @@ end $$;
 -- Issue stocked BOM children to a job (depletion ledger + on-hand decrement).
 create function pg_temp.deplete_job(p_job uuid, p_when int)
 returns void language plpgsql as $$
-declare jp record; e record; v_num text; used numeric;
+declare jp record; e record; v_num text; used numeric; v_from uuid;
 begin
   select job_number into v_num from public.jobs where id = p_job;
   for jp in select id, part_id, quantity from public.job_parts where job_id = p_job loop
@@ -763,26 +964,26 @@ begin
               'Issued to '||v_num, '11111111-1111-1111-1111-111111111111', now() - (p_when||' days')::interval);
       -- Decrement the BALANCE, not `parts.quantity`. As of 20260802015837 that column is
       -- maintained solely by `recompute_part_quantity_from_locations`, and a direct write
-      -- raises — which is the point: the seed now has to move stock the way the app does.
-      -- Everything is still in Unassigned at this stage; the put-away block runs later.
-      -- Split, because `part_location_stock` now CHECKs `quantity > 0` (20260802144310): a bin
-      -- emptied by consumption loses its row rather than parking a zero there. `greatest(0, ...)`
-      -- used to leave exactly that residue, and is where four of the seed's zero rows came from.
-      delete from public.part_location_stock s
-       using public.inventory_locations l
+      -- raises — which is the point: the seed has to move stock the way the app does.
+      --
+      -- From the FULLEST location holding the part, which since 20260906182638 is a real
+      -- shelf rather than a system bucket: `Unassigned` is gone, so stock was placed at
+      -- named places above and this takes it from where it actually is.
+      --
+      -- Split, because `part_location_stock` CHECKs `quantity > 0` (20260802144310): a bin
+      -- emptied by consumption loses its row rather than parking a zero there.
+      select s.id into v_from
+        from public.part_location_stock s
        where s.part_id = e.child_part_id
-         and s.location_id = l.id
-         and l.company_id = '22222222-2222-2222-2222-222222222222'
-         and l.kind = 'system'
-         and s.quantity <= used;
-      update public.part_location_stock s
-         set quantity = s.quantity - used
-        from public.inventory_locations l
-       where s.part_id = e.child_part_id
-         and s.location_id = l.id
-         and l.company_id = '22222222-2222-2222-2222-222222222222'
-         and l.kind = 'system'
-         and s.quantity > used;
+       order by s.quantity desc
+       limit 1;
+      if v_from is null then continue; end if;
+
+      delete from public.part_location_stock
+       where id = v_from and quantity <= used;
+      update public.part_location_stock
+         set quantity = quantity - used
+       where id = v_from and quantity > used;
     end loop;
   end loop;
 end $$;
@@ -1481,87 +1682,74 @@ where uca.company_id = '22222222-2222-2222-2222-222222222222'
     where n.author_id = uca.id and r.kind = 'helpful'
   ) >= 3;
 
--- ── Inventory locations (feature-flagged) ────────────────────────────────────
--- Turned on for the seeded company so the location-tracked half of inventory is
--- exercised in dev, preview branches and manual testing — not just the aggregate
--- path. Names follow the vocabulary in Contour's legacy export (CABINET / SHELF /
--- YARD), so the dev data looks like a real shop rather than "Location 1".
+-- ── Inventory locations ─────────────────────────────────────────────────────
+-- The tree and the opening stock MOVED UP, next to the parts they belong to.
 --
--- ORDER MATTERS, and this block must stay LAST. Tracking a part makes
--- `enforce_tracked_part_quantity` reject any direct write to parts.quantity, and
--- pg_temp.deplete_job() above does exactly that. Flip the flag before the
--- transaction graph is built and the seed dies mid-way. Everything here runs
--- after the last quantity write.
+-- They were last in the file for a reason that no longer exists: stock arrived
+-- as an opening `parts.quantity` dropped into a magic `Unassigned` bucket, and
+-- this block ran afterwards to redistribute it onto shelves. `Unassigned` is
+-- gone (20260906182638) and a quantity cannot exist without a location, so the
+-- places now have to be built BEFORE anything is stocked into them. The
+-- put-away helper went with the pile it existed to empty.
 
--- Move a share of whatever a part currently holds at one location into another.
--- Fraction of the *live* balance, floored to a whole unit (these are all 'each').
-create function pg_temp.put_away(p_part uuid, p_from uuid, p_to uuid, p_share numeric, p_name text)
-returns void language plpgsql as $$
-declare v_have numeric; v_move numeric;
-begin
-  select quantity into v_have from public.part_location_stock
-   where part_id = p_part and location_id = p_from;
-  v_move := floor(coalesce(v_have, 0) * p_share);
-  if v_move <= 0 then return; end if;
-  perform public.transfer_stock(p_part, p_from, p_to, v_move, 'each', v_move,
-                                'Put away to ' || p_name);
-end $$;
-
+-- ---------------------------------------------------------------------------
+-- One heat-tracked material, so the feature is visible without setting it up
+-- ---------------------------------------------------------------------------
+-- Every other part in this seed is untracked, which is right -- a shop holds
+-- thousands and a handful of bar and plate is what needs tracing. But with none
+-- tracked at all, nobody running the app locally ever sees a lot picker, a
+-- per-heat count row or a heat on a packing slip, and the whole layer is
+-- invisible until someone hand-builds the state.
+--
+-- RAW-STEEL-BLANK because raw bar is exactly what a real shop traces, and
+-- because it is already sitting whole in the Yard -- which makes this the
+-- INSTRUCTIVE case rather than the tidy one. Recording the first heat turns
+-- tracking on (20260906153732) and migrates that existing balance into a
+-- PRE-TRACKING lot, so the Yard ends up holding three lots:
+--
+--   PRE-TRACKING  -- was here before anyone recorded a heat; no known number
+--   HT-24-4471    -- received after
+--   HT-24-8823    -- and again
+--
+-- That is precisely what a shop turning tracking on mid-life sees, and it
+-- exercises every path at once: the take picker has a real choice to make, the
+-- count sheet has to ask per heat, and the reshape has to say which one moves.
 do $$
 declare
-  v_unassigned uuid;
-  v_shelf_a    constant uuid := '71000000-0000-0000-0000-000000000002';
-  v_shelf_b    constant uuid := '71000000-0000-0000-0000-000000000003';
-  v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
   v_company    constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
+  v_steel      constant uuid := '60000000-0000-0000-0000-000000000002';
 begin
-  -- transfer_stock authorises against get_user_company_ids(), i.e. auth.uid(), which is
-  -- null in a seed. Impersonate the dev user for this block so the put-aways go through
-  -- the real RPC — which also writes the paired transfer rows to inventory_transactions.
-  -- Transaction-local (the `true`), so it expires with this DO block.
+  -- Same impersonation as the put-away block above, and for the same reason:
+  -- add_stock_at_location authorises against auth.uid(), which is null in a seed.
   perform set_config(
     'request.jwt.claims',
     json_build_object('sub', '11111111-1111-1111-1111-111111111111',
                       'role', 'authenticated')::text,
     true);
 
-  -- No flag write, and no backfill. `enable_location_tracking_for_company` was dropped in
-  -- 20260802015837: every part is seeded into Unassigned by `seed_new_part_balance` the
-  -- moment it is inserted, for every company. The `inventory_locations` flag that used to be
-  -- set here governed only whether a shop MANAGES places, never whether its stock had one, and
-  -- it was retired in Aug 2026. All this block needs is the bucket's id.
-  v_unassigned := public.inv_get_or_create_unassigned(v_company);
+  -- Guard rather than assume. The scatter above is data-driven and the Yard's
+  -- contents depend on what the job depletions left behind, so a future edit
+  -- could legitimately leave this part somewhere else. Seeding a heat against a
+  -- part that is not there would still "work" -- it would just create a lot
+  -- nobody can see, which is worse than skipping.
+  if not exists (
+    select 1 from public.part_location_stock
+     where part_id = v_steel and location_id = v_yard and quantity > 0
+  ) then
+    raise notice 'Skipping heat seed: RAW-STEEL-BLANK is not in the Yard.';
+    return;
+  end if;
 
-  -- No is_stockable / is_qr_anchor: both were dropped in
-  -- 20260623031347_drop_location_display_flags.sql. Every node is stockable and
-  -- every node can carry a QR now.
-  -- No `code` and no `kind`: the column went in 20260803034616 and the user-facing kind field in
-  -- e2e2f5e. `kind` survives in the schema only for the auto-managed `Unassigned` pile, which
-  -- `inv_get_or_create_unassigned` creates — never a hand-written row like these.
-  insert into public.inventory_locations (id, company_id, parent_id, name, sort_order) values
-    ('71000000-0000-0000-0000-000000000001', v_company, null, 'Cabinet 3', 1),
-    (v_shelf_a, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf A', 1),
-    (v_shelf_b, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf B', 2),
-    (v_yard,    v_company, null, 'Yard', 2)
-  on conflict (id) do nothing;
+  perform public.add_stock_at_location(
+    v_steel, v_yard, 40, 'each', 40,
+    p_notes => 'Received from the mill',
+    p_heat_number => 'HT-24-4471');
 
-  -- Spread stock so all three count-sheet write targets exist in dev data. The
-  -- count resolves a part's target by how many locations hold stock, so without
-  -- this every part sits at Unassigned and only one branch is ever reachable.
-  --   BUY-BEARING-608ZZ  -> Shelf A only        : counts to a named bin
-  --   RAW-STEEL-BLANK    -> Yard only           : counts to a named bin
-  --   BUY-ORING-214      -> Shelf A + Shelf B   : EXCLUDED from the sheet ("count it at its locations")
-  --   everything else    -> Unassigned          : counts to the system bucket
-  --
-  -- Quantities are read from the balance rather than hardcoded: pg_temp.deplete_job()
-  -- above has already consumed against these parts, so the seeded insert figures are
-  -- stale by now and transfer_stock rejects an overdraw.
-  perform pg_temp.put_away('60000000-0000-0000-0000-000000000004', v_unassigned, v_shelf_a, 1.0, 'Shelf A');
-  perform pg_temp.put_away('60000000-0000-0000-0000-000000000002', v_unassigned, v_yard,    1.0, 'Yard');
-  -- Split one part over two bins so the "count it at its locations" exclusion has a
-  -- live example: 60% to A, then everything still loose to B.
-  perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_a, 0.6, 'Shelf A');
-  perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_b, 1.0, 'Shelf B');
+  perform public.add_stock_at_location(
+    v_steel, v_yard, 25, 'each', 25,
+    p_notes => 'Received from the mill',
+    p_heat_number => 'HT-24-8823');
 end $$;
 
 -- ---------------------------------------------------------------------------

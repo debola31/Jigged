@@ -48,27 +48,25 @@ export const LOCATION_KINDS = [
 export type LocationKind = (typeof LOCATION_KINDS)[number];
 
 /**
- * The auto-managed `Unassigned` bucket's kind.
+ * The one word a `kind` may not be.
  *
- * Not a suggestion and never user-assignable: it marks the one row the stock RPCs create and
- * resolve by literal name, and the UI withholds every structural action from it. Kept here so
- * the string has exactly one definition.
+ * It marked the auto-managed `Unassigned` bucket until 20260906182638 removed that concept. The
+ * word stays reserved rather than being freed, because the database now CHECKs it
+ * (`inventory_locations_kind_not_system`): typing it would be refused by a constraint violation
+ * instead of the sentence below, and nothing is gained by letting a shop label a shelf "system".
  */
 export const SYSTEM_KIND = 'system';
 
 /**
- * Guard the one reserved word, because typing it is unrecoverable.
+ * Guard the one reserved word, so the refusal is a sentence rather than a constraint violation.
  *
- * `kind` is free text on purpose (see above), and almost anything you type degrades gracefully:
- * `unitKind` falls through to a generic drawing and nothing else cares. `system` is the exception.
- * It is the marker for the auto-managed `Unassigned` bucket, and every surface treats that bucket
- * as not-a-place — the destination pickers drop it, the operator lookup reports its contents as
- * "not put away yet", the count sheet refuses it as a put-away target, and, fatally,
- * `LocationDetailSheet` withholds the whole structural-actions block from it.
- *
- * Rename lives in that block. So a shelf you accidentally typed "system" into can no longer be
- * renamed, subdivided or deleted, and there is no other edit path: the typo is permanent and the
- * only fix is SQL. Rejecting it at the two write points costs nothing.
+ * `kind` is free text on purpose (see above) and almost anything you type degrades gracefully:
+ * `unitKind` falls through to a generic drawing and nothing else cares. `system` is the exception,
+ * and the reason has changed. It used to be unrecoverable — it marked the `Unassigned` bucket, and
+ * `LocationDetailSheet` withheld the whole structural-actions block from anything wearing it, so a
+ * shelf you typed it into could no longer be renamed, subdivided or deleted and the only fix was
+ * SQL. That trap is gone with the bucket; what remains is a database CHECK, and catching it here
+ * turns a 23514 into something a person can act on.
  */
 export function isReservedKind(kind: string | null | undefined): boolean {
   return (kind ?? '').trim().toLowerCase() === SYSTEM_KIND;
@@ -76,4 +74,4 @@ export function isReservedKind(kind: string | null | undefined): boolean {
 
 /** Shown wherever a reserved kind is refused, so the message is written once. */
 export const RESERVED_KIND_MESSAGE =
-  '"system" is reserved for the Unassigned pile. Pick another word — try shelf, bin or cabinet.';
+  '"system" is a reserved word. Pick another — try shelf, bin or cabinet.';

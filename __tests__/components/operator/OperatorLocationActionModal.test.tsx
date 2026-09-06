@@ -19,6 +19,9 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+  // The heat suggestions a removal offers; empty here, and swallowed on failure by the modal.
+  // Nothing on this shelf: the lot picker stays hidden and these specs test the rest.
+  getLotsAtLocationForPart: vi.fn(async () => ({ lots: [], tracked: false })),
 }));
 // The action modal can now attach a photo, which pulls in storageHelpers -> lib/supabase, and that
 // module builds its client eagerly at import time whenever `window` exists. Stubbed rather than
@@ -144,10 +147,10 @@ describe('move', () => {
     await waitFor(() =>
       // operatorId now rides on every operator write, not just depletion — bin history
       // has to be able to name who moved it.
-      expect(transferStock).toHaveBeenCalledWith('p1', 'loc1', 'loc3', 4, 'ea', {
-        notes: undefined,
-        operatorId: 'op1',
-      }),
+      expect(transferStock).toHaveBeenCalledWith(
+        'p1', 'loc1', 'loc3', 4, 'ea',
+        expect.objectContaining({ notes: undefined, operatorId: 'op1' }),
+      ),
     );
   });
 

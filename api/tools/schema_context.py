@@ -336,6 +336,24 @@ SCHEMA_CONTEXT = """
 - operator_id: UUID, created_by: UUID
 - has_discrepancy: BOOLEAN (default false)
 - notes: TEXT, created_at: TIMESTAMPTZ
+- heat_number: TEXT (nullable) -- the mill heat on this movement, upper-case; NULL means none
+  was recorded, which is the normal state. "Which jobs used heat X" = depletion rows with that
+  heat_number, grouped by job_id.
+- lot_id: UUID (FK -> material_lots.id, nullable) -- which lot moved, when the part is tracked.
+
+### material_lots (one mill heat of one part)
+- id: UUID, company_id: UUID, part_id: UUID (FK -> parts.id)
+- lot_code: TEXT -- how it is addressed: the mill heat when there is one, else a minted code.
+- heat_number: TEXT (nullable) -- the mill's own number. NULL is NOT the same as a blank
+  lot_code: it means the material arrived without a heat anyone could read.
+- vendor_id: UUID (nullable), received_at: TIMESTAMPTZ, notes: TEXT
+
+  Heat tracking is PER PART and off by default: parts.lot_tracked is false for nearly every part,
+  because a shop holds thousands and only bar and plate stock needs tracing. So a part with no
+  lots is the normal case and does NOT mean its material is untraced-but-should-be -- it means
+  the shop never asked for heats on it. "How much of heat X is left" is a question that applies
+  only to a tracked part; for an untracked one the answer is not zero, it is that the question
+  does not apply. Say that rather than reporting a zero, which reads as "none left".
 
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)

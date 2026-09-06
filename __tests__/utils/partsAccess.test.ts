@@ -101,6 +101,7 @@ describe('partsAccess utilities', () => {
     reorder_point: null,
     preferred_vendor_id: null,
     costing_batch_quantity: null,
+    lot_tracked: false,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -638,7 +639,8 @@ describe('partsAccess utilities', () => {
         reorder_point: null,
         preferred_vendor_id: null,
         costing_batch_quantity: null,
-            created_at: '2024-01-01T00:00:00Z',
+        lot_tracked: false,
+        created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
 

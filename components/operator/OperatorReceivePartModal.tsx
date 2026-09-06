@@ -58,6 +58,14 @@ export default function OperatorReceivePartModal({
   const [unit, setUnit] = useState('');
   const [notes, setNotes] = useState('');
   /**
+   * The mill heat / lot number, read off the tag on the bar being put down.
+   *
+   * This is the ONLY place a heat first enters Jigged — the take to a job later reads it back
+   * off the same bar. Optional and never nagged: most shops do not record heats, and a blank here
+   * stays blank on every surface downstream (docs/modules/inventory.md §5.6, reopened 2026-09-04).
+   */
+  const [heatNumber, setHeatNumber] = useState('');
+  /**
    * The photo of what was just put down.
    *
    * This is the FIRST time the part lands in this bin, which makes it the drop most worth
@@ -67,6 +75,8 @@ export default function OperatorReceivePartModal({
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set to the part's name when THIS receipt is what started tracing it. Holds the dialog open. */
+  const [startedTracking, setStartedTracking] = useState<string | null>(null);
 
   // Reset each time the dialog opens (house convention: Dialog onEnter, not a
   // setState-in-effect). Nothing is loaded here any more: the picker fetches its own options as
@@ -76,8 +86,10 @@ export default function OperatorReceivePartModal({
     setQuantity('');
     setUnit('');
     setNotes('');
+    setHeatNumber('');
     setPhoto(null);
     setError(null);
+    setStartedTracking(null);
   };
 
   const unitOptions = useMemo(() => {
@@ -108,14 +120,16 @@ export default function OperatorReceivePartModal({
       // already written for a human, and the catch below renders it verbatim.
       const photoPath = photo ? await uploadMovementPhoto(companyId, locationId, photo) : undefined;
 
-      await addStockAtLocation(part.id, locationId, qty, unit, {
+      const result = await addStockAtLocation(part.id, locationId, qty, unit, {
         notes: notes || undefined,
         operatorId: operatorId || undefined,
         photoPath,
+        heatNumber: heatNumber.trim() || undefined,
       });
       // Matches the shape `OperatorLocationActionModal` sends, so both stock-in paths land on one
       // event. `action: 'add'` because that is what this is — the only difference is that the part
       // was not here yet, which `part_id` and the bin's history already tell you.
+      // `heat_captured` is a boolean, never the heat itself — that is the customer's business data.
       posthog.capture('stock updated', {
         surface: 'operator_receive',
         action: 'add',
@@ -123,8 +137,29 @@ export default function OperatorReceivePartModal({
         quantity: qty,
         unit,
         location_id: locationId,
+        heat_captured: heatNumber.trim().length > 0,
       });
       await onDone();
+
+      /*
+       * The one case this dialog does not close on.
+       *
+       * Writing a heat against a part nobody was tracing turns tracking ON for it, and from here
+       * every removal of that part asks which heat it came from. That is the behaviour the shop
+       * asked for, but it is a change to how the part works from now on — and the person who
+       * caused it is standing here, holding the bar, in the one second where the cause and the
+       * effect are obviously connected. Closing silently would hand them the surprise a week
+       * later at a shelf, with nothing to link it back.
+       *
+       * A read-only statement rather than a confirm: the material is already stocked and the
+       * heat is already recorded, so there is nothing to take back here — undoing it is a
+       * deliberate act on the part page, which is where it says so and offers it. Asking now
+       * would be asking about a write that has already happened.
+       */
+      if (result?.started_tracking) {
+        setStartedTracking(part.part_name);
+        return;
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add stock.');
@@ -141,8 +176,23 @@ export default function OperatorReceivePartModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>Stock a part — {locationName}</DialogTitle>
+      <DialogTitle>
+        {startedTracking ? 'Stocked, and now tracked by heat' : `Stock a part — ${locationName}`}
+      </DialogTitle>
       <DialogContent>
+        {/*
+          The form is REPLACED, not disabled behind a banner.
+          The write has landed; leaving the fields on screen next to a message would read as
+          "here is your form, and also a note", and the obvious next tap would be Add again —
+          against a bin that already has the bar in it. There is one thing to do now.
+        */}
+        {startedTracking ? (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            {startedTracking} is now tracked by heat, because you recorded one for it. Taking any of
+            it will ask which heat it came from. Stock that was already on the shelf is kept
+            separately, marked as having no known heat.
+          </Alert>
+        ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           {/* No `onCreateNew`: creating parts is not an operator's job — same call as
               OperatorPartLookup. `excludeIds` drops what is already on this shelf. */}
@@ -181,6 +231,17 @@ export default function OperatorReceivePartModal({
               ))}
             </TextField>
           </Stack>
+          {/* Between the quantity and the notes, where the four-verb modal puts it too. Upper-case
+              keyboard on a phone because mill tags are upper-case alphanumerics; the database
+              normalises whatever arrives, so this is convenience, not correctness. */}
+          <TextField
+            label="Heat number (optional)"
+            value={heatNumber}
+            onChange={(e) => setHeatNumber(e.target.value)}
+            fullWidth
+            disabled={!part}
+            slotProps={{ htmlInput: { autoCapitalize: 'characters', maxLength: 64 } }}
+          />
           <TextField
             label="Notes (optional)"
             value={notes}
@@ -194,14 +255,28 @@ export default function OperatorReceivePartModal({
           <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving} size="large">
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={saving || !part} size="large">
-          Add
-        </Button>
+        {startedTracking ? (
+          <Button onClick={onClose} variant="contained" size="large">
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button onClick={onClose} disabled={saving} size="large">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              variant="contained"
+              disabled={saving || !part}
+              size="large"
+            >
+              Add
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );

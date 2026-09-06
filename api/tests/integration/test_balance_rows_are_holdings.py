@@ -43,10 +43,11 @@ def shop(supabase_admin):
         {"id": company_id, "name": f"Residue Test {company_id[:8]}"}
     ).execute()
 
-    # The system bucket is what `resolveFallbackPlace` needs and what the seeding trigger uses.
-    unassigned = supabase_admin.rpc(
-        "inv_get_or_create_unassigned", {"p_company_id": company_id}
-    ).execute().data
+    # An ordinary second place. This was the auto-minted `Unassigned` bucket until
+    # 20260906182638 removed the concept; these cases only ever needed two places.
+    unassigned = supabase_admin.table("inventory_locations").insert(
+        {"company_id": company_id, "name": "Put-away"}
+    ).execute().data[0]["id"]
     shelf = supabase_admin.table("inventory_locations").insert(
         {"company_id": company_id, "name": "Shelf A", "kind": "shelf"}
     ).execute().data[0]["id"]
@@ -135,9 +136,9 @@ class TestSeedingAnOpeningBalanceDoesNotDoubleStock:
         receive stock later. Seeding a zero row would violate the table's own
         `CHECK (quantity > 0)`, so the trigger's early return is load-bearing.
 
-        The count sheet reaches such a part through `resolveFallbackPlace`, which reads the
-        company's system bucket from the LOCATIONS list, so it needs no balance row to offer an
-        opening count.
+        Since 20260906182638 the count sheet gives such a part NO row: with no bucket to target,
+        "this part is nowhere" is a complete answer rather than a line to type into. Finding some
+        is recorded at the bin you found it in, which names a real shelf.
         """
         empty = supabase_admin.table("parts").insert(
             {
@@ -159,34 +160,41 @@ class TestSeedingAnOpeningBalanceDoesNotDoubleStock:
         )
         assert rows == [], "a part with nothing anywhere should carry no balance row at all"
 
-    def test_a_part_created_with_stock_is_parked_at_unassigned(self, supabase_admin, shop):
-        """The other half of the trigger, which nothing else in this file covered.
+    def test_a_part_cannot_be_created_carrying_stock(self, supabase_admin, shop):
+        """The inverse of what this used to assert, and the point of 20260906182638.
 
-        An INSERT carrying a non-zero quantity is legal — `enforce_tracked_part_quantity` is
-        BEFORE UPDATE only — and it is how the CSV importer and service-role scripts create a part
-        that already holds stock. Exactly one row, at the system bucket, matching the rollup.
+        An INSERT carrying a non-zero quantity used to be legal — `enforce_tracked_part_quantity`
+        was BEFORE UPDATE only — and `seed_new_part_balance` parked the number at the company's
+        `Unassigned` bucket. That was the one path by which a quantity could exist without anyone
+        saying where it was.
+
+        There is no bucket to park it in now, so the insert is refused rather than silently
+        producing a `parts.quantity` no balance row supports. Stock enters through
+        `add_stock_at_location`, which has always named a location.
         """
-        stocked = supabase_admin.table("parts").insert(
-            {
-                "company_id": shop["company"],
-                "part_name": f"OPENING-{shop['company'][:8]}",
-                "source": "bought",
-                "primary_unit": "each",
-                "quantity": 42,
-            }
-        ).execute().data[0]["id"]
+        with pytest.raises(Exception) as exc:
+            supabase_admin.table("parts").insert(
+                {
+                    "company_id": shop["company"],
+                    "part_name": f"OPENING-{shop['company'][:8]}",
+                    "source": "bought",
+                    "primary_unit": "each",
+                    "quantity": 42,
+                }
+            ).execute()
 
-        rows = (
-            supabase_admin.table("part_location_stock")
-            .select("location_id, quantity")
-            .eq("part_id", stocked)
+        assert "starts at 0" in str(exc.value)
+
+        # And nothing landed: no part, so certainly no balance behind it.
+        assert (
+            supabase_admin.table("parts")
+            .select("id")
+            .eq("company_id", shop["company"])
+            .eq("part_name", f"OPENING-{shop['company'][:8]}")
             .execute()
             .data
+            == []
         )
-        assert len(rows) == 1
-        assert rows[0]["location_id"] == shop["unassigned"]
-        assert float(rows[0]["quantity"]) == 42
-        assert _rollup(supabase_admin, stocked) == 42
 
 
 class TestTheTableRefusesAZero:

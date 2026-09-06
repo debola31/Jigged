@@ -301,6 +301,9 @@ function PartPlacesBody({
                           locationId={r.location_id}
                           locationName={path}
                           restrictToPartId={part.id}
+                          // The row IS a heat, so the form opens on that heat rather than on every
+                          // heat of the bar sitting here.
+                          restrictToLotId={r.lot_id}
                           onCancel={() => setOpen(null)}
                           onDone={afterWrite}
                         />
@@ -316,6 +319,7 @@ function PartPlacesBody({
                             partId: part.id,
                             partName: part.name,
                             primaryUnit: part.unit,
+                            lotId: r.lot_id,
                           }}
                           onCancel={() => setOpen(null)}
                           onDone={afterWrite}

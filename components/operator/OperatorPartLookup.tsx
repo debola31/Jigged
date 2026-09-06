@@ -452,6 +452,9 @@ export default function OperatorPartLookup({
                               locationId={b.location_id}
                               locationName={path}
                               restrictToPartId={selected.id}
+                              // The row IS a heat, so the form opens on that heat rather than on
+                              // every heat of the bar sitting here.
+                              restrictToLotId={b.lot_id}
                               onCancel={() => setOpen(null)}
                               onDone={afterWrite}
                             />
@@ -467,6 +470,7 @@ export default function OperatorPartLookup({
                                 partId: selected.id,
                                 partName: selected.part_name,
                                 primaryUnit: selected.primary_unit,
+                                lotId: b.lot_id,
                               }}
                               // The shop floor's removal has always been graceful: the material is
                               // already off the shelf, so a stale count must not refuse the write.

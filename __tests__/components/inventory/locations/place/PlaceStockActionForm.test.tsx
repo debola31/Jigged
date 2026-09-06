@@ -612,6 +612,61 @@ describe('a bin holding two heats of one part', () => {
     expect(screen.queryByRole('combobox', { name: /^heat/i })).not.toBeInTheDocument();
   });
 
+  /**
+   * Opened from a row that IS a heat — the operator lookup and the part drawer both do this.
+   *
+   * Handing back all three heats of the bar ignores the tap, and on a phone turns a one-line form
+   * into a list to re-choose from.
+   */
+  it('narrows to the one heat when the caller names a lot', async () => {
+    render(
+      <PlaceStockActionForm
+        action="deplete"
+        companyId="co1"
+        locationId="bin5"
+        locationName="Bin 5"
+        moveDestinations={DESTINATIONS}
+        restrictTo={{
+          partId: 'p-steel',
+          partName: 'RAW-STEEL-BLANK',
+          primaryUnit: 'ea',
+          lotId: 'lot-2',
+        }}
+        onCancel={onCancel}
+        onDone={vi.fn()}
+      />,
+    );
+    await screen.findByText(/Heat 8823/);
+
+    expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('RAW-STEEL-BLANK')).toHaveLength(1);
+  });
+
+  /**
+   * An `add` is ALWAYS one line: it puts NEW material down and names its heat by typing it, so
+   * binding lines to the heats already on the shelf would offer three boxes for one delivery.
+   */
+  it('offers a single line for an add, whatever the bin already holds', async () => {
+    render(
+      <PlaceStockActionForm
+        action="add"
+        companyId="co1"
+        locationId="bin5"
+        locationName="Bin 5"
+        moveDestinations={DESTINATIONS}
+        restrictTo={{ partId: 'p-steel', partName: 'RAW-STEEL-BLANK', primaryUnit: 'ea' }}
+        onCancel={onCancel}
+        onDone={vi.fn()}
+      />,
+    );
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    expect(screen.getAllByText('RAW-STEEL-BLANK')).toHaveLength(1);
+    // Summed across heats — what is already here is worth knowing while you put more down.
+    expect(screen.getByText(/12 ea here/)).toBeInTheDocument();
+    expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
+  });
+
   /** `All` fills the balance of the line it sits on, not the part's total across heats. */
   it('fills only its own line from All', async () => {
     const user = userEvent.setup();

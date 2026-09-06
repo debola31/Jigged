@@ -203,7 +203,21 @@ export interface PlaceStockActionFormProps {
    * the same four RPCs, with its own drift in what a blank row means and its own version of the
    * disarm-what-landed rule.
    */
-  restrictTo?: { partId: string; partName: string; primaryUnit: string | null };
+  /**
+   * Narrow to ONE part — set when this is opened from a part rather than from a place.
+   *
+   * `lotId` narrows it further, to one heat. The surfaces that pass it open this form from a row
+   * that is already a (place, lot): tapping the `Heat 4471` line and being shown all three heats
+   * of the bar ignores the tap, and on a phone it turns a one-line form into a list to re-choose
+   * from. Absent means "every lot of this part here", which is right for an untracked part and for
+   * a caller that genuinely has no lot in hand.
+   */
+  restrictTo?: {
+    partId: string;
+    partName: string;
+    primaryUnit: string | null;
+    lotId?: string | null;
+  };
   /**
    * Let a removal exceed what the system thinks is there, instead of refusing it.
    *
@@ -366,7 +380,37 @@ export default function PlaceStockActionForm({
        * part itself with a null `onHand` is what makes the row appear at all — and null is the
        * right value, since "we have no record here" is not the same as "there are zero".
        */
-      const found = here.filter((r) => r.partId === restrictTo.partId);
+      /*
+       * `add` is ALWAYS one line, whatever the bin holds.
+       *
+       * The other two act on material that is already here, so their lines are the balances. An
+       * add puts NEW material down and names its heat by typing it — binding those lines to the
+       * heats already on the shelf would offer three boxes for one delivery and imply you were
+       * adding to a specific existing heat, which the write does not do (it resolves the lot from
+       * the typed number). The on-hand still shows, summed across heats, because "there are
+       * already 245 here" is worth knowing while you put more down.
+       */
+      if (action === 'add') {
+        const mine = here.filter((r) => r.partId === restrictTo.partId);
+        const total = mine.reduce((sum, r) => sum + (r.onHand ?? 0), 0);
+        return [
+          {
+            partId: restrictTo.partId,
+            partName: restrictTo.partName,
+            primaryUnit: restrictTo.primaryUnit || 'ea',
+            onHand: mine.length > 0 ? total : null,
+            lotId: null,
+            lotCode: null,
+            heatNumber: null,
+          },
+        ];
+      }
+
+      const found = here.filter(
+        (r) =>
+          r.partId === restrictTo.partId &&
+          (restrictTo.lotId == null || r.lotId === restrictTo.lotId),
+      );
       if (found.length > 0) return found;
       return [
         {

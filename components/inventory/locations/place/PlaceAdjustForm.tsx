@@ -84,6 +84,14 @@ export interface PlaceAdjustFormProps {
   locationName: string;
   /** Narrow to ONE part — set when this is opened from a part rather than from a place. */
   restrictToPartId?: string;
+  /**
+   * Narrow further, to one heat.
+   *
+   * The callers that pass it open this form from a row that is already a (place, lot), so
+   * counting the `Heat 4471` line and being handed all three heats of the bar ignores the tap.
+   * Absent means every lot of the part here, which is right for an untracked one.
+   */
+  restrictToLotId?: string | null;
   /** Back to the place overview. The drawer stays open. */
   onCancel: () => void;
   onDone: () => void | Promise<void>;
@@ -94,6 +102,7 @@ export default function PlaceAdjustForm({
   locationId,
   locationName,
   restrictToPartId,
+  restrictToLotId,
   onCancel,
   onDone,
 }: PlaceAdjustFormProps) {
@@ -114,8 +123,13 @@ export default function PlaceAdjustForm({
   );
   const rows: LocationContent[] = useMemo(() => {
     const all = data?.contents ?? [];
-    return restrictToPartId ? all.filter((c) => c.part_id === restrictToPartId) : all;
-  }, [data, restrictToPartId]);
+    if (!restrictToPartId) return all;
+    return all.filter(
+      (c) =>
+        c.part_id === restrictToPartId &&
+        (restrictToLotId == null || c.lot_id === restrictToLotId),
+    );
+  }, [data, restrictToPartId, restrictToLotId]);
   /** Set when the bin holds more than one read returns, so the cap is said rather than hidden. */
   const clipped = data ? Math.max(0, data.total - data.contents.length) : 0;
 

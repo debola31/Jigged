@@ -24,7 +24,12 @@ import type {
   InventoryLocation,
   PartLocationBalanceWithLocation,
 } from '@/types/inventoryLocations';
-import { createLocation, getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
+import {
+  createLocation,
+  getBalancesForPart,
+  getLocations,
+  setPartLotTracking,
+} from '@/utils/inventoryLocationsAccess';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import { compareLocationNames } from '@/lib/locationTree';
@@ -61,6 +66,7 @@ export default function PartLocationInventory({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<LocationAction | null>(null);
+  const [untracking, setUntracking] = useState(false);
 
   const primaryUnit = part.primary_unit ?? '';
 
@@ -122,18 +128,43 @@ export default function PartLocationInventory({
    * a part had passed through, and offering one as a move source got you as far as the RPC before
    * it failed with "Insufficient stock at source location (have 0, need N)".
    */
-  const sourceBalances = useMemo<LocationBalanceOption[]>(
-    () =>
-      balances
-        .filter((b) => Number(b.quantity ?? 0) > 0)
-        .map((b) => ({ id: b.location_id, label: b.path.join(' › ') || b.location_name, quantity: b.quantity }))
-        .sort((a, b) => compareLocationNames(a.label, b.label)),
-    [balances],
-  );
+  const sourceBalances = useMemo<LocationBalanceOption[]>(() => {
+    /*
+     * One entry per PLACE, summed across heats.
+     *
+     * A balance row is (place, lot) since heat tracking landed, so mapping rows straight to
+     * options listed a two-heat shelf twice under one name and one id — an unpickable pair, and
+     * each carrying half the stock that is actually there. The modal asks which heat AFTER a
+     * place is chosen (`getLotsAtLocationForPart`), so the place is what belongs here and the
+     * total is what "have N" means when you are standing in front of it.
+     */
+    const byPlace = new Map<string, LocationBalanceOption>();
+    for (const b of balances) {
+      const quantity = Number(b.quantity ?? 0);
+      if (quantity <= 0) continue;
+      const existing = byPlace.get(b.location_id);
+      if (existing) existing.quantity += quantity;
+      else
+        byPlace.set(b.location_id, {
+          id: b.location_id,
+          label: b.path.join(' › ') || b.location_name,
+          quantity,
+        });
+    }
+    return [...byPlace.values()].sort((a, b) => compareLocationNames(a.label, b.label));
+  }, [balances]);
 
-  /** A part in one place is not "split"; counting it there is counting it everywhere. */
+  /**
+   * A part in one place is not "split"; counting it there is counting it everywhere.
+   *
+   * Distinct PLACES, not balance rows: two heats on one shelf are two rows and one shelf, and
+   * counting rows offered "Count all 2 locations" for a part that lives in exactly one.
+   */
   const placesWithStock = useMemo(
-    () => balances.filter((b) => Number(b.quantity ?? 0) > 0).length,
+    () =>
+      new Set(
+        balances.filter((b) => Number(b.quantity ?? 0) > 0).map((b) => b.location_id),
+      ).size,
     [balances],
   );
 
@@ -160,6 +191,27 @@ export default function PartLocationInventory({
   const onActionDone = async () => {
     await reload();
     await onStockChanged();
+  };
+
+  /**
+   * Turn heat tracking off for this part.
+   *
+   * `onStockChanged` rather than `reload`, because the flag lives on the PART and this panel is
+   * handed it as a prop — reloading the balances would leave the banner on screen asserting
+   * something that is no longer true until the page happened to refetch.
+   */
+  const stopTrackingHeats = async () => {
+    setUntracking(true);
+    setError(null);
+    try {
+      await setPartLotTracking(partId, false);
+      await onStockChanged();
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not stop tracking heats for this part.');
+    } finally {
+      setUntracking(false);
+    }
   };
 
   return (
@@ -203,6 +255,38 @@ export default function PartLocationInventory({
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
+      {/*
+        Why this is here at all.
+
+        Heat tracking turns itself ON — recording a heat on a receipt is the decision to trace the
+        part, so nobody visits a setting to start it. That is the right default and it leaves one
+        trap: type a heat by mistake and this part demands one on every removal forever, with no
+        visible reason and nothing to undo it. So the state is stated where someone would come
+        looking ("why is it asking me which heat?"), and the way back out is beside it.
+
+        Switching off does NOT merge the split balances back together. Picking a survivor and
+        silently adding the others to it would destroy the record of what is physically on the
+        shelf — the flag stops future enforcement, it is not an instruction to forget.
+      */}
+      {part.lot_tracked && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            <Button
+              size="small"
+              color="inherit"
+              disabled={untracking}
+              onClick={stopTrackingHeats}
+            >
+              {untracking ? 'Stopping…' : 'Stop tracking'}
+            </Button>
+          }
+        >
+          Heat-tracked. Stock is held per heat, and taking any of it asks which heat it came from.
+        </Alert>
+      )}
+
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
           <CircularProgress size={28} />
@@ -214,9 +298,24 @@ export default function PartLocationInventory({
       ) : (
         <Stack spacing={1}>
           {balances.map((b) => (
-            <Paper key={b.location_id} variant="outlined" sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center' }}>
+            /*
+              Keyed by (place, LOT), not by place.
+              A heat-tracked bar holding two heats on one shelf is two balance rows, so a
+              place-only key renders the same shelf twice under one React key — and reads as two
+              locations with two different numbers and no way to tell which bar either is.
+            */
+            <Paper
+              key={`${b.location_id}:${b.lot_id ?? 'none'}`}
+              variant="outlined"
+              sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center' }}
+            >
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography noWrap>{b.path.join(' › ') || b.location_name}</Typography>
+                {b.lot_id && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    {b.heat_number ? `Heat ${b.heat_number}` : b.lot_code}
+                  </Typography>
+                )}
               </Box>
               <Typography sx={{ fontWeight: 600 }}>
                 {b.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })} {primaryUnit}

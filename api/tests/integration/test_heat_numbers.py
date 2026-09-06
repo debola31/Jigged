@@ -287,27 +287,40 @@ def test_a_heat_longer_than_a_mill_tag_is_refused(db, shop):
 
 
 def test_the_take_to_a_job_carries_the_heat_and_the_job(db, shop):
-    """A take records the heat it named, and refuses to record one that never came in.
-
-    The second half is the rule 20260906121901 added, and it is the whole point of the picker
-    that replaced the free-text box. `8823` was never received for this part, so `resolve_lot`
-    returns nothing on the way out and the row records no heat -- rather than minting a lot to
-    consume, which is how a mistyped 4417 used to become a real record and print on a slip.
-    """
+    """A take records the heat it named, against the job it fed."""
     with user_session(shop["user"]) as (conn, cur):
         receive(cur, shop, shop["bar"], 100, "4471")
         take(cur, shop, shop["bar"], 40, "4471", job=shop["job"])
-        take(cur, shop, shop["bar"], 10, "8823")  # a heat nobody ever received
         conn.commit()
     with db.cursor() as cur:
-        # Both takes commit in one transaction, so their created_at is identical (now() is
-        # transaction-stable) and row order is arbitrary — compare as a set, not a sequence.
         cur.execute(
             "SELECT heat_number, job_id::text FROM inventory_transactions"
             " WHERE part_id = %s AND type = 'depletion'",
             (shop["bar"],),
         )
-        assert set(cur.fetchall()) == {("4471", shop["job"]), (None, None)}
+        assert cur.fetchall() == [("4471", shop["job"])]
+
+
+def test_a_take_cannot_name_a_heat_that_never_came_in(db, shop):
+    """The whole point of the picker that replaced the free-text box.
+
+    `resolve_lot` takes `p_create` and `p_mint` as separate permissions: a receipt gets both, a
+    take gets neither. So `8823` resolves to nothing on the way out -- and because receiving
+    `4471` started tracing this part (20260906153732), a take that names nothing is refused
+    outright rather than quietly recording a movement with no heat.
+
+    The rule being enforced: **a mistyped 4417 must not become a real record that prints on a
+    packing slip.** With free text it would have, and nobody would learn of it until a customer
+    asked for the certificate behind a heat that never existed.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 100, "4471")
+        conn.commit()
+
+    with user_session(shop["user"]) as (conn, cur):
+        with pytest.raises(errors.CheckViolation) as exc:
+            take(cur, shop, shop["bar"], 10, "8823")
+    assert "heat" in str(exc.value).lower()
 
     # And no lot was invented for it, which is the durable half of the same rule.
     with db.cursor() as cur:
@@ -598,3 +611,156 @@ def lot_id_by_code(db, part, code):
     with db.cursor() as cur:
         cur.execute("SELECT id FROM material_lots WHERE part_id = %s AND lot_code = %s", (part, code))
         return cur.fetchone()[0]
+
+
+# ── Recording a heat starts tracking (20260906153732) ──────────────────────────────────────────
+#
+# The flag had no way to be set. The founder's own description is the design: "once someone adds a
+# heat number to it, then it becomes a tracked part so we only enforce things as necessary" — so
+# the flag is a CONSEQUENCE of writing down a mill heat, not a preference anyone has to find.
+
+
+def tracked(db, part):
+    with db.cursor() as cur:
+        cur.execute("SELECT lot_tracked FROM parts WHERE id = %s", (part,))
+        return cur.fetchone()[0]
+
+
+def test_a_heat_on_an_untraced_part_starts_tracing_it(db, shop):
+    assert tracked(db, shop["bar"]) is False
+
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 10, "4471")
+        conn.commit()
+
+    assert tracked(db, shop["bar"]) is True
+    # And the stock that just arrived is under its own real heat, not a minted placeholder.
+    assert balances(db, shop["bar"]) == [("4471", 10.0)]
+
+
+def test_the_receipt_says_it_started_tracking_so_the_ui_can_explain_itself(db, shop):
+    """A part that silently begins demanding a heat on every removal is the surprise to avoid.
+
+    The dialog that caused it is the only place that can explain it at the moment it becomes true,
+    so the RPC hands back the fact rather than making the browser diff a flag it never read.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 10, "4471")
+        first = cur.fetchone()[0]
+        receive(cur, shop, shop["bar"], 5, "8823")
+        second = cur.fetchone()[0]
+        conn.commit()
+
+    assert first["started_tracking"] is True
+    assert second["started_tracking"] is False
+
+
+def test_a_receipt_with_no_heat_leaves_an_untraced_part_untraced(db, shop):
+    """Most receipts, in most shops. Nothing about the ordinary path changes."""
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["plate"], 40, None)
+        conn.commit()
+
+    assert tracked(db, shop["plate"]) is False
+    assert balances(db, shop["plate"]) == [(None, 40.0)]
+
+
+def test_a_blank_heat_decides_nothing(db, shop):
+    """The normalisation the ledger applies is applied to the DECISION too.
+
+    Otherwise a stray space in a text field would start enforcing heats on a part nobody meant to
+    trace, and the shop would discover it at the next removal.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["plate"], 40, "   ")
+        conn.commit()
+
+    assert tracked(db, shop["plate"]) is False
+
+
+def test_stock_already_on_the_shelf_stays_removable_after_tracking_starts(db, shop):
+    """The reason this delegates to `set_part_lot_tracking` instead of setting the column.
+
+    Flipping the flag alone would strand the material that was already there: a take of a tracked
+    part must name a lot, and those rows have none. Migrated into PRE-TRACKING in the same
+    statement, the invariant holds at rest rather than needing an "if the lot is missing" branch on
+    every read for the rest of the part's life.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 30, None)  # untraced: one lot-less row
+        conn.commit()
+    assert balances(db, shop["bar"]) == [(None, 30.0)]
+
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 12, "4471")  # the decision
+        conn.commit()
+
+    # The old stock is under PRE-TRACKING, the new under its real heat. Nothing is stranded.
+    assert balances(db, shop["bar"]) == [(None, 30.0), ("4471", 12.0)]
+    pre = lot_id_by_code(db, shop["bar"], "PRE-TRACKING")
+
+    with user_session(shop["user"]) as (conn, cur):
+        cur.execute(
+            """
+            SELECT deplete_stock_at_location(%s::uuid, %s::uuid, 5, 'in', 5,
+                                             p_graceful => true, p_lot_id => %s::uuid)
+            """,
+            (shop["bar"], shop["shelf"], pre),
+        )
+        conn.commit()
+
+    assert balances(db, shop["bar"]) == [(None, 25.0), ("4471", 12.0)]
+
+
+def test_adding_to_a_lot_already_chosen_is_not_a_new_decision(db, shop):
+    """`p_lot_id` means "add to the lot I picked" — a restatement, not an assertion.
+
+    Only a tracked part has a lot to pick in the first place, so a lot id says nothing new about
+    whether the part should be traced. This is reachable because switching tracking off
+    deliberately leaves the lots and the split balances in place: someone adds to a heat that
+    still exists on a part nobody is enforcing any more, and it must not switch enforcement back
+    on behind them.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["plate"], 10, "9001")  # the decision, made once
+        conn.commit()
+    assert tracked(db, shop["plate"]) is True
+    own = lot_id(db, shop["plate"], "9001")
+
+    with user_session(shop["user"]) as (conn, cur):
+        cur.execute("SELECT set_part_lot_tracking(%s::uuid, false)", (shop["plate"],))
+        conn.commit()
+    assert tracked(db, shop["plate"]) is False
+
+    with user_session(shop["user"]) as (conn, cur):
+        cur.execute(
+            "SELECT add_stock_at_location(%s::uuid, %s::uuid, 3, 'in', 3, p_lot_id => %s::uuid)",
+            (shop["plate"], shop["shelf"], own),
+        )
+        result = cur.fetchone()[0]
+        conn.commit()
+
+    assert tracked(db, shop["plate"]) is False
+    assert result["started_tracking"] is False
+    # The stock still landed on the heat it named — switching enforcement off is not an
+    # instruction to forget what has been traced.
+    assert balances(db, shop["plate"]) == [("9001", 13.0)]
+
+
+def test_a_foreign_lot_is_refused_rather_than_silently_ignored(db, shop):
+    """A lot belongs to one part. Another part's is a bug in the caller, not a preference.
+
+    Ignoring it and falling through to "no lot" would file the stock under nothing and look like
+    it worked — which is how a balance ends up somewhere nobody can find it.
+    """
+    with user_session(shop["user"]) as (conn, cur):
+        receive(cur, shop, shop["bar"], 5, "4471")
+        conn.commit()
+    foreign = lot_id(db, shop["bar"], "4471")
+
+    with user_session(shop["user"]) as (conn, cur):
+        with pytest.raises(errors.ForeignKeyViolation):
+            cur.execute(
+                "SELECT add_stock_at_location(%s::uuid, %s::uuid, 3, 'in', 3, p_lot_id => %s::uuid)",
+                (shop["plate"], shop["shelf"], foreign),
+            )

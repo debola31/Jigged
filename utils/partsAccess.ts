@@ -26,7 +26,7 @@ import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, created_at, updated_at';
+  'id, company_id, part_name, description, source, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, lot_tracked, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -39,6 +39,7 @@ interface PartRow {
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   costing_batch_quantity: number | string | null;
+  lot_tracked: boolean;
   created_at: string;
   updated_at: string;
   routings?: Array<{ id: string }> | { id: string } | null;
@@ -61,6 +62,7 @@ function rowToPart(row: PartRow): Part {
       row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
         ? null
         : Number(row.costing_batch_quantity),
+    lot_tracked: Boolean(row.lot_tracked),
     created_at: row.created_at,
     updated_at: row.updated_at,
     routing: routingRecord

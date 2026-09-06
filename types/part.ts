@@ -27,6 +27,18 @@ export interface Part {
   // 25) instead of re-amortizing over however many a consuming order draws.
   // NULL = value at the cascaded consumed qty (default). Ignored for bought.
   costing_batch_quantity: number | null;
+  /**
+   * When true this part's material is traced by mill heat: every balance is keyed by lot, and a
+   * removal REFUSES to proceed without naming one.
+   *
+   * Nobody sets this from a settings screen. Recording a heat on a receipt turns it on, because
+   * writing down the number off a mill tag IS the decision to trace that bar — a shop holds
+   * thousands of parts and a handful of bar and plate is what needs tracing. Switching it back off
+   * is deliberate, and goes through `setPartLotTracking`, never a direct UPDATE: turning it ON has
+   * to migrate the existing lot-less balances in the same statement or the material already on the
+   * shelf becomes unremovable.
+   */
+  lot_tracked: boolean;
   // When true, parts.quantity is a trigger-maintained rollup of
   // part_location_stock and stock is managed per-location (see InventoryTab).
   created_at: string;

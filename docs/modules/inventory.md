@@ -594,7 +594,7 @@ the third key, and no amount of care on the ledger substitutes for it.
 | | |
 |---|---|
 | `material_lots` | A heat, as a row. Identity is `(part_id, lower(btrim(lot_code)))`; `heat_number` is nullable and is **not** the same as the code — NULL says the material arrived without a heat we could read, and such a lot gets a minted code so untagged bar is still storable. Soft-deletes like everything else. |
-| `parts.lot_tracked` | Per part, default **false**. A shop holds ~9,000 parts and a handful of bar and plate is what needs tracing — the same call JobBOSS makes. Never set directly: `set_part_lot_tracking()` flips it **and** migrates existing lot-less balances into a `PRE-TRACKING` lot in the same statement. |
+| `parts.lot_tracked` | Per part, default **false**. A shop holds ~9,000 parts and a handful of bar and plate is what needs tracing — the same call JobBOSS makes. Turned on by **recording a heat on a receipt**, not by a setting (see below). Never set directly: `set_part_lot_tracking()` flips it **and** migrates existing lot-less balances into a `PRE-TRACKING` lot in the same statement. |
 | `part_location_stock.lot_id` + `lot_key` | The third key. `lot_key` is a **stored generated column** collapsing NULL to the zero uuid, so `UNIQUE (part_id, location_id, lot_key)` is FULL and an upsert can infer it. Without it the NULL-lot rows would compare distinct from one another and one part could hold several balances at one place — no error, just `parts.quantity` counting the same steel twice. |
 | `lot_certificates` | The mill cert, attached to the **lot** and not to a movement. Schema only; no upload UI yet. |
 
@@ -612,6 +612,27 @@ material that predates the rule. The `PRE-TRACKING` lot is named for what it is 
 invented heat, because a made-up number on a packing slip is worse than an honest "not known". This
 is [CLAUDE.md's no-silent-runtime-fallbacks rule](../../CLAUDE.md): the invariant holds at rest
 instead of being patched by an `IF lot IS NULL` branch on every read.
+
+**Nobody turns the flag on. Recording a heat does**
+([`20260906153732`](../../supabase/migrations/20260906153732_heat_on_receipt_starts_tracking.sql)).
+The founder's words were *"once someone adds a heat number to it, then it becomes a tracked part so
+we only enforce things as necessary"*, and read literally that is not a setting at all — it is a
+consequence. Nobody goes looking for a preference; they write down the number off the mill tag
+because this is the bar they will have to account for, and the software notices. So
+`add_stock_at_location` calls `set_part_lot_tracking(part, true)` when a **non-blank** heat arrives
+for an untraced part, before its own insert, and returns `started_tracking` so the surface that
+caused it can say so.
+
+It lives in the RPC and not in a dialog because two writers would be two answers: a browser that
+flipped the flag first would leave a part tracked when the receipt then failed, and would never fire
+for the CSV importer or a future PO receipt, both of which already call this function with a heat.
+It does **not** fire on a lot id alone (that is a restatement about a part already tracked, not a new
+assertion), it does not fire on whitespace, and it never turns tracking **off** — untagged material
+still arrives against a tracked part and mints a code rather than quietly ending traceability.
+
+The one trap this creates is a heat typed by mistake, which would otherwise leave a part demanding
+heats forever with no visible reason. So the part page's inventory tab states the fact and carries
+the way back out ([`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)).
 
 **Turning it OFF leaves the balances split.** Merging them back would have to pick a survivor and
 silently add the others to it, destroying the record of what is physically on the shelf. The flag

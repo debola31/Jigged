@@ -152,6 +152,17 @@ export interface StockMutationResult {
   part_quantity: number;
   has_discrepancy?: boolean;
   shortfall?: number;
+  /** The lot the movement landed on, when the part is tracked. */
+  lot_id?: string | null;
+  /**
+   * True when THIS receipt is what started tracing the part — the first heat recorded against it.
+   *
+   * Returned so the surface that caused it can say so. From here on every removal of this part
+   * must name a heat, and a part that silently begins refusing takes is exactly the surprise the
+   * per-part flag exists to avoid; the dialog in front of the person who typed the number is the
+   * only place that can explain it at the moment it becomes true.
+   */
+  started_tracking?: boolean;
 }
 
 export interface TransferResult {

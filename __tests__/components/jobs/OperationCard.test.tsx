@@ -7,6 +7,7 @@ import jiggedTheme from '@/lib/theme';
 import OperationCard from '@/components/jobs/OperationCard';
 import type { JobOperation } from '@/types/job';
 import type { OutsideOperationSummary } from '@/types/outsideShipment';
+import type { OperationCompletionSummary } from '@/types/operationCompletion';
 
 // The card reads no data of its own any more — completion history, vendor slips
 // and notes all moved to the job activity rail — so the Supabase-importing
@@ -46,7 +47,11 @@ const baseProps = {
 
 const renderCard = (
   operation: JobOperation,
-  extra: { noteCount?: number; onShowActivity?: (id: string, name: string) => void } = {},
+  extra: {
+    noteCount?: number;
+    onShowActivity?: (id: string, name: string) => void;
+    summary?: OperationCompletionSummary;
+  } = {},
 ) =>
   render(
     <ThemeProvider theme={jiggedTheme}>
@@ -107,6 +112,44 @@ describe('OperationCard — the note badge', () => {
     // The admin completion note renders on its completion's row in the rail,
     // not here — which is also why it is not counted in the badge.
     expect(screen.queryByText('admin completion note')).not.toBeInTheDocument();
+  });
+});
+
+describe('OperationCard — undoing an internal step', () => {
+  /**
+   * THE GATE WAS `status === 'completed'`, so a step with 10 of 14 good — a
+   * mistyped quantity, the commonest thing to want back — offered no control at
+   * all. `undoJobOperation` has always voided every completion on the step
+   * regardless of status; only the gate was wrong.
+   */
+  it('offers undo on a partially completed step, not just a finished one', () => {
+    renderCard(op({ status: 'in_progress' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 10, qty_remaining: 4 },
+    });
+
+    expect(
+      screen.getByRole('button', { name: /Undo everything recorded on this step/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers no undo when nothing has been recorded', () => {
+    renderCard(op({ status: 'pending' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 0, qty_remaining: 14 },
+    });
+
+    expect(screen.queryByRole('button', { name: /Undo/i })).not.toBeInTheDocument();
+  });
+
+  it('names the step-clearing undo apart from the rail\u2019s per-event one', () => {
+    // The rail says "Undo the completion of N pieces on X"; this one clears the
+    // whole step, and the label has to say which is which.
+    renderCard(op({ status: 'completed' }), {
+      summary: { job_operation_id: 'op-1', target: 14, qty_good: 14, qty_remaining: 0 },
+    });
+
+    expect(
+      screen.getByRole('button', { name: /Undo everything recorded on this step/i }),
+    ).toBeInTheDocument();
   });
 });
 

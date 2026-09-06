@@ -129,10 +129,23 @@ export default function OperationCard({
   // Names what one press actually reverses. An outside op steps back one
   // MOVEMENT (the newest receipt, else the newest slip), which is not the same
   // promise as undoing a completion.
-  const undoLabel = isExternal ? 'Undo last movement' : 'Undo completion';
+  const undoLabel = isExternal
+    ? 'Undo last movement'
+    : 'Undo everything recorded on this step';
+  /**
+   * ANYTHING RECORDED CAN BE TAKEN BACK, not only a finished step.
+   *
+   * This gated on `status === 'completed'`, so a step with 10 of 14 good — a
+   * mistyped quantity, the commonest thing to want back — offered no control at
+   * all. `undoJobOperation` has always voided every completion on the step
+   * regardless of status; only the gate was wrong.
+   *
+   * Distinct from the activity rail's Undo, which takes back ONE recorded
+   * event. This one clears the step, which is why the label says so.
+   */
   const canUndo = isExternal
     ? !!outside && (outside.qty_sent > 0 || outside.qty_good > 0)
-    : status === 'completed';
+    : qtyGood > 0;
 
   const formatDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '—';

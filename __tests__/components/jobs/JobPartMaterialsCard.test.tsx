@@ -146,12 +146,25 @@ describe('JobPartMaterialsCard', () => {
     expect(screen.getByText('ODD')).toBeInTheDocument();
   });
 
-  // Both limitations are stated on screen rather than left to be discovered from a wrong number.
-  it('says out loud that it only covers top-level materials and shop-wide stock', async () => {
+  /**
+   * THE CAPTION IS GONE, and this test now pins its absence rather than its
+   * presence — so the deletion reads as a decision instead of a regression
+   * somebody quietly made.
+   *
+   * It said the check covers top-level materials only and that on-hand is
+   * shop-wide. Both are still true, and both are now only in the component's
+   * docblock. It was removed as page furniture on a screen being simplified;
+   * if a one-level comparison ever produces a number somebody acts on wrongly,
+   * putting it back is the first fix to reach for.
+   */
+  it('no longer captions its own limitations on screen', async () => {
     asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel' })]);
     renderCard();
-    expect(await screen.findByText(/top-level materials only/i)).toBeInTheDocument();
-    expect(screen.getByText(/other open jobs may want the same material/i)).toBeInTheDocument();
+    expect(await screen.findByText('STEEL')).toBeInTheDocument();
+    expect(screen.queryByText(/top-level materials only/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/other open jobs may want the same material/i),
+    ).not.toBeInTheDocument();
   });
 
   it('says so when the part has no BOM at all', async () => {

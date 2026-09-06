@@ -317,10 +317,18 @@ combined multi-select, the single stage chip, and "No jobs found".)*
 
 ### Job detail — `/dashboard/{companyId}/jobs/{id}`
 
-Header: job number, `JobStatusBlock` (production chip + fulfillment chip with a shipped-quantity
-breakdown, created date, due date), overdue badge. Body: Job Details card (customer,
-customer PO, source — quote link or "Direct PO" — and Attachments), billing/shipping card, and
-per-part cards with operations, live materials and shipment/invoice summaries.
+Header: job number, overdue badge. Body: **Job Details card** — customer, customer PO,
+source (quote link or "Direct PO"), and the production + fulfillment chips with created and due
+dates, laid out two-up — then the billing/shipping card, then the part with its operations and
+live materials.
+
+*Simplified 2026-09-06, when the activity rail arrived and the page needed to give something
+back:* `JobStatusBlock` was a band of its own holding four facts, directly above a card whose job
+is facts about the job, and now renders as rows inside it. The **Production** collapsible section
+went with the count beside it — a job carries one part, so the header was a count of one over a
+control that only ever hid the thing people came for. **Attachments** left the card; they are job
+attachments (customer PO PDFs), not part files, and remain viewable and editable on the Edit
+screen.
 
 Actions, left to right: Edit · Print Traveler (per part; acts directly on a
 single-part job, opens a picker otherwise) · **Shipments** and **Invoices** dropdowns (view

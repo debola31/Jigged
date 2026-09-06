@@ -16,7 +16,6 @@ import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import IconButton from '@mui/material/IconButton';
-import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
@@ -41,7 +40,7 @@ import {
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import JobActivityRail, {
@@ -55,7 +54,6 @@ import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 import { CreateShipmentModal } from '@/components/shipments';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
-import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import {
   getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
@@ -515,7 +513,6 @@ export default function JobDetailPage() {
         </Box>
       </Box>
 
-      <JobStatusBlock job={job} parts={parts} />
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
@@ -535,7 +532,19 @@ export default function JobDetailPage() {
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Stack spacing={1.5}>
+              {/* TWO UP, because this card absorbed the status band and became
+                  seven label/value pairs — stacked, that made the page taller
+                  than the arrangement it replaced, which is the opposite of the
+                  point. Billing & Shipping beside it already reads this way. */}
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                  columnGap: 3,
+                  rowGap: 1.5,
+                  alignItems: 'start',
+                }}
+              >
                 <Box>
                   <Typography variant="caption" color="text.secondary">
                     Customer
@@ -574,10 +583,11 @@ export default function JobDetailPage() {
                     </MuiLink>
                   </Box>
                 )}
-                {/* Attachments (customer PO PDF, drawings) live here with the rest of the
-                    job metadata — read-only; adding/removing is on the Edit screen. */}
-                <JobAttachmentsCard jobId={jobId} companyId={companyId} readOnly embedded />
-              </Stack>
+                {/* Status and dates, folded in from what used to be a band of
+                    its own above the cards. Four facts about the job, in the
+                    card whose job is facts about the job. */}
+                <JobStatusBlock job={job} parts={parts} />
+              </Box>
             </CardContent>
           </Card>
         </Grid>
@@ -586,16 +596,10 @@ export default function JobDetailPage() {
           <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} readOnly />
         </Grid>
 
+        {/* No section header and no collapse. A job carries one part, so a
+            "Production · 1 part" heading over a single part was a count of one
+            and a control that only ever hid the thing people came to see. */}
         <Grid size={{ xs: 12 }}>
-          <CollapsibleSection
-            title="Production"
-            defaultExpanded
-            summary={
-              <Typography variant="body2" color="text.secondary">
-                {parts.length} {parts.length === 1 ? 'part' : 'parts'}
-              </Typography>
-            }
-          >
               {parts.length === 0 ? (
                 <Typography color="text.secondary" sx={{ px: 1 }}>
                   No parts on this job.
@@ -687,7 +691,6 @@ export default function JobDetailPage() {
                   })}
                 </Box>
               )}
-          </CollapsibleSection>
         </Grid>
 
         {/* Shipping + invoicing now live entirely in the top toolbar dropdowns

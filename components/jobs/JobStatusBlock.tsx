@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
-import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
 import type { Job, JobPart } from '@/types/job';
@@ -16,13 +15,18 @@ interface JobStatusBlockProps {
 }
 
 /**
- * Job-level status block rendered between the header (job_number + actions)
- * and the rest of the page. Two badges — production and fulfillment — side
- * by side with a sub-row when at least one shipment exists.
+ * The job's status and dates, as rows INSIDE the Job Details card.
  *
- * Loads the shipment summary lazily on mount. The badges render
- * immediately from the job row so the layout is stable before the
- * shipment fetch completes (FR-NEW-2: status block under 200ms).
+ * This used to be a band of its own between the header and the page body. It
+ * was four facts — production, fulfillment, created, due — sitting in a strip
+ * that existed only to hold them, directly above a card whose entire job is to
+ * hold facts about the job. Folding them in removes a whole horizontal band
+ * from the page without losing anything.
+ *
+ * Still a component rather than inline markup because the fulfillment label is
+ * not just the status: `Partially Shipped — 25 of 100` needs the shipment
+ * summary, fetched lazily here. The chips render immediately from the job row
+ * so the card's layout is stable before that lands.
  */
 export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
   const [summary, setSummary] = useState<JobShipmentSummary | null>(null);
@@ -59,18 +63,21 @@ export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
       : undefined;
 
   return (
-    <Box sx={{ mb: 3 }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Production
-          </Typography>
+    <>
+      <Box>
+        <Typography variant="caption" color="text.secondary">
+          Production
+        </Typography>
+        <Box sx={{ mt: 0.25 }}>
           <ProductionStatusChip status={job.production_status} size="medium" />
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Fulfillment
-          </Typography>
+      </Box>
+
+      <Box>
+        <Typography variant="caption" color="text.secondary">
+          Fulfillment
+        </Typography>
+        <Box sx={{ mt: 0.25 }}>
           {fulfillmentLabel ? (
             // Override the chip label when we have a quantity breakdown.
             <FulfillmentStatusChipWithLabel
@@ -81,29 +88,26 @@ export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
             <FulfillmentStatusChip status={job.fulfillment_status} size="medium" />
           )}
         </Box>
-      </Stack>
+      </Box>
 
-      {(job.created_at || job.due_date) && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {job.created_at && (
-            <>
-              Created{' '}
-              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                {formatShipDate(job.created_at)}
-              </Box>
-            </>
-          )}
-          {job.due_date && (
-            <>
-              {job.created_at ? ' · ' : ''}Due{' '}
-              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                {formatShipDate(job.due_date)}
-              </Box>
-            </>
-          )}
-        </Typography>
+      {job.created_at && (
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Created
+          </Typography>
+          <Typography fontWeight={500}>{formatShipDate(job.created_at)}</Typography>
+        </Box>
       )}
-    </Box>
+
+      {job.due_date && (
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Due
+          </Typography>
+          <Typography fontWeight={500}>{formatShipDate(job.due_date)}</Typography>
+        </Box>
+      )}
+    </>
   );
 }
 

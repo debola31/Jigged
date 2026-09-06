@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
+import Link from '@mui/material/Link';
 import CircularProgress from '@mui/material/CircularProgress';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
@@ -22,8 +22,6 @@ import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 export interface OutsideWorkDrawerProps {
   companyId: string;
   onClose: () => void;
-  /** Opens the slip preview for reprinting. */
-  onViewSlip: (shipmentId: string) => void;
 }
 
 function daysSince(iso: string): number {
@@ -37,8 +35,8 @@ function daysSince(iso: string): number {
  * PerformCoat got?", not "which jobs have parts out" — so the grouping is the
  * answer rather than a sort applied to one.
  *
- * READ AND REPRINT ONLY. There is no send, no receive and no undo here, and that
- * is not an omission. The outside-work TAB was deleted in Aug 2026 because it was
+ * READ ONLY. There is no send, no receive and no undo here, and that is not an
+ * omission. The outside-work TAB was deleted in Aug 2026 because it was
  * a second place to ACT on an operation, and every one of those actions has
  * carried full fidelity on the operation card throughout. This lists documents
  * and points at rows; a slip's Void lives inside its own preview, where the
@@ -51,14 +49,15 @@ function daysSince(iso: string): number {
  * open" the same moment and lets the fetch go through `useLoad` rather than an
  * effect that sets state.
  *
- * Rows deep-link to `?op=` on the job, which OperationsPanel scroll-highlights.
- * Landing at the top of a job with fourteen operations and being told to find the
- * anodize step is how a read-only view becomes a dead end.
+ * Each row is ONE link -- the job number -- deep-linking to `?op=` on the job,
+ * which OperationsPanel scroll-highlights. Landing at the top of a job with
+ * fourteen operations and being told to find the anodize step is how a read-only
+ * view becomes a dead end. The slip itself is reachable from that step, which is
+ * where someone deciding to reprint it is already standing.
  */
 export default function OutsideWorkDrawer({
   companyId,
   onClose,
-  onViewSlip,
 }: OutsideWorkDrawerProps) {
   const router = useRouter();
   const { data, loading, error } = useLoad(
@@ -144,8 +143,6 @@ export default function OutsideWorkDrawer({
             {group.slips.map((s) => {
               const out = outstandingOn(s);
               const days = daysSince(s.shipped_at);
-              // Both sides on the READER's calendar. Date.parse on a plain
-              // date is UTC midnight, which calls a job overdue all evening.
               const overdue = isDateOnlyPast(s.due_back_on);
               return (
                 <Box
@@ -154,15 +151,30 @@ export default function OutsideWorkDrawer({
                     display: 'flex',
                     alignItems: 'baseline',
                     gap: 1,
-                    flexWrap: 'wrap',
                     py: 1,
                     borderTop: '1px solid',
                     borderColor: 'divider',
                   }}
                 >
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {s.job?.job_number ?? '—'}
-                  </Typography>
+                  {/* THE JOB NUMBER IS THE LINK, and it is the only one. It used
+                      to sit beside a slip-number button and an "Open step"
+                      button -- three targets on a row whose whole job is to get
+                      you to one place. The number is what the shop says out
+                      loud, so it is what you click. */}
+                  <Link
+                    component="button"
+                    type="button"
+                    underline="hover"
+                    onClick={() => {
+                      onClose();
+                      router.push(
+                        `/dashboard/${companyId}/jobs/${s.job_id}?op=${s.job_operation_id}`,
+                      );
+                    }}
+                    sx={{ fontWeight: 500, fontSize: '0.875rem', flexShrink: 0 }}
+                  >
+                    {s.job?.job_number ?? 'Open job'}
+                  </Link>
                   <Typography variant="body2" sx={{ color: 'warning.light' }}>
                     {out}
                   </Typography>
@@ -180,22 +192,6 @@ export default function OutsideWorkDrawer({
                     {days === 0 ? 'today' : `${days}d`}
                     {s.due_back_on ? ` · due ${formatDateOnly(s.due_back_on)}` : ''}
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 0.5, width: '100%', justifyContent: 'flex-end' }}>
-                    <Button size="small" onClick={() => onViewSlip(s.id)}>
-                      {s.slip_number}
-                    </Button>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        onClose();
-                        router.push(
-                          `/dashboard/${companyId}/jobs/${s.job_id}?op=${s.job_operation_id}`,
-                        );
-                      }}
-                    >
-                      Open step
-                    </Button>
-                  </Box>
                 </Box>
               );
             })}

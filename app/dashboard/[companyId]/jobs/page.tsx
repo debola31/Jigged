@@ -30,12 +30,10 @@ import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import Divider from '@mui/material/Divider';
-import Chip from '@mui/material/Chip';
 import StatusChip from '@/components/common/StatusChip';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -59,7 +57,6 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { formatDateOnly as formatDate } from '@/lib/localDate';
 import OutsideWorkStrip from '@/components/jobs/OutsideWorkStrip';
 import OutsideWorkDrawer from '@/components/jobs/OutsideWorkDrawer';
-import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 import {
   isJobOverdue,
   isJobClosed,
@@ -283,24 +280,17 @@ export default function JobsPage() {
   const matchTotal = jobsData?.total ?? 0;
   const truncated = jobsData?.truncated ?? false;
 
-  // Jobs whose only live work is out at a vendor read as stalled in the normal
-  // list (the "current op" is a sent external op, which counts as incomplete but
-  // isn't actionable in-shop). A small "At vendor" chip on those rows explains
-  // why. Reuses the Outside-work queue query (worked from Vendors → Outside work)
-  // — external ops only, so it's cheap.
+  // The company-wide outside queue. It backs the strip below the header, which
+  // is now its only reader -- the per-row "At vendor" chip it was added for is
+  // gone.
   const { data: outsideData } = useLoad(
     () => getOutsideOpsForCompany(companyId),
     [companyId],
   );
-  const atVendorJobIds = useMemo(
-    () => new Set((outsideData ?? []).filter((o) => o.status === 'sent').map((o) => o.job_id)),
-    [outsideData],
-  );
 
-  // The strip is free -- it reads the queue above, already loaded for the chip.
+  // Free: the strip reads the queue above rather than fetching its own.
   // The drawer pays for its own detail, and only when someone opens it.
   const [outsideDrawerOpen, setOutsideDrawerOpen] = useState(false);
-  const [previewSlipId, setPreviewSlipId] = useState<string | null>(null);
 
   // Narrow to the exact stages the user selected. Stages are derived from
   // (production_status, fulfillment_status), so we match on the same helper the
@@ -531,26 +521,15 @@ export default function JobsPage() {
       width: 200,
       sortable: false,
       cellStyle: { display: 'flex', alignItems: 'center' },
+      // ONE status per row. An "At vendor" chip used to sit beside the lifecycle
+      // chip on the rows with parts out, and two chips stacked in a 200px cell
+      // wrapped onto a second line -- it made the busiest rows the ones with the
+      // least to say. What is out at a vendor is now answered where it is
+      // actually asked: the strip above the grid, and the drawer behind it.
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
         const cfg = JOB_LIFECYCLE_STAGE_CONFIG[getJobLifecycleStage(params.data)];
-        const atVendor = atVendorJobIds.has(params.data.id);
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-            <StatusChip label={cfg.label} color={cfg.color} />
-            {atVendor && (
-              <Tooltip title="Parts are out at an outside vendor">
-                <Chip
-                  label="At vendor"
-                  color="warning"
-                  variant="outlined"
-                  size="small"
-                  icon={<LocalShippingIcon />}
-                />
-              </Tooltip>
-            )}
-          </Box>
-        );
+        return <StatusChip label={cfg.label} color={cfg.color} />;
       },
     },
     {
@@ -974,15 +953,8 @@ export default function JobsPage() {
       <OutsideWorkDrawer
         companyId={companyId}
         onClose={() => setOutsideDrawerOpen(false)}
-        onViewSlip={setPreviewSlipId}
       />
       )}
-
-      <OutsideShipmentPreviewDialog
-        open={previewSlipId !== null}
-        shipmentId={previewSlipId}
-        onClose={() => setPreviewSlipId(null)}
-      />
 
     </Box>
   );

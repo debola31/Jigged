@@ -283,7 +283,12 @@ export default function JobsPage() {
   // The company-wide outside queue. It backs the strip below the header, which
   // is now its only reader -- the per-row "At vendor" chip it was added for is
   // gone.
-  const { data: outsideData } = useLoad(
+  //
+  // `refresh`, not `reload`: receiving happens in a drawer sitting over this
+  // page, and `reload` would flip the strip to a null queue mid-write and blink
+  // it out and back. `refresh` keeps the current strip on screen until the new
+  // queue replaces it -- or removes it, when the last piece just came back.
+  const { data: outsideData, refresh: refreshOutsideQueue } = useLoad(
     () => getOutsideOpsForCompany(companyId),
     [companyId],
   );
@@ -291,6 +296,19 @@ export default function JobsPage() {
   // Free: the strip reads the queue above rather than fetching its own.
   // The drawer pays for its own detail, and only when someone opens it.
   const [outsideDrawerOpen, setOutsideDrawerOpen] = useState(false);
+
+  /**
+   * A receipt inside the drawer changes BOTH lists, so both get re-pulled.
+   *
+   * The strip is the one that is easy to forget, and the symptom is specific:
+   * receive the last piece that was out, and the band goes on announcing parts
+   * at a vendor until the page is reloaded. The drawer refreshes itself and the
+   * grid was refreshed here, so everything visible agreed except the one line
+   * making a claim about the world.
+   */
+  const handleOutsideReceived = useCallback(async () => {
+    await Promise.all([fetchJobs(), refreshOutsideQueue()]);
+  }, [fetchJobs, refreshOutsideQueue]);
 
   // Narrow to the exact stages the user selected. Stages are derived from
   // (production_status, fulfillment_status), so we match on the same helper the
@@ -953,7 +971,7 @@ export default function JobsPage() {
       <OutsideWorkDrawer
         companyId={companyId}
         onClose={() => setOutsideDrawerOpen(false)}
-        onReceived={fetchJobs}
+        onReceived={handleOutsideReceived}
       />
       )}
 

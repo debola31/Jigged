@@ -43,6 +43,7 @@ interface Seeded {
   jobId: string;
   jobPartId: string;
   opId: string;
+  jobNumber: string;
 }
 
 /**
@@ -84,12 +85,13 @@ async function seedOutsideJob(a: SupabaseClient): Promise<Seeded> {
     .from('parts').select('id').eq('company_id', companyId).eq('source', 'made').limit(1).single();
 
   const suffix = Math.random().toString(36).slice(2, 8);
+  const jobNumber = `VPS-${suffix}`;
   const { data: job, error: jobErr } = await a
     .from('jobs')
     .insert({
       company_id: companyId,
       customer_id: customer!.id,
-      job_number: `VPS-${suffix}`,
+      job_number: jobNumber,
       production_status: 'not_started',
       fulfillment_status: 'unshipped',
     })
@@ -128,7 +130,7 @@ async function seedOutsideJob(a: SupabaseClient): Promise<Seeded> {
     .single();
   if (opErr || !op) throw new Error(`job_operation seed: ${opErr?.message}`);
 
-  return { companyId, jobId: job.id, jobPartId: jp.id, opId: op.id };
+  return { companyId, jobId: job.id, jobPartId: jp.id, opId: op.id, jobNumber };
 }
 
 test.describe('outside processing — shipping & receiving', () => {
@@ -232,5 +234,57 @@ test.describe('outside processing — shipping & receiving', () => {
       .from('job_operations').select('status, sent_at').eq('id', opId).single();
     expect(undone!.status).toBe('sent');
     expect(undone!.sent_at).not.toBeNull();
+  });
+
+  test('receiving the last piece in the drawer clears the strip, with no reload', async ({ page }) => {
+    // THE STRIP HAS ITS OWN QUERY, and the drawer's receipt has to invalidate
+    // it. It shipped not doing that: receive the last thing that was out, close
+    // the drawer, and the band went on announcing parts at a vendor until
+    // someone reloaded the page — the one line on screen making a claim about
+    // the physical world, and the only one that was wrong.
+    //
+    // Counted as a DELTA rather than asserting the band disappears: the jobs
+    // list is company-wide and a sibling spec deliberately leaves an operation
+    // at a vendor, so "is it gone" is only true when this spec runs alone.
+    const a = admin();
+    const { companyId, jobId, jobNumber } = await seedOutsideJob(a);
+
+    await page.goto(`/dashboard/${companyId}/jobs/${jobId}`);
+    await page.getByRole('button', { name: /Send to /i }).click();
+    await page.getByRole('button', { name: /Send & print slip/i }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+    /** Jobs the strip says have parts out; 0 when it is absent, as it should be. */
+    const stripJobCount = async (): Promise<number> => {
+      const band = page.getByRole('button', { name: /See what's out/i });
+      if ((await band.count()) === 0) return 0;
+      const m = (await band.innerText()).match(/(\d+)\s+jobs?\s+ha[sv]e?\s+parts/i);
+      return m ? Number(m[1]) : 0;
+    };
+
+    await page.goto(`/dashboard/${companyId}/jobs`);
+    const band = page.getByRole('button', { name: /See what's out/i });
+    await expect(band).toBeVisible();
+    const before = await stripJobCount();
+    expect(before).toBeGreaterThan(0);
+
+    // The whole band is the target, and a click at its far left — over the
+    // text, not the label — has to open the drawer.
+    const box = (await band.boundingBox())!;
+    await page.mouse.click(box.x + 24, box.y + box.height / 2);
+
+    const jobLink = page.getByRole('button', { name: jobNumber, exact: true });
+    await expect(jobLink).toBeVisible();
+    // The Receive button on THIS job's row, not whichever row happens to be first.
+    await jobLink.locator('xpath=..').getByRole('button', { name: 'Receive' }).click();
+    // "Amount received" defaults to everything outstanding, so this is the
+    // last-piece case with no typing.
+    await page.getByRole('button', { name: /Record receipt/i }).click();
+    await expect(jobLink).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Close' }).first().click();
+
+    // NO page.reload() anywhere above. That is the assertion.
+    await expect.poll(stripJobCount, { timeout: 10_000 }).toBe(before - 1);
   });
 });

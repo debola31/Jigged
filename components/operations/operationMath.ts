@@ -104,11 +104,9 @@ export function outsideSendCaption(c: OutsideSendConsequence, vendor: string): s
 /**
  * What recording this receipt will do to the slip it is against.
  *
- * `good` and `scrapped` are separate because they answer different questions:
- * together they retire the vendor's outstanding balance (so the step stops
- * reading "at the vendor"), but only `good` counts toward the step being done.
- * 98 good + 2 scrapped of 100 closes the slip and leaves the step short — which
- * is exactly what an in-house op says at 98 good of 100.
+ * GOOD ONLY. What a vendor lost is settled by short-closing the slip, not by a
+ * second number here — which also keeps this in step with
+ * `operationCompletionConsequence`, since in-house completions are good-only too.
  */
 export type OutsideReceiptConsequence =
   | { kind: 'none' }
@@ -118,19 +116,15 @@ export type OutsideReceiptConsequence =
 
 export function outsideReceiptConsequence(
   goodInput: string | number,
-  scrappedInput: string | number,
   outstanding: number,
 ): OutsideReceiptConsequence {
-  const num = (v: string | number) => {
-    const p = typeof v === 'number' ? v : Number(v);
-    return Number.isFinite(p) ? Math.max(0, p) : 0;
-  };
-  const total = num(goodInput) + num(scrappedInput);
+  const parsed = typeof goodInput === 'number' ? goodInput : Number(goodInput);
+  const good = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   const out = Math.max(0, outstanding);
-  if (total <= 0) return { kind: 'none' };
-  if (total > out) return { kind: 'over', excess: total - out };
-  if (total === out) return { kind: 'closes' };
-  return { kind: 'partial', stillOut: out - total };
+  if (good <= 0) return { kind: 'none' };
+  if (good > out) return { kind: 'over', excess: good - out };
+  if (good === out) return { kind: 'closes' };
+  return { kind: 'partial', stillOut: out - good };
 }
 
 export function outsideReceiptCaption(

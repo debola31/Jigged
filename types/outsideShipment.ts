@@ -38,6 +38,15 @@ export interface OutsideShipment {
   due_back_on: string | null;
   carrier: string | null;
   notes: string | null;
+  /**
+   * Short-close: "that is everything we are getting". Retires whatever is still
+   * outstanding on this slip WITHOUT counting toward the operation's good total,
+   * so 98 good of 100 closes the slip and still leaves the step short. Sage's
+   * short-close, Oracle's quantity-cancelled. Distinct from a void, which says
+   * the send never counted at all.
+   */
+  closed_at: string | null;
+  closed_by: string | null;
 
   created_by: string | null;
   voided_at: string | null;
@@ -57,14 +66,14 @@ export interface OutsideShipmentReceipt {
   outside_shipment_id: string;
   job_operation_id: string;
   job_part_id: string;
-  /** Drives the operation's status against `job_parts.quantity`. */
-  quantity_good: number;
   /**
-   * What the vendor consumed or ruined. Retires the shipment's outstanding
-   * balance — so the op stops reading "at the vendor" — WITHOUT counting toward
-   * the good total, so 98 of 100 reads `in_progress`, not `completed`.
+   * Drives the operation's status against `job_parts.quantity`.
+   *
+   * GOOD-ONLY, matching `job_operation_completions`. What a vendor lost is
+   * settled by short-closing the slip, not by a scrap number here — a receipt
+   * records what came back, and nothing else.
    */
-  quantity_scrapped: number;
+  quantity_good: number;
   received_at: string;
   received_by: string | null;
   note: string | null;
@@ -101,9 +110,10 @@ export interface CreateOutsideShipmentPayload {
 
 export interface RecordOutsideReceiptPayload {
   quantityGood: number;
-  quantityScrapped?: number;
   receivedAt?: string | null;
   note?: string | null;
+  /** Short-close the slip in the same breath: nothing more is coming back. */
+  closeShipment?: boolean;
 }
 
 /**
@@ -116,8 +126,10 @@ export interface OutsideOperationSummary {
   qty_ordered: number;
   qty_sent: number;
   qty_good: number;
-  qty_scrapped: number;
-  /** sent − (good + scrapped), clamped at 0. What is physically at the vendor. */
+  /**
+   * Summed PER SLIP: a short-closed slip owes nothing however much came back on
+   * it, which a flat `sent − good` cannot express.
+   */
   qty_at_vendor: number;
   /**
    * What still has to go through the process: ordered − good − at_vendor,
@@ -141,13 +153,3 @@ export interface OutsideShipmentFilters {
   openOnly?: boolean;
 }
 
-/**
- * Money-free line the slip and the card both print for a receipt.
- * Kept here so the PDF and the UI cannot word the same fact differently.
- */
-export function describeOutsideReceipt(r: Pick<OutsideShipmentReceipt, 'quantity_good' | 'quantity_scrapped'>): string {
-  if (r.quantity_scrapped > 0) {
-    return `${r.quantity_good} back, ${r.quantity_scrapped} scrapped`;
-  }
-  return `${r.quantity_good} back`;
-}

@@ -206,8 +206,14 @@ docblock in [`utils/operatorAccess.ts`](../../utils/operatorAccess.ts). The cust
 
 ## Surfaces
 
-**Send and receive live ONLY on the operation** — the office card and the operator step screen.
-Everything else is read-and-reprint. That is deliberate: a cross-job outside-work *action* tab was
+**Receive is on the operation AND in the drawer; send and undo are only on the operation.** The
+asymmetry is the point. The Aug 2026 tab was deleted for carrying all three across every job — a
+duplicate of what the operation card already did. Receiving is the one that is *not* a duplicate:
+when a truck arrives from the plater with three boxes for three jobs, the dock does that in one
+place, and an operation card structurally cannot serve it because it only ever knows one operation.
+Sending and undoing have no batch shape — you send one step's parts while looking at that step — so
+they stay put, and this does not become the tab again. **Both receive paths call the same access
+function**, which is what stops the two surfaces drifting. Everything else is read-and-reprint. That is deliberate: a cross-job outside-work *action* tab was
 deleted in Aug 2026 because a second place to act on the same row is a liability
 ([jobs.md](jobs.md#outside-external-vendor-operations)), and that argument still holds.
 
@@ -228,7 +234,7 @@ between AND and OR.
 | **Operator step screen** | One tap survives and gains a fact: the button reads `SEND 50 TO PROFINISH`, the same move the page already makes with `RECORD n FINISHED`. Scrap is **progressively disclosed** — two prefilled numeric fields side by side on a one-handed phone is the shape that gets fat-fingered. |
 | **Slip preview** | Reprint, download, print — and **Void, which lives here and nowhere else**, so the destructive action is only reachable once the document is on screen. |
 | **Jobs-page strip** ([`OutsideWorkStrip`](../../components/jobs/OutsideWorkStrip.tsx)) | Renders **only while something is at a vendor** — so on the days nothing is out, most days for a shop with three outside steps, the Jobs page is exactly what it was. Costs no query: every number comes from the outside queue the page already loads for its At-vendor chip. |
-| **Outside-work drawer** ([`OutsideWorkDrawer`](../../components/jobs/OutsideWorkDrawer.tsx)) | Opened by the strip. Grouped **by vendor**, oldest first, because "what has PerformCoat got?" is how the question is actually asked. Each row is **one link — the job number** — deep-linking to `?op=` on the job; the slip is reachable from that step, where anyone deciding to reprint it is already standing. Loaded on open, not with the page. **No send, no receive, no undo.** |
+| **Outside-work drawer** ([`OutsideWorkDrawer`](../../components/jobs/OutsideWorkDrawer.tsx)) | Opened by the strip. Grouped **by vendor**, oldest first, because "what has PerformCoat got?" is how the question is actually asked. Each row is the job number as **one link** — deep-linking to `?op=` on the job — plus **Receive**. Loaded on open, not with the page. |
 
 ### Surveillance guardrail
 

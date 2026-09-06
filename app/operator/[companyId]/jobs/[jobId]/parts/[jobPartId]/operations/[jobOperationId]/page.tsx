@@ -3,6 +3,7 @@
 import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
+import { daysAtVendorBucket } from '@/components/jobs/outsideWorkMetrics';
 import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -11,7 +12,9 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
+import Checkbox from '@mui/material/Checkbox';
 import CircularProgress from '@mui/material/CircularProgress';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
@@ -92,22 +95,6 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
 const OP_DETAILS_KEY = 'jigged:op-details-expanded';
 
 
-/**
- * Days at the vendor, BUCKETED -- and bucketed here for the same reason the
- * office buckets it: a raw duration answers nothing the bucket does not, and 21
- * days is already the shop-facing threshold. It describes the JOB, never the
- * person: it is derived from one shipment's ship date, and nothing on this
- * screen accumulates across jobs.
- */
-function daysAtVendorBucket(shippedAt: string | null): string {
-  if (!shippedAt) return 'unknown';
-  const days = (Date.now() - Date.parse(shippedAt)) / 86_400_000;
-  if (days < 1) return 'same_day';
-  if (days <= 3) return '1_3d';
-  if (days <= 7) return '4_7d';
-  if (days <= 21) return '8_21d';
-  return 'over_21d';
-}
 
 export default function OperatorOperationActionPage() {
   const params = useParams();
@@ -174,11 +161,10 @@ export default function OperatorOperationActionPage() {
   // then defaults to the remaining balance (dialled down for a partial).
   const [qtyInput, setQtyInput] = useState('');
   const [qtyDirty, setQtyDirty] = useState(false);
-  // SCRAP IS PROGRESSIVELY DISCLOSED. One field and one tap covers the normal
-  // return; two prefilled numeric fields side by side on a one-handed phone
-  // screen is the shape that gets fat-fingered. The office sees both at once.
-  const [scrapInput, setScrapInput] = useState('');
-  const [showScrap, setShowScrap] = useState(false);
+  // "That is everything we are getting" -- one checkbox, not a second number.
+  // A short return is settled by closing the slip, the way Sage and Oracle do
+  // it, rather than by reconciling a scrap quantity on a phone.
+  const [closeSlip, setCloseSlip] = useState(false);
   const [slipNotice, setSlipNotice] = useState<string | null>(null);
   // Bumped after every step action — start, complete, cancel — so the feed below
   // reloads and shows the row it created. It is also what makes the composer
@@ -328,7 +314,6 @@ export default function OperatorOperationActionPage() {
         : '';
 
   const outsideQty = Number(qtyValue) || 0;
-  const scrapQty = Number(scrapInput) || 0;
 
   const canComplete = Number(qtyValue) > 0;
 
@@ -603,18 +588,17 @@ export default function OperatorOperationActionPage() {
     try {
       const result = await receiveOutsideOperation(jobOperationId, {
         quantityGood: outsideQty,
-        quantityScrapped: scrapQty,
+        closeShipment: closeSlip,
       });
       posthog.capture('outside shipment received', {
         surface: 'operator',
-        is_full: outsideQty + scrapQty >= (outside?.qty_at_vendor ?? 0),
-        had_scrap: scrapQty > 0,
+        is_full: outsideQty >= (outside?.qty_at_vendor ?? 0),
+        short_closed: closeSlip,
         was_backfilled: result.wasBackfilled,
         days_at_vendor_bucket: daysAtVendorBucket(outside?.oldest_open_shipped_at ?? null),
       });
       setQtyDirty(false);
-      setScrapInput('');
-      setShowScrap(false);
+      setCloseSlip(false);
       await reloadAll();
     } catch (err) {
       setError(err);
@@ -1034,18 +1018,6 @@ export default function OperatorOperationActionPage() {
 
           {outsideMode === 'receive' && (
             <>
-              {showScrap && (
-                <TextField
-                  label="Scrapped at vendor"
-                  type="number"
-                  value={scrapInput}
-                  onChange={(e) => setScrapInput(e.target.value)}
-                  inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Scrapped at vendor' }}
-                  fullWidth
-                  size="small"
-                  sx={{ '& .MuiOutlinedInput-root': { minHeight: 48 } }}
-                />
-              )}
               <Button
                 fullWidth
                 variant="contained"
@@ -1053,23 +1025,32 @@ export default function OperatorOperationActionPage() {
                 color="primary"
                 startIcon={<Inventory2Icon />}
                 onClick={handleReceive}
-                disabled={actionLoading || outsideQty + scrapQty <= 0}
+                disabled={actionLoading || (outsideQty <= 0 && !closeSlip)}
                 sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
               >
                 {actionLoading ? <CircularProgress size={24} /> : `RECEIVE ${outsideQty}`}
               </Button>
-              {!showScrap && (
-                <Button
-                  fullWidth
-                  variant="text"
-                  size="small"
-                  color="inherit"
-                  onClick={() => setShowScrap(true)}
-                  sx={{ minHeight: 44 }}
-                >
-                  Some were scrapped
-                </Button>
-              )}
+              {/* ONE CHECKBOX, not a second number. A short return is settled by
+                  closing the slip -- Sage's short-close, Oracle's
+                  quantity-cancelled -- rather than by reconciling a scrap
+                  quantity on a phone. The pieces stay missing from the good
+                  total either way; what this settles is the paperwork, so a
+                  write-off stops sitting on the chase list. */}
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={closeSlip}
+                    onChange={(e) => setCloseSlip(e.target.checked)}
+                    sx={{ minWidth: 44, minHeight: 44 }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    That&apos;s everything we&apos;re getting
+                  </Typography>
+                }
+                sx={{ mx: 0 }}
+              />
             </>
           )}
 

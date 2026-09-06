@@ -32,6 +32,9 @@ const { mockSupabase, queueBuilders, mockRpc, mockCapture } = vi.hoisted(() => {
     rpc,
     auth: {
       getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null }),
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { user: { id: 'user-1' } } }, error: null,
+      }),
     },
   };
   return {
@@ -51,6 +54,7 @@ vi.mock('@sentry/nextjs', () => ({ captureException: mockCapture }));
 
 import {
   compareOutsideShipmentOrder,
+  receiveOutsideShipment,
   createOutsideShipment,
   getOutsideSummariesForPart,
   getSentBeforeShipment,
@@ -100,6 +104,61 @@ describe('createOutsideShipment', () => {
   });
 });
 
+describe('receiveOutsideShipment', () => {
+  const shipRow = {
+    company_id: 'co-1', id: 'ship-1', job_operation_id: 'op-1',
+    job_part_id: 'jp-1', voided_at: null,
+  };
+
+  it('CLOSES the slip when asked, not just accepts the flag', async () => {
+    // The flag was plumbed through the payload, validated against, and then
+    // silently dropped -- every test passed because none asserted the close
+    // actually happened. Only clicking it in the browser found it.
+    const lookup = buildQueryStub({ data: shipRow });
+    const insert = buildQueryStub({ data: { id: 'r-1' } });
+    const close = buildQueryStub({ data: null });
+    queueBuilders([lookup, insert, close]);
+
+    await receiveOutsideShipment('ship-1', { quantityGood: 48, closeShipment: true });
+
+    expect(close.update).toHaveBeenCalledWith(
+      expect.objectContaining({ closed_at: expect.any(String), closed_by: 'user-1' }),
+    );
+    // Idempotent, and never re-closes a voided slip.
+    expect(close.is).toHaveBeenCalledWith('closed_at', null);
+    expect(close.is).toHaveBeenCalledWith('voided_at', null);
+  });
+
+  it('does not close when the flag is absent', async () => {
+    const lookup = buildQueryStub({ data: shipRow });
+    const insert = buildQueryStub({ data: { id: 'r-1' } });
+    queueBuilders([lookup, insert]);
+    // A third builder would throw "ran out of stubbed builders" if it closed.
+    await expect(
+      receiveOutsideShipment('ship-1', { quantityGood: 48 }),
+    ).resolves.toEqual({ receiptId: 'r-1' });
+  });
+
+  it('writes NO receipt for a close with nothing received', async () => {
+    // The vendor returned nothing and the shop is writing the slip off. A zero
+    // receipt would be meaningless, and the CHECK refuses it anyway.
+    const lookup = buildQueryStub({ data: shipRow });
+    const close = buildQueryStub({ data: null });
+    queueBuilders([lookup, close]);
+
+    await expect(
+      receiveOutsideShipment('ship-1', { quantityGood: 0, closeShipment: true }),
+    ).resolves.toEqual({ receiptId: null });
+    expect(close.update).toHaveBeenCalled();
+  });
+
+  it('refuses a receipt of nothing that is not a close', async () => {
+    await expect(
+      receiveOutsideShipment('ship-1', { quantityGood: 0 }),
+    ).rejects.toThrow(/how many came back/i);
+  });
+});
+
 describe('voidOutsideShipment', () => {
   it('goes through the RPC, because the ordering is what keeps the job rollup alive', async () => {
     mockRpc.mockResolvedValue({ data: 2, error: null });
@@ -119,54 +178,53 @@ describe('getOutsideSummariesForPart', () => {
     await expect(getOutsideSummariesForPart('jp-1')).resolves.toEqual([]);
   });
 
-  it('derives at-vendor and to-send, and scrap retires the vendor balance without completing the step', async () => {
+  it('derives at-vendor and to-send per slip', async () => {
     queueBuilders([
       buildQueryStub({ data: ops }),
       buildQueryStub({
         data: [
-          { id: 's1', job_operation_id: 'op-out', quantity: 60, shipped_at: '2026-08-01T00:00:00Z', due_back_on: '2026-08-08' },
-          { id: 's2', job_operation_id: 'op-out', quantity: 40, shipped_at: '2026-08-05T00:00:00Z', due_back_on: null },
+          { id: 's1', job_operation_id: 'op-out', quantity: 60, shipped_at: '2026-08-01T00:00:00Z', due_back_on: '2026-08-08', closed_at: null },
+          { id: 's2', job_operation_id: 'op-out', quantity: 40, shipped_at: '2026-08-05T00:00:00Z', due_back_on: null, closed_at: null },
         ],
       }),
       buildQueryStub({
         data: [
-          { job_operation_id: 'op-out', outside_shipment_id: 's1', quantity_good: 58, quantity_scrapped: 2 },
+          { job_operation_id: 'op-out', outside_shipment_id: 's1', quantity_good: 60 },
         ],
       }),
     ]);
 
     const [row] = await getOutsideSummariesForPart('jp-1');
     expect(row.qty_sent).toBe(100);
-    expect(row.qty_good).toBe(58);
-    expect(row.qty_scrapped).toBe(2);
-    // s1 is fully accounted for (58 + 2 = 60); only s2's 40 are still out.
+    expect(row.qty_good).toBe(60);
+    // s1 is fully accounted for; only s2's 40 are still out.
     expect(row.qty_at_vendor).toBe(40);
-    // ordered 100 − good 58 − at_vendor 40 = 2: the pieces the vendor scrapped
-    // have to be re-run and sent again. `ordered − sent` would say 0 here and
-    // leave the job two parts short with nothing to send.
-    expect(row.qty_to_send).toBe(2);
+    // ordered 100 − good 60 − at_vendor 40 = 0: everything is either back or away.
+    expect(row.qty_to_send).toBe(0);
     expect(row.open_slip_count).toBe(1);
-    // s1 is closed, so its due date must not be the one the UI chases.
+    // s1 is fully received, so its ship date must not be the one the UI chases.
     expect(row.oldest_open_shipped_at).toBe('2026-08-05T00:00:00Z');
     expect(row.earliest_due_back_on).toBeNull();
   });
 
-  it('counts scrapped pieces back into what still has to be sent', async () => {
-    // Everything ordered went out, 10 came back good and the vendor ruined 2.
-    // Nothing is at the vendor and the step is two short, so two still have to
-    // be re-run and sent -- which is the case that surfaced a dead "SEND 0"
-    // button when this was `ordered - sent`.
+  it('a SHORT-CLOSED slip owes nothing, however little came back on it', async () => {
+    // Sage's short-close. The 2 stay missing from qty_good -- so the step is
+    // still short -- but the slip stops reading as at-the-vendor, which is what
+    // stops a write-off sitting on the chase list forever.
     queueBuilders([
+      buildQueryStub({ data: [ops[0]] }),
       buildQueryStub({
-        data: [{ id: 'op-out', vendor_service_id: 'vs-1', job_part: { quantity: 12 } }],
+        data: [{ id: 's1', job_operation_id: 'op-out', quantity: 100, shipped_at: 'x', due_back_on: null, closed_at: '2026-08-09T00:00:00Z' }],
       }),
-      buildQueryStub({ data: [{ id: 's1', job_operation_id: 'op-out', quantity: 12, shipped_at: 'x', due_back_on: null }] }),
       buildQueryStub({
-        data: [{ job_operation_id: 'op-out', outside_shipment_id: 's1', quantity_good: 10, quantity_scrapped: 2 }],
+        data: [{ job_operation_id: 'op-out', outside_shipment_id: 's1', quantity_good: 98 }],
       }),
     ]);
     const [row] = await getOutsideSummariesForPart('jp-1');
     expect(row.qty_at_vendor).toBe(0);
+    expect(row.qty_good).toBe(98);
+    expect(row.open_slip_count).toBe(0);
+    // Still two short of the order, so they reappear as work to send.
     expect(row.qty_to_send).toBe(2);
   });
 
@@ -187,7 +245,7 @@ describe('getOutsideSummariesForPart', () => {
       buildQueryStub({ data: [ops[0]] }),
       buildQueryStub({
         data: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 25.5].map((q, i) => ({
-          id: `s${i}`, job_operation_id: 'op-out', quantity: q, shipped_at: 'x', due_back_on: null,
+          id: `s${i}`, job_operation_id: 'op-out', quantity: q, shipped_at: 'x', due_back_on: null, closed_at: null,
         })),
       }),
       buildQueryStub({ data: [] }),
@@ -254,8 +312,8 @@ describe('listOutsideShipmentsForCompany', () => {
     queueBuilders([
       buildQueryStub({
         data: [
-          { id: 's1', quantity: 10, voided_at: null, receipts: [{ quantity_good: 10, quantity_scrapped: 0, voided_at: null }] },
-          { id: 's2', quantity: 10, voided_at: null, receipts: [] },
+          { id: 's1', quantity: 10, voided_at: null, closed_at: null, receipts: [{ quantity_good: 10, voided_at: null }] },
+          { id: 's2', quantity: 10, voided_at: null, closed_at: null, receipts: [] },
         ],
       }),
     ]);
@@ -265,19 +323,21 @@ describe('listOutsideShipmentsForCompany', () => {
 });
 
 describe('outstandingOn', () => {
-  it('counts scrapped pieces as accounted for — they are not still on the rack', () => {
+  it('a CLOSED slip owes nothing, whatever came back on it', () => {
     expect(outstandingOn({
-      quantity: 100, voided_at: null,
-      receipts: [{ quantity_good: 98, quantity_scrapped: 2, voided_at: null }],
+      quantity: 100, voided_at: null, closed_at: '2026-08-09',
+      receipts: [{ quantity_good: 98, voided_at: null }],
     } as never)).toBe(0);
   });
 
   it('ignores voided receipts, and a voided slip owes nothing', () => {
+    // A void says the send never counted; a close says it counted and is
+    // finished. Different facts, same effect on what the vendor owes.
     expect(outstandingOn({
-      quantity: 100, voided_at: null,
-      receipts: [{ quantity_good: 100, quantity_scrapped: 0, voided_at: '2026-08-01' }],
+      quantity: 100, voided_at: null, closed_at: null,
+      receipts: [{ quantity_good: 100, voided_at: '2026-08-01' }],
     } as never)).toBe(100);
-    expect(outstandingOn({ quantity: 100, voided_at: '2026-08-01', receipts: [] } as never)).toBe(0);
+    expect(outstandingOn({ quantity: 100, voided_at: '2026-08-01', closed_at: null, receipts: [] } as never)).toBe(0);
   });
 });
 

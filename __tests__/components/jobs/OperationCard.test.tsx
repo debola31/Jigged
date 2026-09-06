@@ -142,7 +142,6 @@ describe('OperationCard — external (outside-vendor) operations', () => {
     qty_ordered: 100,
     qty_sent: 0,
     qty_good: 0,
-    qty_scrapped: 0,
     qty_at_vendor: 0,
     qty_to_send: 100,
     oldest_open_shipped_at: null,
@@ -202,9 +201,9 @@ describe('OperationCard — external (outside-vendor) operations', () => {
 
   it('reads the ledger back in the shop\'s own words, dropping every zero clause', () => {
     renderExternal(externalOp({ status: 'sent' }), {
-      outside: ledger({ qty_sent: 100, qty_good: 48, qty_scrapped: 2, qty_at_vendor: 50, qty_to_send: 0 }),
+      outside: ledger({ qty_sent: 100, qty_good: 48, qty_at_vendor: 50, qty_to_send: 2 }),
     });
-    expect(screen.getByText(/48 \/ 100 back · 50 at vendor · 2 scrapped/)).toBeInTheDocument();
+    expect(screen.getByText(/48 \/ 100 back · 50 at vendor · 2 to send/)).toBeInTheDocument();
   });
 
   it('keeps Receive as a filled PRIMARY button, never green', async () => {

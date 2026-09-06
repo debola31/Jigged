@@ -953,6 +953,7 @@ export default function JobsPage() {
       <OutsideWorkDrawer
         companyId={companyId}
         onClose={() => setOutsideDrawerOpen(false)}
+        onReceived={fetchJobs}
       />
       )}
 

@@ -8,7 +8,8 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import MenuItem from '@mui/material/MenuItem';
-import Stack from '@mui/material/Stack';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 
@@ -27,7 +28,8 @@ export interface OpenSlipOption {
 export interface ReceiveFromVendorSubmit {
   shipmentId: string | null;
   quantityGood: number;
-  quantityScrapped: number;
+  /** Short-close: nothing more is coming back on this slip. */
+  closeShipment: boolean;
 }
 
 interface ReceiveFromVendorDialogProps {
@@ -48,6 +50,13 @@ interface ReceiveFromVendorDialogProps {
  * OLDEST SLIP FIRST, and it is the default. A plater returns the first batch
  * first, and it is the one whose due-back has aged — so FIFO is both what
  * happened and what the shop is chasing.
+ *
+ * A SHORT RETURN IS A CLOSE, NOT A SCRAP NUMBER. "That's everything we're
+ * getting" settles the slip's remainder without pretending it came back -- the
+ * pieces stay missing from the operation's good total, so the step is still
+ * short. That is Sage's short-close and Oracle's quantity-cancelled, and it
+ * replaced a `quantity_scrapped` field that disagreed with our own in-house
+ * completions, which are deliberately good-only.
  *
  * THE NO-SLIP CASE IS SAID OUT LOUD. When nothing is open — nobody made a slip
  * and the parts came back anyway — the receipt still needs a shipment to hang
@@ -71,15 +80,15 @@ export default function ReceiveFromVendorDialog({
   const [goodInput, setGoodInput] = useState(() =>
     first && first.outstanding > 0 ? String(first.outstanding) : '',
   );
-  const [scrapInput, setScrapInput] = useState('');
-  const [showScrap, setShowScrap] = useState(false);
+  const [closeSlip, setCloseSlip] = useState(false);
 
   const slip = openSlips.find((s) => s.id === slipId) ?? first;
   const outstanding = slip?.outstanding ?? 0;
-  const consequence = outsideReceiptConsequence(goodInput, scrapInput, outstanding);
+  const consequence = outsideReceiptConsequence(goodInput, outstanding);
   const good = Number(goodInput) || 0;
-  const scrapped = Number(scrapInput) || 0;
-  const canSubmit = good + scrapped > 0 && !busy;
+  // A close with no receipt is legitimate -- the vendor returned nothing and the
+  // shop is writing the slip off.
+  const canSubmit = (good > 0 || closeSlip) && !busy;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -123,39 +132,44 @@ export default function ReceiveFromVendorDialog({
           </Typography>
         )}
 
-        <Stack direction="row" spacing={2} sx={{ mb: 1 }}>
-          <TextField
-            label="Good received"
-            type="number"
-            value={goodInput}
-            onChange={(e) => setGoodInput(e.target.value)}
-            autoFocus
-            fullWidth
-            slotProps={{ htmlInput: { min: 0, step: 'any' } }}
-          />
-          {showScrap && (
-            <TextField
-              label="Scrapped at vendor"
-              type="number"
-              value={scrapInput}
-              onChange={(e) => setScrapInput(e.target.value)}
-              fullWidth
-              slotProps={{ htmlInput: { min: 0, step: 'any' } }}
-            />
-          )}
-        </Stack>
+        <TextField
+          label="Good received"
+          type="number"
+          value={goodInput}
+          onChange={(e) => setGoodInput(e.target.value)}
+          autoFocus
+          fullWidth
+          slotProps={{ htmlInput: { min: 0, step: 'any' } }}
+          sx={{ mb: 1 }}
+        />
 
-        {!showScrap && (
-          <Button size="small" onClick={() => setShowScrap(true)} sx={{ mb: 1 }}>
-            Some were scrapped
-          </Button>
-        )}
+        {/* ONE CHECKBOX, not a second number. The shortfall is settled by
+            closing the slip rather than by reconciling a scrap quantity -- the
+            pieces stay missing from the good total either way, so the step is
+            still short and the shop still re-runs them or drops the order. */}
+        <FormControlLabel
+          control={
+            <Checkbox checked={closeSlip} onChange={(e) => setCloseSlip(e.target.checked)} />
+          }
+          label={
+            <Typography variant="body2">
+              That&apos;s everything we&apos;re getting
+              {outstanding > good ? ` — writes off ${outstanding - good}` : ''}
+            </Typography>
+          }
+          sx={{ mb: 1 }}
+        />
 
+        {/* The checkbox and this line must never contradict each other. Ticked,
+            the remainder is being written off -- saying "2 still at the vendor"
+            underneath it describes the outcome of NOT ticking it. */}
         <Typography
           variant="body2"
           color={consequence.kind === 'over' ? 'warning.main' : 'text.secondary'}
         >
-          {outsideReceiptCaption(consequence, vendorName) || ' '}
+          {closeSlip
+            ? `${slip?.slip_number ?? 'This slip'} closes — nothing more expected back.`
+            : outsideReceiptCaption(consequence, vendorName) || ' '}
         </Typography>
       </DialogContent>
       <DialogActions>
@@ -167,7 +181,7 @@ export default function ReceiveFromVendorDialog({
             onSubmit({
               shipmentId: slip?.id ?? null,
               quantityGood: good,
-              quantityScrapped: scrapped,
+              closeShipment: closeSlip,
             })
           }
           variant="contained"

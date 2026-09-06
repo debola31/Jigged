@@ -2101,7 +2101,6 @@ export type Database = {
           note: string | null
           outside_shipment_id: string
           quantity_good: number
-          quantity_scrapped: number
           received_at: string
           received_by: string | null
           updated_at: string
@@ -2117,7 +2116,6 @@ export type Database = {
           note?: string | null
           outside_shipment_id: string
           quantity_good?: number
-          quantity_scrapped?: number
           received_at?: string
           received_by?: string | null
           updated_at?: string
@@ -2133,7 +2131,6 @@ export type Database = {
           note?: string | null
           outside_shipment_id?: string
           quantity_good?: number
-          quantity_scrapped?: number
           received_at?: string
           received_by?: string | null
           updated_at?: string
@@ -2170,6 +2167,8 @@ export type Database = {
       outside_shipments: {
         Row: {
           carrier: string | null
+          closed_at: string | null
+          closed_by: string | null
           company_id: string
           created_at: string
           created_by: string | null
@@ -2195,6 +2194,8 @@ export type Database = {
         }
         Insert: {
           carrier?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
@@ -2220,6 +2221,8 @@ export type Database = {
         }
         Update: {
           carrier?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null

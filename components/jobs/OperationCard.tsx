@@ -330,7 +330,6 @@ export default function OperationCard({
               {[
                 `${outside.qty_good} / ${outside.qty_ordered} back`,
                 outside.qty_at_vendor > 0 ? `${outside.qty_at_vendor} at vendor` : '',
-                outside.qty_scrapped > 0 ? `${outside.qty_scrapped} scrapped` : '',
                 outside.qty_to_send > 0 ? `${outside.qty_to_send} to send` : '',
               ]
                 .filter(Boolean)
@@ -488,7 +487,6 @@ export default function OperationCard({
                     const voided = sl.voided_at !== null;
                     const live = (sl.receipts ?? []).filter((r) => !r.voided_at);
                     const good = live.reduce((n, r) => n + Number(r.quantity_good), 0);
-                    const scrap = live.reduce((n, r) => n + Number(r.quantity_scrapped), 0);
                     const out = outstandingOn(sl);
                     return (
                       <Box
@@ -501,8 +499,8 @@ export default function OperationCard({
                         >
                           {sl.quantity} sent {formatDateTime(sl.shipped_at)}
                           {good > 0 ? ` · ${good} back` : ''}
-                          {scrap > 0 ? `, ${scrap} scrapped` : ''}
                           {!voided && out > 0 ? ` · ${out} still out` : ''}
+                          {sl.closed_at ? ' · closed short' : ''}
                           {voided ? ' · voided' : ''}
                         </Typography>
                         {/* The slip NUMBER is the control, matching the drawer.

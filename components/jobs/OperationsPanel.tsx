@@ -33,6 +33,7 @@ import {
   getOperationCompletionSummaries,
 } from '@/utils/operationCompletionsAccess';
 import posthog from 'posthog-js';
+import { daysAtVendorBucket } from './outsideWorkMetrics';
 import { getOperationActuals } from '@/utils/operationIntervalsAccess';
 import type { OperationActuals } from '@/types/operationInterval';
 import { useSearchParams } from 'next/navigation';
@@ -49,22 +50,6 @@ const EMPTY_SUMMARY_MAP: Map<string, OperationCompletionSummary> = new Map();
 const EMPTY_ACTUALS_MAP: Map<string, OperationActuals> = new Map();
 const EMPTY_OUTSIDE_MAP: Map<string, OutsideOperationSummary> = new Map();
 
-/**
- * Days at the vendor, BUCKETED. A raw per-slip duration answers nothing the
- * bucket does not, and 21 days is already the shop-facing threshold the vendor
- * page paints red -- so the analytics boundary is the same one the product
- * draws. Buckets, not a number, also keeps this shape-only per the telemetry
- * convention.
- */
-function daysAtVendorBucket(shippedAt: string | null): string {
-  if (!shippedAt) return 'unknown';
-  const days = (Date.now() - Date.parse(shippedAt)) / 86_400_000;
-  if (days < 1) return 'same_day';
-  if (days <= 3) return '1_3d';
-  if (days <= 7) return '4_7d';
-  if (days <= 21) return '8_21d';
-  return 'over_21d';
-}
 
 interface OperationsPanelProps {
   job: Job;
@@ -388,16 +373,16 @@ export default function OperationsPanel({
       const result = v.shipmentId
         ? await receiveOutsideShipment(v.shipmentId, {
             quantityGood: v.quantityGood,
-            quantityScrapped: v.quantityScrapped,
+            closeShipment: v.closeShipment,
           }).then(() => ({ wasBackfilled: false }))
         : await receiveOutsideOperation(receiveOp.id, {
             quantityGood: v.quantityGood,
-            quantityScrapped: v.quantityScrapped,
+            closeShipment: v.closeShipment,
           });
       posthog.capture('outside shipment received', {
         surface: 'office',
-        is_full: slip ? v.quantityGood + v.quantityScrapped >= slip.outstanding : true,
-        had_scrap: v.quantityScrapped > 0,
+        is_full: slip ? v.quantityGood >= slip.outstanding : true,
+        short_closed: Boolean(v.closeShipment),
         was_backfilled: result.wasBackfilled,
         days_at_vendor_bucket: daysAtVendorBucket(shippedAt),
       });

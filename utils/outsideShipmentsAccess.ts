@@ -57,11 +57,11 @@ const SHIPMENT_COLUMNS =
   'id, company_id, job_id, job_part_id, job_operation_id, vendor_id, vendor_address_id, ' +
   'vendor_contact_id, vendor_name, service_name, ship_to_address, ship_to_contact, ' +
   'slip_number, quantity, shipped_at, due_back_on, carrier, notes, created_by, ' +
-  'voided_at, voided_by, created_at, updated_at';
+  'closed_at, closed_by, voided_at, voided_by, created_at, updated_at';
 
 const RECEIPT_COLUMNS =
   'id, company_id, outside_shipment_id, job_operation_id, job_part_id, quantity_good, ' +
-  'quantity_scrapped, received_at, received_by, note, voided_at, voided_by, created_at, updated_at';
+  'received_at, received_by, note, voided_at, voided_by, created_at, updated_at';
 
 // ---------------------------------------------------------------------------
 // Writes
@@ -122,11 +122,12 @@ export async function createOutsideShipment(
 export async function receiveOutsideShipment(
   shipmentId: string,
   payload: RecordOutsideReceiptPayload,
-): Promise<{ receiptId: string }> {
+): Promise<{ receiptId: string | null }> {
   const good = payload.quantityGood ?? 0;
-  const scrapped = payload.quantityScrapped ?? 0;
-  if (!(good + scrapped > 0)) {
-    throw new Error('Record how many came back, or how many the vendor scrapped.');
+  // A close with NO receipt is legitimate: the vendor returned nothing and the
+  // shop is writing the slip off. A receipt of nothing is not.
+  if (good <= 0 && !payload.closeShipment) {
+    throw new Error('Record how many came back.');
   }
 
   const supabase = getSupabase();
@@ -154,24 +155,66 @@ export async function receiveOutsideShipment(
     throw new Error('That slip was voided — nothing can be received against it.');
   }
 
-  const { data, error } = await supabase
-    .from('outside_shipment_receipts')
-    .insert({
-      company_id: ship.company_id,
-      outside_shipment_id: ship.id,
-      job_operation_id: ship.job_operation_id,
-      job_part_id: ship.job_part_id,
-      quantity_good: good,
-      quantity_scrapped: scrapped,
-      received_at: payload.receivedAt ?? undefined,
-      received_by: session?.user.id ?? null,
-      note: payload.note?.trim() || null,
-    })
-    .select('id')
-    .single();
+  // A close with no pieces is legitimate -- the vendor returned nothing and the
+  // shop is writing the slip off -- so the receipt is skipped rather than faked
+  // with a zero, which the CHECK would refuse anyway.
+  let receiptId: string | null = null;
+  if (good > 0) {
+    const { data, error } = await supabase
+      .from('outside_shipment_receipts')
+      .insert({
+        company_id: ship.company_id,
+        outside_shipment_id: ship.id,
+        job_operation_id: ship.job_operation_id,
+        job_part_id: ship.job_part_id,
+        quantity_good: good,
+        received_at: payload.receivedAt ?? undefined,
+        received_by: session?.user.id ?? null,
+        note: payload.note?.trim() || null,
+      })
+      .select('id')
+      .single();
 
-  if (error || !data) throw toFriendlyError(error, { entity: 'receipt' });
-  return { receiptId: data.id };
+    if (error || !data) throw toFriendlyError(error, { entity: 'receipt' });
+    receiptId = data.id;
+  }
+
+  // AFTER the receipt, so what came back is counted before the remainder is
+  // written off. Closing first would still land the same numbers, but only
+  // because the derivation is a pure function of both -- and relying on that is
+  // how an ordering assumption becomes load-bearing without anyone saying so.
+  if (payload.closeShipment) await closeOutsideShipment(shipmentId);
+
+  return { receiptId };
+}
+
+/**
+ * "That is everything we are getting."
+ *
+ * Retires whatever is still outstanding on one slip without pretending it came
+ * back: the pieces stay missing from the operation's good total, so the step is
+ * still short and the shop still has to re-run them or drop the order quantity.
+ * What it settles is the SLIP, so a written-off shortfall stops sitting on the
+ * chase list forever.
+ *
+ * A column-scoped UPDATE, not an RPC. Voiding a shipment has to be an RPC
+ * because its two statements must run in order; closing touches two columns and
+ * nothing cascades from the order it happens in.
+ */
+export async function closeOutsideShipment(shipmentId: string): Promise<void> {
+  const supabase = getSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error('You must be signed in to close a slip.');
+
+  const { error } = await supabase
+    .from('outside_shipments')
+    .update({ closed_at: new Date().toISOString(), closed_by: session.user.id })
+    .eq('id', shipmentId)
+    .is('closed_at', null)
+    .is('voided_at', null);
+  if (error) throw toFriendlyError(error, { entity: 'shipment' });
 }
 
 /**
@@ -191,9 +234,8 @@ export async function receiveOutsideShipment(
 export async function receiveOutsideOperation(
   jobOperationId: string,
   payload: RecordOutsideReceiptPayload,
-): Promise<{ shipmentId: string; receiptId: string; wasBackfilled: boolean }> {
+): Promise<{ shipmentId: string; receiptId: string | null; wasBackfilled: boolean }> {
   const good = payload.quantityGood ?? 0;
-  const scrapped = payload.quantityScrapped ?? 0;
 
   const open = await getOpenOutsideShipments(jobOperationId);
   if (open.length > 0) {
@@ -206,7 +248,7 @@ export async function receiveOutsideOperation(
 
   const { shipmentId } = await createOutsideShipment({
     jobOperationId,
-    quantity: good + scrapped,
+    quantity: good,
     notes: 'Recorded when the parts came back — no slip was made for the send.',
   });
   const { receiptId } = await receiveOutsideShipment(shipmentId, payload);
@@ -371,11 +413,11 @@ export async function getOpenOutsideShipments(
 ): Promise<(OutsideShipment & { outstanding: number })[]> {
   const all = await getOutsideShipmentsForOperation(jobOperationId);
   return all
-    .filter((s) => !s.voided_at)
+    .filter((s) => !s.voided_at && !s.closed_at)
     .map((s) => {
       const back = (s.receipts ?? [])
         .filter((r) => !r.voided_at)
-        .reduce((n, r) => n + Number(r.quantity_good) + Number(r.quantity_scrapped), 0);
+        .reduce((n, r) => n + Number(r.quantity_good), 0);
       return { ...s, outstanding: roundQty(Math.max(0, Number(s.quantity) - back)) };
     })
     .filter((s) => s.outstanding > 0)
@@ -433,12 +475,12 @@ export async function getOutsideSummariesForPart(
   const [{ data: ships, error: sErr }, { data: receipts, error: rErr }] = await Promise.all([
     supabase
       .from('outside_shipments')
-      .select('job_operation_id, quantity, shipped_at, due_back_on, id')
+      .select('job_operation_id, quantity, shipped_at, due_back_on, id, closed_at')
       .in('job_operation_id', opIds)
       .is('voided_at', null),
     supabase
       .from('outside_shipment_receipts')
-      .select('job_operation_id, outside_shipment_id, quantity_good, quantity_scrapped')
+      .select('job_operation_id, outside_shipment_id, quantity_good')
       .in('job_operation_id', opIds)
       .is('voided_at', null),
   ]);
@@ -447,8 +489,7 @@ export async function getOutsideSummariesForPart(
 
   const backBySlip = new Map<string, number>();
   for (const r of receipts ?? []) {
-    const n = (backBySlip.get(r.outside_shipment_id) ?? 0) +
-      Number(r.quantity_good) + Number(r.quantity_scrapped);
+    const n = (backBySlip.get(r.outside_shipment_id) ?? 0) + Number(r.quantity_good);
     backBySlip.set(r.outside_shipment_id, roundQty(n));
   }
 
@@ -462,14 +503,16 @@ export async function getOutsideSummariesForPart(
     let sent = 0;
     for (const s of mySlips) sent = roundQty(sent + Number(s.quantity));
     let good = 0;
-    let scrapped = 0;
-    for (const r of myReceipts) {
-      good = roundQty(good + Number(r.quantity_good));
-      scrapped = roundQty(scrapped + Number(r.quantity_scrapped));
-    }
+    for (const r of myReceipts) good = roundQty(good + Number(r.quantity_good));
 
+    // A short-closed slip owes nothing, however much came back on it. Summing
+    // per slip is the only way to say that -- a flat `sent - good` cannot.
     const openSlips = mySlips.filter(
-      (s) => Number(s.quantity) - (backBySlip.get(s.id) ?? 0) > 0,
+      (s) => !s.closed_at && Number(s.quantity) - (backBySlip.get(s.id) ?? 0) > 0,
+    );
+    const atVendor = openSlips.reduce(
+      (n, s) => roundQty(n + Math.max(0, Number(s.quantity) - (backBySlip.get(s.id) ?? 0))),
+      0,
     );
     const openDates = openSlips.map((s) => s.shipped_at).sort();
     const dueDates = openSlips
@@ -482,15 +525,14 @@ export async function getOutsideSummariesForPart(
       qty_ordered: ordered,
       qty_sent: sent,
       qty_good: good,
-      qty_scrapped: scrapped,
-      qty_at_vendor: roundQty(Math.max(0, sent - good - scrapped)),
+      qty_at_vendor: atVendor,
       // WHAT STILL HAS TO GO THROUGH THE PROCESS -- ordered minus what is
       // already good minus what is currently away. NOT `ordered - sent`, which
-      // counts a scrapped piece as satisfied: send 12, get 10 good and 2
-      // scrapped, and that formula says 0 left while the job is still two parts
-      // short. The shop re-runs those 2 and sends them again, so they have to
-      // reappear here or the button offers to send nothing.
-      qty_to_send: roundQty(Math.max(0, ordered - good - Math.max(0, sent - good - scrapped))),
+      // counts a written-off piece as satisfied: send 12, get 10 back and
+      // short-close the slip, and that formula says 0 left while the job is
+      // still two parts short. The shop re-runs those 2 and sends them again, so
+      // they have to reappear here or the button offers to send nothing.
+      qty_to_send: roundQty(Math.max(0, ordered - good - atVendor)),
       oldest_open_shipped_at: openDates[0] ?? null,
       earliest_due_back_on: dueDates[0] ?? null,
       open_slip_count: openSlips.length,
@@ -588,12 +630,14 @@ export async function listOutsideShipmentsForCompany(
 
 /** What is still at the vendor on one slip. Shared so the grid and the card agree. */
 export function outstandingOn(
-  s: Pick<OutsideShipmentWithRelations, 'quantity' | 'voided_at' | 'receipts'>,
+  s: Pick<OutsideShipmentWithRelations, 'quantity' | 'voided_at' | 'closed_at' | 'receipts'>,
 ): number {
-  if (s.voided_at) return 0;
+  // A voided slip never counted; a closed one counted and is finished. Either
+  // way the vendor owes nothing on it.
+  if (s.voided_at || s.closed_at) return 0;
   const back = (s.receipts ?? [])
     .filter((r) => !r.voided_at)
-    .reduce((n, r) => n + Number(r.quantity_good) + Number(r.quantity_scrapped), 0);
+    .reduce((n, r) => n + Number(r.quantity_good), 0);
   return roundQty(Math.max(0, Number(s.quantity) - back));
 }
 

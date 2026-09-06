@@ -82,20 +82,26 @@ describe('outsideSendConsequence', () => {
 });
 
 describe('outsideReceiptConsequence', () => {
-  it('closes the slip when good + scrapped accounts for everything that went out', () => {
-    // 98 back and 2 the plater ruined: nothing is on their rack any more, even
-    // though the step is still two pieces short.
-    expect(outsideReceiptConsequence(98, 2, 100)).toEqual({ kind: 'closes' });
+  it('closes the slip when everything that went out has come back', () => {
+    expect(outsideReceiptConsequence(100, 100)).toEqual({ kind: 'closes' });
   });
 
   it('leaves the rest at the vendor on a partial return', () => {
-    expect(outsideReceiptConsequence(60, 0, 100)).toEqual({ kind: 'partial', stillOut: 40 });
-    expect(outsideReceiptCaption(outsideReceiptConsequence(60, 0, 100), 'ProFinish'))
+    expect(outsideReceiptConsequence(60, 100)).toEqual({ kind: 'partial', stillOut: 40 });
+    expect(outsideReceiptCaption(outsideReceiptConsequence(60, 100), 'ProFinish'))
       .toBe('40 still at ProFinish on this slip.');
   });
 
+  it('is good-only — a short return is settled by closing the slip, not a scrap number', () => {
+    // 98 of 100 back leaves 2 outstanding here. What writes those 2 off is
+    // outside_shipments.closed_at (Sage's short-close), not a second field on
+    // the receipt -- which also keeps this in step with in-house completions,
+    // which are deliberately good-only.
+    expect(outsideReceiptConsequence(98, 100)).toEqual({ kind: 'partial', stillOut: 2 });
+  });
+
   it('flags a receipt bigger than the slip — usually the wrong slip', () => {
-    const c = outsideReceiptConsequence(120, 0, 100);
+    const c = outsideReceiptConsequence(120, 100);
     expect(c).toEqual({ kind: 'over', excess: 20 });
     expect(outsideReceiptCaption(c, 'ProFinish')).toMatch(/check the slip number/i);
   });

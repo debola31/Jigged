@@ -160,6 +160,13 @@ def outside(supabase_admin: Client, seeded_user_a: dict) -> OutsideJob:
 # helpers
 # --------------------------------------------------------------------------
 
+def _close(user: dict, shipment_id: str) -> None:
+    """Short-close: a column-scoped UPDATE, not an RPC."""
+    user["client"].table("outside_shipments").update(
+        {"closed_at": "now()", "closed_by": user["user_id"]}
+    ).eq("id", shipment_id).execute()
+
+
 def _op(admin: Client, op_id: str) -> dict:
     return (
         admin.table("job_operations")
@@ -175,7 +182,7 @@ def _send(user: dict, op_id: str, qty: float, **kw) -> dict:
     return rows[0] if isinstance(rows, list) else rows
 
 
-def _receive(user: dict, ship: dict, admin: Client, good: float, scrapped: float = 0) -> None:
+def _receive(user: dict, ship: dict, admin: Client, good: float) -> None:
     """Receiving is a plain insert -- deliberately not an RPC."""
     row = (
         admin.table("outside_shipments")
@@ -189,7 +196,6 @@ def _receive(user: dict, ship: dict, admin: Client, good: float, scrapped: float
             "job_operation_id": row["job_operation_id"],
             "job_part_id": row["job_part_id"],
             "quantity_good": good,
-            "quantity_scrapped": scrapped,
             # Set explicitly, exactly as the access layer does for
             # job_operation_completions.completed_by. There is deliberately no
             # DEFAULT auth.uid() on the column: the two receipt-shaped tables
@@ -237,19 +243,30 @@ def test_the_status_walks_the_send_and_receive_quantities(
 def test_a_short_return_reads_in_progress_rather_than_completing_two_pieces_light(
     supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
 ):
-    """100 out, 98 good + 2 scrapped at the vendor.
+    """100 out, 98 back, and the last 2 written off by SHORT-CLOSING the slip.
 
-    Outstanding is zero, so nothing is at the plater and the op must not read
-    `sent`. But 98 < 100, so it must not read `completed` either -- exactly what
-    an in-house op says at 98 good of 100. Dropping the order to 98 is the shop
-    deciding to ship short, and the existing part-quantity trigger closes it.
+    Closing retires what is still outstanding without pretending it came back:
+    nothing is at the plater, so the op must not read `sent` -- but 98 < 100, so
+    it must not read `completed` either. That is exactly what an in-house op says
+    at 98 good of 100, which is the point: outside and in-house now answer the
+    same question the same way.
+
+    This replaces a `quantity_scrapped` column on the receipt. Sage 300
+    short-closes a PO and Oracle closes on quantity-cancelled; nobody reconciles
+    a scrap number per receipt, and our own job_operation_completions is
+    deliberately good-only.
     """
     admin = supabase_admin
     s1 = _send(seeded_user_a, outside.op_id, 100)
-    _receive(seeded_user_a, s1, admin, good=98, scrapped=2)
+    _receive(seeded_user_a, s1, admin, good=98)
 
+    # Still owed 2 until somebody says otherwise.
+    assert _op(admin, outside.op_id)["status"] == "sent"
+
+    _close(seeded_user_a, s1["shipment_id"])
     assert _op(admin, outside.op_id)["status"] == "in_progress"
 
+    # Ship short and the existing part-quantity trigger closes it.
     admin.table("job_parts").update({"quantity": 98}).eq("id", outside.job_part_id).execute()
     assert _op(admin, outside.op_id)["status"] == "completed"
 
@@ -257,17 +274,34 @@ def test_a_short_return_reads_in_progress_rather_than_completing_two_pieces_ligh
 def test_pieces_the_vendor_never_returns_keep_the_op_at_the_vendor(
     supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
 ):
-    """98 back with NO scrap recorded means 2 are still on someone's rack.
+    """98 back with the slip left OPEN means 2 are still on someone's rack.
 
-    This is the counterpart to the test above and the reason quantity_scrapped
-    is a separate column: booking a piece as scrapped is a decision a person
-    takes, and until they take it the shop is still owed the part.
+    The counterpart to the test above, and the reason short-close is an explicit
+    act rather than something a receipt infers: until a person decides those 2
+    are gone, the shop is still owed them and the drawer should still chase them.
     """
     admin = supabase_admin
     s1 = _send(seeded_user_a, outside.op_id, 100)
-    _receive(seeded_user_a, s1, admin, good=98, scrapped=0)
+    _receive(seeded_user_a, s1, admin, good=98)
 
     assert _op(admin, outside.op_id)["status"] == "sent"
+
+
+def test_closing_a_slip_does_not_count_toward_the_good_total(
+    supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
+):
+    """A close settles the PAPERWORK, never the production.
+
+    Close a slip with nothing received against it and the op falls back to
+    `pending`: no pieces came back, so none can count. Reading a close as
+    "received" would let a shop complete a job it never made parts for.
+    """
+    admin = supabase_admin
+    s1 = _send(seeded_user_a, outside.op_id, 100)
+    assert _op(admin, outside.op_id)["status"] == "sent"
+
+    _close(seeded_user_a, s1["shipment_id"])
+    assert _op(admin, outside.op_id)["status"] == "pending"
 
 
 def test_a_quantity_edit_cannot_reach_the_send(
@@ -489,9 +523,10 @@ def test_a_receipt_cannot_be_attached_to_another_operations_shipment(
 def test_an_empty_receipt_is_refused(
     supabase_admin: Client, seeded_user_a: dict, outside: OutsideJob
 ):
+    """A receipt of nothing is meaningless -- a close is how you record nothing."""
     s1 = _send(seeded_user_a, outside.op_id, 10)
     with pytest.raises(APIError):
-        _receive(seeded_user_a, s1, supabase_admin, good=0, scrapped=0)
+        _receive(seeded_user_a, s1, supabase_admin, good=0)
 
 
 # --------------------------------------------------------------------------

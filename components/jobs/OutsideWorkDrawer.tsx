@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
 import CircularProgress from '@mui/material/CircularProgress';
 import Drawer from '@mui/material/Drawer';
@@ -13,15 +14,21 @@ import { useRouter } from 'next/navigation';
 
 import { useLoad } from '@/hooks/useLoad';
 import { formatDateOnly, isDateOnlyPast } from '@/lib/localDate';
+import posthog from 'posthog-js';
 import {
   listOutsideShipmentsForCompany,
   outstandingOn,
+  receiveOutsideShipment,
 } from '@/utils/outsideShipmentsAccess';
+import ReceiveFromVendorDialog from './ReceiveFromVendorDialog';
+import { daysAtVendorBucket } from './outsideWorkMetrics';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 
 export interface OutsideWorkDrawerProps {
   companyId: string;
   onClose: () => void;
+  /** Fired after a receipt so the caller can re-pull its own outside queue. */
+  onReceived?: () => void;
 }
 
 function daysSince(iso: string): number {
@@ -58,11 +65,15 @@ function daysSince(iso: string): number {
 export default function OutsideWorkDrawer({
   companyId,
   onClose,
+  onReceived,
 }: OutsideWorkDrawerProps) {
   const router = useRouter();
+  const [receiving, setReceiving] = useState<OutsideShipmentWithRelations | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const { data, loading, error } = useLoad(
     () => listOutsideShipmentsForCompany(companyId, { openOnly: true }),
-    [companyId],
+    [companyId, reloadKey],
   );
   // "Couldn't load" must never render as "nothing is out" — that reads as the
   // parts having come back. Keep the two states apart.
@@ -192,12 +203,62 @@ export default function OutsideWorkDrawer({
                     {days === 0 ? 'today' : `${days}d`}
                     {s.due_back_on ? ` · due ${formatDateOnly(s.due_back_on)}` : ''}
                   </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setReceiving(s)}
+                    sx={{ flexShrink: 0, ml: 0.5 }}
+                  >
+                    Receive
+                  </Button>
                 </Box>
               );
             })}
           </Box>
         ))}
       </Box>
+
+      {receiving && (
+        <ReceiveFromVendorDialog
+          open
+          vendorName={receiving.vendor_name}
+          operationName={receiving.service_name}
+          partName={receiving.job?.job_number ?? ''}
+          openSlips={[
+            {
+              id: receiving.id,
+              slip_number: receiving.slip_number,
+              shipped_at: receiving.shipped_at,
+              outstanding: outstandingOn(receiving),
+            },
+          ]}
+          busy={busy}
+          onClose={() => setReceiving(null)}
+          onSubmit={async (v) => {
+            setBusy(true);
+            try {
+              // The SAME function the operation card calls. Two surfaces, one
+              // write path -- which is what stops them drifting.
+              await receiveOutsideShipment(receiving.id, {
+                quantityGood: v.quantityGood,
+                closeShipment: v.closeShipment,
+              });
+              posthog.capture('outside shipment received', {
+                surface: 'office',
+                is_full: v.quantityGood >= outstandingOn(receiving),
+                short_closed: Boolean(v.closeShipment),
+                was_backfilled: false,
+                days_at_vendor_bucket: daysAtVendorBucket(receiving.shipped_at),
+              });
+              setReceiving(null);
+              setReloadKey((n) => n + 1);
+              onReceived?.();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
     </Drawer>
   );
 }

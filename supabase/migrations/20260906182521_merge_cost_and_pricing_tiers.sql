@@ -49,6 +49,16 @@
 -- Every function below was rebuilt from its LIVE PRODUCTION body, md5-verified
 -- against pg_proc.prosrc, and replaced with CREATE OR REPLACE -- never
 -- DROP+CREATE, which would destroy both the ACL and the COMMENT.
+--
+-- REBASED onto 20260906170449 (an unpriced routing step is a GAP, not an
+-- exception). That migration CREATE OR REPLACEs part_rollup_at_qty too, from the
+-- definition that was newest when it was written -- which still read
+-- part_procurement_tiers. Landing before it, this migration's rewrite was
+-- silently clobbered and the seed then failed on a table that no longer exists.
+-- Two branches replacing one function body is a conflict git cannot see: the
+-- files never touch. Hence the later timestamp, and hence part_rollup_at_qty
+-- below carries BOTH changes -- their NULL-returning routing arms, verbatim, and
+-- this migration's merged-ladder bought arm.
 
 -- == 1. the column =========================================================
 -- NULL for made parts by design: their base is the routing + BOM rollup, not a
@@ -218,11 +228,12 @@ BEGIN
              WHERE ro.routing_id = v_routing_id
         LOOP
             IF v_op.vendor_service_id IS NULL THEN
+                -- A station with no rate is a GAP, not a fault: nobody has said
+                -- what an hour there costs yet. Same shape as a bought leaf with
+                -- no tier, three lines below -- return NULL and let
+                -- compute_part_cost_explain name it via missing_op_rates.
                 IF v_op.labor_rate_override IS NULL AND v_op.wc_labor_rate IS NULL THEN
-                    RAISE EXCEPTION
-                        'Cannot compute cost for part %: internal routing op has no labor rate (neither override nor work_center default)',
-                        v_part_name
-                        USING ERRCODE = 'check_violation';
+                    RETURN NULL;
                 END IF;
                 v_op_cost := (COALESCE(v_op.setup_minutes, 0) / p_qty
                               + COALESCE(v_op.cycle_minutes_per_unit, 0))
@@ -234,10 +245,7 @@ BEGIN
                 -- moves every step that never overrode it, exactly as raising a
                 -- station's labor_rate does.
                 IF v_op.external_unit_price IS NULL AND v_op.vs_unit_price IS NULL THEN
-                    RAISE EXCEPTION
-                        'Cannot compute cost for part %: outside routing op has no unit price (neither a step override nor a price on the vendor service)',
-                        v_part_name
-                        USING ERRCODE = 'check_violation';
+                    RETURN NULL;
                 END IF;
                 v_op_cost := COALESCE(v_op.external_unit_price, v_op.vs_unit_price);
             END IF;

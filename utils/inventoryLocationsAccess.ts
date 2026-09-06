@@ -1090,7 +1090,7 @@ export async function getRecentHeatNumbersForParts(
     throw error;
   }
 
-  type Seen = { heat: string; newest: string; here: boolean };
+  type Seen = { heat: string; here: boolean };
   const perPart = new Map<string, Map<string, Seen>>();
   for (const row of data ?? []) {
     if (!row.part_id || !row.heat_number) continue;
@@ -1100,7 +1100,7 @@ export async function getRecentHeatNumbersForParts(
     if (seen) {
       seen.here = seen.here || here;
     } else {
-      heats.set(row.heat_number, { heat: row.heat_number, newest: row.created_at, here });
+      heats.set(row.heat_number, { heat: row.heat_number, here });
     }
     perPart.set(row.part_id, heats);
   }

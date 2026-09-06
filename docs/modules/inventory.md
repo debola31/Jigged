@@ -158,7 +158,7 @@ worked, leaves): a job attribute.
 | MRP run / netting | No trustworthy lead times or BOM depth; nobody in a 10-person shop acts on the output. J10 reorder points cover it. |
 | Multi-warehouse | One building; `inventory_locations` nests if a second appears. |
 | Customer-owned stock | Never enters stock — no ownership flag, ledger or valuation. |
-| Valuation / COGS / postings | QuickBooks owns money; Jigged tracks *quantities and identity* — cost is costing's (`part_procurement_tiers`, `compute_part_cost_at_qty`). |
+| Valuation / COGS / postings | QuickBooks owns money; Jigged tracks *quantities and identity* — cost is costing's (`part_pricing_tiers.cost_per_unit`, `compute_part_cost_at_qty`). |
 | Automatic purchasing | We propose the buy list, a human orders; auto needs vendor integration and unearned trust. |
 | Tool crib / perishable tooling | Different lifecycle (tool life, regrinds, checkout); own module later. |
 
@@ -304,7 +304,7 @@ Anyone naming a place as they need it. **Closed (Phase 2, 2026-07-30):** permane
 
 ### J3 — Estimate material cost on a quote
 
-Quoter. **Built** — `parts_bom` + `part_procurement_tiers` + made-child batch pinning (`costing_batch_quantity`) via `compute_part_cost_at_qty`. Material consumption is exact; nothing rounds a fractional BOM quantity up. Here for the boundary only: quoting reads *cost*, never *availability*, and reserves nothing ([§5.7](#57-quoting-never-touches-stock)).
+Quoter. **Built** — `parts_bom` + `part_pricing_tiers.cost_per_unit` + made-child batch pinning (`costing_batch_quantity`) via `compute_part_cost_at_qty`. Material consumption is exact; nothing rounds a fractional BOM quantity up. Here for the boundary only: quoting reads *cost*, never *availability*, and reserves nothing ([§5.7](#57-quoting-never-touches-stock)).
 
 ### **J4 — Job kickoff material check**
 

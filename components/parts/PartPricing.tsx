@@ -7,6 +7,7 @@ import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Table from '@mui/material/Table';
@@ -79,6 +80,12 @@ interface EditRow {
   id?: string;
   sequence: number;
   quantity: string;
+  /**
+   * What a BOUGHT part costs us at this break — editable, and the base the
+   * markup is applied to. Empty string for a made part, whose base is the
+   * routing + BOM rollup rather than a stored number.
+   */
+  costPerUnit: string;
   markupPercent: string;
   unitPrice: string;
   /** null when materials are incomplete or the breakdown is missing — render
@@ -92,25 +99,31 @@ interface EditRow {
  * typing 1 → 10 → 1 ends up genuinely clean again instead of nagging for a save
  * that would write nothing.
  *
- * Only quantity + markup are compared: they are what `replaceTiersForPart`
+ * Quantity, cost and markup are compared: they are what `replaceTiersForPart`
  * persists. `unitPrice` is derived (base × markup) and `baseCostPerUnit` is a
- * fetched display value, so neither can differ without markup differing too.
+ * display value, so neither can differ without one of the three differing too.
  */
 interface TierSnapshot {
   quantity: string;
+  costPerUnit: string;
   markupPercent: string;
 }
 
 function snapshotRows(rows: EditRow[]): TierSnapshot[] {
   return rows.map((r) => ({
     quantity: r.quantity.trim(),
+    costPerUnit: r.costPerUnit.trim(),
     markupPercent: r.markupPercent.trim(),
   }));
 }
 
 function rowDiffersFromBaseline(row: EditRow, base: TierSnapshot | undefined): boolean {
   if (!base) return true; // a row with no counterpart is newly added
-  return row.quantity.trim() !== base.quantity || row.markupPercent.trim() !== base.markupPercent;
+  return (
+    row.quantity.trim() !== base.quantity ||
+    row.costPerUnit.trim() !== base.costPerUnit ||
+    row.markupPercent.trim() !== base.markupPercent
+  );
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -131,12 +144,24 @@ function parseNumber(s: string): number | null {
  * the persisted line use, so a tier's price here matches a quote at that qty).
  * Base absent from the map = not fetched yet → render "—" until it lands.
  */
-function recomputeRow(row: EditRow, baseCostByQty: Map<number, number | null>): EditRow {
+function recomputeRow(
+  row: EditRow,
+  baseCostByQty: Map<number, number | null>,
+  isBought = false,
+): EditRow {
   const qty = parseNumber(row.quantity);
   if (qty === null || qty <= 0) {
     return { ...row, baseCostPerUnit: null };
   }
-  const base = baseCostByQty.has(qty) ? baseCostByQty.get(qty) ?? null : undefined;
+  // A bought part's base IS the cost on this row — it has no BOM, so its charge
+  // base and its true cost are the same number. Reading the cell rather than the
+  // engine means the price updates as the cost is typed, instead of after a save
+  // and a refetch.
+  const base = isBought
+    ? parseNumber(row.costPerUnit)
+    : baseCostByQty.has(qty)
+      ? baseCostByQty.get(qty) ?? null
+      : undefined;
   if (base === undefined) {
     return { ...row, baseCostPerUnit: null };
   }
@@ -164,6 +189,7 @@ function blankRow(): EditRow {
   return {
     sequence: 10,
     quantity: '1',
+    costPerUnit: '',
     markupPercent: '',
     unitPrice: '',
     baseCostPerUnit: 0,
@@ -253,6 +279,24 @@ export default function PartPricing({
   const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
   const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
 
+  /**
+   * Breaks typed twice. `part_pricing_tiers` is unique on (part_id, quantity) —
+   * one break, one row — so this would come back as a raw 23505. Saying it here
+   * beats surfacing a constraint name.
+   */
+  const duplicateQuantities = (() => {
+    const seen = new Map<number, number>();
+    const dupes: number[] = [];
+    rows.forEach((r) => {
+      const q = parseNumber(r.quantity);
+      if (q === null || q <= 0) return;
+      const n = (seen.get(q) ?? 0) + 1;
+      seen.set(q, n);
+      if (n === 2) dupes.push(q);
+    });
+    return dupes;
+  })();
+
   // Costing lot size — the production run this part's cost amortizes over, and
   // the quantity it's valued at when consumed as a component. Drives the live
   // Cost breakdown below (setup / N). Made parts only.
@@ -317,6 +361,7 @@ export default function PartPricing({
         id: t.id,
         sequence: t.sequence,
         quantity: String(t.quantity),
+        costPerUnit: t.cost_per_unit !== null ? String(t.cost_per_unit) : '',
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
         // unitPrice + baseCostPerUnit are filled in by the base effect
         // (getComputedPartChargeBase per tier qty → base × markup) once the
@@ -327,7 +372,11 @@ export default function PartPricing({
       // A never-configured part shows a single unfilled row to fill in — NOT
       // dirty, so Save stays disabled until the user actually edits it.
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
-      const recomputed = seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current));
+      // A ladder reads low-to-high. Rows arrive ordered by `sequence`, which
+      // tracks the break after a save but need not on rows written by an
+      // importer or a migration, so sort on the number the user actually reads.
+      seeded.sort((a, b) => (parseNumber(a.quantity) ?? 0) - (parseNumber(b.quantity) ?? 0));
+      const recomputed = seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current, isBought));
       setRows(recomputed);
       // These rows now mirror the database, so they become the clean baseline.
       setBaseline(snapshotRows(recomputed));
@@ -427,10 +476,14 @@ export default function PartPricing({
   // true cost until someone sets that toggle — and when they diverge, the Cost
   // card above names the gap (Material markup / unit → Price base / unit) so the
   // two cards can't look like they disagree. Debounced so editing a tier
-  // qty doesn't refetch on every keystroke. Works for BOTH made and bought parts
-  // — for a bought part the engine reads its procurement tiers — so the Pricing
-  // card can show the same Base/unit + final Unit-price columns for both.
+  // qty doesn't refetch on every keystroke.
+  //
+  // MADE PARTS ONLY. A bought part's base is the cost typed on its own row — it
+  // has no BOM, so its charge base and true cost are the same number the grid
+  // already holds. Asking the engine for it would be a round trip to be told
+  // what is on screen, and it would lag a keystroke behind.
   useEffect(() => {
+    if (isBought) return;
     const qtys = [
       ...new Set(
         rows
@@ -476,8 +529,8 @@ export default function PartPricing({
   // Re-price every tier row when base costs arrive/change (base × markup).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
-  }, [tierBaseCosts]);
+    setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts, isBought)));
+  }, [tierBaseCosts, isBought]);
 
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
@@ -500,14 +553,35 @@ export default function PartPricing({
       setError('Every tier needs a quantity greater than 0.');
       return;
     }
+    if (duplicateQuantities.length > 0) {
+      setError(
+        `Two tiers share the same min qty (${duplicateQuantities.join(', ')}). ` +
+          'One break, one row — give them different quantities or remove one.',
+      );
+      return;
+    }
     setSaveState('saving');
     setError(null);
     try {
-      const sortedRows = [...rows].sort((a, b) => a.sequence - b.sequence);
-      const payload = sortedRows.map((r, i) => ({
+      // Ascending by BREAK, not by the old sequence. A ladder reads bottom-up,
+      // and sequence is renumbered to match so the next load comes back in the
+      // same order. Sorting here rather than on every keystroke is deliberate:
+      // reordering as somebody types would move the row out from under them.
+      const sortedRows = [...rows].sort(
+        (a, b) => (parseNumber(a.quantity) ?? 0) - (parseNumber(b.quantity) ?? 0),
+      );
+      // Each row KEEPS its own sequence. Renumbering by position used to be
+      // harmless because the sort was by sequence; sorting by break can swap two
+      // rows, and `replaceTiersForPart` updates one row at a time against
+      // UNIQUE (part_id, sequence) — so a swap would collide halfway through.
+      // Display order comes from the break now, which is what a reader sorts by
+      // anyway, so sequence has nothing left to encode.
+      const payload = sortedRows.map((r) => ({
         id: r.id,
-        sequence: (i + 1) * 10,
+        sequence: r.sequence,
         quantity: parseNumber(r.quantity) as number,
+        // Made parts store no cost — their base is the routing + BOM rollup.
+        cost_per_unit: isBought ? parseNumber(r.costPerUnit) : null,
         markup_percent: parseNumber(r.markupPercent),
       }));
       await replaceTiersForPart(companyId, partId, payload);
@@ -566,7 +640,7 @@ export default function PartPricing({
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts, isBought);
       return next;
     });
   };
@@ -575,7 +649,16 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts, isBought);
+      return next;
+    });
+  };
+
+  const handleCostChange = (idx: number, value: string): void => {
+    if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
+    updateRows((prev) => {
+      const next = [...prev];
+      next[idx] = recomputeRow({ ...next[idx], costPerUnit: value }, tierBaseCosts, isBought);
       return next;
     });
   };
@@ -606,11 +689,15 @@ export default function PartPricing({
       const row: EditRow = {
         sequence: nextSequence,
         quantity: '',
+        // A new break inherits the cost of the row above: a volume break is
+        // usually about the markup, and restating an unchanged cost by hand is
+        // how the two ladders drifted apart in the first place.
+        costPerUnit: prev.length > 0 ? prev[prev.length - 1].costPerUnit : '',
         markupPercent: '',
         unitPrice: '',
         baseCostPerUnit: 0,
       };
-      return [...prev, recomputeRow(row, tierBaseCosts)];
+      return [...prev, recomputeRow(row, tierBaseCosts, isBought)];
     });
   };
 
@@ -930,7 +1017,7 @@ export default function PartPricing({
               <TableHead>
                 <TableRow>
                   <TableCell>{qtyColumnHeader}</TableCell>
-                  <TableCell align="right">Base / unit</TableCell>
+                  <TableCell align="right">{isBought ? 'Unit cost' : 'Base / unit'}</TableCell>
                   <TableCell align="right">Markup %</TableCell>
                   <TableCell align="right">Unit price</TableCell>
                   <TableCell align="right"></TableCell>
@@ -955,6 +1042,13 @@ export default function PartPricing({
                         },
                       }}
                     >
+                      {/* Every break is editable, including the lowest. It is
+                          still true that the lowest one cannot gate anything —
+                          the engine floors to it when no break covers the
+                          quantity — but that is a fact to STATE, not a field to
+                          confiscate. A shop that prices from 0.5 up has to be
+                          able to say 0.5. The caption below says what the lowest
+                          break actually does. */}
                       <TableCell sx={{ minWidth: 90 }}>
                         <TextField
                           size="small"
@@ -963,8 +1057,19 @@ export default function PartPricing({
                           inputMode="decimal"
                         />
                       </TableCell>
-                      <TableCell align="right">
-                        {formatCurrency(row.baseCostPerUnit)}
+                      <TableCell align="right" sx={{ minWidth: 120 }}>
+                        {isBought ? (
+                          <TextField
+                            size="small"
+                            value={row.costPerUnit}
+                            onChange={(e) => handleCostChange(idx, e.target.value)}
+                            inputMode="decimal"
+                            sx={{ width: 110 }}
+                            slotProps={{ input: { startAdornment: <InputAdornment position="start">$</InputAdornment> } }}
+                          />
+                        ) : (
+                          formatCurrency(row.baseCostPerUnit)
+                        )}
                       </TableCell>
                       <TableCell align="right" sx={{ minWidth: 120 }}>
                         <TextField
@@ -1029,9 +1134,23 @@ export default function PartPricing({
               flexWrap: 'wrap',
             }}
           >
-            <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
-              Add tier
-            </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
+                Add tier
+              </Button>
+              {/* Said once, below the rows. It was briefly a helperText on the
+                  lowest row's field, which reserved space under that one cell and
+                  knocked the row out of alignment with its neighbours. The fact
+                  belongs to the ladder anyway, not to a row: the engine floors to
+                  the lowest break, so a quantity under it still prices. Worth
+                  stating — silent flooring is how a part ended up with Min qty
+                  200 and no visible effect at qty 0.1. */}
+              {rows.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  The lowest break also applies to any smaller quantity.
+                </Typography>
+              )}
+            </Box>
             {!dirty && <SaveStatus state={saveState} />}
           </Box>
 

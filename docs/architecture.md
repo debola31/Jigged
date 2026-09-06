@@ -293,8 +293,7 @@ writing down:
 | Table(s) | Rule |
 |---|---|
 | `parts` | Company-wide, no `customer_id`. Absorbed the former `inventory_items`. |
-| `part_pricing_tiers` | Quantity break-points with `markup_percent`. **Markup is the source of truth**; unit price derives live as `base_cost × (1 + markup/100)` — base cost from routing/BOM for made parts, from `part_procurement_tiers` for bought parts. |
-| `part_procurement_tiers` | Part-level bought-part cost sheet `(part_id, min_quantity) → cost_per_unit`, **independent of vendor**. `parts.preferred_vendor_id` is a supplier *label*, not a cost filter. Multi-vendor sheets / RFQ / POs deferred to a future purchasing module. |
+| `part_pricing_tiers` | **One tier ladder per part**, unique on `(part_id, quantity)`. Each break carries `cost_per_unit` (what a *bought* part costs us; NULL for made parts) and `markup_percent`. **Markup is the source of truth**; unit price derives live as `base_cost × (1 + markup/100)` — base cost from `cost_per_unit` for bought parts, from the routing/BOM rollup for made ones. Cost is a property of the **part**: `parts.preferred_vendor_id` is a supplier *label*, not a cost filter, and multi-vendor sheets / RFQ / POs are deferred to a future purchasing module. Bought costs lived in a separate `part_procurement_tiers` table with its own `min_quantity` ladder until 2026-09-06 — two ladders nothing kept aligned. |
 | `routings`, `routing_operations` | 1:1 with parts (unique `part_id`); operations are a linear, sequence-ordered list. Materials are **not** routing-attached — they live on `parts_bom`. The old `routing_materials` table was removed. |
 | `parts_bom` | `(parent_part_id, child_part_id, quantity, unit)`; feeds `compute_part_cost_at_qty`. |
 | `quote_line_items` | Immutable snapshot of the selected `part_pricing_tiers` (`pricing_basis_snapshot`), with per-quote overrides via `is_quote_override`. |

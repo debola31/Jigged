@@ -2,21 +2,17 @@ import * as Sentry from '@sentry/nextjs';
 
 import { getSupabase } from '@/lib/supabase';
 import { toFriendlyError } from '@/lib/supabaseErrors';
-import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
+import { toError } from '@/lib/supabaseErrors';
 import type {
   PartPricingTier,
   PartPricingTierInput,
   ComputedPartPricingTier,
 } from '@/types/partPricing';
-import {
-  getComputedPartChargeBase,
-  getComputedPartCost,
-  addPartPricingNote,
-} from '@/utils/partsAccess';
+import { getComputedPartChargeBase, addPartPricingNote } from '@/utils/partsAccess';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
-import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
+import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 
 /**
  * Get all pricing tiers for a part (raw DB shape), ordered by sequence.
@@ -38,62 +34,20 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
 }
 
 /**
- * The price of a part at a specific quantity — the SINGLE SOURCE OF TRUTH the
- * Pricing card, the quote form, and the persisted quote line all use.
- *
- * `base_cost` comes from the ONE canonical engine (via
- * `getComputedPartChargeBase`) at the ACTUAL qty; the markup is the tier that
- * applies at that qty; `unit_price = base × (1 + markup/100)`. Because base is
- * computed at the exact qty (not read off a step-function tier ladder), the
- * number is exact at every qty and identical wherever it's shown. A caller that
- * already has the tier list passes it in to skip the extra fetch; otherwise the
- * tiers are loaded here.
- *
- * **The base is the CHARGE base, not the true cost** (#727): markup applies to
- * what we charge ourselves for the materials, so a BOM line set to charge its
- * child at price is already inside `base_cost`. The two are the same number
- * until someone sets that toggle.
- */
-export interface PartPriceAtQty {
-  base_cost: number | null;
-  markup_percent: number | null;
-  unit_price: number | null;
-  source_tier_id: string | null;
-  below_min: boolean;
-}
-
-export async function getPartPriceAtQty(
-  partId: string,
-  qty: number,
-  tiers?: ReadonlyArray<{ id: string; quantity: number; markup_percent: number | null }>,
-): Promise<PartPriceAtQty> {
-  const ladder = tiers ?? (await getTiersForPart(partId));
-  const [resolved, base] = await Promise.all([
-    Promise.resolve(resolveMarkupAtQty(ladder, qty)),
-    getComputedPartChargeBase(partId, qty).catch(() => null),
-  ]);
-  const unit_price = resolved ? unitPriceFromBase(base, resolved.markup_percent) : null;
-  return {
-    base_cost: base,
-    markup_percent: resolved?.markup_percent ?? null,
-    unit_price,
-    source_tier_id: resolved?.source_tier_id ?? null,
-    below_min: resolved?.below_min ?? false,
-  };
-}
-
-/**
  * The tier ladder with each tier's `unit_price` computed AT THAT TIER'S OWN
- * QUANTITY, all through the one canonical engine (`getComputedPartChargeBase` —
- * the same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
- * disagree). Drives the quote-form tier ladder, the drift snapshot, and the
- * Pricing card's tier table. A null markup or an unresolvable base yields
- * `unit_price = null` so the "no usable tier" check still fires.
+ * QUANTITY, through the one canonical engine (`getComputedPartChargeBase`), so
+ * no TS/SQL split can make two screens disagree. Drives the quote-form tier
+ * ladder, the drift snapshot, and the Pricing card's tier table. A null markup
+ * or an unresolvable base yields `unit_price = null` so the "no usable tier"
+ * check still fires.
  *
- * Note: this is the price AT each breakpoint. The actual order/line price is
- * `getPartPriceAtQty(part, orderQty)` — base at the real qty × the resolved
- * tier's markup — which every consuming surface uses so between-breakpoint
- * orders are exact, not snapped to a breakpoint.
+ * **This IS the order price, not just the price at a breakpoint.** A tier's
+ * listed price holds for its whole band (founder rule, 2026-08-07): a quote
+ * resolves the tier with `resolveTier` and takes the number shown here, so the
+ * part page and the quote can never disagree. A companion `getPartPriceAtQty`
+ * once recomputed the base at the *order* quantity instead — the pre-2026-08-07
+ * rule — and survived unused, with a doc comment here still calling it the real
+ * price path. Both are gone.
  */
 export async function getTiersWithComputedPrices(
   partId: string,
@@ -107,24 +61,6 @@ export async function getTiersWithComputedPrices(
       return { ...t, unit_price: unitPriceFromBase(base, t.markup_percent) };
     }),
   );
-}
-
-/**
- * Get a single tier by id.
- */
-export async function getTier(tierId: string): Promise<PartPricingTier | null> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('part_pricing_tiers')
-    .select('*')
-    .eq('id', tierId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error fetching tier:', error);
-    throw error;
-  }
-  return data as PartPricingTier | null;
 }
 
 /**
@@ -177,6 +113,7 @@ export async function replaceTiersForPart(
         .update({
           sequence: tier.sequence,
           quantity: tier.quantity,
+          cost_per_unit: tier.cost_per_unit ?? null,
           markup_percent: tier.markup_percent,
         })
         .eq('id', tier.id);
@@ -189,6 +126,7 @@ export async function replaceTiersForPart(
           company_id: companyId,
           sequence: tier.sequence,
           quantity: tier.quantity,
+          cost_per_unit: tier.cost_per_unit ?? null,
           markup_percent: tier.markup_percent,
         });
       if (error) throw toFriendlyError(error, { entity: 'pricing tier' });
@@ -196,23 +134,6 @@ export async function replaceTiersForPart(
   }
 
   return getTiersForPart(partId);
-}
-
-/**
- * Delete a single tier.
- */
-export async function deleteTier(tierId: string): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase.from('part_pricing_tiers').delete().eq('id', tierId);
-  if (error) {
-    console.error('Error deleting pricing tier:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
-        entity: 'pricing tier',
-        fallback: 'Failed to delete pricing tier.',
-      }),
-    );
-  }
 }
 
 /**
@@ -270,15 +191,23 @@ export async function ensureStarterPricingTier(
   source: 'made' | 'bought',
 ): Promise<boolean> {
   const existing = await getTiersForPart(partId);
-  if (existing.length > 0) return false;
 
   // "Is there a cost", not "is there a routing". A made part whose operations
   // were all deleted still HAS a routing row and rolls up to $0; a markup there
   // would make it quotable for nothing, which is worse than not being quotable.
+  //
+  // The two sources diverge because a bought part's cost now lives ON its tier
+  // row. Such a part already HAS rows the moment anyone records a cost, so
+  // "no tiers yet" is the wrong question for it — what it can still be missing
+  // is a markup.
+  let unpriced: PartPricingTier[] = [];
   if (source === 'bought') {
-    const cost = await getComputedPartCost(partId, 1).catch(() => null);
-    if (cost === null) return false;
+    const costed = existing.filter((t) => t.cost_per_unit !== null);
+    if (costed.length === 0) return false;
+    unpriced = costed.filter((t) => t.markup_percent === null);
+    if (unpriced.length === 0) return false;
   } else {
+    if (existing.length > 0) return false;
     const breakdown = await calculateRoutingCost(partId, 1).catch(() => null);
     const hasPricedWork =
       !!breakdown &&
@@ -293,9 +222,24 @@ export async function ensureStarterPricingTier(
   const starters = readCompanyPricingDefaults(company);
   const markup = source === 'bought' ? starters.bought : starters.made;
 
-  await replaceTiersForPart(companyId, partId, [
-    { sequence: 10, quantity: 1, markup_percent: markup },
-  ]);
+  // Bought: fill the default into the costed rows that lack a markup, leaving
+  // every id, quantity and row count alone — a quote line's drift check compares
+  // exactly those, so inventing or renumbering rows here would flag every quote
+  // on the part as drifted without a single price moving.
+  // Made: the part has no rows at all, so create the one starter break.
+  await replaceTiersForPart(
+    companyId,
+    partId,
+    source === 'bought'
+      ? existing.map((t) => ({
+          id: t.id,
+          sequence: t.sequence,
+          quantity: t.quantity,
+          cost_per_unit: t.cost_per_unit,
+          markup_percent: unpriced.some((u) => u.id === t.id) ? markup : t.markup_percent,
+        }))
+      : [{ sequence: 10, quantity: 1, markup_percent: markup }],
+  );
 
   // Audit trail: a pricing row that appears with no trace is what the notes feed
   // exists to prevent.

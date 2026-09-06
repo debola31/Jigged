@@ -311,8 +311,14 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
         .execute()
     )
     bought_id = bought.data[0]["id"]
-    admin.table("part_procurement_tiers").insert(
-        {"part_id": bought_id, "min_quantity": 1, "cost_per_unit": 10}
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": bought_id,
+            "company_id": env.company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "cost_per_unit": 10,
+        }
     ).execute()
     admin.table("parts_bom").update(
         {"child_part_id": bought_id, "charge_basis": "price"}
@@ -326,17 +332,12 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
         assert bought_id in {g["part_id"] for g in explain["missing_markups"]}
         assert env.parent_id not in _list_priceable(admin, env.company_id)
 
-        # Its own tier — the thing the starter tier writes — unblocks it, on
-        # both views.
-        admin.table("part_pricing_tiers").insert(
-            {
-                "part_id": bought_id,
-                "company_id": env.company_id,
-                "sequence": 10,
-                "quantity": 1,
-                "markup_percent": 25,
-            }
-        ).execute()
+        # Its own markup — the thing the starter tier writes — unblocks it, on
+        # both views. An UPDATE, not an insert: the cost above already created
+        # this part's one tier row, and cost and markup share it.
+        admin.table("part_pricing_tiers").update({"markup_percent": 25}).eq(
+            "part_id", bought_id
+        ).eq("quantity", 1).execute()
         explain = _detail_explain(admin, env.parent_id)
         assert explain["is_priceable"] is True
         assert explain["missing_markups"] == []
@@ -344,7 +345,7 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
     finally:
         admin.table("parts_bom").delete().eq("parent_part_id", env.parent_id).execute()
         admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
-        admin.table("part_procurement_tiers").delete().eq("part_id", bought_id).execute()
+        admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
         admin.table("parts").delete().eq("id", bought_id).execute()
 
 

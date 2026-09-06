@@ -217,9 +217,10 @@ having actually changed), while leaving the derived-data refetches on the
 refresh signal untouched. See `PartPricing.tsx`'s load effect, and the
 regression tests in
 [`__tests__/components/parts/PartPricing.test.tsx`](../__tests__/components/parts/PartPricing.test.tsx)
-(`describe`: *PartPricing — staged tier edits survive sibling saves*) and
-[`__tests__/components/parts/PartProcurementPricingPanel.test.tsx`](../__tests__/components/parts/PartProcurementPricingPanel.test.tsx)
-(`describe`: *PartProcurementPricingPanel — part-level tiers, explicit save*).
+(`describe`: *PartPricing — staged tier edits survive sibling saves*). There was
+a second card here — the bought part's Cost card, over its own tier table — with
+its own copy of the same guard. Cost and markup are one ladder now, so there is
+one staged section to isolate instead of two that had to agree.
 
 ### Invariant 2 — exit guard
 

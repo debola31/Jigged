@@ -29,7 +29,7 @@ vi.mock('@/utils/partsAccess', () => ({
   getPartCostExplain: vi.fn(),
 }));
 
-import { getTiersWithComputedPrices, getPartPriceAtQty } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { getComputedPartChargeBase } from '@/utils/partsAccess';
 
 const mockComputedPartCost = vi.mocked(getComputedPartChargeBase);
@@ -107,52 +107,3 @@ describe('getTiersWithComputedPrices — one engine for made and bought', () => 
   });
 });
 
-describe('getPartPriceAtQty — the single source used by form/line/preview', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockBuilder.error = null;
-  });
-
-  it('computes base(qty) × the markup tier that applies at qty', async () => {
-    // Tiers: 25% for >=1, 15% for >=100. At qty 50 the 25% tier applies.
-    const tiers = [
-      { id: 't1', quantity: 1, markup_percent: 25 },
-      { id: 't100', quantity: 100, markup_percent: 15 },
-    ];
-    mockComputedPartCost.mockResolvedValue(8);
-
-    const p = await getPartPriceAtQty('part-1', 50, tiers);
-
-    expect(mockComputedPartCost).toHaveBeenCalledWith('part-1', 50);
-    expect(p.base_cost).toBe(8);
-    expect(p.markup_percent).toBe(25);
-    expect(p.source_tier_id).toBe('t1');
-    expect(p.unit_price).toBe(10); // 8 × 1.25
-    expect(p.below_min).toBe(false);
-  });
-
-  it('uses the higher-qty tier once the order reaches it', async () => {
-    const tiers = [
-      { id: 't1', quantity: 1, markup_percent: 25 },
-      { id: 't100', quantity: 100, markup_percent: 15 },
-    ];
-    mockComputedPartCost.mockResolvedValue(8);
-
-    const p = await getPartPriceAtQty('part-1', 100, tiers);
-
-    expect(p.markup_percent).toBe(15);
-    expect(p.source_tier_id).toBe('t100');
-    expect(p.unit_price).toBe(9.2); // 8 × 1.15
-  });
-
-  it('flags below_min and null-prices when base cannot resolve', async () => {
-    const tiers = [{ id: 't10', quantity: 10, markup_percent: 25 }];
-    mockComputedPartCost.mockResolvedValue(null);
-
-    const p = await getPartPriceAtQty('part-1', 3, tiers);
-
-    expect(p.below_min).toBe(true); // qty 3 < lowest tier 10
-    expect(p.unit_price).toBeNull(); // base null → no price
-    expect(p.markup_percent).toBe(25);
-  });
-});

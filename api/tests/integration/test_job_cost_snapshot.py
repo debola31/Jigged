@@ -146,8 +146,14 @@ def env(admin: Client):
         )
 
     bar_id = make_part("BAR", "bought")
-    admin.table("part_procurement_tiers").insert(
-        {"part_id": bar_id, "min_quantity": 1, "cost_per_unit": 4}
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": bar_id,
+            "company_id": company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "cost_per_unit": 4,
+        }
     ).execute()
 
     widget_id = make_part("WIDGET", "made")
@@ -223,7 +229,7 @@ def env(admin: Client):
     admin.table("jobs").delete().eq("id", job_id).execute()
     admin.table("parts_bom").delete().eq("parent_part_id", widget_id).execute()
     admin.table("routings").delete().eq("company_id", company_id).execute()
-    admin.table("part_procurement_tiers").delete().eq("part_id", bar_id).execute()
+    admin.table("part_pricing_tiers").delete().eq("part_id", bar_id).execute()
     admin.table("parts").delete().eq("company_id", company_id).execute()
     admin.table("work_centers").delete().eq("company_id", company_id).execute()
     admin.table("companies").delete().eq("id", company_id).execute()
@@ -259,7 +265,7 @@ def test_a_later_rate_change_does_not_move_the_job(admin: Client, env: JobEnv):
 def test_a_material_cost_change_does_not_move_the_job_either(admin: Client, env: JobEnv):
     """Same guarantee on the other half of the cost. Materials were previously
     absent from profitability entirely, so this drift was invisible twice over."""
-    admin.table("part_procurement_tiers").update({"cost_per_unit": 9}).eq(
+    admin.table("part_pricing_tiers").update({"cost_per_unit": 9}).eq(
         "part_id", env.bar_id
     ).execute()
 

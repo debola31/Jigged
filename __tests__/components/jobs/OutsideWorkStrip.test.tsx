@@ -101,19 +101,54 @@ describe('OutsideWorkStrip', () => {
   });
 });
 
-describe('OutsideWorkStrip — the action has to be legible on its own band', () => {
-  it('does not take the theme default text-button blue, which fails AA here', () => {
-    // Measured against the amber band: primary.light #6FA3D8 is 3.83:1 at rest
-    // and 3.03:1 on hover, where AA wants 4.5:1. warning.light is 6.09 / 4.81.
-    renderStrip([op()]);
-    const btn = screen.getByRole('button', { name: /See what's out/i });
-    const style = getComputedStyle(btn);
-    expect(style.color).not.toBe('rgb(111, 163, 216)');
+describe('OutsideWorkStrip — the whole band is the control', () => {
+  it('is ONE button carrying the whole summary, not a link parked at the far right', () => {
+    // The band says one thing and does one thing, so the target is the band.
+    // A clickable phrase inside an inert band asks the reader to find a
+    // boundary that nothing on screen draws.
+    renderStrip([op({ job_number: 'J-0141', vendor_name: 'PerformCoat' })]);
+    const band = screen.getByRole('button');
+    expect(band).toHaveTextContent(/1 job has parts at 1 vendor/i);
+    expect(band).toHaveTextContent(/Longest out: J-0141 at PerformCoat/i);
+    expect(band).toHaveTextContent(/See what's out/i);
   });
 
-  it('underlines the action, so it does not read as a control by hue alone', () => {
+  it('is a real <button>, so it takes focus and fires from the keyboard', () => {
+    // A Box with an onClick looks identical and is unreachable without a mouse.
+    const onOpen = renderStrip([op()]);
+    const band = screen.getByRole('button');
+    expect(band.tagName).toBe('BUTTON');
+    band.focus();
+    expect(band).toHaveFocus();
+    return userEvent.keyboard('{Enter}').then(() => {
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('nests NO interactive element inside it', () => {
+    // A button inside a button is invalid HTML and gives the row two competing
+    // accessible names. "See what's out" is the affordance, not a second control.
     renderStrip([op()]);
-    const btn = screen.getByRole('button', { name: /See what's out/i });
-    expect(getComputedStyle(btn).textDecoration).toMatch(/underline/);
+    const band = screen.getByRole('button');
+    expect(band.querySelectorAll('button, a, input, [role="button"]')).toHaveLength(0);
+  });
+});
+
+describe('OutsideWorkStrip — the affordance has to be legible on its own band', () => {
+  it('does not take the theme default text-button blue, which fails AA here', () => {
+    // Measured off the rendered band at its lightest point: primary.light
+    // #6FA3D8 is 3.83:1 at rest and 3.03:1 hovered, where AA wants 4.5:1.
+    // warning.light #fbbf24 is 5.27:1 / 4.93:1.
+    renderStrip([op()]);
+    const affordance = screen.getByText(/See what's out/i);
+    expect(getComputedStyle(affordance).color).not.toBe('rgb(111, 163, 216)');
+  });
+
+  it('marks itself as a control by more than hue — a chevron rides with the label', () => {
+    // Colour alone is the failure StatusDot exists to avoid, and it is the only
+    // cue left now that the underline went with the text button.
+    renderStrip([op()]);
+    const band = screen.getByRole('button');
+    expect(band.querySelector('svg[data-testid="ChevronRightIcon"]')).not.toBeNull();
   });
 });

@@ -475,16 +475,34 @@ Measured on the Jobs page's outside-work strip (an amber-tinted band):
 | Foreground | At rest | On hover | AA needs |
 |---|---|---|---|
 | `primary.light` #6FA3D8 — the theme default | **3.83:1** | **3.03:1** | 4.5:1 |
-| `warning.light` #fbbf24 | 6.09:1 | 4.81:1 | 4.5:1 |
+| `warning.light` #fbbf24 | 5.27:1 | 4.93:1 | 4.5:1 |
 
-Hover is the worse case and the easy one to miss: MUI lightens the ground under a
-light foreground, so a button that scrapes past at rest can fail once the cursor
-is on it. **Check both states.**
+Hover is the worse case and the easy one to miss: lightening the ground under a
+light foreground costs contrast, whether it comes from MUI's own overlay or from
+your `&:hover` background. **Check both states.**
+
+**Sample the LIGHTEST pixel of the band, not its nominal colour.** The page
+ground is a `135deg` gradient with an ambient radial glow on top, so a band's
+real background varies across its own width — the numbers above come from its
+right end, which is both the brightest point and where the action sits. The
+first measurement of this band read 6.09/4.81 because it sampled the middle.
 
 The fix is an `sx` colour drawn from the band's own semantic — which also ties
-the action to the thing it belongs to. And give it a **persistent underline**:
-without one the only thing marking it as a control is its hue, the same
-colour-alone failure `StatusDot` exists to avoid.
+the action to the thing it belongs to — and a non-hue cue (an underline on a
+text button, a chevron on a band), because hue alone is the same failure
+`StatusDot` exists to avoid.
+
+**A band that says one thing and does one thing should be one button.** The
+strip started as a small text link parked at the far right of a ~1400px band;
+it is now a single `ButtonBase` wrapping the whole row, so the target is the
+band and there is no invisible boundary between a clickable region and an inert
+one. Two conditions come with that, and they are what make it an improvement
+rather than a bigger hit area: it must be a real `<button>` (a `Box` with an
+`onClick` looks identical and is unreachable from the keyboard), and **nothing
+inside it may be interactive** — a nested button is invalid HTML and splits the
+row's accessible name. `ButtonBase` also ships no focus ring, so give it an
+explicit `&:focus-visible` outline. If a second action is ever wanted on such a
+band, it stops being a button first.
 
 ### Status Badges
 

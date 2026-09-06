@@ -1,8 +1,9 @@
 'use client';
 
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
 import Typography from '@mui/material/Typography';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 
 import type { OutsideOperation } from '@/types/operator';
@@ -37,6 +38,18 @@ function daysSince(iso: string): number {
  * There is deliberately no send or receive here. Those live on the operation,
  * and a second place to act on the same row is what got the outside-work tab
  * deleted in Aug 2026 (docs/modules/jobs.md).
+ *
+ * THE WHOLE BAND IS THE BUTTON, and it is a real `<button>` rather than a Box
+ * with an onClick — so it takes keyboard focus, announces itself as a control,
+ * and fires on Enter and Space for free. It replaced a small text link parked
+ * at the far right of a ~1400px band: the band says exactly one thing and does
+ * exactly one thing, so carving it into a clickable region and an inert one
+ * only asked the reader to find the boundary.
+ *
+ * That has one hard consequence: NOTHING INSIDE MAY BE INTERACTIVE. A nested
+ * button is invalid HTML and gives the row two competing accessible names, so
+ * "See what's out" is now a plain span — the affordance, not the control. If a
+ * second action is ever wanted here, the band stops being a button first.
  */
 export default function OutsideWorkStrip({ outsideOps, onOpen }: OutsideWorkStripProps) {
   const atVendor = outsideOps.filter((o) => o.status === 'sent');
@@ -54,21 +67,47 @@ export default function OutsideWorkStrip({ outsideOps, onOpen }: OutsideWorkStri
     : undefined;
 
   return (
-    <Box
+    <ButtonBase
+      onClick={onOpen}
       sx={{
         display: 'flex',
         alignItems: 'center',
         gap: 2,
+        width: '100%',
         mb: 2,
         px: 2,
         py: 1.5,
         borderRadius: 1,
+        textAlign: 'left',
+        justifyContent: 'flex-start',
         // Amber, matching the At-vendor chip on the rows below and the operator's
         // own at-vendor line. One colour means one fact across three surfaces.
         bgcolor: 'rgba(245, 158, 11, 0.10)',
         border: '1px solid rgba(245, 158, 11, 0.35)',
         borderLeft: '3px solid',
         borderLeftColor: 'warning.main',
+        transition: 'background-color 120ms ease, border-color 120ms ease',
+        // HOVER LIGHTENS THE GROUND, WHICH IS THE WORSE CASE FOR CONTRAST, so
+        // the lift is deliberately small and the rest of the feedback is spent
+        // on the border instead. MEASURED off the rendered page, sampling the
+        // lightest pixel at the band's right end -- where the 135deg page
+        // gradient and the ambient backdrop's glow are both at their brightest,
+        // and where the affordance happens to sit. `warning.light` there is
+        // 5.27:1 at rest and 4.93:1 hovered, against AA's 4.5:1 for normal
+        // text. The same lift at 0.16 measured 4.78:1 hovered: the extra alpha
+        // is not visible and the margin is.
+        '&:hover': {
+          bgcolor: 'rgba(245, 158, 11, 0.14)',
+          borderColor: 'rgba(245, 158, 11, 0.55)',
+          borderLeftColor: 'warning.main',
+        },
+        // ButtonBase ships no focus ring of its own. Without this the keyboard
+        // path to the drawer is invisible.
+        '&:focus-visible': {
+          outline: '2px solid',
+          outlineColor: 'warning.light',
+          outlineOffset: '2px',
+        },
       }}
     >
       <LocalShippingIcon sx={{ color: 'warning.main', flexShrink: 0 }} />
@@ -87,34 +126,22 @@ export default function OutsideWorkStrip({ outsideOps, onOpen }: OutsideWorkStri
         )}
       </Box>
       <Box sx={{ flex: 1 }} />
-      {/**
-       * AMBER, not the theme's default text-button blue, and MEASURED rather
-       * than eyeballed.
-       *
-       * `lib/theme.ts` paints every text button `primary.light` (#6FA3D8)
-       * regardless of its `color` prop -- which is right on the app's own
-       * ground and wrong on this one. Against the amber-tinted band it measures
-       * **3.83:1 at rest and 3.03:1 on hover**, where WCAG AA wants 4.5:1 for
-       * normal text; hover is worse because it lightens the ground under a
-       * light foreground. `warning.light` measures 6.09:1 and 4.81:1, passing
-       * in both states, and it ties the action to the band it sits in.
-       *
-       * The underline is not decoration either: without it the only thing
-       * marking this as a control is its hue, which is the same colour-alone
-       * failure `StatusDot` exists to avoid.
-       */}
-      <Button
-        onClick={onOpen}
+      <Box
         sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
           flexShrink: 0,
-          whiteSpace: 'nowrap',
           color: 'warning.light',
-          textDecoration: 'underline',
-          '&:hover': { color: 'warning.light', textDecoration: 'underline' },
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
         }}
       >
-        See what&apos;s out
-      </Button>
-    </Box>
+        <Typography variant="button" sx={{ color: 'inherit', fontWeight: 'inherit' }}>
+          See what&apos;s out
+        </Typography>
+        <ChevronRightIcon fontSize="small" />
+      </Box>
+    </ButtonBase>
   );
 }

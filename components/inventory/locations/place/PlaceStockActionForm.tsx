@@ -665,15 +665,33 @@ export default function PlaceStockActionForm({
               const typed = qty[row.partId] ?? '';
               const value = parseFloat(typed);
               const over = row.onHand != null && Number.isFinite(value) && value > row.onHand;
+              /*
+               * WRAPS, and does not merely shrink.
+               *
+               * The `sm` breakpoint is a VIEWPORT question being asked about a CONTAINER: this
+               * same row renders inside `PartPlacesDrawer`, which is ~460px wide on a desktop
+               * viewport that is well past `sm`. So it laid out as a row, the controls kept their
+               * fixed widths, and `minWidth: 0` let the label column collapse to a sliver —
+               * "3,626 ea here" wrapping to three lines beside the number input. Adding the heat
+               * field is what finally overflowed it, but the fragility predates that.
+               *
+               * `flexWrap` plus a real minimum on the label is the container-aware fix: when the
+               * controls no longer fit beside the name they drop to their own line instead of
+               * crushing it. `useFlexGap` because `spacing` is margin-based, and margins do not
+               * apply across a wrap.
+               */
               return (
                 <Stack
                   key={row.partId}
                   direction={{ xs: 'column', sm: 'row' }}
                   spacing={{ xs: 0.5, sm: 1.5 }}
+                  useFlexGap
+                  flexWrap="wrap"
                   alignItems={{ xs: 'stretch', sm: 'center' }}
                   sx={{ minHeight: 48, py: { xs: 0.5, sm: 0 } }}
                 >
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {/* `160px` is the floor at which the on-hand caption still reads on one line. */}
+                  <Box sx={{ flex: '1 1 160px', minWidth: 0 }}>
                     <Typography variant="body2" noWrap title={row.partName}>
                       {row.partName}
                     </Typography>
@@ -686,7 +704,17 @@ export default function PlaceStockActionForm({
                     </Typography>
                   </Box>
 
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  {/* The controls travel together and keep their widths — they are the things
+                      being typed into. When they no longer fit beside the name, the whole group
+                      wraps to the next line rather than any one of them narrowing. */}
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    useFlexGap
+                    flexWrap="wrap"
+                    alignItems="center"
+                    sx={{ flexShrink: 0 }}
+                  >
                     <TextField
                       size="small"
                       type="number"
@@ -736,7 +764,7 @@ export default function PlaceStockActionForm({
                     {showLotPicker &&
                       (lotsHere?.tracked.has(row.partId) ||
                         (lotsHere?.lots.get(row.partId)?.length ?? 0) > 0) && (
-                        <Box sx={{ width: 170 }}>
+                        <Box sx={{ width: 150 }}>
                           <LotPicker
                             size="small"
                             label="Heat"

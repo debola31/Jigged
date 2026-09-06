@@ -151,6 +151,34 @@ company keeps its old invoices exactly as they last read: an Intuit invoice id i
 inside the realm that issued it, and re-querying it against a new realm would attach another
 company's numbers to Jigged's invoice.
 
+**A reconnect never changes which QuickBooks company this is.** The authorize screen grants access
+for whichever Intuit account is signed into that browser, and Intuit offers a brand-new trial company
+to a signer who has none — so an admin reconnecting an expired connection while signed in as
+themselves can land on a different company file without being asked a single question. Found live on
+2026-09-05, reconnecting Contour Tool & Machine after Intuit revoked their grant.
+
+`persist_connection` overwrites `realm_id` unconditionally and nothing checked it, so that used to
+succeed and the card just said "Connected" — while every invoice link and customer mapping stayed
+bound to the old realm, payment status reported them as belonging to a previous company, and new
+pushes went to the empty one. The callback now compares the realm Intuit returns against the stored
+one and refuses outright, redirecting to `?qb=realm_mismatch`; the grant it declined to store is
+revoked rather than left live.
+
+**The refusal is unconditional, and the first draft of it was not.** That draft allowed the switch
+when no invoice or customer row was bound to the old realm, on the theory that there was nothing to
+strand. There is: `default_item_id`, `default_income_account_id`, `po_custom_field_id` and
+`po_custom_field_name` live on the connection row, name objects *inside the old company file*, and
+`persist_connection` clears none of them. A "harmless" swap therefore leaves the new company
+pointing at another company's item and income account, and the next push files a **wrong invoice**
+rather than merely failing to read one. One rule with no exception is also the only version a shop
+owner can predict, since the exception turned on state they cannot see.
+
+**Switching companies on purpose still works: Disconnect, then connect.** That path deletes the
+connection row, which is exactly what makes it safe — every stale realm-specific setting goes with
+it — and `revoke_token` never raises, so it cannot get stuck. The one comparison that is skipped is
+a stored row from the *other* Intuit environment: a sandbox row while running production is stale by
+definition, not a company to protect, so it never blocks a fresh connection.
+
 ### A void in QuickBooks reopens the quantity
 
 `voided` or `missing` sets `voided_at`, which fires the existing

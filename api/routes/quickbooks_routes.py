@@ -204,6 +204,59 @@ async def callback(
             .execute()
         )
         connected_by = access.data[0]["id"] if access.data else None
+
+        # ── A reconnect NEVER changes which QuickBooks company this is ──
+        #
+        # The authorize screen grants access for whichever Intuit account is signed
+        # into that browser, and Intuit offers a brand new trial company to a signer
+        # who has none. So the realm coming back here is not necessarily the realm
+        # that went out: an admin reconnecting an expired connection while signed in
+        # as themselves can land on a different company file without being asked a
+        # single question. Seen live on 2026-09-05.
+        #
+        # persist_connection overwrites realm_id unconditionally and nothing checked
+        # it, so that used to succeed and the card just said "Connected".
+        #
+        # This refuses on the realm alone, with no "but it looks harmless" branch.
+        # An earlier cut allowed the switch when no invoice or customer row was
+        # bound to the old realm, on the theory that there was nothing to strand.
+        # That was wrong: FOUR realm-specific settings live on the connection row
+        # itself — default_item_id, default_income_account_id, po_custom_field_id
+        # and po_custom_field_name — and persist_connection does not clear any of
+        # them. A "harmless" swap therefore leaves the new company pointing at an
+        # item and income account belonging to the old one, and the next push files
+        # a WRONG invoice rather than merely failing to read one.
+        #
+        # Switching companies on purpose still works: Disconnect, then connect.
+        # That path DELETES the connection row, which is precisely what makes it
+        # safe — every stale realm-specific setting goes with it — and revoke_token
+        # never raises, so it cannot get stuck. One rule, one escape hatch, no state
+        # a shop owner cannot see deciding which they get.
+        existing = qb.get_connection(db, company_id)
+        if (
+            existing
+            and existing.get("realm_id")
+            and existing["realm_id"] != realmId
+            # Only meaningful within one Intuit environment: a sandbox row while
+            # running production is stale by definition, not a company to protect.
+            and existing.get("environment") == qb._environment()
+        ):
+            logger.warning(
+                "QuickBooks callback for company %s returned realm %s but the "
+                "connection is bound to %s. Refusing.",
+                company_id,
+                realmId,
+                existing["realm_id"],
+            )
+            # Do not leave a live grant we have decided not to store. Best effort:
+            # failing to revoke is untidy, not harmful, and must not turn a refusal
+            # the user can act on into a generic error they cannot.
+            try:
+                qb.revoke_token(bundle.refresh_token)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Could not revoke the unused QuickBooks grant: %s", exc)
+            return RedirectResponse(f"{settings_url}?qb=realm_mismatch", status_code=302)
+
         qb.persist_connection(db, company_id, realmId, bundle, connected_by=connected_by)
         # Best-effort: store the QBO company name for the UI label.
         try:

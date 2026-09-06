@@ -328,12 +328,20 @@ is facts about the job, and now renders as rows inside it. The **Production** co
 went with the count beside it — a job carries one part, so the header was a count of one over a
 control that only ever hid the thing people came for. **Attachments** left the card; they are job
 attachments (customer PO PDFs), not part files, and remain viewable and editable on the Edit
-screen.
+screen — reachable from the job page as a **paperclip beside the Customer PO**, which is what the
+files actually are. It renders nothing when there are none, opens a single file directly, and asks
+which one when there are several. The Customer PO row is unconditional for that reason: hiding it
+when a job has no PO *number* would strand a file that a job has.
 
 Actions, left to right: Edit · Print Traveler (per part; acts directly on a
 single-part job, opens a picker otherwise) · **Shipments** and **Invoices** dropdowns (view
-existing + create, so both are reachable without scrolling) · **Activity** (toggles the rail
-below) · Reopen *or* Cancel · Delete.
+existing + create, so both are reachable without scrolling) · Reopen, when the job is cancelled ·
+and an **overflow** holding Cancel and Delete. Those two are the rarest things anyone does to a
+job and the most expensive to do by accident, and they were sitting full-size beside Print
+Traveler; behind a kebab they cost the toolbar nothing and take a deliberate second press. Reopen
+stays out in the open — it is the opposite of destructive, and on a cancelled job it is the one
+thing somebody came to do. There is no Activity button: the rail's own collapsed strip is the way
+in.
 Cancel is offered while production is neither `completed` nor `cancelled`; Reopen only when
 `cancelled`; shipping is gated by `canShip` (not cancelled, not fully shipped, has parts).
 *(This doc previously gave a per-status action table gating Edit and Create shipment/invoice on

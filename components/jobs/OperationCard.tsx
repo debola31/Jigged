@@ -9,7 +9,6 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import UndoIcon from '@mui/icons-material/Undo';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
@@ -259,15 +258,12 @@ export default function OperationCard({
               </Typography>
             </Box>
           )}
-          {status === 'completed' && operation.completed_at && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-              <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
-              <Typography variant="caption" color="text.secondary">
-                {isExternal ? 'Received' : 'Completed'} {formatDateTime(operation.completed_at)}
-                {operation.completed_by_name ? ` by ${operation.completed_by_name}` : ''}
-              </Typography>
-            </Box>
-          )}
+          {/* WHO FINISHED IT AND WHEN is not here any more. The activity rail
+              three inches to the right says "Completed Final Inspection · Dev
+              Seed User · 10 pcs" with a timestamp, and it says it for every
+              completion rather than only the last one. This line was the same
+              sentence, less complete, on the surface people act from. The chip
+              still says the step is done; the feed says who and when. */}
           {/* Quantity progress: good pieces vs the part's order qty. Shown when
               there's a target and either work has started or it's not yet done.
               Not for external ops (vendor work — no quantity completions). */}

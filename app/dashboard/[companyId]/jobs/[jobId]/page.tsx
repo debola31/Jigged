@@ -28,6 +28,9 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PrintIcon from '@mui/icons-material/Print';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
 
 import {
@@ -42,6 +45,7 @@ import type { JobPartShipmentSummary } from '@/types/shipment';
 import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
+import JobAttachmentsInline from '@/components/jobs/JobAttachmentsInline';
 import JobActivityRail, {
   captureRailToggle,
   readRailOpen,
@@ -75,6 +79,7 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -474,8 +479,15 @@ export default function JobDetailPage() {
             />
           )}
 
-          {/* The negative cluster sits at the right, after the benign + invoice
-              actions: the lifecycle toggle (Reopen/Cancel) then Delete last. */}
+          {/* THE DESTRUCTIVE PAIR MOVES BEHIND AN OVERFLOW.
+              Cancel and Delete are the two rarest things anyone does to a job
+              and the two most expensive to do by accident, and they were sitting
+              at full size next to Print Traveler. Behind a kebab they cost the
+              toolbar nothing and take a deliberate second press.
+
+              Reopen stays out here: it is the opposite of destructive, it only
+              exists on a cancelled job, and on that job it is the ONE thing
+              somebody came to do. */}
           {canReopen && (
             <Button
               variant="outlined"
@@ -486,29 +498,49 @@ export default function JobDetailPage() {
               Reopen
             </Button>
           )}
-          {canCancel && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<CancelIcon />}
-              onClick={() => setCancelDialogOpen(true)}
-              disabled={actionLoading}
-            >
-              Cancel
-            </Button>
-          )}
-          <Tooltip title="Delete job">
+          <Tooltip title="More actions">
             <span>
               <IconButton
-                color="error"
-                onClick={handleDeleteClick}
+                onClick={(e) => setMoreAnchor(e.currentTarget)}
                 disabled={actionLoading}
-                aria-label="Delete job"
+                aria-label="More job actions"
+                data-testid="job-more-actions"
               >
-                <DeleteIcon />
+                <MoreVertIcon />
               </IconButton>
             </span>
           </Tooltip>
+          <Menu
+            anchorEl={moreAnchor}
+            open={moreAnchor !== null}
+            onClose={() => setMoreAnchor(null)}
+          >
+            {canCancel && (
+              <MenuItem
+                onClick={() => {
+                  setMoreAnchor(null);
+                  setCancelDialogOpen(true);
+                }}
+              >
+                <ListItemIcon>
+                  <CancelIcon fontSize="small" color="error" />
+                </ListItemIcon>
+                <ListItemText>Cancel job</ListItemText>
+              </MenuItem>
+            )}
+            {/* Delete sits last, the rule for a destructive list. */}
+            <MenuItem
+              onClick={() => {
+                setMoreAnchor(null);
+                handleDeleteClick();
+              }}
+            >
+              <ListItemIcon>
+                <DeleteIcon fontSize="small" color="error" />
+              </ListItemIcon>
+              <ListItemText>Delete job</ListItemText>
+            </MenuItem>
+          </Menu>
         </Box>
       </Box>
 
@@ -560,14 +592,20 @@ export default function JobDetailPage() {
                     <Typography>—</Typography>
                   )}
                 </Box>
-                {job.customer_po_number && (
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">
-                      Customer PO
-                    </Typography>
-                    <Typography fontWeight={500}>{job.customer_po_number}</Typography>
+                {/* UNCONDITIONAL, unlike the other optional fields, because the
+                    paperclip lives here: attachments are the customer's PO PDF,
+                    and hiding the row when there is no PO NUMBER would make a
+                    file on such a job unreachable from this page. One "—" is
+                    cheaper than an orphaned document. */}
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Customer PO
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography fontWeight={500}>{job.customer_po_number || '—'}</Typography>
+                    <JobAttachmentsInline jobId={jobId} />
                   </Box>
-                )}
+                </Box>
                 {job.quote_id && job.quotes && (
                   <Box>
                     <Typography variant="caption" color="text.secondary">

@@ -422,15 +422,14 @@ export default function OperationsPanel({
     <>
       <Card elevation={2}>
         <CardContent>
-          {/* Header with Progress */}
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Operations ({completedCount}/{operations.length} completed)
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {Math.round(progressPercent)}%
-            </Typography>
-          </Box>
+          {/* ONE RENDERING OF ONE NUMBER.
+              This was three: "(2/2 completed)", "100%", and the bar — over rows
+              that each carry their own status chip, which is a fourth. The bar
+              is the one that reads at a glance and the only one that does not
+              need reading at all, so it is the one that stays. */}
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+            Operations
+          </Typography>
 
           {/* Progress Bar */}
           <LinearProgress

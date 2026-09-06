@@ -40,15 +40,15 @@ export const RAIL_WIDTH_LG = 320;
 export const RAIL_WIDTH_XL = 380;
 
 /**
- * How much vertical room the app chrome takes above `<main>`'s content box.
+ * How much vertical room the sticky app header takes above `<main>`.
  *
- * Only a max-height, never a `top` offset: `<main>` is the scroll container and
- * its padding-box already starts below the sticky header, so `top: 0` on a
- * sticky child is correct. Being a few pixels out here costs a slightly tall
- * scroller, not a covered header — which is exactly why this is a sticky column
- * and not a fixed drawer at `zIndex.drawer`.
+ * A height, never a `top` offset: `<main>` is the scroll container and its
+ * padding box already starts below the sticky header, so `top: 0` on a sticky
+ * child is correct. Being a few pixels out here costs a slightly tall scroller,
+ * not a covered header — which is exactly why this is a sticky column and not a
+ * fixed drawer at `zIndex.drawer`.
  */
-const RAIL_CHROME_INSET = 96;
+const RAIL_HEADER_INSET = 72;
 
 export const RAIL_OPEN_STORAGE_KEY = 'jigged-job-activity-rail-open';
 
@@ -364,18 +364,54 @@ export default function JobActivityRail({
           // Without this the flex row stretches the rail to the content
           // column's height and `sticky` never engages.
           alignSelf: 'flex-start',
-          maxHeight: `calc(100dvh - ${RAIL_CHROME_INSET}px)`,
           /**
-           * A DIVIDER, not a box.
+           * ONE SCREEN TALL, ALWAYS — `height`, not `maxHeight`.
            *
-           * This briefly took the Card treatment — fill, full border, radius —
-           * to make it read as its own surface. It read as a floating panel
-           * bolted onto the page instead. The rail is a REGION of this page,
-           * not an object sitting on it, and a single rule separating it from
-           * the content says that with far less furniture.
+           * With a max the column was only as tall as its own content, so the
+           * divider grew and shrank with the number of rows and read as the
+           * edge of a floating block rather than the edge of a region. Matching
+           * the CONTENT column instead would be worse: production plus
+           * materials runs to several thousand pixels, so the rule would carry
+           * on for screens past the last row, drawn beside nothing.
+           *
+           * Pinned to the viewport is the third option and the right one. The
+           * feed scrolls inside it, and the divider always spans exactly what
+           * you can see.
            */
+          height: `calc(100dvh - ${RAIL_HEADER_INSET}px)`,
+          /**
+           * BLEEDS THROUGH `<main>`'s PADDING, so the region reaches the edges
+           * of the screen instead of floating inside the page's gutter. A band
+           * of canvas above and to the right of it reads as "a block that
+           * happens to be tall", which is the thing the full height was meant
+           * to stop.
+           */
+          // MATCHES `<main>`'s padding exactly — `p: { xs: 2, md: 3 }` — because
+          // a bleed wider than the padding it cancels is overflow, not bleed.
+          mt: { xs: -2, md: -3 },
+          mb: { xs: -2, md: -3 },
+          mr: { xs: -2, md: -3 },
+          /**
+           * A REGION, not a box — a tint and one rule, no border-all-round and
+           * no radius.
+           *
+           * This went through the full Card treatment once (fill, border,
+           * radius) and read as a panel bolted onto the page, because that is
+           * what those three together mean. What separates a region from an
+           * object is exactly the furniture: a surface says "different place",
+           * a closed outline says "different thing".
+           *
+           * A darkening WASH rather than a colour of its own, so it tracks
+           * whatever the ambient backdrop is doing behind it instead of pinning
+           * a hex that drifts out of step with the canvas.
+           */
+          bgcolor: 'rgba(0, 0, 0, 0.16)',
           borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
+          // Restores the inset the negative margins just cancelled, so the
+          // content keeps the page's rhythm even though the surface does not.
           pl: 2,
+          pr: 3,
+          py: 3,
         }}
       >
         {renderBody({
@@ -411,8 +447,16 @@ export default function JobActivityRail({
           top: 0,
           alignSelf: 'flex-start',
           py: 1.5,
-          // The same divider the open rail uses, so collapsing reads as the
-          // region narrowing rather than as a different object appearing.
+          // The same height, wash and rule the open rail uses, so collapsing
+          // reads as the region narrowing rather than as a different thing
+          // appearing in its place.
+          height: `calc(100dvh - ${RAIL_HEADER_INSET}px)`,
+          // MATCHES `<main>`'s padding exactly — `p: { xs: 2, md: 3 }` — because
+          // a bleed wider than the padding it cancels is overflow, not bleed.
+          mt: { xs: -2, md: -3 },
+          mb: { xs: -2, md: -3 },
+          mr: { xs: -2, md: -3 },
+          bgcolor: 'rgba(0, 0, 0, 0.16)',
           borderLeft: '1px solid rgba(255, 255, 255, 0.14)',
         }}
       >

@@ -367,11 +367,23 @@ for interval start/finish. Slips, receipts and completions that were taken back 
 through: this is an audit surface, so the rule is show-struck-through rather than the usual
 `filter-it-out`.
 
-**A divider, not a box.** The rail is separated from the content by a single left rule and
-nothing else. It briefly took the full Card treatment — fill, border, radius — to make it read as
-its own surface, and that read as a panel bolted onto the page: the rail is a REGION of this
-page, not an object sitting on it. The collapsed strip uses the same rule, so collapsing looks
-like the region narrowing.
+**A region, not a box.** The rail is one screen tall, bleeds through `<main>`'s padding to the
+edges, carries a faint darkening wash, and is separated from the content by a single left rule —
+no border-all-round, no radius. Each of those is load-bearing:
+
+- **`height`, not `maxHeight`.** With a max the column was only as tall as its rows, so the rule
+  grew and shrank with the feed and read as the edge of a floating block. Matching the *content*
+  column would be worse — production plus materials runs to thousands of pixels, so the rule
+  would continue for screens past the last row, drawn beside nothing. Pinned to the viewport is
+  the third option and the right one.
+- **The wash and the rule together.** A boundary with no surface reads as a stray line; a surface
+  with a closed outline and a radius reads as an object bolted onto the page, which is what the
+  full Card treatment produced when it was tried. A region needs both, and only both.
+- **The bleed matches `p: { xs: 2, md: 3 }` exactly.** A bleed wider than the padding it cancels
+  is overflow, not bleed — and the collapsed strip renders at `xs`, where the padding is 16px.
+
+The collapsed strip takes the same height, wash and rule, so collapsing reads as the region
+narrowing rather than as a different thing appearing in its place.
 
 **The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
 step, which is what the operator traveler renders, so it is a real channel to the floor. Photos

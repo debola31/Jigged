@@ -86,9 +86,23 @@ export default function ReceiveFromVendorDialog({
   const outstanding = slip?.outstanding ?? 0;
   const consequence = outsideReceiptConsequence(goodInput, outstanding);
   const good = Number(goodInput) || 0;
+
+  /**
+   * THE CLOSE ONLY APPEARS WHEN THERE IS SOMETHING TO WRITE OFF.
+   *
+   * The field is prefilled with the whole outstanding balance, so the common
+   * case is "it all came back" and there is nothing to close — an always-visible
+   * checkbox there is noise that invites a tick meaning nothing. It appears the
+   * moment somebody types a smaller number, which is exactly when the question
+   * "is the rest coming?" becomes real.
+   */
+  const canClose = good < outstanding;
+  // `canClose &&` is not belt-and-braces: tick the box, then raise the quantity
+  // back to full, and the control is gone while the state it set is not.
+  const willClose = canClose && closeSlip;
   // A close with no receipt is legitimate -- the vendor returned nothing and the
   // shop is writing the slip off.
-  const canSubmit = (good > 0 || closeSlip) && !busy;
+  const canSubmit = (good > 0 || willClose) && !busy;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -133,7 +147,7 @@ export default function ReceiveFromVendorDialog({
         )}
 
         <TextField
-          label="Good received"
+          label="Amount received"
           type="number"
           value={goodInput}
           onChange={(e) => setGoodInput(e.target.value)}
@@ -147,18 +161,19 @@ export default function ReceiveFromVendorDialog({
             closing the slip rather than by reconciling a scrap quantity -- the
             pieces stay missing from the good total either way, so the step is
             still short and the shop still re-runs them or drops the order. */}
-        <FormControlLabel
-          control={
-            <Checkbox checked={closeSlip} onChange={(e) => setCloseSlip(e.target.checked)} />
-          }
-          label={
-            <Typography variant="body2">
-              That&apos;s everything we&apos;re getting
-              {outstanding > good ? ` — writes off ${outstanding - good}` : ''}
-            </Typography>
-          }
-          sx={{ mb: 1 }}
-        />
+        {canClose && (
+          <FormControlLabel
+            control={
+              <Checkbox checked={closeSlip} onChange={(e) => setCloseSlip(e.target.checked)} />
+            }
+            label={
+              <Typography variant="body2">
+                That&apos;s everything we&apos;re getting — writes off {outstanding - good}
+              </Typography>
+            }
+            sx={{ mb: 1 }}
+          />
+        )}
 
         {/* The checkbox and this line must never contradict each other. Ticked,
             the remainder is being written off -- saying "2 still at the vendor"
@@ -167,7 +182,7 @@ export default function ReceiveFromVendorDialog({
           variant="body2"
           color={consequence.kind === 'over' ? 'warning.main' : 'text.secondary'}
         >
-          {closeSlip
+          {willClose
             ? `${slip?.slip_number ?? 'This slip'} closes — nothing more expected back.`
             : outsideReceiptCaption(consequence, vendorName) || ' '}
         </Typography>
@@ -181,7 +196,7 @@ export default function ReceiveFromVendorDialog({
             onSubmit({
               shipmentId: slip?.id ?? null,
               quantityGood: good,
-              closeShipment: closeSlip,
+              closeShipment: willClose,
             })
           }
           variant="contained"

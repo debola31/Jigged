@@ -160,12 +160,19 @@ test.describe('outside processing — shipping & receiving', () => {
     await expect(page.getByRole('button', { name: /^Receive 5/i })).toBeVisible();
     await expect(page.getByText(/0 \/ 10 back · 5 at vendor · 5 to send/)).toBeVisible();
 
-    // ---- 3. Receive short, with scrap -------------------------------------
+    // ---- 3. Receive short, and short-close the rest ------------------------
     await page.getByRole('button', { name: /^Receive 5/i }).click();
-    await page.getByRole('button', { name: /Some were scrapped/i }).click();
-    await page.getByRole('spinbutton', { name: /Good received/i }).fill('3');
-    await page.getByRole('spinbutton', { name: /Scrapped at vendor/i }).fill('2');
-    await expect(page.getByText(/Everything on this slip is accounted for/i)).toBeVisible();
+
+    // The field is prefilled with the whole outstanding balance, so there is
+    // nothing to write off and the close is NOT offered yet.
+    await expect(page.getByRole('spinbutton', { name: /Amount received/i })).toHaveValue('5');
+    await expect(page.getByRole('checkbox', { name: /everything we're getting/i })).toHaveCount(0);
+
+    // Type a smaller number and it appears, naming what it writes off.
+    await page.getByRole('spinbutton', { name: /Amount received/i }).fill('3');
+    await page.getByRole('checkbox', { name: /everything we're getting/i }).check();
+    await expect(page.getByText(/writes off 2/i)).toBeVisible();
+    await expect(page.getByText(/closes — nothing more expected back/i)).toBeVisible();
     await page.getByRole('button', { name: /Record receipt/i }).click();
 
     // WAIT FOR THE DIALOG TO CLOSE BEFORE RELOADING. click() returns as soon as
@@ -175,9 +182,10 @@ test.describe('outside processing — shipping & receiving', () => {
     // disappearance is the signal that the row landed.
     await expect(page.getByRole('button', { name: /Record receipt/i })).toHaveCount(0);
     await page.reload();
-    // 3 good, 2 the vendor ruined, nothing left at the vendor -- so Receive is
-    // gone, and the two scrapped pieces are back in what still has to go out.
-    await expect(page.getByText(/3 \/ 10 back · 2 scrapped · 7 to send/)).toBeVisible();
+    // 3 good and the slip closed short, so nothing is left at the vendor --
+    // Receive is gone, and the 2 written off are back in what still has to go
+    // out, because the job is still short of its ten.
+    await expect(page.getByText(/3 \/ 10 back · 7 to send/)).toBeVisible();
     await expect(page.getByRole('button', { name: /^Receive/i })).toHaveCount(0);
 
     // Status is derived, never asserted: 3 good of 10 with nothing away.

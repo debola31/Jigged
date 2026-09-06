@@ -314,6 +314,11 @@ export default function OperatorOperationActionPage() {
         : '';
 
   const outsideQty = Number(qtyValue) || 0;
+  // Same rule as the office dialog: the close only exists when there is
+  // something to write off. The field is prefilled with everything at the
+  // vendor, so on the common path there is nothing to ask.
+  const canCloseSlip = outsideMode === 'receive' && outsideQty < (outside?.qty_at_vendor ?? 0);
+  const willCloseSlip = canCloseSlip && closeSlip;
 
   const canComplete = Number(qtyValue) > 0;
 
@@ -588,12 +593,12 @@ export default function OperatorOperationActionPage() {
     try {
       const result = await receiveOutsideOperation(jobOperationId, {
         quantityGood: outsideQty,
-        closeShipment: closeSlip,
+        closeShipment: willCloseSlip,
       });
       posthog.capture('outside shipment received', {
         surface: 'operator',
         is_full: outsideQty >= (outside?.qty_at_vendor ?? 0),
-        short_closed: closeSlip,
+        short_closed: willCloseSlip,
         was_backfilled: result.wasBackfilled,
         days_at_vendor_bucket: daysAtVendorBucket(outside?.oldest_open_shipped_at ?? null),
       });
@@ -1025,32 +1030,36 @@ export default function OperatorOperationActionPage() {
                 color="primary"
                 startIcon={<Inventory2Icon />}
                 onClick={handleReceive}
-                disabled={actionLoading || (outsideQty <= 0 && !closeSlip)}
+                disabled={actionLoading || (outsideQty <= 0 && !willCloseSlip)}
                 sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
               >
                 {actionLoading ? <CircularProgress size={24} /> : `RECEIVE ${outsideQty}`}
               </Button>
-              {/* ONE CHECKBOX, not a second number. A short return is settled by
-                  closing the slip -- Sage's short-close, Oracle's
-                  quantity-cancelled -- rather than by reconciling a scrap
+              {/* ONE CHECKBOX, not a second number, and only when the operator
+                  has typed a smaller figure than what is out -- which is the
+                  moment "is the rest coming?" becomes a real question. A short
+                  return is settled by closing the slip (Sage's short-close,
+                  Oracle's quantity-cancelled) rather than by reconciling a scrap
                   quantity on a phone. The pieces stay missing from the good
-                  total either way; what this settles is the paperwork, so a
-                  write-off stops sitting on the chase list. */}
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={closeSlip}
-                    onChange={(e) => setCloseSlip(e.target.checked)}
-                    sx={{ minWidth: 44, minHeight: 44 }}
-                  />
-                }
-                label={
-                  <Typography variant="body2" color="text.secondary">
-                    That&apos;s everything we&apos;re getting
-                  </Typography>
-                }
-                sx={{ mx: 0 }}
-              />
+                  total either way; what this settles is the paperwork. */}
+              {canCloseSlip && (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={closeSlip}
+                      onChange={(e) => setCloseSlip(e.target.checked)}
+                      sx={{ minWidth: 44, minHeight: 44 }}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" color="text.secondary">
+                      That&apos;s everything we&apos;re getting —{' '}
+                      {(outside?.qty_at_vendor ?? 0) - outsideQty} written off
+                    </Typography>
+                  }
+                  sx={{ mx: 0 }}
+                />
+              )}
             </>
           )}
 

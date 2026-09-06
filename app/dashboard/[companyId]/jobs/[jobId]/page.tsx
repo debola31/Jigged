@@ -35,7 +35,6 @@ import {
   cancelJob,
   reopenJob,
   deleteJob,
-  updateJobDetails,
 } from '@/utils/jobsAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';

@@ -124,8 +124,8 @@ def shop(db):
             cur.execute(
                 """
                 INSERT INTO jobs (company_id, customer_id, job_number, production_status,
-                                  fulfillment_status, is_hot, due_date, created_at)
-                VALUES (%s, %s, %s, %s, %s, false, %s, now() - (%s || ' days')::interval)
+                                  fulfillment_status, due_date, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now() - (%s || ' days')::interval)
                 RETURNING id
                 """,
                 (
@@ -215,18 +215,6 @@ def test_keeps_the_newest_rows_not_a_uuid_lottery(db, shop):
     rows = search(db, shop["company"])
     numbers = job_numbers(db, rows)
     assert numbers == [f"{MARKER}-{i:04d}" for i in range(LIMIT)]
-
-
-def test_hot_jobs_survive_the_cap_even_when_old(db, shop):
-    """A rush job is the one row a shop cannot afford to have silently cut."""
-    oldest = f"{MARKER}-{JOB_COUNT - 1:04d}"
-    with db.cursor() as cur:
-        cur.execute(
-            "UPDATE jobs SET is_hot = true WHERE company_id = %s AND job_number = %s",
-            (shop["company"], oldest),
-        )
-    numbers = job_numbers(db, search(db, shop["company"]))
-    assert numbers[0] == oldest
 
 
 def test_clamps_the_limit_to_the_url_ceiling(db, shop):

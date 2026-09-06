@@ -202,9 +202,10 @@ describe('drawShopHeaderBlock — it never breaks a document', () => {
   });
 
   /**
-   * The traveler's right column is taller on a hot job (the HOT stamp extends it). Without a cap the
-   * same shop's logo would print bigger on a hot traveler than a cold one — the same paperwork
-   * disagreeing with itself about how big the mark is.
+   * The right column's height varies with what is drawn there (the QR block, and on other
+   * documents more than that). Without a cap the same shop's logo would print bigger on a taller
+   * document than a shorter one — the same paperwork disagreeing with itself about how big the
+   * mark is.
    */
   it('caps the logo so a tall right column cannot inflate it', () => {
     const normal = target();

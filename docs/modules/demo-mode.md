@@ -174,8 +174,8 @@ The `default` v3 graph, all of it written by `seed_demo_data()` in this order:
 | 29 notes across job, part and machine subjects | 21 inventory transactions |
 
 Jobs span every status the app can show — `not_started`, `in_progress` and `completed`
-production; `unshipped`, `partially_shipped` and `fully_shipped` fulfillment — plus two hot jobs,
-several overdue, one customer on credit hold, one resold bought part, and outside operations both
+production; `unshipped`, `partially_shipped` and `fully_shipped` fulfillment — plus several
+overdue, one customer on credit hold, one resold bought part, and outside operations both
 sent and received. Dates are **relative** (`days_ago`, `due_in_days`), so the demo reads as
 current whenever it is seeded rather than ageing into a museum.
 

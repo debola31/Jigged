@@ -71,7 +71,6 @@ function job(over: Partial<OperatorJob> = {}): OperatorJob {
     customer_name: 'Apex Aerospace',
     part_name: 'Spindle Bracket',
     part_quantity: 12,
-    is_hot: false,
     production_status: 'in_progress',
     operation_id: 'op-1',
     operation_name: 'Mill OP20',

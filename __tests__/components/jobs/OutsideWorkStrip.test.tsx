@@ -23,7 +23,6 @@ function op(over: Partial<OutsideOperation> = {}): OutsideOperation {
     sent_at: agoISO(6),
     sent_by_name: null,
     due_date: null,
-    is_hot: false,
     ...over,
   };
 }

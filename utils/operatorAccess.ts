@@ -204,8 +204,6 @@ interface ReadyRow {
   part_name: string;
   part_description: string | null;
   part_quantity: number;
-  /** jobs.is_hot — the RPC returns rows already ordered hot-first. */
-  is_hot: boolean;
   /**
    * A timer is still open on this operation at this station.
    *
@@ -385,7 +383,6 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       customer_name: customerByJob.get(row.job_id) ?? null,
       part_name: row.part_name,
       part_quantity: row.part_quantity,
-      is_hot: row.is_hot ?? false,
       production_status: statusByPart.get(row.job_part_id) ?? 'not_started',
       operation_id: row.job_operation_id,
       operation_name: row.operation_name,
@@ -435,7 +432,7 @@ async function getCompletedOperationRows(
       job_parts!inner(
         quantity, part_id,
         parts(part_name, description),
-        jobs!inner(job_number, company_id, is_hot)
+        jobs!inner(job_number, company_id)
       )
     `)
     .eq('status', 'completed')
@@ -464,13 +461,13 @@ async function getCompletedOperationRows(
           quantity: number;
           part_id: string;
           parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
-          jobs: { job_number: string; is_hot: boolean } | { job_number: string; is_hot: boolean }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
         }
       | {
           quantity: number;
           part_id: string;
           parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
-          jobs: { job_number: string; is_hot: boolean } | { job_number: string; is_hot: boolean }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
         }[]
       | null;
   };
@@ -495,7 +492,6 @@ async function getCompletedOperationRows(
         part_name: partsJoin?.part_name ?? '',
         part_description: partsJoin?.description ?? null,
         part_quantity: partJoin?.quantity ?? 0,
-        is_hot: jobJoin?.is_hot ?? false,
         // The completed list does not compute this. A completed step CAN still
         // carry an open interval (an office-side completion closes none), but
         // this list exists to undo a mis-tapped completion, and marking a row
@@ -910,7 +906,7 @@ export async function getOutsideOpsForCompany(
       id, job_id, job_part_id, operation_name, status, sent_at, sent_by,
       vendor_service:vendor_services!inner(name, vendor:vendors(id, name)),
       job_part:job_parts!inner(parts(part_name)),
-      jobs!inner(job_number, due_date, is_hot, company_id, production_status, deleted_at)
+      jobs!inner(job_number, due_date, company_id, production_status, deleted_at)
     `)
     .eq('jobs.company_id', companyId)
     .is('jobs.deleted_at', null)
@@ -933,7 +929,7 @@ export async function getOutsideOpsForCompany(
     sent_by: string | null;
     vendor_service: OneOrMany<{ name: string; vendor: OneOrMany<{ id: string; name: string }> }>;
     job_part: OneOrMany<{ parts: OneOrMany<{ part_name: string }> }>;
-    jobs: OneOrMany<{ job_number: string; due_date: string | null; is_hot: boolean }>;
+    jobs: OneOrMany<{ job_number: string; due_date: string | null }>;
   };
   const first = <T>(v: OneOrMany<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v);
   const rows = data as unknown as Row[];
@@ -972,13 +968,11 @@ export async function getOutsideOpsForCompany(
       sent_at: r.sent_at,
       sent_by_name: r.sent_by ? nameByUser.get(r.sent_by) ?? null : null,
       due_date: job?.due_date ?? null,
-      is_hot: job?.is_hot ?? false,
     };
   });
 
-  // Hot first, then earliest due date (nulls last).
+  // Earliest due date first (nulls last).
   ops.sort((a, b) => {
-    if (a.is_hot !== b.is_hot) return a.is_hot ? -1 : 1;
     if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
     if (a.due_date) return -1;
     if (b.due_date) return 1;
@@ -1083,7 +1077,7 @@ export async function getJobPartTraveler(
     .select(`
       id, job_id, part_id, production_status, quantity,
       parts(part_name, description),
-      jobs!inner(id, job_number, created_at, due_date, customer_po_number, company_id, is_hot, customers(name))
+      jobs!inner(id, job_number, created_at, due_date, customer_po_number, company_id, customers(name))
     `)
     .eq('id', jobPartId)
     .eq('jobs.company_id', companyId)
@@ -1104,7 +1098,6 @@ export async function getJobPartTraveler(
       created_at: string | null;
       due_date: string | null;
       customer_po_number: string | null;
-      is_hot: boolean;
       customers: { name: string } | { name: string }[] | null;
     } | null;
   };
@@ -1182,7 +1175,6 @@ export async function getJobPartTraveler(
     due_date: jobJoin?.due_date ?? null,
     customer_po_number: jobJoin?.customer_po_number ?? null,
     production_status: p.production_status,
-    is_hot: jobJoin?.is_hot ?? false,
     job_part_count: jobPartCount ?? 1,
     operations,
   };

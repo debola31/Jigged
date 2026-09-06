@@ -123,7 +123,6 @@ function OutsideJobRow({
               <Typography variant="body2" fontWeight={600}>
                 {op.job_number}
               </Typography>
-              {op.is_hot && <Chip size="small" color="error" label="HOT" />}
               <Typography variant="body2" color="text.secondary">
                 {op.part_name ?? 'Part'}
               </Typography>
@@ -260,7 +259,7 @@ export default function VendorDetailPage() {
   const outsideOps = data?.outside ?? EMPTY_OUTSIDE;
   const daysOutById = useMemo(() => new Map(data?.daysOut ?? []), [data?.daysOut]);
 
-  // Oldest sent first — chase order. The company-wide queue sorts hot-then-due,
+  // Oldest sent first — chase order. The company-wide queue sorts by due date,
   // which answers "what goes out today"; standing on ONE vendor the question is
   // "what has this vendor had longest", and that is a different sort.
   const atVendor = outsideOps

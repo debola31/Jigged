@@ -16,11 +16,8 @@ import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
-import Checkbox from '@mui/material/Checkbox';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
@@ -105,9 +102,6 @@ export default function AcceptPurchaseOrderModal({
   const [customerId, setCustomerId] = useState('');
   const [poNumber, setPoNumber] = useState('');
   const [dueDate, setDueDate] = useState('');
-  // "Hot" (rush) marker for the new job. Off by default; toggleable later on the
-  // job detail page.
-  const [hot, setHot] = useState(false);
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()]);
   const [attachment, setAttachment] = useState<File | null>(null);
 
@@ -121,7 +115,6 @@ export default function AcceptPurchaseOrderModal({
     setCustomerId('');
     setPoNumber('');
     setDueDate('');
-    setHot(false);
     setLines([emptyLine()]);
     setAttachment(null);
     getCustomersForSelect(companyId)
@@ -256,7 +249,6 @@ export default function AcceptPurchaseOrderModal({
         customer_id: customerId,
         customer_po_number: poNumber,
         due_date: dueDate || null,
-        hot,
         lines: lines
           .filter((l) => l.part)
           .map((l) => ({
@@ -284,7 +276,6 @@ export default function AcceptPurchaseOrderModal({
       posthog.capture('job created from purchase order', {
         part_count: lines.filter((l) => l.part).length,
         total_value: total,
-        is_hot: hot,
       });
       onCreated(result.job_id);
     } catch (err) {
@@ -363,20 +354,6 @@ export default function AcceptPurchaseOrderModal({
                 slotProps={{ htmlInput: { min: today }, inputLabel: { shrink: true } }}
               />
             </Box>
-            <FormControlLabel
-              sx={{ mt: 1 }}
-              control={
-                <Checkbox
-                  checked={hot}
-                  onChange={(e) => setHot(e.target.checked)}
-                  disabled={loading}
-                  color="error"
-                  icon={<LocalFireDepartmentIcon />}
-                  checkedIcon={<LocalFireDepartmentIcon />}
-                />
-              }
-              label="Mark as Hot (rush)"
-            />
           </Box>
 
           <Divider sx={{ my: 2 }} />

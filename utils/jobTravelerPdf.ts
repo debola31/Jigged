@@ -168,45 +168,10 @@ export async function generateJobTravelerPdf(
   doc.setTextColor(70);
   doc.text(`Job ${traveler.job_number}`, titleRight, headerTop + 36, { align: 'right' });
 
-  // ---------- HOT stamp (under the Job #, left of the QR) ----------
-  // The paperless equivalent of Contour's pink paper / "HOT" in red pen. Drawn as
-  // an OUTLINED "rubber stamp" — a heavy black border with bold black "HOT" on
-  // white, NO filled background. That mirrors the physical HOT rubber stamp,
-  // reads unmistakably in grayscale (no reliance on color), and uses a fraction
-  // of the toner a solid-black fill would (the earlier reversed-white-on-black
-  // version was flagged as too ink-heavy). A double rule gives it stamp presence
-  // without adding meaningful ink.
-  let hotStampBottom = headerTop;
-  if (traveler.is_hot) {
-    const stampW = 82;
-    const stampH = 26;
-    // Tucked into the gap under the Job #, right-aligned to the title.
-    const stampX = titleRight - stampW;
-    const stampY = headerTop + 46;
-    hotStampBottom = stampY + stampH;
-    doc.setDrawColor(0);
-    doc.setLineWidth(2);
-    doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'S');
-    doc.setLineWidth(0.6);
-    doc.roundedRect(stampX + 3.2, stampY + 3.2, stampW - 6.4, stampH - 6.4, 2.5, 2.5, 'S');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
-    doc.setTextColor(0);
-    doc.text('HOT', stampX + stampW / 2, stampY + stampH / 2 + 5.2, { align: 'center' });
-    // Restore stroke/text state for the elements drawn afterwards (divider, etc.).
-    doc.setTextColor(30);
-    doc.setLineWidth(0.75);
-  }
-
-  // Header height is whichever column runs longest. The HOT stamp MUST be in
-  // this max: its bottom sits 16pt below a 56pt QR, so leaving it out draws the
-  // divider straight through the stamp on every hot job.
   // ---------- Header: shop block (left) ----------
-  // Drawn last of the header pieces, because the QR and the HOT stamp on the right decide how tall
-  // this header is — and therefore how much room the logo can take without pushing the Operations
-  // table down. On a hot job the stamp extends the header, so the logo gets more room there; the
-  // ceiling inside `drawShopHeaderBlock` is what stops the same shop's mark changing size between a
-  // hot traveler and a cold one.
+  // Drawn last of the header pieces, because the QR on the right decides how tall this header is —
+  // and therefore how much room the logo can take without pushing the Operations table down. The
+  // ceiling inside `drawShopHeaderBlock` is what stops a shop's mark scaling with the right column.
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
   const shopBlockBottom = drawShopHeaderBlock(doc, {
     company,
@@ -214,11 +179,11 @@ export async function generateJobTravelerPdf(
     logoIncludesName: readLogoIncludesName(company),
     x: MARGIN,
     y: headerTop,
-    availableBottom: Math.max(qrBlockBottom, hotStampBottom),
+    availableBottom: qrBlockBottom,
     nameSize: 14,
   });
 
-  let cursorY = Math.max(shopBlockBottom, qrBlockBottom, hotStampBottom) + 16;
+  let cursorY = Math.max(shopBlockBottom, qrBlockBottom) + 16;
 
   // ---------- Divider ----------
   doc.setDrawColor(205);

@@ -1598,7 +1598,6 @@ export type Database = {
           fulfillment_status: string
           id: string
           invoicing_status: string
-          is_hot: boolean
           job_number: string
           payment_terms: string | null
           production_status: string
@@ -1630,7 +1629,6 @@ export type Database = {
           fulfillment_status: string
           id?: string
           invoicing_status?: string
-          is_hot?: boolean
           job_number: string
           payment_terms?: string | null
           production_status: string
@@ -1662,7 +1660,6 @@ export type Database = {
           fulfillment_status?: string
           id?: string
           invoicing_status?: string
-          is_hot?: boolean
           job_number?: string
           payment_terms?: string | null
           production_status?: string
@@ -4585,7 +4582,6 @@ export type Database = {
         Args: { p_company_id: string; p_work_center_id: string }
         Returns: {
           has_open_interval: boolean
-          is_hot: boolean
           job_id: string
           job_number: string
           job_operation_id: string

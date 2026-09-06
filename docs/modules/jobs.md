@@ -127,7 +127,6 @@ through `applyOverdueJobsFilter` in `utils/dashboardAccess.ts`.)*
 | `quote_id` | Null for direct-PO jobs. **Many jobs may share one `quote_id`** — a quote converts in passes, one job (one customer PO) per pass. |
 | `due_date` | Entered **manually** in the Convert-to-Job modal (required, not in the past). **Not derived from lead time**, and no lead-time snapshot is stored. Now **per part**: quote conversion creates one job per part, so a quote whose parts carry different lead times converts into jobs genuinely due on different days. (It was previously shared by every part on one job, and per-part deadlines were a named gap; that gap closes for anything new, and still applies to legacy multi-part jobs.) |
 | `production_status` / `fulfillment_status` / `invoicing_status` | See above. Derived. |
-| `is_hot` | Rush flag. Toggled by **Mark Hot / Unmark Hot** on the detail header; sorts hot rows to the top of the list (`.order('is_hot', …)`) and of the operator station queue, and washes the row red — echoing pink-paper travelers. |
 | `started_at` / `completed_at` | Stamped by the part→job sync trigger, not by the app: `started_at` the first time the rolled-up status reaches `in_progress` **or** `completed` (never overwritten after), `completed_at` when it reaches `completed`. **`completed_at` is reset to NULL when the job falls back to `in_progress`** — so undoing an operation on a finished job clears the completion date rather than leaving a stale one. The same pair on `job_parts` follows the same rule. **There is no `shipped_at`** on `jobs` or `job_parts` — *(this doc previously listed one on both)*; use `public.job_part_last_ship_date(job_part_id)`. |
 | `customer_po_number`, `billing_address_id`, `shipping_address_id`, `contact_id`, `freight_terms`, `ship_via`, `payment_terms`, `deleted_at` | Header/edit fields. **There is no `notes` column** — *(this doc previously described a Notes section on the detail page and a cancellation reason "saved in notes"; job-level notes live in the `notes` table, step-tagged, and cancel captures no reason)*. |
 
@@ -211,7 +210,7 @@ opt-in (`ConvertToJobModal`: if the chosen quantity crosses a break, the user ma
 re-resolved tier price).
 
 **(b) New Job from PO (direct)** — the **Accept Purchase Order** modal (a modal, not a route) on
-the jobs list captures customer, PO #, due date, hot flag, an optional PO PDF, and one-or-more
+the jobs list captures customer, PO #, due date, an optional PO PDF, and one-or-more
 **existing** parts with quantity + agreed unit price. Choosing part + quantity **pre-fills the
 expected sell price** through the *same* `getTiersWithComputedPrices` + `resolveTier` path quote
 lines use (pure DB reads, no AI); overriding it shows a non-blocking "Differs from expected $X"
@@ -300,8 +299,9 @@ added in #688:
 - **Every filter goes into the RPC** (stage pairs via `stagesToStatusPairs`, customer, overdue),
   so the cap applies to the set the user actually ends up looking at. They used to be applied by
   the caller *after* the cap, which meant they cut into an already-arbitrary subset.
-- **The retained rows are hot first, then newest** — not `ORDER BY job_id`, which existed only to
-  serve `DISTINCT ON` and made the survivors a UUID lottery.
+- **The retained rows are the newest** — not `ORDER BY job_id`, which existed only to serve
+  `DISTINCT ON` and made the survivors a UUID lottery. A rush tier sorted above the date until
+  [`20260906151902`](../../supabase/migrations/20260906151902_remove_hot_job_flag.sql) retired it.
 - **Archived jobs are excluded** rather than consuming cap slots and being discarded downstream,
   and the RPC returns an exact `total_matches` counted *before* the cap. When it cuts, the list
   says so: *"Showing the 120 newest matches out of 843."*
@@ -318,11 +318,11 @@ combined multi-select, the single stage chip, and "No jobs found".)*
 ### Job detail — `/dashboard/{companyId}/jobs/{id}`
 
 Header: job number, `JobStatusBlock` (production chip + fulfillment chip with a shipped-quantity
-breakdown, created date, due date), overdue badge, hot badge. Body: Job Details card (customer,
+breakdown, created date, due date), overdue badge. Body: Job Details card (customer,
 customer PO, source — quote link or "Direct PO" — and Attachments), billing/shipping card, and
 per-part cards with operations, live materials and shipment/invoice summaries.
 
-Actions, left to right: Mark Hot/Unmark Hot · Edit · Print Traveler (per part; acts directly on a
+Actions, left to right: Edit · Print Traveler (per part; acts directly on a
 single-part job, opens a picker otherwise) · **Shipments** and **Invoices** dropdowns (view
 existing + create, so both are reachable without scrolling) · Reopen *or* Cancel · Delete.
 Cancel is offered while production is neither `completed` nor `cancelled`; Reopen only when
@@ -522,7 +522,7 @@ Two RPCs implement it identically, so "ready" has one definition:
 | RPC | Caller | Returns |
 |---|---|---|
 | `get_ready_operations_batch(p_job_ids)` | `getReadyOperationsForJobs` — **no production caller**; dead code kept only by its test | one row per job: the in-progress op if any, else the lowest-sequence ready pending op + a ready count |
-| `get_ready_operations_for_station(p_company_id, p_work_center_id)` | `operatorAccess` (My Station, and All Stations fanned out once per station) | ready-or-active ops at that station, hot jobs first |
+| `get_ready_operations_for_station(p_company_id, p_work_center_id)` | `operatorAccess` (My Station, and All Stations fanned out once per station) | ready-or-active ops at that station, running steps first |
 
 Out-of-order work is **warned, not blocked** (`predecessors_incomplete`) — see
 [operator-view.md](operator-view.md#routing--readiness).
@@ -609,7 +609,7 @@ unless stated.
 |---|---|
 | Search over job number, customer, customer PO, part number, packing slip; blank is a no-op; filters + `JOB_SEARCH_LIMIT` forwarded to the RPC | `describe('searchJobsByIdentifier')` — 7 it |
 | Search restricts the main query by id, mixes in `match_source`, reports `total`/`truncated`, and drops nothing client-side | `describe('getAllJobs — search path')` — 6 it |
-| The cap applies after every filter, keeps the newest (hot first), excludes archived jobs, clamps `p_limit`, and stays SECURITY INVOKER | [`api/tests/integration/test_jobs_search_cap.py`](../../api/tests/integration/test_jobs_search_cap.py) — 18 tests. Needs >`JOB_SEARCH_LIMIT` jobs, which `seed.sql` deliberately does not have |
+| The cap applies after every filter, keeps the newest, excludes archived jobs, clamps `p_limit`, and stays SECURITY INVOKER | [`api/tests/integration/test_jobs_search_cap.py`](../../api/tests/integration/test_jobs_search_cap.py) — 17 tests. Needs >`JOB_SEARCH_LIMIT` jobs, which `seed.sql` deliberately does not have |
 | Stage → status-pair mapping is exact, total and disjoint (the banner's count depends on it) | [`__tests__/types/job.test.ts`](../../__tests__/types/job.test.ts) `describe('stagesToStatusPairs')` — 9 it |
 | Closed stages hidden by default; stage filters applied server-side via `.in()` | `describe('getAllJobs')` — 5 it; [`e2e/jobs-list-status.spec.ts`](../../e2e/jobs-list-status.spec.ts) `test.describe('Jobs list — combined status filter')` — 2 tests |
 | Overdue uses one canonical clause set on the same builder | `describe('applyOverdueJobsFilter')` — 1 it |

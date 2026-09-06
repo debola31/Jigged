@@ -538,10 +538,8 @@ the chip's outlined neutral. `nowrap` means a status must fit its column — siz
 then dropping a dot in front clips the longest label.
 
 **Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a bespoke palette for a
-domain reason — work-centre kind, the Made/Bought source chip on the Parts grid — and the `HOT` rush
-badge ([`JobHotBadge`](../components/jobs/JobHotBadge.tsx)), which deliberately mutes to outlined for
-historical jobs. These use custom hex/rgba, not the semantic palette, and are not on/off status
-badges.
+domain reason — work-centre kind, and the Made/Bought source chip on the Parts grid. These use
+custom hex/rgba, not the semantic palette, and are not on/off status badges.
 
 `StockStatusChip` and `PartClassificationChips` were the other two named here. Both were deleted with
 `parts.is_stocked`: the Parts grid gave up its On hand and Status columns (quantities are Storage's

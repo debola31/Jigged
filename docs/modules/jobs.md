@@ -318,8 +318,8 @@ combined multi-select, the single stage chip, and "No jobs found".)*
 ### Job detail — `/dashboard/{companyId}/jobs/{id}`
 
 Header: job number, overdue badge. Body: **Job Details card** — customer, customer PO,
-source (quote link or "Direct PO"), and the production + fulfillment chips with created and due
-dates, laid out two-up — then the billing/shipping card, then the part with its operations and
+source (quote link or "Direct PO"), the production + fulfillment chips and the due date, laid
+out in two explicit columns — left is what the job IS, right is where it STANDS — then the billing/shipping card, then the part with its operations and
 live materials.
 
 *Simplified 2026-09-06, when the activity rail arrived and the page needed to give something
@@ -376,6 +376,7 @@ Three row kinds, merged by a pure module
 | **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
 | **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Undo** — not "void", which is document language for slips and invoices; the step card has always said `Undo completion`, and the column being `voided_at` is the schema's word rather than the user's. The note typed into the Complete dialog renders here, on the event it describes |
 | **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
+| **Job created** | `jobs.created_at`, derived | Nothing — it is the feed's oldest row and its beginning |
 
 One slip fans out to a `sent` row, one `received` row per receipt, and a `short_closed` row when
 something was retired — never one row that rewrites itself, the same call the operator feed makes
@@ -407,6 +408,12 @@ no border-all-round, no radius. Each of those is load-bearing:
 
 The collapsed strip takes the same height, wash and rule, so collapsing reads as the region
 narrowing rather than as a different thing appearing in its place.
+
+**A job's feed is never empty.** `jobs.created_at` becomes the oldest row, `Job created`, derived
+the same way movements are rather than stored as an event. Before it, an untouched job read
+"Nothing has been recorded on this job yet" — true, and useless, since it left the reader unsure
+whether the feed was broken or the job was simply new. The date also stopped being a field on the
+details card, where it was a fact with no neighbours; here it is the start of a sequence.
 
 **The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
 step, which is what the operator traveler renders, so it is a real channel to the floor. Photos

@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography';
 import JobActivityCompletionRow from './JobActivityCompletionRow';
 import JobActivityMovementRow from './JobActivityMovementRow';
 import JobActivityNoteRow from './JobActivityNoteRow';
+import JobActivityRow from './JobActivityRow';
 import type { JobActivityItem } from './jobActivityTimeline';
 import type { JobNote } from '@/types/operator';
 import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
@@ -90,12 +91,22 @@ export default function JobActivityList({
           );
         }
 
+        if (item.kind === 'movement') {
+          return (
+            <JobActivityMovementRow
+              key={item.key}
+              movement={item.movement}
+              onViewSlip={onViewSlip}
+            />
+          );
+        }
+
+        /* THE JOB'S OWN BEGINNING, rendered inline rather than as a fourth row
+           component. The other three carry data, actions and conditional
+           content; this one is a timestamp and a sentence, and a file of its own
+           would be more ceremony than the row is worth. */
         return (
-          <JobActivityMovementRow
-            key={item.key}
-            movement={item.movement}
-            onViewSlip={onViewSlip}
-          />
+          <JobActivityRow key={item.key} tone="muted" at={item.at} title="Job created" />
         );
       })}
     </Box>

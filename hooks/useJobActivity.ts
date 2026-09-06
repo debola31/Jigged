@@ -55,7 +55,12 @@ export interface UseJobActivityResult {
  * `getJobCompletionsForOffice` is the OFFICE reader and must stay that way; see
  * its docblock for the guardrail that separates it from the operator one.
  */
-export function useJobActivity(companyId: string, jobId: string): UseJobActivityResult {
+export function useJobActivity(
+  companyId: string,
+  jobId: string,
+  /** `jobs.created_at` — the feed's oldest row, so a new job's feed is not empty. */
+  createdAt: string | null,
+): UseJobActivityResult {
   const notesLoad = useLoad(() => getJobNotes(jobId, companyId), [jobId, companyId]);
   const completionsLoad = useLoad(
     () => getJobCompletionsForOffice(companyId, jobId),
@@ -68,8 +73,8 @@ export function useJobActivity(companyId: string, jobId: string): UseJobActivity
   const shipments = shipmentsLoad.data ?? NO_SHIPMENTS;
 
   const items = useMemo(
-    () => buildJobActivity({ notes, completions, shipments }),
-    [notes, completions, shipments],
+    () => buildJobActivity({ notes, completions, shipments, createdAt }),
+    [notes, completions, shipments, createdAt],
   );
   const noteCounts = useMemo(() => noteCountsByOperation(notes), [notes]);
 

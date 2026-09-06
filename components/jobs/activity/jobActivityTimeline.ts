@@ -73,8 +73,9 @@ export type JobActivityMovement =
       vendorName: string;
     };
 
-/** A note, a completion or a movement, as one row of the rail. */
+/** A note, a completion, a movement or the job's own beginning. */
 export type JobActivityItem =
+  | { kind: 'created'; key: string; at: string; jobOperationId: null }
   | { kind: 'note'; key: string; at: string; jobOperationId: string | null; note: JobNote }
   | {
       kind: 'completion';
@@ -167,6 +168,19 @@ export interface JobActivityInput {
   notes: JobNote[];
   completions: JobActivityCompletion[];
   shipments: OutsideShipmentWithRelations[];
+  /**
+   * `jobs.created_at`, which becomes the feed's oldest row.
+   *
+   * A JOB'S FEED IS NEVER EMPTY THIS WAY. Before it, a job nobody had touched
+   * showed "Nothing has been recorded on this job yet" — true, and useless: it
+   * left the reader unsure whether the feed was broken or the job was new. The
+   * date also stops being a field on the details card, where it was a fact with
+   * no neighbours; here it is the start of a sequence.
+   *
+   * Nullable because the column is. No row rather than a row reading "Invalid
+   * Date" — the beginning of the timeline is not a thing to guess at.
+   */
+  createdAt: string | null;
 }
 
 /**
@@ -185,8 +199,13 @@ export function buildJobActivity({
   notes,
   completions,
   shipments,
+  createdAt,
 }: JobActivityInput): JobActivityItem[] {
   const items: JobActivityItem[] = [];
+
+  if (createdAt) {
+    items.push({ kind: 'created', key: 'job-created', at: createdAt, jobOperationId: null });
+  }
 
   for (const note of notes) {
     items.push({

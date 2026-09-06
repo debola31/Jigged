@@ -121,7 +121,7 @@ export default function JobDetailPage() {
    */
   const [activityVersion, setActivityVersion] = useState(0);
 
-  const activity = useJobActivity(companyId, jobId);
+  const activity = useJobActivity(companyId, jobId, job?.created_at ?? null);
   const { reload: reloadActivity } = activity;
 
   const searchParams = useSearchParams();
@@ -557,15 +557,10 @@ export default function JobDetailPage() {
                     </Box>
                   )}
 
-                  {job.created_at && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        Created
-                      </Typography>
-                      <Typography fontWeight={500}>{formatShipDate(job.created_at)}</Typography>
-                    </Box>
-                  )}
-
+                  {/* Created is not here. It is the activity feed's oldest
+                      row — where a date is the start of a sequence rather than
+                      a fact with no neighbours, and where it stops a new job's
+                      feed from opening empty. */}
                   {job.due_date && (
                     <Box>
                       <Typography variant="caption" color="text.secondary">

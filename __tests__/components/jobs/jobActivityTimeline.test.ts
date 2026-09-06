@@ -190,6 +190,7 @@ describe('movementsFromShipments', () => {
 describe('buildJobActivity', () => {
   it('merges all three kinds newest-first', () => {
     const items = buildJobActivity({
+      createdAt: null,
       notes: [note({ id: 'n-1', created_at: '2026-09-05T13:40:00Z', job_operation_id: 'op-20' })],
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
       shipments: [
@@ -213,11 +214,13 @@ describe('buildJobActivity', () => {
   it('orders two same-second events deterministically instead of leaving them to render order', () => {
     const at = '2026-09-05T14:31:00Z';
     const forward = buildJobActivity({
+      createdAt: null,
       notes: [],
       completions: [completion({ id: 'b', completed_at: at }), completion({ id: 'a', completed_at: at })],
       shipments: [],
     });
     const reversed = buildJobActivity({
+      createdAt: null,
       notes: [],
       completions: [completion({ id: 'a', completed_at: at }), completion({ id: 'b', completed_at: at })],
       shipments: [],
@@ -231,6 +234,7 @@ describe('buildJobActivity', () => {
     // shipped_at is deliberately backdatable (20260903203741). This is the
     // behaviour most likely to be reported as a sort bug.
     const items = buildJobActivity({
+      createdAt: null,
       notes: [note({ id: 'n-1', created_at: '2026-09-05T09:00:00Z' })],
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:00:00Z' })],
       shipments: [slip({ id: 's-old', slip_number: 'VPS-1042-9', shipped_at: '2026-09-05T11:00:00Z' })],
@@ -241,6 +245,7 @@ describe('buildJobActivity', () => {
 
   it('carries a voided completion into the list rather than filtering it out', () => {
     const items = buildJobActivity({
+      createdAt: null,
       notes: [],
       completions: [
         completion({ id: 'c-1', completed_at: '2026-09-05T14:00:00Z', voided_at: '2026-09-05T15:00:00Z' }),
@@ -252,8 +257,62 @@ describe('buildJobActivity', () => {
   });
 });
 
+describe("the job's own beginning", () => {
+  /**
+   * A JOB'S FEED IS NEVER EMPTY. Before this row, a job nobody had touched said
+   * "Nothing has been recorded on this job yet" — true, and useless: it left the
+   * reader unsure whether the feed was broken or the job was simply new.
+   */
+  it('gives an untouched job exactly one row', () => {
+    const items = buildJobActivity({
+      notes: [],
+      completions: [],
+      shipments: [],
+      createdAt: '2026-09-01T08:00:00Z',
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'created', key: 'job-created' });
+  });
+
+  it('sorts oldest, under everything that has happened since', () => {
+    const items = buildJobActivity({
+      notes: [note({ id: 'n-1', created_at: '2026-09-05T13:40:00Z' })],
+      completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
+      shipments: [],
+      createdAt: '2026-09-01T08:00:00Z',
+    });
+
+    expect(items.map((i) => i.key)).toEqual(['completion-c-1', 'note-n-1', 'job-created']);
+  });
+
+  it('emits nothing rather than an Invalid Date when the column is null', () => {
+    // The beginning of a timeline is not a thing to guess at.
+    const items = buildJobActivity({
+      notes: [],
+      completions: [],
+      shipments: [],
+      createdAt: null,
+    });
+
+    expect(items).toEqual([]);
+  });
+
+  it('is left out of a step filter, being about the job rather than a step', () => {
+    const items = buildJobActivity({
+      notes: [],
+      completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
+      shipments: [],
+      createdAt: '2026-09-01T08:00:00Z',
+    });
+
+    expect(filterToOperation(items, 'op-20').map((i) => i.key)).toEqual(['completion-c-1']);
+  });
+});
+
 describe('filterToOperation', () => {
   const items = buildJobActivity({
+      createdAt: null,
     notes: [
       note({ id: 'n-step', created_at: '2026-09-05T13:40:00Z', job_operation_id: 'op-20' }),
       note({ id: 'n-job', created_at: '2026-09-05T13:30:00Z', job_operation_id: null }),

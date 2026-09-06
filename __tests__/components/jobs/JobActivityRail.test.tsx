@@ -89,6 +89,7 @@ const SLIP = {
 } as unknown as OutsideShipmentWithRelations;
 
 const ITEMS = buildJobActivity({
+      createdAt: null,
   notes: [NOTE],
   completions: [COMPLETION],
   shipments: [SLIP],
@@ -181,6 +182,7 @@ describe('JobActivityRail — the three row kinds', () => {
 
   it('offers no Undo on a completion already taken back, but still shows the row', () => {
     const items = buildJobActivity({
+      createdAt: null,
       notes: [],
       completions: [{ ...COMPLETION, voided_at: '2026-09-05T15:00:00Z' }],
       shipments: [],
@@ -324,6 +326,7 @@ describe('JobActivityRail — note permissions mirror RLS', () => {
     // notes_update_body and notes_delete both carry note_type = 'user', so a
     // menu here would be a button guaranteed to 42501.
     const items = buildJobActivity({
+      createdAt: null,
       notes: [{ ...NOTE, note_type: 'event' } as JobNote],
       completions: [],
       shipments: [],

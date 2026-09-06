@@ -18,7 +18,6 @@ import { toFriendlyError } from '@/lib/supabaseErrors';
 import type {
   CompletionCaptureSource,
   CreateOperationCompletionInput,
-  OperationCompletionEvent,
   OperationCompletionSummary,
 } from '@/types/operationCompletion';
 
@@ -283,49 +282,35 @@ export async function getOperationCompletionSummaries(
 }
 
 /**
- * The completion event history for one operation (newest first), including
- * voided events, with completed_by resolved to a member name. Backs the admin
- * "who completed how many, when" audit panel.
+ * Resolve a set of completer user ids to member names in ONE batched query
+ * (mirrors getJobWithRelations). Ids with no matching member — a removed
+ * account — map to null rather than dropping out, so a caller that reads the
+ * map for every row gets an explicit "no name" instead of undefined.
+ *
+ * Shared by the two completion readers below so the batching does not get
+ * re-implemented once per surface and drift.
  */
-export async function getOperationCompletionEvents(
-  jobOperationId: string,
+async function resolveCompleterNames(
   companyId: string,
-): Promise<OperationCompletionEvent[]> {
+  userIds: Iterable<string | null>,
+): Promise<Map<string, string | null>> {
+  const wanted = new Set<string>();
+  for (const id of userIds) if (id) wanted.add(id);
+
+  const nameByUser = new Map<string, string | null>();
+  if (wanted.size === 0) return nameByUser;
+
   const supabase = getSupabase();
+  const { data: members } = await supabase
+    .from('user_company_access')
+    .select('user_id, name')
+    .eq('company_id', companyId)
+    .in('user_id', Array.from(wanted));
 
-  const { data, error } = await supabase
-    .from('job_operation_completions')
-    .select(
-      'id, job_operation_id, job_part_id, quantity_good, completed_by, completed_at, note, voided_at, voided_by',
-    )
-    .eq('job_operation_id', jobOperationId)
-    .order('completed_at', { ascending: false });
-
-  if (error) {
-    console.error('Error loading operation completion events:', error);
-    throw new Error('Failed to load completion history.');
+  for (const m of (members ?? []) as Array<{ user_id: string; name: string | null }>) {
+    nameByUser.set(m.user_id, m.name);
   }
-  const rows = (data ?? []) as OperationCompletionEvent[];
-  if (rows.length === 0) return [];
-
-  // Resolve completer names in one batched query (mirrors getJobWithRelations).
-  const userIds = new Set<string>();
-  for (const r of rows) if (r.completed_by) userIds.add(r.completed_by);
-  if (userIds.size > 0) {
-    const { data: members } = await supabase
-      .from('user_company_access')
-      .select('user_id, name')
-      .eq('company_id', companyId)
-      .in('user_id', Array.from(userIds));
-    const nameByUser = new Map<string, string | null>();
-    for (const m of (members ?? []) as Array<{ user_id: string; name: string | null }>) {
-      nameByUser.set(m.user_id, m.name);
-    }
-    for (const r of rows) {
-      r.completed_by_name = r.completed_by ? nameByUser.get(r.completed_by) ?? null : null;
-    }
-  }
-  return rows;
+  return nameByUser;
 }
 
 /**
@@ -416,6 +401,112 @@ export async function getFeedCompletionsForJob(
       quantity_good: Number(row.quantity_good),
       completed_at: row.completed_at,
       operation_name: op?.operation_name ?? '',
+      capture_source: (row.capture_source as CompletionCaptureSource | null) ?? null,
+    };
+  });
+}
+
+/**
+ * ONE UNBROKEN LITERAL — see FEED_COMPLETION above for why concatenation breaks
+ * the type-check.
+ *
+ * No `job_parts` embed. If one is ever added as an `!inner` filter it needs
+ * `.is('job_parts.deleted_at', null)` — job_parts is the one soft-deleted table
+ * anywhere near this query.
+ */
+const OFFICE_COMPLETION =
+  'id, job_operation_id, quantity_good, completed_at, completed_by, note, voided_at, capture_source, job_operations!inner(job_id, operation_name, sequence)' as const;
+
+/** A completion as the OFFICE activity rail shows it. Carries the actor — see below. */
+export interface JobActivityCompletion {
+  id: string;
+  job_operation_id: string;
+  operation_name: string;
+  operation_sequence: number;
+  quantity_good: number;
+  completed_at: string;
+  completed_by: string | null;
+  /** Resolved member name for completed_by (not a DB column). */
+  completed_by_name: string | null;
+  /** The note typed into the office Complete dialog, if any. */
+  note: string | null;
+  /** Non-null on an undone completion. Rendered struck through, never filtered out. */
+  voided_at: string | null;
+  capture_source: CompletionCaptureSource | null;
+}
+
+/**
+ * Every completion on a job, for the OFFICE activity rail.
+ *
+ * THIS IS THE OFFICE READER. `getFeedCompletionsForJob` directly above is the
+ * OPERATOR reader, and its `completed_by.eq.<user>,capture_source.eq.office`
+ * filter is the surveillance guardrail
+ * (docs/modules/operator-view.md#surveillance-guardrail-non-negotiable).
+ * NEITHER MAY BE SUBSTITUTED FOR THE OTHER, and this one must never be imported
+ * from anything under app/operator/ or components/operator/ — a source-scan test
+ * asserts that, because the failure would be silent.
+ *
+ * The absent actor filter is the entire difference, and it does not widen what
+ * the office can see: the operation card has rendered completed_by_name in its
+ * completion history since that panel shipped. The rail relocates that, it does
+ * not open it.
+ *
+ * WHAT THIS DELIBERATELY CANNOT REACH is recorded TIME. job_operation_intervals
+ * has no admin SELECT policy at all — 20260816203641 argues a row-returning
+ * policy exposing operator_id would BE a per-person report, since PostgREST
+ * hands the caller the grouping for free — and 20260825170421 then removed
+ * get_operator_time_detail(), the one audited exception. So the rail shows no
+ * interval rows, and the operator feed's start/finish rows have no office
+ * counterpart. That is not an oversight to fix; office time stays aggregate and
+ * identity-free via get_operation_actuals.
+ *
+ * NOT filtered on voided_at, unlike the operator reader. An undone completion
+ * stays in the history struck through — this is an audit surface, and the rule
+ * here is show-struck-through rather than the usual list-query filter-it-out.
+ */
+export async function getJobCompletionsForOffice(
+  companyId: string,
+  jobId: string,
+): Promise<JobActivityCompletion[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_operation_completions')
+    .select(OFFICE_COMPLETION)
+    .eq('company_id', companyId)
+    .eq('job_operations.job_id', jobId)
+    .order('completed_at', { ascending: false });
+
+  if (error) {
+    throw toFriendlyError(error, {
+      entity: 'completion',
+      fallback: 'Could not load what has been finished on this job.',
+    });
+  }
+
+  const rows = data ?? [];
+  const nameByUser = await resolveCompleterNames(
+    companyId,
+    rows.map((row) => row.completed_by),
+  );
+
+  return rows.map((row) => {
+    const op = row.job_operations as {
+      job_id: string;
+      operation_name: string;
+      sequence: number;
+    } | null;
+    return {
+      id: row.id,
+      job_operation_id: row.job_operation_id,
+      operation_name: op?.operation_name ?? '',
+      operation_sequence: op?.sequence ?? 0,
+      quantity_good: Number(row.quantity_good),
+      completed_at: row.completed_at,
+      completed_by: row.completed_by,
+      completed_by_name: row.completed_by ? nameByUser.get(row.completed_by) ?? null : null,
+      note: row.note,
+      voided_at: row.voided_at,
       capture_source: (row.capture_source as CompletionCaptureSource | null) ?? null,
     };
   });

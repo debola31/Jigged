@@ -324,11 +324,56 @@ per-part cards with operations, live materials and shipment/invoice summaries.
 
 Actions, left to right: Edit · Print Traveler (per part; acts directly on a
 single-part job, opens a picker otherwise) · **Shipments** and **Invoices** dropdowns (view
-existing + create, so both are reachable without scrolling) · Reopen *or* Cancel · Delete.
+existing + create, so both are reachable without scrolling) · **Activity** (toggles the rail
+below) · Reopen *or* Cancel · Delete.
 Cancel is offered while production is neither `completed` nor `cancelled`; Reopen only when
 `cancelled`; shipping is gated by `canShip` (not cancelled, not fully shipped, has parts).
 *(This doc previously gave a per-status action table gating Edit and Create shipment/invoice on
 production status; only Cancel, Reopen and `canShip` are status-gated.)*
+
+**The activity rail.** Everything that has happened to the job, newest first, in a column docked
+to the right of the page from `lg` up and an overlay drawer below it
+([`JobActivityRail`](../../components/jobs/activity/JobActivityRail.tsx)). **It is open by
+default**, remembered per browser under `jigged-job-activity-rail-open`: being discoverable
+without being summoned is the reason it is a rail rather than an on-demand drawer, and
+`activity rail toggled` is the number that says whether that was right.
+
+Three row kinds, merged by a pure module
+([`jobActivityTimeline.ts`](../../components/jobs/activity/jobActivityTimeline.ts)):
+
+| Row | Source | On the row |
+|---|---|---|
+| **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
+| **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Void**. The note typed into the Complete dialog renders here, on the event it describes |
+| **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
+
+One slip fans out to a `sent` row, one `received` row per receipt, and a `short_closed` row when
+something was retired — never one row that rewrites itself, the same call the operator feed makes
+for interval start/finish. Voided slips, receipts and completions stay in the list struck through:
+this is an audit surface, so the rule is show-struck-through rather than the usual
+`filter-it-out`.
+
+**The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
+step, which is what the operator traveler renders, so it is a real channel to the floor. Photos
+are deliberately absent: that pipeline solves a phone-camera problem the office does not have.
+
+**What the rail deliberately cannot show is recorded TIME.** `job_operation_intervals` has no
+admin SELECT policy at all — [`20260816203641`](../../supabase/migrations/20260816203641_job_operation_intervals.sql)
+argues a row-returning policy exposing `operator_id` would *be* a per-person report — and
+[`20260825170421`](../../supabase/migrations/20260825170421_drop_per_person_time_reporting.sql)
+removed the one audited exception. The operator feed has start/finish rows; this one has none, and
+that asymmetry is the guardrail rather than an oversight. Office time stays aggregate and
+identity-free on the step card (`get_operation_actuals`).
+
+**A `?op=` deep link** scroll-highlights the step *and* narrows the rail to it, so arriving from
+the outside-work drawer lands on a highlighted step with its history already showing.
+
+**Step cards carry a note count, not a history.** Completion history, vendor slips and operator
+notes all used to live behind an expand chevron on
+[`OperationCard`](../../components/jobs/OperationCard.tsx) — three chronological histories sorted
+into per-step buckets, only one of which could be open at a time. They moved here; the chevron is
+gone, and the count that remains is a control that filters the rail to that step
+(`activity step filtered`).
 
 **Attachments.** Customer PO PDFs and reference files. **View** opens the file in a dialog
 (`<iframe>` for PDFs, `<img>` for images) off a fresh signed URL, so the PO is readable without
@@ -495,6 +540,11 @@ columns (`dashboardAccess.fetchOperationActivity`). Undo voids the movement, so 
 reload — same as internal-completion undo. The slip itself keeps its number, marked voided: the
 vendor may still be holding the printed copy. Operator notes + photos stay fully
 enabled on outside ops; they are real user notes, no longer polluted by auto-events.
+
+The **job activity rail** derives its own `sent` / `received` / `short_closed` rows from the same
+`outside_shipments` columns, in a pure function rather than by writing `note_type = 'event'` rows:
+the ledger already owns those facts, and a second copy in `notes` would eventually disagree with
+it.
 
 **Deferred:** vendor lead-time → due-date math, per-op cost actuals, and scheduling.
 *(⚠ Two items left this list on 2026-09-03. **Partial/split sends** shipped — that is what the

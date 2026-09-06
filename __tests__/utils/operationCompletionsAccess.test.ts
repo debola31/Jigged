@@ -9,7 +9,7 @@ const { responses, captured, mockSupabase } = vi.hoisted(() => {
   const captured: Record<string, unknown> = {};
   const makeBuilder = (table: string) => {
     const builder: Record<string, unknown> = {};
-    const chain = ['select', 'eq', 'in', 'is', 'order', 'single'];
+    const chain = ['select', 'eq', 'in', 'order', 'single'];
     chain.forEach((m) => {
       builder[m] = vi.fn().mockImplementation(() => builder);
     });
@@ -18,6 +18,14 @@ const { responses, captured, mockSupabase } = vi.hoisted(() => {
     // the rule be deleted with every test still green.
     builder.or = vi.fn().mockImplementation((filter: string) => {
       captured[`${table}.or`] = filter;
+      return builder;
+    });
+    // Same reasoning for `is`: whether a reader filters voided_at is the
+    // difference between a live list and an audit trail, and the office rail
+    // deliberately does NOT filter it.
+    builder.is = vi.fn().mockImplementation((column: string, value: unknown) => {
+      const prior = (captured[`${table}.is`] as unknown[][]) ?? [];
+      captured[`${table}.is`] = [...prior, [column, value]];
       return builder;
     });
     builder.insert = vi.fn().mockImplementation((payload: unknown) => {
@@ -53,7 +61,7 @@ import {
   voidOperationCompletion,
   voidAllOperationCompletions,
   getOperationCompletionSummaries,
-  getOperationCompletionEvents,
+  getJobCompletionsForOffice,
 } from '@/utils/operationCompletionsAccess';
 
 beforeEach(() => {
@@ -274,26 +282,6 @@ describe('getOperationCompletionSummaries', () => {
   });
 });
 
-describe('getOperationCompletionEvents', () => {
-  it('returns the events and resolves completer names', async () => {
-    responses['job_operation_completions'] = {
-      data: [
-        { id: 'e-1', job_operation_id: 'op-1', job_part_id: 'jp-1', quantity_good: 3, completed_by: 'user-1', completed_at: 't2', note: null, voided_at: null, voided_by: null },
-      ],
-      error: null,
-    };
-    responses['user_company_access'] = { data: [{ user_id: 'user-1', name: 'Sam' }], error: null };
-
-    const events = await getOperationCompletionEvents('op-1', 'co-1');
-    expect(events).toHaveLength(1);
-    expect(events[0].completed_by_name).toBe('Sam');
-  });
-});
-
-/**
- * The feed read. Own rows plus every OFFICE row — the own-rows rule is about
- * PEOPLE, and an office completion has no person in it.
- */
 describe('getFeedCompletionsForJob', () => {
   it('asks for the caller\'s own rows OR any the office recorded', async () => {
     responses['job_operation_completions'] = { data: [], error: null };
@@ -336,5 +324,94 @@ describe('getFeedCompletionsForJob', () => {
     };
     const rows = await getFeedCompletionsForJob('co-1', 'job-1');
     expect(rows[0].capture_source).toBeNull();
+  });
+});
+
+/**
+ * THE GUARDRAIL REGRESSION TEST.
+ *
+ * These two readers hit the same table and differ by exactly two filters. The
+ * pressure to "deduplicate" them will come, and it will look like a tidy-up.
+ * Both directions are asserted here so that collapsing them fails loudly:
+ * dropping the operator reader's filters publishes every operator's output
+ * shop-wide, and adding them to the office reader silently empties the rail.
+ */
+describe('getJobCompletionsForOffice vs getFeedCompletionsForJob', () => {
+  it('issues no actor filter and no voided_at filter — it is an audit surface', async () => {
+    responses['job_operation_completions'] = { data: [], error: null };
+
+    await getJobCompletionsForOffice('co-1', 'job-1');
+
+    expect(captured['job_operation_completions.or']).toBeUndefined();
+    expect(captured['job_operation_completions.is']).toBeUndefined();
+  });
+
+  it('still constrains the OPERATOR reader to own-rows-or-office, non-voided', async () => {
+    responses['job_operation_completions'] = { data: [], error: null };
+
+    await getFeedCompletionsForJob('co-1', 'job-1');
+
+    expect(captured['job_operation_completions.or']).toBe(
+      'completed_by.eq.user-1,capture_source.eq.office',
+    );
+    expect(captured['job_operation_completions.is']).toEqual([['voided_at', null]]);
+  });
+
+  it('keeps a voided completion in the office history rather than dropping it', async () => {
+    responses['job_operation_completions'] = {
+      data: [
+        {
+          id: 'c-1',
+          job_operation_id: 'op-1',
+          quantity_good: '4',
+          completed_at: '2026-09-05T14:31:00Z',
+          completed_by: 'user-9',
+          note: null,
+          voided_at: '2026-09-05T15:00:00Z',
+          capture_source: 'operator',
+          job_operations: { job_id: 'job-1', operation_name: 'Mill', sequence: 20 },
+        },
+      ],
+      error: null,
+    };
+    responses['user_company_access'] = { data: [{ user_id: 'user-9', name: 'Kurtis' }], error: null };
+
+    const rows = await getJobCompletionsForOffice('co-1', 'job-1');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      quantity_good: 4,
+      operation_name: 'Mill',
+      operation_sequence: 20,
+      completed_by_name: 'Kurtis',
+      voided_at: '2026-09-05T15:00:00Z',
+    });
+  });
+
+  it('reports a completer with no matching member as unnamed rather than dropping the row', async () => {
+    // A removed account still completed the work. Losing the row would lose the
+    // quantity; guessing a name would invent one.
+    responses['job_operation_completions'] = {
+      data: [
+        {
+          id: 'c-2',
+          job_operation_id: 'op-2',
+          quantity_good: '1',
+          completed_at: '2026-09-05T09:00:00Z',
+          completed_by: 'ghost-user',
+          note: 'ran short',
+          voided_at: null,
+          capture_source: 'office',
+          job_operations: { job_id: 'job-1', operation_name: 'Saw', sequence: 10 },
+        },
+      ],
+      error: null,
+    };
+    responses['user_company_access'] = { data: [], error: null };
+
+    const rows = await getJobCompletionsForOffice('co-1', 'job-1');
+
+    expect(rows[0].completed_by_name).toBeNull();
+    expect(rows[0].note).toBe('ran short');
   });
 });

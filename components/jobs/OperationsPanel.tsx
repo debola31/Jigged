@@ -12,7 +12,6 @@ import Alert from '@mui/material/Alert';
 
 import { useLoad } from '@/hooks/useLoad';
 import type { Job, JobOperation, ProductionStatus } from '@/types/job';
-import type { JobNote } from '@/types/operator';
 import type { OperationCompletionSummary } from '@/types/operationCompletion';
 import {
   completeJobOperation,
@@ -56,8 +55,24 @@ interface OperationsPanelProps {
   operations: JobOperation[];
   onOperationUpdate: () => void;
   disabled?: boolean;
-  /** Operator step-tagged notes + photos keyed by job_operation_id. */
-  notesByOperation?: Map<string, JobNote[]>;
+  /**
+   * How many activity-rail notes each step has, keyed by job_operation_id.
+   * A count, not the notes: the card renders a badge that filters the rail.
+   */
+  noteCounts?: Map<string, number>;
+  /** Narrow the activity rail to a step. Absent where there is no rail. */
+  onShowActivity?: (operationId: string, stepName: string) => void;
+  /**
+   * Bumped by the page after a write the RAIL performed, so these panels
+   * re-read their own ledgers.
+   *
+   * `onOperationUpdate` only refetches the JOB; the quantities on these cards
+   * come from three useLoads in here that nothing outside could reach. Without
+   * this, voiding a completion in the rail would leave the step card still
+   * showing the quantity it just undid — the two halves of the page disagreeing
+   * about whether a step is done.
+   */
+  refreshSignal?: number;
   /** The part these operations belong to. Names the part on the outside-send dialog. */
   partName?: string | null;
 }
@@ -73,7 +88,9 @@ export default function OperationsPanel({
   operations,
   onOperationUpdate,
   disabled = false,
-  notesByOperation,
+  noteCounts,
+  onShowActivity,
+  refreshSignal = 0,
   partName,
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
@@ -95,7 +112,7 @@ export default function OperationsPanel({
     const next = new Map<string, OperationCompletionSummary>();
     for (const rows of perPart) for (const r of rows) next.set(r.job_operation_id, r);
     return next;
-  }, [partIdsKey]);
+  }, [partIdsKey, refreshSignal]);
   const summaryByOp = summaryData ?? EMPTY_SUMMARY_MAP;
 
   // The outside quantity ledger, loaded per PART for the same reason the
@@ -107,7 +124,7 @@ export default function OperationsPanel({
     const next = new Map<string, OutsideOperationSummary>();
     for (const rows of perPart) for (const r of rows) next.set(r.job_operation_id, r);
     return next;
-  }, [partIdsKey]);
+  }, [partIdsKey, refreshSignal]);
   const outsideByOp = outsideData ?? EMPTY_OUTSIDE_MAP;
 
   // Recorded time per op, keyed the same way. AGGREGATE AND WITHOUT OPERATOR
@@ -146,7 +163,7 @@ export default function OperationsPanel({
   }, [highlightOpId, opIdsKey]);
   const { data: actualsData, reload: reloadActuals } = useLoad(
     () => getOperationActuals(opIdsKey ? opIdsKey.split(',') : []),
-    [opIdsKey],
+    [opIdsKey, refreshSignal],
   );
   const actualsByOp = actualsData ?? EMPTY_ACTUALS_MAP;
 
@@ -462,22 +479,16 @@ export default function OperationsPanel({
               >
               <OperationCard
                 operation={operation}
-                companyId={job.company_id}
                 summary={summaryByOp.get(operation.id)}
                 outside={outsideByOp.get(operation.id)}
-                onViewSlip={setPreviewSlipId}
                 disabled={isDisabled}
-                stepNotes={notesByOperation?.get(operation.id)}
+                noteCount={noteCounts?.get(operation.id) ?? 0}
+                onShowActivity={onShowActivity}
                 onComplete={handleOpenComplete}
                 onUndo={handleUndo}
                 onSend={handleSend}
                 onReceive={handleReceive}
                 actuals={actualsByOp.get(operation.id)}
-                onCompletionsChanged={() => {
-                  reloadSummaries();
-                  reloadActuals();
-                  onOperationUpdate();
-                }}
               />
               </Box>
             ))}

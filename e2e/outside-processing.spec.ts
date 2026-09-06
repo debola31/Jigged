@@ -195,13 +195,22 @@ test.describe('outside processing — shipping & receiving', () => {
       .from('job_operations').select('status').eq('id', opId).single();
     expect(after!.status).toBe('in_progress');
 
-    // ---- 4. The slip is reprintable from the OPERATION that produced it ----
-    // Not from a job-toolbar menu: a second packing-slip dropdown beside
+    // ---- 4. The slip is reprintable from the JOB'S ACTIVITY RAIL ----
+    // Still not from a job-toolbar menu: a second packing-slip dropdown beside
     // "Shipments" meant telling two of them apart by reading the labels, on the
     // surface where picking the wrong one sends a customer's paperwork to a
-    // plater. The slip lives on the step it came from.
-    await page.getByTestId('operation-expand').first().click();
-    await page.getByRole('button', { name: /^VPS-/ }).first().click();
+    // plater. The slip now lives on its movement row in the activity rail —
+    // "Sent 12 to Acme" with the slip number under it — rather than behind the
+    // step card's expand, which no longer exists.
+    //
+    // Scoped to the rail because the docked column and the narrow-screen
+    // overlay render the same labels. Playwright runs Desktop Chrome at
+    // 1280×720, which is above `lg`, so the DOCKED branch is the one exercised
+    // here — and 1280 is also where the operation row wraps its action cluster,
+    // so this run covers that too.
+    const rail = page.getByTestId('job-activity-rail');
+    await expect(rail).toBeVisible();
+    await rail.getByRole('button', { name: /^VPS-/ }).first().click();
     await expect(page.getByRole('heading', { name: /Vendor packing slip — VPS-/i })).toBeVisible();
   });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -30,6 +30,7 @@ import PrintIcon from '@mui/icons-material/Print';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
+import HistoryIcon from '@mui/icons-material/History';
 
 import {
   getJobWithRelations,
@@ -41,11 +42,17 @@ import {
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
-import type { JobNote } from '@/types/operator';
-import { getJobNotes } from '@/utils/operatorAccess';
 import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
+import JobActivityRail, {
+  captureRailToggle,
+  readRailOpen,
+  writeRailOpen,
+} from '@/components/jobs/activity/JobActivityRail';
+import { useJobActivity } from '@/hooks/useJobActivity';
+import { getCurrentMember } from '@/utils/operatorAccess';
+import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 import { CreateShipmentModal } from '@/components/shipments';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
@@ -67,7 +74,6 @@ export default function JobDetailPage() {
   const [partSummaries, setPartSummaries] = useState<JobPartShipmentSummary[]>([]);
   const [invoiceSummaries, setInvoiceSummaries] = useState<JobPartInvoiceSummary[]>([]);
   const [invoicesRefreshKey, setInvoicesRefreshKey] = useState(0);
-  const [notesByOperation, setNotesByOperation] = useState<Map<string, JobNote[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +93,46 @@ export default function JobDetailPage() {
   // more than one part).
   const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
+  /**
+   * THE ACTIVITY RAIL.
+   *
+   * Two open states, not one. `railOpen` is the docked column above `lg`,
+   * remembered per browser and defaulting OPEN — being discoverable without
+   * being summoned is the whole reason this is a rail. `mobileRailOpen` is the
+   * narrow-screen overlay and always starts false, so the Drawer's Modal never
+   * mounts while the rail is docked and cannot fight it for focus.
+   */
+  const [railOpen, setRailOpen] = useState<boolean>(() => readRailOpen());
+  const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  /**
+   * Which step the rail is narrowed to, as a THREE-state value.
+   *
+   * `undefined` means nobody has touched the filter, so a `?op=` deep link
+   * still governs; `null` means it was explicitly cleared and the link should
+   * not re-apply; a string is a step somebody picked. Derived rather than
+   * synced in an effect — a `useEffect` that setState'd the link into the
+   * filter is a cascading render, and clearing it would have needed a ref to
+   * stop the effect immediately putting it back.
+   */
+  const [userFilterOpId, setUserFilterOpId] = useState<string | null | undefined>(undefined);
+  const [member, setMember] = useState<{ id: string; isAdmin: boolean } | null>(null);
+  /** The rail's own slip preview. OperationsPanel keeps its post-send one. */
+  const [railSlipId, setRailSlipId] = useState<string | null>(null);
+  /**
+   * Bumped after any write the RAIL performs, and passed to OperationsPanel so
+   * its own quantity ledgers re-read. `fetchJob` alone is not enough: the panel
+   * loads summaries, actuals and the outside ledger through its own useLoads,
+   * and without this a void in the rail would leave the step card still showing
+   * the quantity it just undid.
+   */
+  const [activityVersion, setActivityVersion] = useState(0);
+
+  const activity = useJobActivity(companyId, jobId);
+  const { reload: reloadActivity } = activity;
+
+  const searchParams = useSearchParams();
+  const deepLinkedOpId = searchParams.get('op');
+
 
   const fetchJob = useCallback(async () => {
     try {
@@ -105,24 +151,10 @@ export default function JobDetailPage() {
       } catch (err) {
         console.warn('Job detail: per-part invoice summaries failed', err);
       }
-      try {
-        // Operator step-tagged notes + photos, grouped by operation, so an
-        // operation's expand can show who noted what (and any pictures) —
-        // regardless of completion status, so pending-op notes surface too.
-        const allNotes = await getJobNotes(jobId, companyId);
-        const byOp = new Map<string, JobNote[]>();
-        for (const n of allNotes) {
-          if (!n.job_operation_id) continue;
-          const arr = byOp.get(n.job_operation_id) ?? [];
-          arr.push(n);
-          byOp.set(n.job_operation_id, arr);
-        }
-        // getJobNotes is newest-first; show a step's notes oldest-first.
-        for (const arr of byOp.values()) arr.reverse();
-        setNotesByOperation(byOp);
-      } catch (err) {
-        console.warn('Job detail: step notes failed', err);
-      }
+      // Notes are no longer read here. They belong to the activity rail, which
+      // loads them through useJobActivity — and the bucketing this used to do
+      // silently DROPPED every note without a job_operation_id, which is why
+      // job-level notes have been invisible on this page since they shipped.
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load job');
@@ -139,6 +171,23 @@ export default function JobDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchJob();
   }, [fetchJob]);
+
+  /**
+   * The signed-in member, for the rail's own-note edit/delete gates. Resolved
+   * unconditionally rather than on first interaction — the gates render with
+   * every note, not after a click.
+   */
+  useEffect(() => {
+    let active = true;
+    getCurrentMember(companyId)
+      .then((m) => {
+        if (active && m) setMember({ id: m.id, isAdmin: m.role === 'admin' });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [companyId]);
 
   // Surface a "View invoice" deep link if this job already has a QBO invoice.
   // Plain Supabase read (no AI), safe on mount.
@@ -303,8 +352,46 @@ export default function JobDetailPage() {
     );
   }
 
+  /**
+   * A `?op=` deep link scroll-highlights the step (OperationsPanel) and narrows
+   * the rail to it — landing on a highlighted step with its history already
+   * showing is the moment the rail earns the width it costs.
+   *
+   * Resolves to null until the job loads, and again if the id names a step this
+   * job does not have: a filter chip labelled with a step nobody can see would
+   * be worse than no chip.
+   */
+  const activeFilterOpId = userFilterOpId !== undefined ? userFilterOpId : deepLinkedOpId;
+  const railFilter = (() => {
+    if (!activeFilterOpId) return null;
+    const step = job?.job_parts
+      ?.flatMap((p) => p.job_operations ?? [])
+      .find((o) => o.id === activeFilterOpId);
+    return step ? { operationId: step.id, stepName: step.operation_name } : null;
+  })();
+
+  const railReserved = railOpen;
+  const headerCardSpan = railReserved
+    ? ({ xs: 12, xl: 6 } as const)
+    : ({ xs: 12, md: 6 } as const);
+
+  const openRail = () => {
+    setRailOpen(true);
+    writeRailOpen(true);
+    captureRailToggle(true, true);
+  };
+  const closeRail = () => {
+    setRailOpen(false);
+    writeRailOpen(false);
+    captureRailToggle(false, true);
+  };
+
   return (
-    <Box>
+    /* The rail is an in-flow column, so it reserves its own width and there is
+       no second number to keep in sync with it — the trap LocationsManager has
+       to work around for its persistent drawer. */
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: { lg: 3 } }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => router.push(`/dashboard/${companyId}/jobs`)}
@@ -355,6 +442,33 @@ export default function JobDetailPage() {
               Print Traveler
             </Button>
           )}
+          {/* THE ACTIVITY TOGGLE, TWICE, EACH GATED BY CSS.
+              One control conceptually, but the wide screen toggles a docked
+              column and the narrow one opens an overlay — two different pieces
+              of state. Splitting them by breakpoint keeps that honest without a
+              `useMediaQuery`, which would make one branch unrenderable in jsdom
+              (see __tests__/setup.ts on why this repo prefers CSS breakpoints).
+              Only ever one is visible. */}
+          <Button
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={railOpen ? closeRail : openRail}
+            aria-pressed={railOpen}
+            sx={{ display: { xs: 'none', lg: 'inline-flex' } }}
+          >
+            Activity
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<HistoryIcon />}
+            onClick={() => {
+              setMobileRailOpen(true);
+              captureRailToggle(true, false);
+            }}
+            sx={{ display: { xs: 'inline-flex', lg: 'none' } }}
+          >
+            Activity
+          </Button>
           {/* Shipments + invoices are dropdowns (view existing + create) so both are
               reachable from the top without scrolling, and the toolbar doesn't grow a
               separate button per action. Full detail lives in the Fulfillment section. */}
@@ -433,9 +547,12 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
+      {/* WITH THE RAIL OPEN THE CONTENT COLUMN IS 568px AT `lg`, which would put
+          these two cards at 284px each. The span follows the rail rather than a
+          raw breakpoint, so they stack until there is genuinely room for two. */}
       <Grid container spacing={3}>
         {/* Compact details + billing, side by side (mirrors the edit view). */}
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={headerCardSpan}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
@@ -489,7 +606,7 @@ export default function JobDetailPage() {
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={headerCardSpan}>
           <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} readOnly />
         </Grid>
 
@@ -557,7 +674,16 @@ export default function JobDetailPage() {
                             operations={part.job_operations}
                             onOperationUpdate={fetchJob}
                             disabled={actionLoading}
-                            notesByOperation={notesByOperation}
+                            noteCounts={activity.noteCounts}
+                            onShowActivity={(operationId) => {
+                              setUserFilterOpId(operationId);
+                              // On a narrow screen the rail is an overlay, so
+                              // filtering it without opening it would look like
+                              // the press did nothing.
+                              setMobileRailOpen(true);
+                              if (!railOpen) openRail();
+                            }}
+                            refreshSignal={activityVersion}
                             // The outside-send dialog names the part in its
                             // subtitle; without this it would repeat the process
                             // name twice, which reads as a rendering bug.
@@ -713,6 +839,50 @@ export default function JobDetailPage() {
         onClose={() => setPushSuccess(null)}
         message={pushSuccess ?? ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      />
+
+      {/* The rail's slip preview. OperationsPanel keeps its own for the
+          auto-preview after a send; only one is ever open, and each reloads
+          both halves of the page so a void cannot update one and not the
+          other. */}
+      <OutsideShipmentPreviewDialog
+        open={railSlipId !== null}
+        shipmentId={railSlipId}
+        onClose={() => setRailSlipId(null)}
+        onVoided={() => {
+          void reloadActivity();
+          setActivityVersion((n) => n + 1);
+          fetchJob();
+        }}
+      />
+      </Box>
+
+      <JobActivityRail
+        companyId={companyId}
+        jobId={jobId}
+        items={activity.items}
+        loading={activity.loading}
+        error={activity.error}
+        reload={async () => {
+          await reloadActivity();
+          // The step cards read their quantities through OperationsPanel's own
+          // loads, which fetchJob does not reach. Bumping this is what keeps
+          // the rail and the cards telling the same story.
+          setActivityVersion((n) => n + 1);
+          fetchJob();
+        }}
+        memberId={member?.id ?? null}
+        isAdmin={member?.isAdmin ?? false}
+        open={railOpen}
+        onClose={closeRail}
+        mobileOpen={mobileRailOpen}
+        onMobileClose={() => {
+          setMobileRailOpen(false);
+          captureRailToggle(false, false);
+        }}
+        filter={railFilter}
+        onClearFilter={() => setUserFilterOpId(null)}
+        onViewSlip={setRailSlipId}
       />
     </Box>
   );

@@ -115,7 +115,7 @@ Two facts that keep those rows from being re-litigated:
 > exist; its helper is `reviveArchivedCustomerByName`, private to
 > `utils/customerAccess.ts`, not an exported `reviveArchivedCustomer`.)*
 
-### Note surfaces — the one place the standard splits by device, not stakes
+### Note surfaces — the one place the standard splits by available width, not stakes
 
 Note / comment **edit + delete** affordances are shaped per surface:
 
@@ -123,6 +123,7 @@ Note / comment **edit + delete** affordances are shaped per surface:
 |---|---|---|
 | **Operator** — job feed, Playbook sheet, machine logbook | One 48px overflow (kebab) → Edit / Delete ([`NoteActionsMenu`](../components/notes/NoteActionsMenu.tsx)) | Note headers already carry author + optional step chip + timestamp and already wrap at 375px; two more 48px targets push every header onto a third line. MUI `MenuItem`s clear 48px, so the touch floor is met at the point of *choice* — which is where it matters, since a mis-tap on a kebab is harmless and a mis-tap on a bare trash icon is not. |
 | **Office** — part Activity ([`HistoryTab`](../components/parts/workspace/tabs/HistoryTab.tsx)) | Destructive control **shown at rest** as an error-coloured trash icon, plain edit icon beside it, delete rightmost | Burying delete in a kebab here would regress the red-at-rest and delete-sits-last rules above. Desktop has the width and the hover; the phone constraint does not apply. |
+| **Office** — the job activity rail ([`JobActivityNoteRow`](../components/jobs/activity/JobActivityNoteRow.tsx)) | The kebab, **not** the office icons-at-rest shape | The exception that proves the split is about WIDTH, not about who is looking. This is an office surface with a phone's constraint: the rail is 320px at `lg`, so a note's content column is ~288px and two 48px targets at rest would take a sixth of it on every row. The rule below settles it — the kebab is the default for a new note surface, and icons-at-rest is what a wide pane earns. |
 | **The operator's own work list** (`/operator/[companyId]/my-work`) | Same kebab, **plus: the row body must stay inert** | See below. |
 
 The work list is the only note surface whose row also has to disclose *content* —

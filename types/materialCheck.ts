@@ -67,8 +67,7 @@ export interface MaterialRequirement {
   partName: string;
   /** The unit written on the BOM line, which may not be the stock unit. */
   bomUnit: string;
-  consumeWholeUnits: boolean;
-  /** Job draw in the BOM line's own unit, ceil applied when `consumeWholeUnits`. */
+  /** Job draw in the BOM line's own unit — exact, never rounded up. */
   requiredInBomUnit: number;
   /** The same draw in the part's primary unit. `null` ⟺ the units are incomparable. */
   requiredInStockUnit: number | null;

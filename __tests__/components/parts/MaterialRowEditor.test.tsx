@@ -58,7 +58,6 @@ describe('MaterialRowEditor — single quantity field', () => {
       childPart: makeOption(),
       quantity: '0.05',
       unit: 'each',
-      consume_whole_units: true,
       charge_basis: 'cost',
     };
     render(
@@ -82,7 +81,6 @@ describe('MaterialRowEditor — single quantity field', () => {
       childPart: makeOption(),
       quantity: '0.05',
       unit: 'each',
-      consume_whole_units: true,
       charge_basis: 'cost',
     };
     render(
@@ -108,7 +106,6 @@ describe('MaterialRowEditor — single quantity field', () => {
       childPart: makeOption(),
       quantity: '1',
       unit: 'each',
-      consume_whole_units: true,
     };
     render(
       <MaterialRowEditor
@@ -124,7 +121,11 @@ describe('MaterialRowEditor — single quantity field', () => {
     expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
   });
 
-  it('derives consume_whole_units = true for a count unit (no manual toggle)', async () => {
+  // The editor used to derive consume_whole_units from the unit here, silently, with no
+  // toggle — so a bar of stock held as "each" charged a whole bar for the 0.2 of it a part
+  // used, and re-saving the row re-imposed that. The column is gone; a fractional quantity on
+  // a count unit is saved verbatim and costed verbatim.
+  it('saves a fractional quantity on a count unit untouched', async () => {
     const onSave = vi.fn();
     nextPickOption = makeOption({ primary_unit: 'each' });
     render(
@@ -133,27 +134,13 @@ describe('MaterialRowEditor — single quantity field', () => {
 
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
     const qty = await screen.findByLabelText(/per part/i);
-    await user.type(qty, '2');
+    await user.type(qty, '0.2');
     await user.click(screen.getByRole('button', { name: /add to bom/i }));
 
-    expect(onSave.mock.calls[0][0].consume_whole_units).toBe(true);
-    // No round-up switch is rendered anymore.
+    expect(onSave.mock.calls[0][0].quantity).toBe('0.2');
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty('consume_whole_units');
+    // No round-up switch is rendered, and none is needed.
     expect(screen.queryByRole('checkbox')).toBeNull();
-  });
-
-  it('derives consume_whole_units = false for a length unit', async () => {
-    const onSave = vi.fn();
-    nextPickOption = makeOption({ primary_unit: 'inches' });
-    render(
-      <MaterialRowEditor companyId="co-1" onSave={onSave} onCancel={() => undefined} />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'pick-part' }));
-    const qty = await screen.findByLabelText(/per part/i);
-    await user.type(qty, '7');
-    await user.click(screen.getByRole('button', { name: /add to bom/i }));
-
-    expect(onSave.mock.calls[0][0].consume_whole_units).toBe(false);
   });
 
   it('allows changing the material part in edit mode (picker not locked)', async () => {
@@ -161,7 +148,6 @@ describe('MaterialRowEditor — single quantity field', () => {
       childPart: makeOption(),
       quantity: '1',
       unit: 'each',
-      consume_whole_units: true,
     };
     render(
       <MaterialRowEditor
@@ -208,7 +194,6 @@ describe('MaterialRowEditor — single quantity field', () => {
       childPart: makeOption(),
       quantity: '0.05',
       unit: 'each',
-      consume_whole_units: true,
       charge_basis: 'cost',
     };
     render(
@@ -247,7 +232,6 @@ describe('MaterialRowEditor — single quantity field', () => {
         childPart: makeOption({ primary_unit: 'each' }),
         quantity: '2',
         unit: 'each',
-        consume_whole_units: true,
         charge_basis: 'price',
       };
       const onSave = vi.fn();

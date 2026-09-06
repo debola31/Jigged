@@ -361,7 +361,6 @@ export default function PartBomPanel({
       child_part_id: value.childPart.id,
       quantity: value.quantity,
       unit: value.unit,
-      consume_whole_units: value.consume_whole_units,
       charge_basis: chargeBasis,
     };
 
@@ -503,7 +502,6 @@ export default function PartBomPanel({
         } satisfies PartSelectOption,
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
-        consume_whole_units: editingRow.consume_whole_units,
         charge_basis: editingRow.charge_basis,
       }
     : undefined;
@@ -678,14 +676,6 @@ export default function PartBomPanel({
                 key: 'basis',
                 text: chargeAtPriceLabel(markup),
                 warning: ladderLoaded && ladder.length > 0 && markup === null,
-              });
-            }
-            // Only meaningful for a fractional-capable line; "whole units" on a
-            // part that can't be split says nothing.
-            if (row.consume_whole_units || pinnedBatch !== null) {
-              captionParts.push({
-                key: 'mode',
-                text: row.consume_whole_units ? 'whole units' : 'fractional',
               });
             }
             if (pinnedBatch !== null) {

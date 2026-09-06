@@ -497,12 +497,27 @@ SENSITIVE_TABLES = frozenset({
     # The customer's own carrier account number — their shared secret, not ours.
     # "Which customers ship on their own UPS account?" is a reasonable question
     # for an owner to type, and answering it from this table would put account
-    # numbers into an AI response and into ai_chat_queries. Blocked the same way
-    # the quickbooks_* tables are: no grant to jigged_ai_readonly and no
-    # ai_readonly_select policy (the baseline's ALTER DEFAULT PRIVILEGES grants
-    # SELECT on every new public table, so the migration's REVOKE is
-    # load-bearing rather than decorative), plus this whole-word entry.
+    # numbers into an AI response and into ai_chat_queries. Blocked at both
+    # layers: 20260801024648 REVOKEs SELECT from jigged_ai_readonly (the
+    # baseline's ALTER DEFAULT PRIVILEGES grants one on every new public table,
+    # so that REVOKE is load-bearing rather than decorative) and the table
+    # carries no ai_readonly_select policy, plus this whole-word entry.
     "customer_carrier_accounts",
+    # Now also the QuickBooks Online payment mirror -- qb_balance, qb_total_amt
+    # and what QBO last said about each invoice.
+    #
+    # CORRECTED 2026-09-03: the comment above used to cover this table too and
+    # said a REVOKE was what protected it. Checked, and false -- no migration
+    # revokes jigged_ai_readonly here, so the baseline's SELECT grant still
+    # stands. What makes the rows unreadable is the ABSENCE of an
+    # ai_readonly_select policy: 20260826103645 measured the quickbooks_* tables
+    # returning ZERO ROWS as the role for exactly that reason. The protection is
+    # real but it is one layer, not two.
+    #
+    # Never add such a policy now that the row carries balances. "Who owes me
+    # money" answered out of a mirror is the AR subledger
+    # docs/modules/customers.md refuses, built by accident, and the mirror is
+    # only as fresh as its last check.
     "quickbooks_invoice_links",
     # The clickwrap record: who accepted which legal document, from which IP.
     # Blocked for the same reason as customer_carrier_accounts and for one more.

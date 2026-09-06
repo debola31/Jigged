@@ -43,11 +43,29 @@ interface QuickBooksIntegrationCardProps {
   companyId: string;
 }
 
+/**
+ * The connection status as this card reads it.
+ *
+ * `webhook_last_received_at` is on the wire -- GET /{company}/status returns it
+ * from the connection row -- but is not yet declared on the shared
+ * `QuickBooksStatus`. Declared here as OPTIONAL rather than asserted with a cast:
+ * a `QuickBooksStatus` is assignable to this without one, and the only thing the
+ * card can conclude from a missing value is "no webhook has arrived", which is
+ * exactly what it renders. Fold it into `QuickBooksStatus` and delete this when
+ * that type is next touched.
+ */
+interface QuickBooksStatusView extends QuickBooksStatus {
+  /** When Intuit last told us something about this company changed. Null until
+   *  the first notification lands -- it carries no numbers, only the fact that
+   *  there is something to re-read. */
+  webhook_last_received_at?: string | null;
+}
+
 export default function QuickBooksIntegrationCard({ companyId }: QuickBooksIntegrationCardProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<QuickBooksStatus | null>(null);
+  const [status, setStatus] = useState<QuickBooksStatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -60,6 +78,11 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   // Without it, a network blip renders "Connect to QuickBooks" to a shop that is
   // already connected -- a failed check shown as a definitive negative.
   const [statusFailed, setStatusFailed] = useState(false);
+  /** The OAuth callback refused a sign-in that named a different QuickBooks
+   *  company. Kept as a flag rather than an error string because the message
+   *  needs `status.qb_company_name`, which is still loading when the redirect
+   *  is read — so it is composed at render, once the name is actually known. */
+  const [realmMismatch, setRealmMismatch] = useState(false);
   const [desktop, setDesktop] = useState<DesktopStatus | null>(null);
   const [pendingLink, setPendingLink] = useState<DesktopLink | null>(null);
   /** WHICH provider is being connected, not merely that something is. Both
@@ -146,6 +169,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     if (!qb) return;
     (async () => {
       if (qb === 'connected') setSuccess('QuickBooks connected.');
+      else if (qb === 'realm_mismatch') setRealmMismatch(true);
       else if (qb === 'error') setError('QuickBooks connection failed. Please try again.');
     })();
     router.replace(`/dashboard/${companyId}/settings`);
@@ -246,11 +270,28 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
       }
       statusChip={statusChip}
-      description="Push invoices from Jigged into QuickBooks. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
+      description="Push invoices from Jigged into QuickBooks, and read back what QuickBooks says about them — what’s still owed, and when it’s due. Jigged only ever adds invoices and reads; it never changes or deletes anything already in your QuickBooks."
     >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
+          </Alert>
+        )}
+        {realmMismatch && (
+          // WARNING, not error: nothing was changed and the shop can fix it in
+          // one go. Naming the company they are already filed in is the whole
+          // point of the message — "a different company" is true and useless,
+          // while "something other than Contour Tool Inc." says which account to
+          // sign in as. The disconnect-first escape hatch is mentioned because a
+          // shop genuinely moving to a new QuickBooks company is a real thing,
+          // just not something to do by accident.
+          <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setRealmMismatch(false)}>
+            That sign-in was for a different QuickBooks company
+            {status?.qb_company_name ? ` than ${status.qb_company_name}` : ''}. Nothing was
+            changed. Sign in to QuickBooks as someone with access to{' '}
+            {status?.qb_company_name ?? 'your existing company'} and try again. If you really are
+            moving to a new QuickBooks company, disconnect first — your existing invoices stay
+            filed under the old one either way.
           </Alert>
         )}
         {success && (
@@ -352,10 +393,27 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               </Alert>
             )}
 
-            <Typography variant="body2" sx={{ mb: 3 }}>
+            <Typography variant="body2" sx={{ mb: 1 }}>
               {status?.qb_company_name
                 ? <>Connected to <strong>{status.qb_company_name}</strong>.</>
                 : 'QuickBooks is connected.'}
+            </Typography>
+
+            {/* Evidence that the inbound half of the integration is alive.
+                QuickBooks notifies us that something changed; the notification
+                carries no numbers, so nothing here is a balance -- it is a
+                timestamp, and its whole value is that an empty one is the single
+                visible symptom of a webhook that never got registered. Without
+                it the shop still sees correct payment status (opening a job's
+                Invoices menu re-reads anything older than ten minutes), just at
+                the cost of a round trip to Intuit every time, and nobody would
+                ever notice. */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              {status?.webhook_last_received_at
+                ? `Live payment updates from QuickBooks: last received ${formatReceivedAt(
+                    status.webhook_last_received_at,
+                  )}.`
+                : 'No live payment updates have arrived from QuickBooks yet. Payment status still refreshes whenever someone opens a job’s Invoices menu — but if this stays empty, the QuickBooks notification setup is worth checking.'}
             </Typography>
 
             {/* PO number placement.
@@ -438,6 +496,22 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   );
 }
 
+
+/** When Intuit last notified us, to the minute — the resolution that answers
+ *  "is this working right now". Falls back to the raw value rather than an empty
+ *  string, so an unparseable timestamp shows as something odd instead of turning
+ *  the sentence into "last received ." */
+function formatReceivedAt(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+}
 
 /** One of the two co-equal provider choices. Both buttons are `contained`: they
  *  are peers, and ranking them by giving one a border would imply a house

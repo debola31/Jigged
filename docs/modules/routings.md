@@ -251,34 +251,38 @@ callers such as `calculateTierPricing` divide it by the tier quantity.
 ### Material cost
 
 *(This doc previously stated `total_material_cost = Σ (bom_line.quantity ×
-child_part.cost_per_unit)`. That predates yield/batch-pinning costing: the code never reads
-`cost_per_unit` here, and unit conversion, whole-unit ceiling, and made-child batch pinning
-all move the number. Corrected 2026-08-03 against `utils/routingCostCalculation.ts`.)*
+child_part.cost_per_unit)`. That predates batch-pinning costing: the code never reads
+`cost_per_unit` here, and unit conversion and made-child batch pinning both move the number.
+Corrected 2026-08-03 against `utils/routingCostCalculation.ts`.)*
+
+*(Corrected again 2026-09-06: every revision until now carried a `consume_whole_units`
+ceiling — `units_consumed = ceil(qty × qty_in_primary)` — and the two-branch
+`line_cost_per_parent_unit` that ceiling forced. The flag is gone, column and all. It was
+derived from the BOM line's unit with no way to override it, so bar stock held as "each"
+silently charged a whole bar for the fifth of one a part used; and because a price is
+anchored at its pricing tier's quantity, at a tier of 1 EVERY fractional quantity flattened
+to one whole unit. Consumption is exact now, and the two branches are algebraically the same
+expression.)*
 
 Per BOM line, summed:
 
 ```
 qty_in_primary  = bom.quantity × conversion(child, bom.unit → child.primary_unit)
                   # empty bom.unit is treated as already-primary
-units_consumed  = consume_whole_units ? ceil(qty × qty_in_primary)   # discrete stock
-                                      : qty × qty_in_primary
 child_val_qty   = child.source == 'made' ? (child.costing_batch_quantity ?? 1)  # pinned to
-                                         : units_consumed                      # the lot size
+                                         : qty × qty_in_primary                 # the lot size
 child_unit_cost = compute_part_cost_at_qty(child.id, child_val_qty)
 
-line_cost_per_parent_unit =
-    (!consume_whole_units && child.source != 'made')
-      ? qty_in_primary × child_unit_cost            # LEGACY expression, kept textually
-                                                    # identical so pre-existing BOM lines
-                                                    # stay byte-identical
-      : (units_consumed × child_unit_cost) / qty
+line_cost_per_parent_unit = qty_in_primary × child_unit_cost
 ```
 
 A **made** child is valued at its standard-costing lot size (the run its cost amortizes
 over), fixed regardless of order size; a **bought** child at what is actually consumed
-(procurement tier / floor). This mirrors `compute_part_cost_at_qty` exactly — including
-sub-assembly setup, which that function amortizes as `setup_minutes / p_qty`, i.e. over
-`child_val_qty` (the child's pinned lot size when made), **not** over the parent's quantity.
+(procurement tier / floor). That valuation quantity is now the ONLY thing made and bought
+children differ by — the per-parent-unit multiplication is the same one line for both.
+This mirrors `compute_part_cost_at_qty` exactly — including sub-assembly setup, which that
+function amortizes as `setup_minutes / p_qty`, i.e. over `child_val_qty` (the child's pinned
+lot size when made), **not** over the parent's quantity.
 
 If **any** BOM line can't be priced, `materials_complete = false` and both
 `total_material_cost` and `total_cost` become `null` (mirroring SQL NULL propagation), so
@@ -352,7 +356,7 @@ still automation-pending. Doc-vs-code divergences from the earlier audit are on 
 | Mixed kinds sum correctly | **C** › `calculateRoutingCost` › `mixed internal + external routings` (1 it) |
 | Zero operations emits `no_operations`; neither routing nor BOM returns `null` | **C** › `calculateRoutingCost` › `routing edge cases` (1 it), `returns null when there is nothing to cost` (1 it) |
 | BOM child cost rolls into `total_material_cost`; unit fallbacks; `missing_material_cost` blanks base + unit price via `materials_complete = false` | **C** › `calculateRoutingCost` › `BOM materials` (7 it), `combined routing + BOM` (1 it) |
-| Yield: whole-unit ceiling, made-child batch pinning, fractional-unpinned legacy path unchanged, documented diamond-BOM over-consumption limit | **C** › `calculateRoutingCost — yield / ceiling / batch pinning` (8 it) |
+| Yield: made-child batch pinning; per-part cost does not step with order quantity; a fractional quantity moves the cost at a batch of 1; a shared diamond-BOM child stays linear | **C** › `calculateRoutingCost — yield / batch pinning` (8 it) |
 | Setup amortizes across tier quantity; qty ≤ 0 → 1; `null` unit price when markup is null; per-unit base qty-invariant apart from setup | **C** › `calculateTierPricing` (4 it) |
 | Validate: happy path groups ops; unknown work center fails; `MISCELLANEOUS` routes when present, fails when absent; external-only field on an internal row rejected | **I** › `TestRoutingsValidate` (5 tests) |
 | Execute: internal `labor_rate_override` written; external cost fields used; re-import upserts `(routing_id, sequence)` instead of 500-ing | **I** › `TestRoutingsExecute` (3 tests) — the external test asserts `external_setup_cost`, the dropped column ([#549](#known-importer-bug-549)) |

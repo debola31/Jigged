@@ -3,10 +3,16 @@
 Covers the pieces a reviewer flagged as load-bearing: the tax/rounding mapping,
 the compare-and-set token refresh (and its invalid_grant branches), QBO query
 escaping, and customer resolution tiers.
+
+Plus the read-only invoice payment mirror (2026-09-03): the status rule, the strict
+query wrapper that refuses to read an unreadable answer as "no rows", the chunked
+invoice fetch and its confirm-before-missing rule, and the freshness decision that
+makes opening the Invoices menu ask Intuit only when it has to.
 """
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -857,3 +863,376 @@ def test_sum_invoiced_ignores_pending_and_voided_links():
         ],
     )
     assert qb.sum_invoiced_by_part(db, "job1") == {"jp1": 5.0}
+
+
+# ───────────────────────── invoice payment mirror: the status rule ─────────────────────────
+# derive_invoice_status is the one place the word a shop owner reads is decided, and it is
+# pure — no clock, no I/O — so every case below is exact rather than approximate.
+
+
+def test_a_paid_invoice_reads_paid():
+    """Nothing owed is the whole test. QBO reports a settled invoice as Balance 0
+    while keeping TotalAmt, so `paid` can never be inferred from the total alone."""
+    assert qb.derive_invoice_status(
+        found=True, total_amt="500.00", balance="0.00", jigged_total="500.00"
+    ) == "paid"
+
+
+def test_a_part_paid_invoice_reads_partial():
+    assert qb.derive_invoice_status(
+        found=True, total_amt="500.00", balance="200.00", jigged_total="500.00"
+    ) == "partial"
+
+
+def test_an_untouched_invoice_reads_open():
+    assert qb.derive_invoice_status(
+        found=True, total_amt="500.00", balance="500.00", jigged_total="500.00"
+    ) == "open"
+
+
+def test_a_voided_invoice_is_not_read_as_paid():
+    """QBO does not delete a voided invoice — it zeroes the amounts and keeps the
+    number, so a void arrives looking exactly like a settled invoice: Balance 0.
+
+    Ordering the void test ABOVE the balance test is what keeps the two apart, and it
+    is the ordering that matters rather than the arithmetic: read the other way round,
+    every void in the shop would show as money collected."""
+    assert qb.derive_invoice_status(
+        found=True, total_amt="0.00", balance="0.00", jigged_total="1000.00"
+    ) == "voided"
+
+
+def test_a_zero_dollar_invoice_with_no_jigged_lines_is_paid():
+    """The other side of that ordering. An invoice we never put lines on has a zero
+    total legitimately — nothing is owed on it and there is no evidence anyone voided
+    anything — so it must fall through to `paid` rather than be called a void."""
+    assert qb.derive_invoice_status(
+        found=True, total_amt="0.00", balance="0.00", jigged_total="0.00"
+    ) == "paid"
+
+
+def test_partial_versus_open_uses_quickbooks_own_total_not_jiggeds():
+    """THE TAX-INCLUSIVE TRAP. QuickBooks totals include sales tax; Jigged's line
+    total does not. On a taxed invoice the QBO total legitimately EXCEEDS ours, so an
+    untouched invoice's balance (1077.50, tax included) sits above Jigged's line total
+    (1000.00).
+
+    Comparing the balance against jigged_total to decide partial vs open would call
+    that invoice partly paid on the day it was issued — and would do it on every
+    invoice at every shop that charges tax. jigged_total is for the void test only."""
+    assert qb.derive_invoice_status(
+        found=True, total_amt="1077.50", balance="1077.50", jigged_total="1000.00"
+    ) == "open"
+    # A genuine part payment against that same taxed invoice still reads partial.
+    assert qb.derive_invoice_status(
+        found=True, total_amt="1077.50", balance="77.50", jigged_total="1000.00"
+    ) == "partial"
+    # And the substitution read the other way round: 27.50 has been paid, so the
+    # invoice IS partly paid even though more is still owed than Jigged ever billed.
+    # Comparing against jigged_total here would call it untouched.
+    assert qb.derive_invoice_status(
+        found=True, total_amt="1077.50", balance="1050.00", jigged_total="1000.00"
+    ) == "partial"
+
+
+def test_an_invoice_confirmed_absent_reads_missing():
+    """found=False comes from fetch_invoice_facts alone, and only after TWO successful
+    queries failed to return the id — see the confirm tests below."""
+    assert qb.derive_invoice_status(
+        found=False, total_amt=None, balance=None, jigged_total="500.00"
+    ) == "missing"
+
+
+@pytest.mark.parametrize(
+    "total_amt, balance",
+    [
+        (None, "0.00"),            # QBO omitted TotalAmt entirely
+        ("500.00", None),          # QBO omitted Balance entirely
+        ("five hundred", "0.00"),  # a body we could parse as JSON but not as money
+        ("500.00", "n/a"),
+    ],
+)
+def test_an_unreadable_amount_raises_rather_than_guessing(total_amt, balance):
+    """Every fallback available here is a claim about money QuickBooks did not make:
+    0 says "settled", None says "unknown" in a column that means "checked", and
+    keeping the previous value dates a stale balance as fresh. So the pass aborts and
+    the stored answer stays exactly as QuickBooks last left it."""
+    with pytest.raises(ValueError):
+        qb.derive_invoice_status(
+            found=True, total_amt=total_amt, balance=balance, jigged_total="500.00"
+        )
+
+
+# ───────────────────────── invoice payment mirror: reading QBO ─────────────────────────
+_ID_LITERAL = re.compile(r"'([^']*)'")
+
+_FAULT_BODY = {
+    "Fault": {
+        "Error": [{"Message": "Object Not Found", "code": "610"}],
+        "type": "ValidationFault",
+    },
+    "time": "2026-09-03T18:00:00.000-07:00",
+}
+
+
+def _invoice_row(invoice_id: str, total="100.00", balance="0.00") -> dict:
+    return {
+        "Id": invoice_id,
+        "TotalAmt": total,
+        "Balance": balance,
+        "DueDate": "2026-09-30",
+        "TxnDate": "2026-09-01",
+    }
+
+
+class _FakeQueries:
+    """Stands in for qb_query_strict. Answers from the set of invoice ids QuickBooks
+    "has", records every query text so chunking and escaping can be asserted, and can
+    fail a chosen call to simulate Intuit going down mid-pass.
+
+    `on_confirm` are ids the batch query misses but the single-id re-read finds —
+    the query-index lag that _confirm_invoice exists for."""
+
+    def __init__(self, present=(), *, on_confirm=(), extra_rows=(), fail_at=None):
+        self.present = set(present)
+        self.on_confirm = set(on_confirm)
+        self.extra_rows = list(extra_rows)
+        self.fail_at = fail_at
+        self.queries: list[str] = []
+
+    def __call__(self, db, company_id, query):
+        self.queries.append(query)
+        if self.fail_at is not None and len(self.queries) == self.fail_at:
+            raise qb.QuickBooksApiError("QuickBooks API error (500)", status=500)
+        held = self.present | (self.on_confirm if " Id = " in query else set())
+        rows = [_invoice_row(i) for i in _ID_LITERAL.findall(query) if i in held]
+        rows.extend(self.extra_rows)
+        return {"Invoice": rows} if rows else {}
+
+
+def test_qb_query_strict_raises_when_the_body_carries_no_query_response(monkeypatch):
+    """A 200 whose body is not the shape we expect — a proxy's error page, a
+    maintenance stub — must not read as "no invoices exist"."""
+    monkeypatch.setattr(qb, "qb_request", lambda *a, **k: {"time": "2026-09-03T18:00:00Z"})
+    with pytest.raises(qb.QuickBooksReadUnavailable):
+        qb.qb_query_strict(None, "c1", "select * from Invoice")
+
+
+def test_qb_query_strict_raises_on_a_fault_returned_with_http_200(monkeypatch):
+    """Intuit answers some query faults with a 200 carrying a Fault, so the HTTP
+    status alone does not say whether the answer is usable."""
+    monkeypatch.setattr(qb, "qb_request", lambda *a, **k: _FAULT_BODY)
+    with pytest.raises(qb.QuickBooksReadUnavailable):
+        qb.qb_query_strict(None, "c1", "select * from Invoice")
+
+
+def test_qb_query_strict_returns_a_readable_answer_including_an_empty_one(monkeypatch):
+    """An empty QueryResponse IS an answer — QuickBooks looked and found nothing — and
+    has to stay distinguishable from the unreadable bodies above."""
+    monkeypatch.setattr(
+        qb, "qb_request", lambda *a, **k: {"QueryResponse": {"Invoice": [_invoice_row("7")]}}
+    )
+    assert qb.qb_query_strict(None, "c1", "q")["Invoice"][0]["Id"] == "7"
+    monkeypatch.setattr(qb, "qb_request", lambda *a, **k: {"QueryResponse": {}})
+    assert qb.qb_query_strict(None, "c1", "q") == {}
+
+
+def test_qb_query_cannot_be_used_here_because_it_reads_a_fault_as_no_rows(monkeypatch):
+    """WHY qb_query_strict exists at all, asserted rather than left as a comment.
+
+    qb_query returns resp.get("QueryResponse", {}), so the fault body below arrives as
+    an empty result. For reference-data lookups that is harmless. Here it is exactly
+    the failure the house rule forbids: "we couldn't ask" becoming "the invoice was
+    deleted", stored as `missing` and read by a shop owner as a deleted invoice."""
+    monkeypatch.setattr(qb, "qb_request", lambda *a, **k: _FAULT_BODY)
+    assert qb.qb_query(None, "c1", "select * from Invoice") == {}
+    with pytest.raises(qb.QuickBooksReadUnavailable):
+        qb.qb_query_strict(None, "c1", "select * from Invoice")
+
+
+def test_many_invoices_are_asked_in_capped_chunks_that_cannot_be_silently_paged(monkeypatch):
+    """250 ids -> 100 + 100 + 50, every query carrying MAXRESULTS.
+
+    QBO pages a query at 100 rows BY DEFAULT and truncates with no marker and no
+    count, so without MAXRESULTS a full chunk could come back short — and every
+    dropped id would look like an absence, which is the only input that yields
+    `missing`."""
+    fake = _FakeQueries(present=(str(n) for n in range(250)))
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+
+    facts = qb.fetch_invoice_facts(None, "c1", [str(n) for n in range(250)])
+
+    assert len(facts) == 250
+    assert all(f is not None for f in facts.values())
+    # Three chunks and nothing else: every id came back, so no confirm re-read fired.
+    assert len(fake.queries) == 3
+    assert [len(_ID_LITERAL.findall(q)) for q in fake.queries] == [100, 100, 50]
+    for query in fake.queries:
+        assert f"MAXRESULTS {qb.INVOICE_QUERY_MAXRESULTS}" in query
+    # Ids go in as quoted literals — an unquoted id is a QBO syntax error.
+    assert "'0'" in fake.queries[0]
+
+
+def test_one_absence_is_confirmed_by_a_second_read_before_it_counts(monkeypatch):
+    """QBO's query index lags a freshly created invoice, so an id can be genuinely
+    absent from a batch query and present a second later on its own. One absence is
+    therefore not evidence, and the per-id re-read is what turns it into evidence."""
+    fake = _FakeQueries(present={"10"}, on_confirm={"11"})
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+
+    facts = qb.fetch_invoice_facts(None, "c1", ["10", "11"])
+
+    assert facts["10"] is not None
+    assert facts["11"] is not None  # found on the second look — NOT missing
+    assert len(fake.queries) == 2
+    assert "Id = '11'" in fake.queries[1]
+
+
+def test_only_a_second_absence_reports_an_invoice_as_gone(monkeypatch):
+    """The single input that can produce `missing`: absent from two consecutive
+    SUCCESSFUL queries. None here means confirmed absent, never "we didn't see it"."""
+    fake = _FakeQueries(present={"10"})
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+
+    facts = qb.fetch_invoice_facts(None, "c1", ["10", "11"])
+
+    assert facts["11"] is None
+    assert len(fake.queries) == 2
+
+
+def test_a_chunk_answering_with_more_rows_than_it_was_asked_for_raises(monkeypatch):
+    """More rows than ids means the `Id in (...)` filter did not apply, so the page is
+    one we cannot explain. Absence from a page like that says nothing about whether an
+    invoice exists, and deriving `missing` from it would be a guess."""
+    fake = _FakeQueries(present={"10", "11"}, extra_rows=[_invoice_row("999")])
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+    with pytest.raises(qb.QuickBooksReadUnavailable):
+        qb.fetch_invoice_facts(None, "c1", ["10", "11"])
+
+
+def test_a_failing_chunk_yields_nothing_at_all_rather_than_a_partial_map(monkeypatch):
+    """The first chunk succeeded and the second did not. Returning the first chunk's
+    answers would let the caller write fresh statuses for some invoices on a job and
+    leave the rest at a stale balance with an unchanged timestamp — one job showing
+    two answers of different ages that both look current."""
+    fake = _FakeQueries(present=(str(n) for n in range(150)), fail_at=2)
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+    with pytest.raises(qb.QuickBooksReadUnavailable):
+        qb.fetch_invoice_facts(None, "c1", [str(n) for n in range(150)])
+
+
+def test_the_fake_branch_reports_paid_without_touching_intuit(monkeypatch):
+    """QUICKBOOKS_FAKE lets the e2e suite drive the whole store-and-render path with no
+    network — the same escape hatch, and the same guard, as create_invoice."""
+    monkeypatch.setenv("QUICKBOOKS_FAKE", "1")
+
+    def _must_not_ask(*a, **k):
+        raise AssertionError("the fake branch reached QuickBooks")
+
+    monkeypatch.setattr(qb, "qb_query_strict", _must_not_ask)
+
+    fact = qb.fetch_invoice_facts(None, "c1", ["10"])["10"]
+    assert fact["balance"] == "0.00"
+    assert qb.derive_invoice_status(
+        found=True,
+        total_amt=fact["total_amt"],
+        balance=fact["balance"],
+        jigged_total="1.00",
+    ) == "paid"
+
+
+def test_the_fake_branch_is_ignored_in_production(monkeypatch):
+    """The guard that stops a stray environment variable marking a real shop's
+    invoices paid."""
+    monkeypatch.setenv("QUICKBOOKS_FAKE", "1")
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "production")
+    fake = _FakeQueries(present={"10"})
+    monkeypatch.setattr(qb, "qb_query_strict", fake)
+
+    qb.fetch_invoice_facts(None, "c1", ["10"])
+    assert len(fake.queries) == 1  # it really asked Intuit
+
+
+# ───────────────────────── invoice payment mirror: when to ask ─────────────────────────
+# links_need_check is what makes the menu-open automatic without polling anything: the
+# BACKEND decides whether Intuit is asked, and the browser only says "the user opened
+# the invoice list".
+
+_NOW = datetime(2026, 9, 3, 18, 0, tzinfo=timezone.utc)
+
+
+def _link(**over) -> dict:
+    base = {
+        "id": "link-1",
+        "realm_id": "realm-123",
+        "qb_invoice_id": "1001",
+        "qb_status_checked_at": (_NOW - timedelta(minutes=1)).isoformat(),
+        "qb_stale_at": None,
+    }
+    base.update(over)
+    return base
+
+
+def test_a_freshly_checked_set_of_links_is_not_re_asked():
+    """The baseline every trigger below is measured against: opening the menu twice in
+    a minute is one Intuit call, not two."""
+    assert qb.links_need_check([_link()], _conn(), _NOW) is False
+
+
+def test_an_invoice_that_has_never_been_checked_is_asked_about():
+    """The first menu-open after a push, and the state every existing row is in until
+    the launch backfill runs."""
+    assert qb.links_need_check([_link(qb_status_checked_at=None)], _conn(), _NOW) is True
+
+
+def test_a_webhook_marking_this_invoice_stale_forces_a_re_check():
+    """The fast path. The webhook wrote qb_stale_at and made no Intuit call itself, so
+    this comparison is the only thing that turns a notification into a read."""
+    link = _link(qb_stale_at=(_NOW - timedelta(seconds=30)).isoformat())
+    assert qb.links_need_check([link], _conn(), _NOW) is True
+    # A marker OLDER than our last check is already accounted for — that read happened
+    # after the change, so re-asking would be a wasted call.
+    seen = _link(qb_stale_at=(_NOW - timedelta(minutes=5)).isoformat())
+    assert qb.links_need_check([seen], _conn(), _NOW) is False
+
+
+def test_a_payment_webhook_marking_the_whole_realm_stale_forces_a_re_check():
+    """Payment and CreditMemo notifications name only their own id. Resolving one to
+    the invoices it settles would be an Intuit call inside the webhook handler, which
+    must stay a pure DB write — so the connection is marked and every link re-reads."""
+    conn = _conn(qb_invoices_stale_since=(_NOW - timedelta(seconds=30)).isoformat())
+    assert qb.links_need_check([_link()], conn, _NOW) is True
+
+
+def test_an_answer_older_than_the_age_bound_is_re_asked():
+    """The backstop for the webhook that never arrived — wrong host, Intuit retries
+    exhausted, subscription lapsed. Nothing polls; this fires only when someone opens
+    the menu, which is the difference between an age bound and a poller.
+
+    The minutes below are LITERAL, and the constant is pinned, on purpose. Deriving
+    them from INVOICE_STATUS_MAX_AGE_MINUTES made this test move its own goalpost:
+    raising the bound to a month left it green, which is exactly the change that would
+    silently stop the backstop firing."""
+    assert qb.INVOICE_STATUS_MAX_AGE_MINUTES == 10
+
+    stale = _link(qb_status_checked_at=(_NOW - timedelta(minutes=11)).isoformat())
+    assert qb.links_need_check([stale], _conn(), _NOW) is True
+    # Inside the bound, with no marker, is left alone — otherwise every menu-open
+    # would be an Intuit call and the bound would be doing nothing.
+    current = _link(qb_status_checked_at=(_NOW - timedelta(minutes=9)).isoformat())
+    assert qb.links_need_check([current], _conn(), _NOW) is False
+
+
+@pytest.mark.parametrize(
+    "link_over, conn_over",
+    [
+        ({"qb_status_checked_at": "not a timestamp"}, {}),
+        ({"qb_stale_at": "not a timestamp"}, {}),
+        ({}, {"qb_invoices_stale_since": "not a timestamp"}),
+    ],
+)
+def test_an_unreadable_timestamp_forces_a_re_check(link_over, conn_over):
+    """Asking again costs one Intuit call. Treating an unreadable timestamp as
+    "nothing to do" would show a stale balance as current, which is the single failure
+    this whole feature exists to prevent."""
+    assert qb.links_need_check([_link(**link_over)], _conn(**conn_over), _NOW) is True

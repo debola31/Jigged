@@ -12,7 +12,7 @@ import Typography from '@mui/material/Typography';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartUnitConversions } from '@/utils/partsAccess';
-import { defaultConsumeWholeUnits, unitShortLabel } from '@/lib/standardUnits';
+import { isCountUnit as unitCountsDiscreteThings, unitShortLabel } from '@/lib/standardUnits';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import { type ChargeBasis } from '@/types/bom';
 
@@ -23,8 +23,6 @@ export interface MaterialEditorValue {
   /** Per-part consumption of the material, in `unit`. Canonical stored value. */
   quantity: string;
   unit: string;
-  /** Ceiling consumption to whole units at the order qty (discrete stock). */
-  consume_whole_units: boolean;
   /**
    * What this material contributes to the parent's cost (#727). Carried, not
    * edited: the control is one per part on the Materials panel, not one per row,
@@ -81,7 +79,6 @@ const EMPTY_VALUE: MaterialEditorValue = {
   childPart: null,
   quantity: '',
   unit: '',
-  consume_whole_units: false,
   charge_basis: 'cost',
 };
 
@@ -91,10 +88,9 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * Three fields, nothing else: the material part, its unit, and one
  * quantity-per-part field. The quantity accepts a whole number, a decimal, or a
  * simple fraction ("1/20") — a value below 1 is a yield (many parts from one
- * unit), so there is no separate yield mode. Whether discrete stock is drawn in
- * whole units is derived automatically from the unit (count → whole). A made
- * child's costing batch (for setup amortization) is set on that child's own
- * page, not here.
+ * unit), so there is no separate yield mode, and the quantity means exactly what
+ * it says: nothing rounds it up behind your back. A made child's costing batch
+ * (for setup amortization) is set on that child's own page, not here.
  *
  * **Charge basis is deliberately NOT a field here.** It briefly was, and a
  * fourth control on every material row bought nothing: a shop that marks up
@@ -121,7 +117,7 @@ export default function MaterialRowEditor({
     setValue(initial ?? EMPTY_VALUE);
   }, [initial]);
 
-  const isCountUnit = defaultConsumeWholeUnits(value.unit);
+  const isCountUnit = unitCountsDiscreteThings(value.unit);
 
   // Load the child's secondary units on selection.
   useEffect(() => {
@@ -189,9 +185,6 @@ export default function MaterialRowEditor({
       ...value,
       // Canonicalize the quantity (a fraction like "1/20" → "0.05").
       quantity: String(perPartQty),
-      // Whole-unit consumption is derived from the unit, not a manual toggle:
-      // count/discrete stock rounds up, continuous material is fractional.
-      consume_whole_units: defaultConsumeWholeUnits(value.unit),
       charge_basis: value.charge_basis,
     });
   };

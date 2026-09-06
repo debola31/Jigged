@@ -11,9 +11,16 @@ Auth model (mirrors quote_email_routes):
     additionally require the 'admin' role.
   - The OAuth callback has NO bearer token (Intuit redirects the browser there), so
     its only trust signal is the signed `state` we minted in /authorize.
+  - The webhook has no bearer token either (Intuit posts to it server-to-server), so
+    its only trust signal is the HMAC in `intuit-signature`. It writes stale markers
+    and nothing else.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
 import sentry_sdk
@@ -36,6 +43,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/quickbooks", tags=["quickbooks"])
 
 STATE_TTL_SECONDS = 600
+
+# Intuit's own notification bodies are a few kilobytes. The cap is not about them:
+# the webhook is public, so an unauthenticated caller must not be able to make us
+# HMAC and json.loads an arbitrary amount of data. Checked before either happens.
+WEBHOOK_MAX_BYTES = 1024 * 1024
+
+# Entities whose change can move a balance we mirror. Everything else is discarded
+# SILENTLY — the Intuit portal lets a human tick extra entities onto the same
+# endpoint, and a shop doing that must not start seeing 400s or filing Sentry issues.
+WEBHOOK_ENTITIES = frozenset({"invoice", "payment", "creditmemo"})
 
 
 # ───────────────────────── helpers ─────────────────────────
@@ -62,6 +79,23 @@ def _state_secret() -> str:
     if not secret:
         raise HTTPException(status_code=503, detail="QUICKBOOKS_STATE_SECRET not configured")
     return secret
+
+
+def _webhook_verifier_token() -> str:
+    """The verifier token from the Intuit app's Webhooks page.
+
+    A THIRD secret, distinct from the OAuth client secret and from
+    QUICKBOOKS_STATE_SECRET: Intuit signs notifications with this one alone, and
+    rotating it in the portal is what invalidates in-flight deliveries. 503 rather
+    than a default, so an unconfigured environment rejects everything loudly instead
+    of accepting unsigned bodies.
+    """
+    token = os.getenv("QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN")
+    if not token:
+        raise HTTPException(
+            status_code=503, detail="QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN not configured"
+        )
+    return token
 
 
 def _mint_state(company_id: str, user_id: str) -> str:
@@ -170,6 +204,59 @@ async def callback(
             .execute()
         )
         connected_by = access.data[0]["id"] if access.data else None
+
+        # ── A reconnect NEVER changes which QuickBooks company this is ──
+        #
+        # The authorize screen grants access for whichever Intuit account is signed
+        # into that browser, and Intuit offers a brand new trial company to a signer
+        # who has none. So the realm coming back here is not necessarily the realm
+        # that went out: an admin reconnecting an expired connection while signed in
+        # as themselves can land on a different company file without being asked a
+        # single question. Seen live on 2026-09-05.
+        #
+        # persist_connection overwrites realm_id unconditionally and nothing checked
+        # it, so that used to succeed and the card just said "Connected".
+        #
+        # This refuses on the realm alone, with no "but it looks harmless" branch.
+        # An earlier cut allowed the switch when no invoice or customer row was
+        # bound to the old realm, on the theory that there was nothing to strand.
+        # That was wrong: FOUR realm-specific settings live on the connection row
+        # itself — default_item_id, default_income_account_id, po_custom_field_id
+        # and po_custom_field_name — and persist_connection does not clear any of
+        # them. A "harmless" swap therefore leaves the new company pointing at an
+        # item and income account belonging to the old one, and the next push files
+        # a WRONG invoice rather than merely failing to read one.
+        #
+        # Switching companies on purpose still works: Disconnect, then connect.
+        # That path DELETES the connection row, which is precisely what makes it
+        # safe — every stale realm-specific setting goes with it — and revoke_token
+        # never raises, so it cannot get stuck. One rule, one escape hatch, no state
+        # a shop owner cannot see deciding which they get.
+        existing = qb.get_connection(db, company_id)
+        if (
+            existing
+            and existing.get("realm_id")
+            and existing["realm_id"] != realmId
+            # Only meaningful within one Intuit environment: a sandbox row while
+            # running production is stale by definition, not a company to protect.
+            and existing.get("environment") == qb._environment()
+        ):
+            logger.warning(
+                "QuickBooks callback for company %s returned realm %s but the "
+                "connection is bound to %s. Refusing.",
+                company_id,
+                realmId,
+                existing["realm_id"],
+            )
+            # Do not leave a live grant we have decided not to store. Best effort:
+            # failing to revoke is untidy, not harmful, and must not turn a refusal
+            # the user can act on into a generic error they cannot.
+            try:
+                qb.revoke_token(bundle.refresh_token)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Could not revoke the unused QuickBooks grant: %s", exc)
+            return RedirectResponse(f"{settings_url}?qb=realm_mismatch", status_code=302)
+
         qb.persist_connection(db, company_id, realmId, bundle, connected_by=connected_by)
         # Best-effort: store the QBO company name for the UI label.
         try:
@@ -188,6 +275,244 @@ async def callback(
     return RedirectResponse(f"{settings_url}?qb=connected", status_code=302)
 
 
+# ───────────────────────── Change notifications (webhook) ─────────────────────────
+def _normalise_webhook_events(payload) -> list[dict]:
+    """Flatten either Intuit notification format into one shape:
+    {realm_id, entity, operation, entity_id, event_time}.
+
+    BOTH formats are accepted because the Intuit developer portal carries a per-app
+    toggle between them: flipping it is two clicks by a human, not a deploy, and the
+    old shape keeps arriving from apps configured before the switch.
+      * current  — a bare JSON array of CloudEvents, each with `intuitaccountid`
+                   (the realm), `intuitentityid`, and a dotted `type` such as
+                   "qbo.invoice.updated.v1";
+      * legacy   — {"eventNotifications": [{"realmId", "dataChangeEvent":
+                   {"entities": [{"name", "id", "operation", "lastUpdated"}]}}]}.
+
+    Raises on anything else. The caller reports that, deliberately: the signature has
+    already passed by then, so an unparseable body is one Intuit itself signed.
+    """
+    events: list[dict] = []
+
+    if isinstance(payload, list):
+        for ev in payload:
+            parts = str(ev["type"]).split(".")
+            if len(parts) < 3:
+                raise ValueError(f"Unrecognised CloudEvents type: {ev.get('type')!r}")
+            events.append(
+                {
+                    "realm_id": str(ev["intuitaccountid"]),
+                    "entity": parts[1].lower(),
+                    "operation": parts[2].lower(),
+                    "entity_id": str(ev["intuitentityid"]),
+                    "event_time": ev.get("time"),
+                }
+            )
+        return events
+
+    if isinstance(payload, dict) and "eventNotifications" in payload:
+        for note in payload.get("eventNotifications") or []:
+            realm_id = str(note["realmId"])
+            for ent in ((note.get("dataChangeEvent") or {}).get("entities")) or []:
+                events.append(
+                    {
+                        "realm_id": realm_id,
+                        "entity": str(ent["name"]).lower(),
+                        "operation": str(ent.get("operation") or "").lower(),
+                        "entity_id": str(ent["id"]),
+                        "event_time": ent.get("lastUpdated"),
+                    }
+                )
+        return events
+
+    raise ValueError("Unrecognised QuickBooks webhook payload shape")
+
+
+def _webhook_event_time(raw, received_at: datetime) -> datetime:
+    """Intuit's own timestamp for the change, or the moment we received it.
+
+    Falling back to `received_at` is the SAFE direction and that is why it is a
+    fallback at all: the value is only ever compared against qb_status_checked_at to
+    decide whether to re-ask QuickBooks, so a marker that is too NEW costs one extra
+    read, while one that is too old would leave a changed invoice looking current.
+    """
+    if not raw:
+        return received_at
+    try:
+        return qb._parse_dt(str(raw))
+    except (ValueError, TypeError):
+        logger.info("QuickBooks webhook: unparseable event time %r", raw)
+        return received_at
+
+
+def _apply_webhook_markers(
+    db: Client, by_realm: dict[str, list[dict]], received_at: datetime
+) -> int:
+    """Stamp the stale markers for one verified notification. DATABASE WRITES ONLY.
+
+    Returns the number of rows stamped, so a delivery that resolved to nothing is
+    distinguishable from one that never arrived at all.
+    """
+    conns = (
+        db.table("quickbooks_connections")
+        .select("company_id, realm_id")
+        .in_("realm_id", list(by_realm))
+        # A sandbox notification must never touch a production row. The realm id
+        # alone does not say which environment it came from, and both environments'
+        # connections live in the same table.
+        .eq("environment", qb._environment())
+        .execute()
+        .data
+        or []
+    )
+
+    # Several companies can legitimately share one realm — the UNIQUE on
+    # quickbooks_connections is company_id, not realm_id — so this is a list, and
+    # every match gets stamped rather than just the first.
+    companies_by_realm: dict[str, list[str]] = {}
+    for c in conns:
+        companies_by_realm.setdefault(c["realm_id"], []).append(c["company_id"])
+
+    received_iso = received_at.isoformat()
+    marked = 0
+
+    for realm_id, events in by_realm.items():
+        company_ids = companies_by_realm.get(realm_id)
+        if not company_ids:
+            # Ordinary, not an error: the shop disconnected, or the realm belongs to
+            # the other environment's app on the same Intuit account.
+            logger.info("QuickBooks webhook for unknown realm %s (ignored)", realm_id)
+            continue
+
+        # Invoice ids bucketed by the event's own instant, so one UPDATE covers every
+        # invoice that changed at the same time instead of one per id.
+        invoice_ids_by_time: dict[str, set[str]] = {}
+        connection_stale_at: datetime | None = None
+        for ev in events:
+            at = _webhook_event_time(ev["event_time"], received_at)
+            if ev["entity"] == "invoice":
+                invoice_ids_by_time.setdefault(at.isoformat(), set()).add(ev["entity_id"])
+            elif connection_stale_at is None or at > connection_stale_at:
+                # Payment and CreditMemo name only their OWN id. Resolving one to the
+                # invoices it settles is an Intuit query, which this handler must not
+                # make, so the whole realm is marked instead.
+                connection_stale_at = at
+
+        for company_id in company_ids:
+            conn_update = {"webhook_last_received_at": received_iso}
+            if connection_stale_at is not None:
+                # Last write wins, with no monotonic guard: two payment events
+                # arriving out of order could move this marker backwards, and that
+                # self-heals — links_need_check re-asks anything older than
+                # INVOICE_STATUS_MAX_AGE_MINUTES regardless of any marker.
+                conn_update["qb_invoices_stale_since"] = connection_stale_at.isoformat()
+                marked += 1
+            db.table("quickbooks_connections").update(conn_update).eq(
+                "company_id", company_id
+            ).execute()
+
+            for at_iso, ids in invoice_ids_by_time.items():
+                updated = (
+                    db.table("quickbooks_invoice_links")
+                    .update({"qb_stale_at": at_iso})
+                    .eq("company_id", company_id)
+                    .eq("realm_id", realm_id)
+                    .eq("provider", "qbo")
+                    # ANY status on purpose. A link still 'pending' or
+                    # 'needs_verification' can already hold the id of an invoice that
+                    # exists in QuickBooks, and marking it now means the first refresh
+                    # after it flips to 'created' sees a real answer.
+                    .in_("qb_invoice_id", sorted(ids))
+                    .execute()
+                    .data
+                    or []
+                )
+                marked += len(updated)
+
+    return marked
+
+
+@router.post("/webhook")
+async def webhook(request: Request):
+    """Intuit change notification. Signature-verified, then PURE DATABASE WRITES.
+
+    ZERO INTUIT READS HAPPEN HERE, and that is the design rather than an omission. A
+    notification says only THAT something changed; the balance itself is fetched
+    later, when someone opens a job's Invoices menu, by
+    POST /{company_id}/jobs/{job_id}/invoice-status. Reading Intuit from this handler
+    would put a third-party round trip — plus a possible token refresh — inside a
+    request Intuit retries on timeout, to produce a number nobody may ever look at.
+
+    So all this does is stamp staleness: qb_stale_at on the invoice rows an Invoice
+    event names, and qb_invoices_stale_since on the connection for Payment and
+    CreditMemo events, whose payloads name only the payment or memo id.
+
+    THE PRODUCTION ENDPOINT MUST BE REGISTERED ON
+    https://www.jigged.app/api/quickbooks/webhook — never the apex. Vercel answers
+    https://jigged.app/… with a 307 from its edge router, BEFORE this function is
+    invoked, so a misregistration fails with nothing for Sentry to see. That is
+    as-built history, not caution: the Stripe endpoint was registered on the apex and
+    every live event failed for five days (docs/modules/billing.md § "The production
+    webhook URL must be www.jigged.app"). A GET here answers 405 automatically —
+    route reachable, method not allowed — which is what an uptime probe asserts, and
+    it never reaches the signature path so the probe files no events.
+    """
+    raw = await request.body()
+    if len(raw) > WEBHOOK_MAX_BYTES:
+        logger.warning("QuickBooks webhook rejected: %d byte body", len(raw))
+        raise HTTPException(status_code=413, detail="Payload too large")
+
+    expected = base64.b64encode(
+        hmac.new(_webhook_verifier_token().encode("utf-8"), raw, hashlib.sha256).digest()
+    ).decode("ascii")
+    if not hmac.compare_digest(expected, request.headers.get("intuit-signature", "")):
+        # Deliberately NOT captured to Sentry, for the same reason as the Stripe
+        # webhook (stripe_routes.py): this route is public and unauthenticated, so
+        # anyone who finds the URL can drive this branch at will, and reporting it
+        # hands a stranger our issue quota. A genuine mismatch — a verifier token
+        # rotated in the portal — shows in Intuit's own delivery log, which is the
+        # authority on it anyway.
+        logger.warning("QuickBooks webhook rejected: invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        events = _normalise_webhook_events(json.loads(raw))
+    except Exception as exc:  # noqa: BLE001
+        # REPORTABLE, unlike the branch above: the signature has already passed, so
+        # Intuit signed this body. It is a shape change on their side or a bug on
+        # ours, and both are ours to know about.
+        sentry_sdk.capture_exception(exc)
+        logger.warning("QuickBooks webhook: unparseable signed payload", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid payload") from exc
+
+    received_at = datetime.now(timezone.utc)
+    by_realm: dict[str, list[dict]] = {}
+    for ev in events:
+        if ev["entity"] in WEBHOOK_ENTITIES:
+            by_realm.setdefault(ev["realm_id"], []).append(ev)
+
+    if not by_realm:
+        return {"received": True, "realms": 0, "marked": 0}
+
+    try:
+        marked = _apply_webhook_markers(_service_client(), by_realm, received_at)
+    except Exception as exc:  # noqa: BLE001
+        # 500 so Intuit retries the delivery. Sentry gets ONE event, not two: the
+        # Starlette integration captures any 5xx by itself, so a capture_exception
+        # here as well would file the same failure twice under different
+        # fingerprints (the trap in telemetry.md). The context is what makes the
+        # integration's event actionable, and carries counts only — never a realm's
+        # documents.
+        sentry_sdk.set_context(
+            "quickbooks_webhook",
+            {"realms": len(by_realm), "events": sum(len(v) for v in by_realm.values())},
+        )
+        logger.warning("QuickBooks webhook handler error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Webhook handler error") from exc
+
+    return {"received": True, "realms": len(by_realm), "marked": marked}
+
+
 class StatusResponse(BaseModel):
     connected: bool
     reconnect_required: bool = False
@@ -195,6 +520,11 @@ class StatusResponse(BaseModel):
     environment: str | None = None
     qb_company_name: str | None = None
     connected_at: str | None = None
+    # Evidence that Intuit's change notifications are actually arriving. A webhook
+    # registered on the apex instead of www is rejected at Vercel's edge with nothing
+    # for Sentry to see (see the webhook route), so a value that stays null is the
+    # only signal the settings card can offer that live updates are not reaching us.
+    webhook_last_received_at: str | None = None
 
 
 @router.get("/{company_id}/status", response_model=StatusResponse)
@@ -210,6 +540,7 @@ async def status(company_id: str, request: Request):
         environment=conn.get("environment"),
         qb_company_name=conn.get("qb_company_name"),
         connected_at=conn.get("created_at"),
+        webhook_last_received_at=conn.get("webhook_last_received_at"),
     )
 
 
@@ -351,6 +682,195 @@ async def refresh_po_field(company_id: str, request: Request):
         field_name=found["name"],
         candidates=found["candidates"],
         slots_used=len(found["candidates"]),
+    )
+
+
+# ───────────────────────── Invoice payment mirror (read-back) ─────────────────────────
+class InvoiceStatusRow(BaseModel):
+    """What QuickBooks Online last said about ONE invoice, exactly as stored.
+
+    Every field but link_id is nullable because "never checked" is a real state the
+    UI renders as such, not a gap to paper over: only a successful Intuit read can
+    produce these values, and no backfill could invent them.
+
+    `overdue` is absent on purpose. It depends on today's date, so it is derived at
+    render from qb_due_date rather than stored and left to rot.
+    """
+
+    link_id: str
+    qb_invoice_id: str | None = None
+    qb_status: str | None = None
+    qb_total_amt: float | None = None
+    qb_balance: float | None = None
+    qb_due_date: str | None = None
+    qb_txn_date: str | None = None
+    voided_at: str | None = None
+
+
+class InvoiceStatusResponse(BaseModel):
+    # checked=False means nothing was stale, so Intuit was NOT asked. It is not an
+    # error and not an empty answer: `invoices` still carries the stored rows.
+    checked: bool
+    checked_at: str | None = None
+    invoices: list[InvoiceStatusRow] = []
+    # Invoices this job holds in a QuickBooks company the shop is no longer connected
+    # to. Their ids address nothing in the current realm, so they are never queried;
+    # the count exists so the UI can explain why those rows have no status rather
+    # than showing them as unchecked forever.
+    skipped_other_realm: int = 0
+
+
+# The response columns come from the service's own list rather than a second copy of
+# it: refresh_invoice_statuses re-selects with qb._MIRROR_COLUMNS after the write, so
+# hardcoding them here would let the checked=False path drift from the checked=True
+# one. The three added columns are what only the ROUTE needs — realm_id to partition
+# by connected company, and the two timestamps links_need_check reads.
+_MIRROR_SELECT = qb._MIRROR_COLUMNS + ", realm_id, qb_status_checked_at, qb_stale_at"
+
+
+def _mirror_row(row: dict) -> InvoiceStatusRow:
+    return InvoiceStatusRow(
+        link_id=row["id"],
+        qb_invoice_id=row.get("qb_invoice_id"),
+        qb_status=row.get("qb_status"),
+        qb_total_amt=row.get("qb_total_amt"),
+        qb_balance=row.get("qb_balance"),
+        qb_due_date=row.get("qb_due_date"),
+        qb_txn_date=row.get("qb_txn_date"),
+        voided_at=row.get("voided_at"),
+    )
+
+
+@router.post(
+    "/{company_id}/jobs/{job_id}/invoice-status", response_model=InvoiceStatusResponse
+)
+async def invoice_status(company_id: str, job_id: str, request: Request):
+    """What QuickBooks Online last said about this job's invoices.
+
+    CALLED WHEN THE INVOICES MENU IS OPENED, and there is deliberately no button
+    beside it. This is the bounded-reconcile-on-an-explicit-action shape
+    /api/stripe/reconcile uses, not a fetch-on-mount: opening the menu is a click,
+    and the BACKEND — never the browser — decides whether Intuit is actually asked.
+    qb.links_need_check answers that from three conditions: a webhook marked
+    something stale, a row has never been checked, or the newest check is older than
+    qb.INVOICE_STATUS_MAX_AGE_MINUTES. A second open inside that window costs one
+    Supabase read and no Intuit call at all.
+
+    A balance the shop has to ask for is a balance they will not trust, which is why
+    it is automatic; the freshness rule above is what keeps automatic affordable.
+
+    MEMBER access, not admin. Reading what QuickBooks said about an invoice is a read
+    on a user surface, and the same members can already create the invoice.
+    """
+    await _verify_company_access(request, company_id)
+    db = _service_client()
+
+    provider = accounting.get_provider(db, company_id)
+    if provider is not None and provider.name != "qbo":
+        # QuickBooks Desktop keeps the balance on a PC behind the Web Connector, so
+        # reading it here would be a multi-second round trip to a machine that may be
+        # switched off — on a menu open. That is exactly the failure mode the terms
+        # endpoint's Desktop cache exists to avoid, and until this mirror has an
+        # equivalent cached path, Desktop gets an honest refusal instead.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Payment status needs QuickBooks Online; this company uses "
+                "QuickBooks Desktop."
+            ),
+        )
+
+    conn = qb.get_connection(db, company_id)
+    if not _is_connected(conn):
+        raise HTTPException(status_code=400, detail="QuickBooks Online is not connected.")
+    if conn.get("reconnect_required"):
+        raise HTTPException(
+            status_code=400,
+            detail="Reconnect QuickBooks first — we can't check payments until then.",
+        )
+
+    await _load_gated_job(db, company_id, job_id)  # 404 + company scoping
+
+    links = (
+        db.table("quickbooks_invoice_links")
+        .select(_MIRROR_SELECT)
+        .eq("company_id", company_id)
+        .eq("job_id", job_id)
+        .eq("provider", "qbo")
+        .eq("status", "created")
+        .not_.is_("qb_invoice_id", "null")
+        .execute()
+        .data
+        or []
+    )
+
+    # Rows the mirror itself voided are KEPT in the batch, not filtered out. If the
+    # invoice reappears in QuickBooks (a delete undone, a void reversed),
+    # apply_qbo_invoice_mirror clears the mirror-owned voided_at and the quantity
+    # re-locks — which it can only do for a row we actually sent.
+    realm_id = conn["realm_id"]
+    in_realm = [r for r in links if r["realm_id"] == realm_id]
+    skipped_other_realm = len(links) - len(in_realm)
+
+    if not in_realm:
+        return InvoiceStatusResponse(checked=False, skipped_other_realm=skipped_other_realm)
+
+    # ONE clock read, taken BEFORE the fetch, serving both the staleness test and the
+    # monotonic guard in apply_qbo_invoice_mirror. Stamping it after Intuit answers
+    # would let a slow pass finish last carrying a later timestamp than a pass that
+    # started after it — and overwrite a newer balance with an older one.
+    checked_at = datetime.now(timezone.utc)
+
+    if not qb.links_need_check(in_realm, conn, checked_at):
+        return InvoiceStatusResponse(
+            checked=False,
+            invoices=[_mirror_row(r) for r in in_realm],
+            skipped_other_realm=skipped_other_realm,
+        )
+
+    # A failed read must NOT be written down — the same rule as refresh_po_field
+    # above, and it bites harder here. Persisting "we couldn't ask" as a status would
+    # tell a shop owner an invoice is unpaid when it may have been settled that
+    # morning. refresh_invoice_statuses writes only on a definitive answer, so every
+    # branch below leaves the stored mirror exactly as it was.
+    try:
+        stored = qb.refresh_invoice_statuses(
+            db, company_id, conn, in_realm, checked_at=checked_at
+        )
+    except qb.QuickBooksNotConnected as exc:
+        # The refresh token died between the check above and the call. Same wording
+        # as the pre-flight branch: the shop's action is identical either way.
+        raise HTTPException(
+            status_code=400,
+            detail="Reconnect QuickBooks first — we can't check payments until then.",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        # 409, NOT a 5xx, and the difference is the whole point. The Starlette
+        # integration captures 5xx only, and this branch fires on a MENU OPEN — a
+        # lapsed connection or an Intuit outage would file an issue every time
+        # anyone glanced at a job, for a condition only the shop can fix. That is how
+        # an alert gets trained away. Same reasoning as the QuickBooks Desktop 409s
+        # in _map_qb_error, which is deliberately not reused here: its 502 semantics
+        # belong to the push path, where a failure IS news.
+        logger.warning(
+            "Could not read QuickBooks invoice status for job %s", job_id, exc_info=True
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "qbo_unreachable",
+                "message": (
+                    "Couldn't reach QuickBooks to check payments. Showing what it "
+                    "last said."
+                ),
+            },
+        ) from exc
+
+    return InvoiceStatusResponse(
+        checked=True,
+        checked_at=checked_at.isoformat(),
+        invoices=[_mirror_row(r) for r in stored],
+        skipped_other_realm=skipped_other_realm,
     )
 
 

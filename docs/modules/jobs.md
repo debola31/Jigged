@@ -171,8 +171,10 @@ reading a live `work_centers` row), `status`, `completed_at` / `completed_by`, `
 
 **Materials are not costed per line anywhere.** `job_materials` freezes quantities only. Per-unit material
 cost is `job_parts.true_cost_per_unit` minus the labour summed from the rates above — costing one BOM line
-would mean re-deriving the unit conversion, whole-unit ceiling and made-vs-bought valuation rules that live
-inside `part_rollup_at_qty`, which is a second copy of a money rule.
+would mean re-deriving the unit conversion and made-vs-bought valuation rules that live inside
+`part_rollup_at_qty`, which is a second copy of a money rule. (That list named a whole-unit ceiling too
+until 2026-09-06, when `consume_whole_units` was removed. The argument now rests on two rules rather than
+three; it was re-examined at the time and still holds.)
 
 `(job_part_id, sequence)` is unique — each part has its own independent sequence.
 
@@ -337,6 +339,13 @@ Add/remove happens on the Edit screen; the detail card is `readOnly embedded` �
 defaults each line to shipped-but-unbilled and caps at ordered-but-unbilled — billing ahead of
 shipping is allowed (a packing slip isn't a delivery) and only softly flagged. Full spec:
 [Invoicing](invoicing.md).
+
+**Each QuickBooks Online invoice in the Invoices menu carries a payment chip** — paid, partly paid,
+open, overdue, voided or deleted in QuickBooks, with the balance. It refreshes when the menu opens,
+and only when something says it is out of date; there is no button, because the person opening the
+menu cannot know whether the number is current. Desktop rows carry no chip. Rules, and what happens
+to invoiced quantity when QuickBooks voids an invoice:
+[Payment status](invoicing.md#payment-status-quickbooks-online-mirror).
 
 **Cancel dialog:** "Every part on the job will be marked cancelled. You can reopen the job later."
 No reason field. *(This doc previously specified a required Cancellation Reason input and the copy

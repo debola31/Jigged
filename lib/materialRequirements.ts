@@ -15,20 +15,18 @@ import type {
 /**
  * What a whole job draws of one BOM line.
  *
- * `consume_whole_units` marks discrete stock — a strip or a blank you can't cut a fraction
- * of — so the draw rounds up. Without it the shop floor is told it needs "0.05 strips".
+ * The draw is exact. It used to round up when the BOM line was flagged as discrete stock, so
+ * the floor was told "1 strip" for a job that consumed 0.6 of one — and the same flag was
+ * ceilinging the COST, where it silently charged a whole $70 bar for the fifth of it a part
+ * actually used. The flag is gone; the quantity says what it says. A job needing 0.6 of a bar
+ * now reads as 0.6, and whoever fetches it still carries one bar to the machine.
  *
  * This is the ONE home for this rule. It previously existed twice, in JobPartMaterialsCard and
  * jobTravelerPdf, which is how a screen and its own printout come to disagree.
  */
-export function requiredQuantity(
-  orderQuantity: number,
-  bomQuantity: number,
-  consumeWholeUnits: boolean,
-): number {
+export function requiredQuantity(orderQuantity: number, bomQuantity: number): number {
   if (!orderQuantity || orderQuantity <= 0) return 0;
-  const raw = orderQuantity * bomQuantity;
-  return consumeWholeUnits ? Math.ceil(raw) : raw;
+  return orderQuantity * bomQuantity;
 }
 
 /**
@@ -78,7 +76,6 @@ export function buildRequirement(args: {
   bomLineId: string;
   bomQuantity: number;
   bomUnit: string;
-  consumeWholeUnits: boolean;
   orderQuantity: number;
   stock: MaterialStockFacts;
   customFactor: number | null;
@@ -88,11 +85,11 @@ export function buildRequirement(args: {
   heatNumbers?: string[];
 }): MaterialRequirement {
   const {
-    bomLineId, bomQuantity, bomUnit, consumeWholeUnits, orderQuantity,
+    bomLineId, bomQuantity, bomUnit, orderQuantity,
     stock, customFactor, issued, hasDiscrepancy, heatNumbers = [],
   } = args;
 
-  const requiredInBomUnit = requiredQuantity(orderQuantity, bomQuantity, consumeWholeUnits);
+  const requiredInBomUnit = requiredQuantity(orderQuantity, bomQuantity);
   const basis = resolveUnitBasis(bomUnit, stock.primaryUnit, customFactor);
   const requiredInStockUnit = inStockUnit(basis, requiredInBomUnit);
 
@@ -112,7 +109,6 @@ export function buildRequirement(args: {
     partId: stock.partId,
     partName: stock.partName,
     bomUnit: (bomUnit || '').trim() || (stock.primaryUnit ?? ''),
-    consumeWholeUnits,
     requiredInBomUnit,
     requiredInStockUnit,
     stockUnit: stock.primaryUnit,

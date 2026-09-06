@@ -36,7 +36,6 @@ interface BomRow {
   child_part_id: string;
   quantity: number;
   unit: string;
-  consume_whole_units: boolean;
 }
 
 interface JobPartRow {
@@ -54,7 +53,7 @@ async function loadBomLines(madePartIds: string[]): Promise<BomRow[]> {
     chunk(madePartIds, CHUNK_PARENTS).map(async (ids) => {
       const { data, error } = await supabase
         .from('parts_bom')
-        .select('id, parent_part_id, child_part_id, quantity, unit, consume_whole_units')
+        .select('id, parent_part_id, child_part_id, quantity, unit')
         .in('parent_part_id', ids)
         .order('sequence', { ascending: true });
       if (error) {
@@ -244,7 +243,6 @@ async function buildRequirementsFor(
           bomLineId: line.id,
           bomQuantity: Number(line.quantity) || 0,
           bomUnit: line.unit,
-          consumeWholeUnits: Boolean(line.consume_whole_units),
           orderQuantity: jobPart.orderQuantity,
           stock,
           customFactor: conversions.get(`${line.child_part_id}:${line.unit}`) ?? null,

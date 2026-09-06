@@ -23,7 +23,6 @@ const row = (over: Partial<MaterialRequirement> & { partId: string }): MaterialR
   bomLineId: `bom-${over.partId}`,
   partName: over.partId.toUpperCase(),
   bomUnit: 'each',
-  consumeWholeUnits: false,
   requiredInBomUnit: 8,
   requiredInStockUnit: 8,
   stockUnit: 'each',

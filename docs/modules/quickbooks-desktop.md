@@ -121,6 +121,16 @@ surface may claim to show "the invoice total"**.
 - **A customer name over 41 characters is refused, not truncated.** Two customers can share their
   first 41 characters, and a collision would invoice the wrong company. Terms *are* truncated — a
   term is a label, a customer is an identity.
+- **Payment status is Online-only, and a Desktop row shows none.** The
+  [QBO mirror](invoicing.md#payment-status-quickbooks-online-mirror) rests on two things Desktop does
+  not have: an Intuit webhook to say an invoice changed, and a read that answers while somebody is
+  waiting. Here a read is a **Web Connector round trip to the shop's PC** — it runs when that
+  machine next polls, so a computer that is off, asleep or has QuickBooks closed answers nothing,
+  and the same silence would have to render as both "not checked yet" and "we asked and it is
+  open". Showing no chip is honest; a chip whose freshness depends on whether a PC in another
+  building is awake is not. The reachability signal the Desktop path *does* have is the explicit
+  Test connection button, which is a different question — is the file reachable at all — and it is
+  already there.
 
 ---
 

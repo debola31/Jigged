@@ -176,8 +176,6 @@ interface BomOverrides {
    */
   childCost?: number | null;
   childPrimaryUnit?: string;
-  /** Whole-unit (ceiling) consumption for this line. Default false (fractional). */
-  consumeWholeUnits?: boolean;
   /** Child part source; batch pinning only applies to 'made' children. */
   childSource?: 'made' | 'bought';
   /** Child's costing_batch_quantity; when set (+made), the line pins to it. */
@@ -219,7 +217,6 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
     quantity: overrides.quantity ?? 1,
     unit: overrides.unit ?? 'ea',
     sequence: 10,
-    consume_whole_units: overrides.consumeWholeUnits ?? false,
     charge_basis: overrides.chargeBasis ?? 'cost',
     notes: null,
     created_at: '2024-01-01T00:00:00Z',
@@ -531,10 +528,13 @@ describe('calculateRoutingCost', () => {
 
       const result = await calculateRoutingCost('part-1');
 
-      // The function rounds material cost to 2 decimal places — 0.6375 → 0.64.
-      // The exact intermediate (0.6375) is what feeds into total rollups, so
-      // we check the rounded item cost AND the total separately.
-      expect(result!.material_items[0].cost).toBe(0.64);
+      // Per-line cost is kept at FULL precision (0.75 × 0.85 = 0.6375) and only
+      // the total rounds, matching the SQL engine, which accumulates in numeric
+      // and rounds once. This comment used to claim the exact intermediate fed
+      // the total while the code actually rounded every line to cents first —
+      // which is how a cheap material at a fractional quantity displayed $0.00
+      // on the Cost card while the real rollup charged for it.
+      expect(result!.material_items[0].cost).toBe(0.6375);
       expect(result!.total_material_cost).toBe(0.64);
       expect(result!.material_items[0].unit).toBe('in');
     });
@@ -818,14 +818,19 @@ describe('calculateTierPricing', () => {
 });
 
 // ============================================================================
-// Material yield / fractional consumption + whole-unit ceiling + batch pinning
+// Material yield / fractional consumption + batch pinning
 //
 // Scenario anchor (Johnny's threading inserts): an intermediate "M48 Ground"
 // strip costs $109 at a batch of 25; wire-EDM cuts 20 blanks per strip, so the
-// insert consumes 0.05 strips/part (yield 20). See the plan's acceptance
-// criteria (a)–(h).
+// insert consumes 0.05 strips/part (yield 20).
+//
+// There used to be a whole-unit ceiling here, derived from the BOM line's unit
+// and invisible in the UI. It made the per-part cost a step function of order
+// quantity, and at a batch of 1 — which is where every price is anchored — it
+// flattened EVERY fractional quantity to one whole unit. Consumption is now
+// exact, so cost is linear in quantity and the tests below say so.
 // ============================================================================
-describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
+describe('calculateRoutingCost — yield / batch pinning', () => {
   beforeEach(() => {
     mockGetRoutingForPart.mockReset();
     mockGetRoutingForPart.mockResolvedValue(null); // BOM-only; isolate material math
@@ -849,18 +854,16 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
       quantity: 0.05,
       unit: 'ea',
       childPrimaryUnit: 'ea',
-      consumeWholeUnits: true,
       ...over,
     });
 
-  it('(a) qty 20, whole-unit, pinned → $5.45/part, 1 strip; values the strip at batch 25', async () => {
+  it('(a) qty 20, pinned → $5.45/part; values the strip at batch 25', async () => {
     mockGetBomForPart.mockResolvedValue([strip()]);
 
     const bd = await calculateRoutingCost('part-1', 20);
 
     expect(bd).not.toBeNull();
-    expect(bd!.material_items[0].units_consumed).toBe(1); // ceil(20 × 0.05) = 1
-    expect(bd!.material_items[0].cost).toBeCloseTo(5.45, 2); // 1 × 109 / 20
+    expect(bd!.material_items[0].cost).toBeCloseTo(5.45, 2); // 0.05 × 109
     expect(bd!.total_material_cost).toBeCloseTo(5.45, 2);
     // Pinning must value the strip at its batch qty (25), NOT the consumed 1 —
     // this is the load-bearing decoupling. Cascaded valuation would explode the
@@ -869,23 +872,37 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
     expect(mockGetComputedPartCost).not.toHaveBeenCalledWith('child-strip', 1);
   });
 
-  it('(b) qty 21, whole-unit → 2 strips, $10.38/part (step function)', async () => {
+  // REGRESSION. This asserted $10.38 at qty 21 — a step, because ceil(21 × 0.05)
+  // charged 2 whole strips for 1.05 strips' worth of material. Material cost per
+  // part must not depend on where the order quantity falls between whole units.
+  it('(b) per-part cost does not step with the order quantity', async () => {
     mockGetBomForPart.mockResolvedValue([strip()]);
 
-    const bd = await calculateRoutingCost('part-1', 21);
-
-    expect(bd!.material_items[0].units_consumed).toBe(2); // ceil(21 × 0.05) = ceil(1.05)
-    expect(bd!.material_items[0].cost).toBeCloseTo(10.38, 2); // 2 × 109 / 21 = 10.3809…
-    expect(bd!.total_material_cost).toBeCloseTo(10.38, 2);
+    for (const qty of [1, 20, 21, 39, 40]) {
+      mockGetComputedPartCost.mockClear();
+      const bd = await calculateRoutingCost('part-1', qty);
+      expect(bd!.material_items[0].cost).toBeCloseTo(5.45, 2); // 0.05 × 109, always
+    }
   });
 
-  it('(c) qty 21, fractional (not whole) → 1.05 strips, stays $5.45/part', async () => {
-    mockGetBomForPart.mockResolvedValue([strip({ consumeWholeUnits: false })]);
-
-    const bd = await calculateRoutingCost('part-1', 21);
-
-    expect(bd!.material_items[0].units_consumed).toBeCloseTo(1.05, 6);
-    expect(bd!.material_items[0].cost).toBeCloseTo(5.45, 2); // 1.05 × 109 / 21
+  // The bug as reported: at a batch of 1, every fractional quantity used to cost
+  // one whole unit, so typing 0.2 / 0.25 / 0.5 changed nothing on screen.
+  it('(c) at a batch of 1, a fractional quantity moves the cost', async () => {
+    const seen: number[] = [];
+    for (const q of [0.2, 0.25, 0.5]) {
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({
+          childId: 'child-bar', childName: 'C FLAT', childSource: 'bought',
+          quantity: q, unit: 'ea', childPrimaryUnit: 'ea', childCost: 70,
+        }),
+      ]);
+      const bd = await calculateRoutingCost('part-1', 1);
+      seen.push(bd!.material_items[0].cost);
+    }
+    expect(seen[0]).toBeCloseTo(14, 2);
+    expect(seen[1]).toBeCloseTo(17.5, 2);
+    expect(seen[2]).toBeCloseTo(35, 2);
+    expect(new Set(seen).size).toBe(3); // three quantities, three costs
   });
 
   it('(d) per-inch 7 in/part, fractional, unpinned → no regression (7 × unit cost)', async () => {
@@ -899,7 +916,6 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
         unit: 'in',
         childPrimaryUnit: 'in',
         childCost: 3,
-        consumeWholeUnits: false,
       }),
     ]);
 
@@ -907,7 +923,6 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
 
     // Legacy formula: qty_in_primary (7) × child cost (3) = 21, independent of N.
     expect(bd!.material_items[0].cost).toBeCloseTo(21, 2);
-    expect(bd!.material_items[0].units_consumed).toBeCloseTo(140, 6); // 20 × 7
     // Cascade valuation uses the consumed qty (20 × 7 = 140), not a batch.
     expect(mockGetComputedPartCost).toHaveBeenCalledWith('child-bar', 140);
   });
@@ -924,7 +939,6 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
         quantity: 1,
         unit: 'ea',
         childPrimaryUnit: 'ea',
-        consumeWholeUnits: false,
         childBatchQty: null,
         childCostByQty: costByQty,
       }),
@@ -948,16 +962,16 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
 
     const bd = await calculateRoutingCost('part-1', 20);
 
-    // u = 2000/10 + 4 = 204 at batch 10; consumed = ceil(20×0.05)=1; cost = 204/20.
+    // u = 2000/10 + 4 = 204 at batch 10; cost = 0.05 × 204 = 10.2.
     expect(mockGetComputedPartCost).toHaveBeenCalledWith('child-strip', 10);
     expect(bd!.material_items[0].cost).toBeCloseTo(10.2, 2);
   });
 
-  it('diamond BOM: a shared whole-unit child over-consumes per path (documented limit)', async () => {
-    // Same child under two lines, 0.5 each, whole-unit. Per-path ceil(1×0.5)=1
-    // → 2 units total at N=1 (vs 1 if merged). This is the linearity-breaking
-    // limitation the plan documents; assert the number is the understood 2×u,
-    // not silently wrong.
+  it('diamond BOM: a shared child summed over two paths is linear, not doubled', async () => {
+    // Same child under two lines, 0.5 each. This used to be the documented
+    // over-consumption limit: per-path ceil(1 × 0.5) = 1 gave 2 whole units at
+    // N=1, twice the merged-DAG ideal. Without the ceiling the two paths simply
+    // add to the 1 unit actually consumed.
     mockGetBomForPart.mockResolvedValue([
       makeBomLine({
         id: 'bom-a',
@@ -968,7 +982,6 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
         unit: 'ea',
         childPrimaryUnit: 'ea',
         childCost: 40,
-        consumeWholeUnits: true,
       }),
       makeBomLine({
         id: 'bom-b',
@@ -979,25 +992,21 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
         unit: 'ea',
         childPrimaryUnit: 'ea',
         childCost: 40,
-        consumeWholeUnits: true,
       }),
     ]);
 
     const bd = await calculateRoutingCost('part-1', 1);
 
-    // Each path: ceil(1 × 0.5) = 1 unit × $40 / 1 = $40. Total = $80 (2× the
-    // merged-DAG ideal of $40 — the documented over-consumption).
+    // Each path: 0.5 × $40 = $20. Total = $40 — the merged-DAG ideal.
     expect(bd!.material_items).toHaveLength(2);
-    expect(bd!.total_material_cost).toBeCloseTo(80, 2);
+    expect(bd!.total_material_cost).toBeCloseTo(40, 2);
   });
 
-  it('exposes qty_in_primary, consume_whole_units and units_consumed on each MaterialItem', async () => {
+  it('exposes qty_in_primary on each MaterialItem', async () => {
     mockGetBomForPart.mockResolvedValue([strip()]);
     const bd = await calculateRoutingCost('part-1', 20);
     const item = bd!.material_items[0];
     expect(item.qty_in_primary).toBeCloseTo(0.05, 6);
-    expect(item.consume_whole_units).toBe(true);
-    expect(item.units_consumed).toBe(1);
   });
 });
 
@@ -1139,13 +1148,13 @@ describe('calculateRoutingCost — charge basis', () => {
     expect(result!.material_items).toHaveLength(0);
   });
 
-  it('applies the whole-unit ceiling to the charged rate and the true rate alike', async () => {
-    // 0.4 strips/part x 3 parts = 1.2 -> 2 whole strips. Both rates ceiling the
-    // same way; only the per-unit number differs.
+  it('applies the same per-unit expression to the charged rate and the true rate', async () => {
+    // 0.4 strips/part. The charged rate and the true rate must go through the
+    // identical expression; only the rate they multiply differs. (This asserted
+    // a shared whole-unit ceiling before that ceiling was removed.)
     mockGetBomForPart.mockResolvedValue([
       makeBomLine({
         quantity: 0.4,
-        consumeWholeUnits: true,
         childCost: 100,
         chargeBasis: 'price',
         childPrice: { unit_price: 125, markup_percent: 25 },
@@ -1155,9 +1164,8 @@ describe('calculateRoutingCost — charge basis', () => {
     const result = await calculateRoutingCost('part-1', 3);
 
     const mat = result!.material_items[0];
-    expect(mat.units_consumed).toBe(2);
-    expect(mat.cost).toBeCloseTo((2 * 125) / 3, 2);
-    expect(mat.true_cost).toBeCloseTo((2 * 100) / 3, 2);
+    expect(mat.cost).toBeCloseTo(0.4 * 125, 2);
+    expect(mat.true_cost).toBeCloseTo(0.4 * 100, 2);
   });
 
   it('resolves a made child price at its costing lot size, not the consumed qty', async () => {

@@ -1,0 +1,185 @@
+# Are the inbound webhook endpoints actually reachable in production?
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# WHY THIS EXISTS, AND WHY IT IS AN ACTIONS WORKFLOW RATHER THAN A SENTRY MONITOR
+# ═══════════════════════════════════════════════════════════════════════════════
+# A webhook registered on the wrong host fails SILENTLY and totally. Vercel serves
+# www.jigged.app as primary and answers https://jigged.app/... with a 307 from its
+# edge router BEFORE the function is invoked, so nothing reaches our code, nothing
+# reaches Sentry, and the vendor simply records a failed delivery in a dashboard
+# nobody is looking at. Stripe's endpoint was registered on the apex on 2026-07-26
+# and every live event failed for five days — see
+# docs/modules/billing.md § "The production webhook URL must be www.jigged.app".
+#
+# Sentry can watch this and there is a detector for each endpoint, but Sentry bills
+# uptime monitors PER ACTIVE MONITOR and this org has one seat, already spent on
+# Stripe's. The QuickBooks detector therefore exists and is disabled
+# (docs/telemetry.md § Trap 3). UptimeRobot's free tier cannot treat a 405 as
+# healthy at all, which is the whole assertion here.
+#
+# So the check lives in the repo instead, and that turns out to be the better
+# place rather than merely the free one:
+#
+#   * it is version-controlled and reviewable, where docs/telemetry.md's recurring
+#     complaint is that every other piece of alerting config is server-side and
+#     invisible;
+#   * it EMAILS SOMEBODY. Both Sentry detectors carry workflowIds=[], so downtime
+#     there is detected and then dropped (docs/telemetry.md § Trap 2). A failing
+#     Actions workflow notifies, which is the same reason deploy-production.yml
+#     was preferred over reading Supabase's check run directly;
+#   * the status code IS the diagnosis, and a workflow can print it in words.
+#
+# THIS IS CI, NOT AN APPLICATION SCHEDULER. The repo deliberately has no runtime
+# scheduler and this does not add one: it runs on GitHub's infrastructure, calls
+# two public URLs with GET, creates no work, and touches neither the database nor
+# Intuit. The "a poll may DISCOVER work, it may never CREATE it" rule in CLAUDE.md
+# is satisfied trivially — this poll cannot create anything at all.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE TRAP TO KNOW BEFORE TRUSTING THIS
+# ═══════════════════════════════════════════════════════════════════════════════
+# GitHub DISABLES SCHEDULED WORKFLOWS after 60 days with no repository activity in
+# a public repo, and tells you by email once. A disabled monitor looks exactly like
+# a passing one, which is the same failure shape as the two Sentry traps above and
+# the reason the daily cron is not the only trigger: the post-deploy run fires on
+# the event that actually breaks this, cannot be disabled by inactivity, and a repo
+# quiet for 60 days is also a repo that has not deployed.
+#
+# Scheduled runs are also delayed or dropped under load, and never fire on the
+# minute. Both are fine here — a misregistration is permanent until a human fixes
+# it, not a transient blip, so WHEN it is noticed matters far less than THAT it is.
+
+name: Webhook Reachability
+
+on:
+  # 06:17 UTC: deliberately not on the hour. GitHub's own guidance is that the
+  # start of every hour is its peak load window, when queued scheduled jobs are
+  # most likely to be delayed or dropped outright.
+  schedule:
+    - cron: '17 6 * * *'
+  # The run that matters most. A 404 here means the backend did not ship, which is
+  # a deploy-time fact, so checking after a deploy catches it in minutes instead of
+  # up to a day. `workflow_run` fires when Deploy Production FINISHES, but that
+  # workflow only triggers Vercel and deliberately does not wait for the build (see
+  # its own header), so the check below waits for the new build to go live.
+  workflow_run:
+    workflows: ['Deploy Production']
+    types: [completed]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: webhook-reachability
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Inbound webhooks answer 405
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Probe every inbound webhook endpoint
+        env:
+          # name|url. Every inbound webhook belongs here — an endpoint nobody
+          # probes is one that can be silently misregistered, and there is no
+          # cheaper moment to add a row than when the endpoint is created.
+          ENDPOINTS: |
+            Stripe|https://www.jigged.app/api/stripe/webhook
+            QuickBooks|https://www.jigged.app/api/quickbooks/webhook
+          # GET is deliberate on all of them: it never reaches the signature
+          # verification path, so the probe itself files no Sentry events and
+          # cannot be mistaken for an attacker driving the reject branch. A
+          # reachable route answers "method not allowed".
+          EXPECTED: '405'
+          DEPLOY_RUN: ${{ github.event_name == 'workflow_run' && 'yes' || 'no' }}
+        run: |
+          set -uo pipefail
+
+          # After a deploy, Vercel is still building when this starts, so the old
+          # build (or a 404) is the honest answer for a few minutes. Poll rather
+          # than sleep-then-check, so a fast deploy is not punished by a fixed wait.
+          # Otherwise a couple of quick retries absorb a transient network blip
+          # without turning one dropped packet into a red build.
+          if [ "$DEPLOY_RUN" = "yes" ]; then
+            ATTEMPTS=24; GAP=30      # up to 12 minutes
+          else
+            ATTEMPTS=3;  GAP=20
+          fi
+
+          # Everything the status code tells you. This legend is the actual product
+          # of this workflow: the code alone is not obviously a diagnosis, and the
+          # person reading a red build at 06:17 is not the person who registered
+          # the endpoint eight months earlier.
+          explain() {
+            case "$1" in
+              307|308) echo "registered on the APEX (jigged.app). Vercel's edge router redirects before the function runs, and neither Stripe nor Intuit follows redirects. Re-register it on www.jigged.app." ;;
+              404)     echo "route not found — the backend did not deploy, or the path changed. Check the latest Deploy Production run." ;;
+              401|403) echo "Vercel Deployment Protection is answering instead of the app. Production should not be protected; check Settings → Deployment Protection." ;;
+              302)     echo "redirected to a login page — Deployment Protection, or the domain points somewhere unexpected." ;;
+              200)     echo "the route answered OK to a GET, which it should never do. The webhook handler is POST-only, so something else is serving this path." ;;
+              000)     echo "no response at all — DNS, TLS, or the host is down." ;;
+              *)       echo "unexpected status." ;;
+            esac
+          }
+
+          FAILED=""
+          while IFS= read -r ROW; do
+            [ -z "${ROW// }" ] && continue
+            NAME="${ROW%%|*}"
+            URL="${ROW#*|}"
+
+            N=0
+            while :; do
+              N=$((N + 1))
+              # --max-time, and NO -L: following a redirect is precisely the
+              # behaviour under test, and a probe that follows it would report the
+              # apex misregistration as healthy.
+              #
+              # `|| CODE=000` rather than `$(curl ... || echo 000)`: on a DNS or
+              # TLS failure curl BOTH prints 000 and exits non-zero, so the inline
+              # form concatenates them into "000000", which matches no case in
+              # explain() and reports "unexpected status" for the one failure the
+              # legend describes best. Overwriting the variable replaces it.
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL") || CODE=000
+              [ -z "$CODE" ] && CODE=000
+              [ "$CODE" = "$EXPECTED" ] && break
+              [ "$N" -ge "$ATTEMPTS" ] && break
+              echo "  $NAME: got $CODE, retrying in ${GAP}s (${N}/${ATTEMPTS})"
+              sleep "$GAP"
+            done
+
+            if [ "$CODE" = "$EXPECTED" ]; then
+              echo "✅ $NAME → $CODE"
+            else
+              REASON="$(explain "$CODE")"
+              echo "::error::$NAME webhook returned $CODE (expected $EXPECTED) — $REASON"
+              FAILED="${FAILED}| \`$NAME\` | \`$CODE\` | $REASON |"$'\n'
+            fi
+          done <<< "$ENDPOINTS"
+
+          if [ -n "$FAILED" ]; then
+            {
+              echo "## Inbound webhook unreachable"
+              echo
+              echo "A vendor sending to this endpoint is being answered by something"
+              echo "other than our handler. Deliveries are failing, and **nothing"
+              echo "reaches Sentry** — the request never gets as far as our code."
+              echo
+              echo "| Endpoint | Got | What it means |"
+              echo "|---|---|---|"
+              printf '%s' "$FAILED"
+              echo
+              echo "Expected \`$EXPECTED\` — route reachable, method not allowed."
+              echo
+              echo "Re-register in the vendor's dashboard: Stripe → Developers →"
+              echo "Webhooks; Intuit → the app's Webhooks tab (Production)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo "## Inbound webhooks reachable"
+            echo
+            echo "Every endpoint answered \`$EXPECTED\` — reachable, and on \`www\`."
+          } >> "$GITHUB_STEP_SUMMARY"

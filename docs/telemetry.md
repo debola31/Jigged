@@ -180,6 +180,7 @@ fails, and so does a listed property nothing passes.
 | `accounting connection tested` | An explicit "Test connection" returns. `ok` false is the ordinary "QuickBooks isn't open right now" case, not an error — it is the denominator for how often a shop PC is actually reachable | `provider`, `ok`, `ms_elapsed` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
 | `accounting disconnected` | An admin disconnects the accounting system | `provider` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
 | `invoice pushed` | An invoice is created in QuickBooks from the job push dialog. `has_deep_link` is false for QuickBooks Desktop, which has no web page to link to | `provider`, `line_count`, `already_existed`, `has_deep_link` | [PushToQuickBooksDialog.tsx](../components/jobs/PushToQuickBooksDialog.tsx) |
+| `invoice status checked` | The job's Invoices menu opens and Jigged reconciles payment status with QuickBooks Online. There is no button — opening the menu is the whole trigger, and the backend decides whether Intuit is actually asked. **`checked` false is the interesting half**: it means nothing was stale, so QuickBooks was never called, which makes this event the denominator for how well the webhook path is doing its job — a rate stuck near 100% true says the webhook is not arriving and every menu open is paying for a round trip. **`ok` false is an Intuit outage or a connection that has lapsed, not a Jigged error**; the menu still shows the last answer QuickBooks gave, with its date. Counts only, never amounts — what an invoice is worth is the shop's business data | `ok`, `checked`, `invoice_count`, `paid_count`, `overdue_count`, `voided_count` | [InvoicesMenu.tsx](../components/jobs/InvoicesMenu.tsx) |
 
 <!-- registry:end -->
 
@@ -394,14 +395,14 @@ The section above is mechanics. This is the state, and it is recorded here becau
 lives in the repo — **all alerting config is server-side only**, which is exactly why the two
 holes below went unnoticed for months. Re-measure with `sentry api` before trusting it.
 
-| | `javascript-nextjs` | `python-fastapi` |
-|---|---|---|
-| Workflow id | 3138841 | 3174587 |
-| Environment | `vercel-production` | `production` |
-| Detector | 6744903 (Issue Stream) | 6806071 (Issue Stream) |
-| Triggers (`any-short`) | `new_high_priority_issue`, `existing_high_priority_issue` | same |
-| Action | `email` → `issue_owners` | same |
-| Frequency | 30 min | 30 min |
+| | `javascript-nextjs` | `python-fastapi` | Uptime |
+|---|---|---|---|
+| Workflow id | 3138841 | 3174587 | 3943738 |
+| Environment | `vercel-production` | `production` | **none, on purpose** (see Trap 2) |
+| Detector | 6744903 (Issue Stream) | 6806071 (Issue Stream) | 6785095 (Stripe webhook) |
+| Triggers (`any-short`) | `new_high_priority_issue`, `existing_high_priority_issue` | same | same |
+| Action | `email` → `issue_owners` | same | same |
+| Frequency | 30 min | 30 min | 30 min |
 
 Ownership on both projects is `{"raw": null, "fallthrough": true}` — **no CODEOWNERS**, so
 `issue_owners` always falls through to ActiveMembers, which is the org's single member. In
@@ -421,19 +422,72 @@ Sentry also does not deliver to an **unverified** primary address, and the org-s
 denied on `/users/{id}/emails/` — so verification can only be confirmed in
 Settings → Account → Emails. A green workflow is not evidence anyone was told.
 
-**Trap 2 — a detector with no workflow notifies nobody.** The uptime monitor is live and
-unrouted:
+**Trap 2 — a detector with no workflow notifies nobody.** Both uptime monitors were live and
+unrouted from creation until 2026-09-04:
 
 ```bash
 sentry api '/api/0/organizations/jigged/detectors/' \
   | jq -r '.[] | "\(.name) → workflowIds=\(.workflowIds)"'
-# Stripe webhook reachable (405 = healthy) → workflowIds=[]
+# Stripe webhook reachable (405 = healthy) → workflowIds=["3943738"]   # fixed
+# QuickBooks webhook reachable (405 = healthy) → workflowIds=[]        # detector is disabled anyway
 ```
 
 An empty `workflowIds`, with no workflow listing it in `detectorIds`, means downtime is detected
-and then dropped. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
-behind the event. **Any new detector is silent until a workflow claims it** — the uptime UI does
-not warn about this.
+and then dropped. **Any new detector is silent until a workflow claims it** — the uptime UI does
+not warn about this. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
+behind the event, which is why the CI probe below exists alongside it rather than instead of it.
+
+Stripe's is now claimed by workflow **3943738 — "Uptime — inbound webhook unreachable"**, and two
+things about how it was made are the reusable part:
+
+- **A new workflow, not a detector added to an existing one.** Updating a workflow requires a full
+  `PUT` body (see above), so a mistake while editing 3138841 or 3174587 would take live *error*
+  alerting down with it. A separate workflow cannot.
+- **`environment` is deliberately `null`.** The two issue workflows are scoped to
+  `vercel-production` and `production` respectively, while an uptime detector stamps the
+  environment from its own config — so attaching one to a workflow whose scope does not match
+  produces a rule that reads correctly and never fires, which is the failure this whole section
+  keeps describing. Scope an uptime workflow to the DETECTOR and leave the environment open.
+
+**There are two inbound webhooks to watch, and both need the same monitor.** Stripe's is the one
+above; Intuit's is `GET https://www.jigged.app/api/quickbooks/webhook`, expecting **405** — route
+reachable, method not allowed. The code is the whole diagnosis: `405` healthy · `307` the endpoint
+got registered on the **apex**, where Vercel's edge router redirects before the function runs (the
+2026-07-26 Stripe outage, [billing.md](modules/billing.md#the-production-webhook-url-must-be-wwwjiggedapp-verified-2026-08-03), and Intuit no
+more follows redirects than Stripe does) · `404` backend not deployed · `401` Vercel deployment
+protection. `GET` is deliberate on both: it never reaches the signature path, so the probe files no
+Sentry events. **Nothing in this repo creates either detector** — they are server-side config like
+everything else in this section, and Trap 2 applies to them equally.
+
+**Trap 3 — an uptime monitor costs a billed seat, and the org has one.** The Intuit detector was
+created on 2026-09-04 (id `10239927`, `javascript-nextjs`, same interval, thresholds and `405`
+assertion as Stripe's) and **is `disabled`**, because activating it is refused:
+
+```
+PUT /api/0/projects/jigged/javascript-nextjs/uptime/10239927/
+{"status": ["You don't have enough pay-as-you-go available to create a new seat"]}
+```
+
+Sentry bills uptime monitors per active monitor; a `disabled` one is free and does not run. The
+included seat is spent on Stripe's, so the second needs pay-as-you-go budget raised in
+Settings → Subscription before `status` can be set to `active`. **A disabled monitor is not a
+degraded monitor — it is no monitor**, and it looks calm in the UI either way, which is the same
+shape as Traps 1 and 2: the thing reports healthy precisely because it is not doing anything.
+
+Two more limits worth knowing before reaching for the CLI here: `PATCH
+/organizations/jigged/detectors/{id}/` answers `403` to the org token (use the project-scoped
+`/projects/jigged/<project>/uptime/{id}/` instead), that `PUT` rejects `mode` as superuser-only, and
+omitting `status` from its body makes it try to activate — which is what surfaces the seat error.
+
+**What actually watches the webhooks is CI, not Sentry.**
+[`webhook-reachability.yml`](../.github/workflows/webhook-reachability.yml) probes every inbound
+endpoint after each production deploy and once a day, asserts `405`, and prints what any other code
+means. It is free (Actions minutes are unmetered on a public repo), it is in the repo rather than in
+server-side config nobody can review, and — unlike both detectors above — **a failure emails
+somebody**. Its own trap is written in its header: GitHub disables a scheduled workflow after 60 days
+of repository inactivity, which is why the post-deploy trigger exists rather than the cron alone.
+Adding an inbound webhook means adding a row to its `ENDPOINTS` list. Vercel's Deployment Protection
+Exceptions, the other route to a probeable preview domain, is **$150/month** and was declined.
 
 **What is deliberately not alerted.** Only *high* priority fires, and Sentry derives priority from
 level: `error`/`fatal` → high, `warning` → medium, `info`/`debug` → low. So the repo's deliberate

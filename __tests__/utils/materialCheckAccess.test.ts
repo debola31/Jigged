@@ -50,9 +50,9 @@ beforeEach(() => {
   fromSpy.mockImplementation((table: string) => makeBuilder(table));
 
   tableData.parts_bom = [
-    { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'each', consume_whole_units: false },
-    { id: 'b2', parent_part_id: 'made1', child_part_id: 'oring', quantity: 4, unit: 'each', consume_whole_units: false },
-    { id: 'b3', parent_part_id: 'made1', child_part_id: 'bolt', quantity: 6, unit: 'each', consume_whole_units: false },
+    { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'each' },
+    { id: 'b2', parent_part_id: 'made1', child_part_id: 'oring', quantity: 4, unit: 'each' },
+    { id: 'b3', parent_part_id: 'made1', child_part_id: 'bolt', quantity: 6, unit: 'each' },
   ];
   tableData.parts = [
     { id: 'steel', part_name: 'Steel', primary_unit: 'each', quantity: 15, is_stocked: true, deleted_at: null },
@@ -82,7 +82,7 @@ describe('getJobPartMaterialCheck — request budget', () => {
 
   it('reads conversions only for lines whose BOM unit differs from the stock unit', async () => {
     tableData.parts_bom = [
-      { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'feet', consume_whole_units: false },
+      { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'feet' },
     ];
     await getJobPartMaterialCheck({
       companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,

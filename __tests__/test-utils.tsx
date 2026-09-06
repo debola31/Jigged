@@ -73,6 +73,19 @@ export const routerMocks = {
   prefetch: mockPrefetch,
 };
 
+/**
+ * Set what `useSearchParams()` returns for the current test file.
+ *
+ * Needed by any component that reads a redirect result off the URL — the
+ * QuickBooks card renders a different message per `?qb=` value, and without this
+ * those branches are unreachable from a test. Additive on purpose: the stub is
+ * still lazily created empty, so every test that does not call this behaves
+ * exactly as before. Call `setSearchParams()` with no argument to clear.
+ */
+export const setSearchParams = (init?: string | Record<string, string>) => {
+  searchParamsStub = new URLSearchParams(init);
+};
+
 // Helper to reset router mocks between tests
 export const resetRouterMocks = () => {
   mockPush.mockClear();

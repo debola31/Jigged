@@ -239,7 +239,7 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
       bom: [
         {
           id: 'b1', parent_part_id: 'p', child_part_id: 'c', quantity: 2, unit: 'each',
-          sequence: 0, consume_whole_units: false, created_at: '', updated_at: '',
+          sequence: 0, created_at: '', updated_at: '',
           child_part: {
             id: 'c', part_name: 'BUY-ORING-214', description: 'O-ring',
             primary_unit: 'each', is_stocked: true, source: 'bought', costing_batch_quantity: 1,

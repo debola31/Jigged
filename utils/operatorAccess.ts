@@ -19,14 +19,13 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage, toFriendlyError } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
   OperatorPlantJob,
   OperatorJobDetail,
   Station,
-  JobCompleteResponse,
   JobTraveler,
   JobPartsOverview,
   JobTravelerOperation,
@@ -602,6 +601,8 @@ interface CurrentOpForDetail {
   work_center_id: string | null;
   work_center_name: string | null;
   work_center_kind: 'internal' | 'external' | null;
+  vendor_service_id: string | null;
+  vendor_id: string | null;
   vendor_name: string | null;
   sent_at: string | null;
 }
@@ -705,6 +706,8 @@ async function assembleJobPartDetail(
     operation_work_center_id: currentOp?.work_center_id ?? null,
     operation_work_center_name: currentOp?.work_center_name ?? null,
     operation_work_center_kind: currentOp?.work_center_kind ?? null,
+    operation_vendor_service_id: currentOp?.vendor_service_id ?? null,
+    operation_vendor_id: currentOp?.vendor_id ?? null,
     operation_vendor_name: currentOp?.vendor_name ?? null,
     operation_sent_at: currentOp?.sent_at ?? null,
     estimated_minutes: estimatedMinutes,
@@ -727,7 +730,7 @@ export async function getOperatorOperationDetail(
 
   const { data: op, error } = await supabase
     .from('job_operations')
-    .select('id, job_part_id, operation_name, status, instructions, sent_at, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, vendor_service_id, work_center:work_centers(name), vendor_service:vendor_services(name, vendor:vendors(name))')
+    .select('id, job_part_id, operation_name, status, instructions, sent_at, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, vendor_service_id, work_center:work_centers(name), vendor_service:vendor_services(name, vendor:vendors(id, name))')
     .eq('id', jobOperationId)
     .single();
 
@@ -737,7 +740,8 @@ export async function getOperatorOperationDetail(
   if (!header) return null; // not this company's job
 
   type WcJoin = { name: string };
-  type VsJoin = { name: string; vendor: { name: string } | { name: string }[] | null };
+  type VendorJoin = { id: string; name: string };
+  type VsJoin = { name: string; vendor: VendorJoin | VendorJoin[] | null };
   const wcJoin = (Array.isArray(op.work_center) ? op.work_center[0] : op.work_center) as WcJoin | null;
   const vsJoin = (Array.isArray(op.vendor_service) ? op.vendor_service[0] : op.vendor_service) as VsJoin | null;
   const vendorJoin = vsJoin
@@ -757,6 +761,8 @@ export async function getOperatorOperationDetail(
     // Kept as the 'external' | 'internal' string the operator pages already
     // branch on, but derived from the column rather than a joinable kind.
     work_center_kind: op.vendor_service_id ? 'external' : 'internal',
+    vendor_service_id: op.vendor_service_id ?? null,
+    vendor_id: vendorJoin?.id ?? null,
     vendor_name: vendorJoin?.name ?? null,
     sent_at: op.sent_at,
   };
@@ -828,186 +834,11 @@ async function loadOpOutsideContext(jobOperationId: string): Promise<OpOutsideCo
   };
 }
 
-/**
- * Throw when a write failed, instead of continuing as though it hadn't.
- *
- * postgrest-js RESOLVES with `{ error }` rather than rejecting, so `await supabase.from(…)
- * .update(…)` with nothing destructured discards every failure. Several operator actions did
- * exactly that and then returned `{ success: true }` — the shop floor was told the work was
- * recorded while the row sat untouched. A lapsed subscription is one way to hit it (RLS blocks
- * the write), but so is any constraint or policy failure.
- *
- * Matching zero rows is NOT a failure here: several of these updates carry a deliberate `.not(…)`
- * guard that legitimately matches nothing. Only a real `error` throws.
- */
-function assertWrote(error: unknown, entity: string, fallback: string): void {
-  if (error) throw toFriendlyError(error, { entity, fallback });
-}
 
-/**
- * Move a job_part to 'in_progress' because work on it has begun. The guard skips
- * parts already in_progress/completed/cancelled, leaving their started_at
- * untouched. Shared by complete, receive, and send (all are "work has begun").
- */
-async function movePartToInProgress(jobPartId: string, now: string): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('job_parts')
-    .update({
-      production_status: 'in_progress',
-      started_at: now,
-      status_changed_at: now,
-      updated_at: now,
-    })
-    .eq('id', jobPartId)
-    .not('production_status', 'in', '("in_progress","completed","cancelled")');
-  assertWrote(error, 'part', 'Failed to update the part status.');
-}
 
-/**
- * Per-part rollup after an op becomes 'completed': mark the part completed if
- * all its ops are now completed, else move a not-yet-started part to
- * in_progress. Returns whether the part is now fully completed. A 'sent'
- * (at-vendor) op counts as NOT completed, so a part with outstanding outside
- * work correctly stays in_progress.
- */
-async function rollupPartAfterCompletion(jobPartId: string, now: string): Promise<boolean> {
-  const supabase = getSupabase();
-  const { data: remaining } = await supabase
-    .from('job_operations')
-    .select('id')
-    .eq('job_part_id', jobPartId)
-    .neq('status', 'completed');
 
-  const partCompleted = !remaining || remaining.length === 0;
 
-  if (partCompleted) {
-    const { error } = await supabase
-      .from('job_parts')
-      .update({
-        production_status: 'completed',
-        completed_at: now,
-        status_changed_at: now,
-        updated_at: now,
-      })
-      .eq('id', jobPartId)
-      .not('production_status', 'in', '("cancelled")');
-    assertWrote(error, 'part', 'Failed to update the part status.');
-  } else {
-    await movePartToInProgress(jobPartId, now);
-  }
-  return partCompleted;
-}
 
-/** Read back the (trigger-cascaded) job production_status as a completed flag. */
-async function readJobCompleted(jobId: string): Promise<boolean> {
-  const supabase = getSupabase();
-  const { data: jobRow } = await supabase
-    .from('jobs')
-    .select('production_status')
-    .eq('id', jobId)
-    .single();
-  return jobRow?.production_status === 'completed';
-}
-
-/**
- * Mark an outside (external-vendor) operation as SENT OUT: the parts have left
- * the shop for the vendor. Moves pending → sent, records who/when (sent_by =
- * signed-in auth user), and moves the part to in_progress (work has begun). Only
- * valid for an external op awaiting send (pending). `sent` is an optional
- * waypoint — see markOperationReceived, which also accepts a still-pending op.
- *
- * The send is NOT logged as a job_note. `sent_at`/`sent_by` on the operation are
- * the record; the /activity feed derives a "Sent to {vendor}" operation activity
- * from `sent_at` (see dashboardAccess.fetchOperationActivity). Auto-notes would
- * only clutter the operator notes feed.
- */
-export async function markOperationSent(jobOperationId: string): Promise<void> {
-  const supabase = getSupabase();
-  const op = await loadOpOutsideContext(jobOperationId);
-  if (!op.is_external) {
-    throw new Error('Only outside (vendor) operations can be sent out.');
-  }
-  if (op.status !== 'pending') {
-    throw new Error('This operation is not awaiting send.');
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-  const now = new Date().toISOString();
-
-  const { error: sendError } = await supabase
-    .from('job_operations')
-    .update({ status: 'sent', sent_at: now, sent_by: user?.id ?? null })
-    .eq('id', jobOperationId);
-  assertWrote(sendError, 'operation', 'Failed to mark the operation sent out.');
-
-  await movePartToInProgress(op.job_part_id, now);
-}
-
-/**
- * Mark an outside (external-vendor) operation as RECEIVED: the parts are back
- * from the vendor and this step is done. Completes the op (received == completed,
- * reusing completed_at/completed_by) and runs the standard part/job rollup.
- *
- * `sent` is an OPTIONAL waypoint: this also accepts a still-`pending` op (the
- * common after-the-fact case where nobody tapped Mark Sent Out while the parts
- * were away). Received-from-pending back-fills sent_at = completed_at. Not logged
- * as a job_note — `sent_at`/`completed_at` on the op are the record, and the
- * /activity feed derives "Sent to {vendor}" + "Received from {vendor}" operation
- * activities from them. Throws for a non-external op or one already completed.
- */
-export async function markOperationReceived(
-  jobOperationId: string,
-): Promise<JobCompleteResponse> {
-  const supabase = getSupabase();
-  const op = await loadOpOutsideContext(jobOperationId);
-  if (!op.is_external) {
-    throw new Error('Only outside (vendor) operations can be received.');
-  }
-  if (op.status !== 'sent' && op.status !== 'pending') {
-    throw new Error('This operation cannot be received.');
-  }
-  const receivedFromPending = op.status === 'pending';
-
-  const { data: { user } } = await supabase.auth.getUser();
-  const now = new Date().toISOString();
-
-  const update: {
-    status: 'completed';
-    completed_at: string;
-    completed_by: string | null;
-    sent_at?: string;
-    sent_by?: string | null;
-  } = { status: 'completed', completed_at: now, completed_by: user?.id ?? null };
-  if (receivedFromPending) {
-    // Send was skipped — record it alongside receipt so the queue/audit reflect
-    // that the parts did go out.
-    update.sent_at = now;
-    update.sent_by = user?.id ?? null;
-  }
-
-  // Checked, not fire-and-forget. postgrest-js RESOLVES with `{ error }` rather than rejecting,
-  // so an un-destructured `await` swallows every failure silently — this reported
-  // `{ success: true }` and told the operator the vendor work was back while the row was
-  // untouched. A lapsed subscription is one way to hit it; so is any RLS or constraint failure.
-  const { error: updateError } = await supabase
-    .from('job_operations')
-    .update(update)
-    .eq('id', jobOperationId);
-  if (updateError) {
-    throw toFriendlyError(updateError, {
-      entity: 'operation',
-      fallback: 'Failed to mark the operation received.',
-    });
-  }
-
-  const partCompleted = await rollupPartAfterCompletion(op.job_part_id, now);
-
-  return {
-    success: true,
-    job_completed: partCompleted ? await readJobCompleted(op.job_id) : false,
-  };
-}
 
 /**
  * Undo an operation's completion (or, for an outside op, its send) and recompute
@@ -1033,55 +864,20 @@ export async function revertOperationCompletion(
 ): Promise<void> {
   const op = await loadOpOutsideContext(jobOperationId);
 
-  // Outside (external-vendor) ops carry status via direct writes with no
-  // completion events, so step the lifecycle back one state and roll the part up
-  // manually — voidAllOperationCompletions would be a no-op for them.
+  // OUTSIDE OPS NO LONGER COME THROUGH HERE. Their status is derived from
+  // outside_shipments and outside_shipment_receipts, and the database refuses a
+  // hand-written one -- so stepping the lifecycle back by writing columns, which
+  // is what this used to do, would now raise 42501 with a message about a
+  // trigger. Undo for an outside op means voiding its newest MOVEMENT, which is
+  // undoLastOutsideMovement in utils/outsideShipmentsAccess.
+  //
+  // Refusing rather than delegating keeps one caller per path: every call site
+  // has been switched, and a new one arriving here is a bug worth a sentence
+  // rather than a silent redirect.
   if (op.is_external) {
-    const supabase = getSupabase();
-    const now = new Date().toISOString();
-
-    let stepBackError: unknown = null;
-    if (op.status === 'completed' && op.sent_at) {
-      // Received → back to sent (parts are still out); keep sent_at/by.
-      ({ error: stepBackError } = await supabase
-        .from('job_operations')
-        .update({ status: 'sent', completed_at: null, completed_by: null })
-        .eq('id', jobOperationId));
-    } else if (op.status === 'sent') {
-      // Un-send → back to pending; clear the send stamp.
-      ({ error: stepBackError } = await supabase
-        .from('job_operations')
-        .update({ status: 'pending', sent_at: null, sent_by: null })
-        .eq('id', jobOperationId));
-    } else {
-      // Legacy external completed op that never went through send → pending.
-      ({ error: stepBackError } = await supabase
-        .from('job_operations')
-        .update({ status: 'pending', completed_at: null, completed_by: null, sent_at: null, sent_by: null })
-        .eq('id', jobOperationId));
-    }
-    assertWrote(stepBackError, 'operation', 'Failed to undo the operation.');
-
-    const { data: stillCompleted } = await supabase
-      .from('job_operations')
-      .select('id')
-      .eq('job_part_id', op.job_part_id)
-      .eq('status', 'completed');
-
-    const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
-
-    const { error: rollbackError } = await supabase
-      .from('job_parts')
-      .update({
-        production_status: hasCompleted ? 'in_progress' : 'not_started',
-        completed_at: null,
-        status_changed_at: now,
-        updated_at: now,
-      })
-      .eq('id', op.job_part_id)
-      .not('production_status', 'in', '("cancelled")');
-    assertWrote(rollbackError, 'part', 'Failed to undo the operation.');
-    return;
+    throw new Error(
+      'An outside operation is undone by voiding its last movement — use undoLastOutsideMovement, not revertOperationCompletion.',
+    );
   }
 
   // Internal op: void completion events; the trigger derives op → pending and

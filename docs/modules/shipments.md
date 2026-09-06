@@ -184,6 +184,22 @@ from this doc.
 
 ---
 
+## The printed slip
+
+**No signature block, since 2026-09-05.** The slip carried `RECEIVED BY` with Signature / Print Name
+/ Date. It went on the reasoning that kept one off the vendor slip
+([outside-processing.md](outside-processing.md)): a packing slip is a **contents list**. The bill of
+lading governs movement and ownership, proof of delivery is a separate signed receipt, and the
+freight literature is blunt that treating a packing slip as proof of delivery is *"a frequent and
+costly mistake"* — it is not a release document, and a signature line does not make it one.
+
+On the customer document that is the worse failure, because it invites a **customer** to treat a
+signed copy as something it legally is not. Nothing captured it either: the signed copy leaves with
+whoever took delivery. What this system records is the shipment row and its line quantities, which is
+what `fulfillment_status` is derived from. The page-break guard went with it — it existed only so the
+block was never orphaned at the foot of a page. Asserted by
+`__tests__/utils/packingSlipPdf.test.ts` › `what it deliberately omits`.
+
 ## Access Layer — `utils/shipmentsAccess.ts`
 
 | Function | Purpose |

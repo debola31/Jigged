@@ -41,6 +41,12 @@ export interface JobOperation {
   sent_at: string | null;
   sent_by: string | null;
   notes: string | null;
+  /**
+   * Snapshotted from the routing step. For an outside op this is what the shop
+   * already wrote about the process, so it is the natural first draft of what to
+   * tell the vendor on the slip.
+   */
+  instructions?: string | null;
   created_at: string;
   updated_at: string;
   /** Non-null iff this op is performed by an outside vendor. */
@@ -563,4 +569,25 @@ export interface OperationUpdateResult {
    * operator's measured minutes are gone.
    */
   discardedRunningTimers?: number;
+}
+
+/**
+ * Is this operation performed by an outside vendor?
+ *
+ * `vendor_service_id` IS the discriminator — `work_centers.kind` was dropped by
+ * the vendor-services split (20260823163931) and must not come back.
+ *
+ * **Use `Boolean()`, never `!== null`.** A `.select()` that omits the column
+ * yields `undefined`, and `undefined !== null` is true — which once labelled
+ * every in-house completion as "received from vendor". The `vendor_service`
+ * fallback covers a select that embedded the relation without the raw id.
+ *
+ * This exists so the office and the operator branch on ONE predicate. They used
+ * to disagree in shape: OperationCard read the column, while the operator step
+ * screen read a derived `operation_work_center_kind === 'external'` string.
+ */
+export function isOutsideOperation(
+  op: Pick<JobOperation, 'vendor_service_id' | 'vendor_service'>,
+): boolean {
+  return Boolean(op.vendor_service_id ?? op.vendor_service);
 }

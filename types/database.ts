@@ -2229,6 +2229,213 @@ export type Database = {
           },
         ]
       }
+      outside_shipment_receipts: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          job_operation_id: string
+          job_part_id: string
+          note: string | null
+          outside_shipment_id: string
+          quantity_good: number
+          received_at: string
+          received_by: string | null
+          updated_at: string
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          job_operation_id: string
+          job_part_id: string
+          note?: string | null
+          outside_shipment_id: string
+          quantity_good?: number
+          received_at?: string
+          received_by?: string | null
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          job_operation_id?: string
+          job_part_id?: string
+          note?: string | null
+          outside_shipment_id?: string
+          quantity_good?: number
+          received_at?: string
+          received_by?: string | null
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outside_receipts_matches_its_shipment"
+            columns: [
+              "outside_shipment_id",
+              "company_id",
+              "job_operation_id",
+              "job_part_id",
+            ]
+            isOneToOne: false
+            referencedRelation: "outside_shipments"
+            referencedColumns: [
+              "id",
+              "company_id",
+              "job_operation_id",
+              "job_part_id",
+            ]
+          },
+          {
+            foreignKeyName: "outside_shipment_receipts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outside_shipments: {
+        Row: {
+          carrier: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          due_back_on: string | null
+          id: string
+          job_id: string
+          job_operation_id: string
+          job_part_id: string
+          notes: string | null
+          quantity: number
+          service_name: string
+          ship_to_address: Json | null
+          ship_to_contact: Json | null
+          shipped_at: string
+          slip_number: string
+          updated_at: string
+          vendor_address_id: string | null
+          vendor_contact_id: string | null
+          vendor_id: string
+          vendor_name: string
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          carrier?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          due_back_on?: string | null
+          id?: string
+          job_id: string
+          job_operation_id: string
+          job_part_id: string
+          notes?: string | null
+          quantity: number
+          service_name: string
+          ship_to_address?: Json | null
+          ship_to_contact?: Json | null
+          shipped_at?: string
+          slip_number: string
+          updated_at?: string
+          vendor_address_id?: string | null
+          vendor_contact_id?: string | null
+          vendor_id: string
+          vendor_name: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          carrier?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          due_back_on?: string | null
+          id?: string
+          job_id?: string
+          job_operation_id?: string
+          job_part_id?: string
+          notes?: string | null
+          quantity?: number
+          service_name?: string
+          ship_to_address?: Json | null
+          ship_to_contact?: Json | null
+          shipped_at?: string
+          slip_number?: string
+          updated_at?: string
+          vendor_address_id?: string | null
+          vendor_contact_id?: string | null
+          vendor_id?: string
+          vendor_name?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outside_shipments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_job_operation_id_fkey"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_job_part_id_fkey"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_vendor_address_id_fkey"
+            columns: ["vendor_address_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_addresses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_vendor_contact_id_fkey"
+            columns: ["vendor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       part_attachments: {
         Row: {
           company_id: string
@@ -4417,6 +4624,22 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      create_outside_shipment: {
+        Args: {
+          p_carrier?: string
+          p_due_back_on?: string
+          p_job_operation_id: string
+          p_notes?: string
+          p_quantity: number
+          p_shipped_at?: string
+          p_vendor_address_id?: string
+          p_vendor_contact_id?: string
+        }
+        Returns: {
+          shipment_id: string
+          slip_number: string
+        }[]
+      }
       create_shipment_with_line_items: {
         Args: {
           p_carrier: string
@@ -4786,12 +5009,24 @@ export type Database = {
         }
         Returns: Json
       }
+      vendor_address_block_snapshot: {
+        Args: { p_address_id: string }
+        Returns: Json
+      }
+      vendor_contact_block_snapshot: {
+        Args: { p_contact_id: string }
+        Returns: Json
+      }
       viewer_excluded_from_metrics: {
         Args: { p_access_id: string }
         Returns: boolean
       }
       void_open_intervals_for_operation: {
         Args: { p_job_operation_id: string }
+        Returns: number
+      }
+      void_outside_shipment: {
+        Args: { p_shipment_id: string }
         Returns: number
       }
       work_center_usage: {

@@ -51,8 +51,6 @@ import {
   getStationName,
   addReaction,
   removeReaction,
-  markOperationSent,
-  markOperationReceived,
   revertOperationCompletion,
   getOutsideOpsForCompany,
   getCurrentMember,
@@ -476,75 +474,19 @@ describe('external operation lifecycle', () => {
     });
   });
 
-  describe('markOperationSent', () => {
-    it('rejects an internal op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: false, status: 'pending' });
-      await expect(markOperationSent('op-1')).rejects.toThrow(/outside/i);
-      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
-    });
-
-    it('rejects an external op that is not pending', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent' });
-      await expect(markOperationSent('op-1')).rejects.toThrow(/awaiting send/i);
-      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
-    });
-
-    it('sets status=sent + sent_at + sent_by for an external pending op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'pending' });
-      await markOperationSent('op-1');
-      const payload = mockQueryBuilder.update.mock.calls[0][0];
-      expect(payload.status).toBe('sent');
-      expect(payload.sent_by).toBe('auth-user-1');
-      expect(payload.sent_at).toEqual(expect.any(String));
-    });
-  });
-
-  describe('markOperationReceived', () => {
-    it('rejects an internal op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: false, status: 'sent' });
-      await expect(markOperationReceived('op-1')).rejects.toThrow(/outside/i);
-    });
-
-    it('completes from sent WITHOUT re-stamping send', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
-      await markOperationReceived('op-1');
-      const payload = mockQueryBuilder.update.mock.calls[0][0];
-      expect(payload.status).toBe('completed');
-      expect(payload.completed_by).toBe('auth-user-1');
-      // Send already happened — do not overwrite it.
-      expect(payload).not.toHaveProperty('sent_at');
-    });
-
-    it('completes from pending AND back-fills the send stamp (sent is optional)', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'pending' });
-      await markOperationReceived('op-1');
-      const payload = mockQueryBuilder.update.mock.calls[0][0];
-      expect(payload.status).toBe('completed');
-      expect(payload.sent_at).toEqual(expect.any(String));
-      expect(payload.sent_by).toBe('auth-user-1');
-    });
-  });
-
-  describe('revertOperationCompletion (external branches)', () => {
-    it('received (completed WITH sent_at) steps back to sent', async () => {
+  describe('outside ops no longer write their own state', () => {
+    /**
+     * markOperationSent and markOperationReceived are GONE, not deprecated:
+     * shipping IS the send, and the database refuses a hand-written status on an
+     * outside op. Their behaviour now lives in outsideShipmentsAccess and is
+     * covered there and in api/tests/integration/test_outside_processing.py.
+     */
+    it('revertOperationCompletion refuses an outside op and names the path that replaced it', async () => {
       mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'completed', sent_at: '2026-07-10T00:00:00Z' });
-      await revertOperationCompletion('op-1');
-      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'sent' });
-    });
-
-    it('legacy completed WITHOUT sent_at steps back to pending', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'completed', sent_at: null });
-      await revertOperationCompletion('op-1');
-      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'pending' });
-    });
-
-    it('sent (un-send) steps back to pending and clears the send stamp', async () => {
-      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
-      await revertOperationCompletion('op-1');
-      const payload = mockQueryBuilder.update.mock.calls[0][0];
-      expect(payload.status).toBe('pending');
-      expect(payload.sent_at).toBeNull();
-      expect(payload.sent_by).toBeNull();
+      await expect(revertOperationCompletion('op-1')).rejects.toThrow(/undoLastOutsideMovement/);
+      // It must refuse BEFORE writing. Stepping a status back by hand would now
+      // raise a 42501 from a trigger, which reads to the user as a bug.
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
     });
   });
 });

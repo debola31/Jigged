@@ -169,7 +169,15 @@ export function buildShopHeaderLines(company: Company): string[] {
   return lines;
 }
 
-function buildAddressBlockLines(
+/**
+ * The shared address renderer, including the `(No address on file)` fallback.
+ *
+ * Exported for the outside-processing slip (utils/outsideShipmentPdf.ts), which
+ * renders a vendor ship-to from the same AddressSnapshot shape. A fourth
+ * hand-rolled copy of this is how four documents start disagreeing about how an
+ * address reads.
+ */
+export function buildAddressBlockLines(
   customerName: string | null | undefined,
   address: AddressSnapshot | null,
   attentionText: string | null,
@@ -885,33 +893,22 @@ export async function generatePackingSlipPdf(
     cursorY += 6;
   }
 
-  // ---------- Signature lines ----------
-  const sigBlockHeight = 56;
-  if (cursorY + sigBlockHeight > pageHeight - MARGIN - 30) {
-    doc.addPage();
-    cursorY = MARGIN;
-  } else {
-    cursorY += 10;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('RECEIVED BY', MARGIN, cursorY);
-  cursorY += 28;
-
-  doc.setDrawColor(160);
-  doc.setLineWidth(0.5);
-  const sigLineY = cursorY + 8;
-  doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
-  doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
-  doc.line(MARGIN + 460, sigLineY, pageWidth - MARGIN, sigLineY);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('Signature', MARGIN, sigLineY + 11);
-  doc.text('Print Name', MARGIN + 270, sigLineY + 11);
-  doc.text('Date', MARGIN + 460, sigLineY + 11);
+  // ---------- No signature block, deliberately ----------
+  // Removed 2026-09-05, and the reasoning is the same one that kept it off the
+  // vendor slip: a packing slip is a CONTENTS LIST. The bill of lading governs
+  // movement and ownership; proof of delivery is a separate signed receipt. The
+  // freight literature is blunt that treating a packing slip as proof of
+  // delivery is "a frequent and costly mistake" -- it is not a release document,
+  // and a signature line does not make it one. It invites a customer to treat a
+  // signed copy as something it legally is not, which is a worse failure on the
+  // customer-facing document than on the vendor one.
+  //
+  // Nothing captured it either: the signed copy stays with whoever took
+  // delivery. What this system actually records is the shipment row and its
+  // line quantities, which is what jobs.fulfillment_status is derived from.
+  //
+  // The page-break guard went with it. It existed only so the block was never
+  // orphaned at the foot of a page.
 
   // ---------- Footer (every page) ----------
   const pageCount = doc.getNumberOfPages();

@@ -434,6 +434,27 @@ describe('generatePackingSlipPdf — the quantity table', () => {
  * including the string each replaced, because a half-applied change prints both lines and looks
  * fine to anyone who was not looking for it.
  */
+describe('generatePackingSlipPdf — what it deliberately omits', () => {
+  it('has no signature block: a packing slip is a contents list, not a receipt', async () => {
+    // Removed 2026-09-05, same reasoning that kept it off the vendor slip. The
+    // bill of lading governs ownership and proof of delivery is a separate
+    // signed receipt; the freight literature calls treating a packing slip as
+    // proof of delivery "a frequent and costly mistake". On the CUSTOMER
+    // document that is the worse failure -- it invites them to treat a signed
+    // copy as something it legally is not.
+    await generatePackingSlipPdf({
+      shipment: shipment(),
+      company,
+      shippedBeforeByJobPart: new Map(),
+      supabase: null,
+    });
+    const drawn = textMock.mock.calls.map((c) => String(c[0]).toUpperCase());
+    expect(drawn).not.toContain('RECEIVED BY');
+    expect(drawn).not.toContain('SIGNATURE');
+    expect(drawn).not.toContain('PRINT NAME');
+  });
+});
+
 describe('generatePackingSlipPdf — document branding', () => {
   // Scoped, because the `beforeEach` above belongs to another describe and `textMock` is shared —
   // without this, the "exactly one" assertion counts every earlier render's footer too.

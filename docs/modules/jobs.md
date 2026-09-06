@@ -190,7 +190,9 @@ The completion model — append-only `job_operation_completions` rows, status de
 owned by [operator-view.md](operator-view.md#status-model) and
 [§Recording a completion](operator-view.md#recording-a-completion). Two consequences bind here:
 raising `job_parts.quantity` **re-opens** an op whose good total no longer reaches the new target,
-and outside steps are exempt from that recompute (see below).
+and that now applies to outside steps too. *(⚠ Corrected 2026-09-03: this said outside steps were
+**exempt** from the recompute. They were, and are not any more — quantities drive an outside op's
+status exactly as they drive an in-house one. See below.)*
 
 ---
 
@@ -428,22 +430,37 @@ heat-treat). It is a first-class routing step, not paperwork.
 > `work_centers.kind='external'`. That column is **dropped** — an op is outside work iff it targets a
 > vendor service. See [vendor-services.md](vendor-services.md).
 
-**Lifecycle — a send/receive axis on `job_operations.status`:**
+> **⚠ Rewritten 2026-09-03.** The send used to be a *status*, written straight onto the operation
+> by a Mark Sent Out button. It is a **row** now — `outside_shipments`, one per send, carrying a
+> quantity — and `job_operations.status` / `sent_at` / `sent_by` are **derived from it**. A
+> hand-written status on an outside op is refused by a trigger, so paperwork and status cannot
+> drift. Full module: [outside-processing.md](outside-processing.md).
 
-- `pending → (Mark Sent Out) sent → (Mark Received) completed`.
-- `sent` is an **optional waypoint**: Mark Received also completes directly from `pending` (the
-  common after-the-fact case), back-filling `sent_at = completed_at`.
-- **Received == completed** (reuses `completed_at` / `completed_by`), so every part/job rollup
-  works unchanged; a `sent` op counts as *not completed*, holding its part at `in_progress` and
-  blocking downstream internal steps.
-- Never completable through the internal path (`completeOperation` / `completeJobOperation`
-  throw); **never auto-skipped** — the snapshot creates it `pending` and nothing advances it
-  without a human action.
-- Exempt from the quantity-derived status recompute: `compute_job_operation_status` returns the
-  stored status when `vendor_service_id` is set. Without that branch a part-quantity edit would
-  recompute a `sent` op back to `pending` and lose the send stamp.
-- Undo steps back one state: received → `sent` (or → `pending` for a legacy op that never went
-  through send); `sent` → `pending`.
+**Lifecycle — quantities, exactly like an in-house op, plus `sent` for what is away:**
+
+| Reading | When |
+|---|---|
+| `completed` | received good ≥ `job_parts.quantity`. **Tested first**, so 120 sent / 100 good back / 20 never returned is done, not held open over 20 pieces nobody wants |
+| `sent` | live shipment quantity exceeds received good-plus-scrapped — i.e. pieces are physically at a vendor |
+| `in_progress` | everything that went out has come back and it was not enough (98 good + 2 scrapped of 100) |
+| `pending` | nothing has gone out |
+
+- **An operation may have MANY shipments.** Send 50 now, 50 next week; each mints its own
+  `VPS-{jobBase}-{n}` slip. That is the whole reason the quantity picker exists.
+- **`quantity_scrapped` is separate from `quantity_good` and both are needed.** Together they
+  retire the vendor's outstanding balance, so the step stops reading "at the vendor". Only `good`
+  counts toward the step being done. 98 + 2 of 100 therefore closes the slip and leaves the op
+  `in_progress` — the same answer an in-house op gives at 98 good. **There is deliberately no
+  "close this out" flag**: it would be a second mechanism for a fact these two numbers already
+  carry, and the two would eventually disagree.
+- **Undo steps back one MOVEMENT** — the newest live receipt, else the newest live shipment. Never
+  both, never skipped.
+- Never completable through the internal path (`completeJobOperation` / `createOperationCompletion`
+  still throw); **never auto-skipped**.
+- **The 2026-08-23 exemption is gone, and its hazard is closed by construction.** That exemption
+  existed because `recompute_job_ops_status_from_part_qty()` runs the status function over every op
+  on a part, and a `sent` op with no completions reset to `pending`. It cannot now: the outside arm
+  reads shipments and receipts, and a quantity edit writes neither.
 
 **Surfaces:** the admin job-detail op card; the operator traveler + operation page (**Mark Sent
 Out** / **Mark Received** there too — the shop floor drives the send, not just the office —
@@ -463,16 +480,27 @@ where in-house steps show setup·cycle).
 > only: `Services`, `Out now` and `Oldest out` columns on the list, and an **Open jobs** card on the
 > vendor, whose rows deep-link to `?op=` on the job so acting is one click rather than a hunt.
 > `getOutsideOpsForCompany` survives — it backs all of the above.
+>
+> **Still true after 2026-09-03, and worth saying because that change adds a cross-job page.**
+> `/dashboard/{companyId}/outside-work` lists SLIPS, not operations, and is read-and-reprint only:
+> send, receive and undo stay exclusively on the operation, and Void is reachable only inside a
+> slip's own preview. The deleted tab's liability was a second place to **act** on the same row;
+> a numbered, printable, voidable document is a thing an operation row cannot represent at all,
+> which is why the register is not a re-litigation of that decision.
 
-**Audit:** send/receive are **not** written as notes — `sent_at`/`sent_by` and
-`completed_at`/`completed_by` *are* the record. The **/activity** feed derives vendor-tagged
+**Audit:** send/receive are **not** written as notes — the `outside_shipments` and
+`outside_shipment_receipts` rows *are* the record, and `sent_at`/`completed_at` mirror them. The **/activity** feed derives vendor-tagged
 **"Sent to {vendor}"** and **"Received from {vendor}"** rows under the Operations filter from those
-columns (`dashboardAccess.fetchOperationActivity`). Undo clears the stamp, so the row drops off on
-reload — same as internal-completion undo, no tombstone. Operator notes + photos stay fully
+columns (`dashboardAccess.fetchOperationActivity`). Undo voids the movement, so the row drops off on
+reload — same as internal-completion undo. The slip itself keeps its number, marked voided: the
+vendor may still be holding the printed copy. Operator notes + photos stay fully
 enabled on outside ops; they are real user notes, no longer polluted by auto-events.
 
-**Deferred (v1):** vendor lead-time → due-date math, PO generation, per-op cost actuals,
-scheduling, and partial/split sends (whole-quantity send/receive only).
+**Deferred:** vendor lead-time → due-date math, per-op cost actuals, and scheduling.
+*(⚠ Two items left this list on 2026-09-03. **Partial/split sends** shipped — that is what the
+whole outside-processing module is. **PO generation** was not deferred but* dropped: *the slip is
+the outside-work document, and it works with no accounting system connected, which the purchase-
+order plan could not.)*
 
 ---
 

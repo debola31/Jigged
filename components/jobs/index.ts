@@ -11,3 +11,5 @@ export { default as JobEditForm } from "./JobEditForm";
 export { default as CollapsibleSection } from "./CollapsibleSection";
 export { default as InvoicesMenu } from "./InvoicesMenu";
 export { default as ShipmentsMenu } from "./ShipmentsMenu";
+export { default as SendToVendorDialog } from "./SendToVendorDialog";
+export { default as ReceiveFromVendorDialog } from "./ReceiveFromVendorDialog";

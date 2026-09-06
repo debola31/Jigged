@@ -30,3 +30,37 @@ export function todayLocalISODate(): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/**
+ * Render a `date` column the way the person who typed it would read it.
+ *
+ * Same trap as above, mirrored. `new Date('2026-09-12')` parses as UTC midnight,
+ * so in any negative-offset zone it renders as the 11th — the calendar day
+ * BEFORE the one the user picked. Splitting the string and building a local date
+ * never does that.
+ *
+ * Extracted from the jobs list, which had the only correct implementation, when
+ * the outside-work drawer needed the second one.
+ *
+ * THE REGEX IS ANCHORED, and the jobs list's original was not. That is a
+ * deliberate behaviour change on one column: `created_at` is a timestamptz, and
+ * the unanchored version prefix-matched it and rendered its UTC calendar day —
+ * so a job created at 9pm local read as having been created TOMORROW, the exact
+ * failure the docblock above describes. Anchored, an instant falls through to
+ * the plain parse and renders the day the shop actually saw. `due_date` is a
+ * plain date and is unaffected either way.
+ */
+export function formatDateOnly(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
+  }
+  return new Date(dateStr).toLocaleDateString();
+}
+
+/** Is this `date` column strictly before today, on the reader's calendar? */
+export function isDateOnlyPast(dateStr: string | null | undefined): boolean {
+  if (!dateStr) return false;
+  return dateStr < todayLocalISODate();
+}

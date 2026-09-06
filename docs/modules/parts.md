@@ -156,7 +156,6 @@ sub-assembly can be a child of several parents without per-routing duplication.
 |---|---|---|
 | parent_part_id / child_part_id | UUID | The edge. A `BEFORE INSERT/UPDATE` trigger rejects cycles (depth 50) |
 | quantity + unit | Numeric + text | Per parent unit. Below 1 is a yield ("1 strip makes 20"); a unit other than the child's primary resolves through `parts_unit_conversions` |
-| consume_whole_units | Boolean | Ceiling to discrete stock. **Derived from the unit** (count → whole), not a manual toggle |
 | charge_basis | Text | `'cost'` (default) or `'price'` — see below |
 
 #### Charge basis — what a child contributes to the parent's rollup ([#727])
@@ -731,7 +730,7 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | List / search / sort / pagination, create, name-uniqueness, update, archive, bulk archive, delete impact, revive-on-collision, notes CRUD, activity | `__tests__/utils/partsAccess.test.ts` → `partsAccess utilities` (16 nested describes, one per exported function) |
 | Tier pricing through one engine for made **and** bought; null-price guards (unresolvable base, null markup, NaN markup); single-round rounding | `__tests__/utils/partPricingTiersAccess.test.ts` → `getTiersWithComputedPrices — one engine for made and bought` (5 its) |
 | The price the quote form / line / preview all read; tier selection at qty; `below_min` | same file → `getPartPriceAtQty — the single source used by form/line/preview` (3 its) |
-| Routing cost build-up, warnings, setup amortization at tier qty, yield / ceiling / batch pinning | `__tests__/utils/routingCostCalculation.test.ts` → `calculateRoutingCost`, `calculateTierPricing`, `calculateRoutingCost — yield / ceiling / batch pinning` |
+| Routing cost build-up, warnings, setup amortization at tier qty, yield / batch pinning | `__tests__/utils/routingCostCalculation.test.ts` → `calculateRoutingCost`, `calculateTierPricing`, `calculateRoutingCost — yield / batch pinning` |
 | Unit-price → markup back-calculation (incl. negative markup, zero base, NaN) | `__tests__/types/quote.test.ts` → `calculateMarkupFromUnitPrice` |
 | Create-mode validation (empty name, duplicate name, success) and existing-mode blur auto-save | `__tests__/components/parts/PartIdentitySection.test.tsx` → `PartIdentitySection` |
 | Staged tier edits surviving a `refreshKey` bump from a sibling save | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — staged tier edits survive sibling saves` (13 its) |

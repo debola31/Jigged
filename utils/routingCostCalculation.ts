@@ -65,7 +65,7 @@ export interface MaterialItem {
    * `true_cost_per_unit`; the two are equal on a `'cost'` line.
    */
   cost_per_unit: number;
-  /** Per-parent-unit contribution at the charged rate (ceiling-adjusted when whole-unit). */
+  /** Per-parent-unit contribution at the charged rate: `qty_in_primary × cost_per_unit`. */
   cost: number;
   /**
    * Per-parent-unit contribution at the TRUE cost rate — every charge basis in
@@ -79,15 +79,6 @@ export interface MaterialItem {
   true_cost: number;
   /** `quantity` converted to the child's primary unit — per parent unit. */
   qty_in_primary: number;
-  /** Whether this line ceilings consumption to whole units. */
-  consume_whole_units: boolean;
-  /**
-   * Total units of this material consumed across the whole order at the qty the
-   * breakdown was computed for (`ceil(order_qty × qty_in_primary)` in whole-unit
-   * mode; `order_qty × qty_in_primary` fractional). Null-safe for display of
-   * "this order needs N strips".
-   */
-  units_consumed: number;
 }
 
 export interface RoutingCostBreakdown {
@@ -309,12 +300,9 @@ export async function calculateRoutingCost(
       }
 
       // Units of the child physically consumed across the parent batch of
-      // safeQty. Whole-unit lines ceiling to discrete stock (a strip you can't
-      // cut a fraction of); fractional lines are exact and equal the prior
-      // cascaded qty.
-      const unitsConsumed = line.consume_whole_units
-        ? Math.ceil(safeQty * qtyInPrimary)
-        : safeQty * qtyInPrimary;
+      // safeQty — exact. This used to ceiling on whole-unit lines, which is how a
+      // 0.2-of-a-bar line charged a whole bar at batch 1.
+      const unitsConsumed = safeQty * qtyInPrimary;
 
       // A MADE child is valued at its standard costing lot size (the run its
       // cost amortizes over), fixed regardless of how many this order draws. A
@@ -413,24 +401,23 @@ export async function calculateRoutingCost(
         chargedUnitRate = priced.unit_price;
       }
 
-      // Per-parent-unit material contribution. The (fractional && not-pinned)
-      // path is the LEGACY expression, kept textually identical so every
-      // pre-existing BOM line yields a byte-identical cost. Ceiling / pinning
-      // take the general (consumed × unit_cost) / batch form.
-      const perParentUnit = (rate: number): number =>
-        !line.consume_whole_units && !pinned
-          ? qtyInPrimary * rate
-          : (unitsConsumed * rate) / safeQty;
+      // One expression for every line. This was two branches that the whole-unit
+      // ceiling forced apart; without it they are algebraically identical, since
+      // (safeQty × qtyInPrimary × rate) / safeQty = qtyInPrimary × rate.
+      //
+      // NOT rounded per line. The SQL engine accumulates at full numeric
+      // precision and rounds once at the end, so rounding each line here made the
+      // Cost card disagree with the price it was meant to explain — and showed
+      // $0.00 for a cheap material at a fractional quantity. Totals below round.
+      const perParentUnit = (rate: number): number => qtyInPrimary * rate;
       materialItems.push({
         item_name: itemName,
         quantity: bomQty,
         unit: effectiveBomUnit || '',
         cost_per_unit: Math.round(chargedUnitRate * 10000) / 10000,
-        cost: Math.round(perParentUnit(chargedUnitRate) * 100) / 100,
-        true_cost: Math.round(perParentUnit(childTrueCost) * 100) / 100,
+        cost: perParentUnit(chargedUnitRate),
+        true_cost: perParentUnit(childTrueCost),
         qty_in_primary: qtyInPrimary,
-        consume_whole_units: line.consume_whole_units,
-        units_consumed: unitsConsumed,
       });
     }
   }

@@ -440,7 +440,6 @@ async function attachMaterials(
         child_part_id: childId,
         quantity: String(material.quantity),
         unit: childUnit,
-        consume_whole_units: false,
         charge_basis: 'cost',
       });
       linked += 1;

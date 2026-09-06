@@ -27,7 +27,6 @@ const req = (over: Partial<Parameters<typeof buildRequirement>[0]> = {}) =>
     bomLineId: 'b1',
     bomQuantity: 2,
     bomUnit: 'each',
-    consumeWholeUnits: false,
     orderQuantity: 5,
     stock: stock({ partId: 'p1', onHand: 100 }),
     customFactor: null,
@@ -38,18 +37,22 @@ const req = (over: Partial<Parameters<typeof buildRequirement>[0]> = {}) =>
 
 describe('requiredQuantity', () => {
   it('multiplies the BOM quantity by the order quantity', () => {
-    expect(requiredQuantity(10, 0.05, false)).toBeCloseTo(0.5);
+    expect(requiredQuantity(10, 0.05)).toBeCloseTo(0.5);
   });
 
-  // "0.05 strips" means nothing to someone pulling material off a shelf.
-  it('rounds up for discrete stock you cannot cut a fraction of', () => {
-    expect(requiredQuantity(10, 0.05, true)).toBe(1);
-    expect(requiredQuantity(3, 1.2, true)).toBe(4);
+  // This used to round up when the line was flagged as discrete stock. The same
+  // flag was ceilinging the COST, where it charged a whole $70 bar for the fifth
+  // of one a part actually used, so it is gone from both. A job needing 0.6 of a
+  // bar now says 0.6, and whoever fetches it still carries one bar to the machine.
+  it('never rounds up — the draw is exactly what the BOM says', () => {
+    expect(requiredQuantity(10, 0.05)).toBeCloseTo(0.5);
+    expect(requiredQuantity(3, 1.2)).toBeCloseTo(3.6);
+    expect(requiredQuantity(1, 0.2)).toBeCloseTo(0.2);
   });
 
   it('returns 0 for a missing or non-positive order quantity', () => {
-    expect(requiredQuantity(0, 4, false)).toBe(0);
-    expect(requiredQuantity(-1, 4, true)).toBe(0);
+    expect(requiredQuantity(0, 4)).toBe(0);
+    expect(requiredQuantity(-1, 4)).toBe(0);
   });
 });
 

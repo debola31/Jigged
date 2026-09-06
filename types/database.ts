@@ -2473,7 +2473,6 @@ export type Database = {
         Row: {
           charge_basis: string
           child_part_id: string
-          consume_whole_units: boolean
           created_at: string
           id: string
           notes: string | null
@@ -2486,7 +2485,6 @@ export type Database = {
         Insert: {
           charge_basis?: string
           child_part_id: string
-          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null
@@ -2499,7 +2497,6 @@ export type Database = {
         Update: {
           charge_basis?: string
           child_part_id?: string
-          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null

@@ -292,7 +292,15 @@ interface PartSpec {
   description: string;
   source: 'made' | 'bought';
   primary_unit: string | null;
-  quantity: number;
+  /*
+   * NO `quantity` — deliberately, and not merely defaulted to 0.
+   *
+   * A part carrying an opening quantity is REFUSED at insert since 20260906182638: the
+   * `Unassigned` bucket that used to absorb it is gone, and stock enters through a location.
+   * Leaving the field here with a 0 default would let a future fixture pass 10 and discover
+   * that in CI, which is exactly how this file broke twice in one afternoon. Removing it makes
+   * the mistake untypeable — stock goes through `ensureStockAt`, which names a place.
+   */
   /** Persisted onto the part's tier row at quantity 1 for bought parts.
    *  Ignored for made parts, whose cost is the routing + BOM rollup. */
   cost_per_unit: number | null;
@@ -323,7 +331,6 @@ async function ensurePart(
         description: spec.description,
         source: spec.source,
         primary_unit: spec.primary_unit,
-        quantity: spec.quantity,
       })
       .select('id')
       .single();
@@ -713,7 +720,6 @@ export default async function globalSetup(): Promise<void> {
     // parts_requires_unit CHECK constraint (20260602…) makes primary_unit
     // NOT NULL for every part. 'ea' is the canonical unit for discrete parts.
     primary_unit: 'ea',
-    quantity: 0,
     cost_per_unit: null,
   });
   const rawPartId = await ensurePart(supabase, companyId, {
@@ -721,10 +727,6 @@ export default async function globalSetup(): Promise<void> {
     description: 'E2E stocked raw material',
     source: 'bought',
     primary_unit: 'lbs',
-    // Zero, and not by preference: since 20260906182638 a part carrying an opening quantity is
-    // REFUSED at insert. There is no `Unassigned` bucket for it to land in any more, so stock
-    // enters where it always could — at a named place, below.
-    quantity: 0,
     cost_per_unit: 5.5,
   });
   await ensureStockAt(supabase, companyId, rawPartId, E2E_RAW_SHELF, 100);
@@ -733,16 +735,16 @@ export default async function globalSetup(): Promise<void> {
     description: 'E2E sub-assembly (BOM child of MFG-001)',
     source: 'made',
     primary_unit: 'ea',
-    quantity: 10,
     cost_per_unit: 12.0,
   });
+  // Its stock, at a named place — the sub-assembly is a BOM child that specs consume.
+  await ensureStockAt(supabase, companyId, subPartId, E2E_SUB_SHELF, 10);
 
   const lengthPartId = await ensurePart(supabase, companyId, {
     part_name: PART_LENGTH_NAME,
     description: 'E2E made part sold by length (inches)',
     source: 'made',
     primary_unit: 'inches',
-    quantity: 0,
     cost_per_unit: null,
   });
 
@@ -838,6 +840,9 @@ async function ensureLocation(
 /** Where the raw material sits. Its own shelf, so no spec's fixture leans on another's. */
 export const E2E_RAW_SHELF = 'E2E Raw Shelf';
 
+/** Where the sub-assembly sits, for the same reason. */
+export const E2E_SUB_SHELF = 'E2E Sub Shelf';
+
 /**
  * Put an exact quantity of one part at one named place.
  *
@@ -882,11 +887,6 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
     primary_unit: 'each',
-    // Zero, which since 20260906182638 is the only quantity a part can be created with: the
-    // `Unassigned` bucket that used to absorb an opening number is gone, and the insert is
-    // refused rather than producing a quantity no balance row supports. The spec then sees
-    // exactly the two shelf rows the upserts below create.
-    quantity: 0,
     cost_per_unit: null,
   });
 

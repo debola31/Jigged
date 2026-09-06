@@ -157,22 +157,25 @@ export default function JobActivityRail({
   const [deleting, setDeleting] = useState<JobNote | null>(null);
   const [rowBusy, setRowBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
-  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [undoingId, setUndoingId] = useState<string | null>(null);
 
   const shown = filter ? filterToOperation(items, filter.operationId) : items;
 
-  const handleVoidCompletion = async (completion: JobActivityCompletion) => {
-    setVoidingId(completion.id);
+  const handleUndoCompletion = async (completion: JobActivityCompletion) => {
+    setUndoingId(completion.id);
     setRowError(null);
     try {
+      // The FUNCTION is still `voidOperationCompletion` and the column is still
+      // `voided_at` — the schema's word for this is void. The user's word is
+      // undo, because void belongs to documents someone is holding a copy of.
       await voidOperationCompletion(completion.id);
       await reload();
       /**
-       * `capture_source` is the interesting half. The office voiding a row it
-       * keyed in itself is a typo; the office voiding an `operator` row is the
+       * `capture_source` is the interesting half. The office undoing a row it
+       * keyed in itself is a typo; the office undoing an `operator` row is the
        * office overruling the floor. One button, two different things.
        */
-      posthog.capture('completion voided', {
+      posthog.capture('completion undone', {
         surface: 'office_job',
         capture_source: completion.capture_source,
       });
@@ -184,7 +187,7 @@ export default function JobActivityRail({
         }),
       );
     } finally {
-      setVoidingId(null);
+      setUndoingId(null);
     }
   };
 
@@ -328,8 +331,8 @@ export default function JobActivityRail({
         isAdmin={isAdmin}
         onEditNote={setEditing}
         onDeleteNote={setDeleting}
-        onVoidCompletion={handleVoidCompletion}
-        voidingCompletionId={voidingId}
+        onUndoCompletion={handleUndoCompletion}
+        undoingCompletionId={undoingId}
         onViewSlip={onViewSlip}
         emptyMessage={
           filter
@@ -359,8 +362,25 @@ export default function JobActivityRail({
           // column's height and `sticky` never engages.
           alignSelf: 'flex-start',
           maxHeight: `calc(100dvh - ${RAIL_CHROME_INSET}px)`,
-          borderLeft: '1px solid rgba(255,255,255,0.14)',
-          pl: 2,
+          /**
+           * A PANEL, not a strip of the page canvas.
+           *
+           * This shipped with only a left hairline and no fill, so it dissolved
+           * into the background and read as part of the page rather than as its
+           * own surface — the one thing the design it was built from was
+           * explicit about.
+           *
+           * The app's Card vocabulary rather than the Drawer gradient the mock
+           * used: this is an in-flow column sitting on the lit canvas, which is
+           * exactly what a Card is here, and taking the tokens means it tracks
+           * the theme instead of pinning two hex values that would drift.
+           */
+          bgcolor: 'background.paper',
+          backdropFilter: 'blur(15px)',
+          WebkitBackdropFilter: 'blur(15px)',
+          border: '1px solid rgba(255, 255, 255, 0.20)',
+          borderRadius: 2,
+          p: 2,
         }}
       >
         {renderBody({
@@ -390,8 +410,14 @@ export default function JobActivityRail({
           position: 'sticky',
           top: 0,
           alignSelf: 'flex-start',
-          py: 1,
-          borderLeft: '1px solid rgba(255,255,255,0.14)',
+          py: 1.5,
+          // Same surface as the open rail, so collapsing reads as the panel
+          // narrowing rather than as a different control appearing.
+          bgcolor: 'background.paper',
+          backdropFilter: 'blur(15px)',
+          WebkitBackdropFilter: 'blur(15px)',
+          border: '1px solid rgba(255, 255, 255, 0.20)',
+          borderRadius: 2,
         }}
       >
         {/* No Tooltip: the strip already names itself just below, and a tooltip

@@ -356,14 +356,19 @@ Three row kinds, merged by a pure module
 | Row | Source | On the row |
 |---|---|---|
 | **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
-| **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Void**. The note typed into the Complete dialog renders here, on the event it describes |
+| **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Undo** — not "void", which is document language for slips and invoices; the step card has always said `Undo completion`, and the column being `voided_at` is the schema's word rather than the user's. The note typed into the Complete dialog renders here, on the event it describes |
 | **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
 
 One slip fans out to a `sent` row, one `received` row per receipt, and a `short_closed` row when
 something was retired — never one row that rewrites itself, the same call the operator feed makes
-for interval start/finish. Voided slips, receipts and completions stay in the list struck through:
-this is an audit surface, so the rule is show-struck-through rather than the usual
+for interval start/finish. Slips, receipts and completions that were taken back stay in the list struck
+through: this is an audit surface, so the rule is show-struck-through rather than the usual
 `filter-it-out`.
+
+**The rail is a panel, not a strip of the page.** It takes the app's Card surface — the same
+`background.paper` fill, hairline and blur every other panel uses — so it reads as its own
+surface against the lit canvas, and the collapsed strip takes the same treatment so collapsing
+looks like the panel narrowing rather than a different control appearing.
 
 **The office can post here** — a plain text-only composer writing `subject_kind: 'job'` with no
 step, which is what the operator traveler renders, so it is a real channel to the floor. Photos

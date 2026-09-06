@@ -165,14 +165,20 @@ describe('JobActivityRail — the three row kinds', () => {
     expect(rail.getByText('Sent 12 to Acme Plating')).toBeInTheDocument();
   });
 
-  it('offers Void on a live completion', () => {
+  it('offers Undo on a live completion — never "Void"', () => {
+    // Void is document language: it belongs to packing slips and invoices,
+    // things somebody is holding a printed copy of. A completion is a quantity
+    // that was recorded, and the step card beside this one has said
+    // `Undo completion` since it shipped.
     const { rail } = renderRail();
+
     expect(
-      rail.getByRole('button', { name: /Void the completion of 12 pieces on Mill/i }),
+      rail.getByRole('button', { name: /Undo the completion of 12 pieces on Mill/i }),
     ).toBeInTheDocument();
+    expect(rail.queryByRole('button', { name: /void/i })).not.toBeInTheDocument();
   });
 
-  it('offers no Void on an already-voided completion, but still shows the row', () => {
+  it('offers no Undo on a completion already taken back, but still shows the row', () => {
     const items = buildJobActivity({
       notes: [],
       completions: [{ ...COMPLETION, voided_at: '2026-09-05T15:00:00Z' }],
@@ -181,20 +187,22 @@ describe('JobActivityRail — the three row kinds', () => {
     const { rail } = renderRail({ items });
 
     expect(rail.getByText('Completed Mill')).toBeInTheDocument();
-    expect(rail.queryByRole('button', { name: /Void the completion/i })).not.toBeInTheDocument();
+    expect(rail.queryByRole('button', { name: /Undo the completion/i })).not.toBeInTheDocument();
   });
 
-  it('reports capture_source when a completion is voided', async () => {
+  it('reports capture_source when a completion is undone', async () => {
     const reload = vi.fn().mockResolvedValue(undefined);
     const { rail } = renderRail({ reload });
 
-    await userEvent.click(rail.getByRole('button', { name: /Void the completion/i }));
+    await userEvent.click(rail.getByRole('button', { name: /Undo the completion/i }));
 
     expect(voidOperationCompletion).toHaveBeenCalledWith('c-1');
     expect(reload).toHaveBeenCalled();
     // The split that makes the event worth having: the office fixing its own
-    // typo versus the office overruling the floor.
-    expect(capture).toHaveBeenCalledWith('completion voided', {
+    // typo versus the office overruling the floor. Named for the ACTION — the
+    // column is still `voided_at`, but that is the schema's word, not the
+    // user's.
+    expect(capture).toHaveBeenCalledWith('completion undone', {
       surface: 'office_job',
       capture_source: 'operator',
     });

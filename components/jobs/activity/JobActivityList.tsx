@@ -17,9 +17,9 @@ export interface JobActivityListProps {
   isAdmin: boolean;
   onEditNote: (note: JobNote) => void;
   onDeleteNote: (note: JobNote) => void;
-  onVoidCompletion: (completion: JobActivityCompletion) => void;
-  /** Which completion is mid-void, so only that row's button disables. */
-  voidingCompletionId?: string | null;
+  onUndoCompletion: (completion: JobActivityCompletion) => void;
+  /** Which completion is mid-undo, so only that row's button disables. */
+  undoingCompletionId?: string | null;
   onViewSlip?: (shipmentId: string) => void;
   /** Shown instead of the list when there is nothing — worded by the caller. */
   emptyMessage?: string;
@@ -38,8 +38,8 @@ export default function JobActivityList({
   isAdmin,
   onEditNote,
   onDeleteNote,
-  onVoidCompletion,
-  voidingCompletionId,
+  onUndoCompletion,
+  undoingCompletionId,
   onViewSlip,
   emptyMessage = 'Nothing has been recorded on this job yet.',
 }: JobActivityListProps) {
@@ -84,8 +84,8 @@ export default function JobActivityList({
             <JobActivityCompletionRow
               key={item.key}
               completion={item.completion}
-              onVoid={onVoidCompletion}
-              voiding={voidingCompletionId === item.completion.id}
+              onUndo={onUndoCompletion}
+              undoing={undoingCompletionId === item.completion.id}
             />
           );
         }

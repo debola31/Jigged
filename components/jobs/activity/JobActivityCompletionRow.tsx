@@ -15,24 +15,32 @@ import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
  * this quantity — so the completion is the event it describes and a separate row
  * would be an event with no time of its own.
  *
- * Void is offered on the row showing the number that is wrong, which is why it
+ * UNDO, not "void". Void is document language — it belongs to packing slips and
+ * invoices, things a customer or a vendor is holding a printed copy of. A
+ * completion is a quantity somebody recorded, and taking it back is an undo;
+ * the step card's own control has said `Undo completion` since it shipped, so
+ * the rail saying anything else would have two words for one action on one
+ * screen. The COLUMN is still `voided_at` and the function is still
+ * `voidOperationCompletion` — the data model's word is not the user's.
+ *
+ * It is offered on the row showing the number that is wrong, which is why it
  * lives here rather than on the step card it used to sit under.
  */
 export default function JobActivityCompletionRow({
   completion,
-  onVoid,
-  voiding,
+  onUndo,
+  undoing,
 }: {
   completion: JobActivityCompletion;
   /**
-   * Absent on a voided row — there is nothing left to undo.
+   * Absent on a row already undone — there is nothing left to take back.
    *
-   * Takes the whole completion, not its id: `completion voided` reports
+   * Takes the whole completion, not its id: `completion undone` reports
    * `capture_source`, which is the split between the office fixing its own typo
    * and the office overruling the floor.
    */
-  onVoid?: (completion: JobActivityCompletion) => void;
-  voiding?: boolean;
+  onUndo?: (completion: JobActivityCompletion) => void;
+  undoing?: boolean;
 }) {
   const voided = completion.voided_at != null;
   const step = completion.operation_name || 'this step';
@@ -64,17 +72,17 @@ export default function JobActivityCompletionRow({
         </Typography>
       ) : null}
 
-      {!voided && onVoid ? (
+      {!voided && onUndo ? (
         <Box sx={{ mt: 0.5 }}>
           <Button
             size="small"
             color="error"
-            disabled={voiding}
-            onClick={() => onVoid(completion)}
-            aria-label={`Void the completion of ${completion.quantity_good} pieces on ${step}`}
+            disabled={undoing}
+            onClick={() => onUndo(completion)}
+            aria-label={`Undo the completion of ${completion.quantity_good} pieces on ${step}`}
             sx={{ minHeight: 32, px: 1, py: 0.25 }}
           >
-            {voiding ? 'Voiding…' : 'Void'}
+            {undoing ? 'Undoing…' : 'Undo'}
           </Button>
         </Box>
       ) : null}

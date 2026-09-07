@@ -38,6 +38,7 @@ import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
+import PartPreferredVendor from '@/components/parts/PartPreferredVendor';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 import UnsavedChangesBar, { unsavedFieldSx } from '@/components/common/UnsavedChangesBar';
 
@@ -1005,11 +1006,39 @@ export default function PartPricing({
 
           {loading && spinner}
 
+          {/* Preferred vendor, for bought parts, in the card that now owns cost.
+              It is AUTO-SAVE sitting above an explicitly-saved table, which
+              interaction-standards.md §2 forbids *when the user cannot tell the
+              two apart* — so it keeps its own bordered block and its own
+              SaveStatus, and the two save models read as two sections rather
+              than one ambiguous card.
+
+              The vendor is a label, not a cost filter: the tiers below apply
+              whoever supplies the part, and `part_rollup_at_qty` never reads
+              `preferred_vendor_id`. */}
+          {!loading && isBought && (
+            <Box
+              sx={{
+                mb: 2,
+                p: 1.5,
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+              }}
+            >
+              <PartPreferredVendor
+                partId={partId}
+                companyId={companyId}
+                preferredVendorId={part.preferred_vendor_id}
+                onSaved={onPricingChanged}
+              />
+            </Box>
+          )}
+
           {/* Markup tiers — always inline-editable. Made and bought parts show the
-              same columns (Base / unit, Markup %, Unit price); the base cost comes
-              from the routing/BOM for made parts and from the procurement tiers for
-              bought parts (same compute engine), so both surface a final unit price
-              after markup. */}
+              same columns; for a bought part the base is the Unit cost typed on
+              the row, for a made part it is the routing + BOM rollup. Both
+              surface a final unit price after markup. */}
           {!loading && (isBought || breakdown) && (
             <>
               <TableContainer>

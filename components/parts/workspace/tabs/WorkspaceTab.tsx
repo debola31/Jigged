@@ -21,7 +21,6 @@ import type {
 import PartPricing from '@/components/parts/PartPricing';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
 import PartBomPanel from '@/components/parts/PartBomPanel';
-import PartPreferredVendor from '@/components/parts/PartPreferredVendor';
 import PartIdentitySection from '../PartIdentitySection';
 import type { PartSetupStatus } from '../partSetupStatus';
 
@@ -223,21 +222,6 @@ export default function WorkspaceTab({
                       currentChain={currentChain}
                       description={`Parts consumed when manufacturing this ${part.part_name}.`}
                       onChanged={refreshAfterMutation}
-                    />
-                  </CardContent>
-                </Card>
-              </Grid>
-            )}
-
-            {part.source === 'bought' && (
-              <Grid size={{ xs: 12 }}>
-                <Card elevation={2}>
-                  <CardContent>
-                    <PartPreferredVendor
-                      partId={partId}
-                      companyId={companyId}
-                      preferredVendorId={part.preferred_vendor_id}
-                      onSaved={() => refreshAfterMutation()}
                     />
                   </CardContent>
                 </Card>

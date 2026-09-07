@@ -397,7 +397,18 @@ function OperatorJobsPageContent() {
           picker is a full-screen commit to a working context and the shell hides
           the nav there; a list of running work on top of it would be a second
           decision on the one screen built for one. */}
-      {!showStationSelector && <RunningNowPanel />}
+      {/* HIDDEN WHILE A SEARCH IS ACTIVE, and that is a correctness fix rather
+          than a preference. The find field narrows the DISPATCH LIST, not this
+          panel, so leaving it up during a search puts rows on screen directly
+          above the words "No jobs match" — the surface contradicting itself, and
+          an E2E assertion counting job-shaped buttons to zero caught it.
+
+          Losing the panel for the duration of a search costs nothing: it is
+          transient, and every running or paused step is guaranteed to be on the
+          dispatch list anyway by the third and fourth eligibility branches of
+          get_ready_operations_for_station, so the work is still findable by the
+          very query being typed. */}
+      {!showStationSelector && !queryInput.trim() && <RunningNowPanel />}
 
       {/* Toolbar: scope segmented control (primary) + a "Show completed"
           checkbox (secondary — an explicit on/off so it's clear whether you're

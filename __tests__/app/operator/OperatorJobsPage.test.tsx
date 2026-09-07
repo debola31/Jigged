@@ -45,6 +45,11 @@ vi.mock('@/utils/operatorAccess', () => ({
 
 /** The banner runs its own Supabase read and has its own suite; it is noise here. */
 vi.mock('@/components/operator/NoteUsageBanner', () => ({ default: () => null }));
+// A visible marker rather than null: this page decides WHETHER to render the
+// panel, and a null stub would make that decision untestable from here.
+vi.mock('@/components/operator/RunningNowPanel', () => ({
+  default: () => <div>RUNNING NOW PANEL</div>,
+}));
 vi.mock('@/components/operator/StationSelector', () => ({
   default: () => <div>Pick a station</div>,
 }));
@@ -173,6 +178,31 @@ describe('OperatorJobsPage — find', () => {
     await user.type(screen.getByLabelText('Find a job'), 'manifold');
     await waitFor(() => expect(screen.queryByText(/CNC Mill · 1/)).not.toBeInTheDocument());
     expect(screen.getByText(/Deburr · 1/)).toBeInTheDocument();
+  });
+
+  it('hides what you have running while a search is active', async () => {
+    // THE FIND FIELD NARROWS THE DISPATCH LIST, NOT THE PANEL. Leaving the panel
+    // up during a search puts job-shaped rows on screen directly above the words
+    // "No jobs match" — the surface contradicting itself. Caught by an E2E
+    // assertion that counts job-shaped buttons to zero after a no-match query.
+    //
+    // Nothing is lost by hiding it: a search is transient, and every running or
+    // paused step is on the dispatch list anyway through the third and fourth
+    // eligibility branches of get_ready_operations_for_station.
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(/J-0118/);
+    expect(screen.getByText('RUNNING NOW PANEL')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Find a job'), 'zzzz');
+    await screen.findByText(/No jobs match/);
+    expect(screen.queryByText('RUNNING NOW PANEL')).not.toBeInTheDocument();
+
+    // And it comes back when the query does, so the panel is gated on the search
+    // rather than torn down by it.
+    await user.click(screen.getByRole('button', { name: 'Show all jobs' }));
+    await screen.findByText(/J-0118/);
+    expect(screen.getByText('RUNNING NOW PANEL')).toBeInTheDocument();
   });
 
   it('says nothing matched — never that there is no work — and offers a way back', async () => {

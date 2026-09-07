@@ -66,6 +66,17 @@ export interface OperatorJob {
    * list. Always false on the completed list, which does not compute it.
    */
   has_open_interval?: boolean;
+  /**
+   * The last span on this row's operation was paused and nothing is running now —
+   * the row is on the list because somebody set it down, not because it is next.
+   *
+   * Drives the `Paused` mark. Same disclosure rules as `has_open_interval` and for
+   * the same reason: it is a fact about the MACHINE, reported for anyone's pause,
+   * so it carries no name, no timestamp and no elapsed figure. The operator's OWN
+   * paused work, which may say more, is RunningNowPanel above this list. Always
+   * false on the completed list, which does not compute it.
+   */
+  has_paused_interval?: boolean;
 }
 
 /**

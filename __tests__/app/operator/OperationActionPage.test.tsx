@@ -146,19 +146,44 @@ const runningInterval = {
   job_operation_id: 'op1',
   effective_started_at: '2026-08-26T15:01:00.000Z',
 };
+const pausedOperation = {
+  interval_id: 'int0',
+  job_operation_id: 'op1',
+  job_id: 'job1',
+  job_part_id: 'jp1',
+  job_number: 'J-0001',
+  part_name: 'BRACKET',
+  operation_name: 'Deburr',
+  work_center_name: 'Bench 1',
+  paused_at: '2026-08-26T14:20:00.000Z',
+};
 const intervalState: {
   running: typeof runningInterval | null;
+  paused: typeof pausedOperation | null;
   cancel: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
-} = { running: null, cancel: vi.fn(), close: vi.fn() };
+  pause: ReturnType<typeof vi.fn>;
+  resume: ReturnType<typeof vi.fn>;
+} = {
+  running: null,
+  paused: null,
+  cancel: vi.fn(),
+  close: vi.fn(),
+  pause: vi.fn(),
+  resume: vi.fn(),
+};
 
 vi.mock('@/components/operator/OperatorIntervalContext', () => ({
   useIntervalContext: () => ({
     openIntervals: intervalState.running ? [intervalState.running] : [],
+    pausedOperations: intervalState.paused ? [intervalState.paused] : [],
     serverSkewMs: 0,
     loading: false,
     intervalFor: () => intervalState.running,
+    pausedFor: () => intervalState.paused,
     start: vi.fn(),
+    resume: intervalState.resume,
+    pause: intervalState.pause,
     close: intervalState.close,
     cancel: intervalState.cancel,
     refresh: vi.fn(),
@@ -568,14 +593,18 @@ describe('operation action page — completion (characterisation)', () => {
 describe('while a timer is running', () => {
   beforeEach(() => {
     intervalState.running = runningInterval;
+    intervalState.paused = null;
     intervalState.cancel = vi.fn(async () => undefined);
     intervalState.close = vi.fn(async () => undefined);
+    intervalState.pause = vi.fn(async () => undefined);
+    intervalState.resume = vi.fn(async () => undefined);
     mockDetail.mockResolvedValue(detail() as never);
     mockSummaries.mockResolvedValue(summary(0) as never);
   });
 
   afterEach(() => {
     intervalState.running = null;
+    intervalState.paused = null;
   });
 
   /** The PAGE's button, never the dialog's confirm (they share a label). */
@@ -597,6 +626,7 @@ describe('while a timer is running', () => {
 
   it('does not offer it when nothing is running', async () => {
     intervalState.running = null;
+    intervalState.paused = null;
     renderPage();
     await screen.findByRole('button', { name: /start this step/i });
 
@@ -657,5 +687,98 @@ describe('while a timer is running', () => {
     // completion has already landed — here the cancel IS the whole action.
     expect(await within(dialog).findByText(/subscription is not active/i)).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Pause and resume — the 2026-09-07 reversal of the "No pause / resume" non-goal.
+ *
+ * WHAT THESE ARE FOR. The recorded objection to pause was that a paused state is
+ * "one more thing to remember to undo", and the reason it was safe to reverse is
+ * that the state is visible from both sides. On this screen that means the primary
+ * button has to CHANGE — a step you set down twenty minutes ago must not greet you
+ * with START THIS STEP while the feed right below it shows the pause. The rest is
+ * the boundary with Cancel activity, which is one letter apart in consequence:
+ * pause keeps the minutes, cancel destroys them.
+ */
+describe('pause and resume', () => {
+  beforeEach(() => {
+    intervalState.running = null;
+    intervalState.paused = null;
+    intervalState.cancel = vi.fn(async () => undefined);
+    intervalState.close = vi.fn(async () => undefined);
+    intervalState.pause = vi.fn(async () => undefined);
+    intervalState.resume = vi.fn(async () => undefined);
+    mockDetail.mockResolvedValue(detail() as never);
+    mockSummaries.mockResolvedValue(summary(0) as never);
+  });
+
+  afterEach(() => {
+    intervalState.running = null;
+    intervalState.paused = null;
+  });
+
+  it('offers Pause beside Cancel activity while a timer runs', async () => {
+    intervalState.running = runningInterval;
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    expect(screen.getByRole('button', { name: /pause/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^cancel activity$/i })[0]).toBeInTheDocument();
+  });
+
+  it('does not offer Pause when nothing is running', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: /start this step/i });
+
+    expect(screen.queryByRole('button', { name: /pause/i })).not.toBeInTheDocument();
+  });
+
+  it('pauses without a confirm dialog, because nothing is lost', async () => {
+    // interaction-standards.md scales friction to consequence. Cancel destroys a
+    // measured span and gets a dialog; pause keeps it and RESUME is one tap away.
+    intervalState.running = runningInterval;
+    renderPage();
+    await screen.findByRole('button', { name: /record/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /pause/i }));
+
+    await waitFor(() => expect(intervalState.pause).toHaveBeenCalledWith('int1'));
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('says RESUME, not START, on a step this operator paused', async () => {
+    // THE ONE THAT MATTERS. START THIS STEP on work already begun reads as the app
+    // having forgotten, while the feed below is showing that it has not.
+    intervalState.paused = pausedOperation;
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /resume this step/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /start this step/i })).not.toBeInTheDocument();
+  });
+
+  it('resumes by operation id, opening a new span rather than reopening one', async () => {
+    intervalState.paused = pausedOperation;
+    renderPage();
+
+    await userEvent.click(await screen.findByRole('button', { name: /resume this step/i }));
+
+    // The OPERATION, not the paused interval: resume is start_operation_interval,
+    // and a call keyed on the old span would mean something reopened it.
+    await waitFor(() => expect(intervalState.resume).toHaveBeenCalledWith('op1'));
+  });
+
+  it('keeps the untimed escape hatch reachable from the resume state', async () => {
+    // `Complete without timing` is gated on the IDLE state plus a quantity. Adding
+    // a third arm to the primary button must not have narrowed that to the cold
+    // start, or an operator who paused, did the work off-clock and came back has
+    // no honest way to record it.
+    intervalState.paused = pausedOperation;
+    renderPage();
+    await screen.findByRole('button', { name: /resume this step/i });
+
+    expect(
+      screen.getByRole('button', { name: /complete without timing/i }),
+    ).toBeInTheDocument();
   });
 });

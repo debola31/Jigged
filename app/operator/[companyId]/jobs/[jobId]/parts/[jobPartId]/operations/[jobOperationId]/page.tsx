@@ -23,6 +23,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -70,16 +71,22 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
  * Undo voids the recorded completions. Loads by job_operation_id so the exact
  * step the operator chose is the one actioned.
  *
- * ONE PRIMARY BUTTON THAT CHANGES MEANING: idle it is START THIS STEP, running
- * it is RECORD <n> FINISHED. Both on screen at once was the bug — it let a step
- * be completed without ever being timed, which made the timer optional in
- * practice. There is still no pause and no resume: you stop by starting the next
- * thing or by recording the completion — those are the only two ways an interval
- * closes.
+ * ONE PRIMARY BUTTON THAT CHANGES MEANING: idle it is START THIS STEP (or RESUME
+ * THIS STEP on a step this operator paused), running it is RECORD <n> FINISHED.
+ * Both on screen at once was the bug — it let a step be completed without ever
+ * being timed, which made the timer optional in practice. Pause is therefore
+ * quiet-tertiary beside `Cancel activity`, never in the primary slot.
+ *
+ * PAUSE ARRIVED 2026-09-07 and reverses a recorded non-goal; the argument is in
+ * supabase/migrations/20260907203755. The short version: the chain expresses "I
+ * stopped doing this" only when there IS a next thing, so walking away had no
+ * honest expression — `Cancel activity` throws the minutes away and leaving it
+ * open holds the machine. Resume is a NEW span, never a reopened one, so
+ * get_operation_actuals sums them and the feed never rewrites a row.
  *
  * TIME IS RECORDED IN THE JOB FEED BELOW — a "Started …" entry when the clock
- * starts and a "Finished …" entry when it stops, each adjustable from the row
- * that shows it. The clock here is the live readout; the feed is the record.
+ * starts, and "Paused …" or "Finished …" when it stops, each adjustable from the
+ * row that shows it. The clock here is the live readout; the feed is the record.
  *
  * `Complete without timing` is the deliberate escape hatch for the operator who
  * did the work and forgot to start. It records NO interval rather than a
@@ -110,16 +117,23 @@ export default function OperatorOperationActionPage() {
   const { stationId, stationName, initializing } = useStationContext();
   const nav = useOperatorNav();
 
-  // Shared with the header strip, so the two can never disagree about whether
-  // this step is running. See OperatorIntervalContext.
+  // Shared with RunningNowPanel on the jobs list, so the two can never disagree
+  // about whether this step is running or paused. See OperatorIntervalContext.
   const {
     intervalFor,
+    pausedFor,
     start: startInterval,
+    resume: resumeInterval,
+    pause: pauseInterval,
     close: closeInterval,
     cancel: cancelInterval,
     serverSkewMs,
   } = useIntervalContext();
   const running = intervalFor(jobOperationId);
+  // A span this operator closed as `paused` with nothing later on the step. Null
+  // while something is running, by construction — the RPC excludes an operation
+  // that has an open interval — so `running` and `paused` are never both set.
+  const paused = pausedFor(jobOperationId);
 
   // Times the operator is about to record, editable before RECORD COMPLETION
   // commits them. Null until they touch Adjust — an untouched interval writes no
@@ -337,11 +351,24 @@ export default function OperatorOperationActionPage() {
    * is always on screen, so the quantity field is never standing between an
    * operator and a note, whatever number is in it.
    */
-  const primaryAction: 'start' | 'complete' | 'none' = showStart
-    ? 'start'
+  const primaryAction: 'start' | 'resume' | 'complete' | 'none' = showStart
+    ? paused
+      ? 'resume'
+      : 'start'
     : canComplete
       ? 'complete'
       : 'none';
+
+  /**
+   * `start` and `resume` are the same act with different words on it, and every
+   * branch that used to ask "is this the start arm?" means "is this idle?".
+   *
+   * Kept as a derived boolean rather than by loosening each comparison to
+   * `!== 'complete'`: the escape hatch below is gated on the idle state AND a
+   * quantity, and a future fourth arm should have to decide which of those it
+   * belongs to rather than inheriting one by accident.
+   */
+  const isIdleAction = primaryAction === 'start' || primaryAction === 'resume';
 
   /**
    * Post-write refetch that KEEPS THE SCREEN UP.
@@ -410,7 +437,7 @@ export default function OperatorOperationActionPage() {
       // THE INTERVAL CLOSES SECOND, AND ALSO NOT ATOMICALLY — same rule as the
       // note below, for the same reason. The completion is the durable
       // production fact and it has already landed. If this close then fails, the
-      // interval simply stays OPEN and turns up on the office's Still-running
+      // interval simply stays OPEN and turns up on the office's unfinished-work
       // list, which is precisely what that list exists to catch. Wrapping the
       // two in a transaction would roll back real finished work because a timing
       // row failed, which is the trade this page already refused once.
@@ -478,6 +505,62 @@ export default function OperatorOperationActionPage() {
   };
 
   /**
+   * Pick a paused step back up.
+   *
+   * Deliberately the same shape as handleStart, because it is the same write —
+   * `start_operation_interval` opens a NEW span. What differs is only the word on
+   * the button and the funnel event, and both matter: "START THIS STEP" on work
+   * you set down twenty minutes ago reads as though the app has forgotten, which
+   * is the opposite of what the feed below it is showing.
+   */
+  const handleResume = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await resumeInterval(jobOperationId);
+      // The feed gains a second "Started …" entry above the "Paused …" one. Two
+      // rows, never one that rewrites itself.
+      setFeedRefreshSignal((n) => n + 1);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  /**
+   * Stop the clock and keep the minutes — the operator is going to lunch.
+   *
+   * THE DISTINCTION FROM `Cancel activity` IS THE WHOLE POINT and the copy has to
+   * carry it: cancel DISCARDS the span, pause CLOSES it. Before this existed, an
+   * operator stepping away had to choose between throwing away real measured time
+   * and leaving a clock running on a machine nobody else could then take.
+   *
+   * NOT swallowed, for handleCancelActivity's reason: the pause IS the whole
+   * action here, so a silent failure sends the operator to lunch believing the
+   * clock stopped when it did not — and the machine stays held against everyone.
+   *
+   * No confirm dialog, unlike cancel. interaction-standards.md scales friction to
+   * consequence, and this one is reversible by the button that replaces it: pause
+   * loses nothing and RESUME is one tap away. Cancel destroys the span, which is
+   * why that one has a dialog.
+   */
+  const handlePause = async () => {
+    if (!running) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await pauseInterval(running.id);
+      setFeedRefreshSignal((n) => n + 1);
+      await reloadAll();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  /**
    * Record the completion with NO interval — the forgot-to-start path.
    *
    * Deliberately writes nothing about time rather than a backdated guess: a
@@ -503,7 +586,7 @@ export default function OperatorOperationActionPage() {
    *
    * NOT swallowed, unlike the `closeInterval` call inside handleRecord. There, a
    * failed close leaves a durable completion already written and the interval
-   * merely open, which the office Still-running card is built to catch. Here the
+   * merely open, which the office unfinished-work card is built to catch. Here the
    * cancel IS the whole action: if it fails and we say nothing, the operator walks
    * away believing the timer stopped when it did not.
    */
@@ -1214,15 +1297,26 @@ export default function OperatorOperationActionPage() {
               variant="contained"
               size="large"
               color="primary"
-              startIcon={
-                primaryAction === 'start' ? <PlayArrowIcon /> : <CheckCircleIcon />
+              startIcon={isIdleAction ? <PlayArrowIcon /> : <CheckCircleIcon />}
+              onClick={
+                primaryAction === 'resume'
+                  ? handleResume
+                  : primaryAction === 'start'
+                    ? handleStart
+                    : handleRecord
               }
-              onClick={primaryAction === 'start' ? handleStart : handleRecord}
               disabled={actionLoading || primaryAction === 'none'}
               sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
             >
               {actionLoading ? (
                 <CircularProgress size={24} />
+              ) : primaryAction === 'resume' ? (
+                // Same write as START — a new span — but not the same words.
+                // "START THIS STEP" on work you set down twenty minutes ago reads
+                // as though the app has forgotten, while the feed right below it
+                // is showing that it has not. The play icon is shared on purpose:
+                // both arms begin timing.
+                'RESUME THIS STEP'
               ) : primaryAction === 'start' ? (
                 'START THIS STEP'
               ) : primaryAction === 'complete' ? (
@@ -1252,7 +1346,7 @@ export default function OperatorOperationActionPage() {
                 Instrumented, so how often it is used is measurable: if it becomes
                 the normal path, the timer is too hard to reach and that is our
                 problem, not the operator's. */}
-            {primaryAction === 'start' && canComplete && (
+            {isIdleAction && canComplete && (
               <Button
                 fullWidth
                 variant="text"
@@ -1271,11 +1365,14 @@ export default function OperatorOperationActionPage() {
                 clock at all — see the migration header.
 
                 A SEPARATE CONDITIONAL, NOT A TERNARY WITH THE BLOCK ABOVE.
-                `primaryAction === 'start'` IS the negation of `running` today,
-                now that the note arm is gone — but the block above is also gated
-                on `canComplete` and this one is not, so a ternary would silently
+                `isIdleAction` IS the negation of `running` today, now that the
+                note arm is gone — but the block above is also gated on
+                `canComplete` and this one is not, so a ternary would silently
                 stop offering the cancel on a running step with nothing entered,
-                which is the exact case it exists for.
+                which is the exact case it exists for. (The escape hatch reads
+                `isIdleAction` rather than `primaryAction === 'start'` since
+                2026-09-07: an operator who paused, did the work off-clock and came
+                back still needs an honest way to record it.)
 
                 GATED ON `running` ALONE, deliberately not on `canComplete`. The
                 motivating case is quantity zero — nothing made, nothing typed —
@@ -1290,6 +1387,38 @@ export default function OperatorOperationActionPage() {
                 which is worth naming rather than leaving as an apparent
                 inconsistency: that control is hidden because "undo what I am
                 doing" is not what it does. Here, that is exactly what this does. */}
+            {/* PAUSE — stop the clock and KEEP the minutes.
+                It sits above Cancel activity because it is the one an operator
+                stepping away actually wants, and because the two are one letter
+                apart in consequence and must not be one tap apart in position:
+                pause closes the span, cancel destroys it.
+
+                NOT IN THE PRIMARY SLOT. The recorded mistake on this screen was
+                two primary actions on screen at once, which let a step be
+                completed without ever being timed. Pause is quiet-tertiary like
+                its neighbour, and the primary keeps saying RECORD.
+
+                NO CONFIRM DIALOG, unlike cancel. interaction-standards.md scales
+                friction to consequence: this loses nothing and RESUME replaces it
+                one tap away, where cancel discards a measured span.
+
+                Gated on `running` alone, for the same reason as the block below —
+                the case that matters most is quantity zero, where the primary is
+                disabled and these are the only live controls on the screen. */}
+            {running && (
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                startIcon={<PauseIcon />}
+                onClick={handlePause}
+                disabled={actionLoading}
+                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
+              >
+                Pause — keep my time
+              </Button>
+            )}
+
             {running && (
               <Button
                 fullWidth

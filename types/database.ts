@@ -4648,10 +4648,25 @@ export type Database = {
         Returns: string
       }
       generate_quote_number: { Args: { company_uuid: string }; Returns: string }
+      get_my_paused_operations: {
+        Args: { p_company_id: string }
+        Returns: {
+          interval_id: string
+          job_id: string
+          job_number: string
+          job_operation_id: string
+          job_part_id: string
+          operation_name: string
+          part_name: string
+          paused_at: string
+          work_center_name: string
+        }[]
+      }
       get_open_intervals: {
         Args: { p_company_id: string }
         Returns: {
           capture_source: string
+          expected_minutes: number
           interval_id: string
           job_id: string
           job_number: string
@@ -4678,6 +4693,24 @@ export type Database = {
         Args: { check_company_id: string }
         Returns: string
       }
+      get_paused_operation_ids_for_station: {
+        Args: { p_company_id: string; p_work_center_id: string }
+        Returns: string[]
+      }
+      get_paused_operations: {
+        Args: { p_company_id: string }
+        Returns: {
+          expected_minutes: number
+          interval_id: string
+          job_id: string
+          job_number: string
+          job_operation_id: string
+          operation_name: string
+          part_name: string
+          paused_at: string
+          work_center_name: string
+        }[]
+      }
       get_priceable_part_ids: {
         Args: { p_company_id: string }
         Returns: string[]
@@ -4694,6 +4727,7 @@ export type Database = {
         Args: { p_company_id: string; p_work_center_id: string }
         Returns: {
           has_open_interval: boolean
+          has_paused_interval: boolean
           job_id: string
           job_number: string
           job_operation_id: string
@@ -4838,6 +4872,10 @@ export type Database = {
           jobs_count: number
           quotes_count: number
         }[]
+      }
+      pause_operation_interval: {
+        Args: { p_interval_id: string }
+        Returns: undefined
       }
       playbook_rpc_execute_leaks: {
         Args: never

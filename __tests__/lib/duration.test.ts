@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
+  LONG_RUNNING_CEILING_MINUTES,
   elapsedMs,
   formatClockTime,
   formatDuration,
   formatStopwatch,
   intervalMs,
+  isLongRunning,
   isoToTimeInput,
+  longRunningThresholdMinutes,
   nudgeIso,
   timeInputToIso,
 } from '@/lib/duration';
@@ -175,5 +178,71 @@ describe('nudgeIso', () => {
 describe('formatClockTime', () => {
   it('is empty for an unparseable instant rather than "Invalid Date"', () => {
     expect(formatClockTime('nope')).toBe('');
+  });
+});
+
+
+/**
+ * The overrun rule, in one sentence: flagged after six hours, or sooner if the
+ * step was estimated at under two.
+ *
+ * Six hours used to be the whole rule, as a local constant on the office card. It
+ * could not tell a 20-minute deburr left running over lunch from a 5-hour EDM burn
+ * doing exactly what it should, so the short job was invisible for five and a half
+ * hours. The factor and the floor are judgements rather than findings and should
+ * be retuned against the `running timer discarded` rate; these tests pin the
+ * SHAPE, which is what a retune must not break.
+ */
+describe('longRunningThresholdMinutes', () => {
+  it('falls back to the flat ceiling when the step carries no estimate', () => {
+    // 0, not null, is what the RPC sends for a step with neither estimate column
+    // set — which is ordinary. The branch is `> 0` for exactly this.
+    expect(longRunningThresholdMinutes(0)).toBe(LONG_RUNNING_CEILING_MINUTES);
+    expect(longRunningThresholdMinutes(null)).toBe(LONG_RUNNING_CEILING_MINUTES);
+    expect(longRunningThresholdMinutes(undefined)).toBe(LONG_RUNNING_CEILING_MINUTES);
+  });
+
+  it('flags a short step at three times its estimate', () => {
+    // The 40-minute step is the case the flat rule missed for five hours.
+    expect(longRunningThresholdMinutes(40)).toBe(120);
+  });
+
+  it('never flags before an hour, however short the step', () => {
+    // Without the floor a five-minute deburr flags at fifteen minutes, and the
+    // office learns to ignore the flag — the most likely way this rule fails.
+    expect(longRunningThresholdMinutes(5)).toBe(60);
+    expect(longRunningThresholdMinutes(1)).toBe(60);
+  });
+
+  it('never waits longer than the flat ceiling, however long the step', () => {
+    // A step estimated at eight hours would otherwise get a full day before
+    // anyone was told, which is past the point the correction is a recall
+    // estimate rather than a memory.
+    expect(longRunningThresholdMinutes(480)).toBe(LONG_RUNNING_CEILING_MINUTES);
+  });
+
+  it('treats a nonsense estimate as no estimate rather than throwing', () => {
+    expect(longRunningThresholdMinutes(Number.NaN)).toBe(LONG_RUNNING_CEILING_MINUTES);
+    expect(longRunningThresholdMinutes(-30)).toBe(LONG_RUNNING_CEILING_MINUTES);
+  });
+});
+
+describe('isLongRunning', () => {
+  const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000).toISOString();
+
+  it('flags a 20-minute step running two hours', () => {
+    expect(isLongRunning(hoursAgo(2), 20)).toBe(true);
+  });
+
+  it('leaves a 5-hour step running four hours alone', () => {
+    expect(isLongRunning(hoursAgo(4), 300)).toBe(false);
+  });
+
+  it('uses the flat ceiling when no estimate is passed — the operator-side form', () => {
+    // The operator surface calls it this way ON PURPOSE. An estimate-derived flag
+    // beside a live clock is the adjacent comparison the surveillance guardrail
+    // refuses, and a forgotten timer is an absolute-duration fact anyway.
+    expect(isLongRunning(hoursAgo(5))).toBe(false);
+    expect(isLongRunning(hoursAgo(7))).toBe(true);
   });
 });

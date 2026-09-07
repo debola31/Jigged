@@ -18,12 +18,30 @@ import {
   Divider,
   Typography,
 } from '@mui/material';
-import { getOpenIntervals, voidOpenIntervalsForOperation } from '@/utils/operationIntervalsAccess';
-import { elapsedMs, formatClockTime, formatDuration } from '@/lib/duration';
-import type { OpenInterval } from '@/types/operationInterval';
+import {
+  getOpenIntervals,
+  getPausedOperations,
+  voidOpenIntervalsForOperation,
+} from '@/utils/operationIntervalsAccess';
+import {
+  LONG_RUNNING_CEILING_MINUTES,
+  elapsedMs,
+  formatClockTime,
+  formatDuration,
+  longRunningThresholdMinutes,
+} from '@/lib/duration';
+import type { OpenInterval, PausedOperation } from '@/types/operationInterval';
 
 /**
- * Work whose timer is still running, oldest first.
+ * Work the shop started and has not finished — running clocks, and paused steps.
+ *
+ * RENAMED FROM StillRunningCard 2026-09-07, because its subject widened. Running
+ * timers were the whole of "unfinished" while the only way to stop one was to
+ * finish the step; once an operator can PAUSE (20260907203755), a step can be set
+ * down and forgotten with no clock ticking on it at all. The recorded objection to
+ * pause was precisely "a paused state is one more thing to remember to undo", and
+ * the second group below is the answer to it — without it, Pause would be a
+ * control that hides the work it is used on.
  *
  * THIS IS THE FORGOTTEN-STOP CHANNEL, and it is the office's job rather than the
  * operator's for a reason that is structural rather than preference. A web page
@@ -59,14 +77,32 @@ import type { OpenInterval } from '@/types/operationInterval';
  * enforced in the schema and not by this component's restraint. Whose it was is
  * a separate question, answered by an admin-gated function that logs the ask.
  */
-// Lowered 12 -> 6 on 2026-08-26. Twelve hours meant a timer started at 4pm was not
-// flagged until 4am, i.e. the office never saw the warning on the day the work
-// happened; six catches an overnight leave-running by the next morning. Defined once
-// and interpolated into the banner copy below, so the sentence follows the number.
-const STALE_HOURS = 6;
+/**
+ * The staleness rule moved to lib/duration.ts on 2026-09-07 and gained a middle
+ * term. It used to be this file's `STALE_HOURS = 6` and nothing else — lowered
+ * from 12 on 2026-08-26 because a timer started at 4pm was not flagged until 4am,
+ * so the office never saw the warning on the day the work happened.
+ *
+ * Six hours is now the CEILING rather than the whole rule: a step estimated at
+ * under two hours is flagged at three times its estimate instead, floored at one
+ * hour. A 20-minute deburr left running over lunch used to be indistinguishable
+ * from a 5-hour EDM burn doing exactly what it should, for five and a half hours.
+ *
+ * `expected_minutes` arrives as 0, not null, when the step carries no estimate,
+ * and 0 selects the flat ceiling. See `longRunningThresholdMinutes`.
+ */
+const STALE_HOURS = LONG_RUNNING_CEILING_MINUTES / 60;
 
-export default function StillRunningCard({ companyId }: { companyId: string }) {
+/** How long this row has been unfinished, and whether that is longer than it should be. */
+function overrun(since: string, expectedMinutes: number) {
+  const ms = elapsedMs(since);
+  const thresholdMinutes = longRunningThresholdMinutes(expectedMinutes);
+  return { ms, isLong: ms > thresholdMinutes * 60_000 };
+}
+
+export default function UnfinishedWorkCard({ companyId }: { companyId: string }) {
   const [rows, setRows] = useState<OpenInterval[]>([]);
+  const [paused, setPaused] = useState<PausedOperation[]>([]);
   const [loaded, setLoaded] = useState(false);
   // The row whose Stop is being confirmed. Discarding measured time is not
   // undoable — `voided_at` has no inverse — so it is a confirm, per
@@ -79,14 +115,18 @@ export default function StillRunningCard({ companyId }: { companyId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    getOpenIntervals(companyId)
-      .then((data) => {
-        if (!cancelled) setRows(data);
-      })
-      .catch(() => {
-        // Silent: this is a supplementary panel, and an error banner on the
-        // dashboard for a list that is empty most days is worse than its
-        // absence. The `.rpc()` call site has already reported to Sentry.
+    // allSettled, not all: the two lists answer different questions, and a failure
+    // on one must not blank the other. A running clock nobody can stop is the more
+    // urgent of the two, so losing it because the paused read failed would be the
+    // wrong trade.
+    Promise.allSettled([getOpenIntervals(companyId), getPausedOperations(companyId)])
+      .then(([open, pausedResult]) => {
+        if (cancelled) return;
+        if (open.status === 'fulfilled') setRows(open.value);
+        if (pausedResult.status === 'fulfilled') setPaused(pausedResult.value);
+        // Silent on rejection: this is a supplementary panel, and an error banner
+        // on the dashboard for a list that is empty most days is worse than its
+        // absence. Both `.rpc()` call sites have already reported to Sentry.
       })
       .finally(() => {
         if (!cancelled) setLoaded(true);
@@ -118,31 +158,71 @@ export default function StillRunningCard({ companyId }: { companyId: string }) {
     }
   };
 
-  // Nothing running is the normal state on most days and takes no space.
-  if (!loaded || rows.length === 0) return null;
+  // Nothing unfinished is the normal state on most days and takes no space.
+  if (!loaded || (rows.length === 0 && paused.length === 0)) return null;
 
-  const stale = rows.filter((r) => elapsedMs(r.started_at) > STALE_HOURS * 3_600_000);
+  // Counted across BOTH groups: the banner's job is to say how much of this card
+  // needs a decision, and a forgotten pause needs one as much as a forgotten clock.
+  const stale = [
+    ...rows.filter((r) => overrun(r.started_at, r.expected_minutes).isLong),
+    ...paused.filter((r) => overrun(r.paused_at, r.expected_minutes).isLong),
+  ];
 
   return (
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>
-          Still running
+          Unfinished on the floor
         </Typography>
 
         {stale.length > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {/* Says what to DO, not who to blame. The times are wrong until
                 somebody who was there says when the work actually stopped —
-                which is a question, not an accusation. */}
-            {stale.length === 1 ? 'One of these has' : `${stale.length} of these have`} been open
-            more than {STALE_HOURS} hours. Nothing is auto-stopped, so the recorded time stays out
-            of every total until someone confirms when the work finished.
+                which is a question, not an accusation.
+
+                THE THRESHOLD IS STATED because it is no longer one number. A
+                reader seeing a 40-minute step flagged and a 5-hour one not would
+                otherwise conclude the card is arbitrary. */}
+            {stale.length === 1 ? 'One of these has' : `${stale.length} of these have`} been
+            sitting longer than the step should take — flagged after {STALE_HOURS} hours, or
+            sooner on a step estimated at under two. Nothing is auto-stopped, so any recorded
+            time stays out of every total until someone confirms when the work finished.
           </Alert>
         )}
 
-        {rows.map((row, i) => (
-          <Box key={row.interval_id}>
+        {rows.length > 0 && paused.length > 0 && (
+          // The group labels appear only when both groups do. With one group the
+          // card heading and the rows already say which it is, and a lone
+          // "Running" subhead under "Unfinished on the floor" is a label for a
+          // distinction that is not being drawn.
+          <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>
+            Running
+          </Typography>
+        )}
+
+        {rows.map((row, i) => {
+          const { ms, isLong } = overrun(row.started_at, row.expected_minutes);
+          return (
+          <Box
+            key={row.interval_id}
+            sx={{
+              // Amber means BEHIND, not broken — docs/design-system.md. Red stays
+              // for things that are actually wrong, and a timer running long is a
+              // question rather than a fault. No green counterpart: colouring the
+              // healthy rows would make this a scoreboard, which is the same
+              // objection OperationCard.tsx records against grading actual
+              // against estimate.
+              ...(isLong && {
+                borderLeft: '3px solid',
+                borderColor: 'warning.main',
+                bgcolor: 'rgba(245, 158, 11, 0.08)',
+                pl: 1.5,
+                py: 1,
+                borderRadius: 0.5,
+              }),
+            }}
+          >
             {i > 0 && <Divider sx={{ my: 1.5 }} />}
             <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
               {/* `?op=` SCROLLS TO AND HIGHLIGHTS THE EXACT STEP (OperationsPanel
@@ -170,11 +250,22 @@ export default function StillRunningCard({ companyId }: { companyId: string }) {
               )}
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-              <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+              <Typography
+                variant="caption"
+                sx={{ flex: 1, color: isLong ? 'warning.light' : 'text.secondary' }}
+              >
                 {row.work_center_name ? `${row.work_center_name} · ` : ''}
                 since {formatClockTime(row.started_at)}
                 {' · '}
-                {formatDuration(elapsedMs(row.started_at))} so far
+                {formatDuration(ms)} so far
+                {/* THE REASON, on flagged rows only. Without it the amber is a
+                    mood; with it the reader can judge whether the flag is fair —
+                    which matters most when it is not, because that is the row
+                    where the estimate needs fixing rather than the clock.
+                    Suppressed when the step has no estimate, where the flat
+                    ceiling did the flagging and "est. 0m" would be a lie. */}
+                {isLong && row.expected_minutes > 0 &&
+                  ` · est. ${formatDuration(row.expected_minutes * 60_000)}`}
               </Typography>
               {/* LOW-EMPHASIS, and it earns that: on most rows the right answer
                   is to leave it alone and let the operator close it themselves.
@@ -187,7 +278,71 @@ export default function StillRunningCard({ companyId }: { companyId: string }) {
               </Button>
             </Box>
           </Box>
-        ))}
+          );
+        })}
+
+        {paused.length > 0 && (
+          <Box sx={{ mt: rows.length > 0 ? 2.5 : 0 }}>
+            {rows.length > 0 && (
+              <Typography variant="overline" sx={{ color: 'text.secondary', display: 'block' }}>
+                Paused
+              </Typography>
+            )}
+            {paused.map((row, i) => {
+              const { ms, isLong } = overrun(row.paused_at, row.expected_minutes);
+              return (
+                <Box
+                  key={row.interval_id}
+                  sx={{
+                    ...(isLong && {
+                      borderLeft: '3px solid',
+                      borderColor: 'warning.main',
+                      bgcolor: 'rgba(245, 158, 11, 0.08)',
+                      pl: 1.5,
+                      py: 1,
+                      borderRadius: 0.5,
+                    }),
+                  }}
+                >
+                  {i > 0 && <Divider sx={{ my: 1.5 }} />}
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+                    <Typography
+                      component={Link}
+                      href={`/dashboard/${companyId}/jobs/${row.job_id}?op=${row.job_operation_id}`}
+                      variant="body2"
+                      sx={{ fontWeight: 600, textDecoration: 'none', color: 'primary.light' }}
+                    >
+                      {row.job_number}
+                    </Typography>
+                    <Typography variant="body2">
+                      {row.operation_name}
+                      {row.part_name ? ` · ${row.part_name}` : ''}
+                    </Typography>
+                  </Box>
+                  {/* NO STOP BUTTON, and its absence is the design rather than an
+                      omission to fill in later. Stop discards a RUNNING clock,
+                      which is a correction only the office can make because the
+                      owner has gone home. A paused span is already closed: its
+                      minutes are recorded and correct, the work centre is free,
+                      and there is nothing here to stop. What this row needs is
+                      somebody to pick the work back up or cancel the job, and
+                      both of those live on the job. */}
+                  <Typography
+                    variant="caption"
+                    sx={{ display: 'block', color: isLong ? 'warning.light' : 'text.secondary' }}
+                  >
+                    {row.work_center_name ? `${row.work_center_name} · ` : ''}
+                    paused {formatClockTime(row.paused_at)}
+                    {' · '}
+                    {formatDuration(ms)} ago
+                    {isLong && row.expected_minutes > 0 &&
+                      ` · est. ${formatDuration(row.expected_minutes * 60_000)}`}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
       </CardContent>
 
       <Dialog open={stopping !== null} onClose={() => (stopBusy ? undefined : setStopping(null))} maxWidth="xs" fullWidth>

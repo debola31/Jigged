@@ -53,7 +53,10 @@ vi.mock('@sentry/nextjs', () => ({ captureException: (...a: unknown[]) => captur
 import {
   adjustOperationInterval,
   closeOperationInterval,
+  getMyPausedOperations,
   getOperationActuals,
+  getPausedOperations,
+  pauseOperationInterval,
   startOperationInterval,
   voidOpenIntervalsForOperation,
 } from '@/utils/operationIntervalsAccess';
@@ -265,6 +268,88 @@ describe('voidOpenIntervalsForOperation', () => {
       error: { code: '42501', message: 'Only an admin can discard a running timer' },
     };
     await expect(voidOpenIntervalsForOperation('op-1')).rejects.toThrow();
+    expect(captureException).toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * Pause — the 2026-09-07 reversal of the "No pause / resume" non-goal.
+ *
+ * The distinction these hold in place is against `cancelOperationInterval`, which
+ * is one letter apart in the UI and the opposite in effect: cancel VOIDS the span
+ * and discards its minutes, pause CLOSES it and keeps them. They call different
+ * RPCs, and a swap would be invisible on screen until someone went looking for
+ * time that no longer existed.
+ */
+describe('pauseOperationInterval', () => {
+  it('calls the pause RPC with the interval id, not the operation id', async () => {
+    await pauseOperationInterval('iv1');
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe('pause_operation_interval');
+    expect(rpcCalls[0].args).toEqual({ p_interval_id: 'iv1' });
+  });
+
+  it('sends no reason, because pause does not ask the operator to classify a stop', async () => {
+    // `done_for_day` / `left_running` were built and removed on 2026-08-18 for
+    // exactly that reason, and pause is not their return.
+    await pauseOperationInterval('iv1');
+
+    expect(rpcCalls[0].args).not.toHaveProperty('p_close_reason');
+    expect(rpcCalls[0].args).not.toHaveProperty('p_reason');
+  });
+
+  it('reports by hand and throws a real Error carrying the DB reason', async () => {
+    responses['pause_operation_interval'] = {
+      data: null,
+      error: { code: 'P0001', message: 'You can only pause an activity you started' },
+    };
+
+    await expect(pauseOperationInterval('iv1')).rejects.toThrow(/only pause an activity you started/i);
+    await expect(pauseOperationInterval('iv1')).rejects.toBeInstanceOf(Error);
+    expect(captureException).toHaveBeenCalled();
+  });
+});
+
+describe('the paused readers', () => {
+  it('reads the caller\'s own paused steps by company', async () => {
+    responses['get_my_paused_operations'] = { data: [{ interval_id: 'iv1' }], error: null };
+
+    const rows = await getMyPausedOperations('co1');
+
+    expect(rpcCalls[0]).toEqual({
+      fn: 'get_my_paused_operations',
+      args: { p_company_id: 'co1' },
+    });
+    expect(rows).toHaveLength(1);
+  });
+
+  it('reads the office list through a different function than the operator one', async () => {
+    // Not a style point. The office function returns expected_minutes and the
+    // operator one must not: an estimate-derived figure beside a live clock is the
+    // comparison the surveillance guardrail refuses. One function serving both
+    // would put the choice in a caller's hands instead of the schema's.
+    responses['get_paused_operations'] = { data: [], error: null };
+
+    await getPausedOperations('co1');
+
+    expect(rpcCalls[0].fn).toBe('get_paused_operations');
+  });
+
+  it('returns an empty list rather than null when nothing is paused', async () => {
+    responses['get_my_paused_operations'] = { data: null, error: null };
+
+    expect(await getMyPausedOperations('co1')).toEqual([]);
+  });
+
+  it('throws a friendly error when the office read fails', async () => {
+    responses['get_paused_operations'] = {
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    };
+
+    await expect(getPausedOperations('co1')).rejects.toThrow();
     expect(captureException).toHaveBeenCalled();
   });
 });

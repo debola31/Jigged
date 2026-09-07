@@ -10,25 +10,35 @@ import {
   cancelOperationInterval,
   closeOperationInterval,
   getMyOpenIntervals,
+  getMyPausedOperations,
+  pauseOperationInterval,
   startOperationInterval,
 } from '@/utils/operationIntervalsAccess';
-import type { IntervalAdjustment, OperationIntervalWithContext } from '@/types/operationInterval';
+import type {
+  IntervalAdjustment,
+  MyPausedOperation,
+  OperationIntervalWithContext,
+} from '@/types/operationInterval';
 
 /**
  * The operator's open intervals.
  *
- * CORRECTED 2026-08-26. This docblock used to say the context existed "because two
- * surfaces have to agree: the strip renders on every screen…". There is no strip
- * — it was withdrawn 2026-08-17, and `useIntervalContext` has exactly ONE consumer,
- * the step screen. The stale claim mattered: it described a shared-state problem
- * that no longer exists, and a reader trusting it would look for a second consumer
- * that is not there.
+ * TWO CONSUMERS AGAIN since 2026-09-07: the step screen, and RunningNowPanel on
+ * the jobs list. A note for whoever reads the history — the 2026-08-26 correction
+ * here said there was exactly ONE consumer because the header strip had been
+ * withdrawn, and that was true when written. The panel is NOT that strip back: the
+ * strip lived in the shell and duplicated a single step screen's own clock, where
+ * this renders on ONE page and answers a question the step screen structurally
+ * cannot — "what else am I holding?" — which only has an answer because the chain
+ * keys on the work centre. The half of the withdrawal that stands is that no
+ * step-level CONTROL may leave the step screen, and an E2E assertion still watches
+ * for that.
  *
- * IT REMAINS A CONTEXT, for the reason that outlived the strip: the list is a
- * cross-cutting fact about the operator rather than about the step being viewed —
- * one operator legitimately holds several open intervals, on steps they are not
- * currently looking at — and the request-id guard plus the visibility refresh below
- * are worth owning once rather than re-deriving per mount.
+ * IT REMAINS A CONTEXT for the reason that outlived the strip and now has a second:
+ * the lists are a cross-cutting fact about the operator rather than about the step
+ * being viewed — one operator legitimately holds several open intervals, on steps
+ * they are not currently looking at — and the request-id guard plus the visibility
+ * refresh below are worth owning once rather than re-deriving per mount.
  *
  * `openIntervals` IS A LIST, not one row. One operator legitimately holds several
  * — three spindles is a normal Tuesday — because the chain is per work centre,
@@ -53,6 +63,16 @@ function bucketElapsed(ms: number): string {
 interface IntervalContextValue {
   openIntervals: OperationIntervalWithContext[];
   /**
+   * Steps the operator paused and has not resumed.
+   *
+   * A SEPARATE LIST rather than a flag on `openIntervals`, because a paused span
+   * is closed — it holds no work centre, contributes a finished duration, and is
+   * not something the elapsed clock should tick on. Merging them would need every
+   * consumer to branch anyway, and the one that forgot would render a running
+   * clock on work that stopped hours ago.
+   */
+  pausedOperations: MyPausedOperation[];
+  /**
    * `server_now − Date.now()` from the last start. Elapsed time must be rendered
    * as `(Date.now() + serverSkewMs) − started_at`, never from a tick count: a
    * backgrounded mobile tab is throttled or suspended, so a counter comes back
@@ -62,7 +82,17 @@ interface IntervalContextValue {
   loading: boolean;
   /** The open interval on this operation, if the operator has one. */
   intervalFor: (jobOperationId: string) => OperationIntervalWithContext | null;
+  /** The operator's unresumed pause on this operation, if there is one. */
+  pausedFor: (jobOperationId: string) => MyPausedOperation | null;
   start: (jobOperationId: string) => Promise<void>;
+  /**
+   * Pick a paused step back up. Deliberately `start_operation_interval` under the
+   * hood — a new span, not a reopened one — with its own capture so the funnel can
+   * tell a resume from a cold start.
+   */
+  resume: (jobOperationId: string) => Promise<void>;
+  /** Close a running span as paused, keeping its minutes. */
+  pause: (intervalId: string) => Promise<void>;
   close: (intervalId: string, completionId?: string | null, adjustment?: IntervalAdjustment) => Promise<void>;
   /** Discard a running interval outright — see `cancelOperationInterval`. */
   cancel: (intervalId: string) => Promise<void>;
@@ -71,10 +101,14 @@ interface IntervalContextValue {
 
 const IntervalContext = createContext<IntervalContextValue>({
   openIntervals: [],
+  pausedOperations: [],
   serverSkewMs: 0,
   loading: true,
   intervalFor: () => null,
+  pausedFor: () => null,
   start: async () => {},
+  resume: async () => {},
+  pause: async () => {},
   close: async () => {},
   cancel: async () => {},
   refresh: async () => {},
@@ -104,13 +138,35 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
   const {
     data,
     loading,
-    reload: refresh,
+    reload: refreshOpen,
   } = useLoad(() => getMyOpenIntervals(companyId), [companyId]);
+
+  /**
+   * A SECOND load rather than one call returning both, and the reason is the
+   * failure mode rather than tidiness: these have different blast radii. A failed
+   * open-interval read leaves the step screen showing START on a step that is
+   * running, which the next action corrects. A failed paused read costs a list
+   * entry. Merging them makes the cheap failure take out the expensive one.
+   */
+  const { data: pausedData, reload: refreshPaused } = useLoad(
+    () => getMyPausedOperations(companyId),
+    [companyId],
+  );
 
   // Memoised: `data ?? []` allocates a new array every render, which would make
   // the `intervalFor` callback below change identity on every render and defeat
   // its memoisation in every consumer.
   const openIntervals = useMemo(() => data ?? [], [data]);
+  const pausedOperations = useMemo(() => pausedData ?? [], [pausedData]);
+
+  /**
+   * Both lists move together on every write — pausing removes an open interval AND
+   * adds a paused one, resuming does the reverse — so no caller should have to
+   * remember to refresh the other half.
+   */
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshOpen(), refreshPaused()]);
+  }, [refreshOpen, refreshPaused]);
 
   /**
    * Re-read when the tab comes back to the foreground.
@@ -184,15 +240,83 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
     [refresh, openIntervals],
   );
 
+  /**
+   * Close a running span as paused.
+   *
+   * `elapsed_bucket` AND NOT AN ELAPSED FIGURE, for the reason spelled out on
+   * `cancel` below: the product question is whether pauses are short breaks or
+   * end-of-shift, and a coarse bucket answers it. A raw per-person duration in
+   * PostHog is the thing the surveillance guardrail is about.
+   *
+   * Read from `openIntervals` BEFORE the await, because after it resolves the row
+   * has moved to the paused list and the bucket would be computed from nothing.
+   */
+  const pause = useCallback(
+    async (intervalId: string) => {
+      const row = openIntervals.find((i) => i.id === intervalId);
+      const elapsedBucket = row ? bucketElapsed(elapsedMs(row.effective_started_at)) : 'unknown';
+
+      await pauseOperationInterval(intervalId);
+      posthog.capture('time interval paused', {
+        elapsed_bucket: elapsedBucket,
+      });
+      await refresh();
+    },
+    [refresh, openIntervals],
+  );
+
+  /**
+   * Pick a paused step back up.
+   *
+   * Calls `startOperationInterval`, exactly like `start` — resume IS a start, on a
+   * step that already has spans. It is a separate function here only so the funnel
+   * can tell the two apart, and so `paused_bucket` can be read before the row
+   * leaves the list. `had_open_interval` is not captured: it belongs to the
+   * question `start` exists to answer, and repeating it here would double-count.
+   */
+  const resume = useCallback(
+    async (jobOperationId: string) => {
+      const row = pausedOperations.find((pausedRow) => pausedRow.job_operation_id === jobOperationId);
+      const pausedBucket = row ? bucketElapsed(elapsedMs(row.paused_at)) : 'unknown';
+
+      const running = await startOperationInterval(jobOperationId);
+      setServerSkewMs(running.serverSkewMs);
+      posthog.capture('time interval resumed', {
+        paused_bucket: pausedBucket,
+      });
+      await refresh();
+    },
+    [refresh, pausedOperations],
+  );
+
   const intervalFor = useCallback(
     (jobOperationId: string) =>
       openIntervals.find((i) => i.job_operation_id === jobOperationId) ?? null,
     [openIntervals],
   );
 
+  const pausedFor = useCallback(
+    (jobOperationId: string) =>
+      pausedOperations.find((row) => row.job_operation_id === jobOperationId) ?? null,
+    [pausedOperations],
+  );
+
   return (
     <IntervalContext.Provider
-      value={{ openIntervals, serverSkewMs, loading, intervalFor, start, close, cancel, refresh }}
+      value={{
+        openIntervals,
+        pausedOperations,
+        serverSkewMs,
+        loading,
+        intervalFor,
+        pausedFor,
+        start,
+        resume,
+        pause,
+        close,
+        cancel,
+        refresh,
+      }}
     >
       {children}
     </IntervalContext.Provider>

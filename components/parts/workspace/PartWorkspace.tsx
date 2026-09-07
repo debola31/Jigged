@@ -47,7 +47,7 @@ const EMPTY_CONVERSIONS: PartUnitConversion[] = [];
 /**
  * The part workspace: a maturity-adaptive record that leads with the
  * type-specific setup (Workspace tab) and surfaces accumulating record data
- * (Inventory, Usage) as deep-linkable tabs under a sticky identity header.
+ * (Storage, Usage) as deep-linkable tabs under a sticky identity header.
  *
  * This is the orchestrator — it owns the data fetch, refresh keys, breadcrumb
  * chain, completeness/priceability signal, the transaction + delete modals,
@@ -111,7 +111,7 @@ export default function PartWorkspace({
   // Bumped after each stock transaction so the history table reloads.
   const [transactionsRefreshKey, setTransactionsRefreshKey] = useState(0);
 
-  // Inline conversion edits from the Inventory tab take precedence over the
+  // Inline conversion edits from the Storage tab take precedence over the
   // seed fetched on load (the editor owns the live list once it mounts). Reset
   // to null on a fresh part (partId-change remounts this component anyway).
   const [conversionsOverride, setConversionsOverride] = useState<PartUnitConversion[] | null>(null);
@@ -285,7 +285,12 @@ export default function PartWorkspace({
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
     // Unconditional since is_stocked was dropped: every part is stockable, so every part
     // has somewhere its stock lives — even when that is 0 at the Unassigned bucket.
-    tabs.push({ slug: 'inventory', label: 'Inventory' });
+    //
+    // Labelled "Storage", the name this area has carried since #622 folded
+    // /inventory into Parts. The slug stays 'inventory' so existing ?tab=inventory
+    // links keep working — the same treatment 'history' gets for the Activity tab
+    // two lines down.
+    tabs.push({ slug: 'inventory', label: 'Storage' });
     tabs.push({ slug: 'usage', label: 'Usage' });
     tabs.push({ slug: 'files', label: 'Files' });
     // Slug stays 'history' so existing ?tab=history deep links keep working.

@@ -54,7 +54,7 @@ const emptyDraft: DraftConversion = { from_unit: '', to_primary_factor: '' };
 const EMPTY_CONVERSIONS: PartUnitConversion[] = [];
 
 /**
- * Inline editor for part unit conversions. Lives in the Inventory panel of
+ * Inline editor for part unit conversions. Lives in the Storage panel of
  * the part detail page (chunk 14 moved unit-conversion editing out of the
  * Part create/edit form — they're a property of an existing part).
  *

@@ -13,6 +13,8 @@ const mockUpdatePartCostingBatchQuantity = vi.fn();
 const mockAddPartPricingNote = vi.fn();
 const mockGetCurrentMember = vi.fn();
 const mockGetCompany = vi.fn();
+const mockGetAllVendors = vi.fn();
+const mockUpdatePartPreferredVendor = vi.fn();
 
 vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersForPart: (...a: unknown[]) => mockGetTiersForPart(...a),
@@ -30,6 +32,10 @@ vi.mock('@/utils/partsAccess', () => ({
   updatePartCostingBatchQuantity: (...a: unknown[]) =>
     mockUpdatePartCostingBatchQuantity(...a),
   addPartPricingNote: (...a: unknown[]) => mockAddPartPricingNote(...a),
+  updatePartPreferredVendor: (...a: unknown[]) => mockUpdatePartPreferredVendor(...a),
+}));
+vi.mock('@/utils/vendorsAccess', () => ({
+  getAllVendors: (...a: unknown[]) => mockGetAllVendors(...a),
 }));
 vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: (...a: unknown[]) => mockGetCurrentMember(...a),
@@ -79,11 +85,31 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
       default_markup_made_percent: 0,
       default_markup_bought_percent: 0,
     });
+    mockGetAllVendors.mockResolvedValue([{ id: 'v1', name: 'Atlas Metals Supply' }]);
+    mockUpdatePartPreferredVendor.mockResolvedValue(undefined);
   });
 
   /** The Min qty box for the first tier row. */
   const minQtyInput = async (): Promise<HTMLElement> =>
     (await screen.findAllByRole('textbox'))[0];
+
+  it('puts the preferred vendor in the Pricing card for a bought part', async () => {
+    // It used to be its own card above this one. Cost lives here now, and the
+    // vendor is the supplier of that cost, so it belongs beside it rather than
+    // floating above as a card of its own.
+    const bought = { ...part, source: 'bought' } as Part;
+    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
+
+    expect(await screen.findByLabelText(/preferred vendor/i)).toBeInTheDocument();
+  });
+
+  it('shows no vendor picker on a made part', async () => {
+    // A made part is not bought from anyone; its base is the routing + BOM rollup.
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await waitFor(async () => expect(await minQtyInput()).toHaveValue('100'));
+    expect(screen.queryByLabelText(/preferred vendor/i)).toBeNull();
+  });
 
   it('renders the ladder low break first, whatever order the rows arrive in', async () => {
     // A ladder reads bottom-up. Rows come back ordered by `sequence`, which need
@@ -446,6 +472,8 @@ describe('PartPricing — the starting-markup caption', () => {
       default_markup_made_percent: 0,
       default_markup_bought_percent: 0,
     });
+    mockGetAllVendors.mockResolvedValue([{ id: 'v1', name: 'Atlas Metals Supply' }]);
+    mockUpdatePartPreferredVendor.mockResolvedValue(undefined);
   });
 
   it('never writes a tier — this card only saves when the user says so', async () => {

@@ -68,7 +68,7 @@ permissions:
 
 jobs:
   alias:
-    # Production deployments own www.jigged.app and must never move this domain —
+    # Production deployments own jigged.app and must never move this domain —
     # which is the whole point of binding it to a branch. `state` also filters out
     # the pending/failure/error statuses that fire for the same deployment.
     if: >-

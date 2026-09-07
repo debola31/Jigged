@@ -447,13 +447,15 @@ async def webhook(request: Request):
     event names, and qb_invoices_stale_since on the connection for Payment and
     CreditMemo events, whose payloads name only the payment or memo id.
 
-    THE PRODUCTION ENDPOINT MUST BE REGISTERED ON
-    https://www.jigged.app/api/quickbooks/webhook — never the apex. Vercel answers
-    https://jigged.app/… with a 307 from its edge router, BEFORE this function is
-    invoked, so a misregistration fails with nothing for Sentry to see. That is
-    as-built history, not caution: the Stripe endpoint was registered on the apex and
-    every live event failed for five days (docs/modules/billing.md § "The production
-    webhook URL must be www.jigged.app"). A GET here answers 405 automatically —
+    THE PRODUCTION ENDPOINT MUST BE REGISTERED ON THE CANONICAL HOST,
+    https://jigged.app/api/quickbooks/webhook — never www. Vercel serves the apex and
+    answers https://www.jigged.app/… with a 307 from its edge router, BEFORE this
+    function is invoked, so a misregistration fails with nothing for Sentry to see.
+    That is as-built history, not caution: the Stripe endpoint was registered on the
+    redirecting host and every live event failed for five days (docs/modules/billing.md
+    § "The production webhook URL"). The two hosts swapped roles in #695 and the rule
+    did not change — register on whichever answers 200, and move this endpoint in the
+    same change if it ever swaps again. A GET here answers 405 automatically —
     route reachable, method not allowed — which is what an uptime probe asserts, and
     it never reaches the signature path so the probe files no events.
     """

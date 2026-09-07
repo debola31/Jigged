@@ -6,7 +6,7 @@ import { createClient } from '@/utils/supabase/server';
  * First-party email-link confirmation.
  *
  * Invite (and, later, other) auth emails point here —
- * https://www.jigged.app/auth/confirm?token_hash=…&type=invite&next=/accept-invite/<id>
+ * https://jigged.app/auth/confirm?token_hash=…&type=invite&next=/accept-invite/<id>
  * — instead of the raw Supabase verify endpoint, so the visible link is
  * first-party. We exchange the one-time `token_hash` for a session server-side
  * (setting the auth cookies the browser client reads), then forward to `next`.

@@ -14,7 +14,7 @@ const CO = '71000000-0000-0000-0000-000000000002';
 const OTHER_CO = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const LOC = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
 const PART = '99999999-8888-7777-6666-555555555555';
-const ORIGIN = 'https://www.jigged.app';
+const ORIGIN = 'https://jigged.app';
 
 /**
  * The round trip: what we print, we can read, and it goes to the right place.

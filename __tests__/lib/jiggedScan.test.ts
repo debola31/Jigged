@@ -26,7 +26,7 @@ const OTHER_CO = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const LOC = '99999999-8888-7777-6666-555555555555';
 const PART = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
 
-const ORIGIN = 'https://www.jigged.app';
+const ORIGIN = 'https://jigged.app';
 const location: JiggedScan = { kind: 'location', companyId: CO, locationId: LOC };
 const traveler: JiggedScan = { kind: 'traveler', companyId: CO, jobPartId: PART };
 
@@ -77,9 +77,13 @@ describe('buildScanUrl', () => {
     expect(url).toMatch(/^[0-9A-Z $%*+\-./:]+$/);
   });
 
-  it('is 77 characters against the canonical origin', () => {
-    expect(buildScanUrl(location, ORIGIN)).toHaveLength(77);
-    expect(buildScanUrl(traveler, ORIGIN)).toHaveLength(77);
+  // 73 = 18 (`https://jigged.app`) + 3 (`/T/`) + 26 + 26. Fixed-length by construction, so this
+  // only moves when the origin does — it was 77 while `www.` was canonical (#695). Both ceilings
+  // in `qrVersionCeiling.test.ts` are what this number actually has to respect; the tighter is 84
+  // alphanumeric characters, for the location label at EC H.
+  it('is 73 characters against the canonical origin', () => {
+    expect(buildScanUrl(location, ORIGIN)).toHaveLength(73);
+    expect(buildScanUrl(traveler, ORIGIN)).toHaveLength(73);
   });
 
   it('distinguishes the two kinds by path segment only', () => {
@@ -88,7 +92,7 @@ describe('buildScanUrl', () => {
   });
 
   it('tolerates a trailing slash on the origin', () => {
-    expect(buildScanUrl(location, 'https://www.jigged.app/')).toBe(buildScanUrl(location, ORIGIN));
+    expect(buildScanUrl(location, 'https://jigged.app/')).toBe(buildScanUrl(location, ORIGIN));
   });
 });
 

@@ -34,8 +34,25 @@ import path from 'path';
  */
 const CANONICAL_HOST = 'jigged.app';
 
-/** Trees where a `https://…jigged.app` literal is a URL we publish or register. */
+/**
+ * Trees where a `https://…jigged.app` literal is a URL we publish or register.
+ *
+ * The repo-root config files are in here by name rather than by directory: `next.config.ts`
+ * (rewrites and redirects), `vercel.json` and the three Sentry configs can each name a host, none
+ * of them lives under a swept directory, and a walk of the repo root would drag in `node_modules`
+ * and every build artifact. They hold no host today — this keeps it that way.
+ */
 const ROOTS = ['app', 'components', 'lib', 'utils', 'supabase/functions', '.github/workflows'];
+
+const ROOT_FILES = [
+  'next.config.ts',
+  'vercel.json',
+  'middleware.ts',
+  'instrumentation.ts',
+  'instrumentation-client.ts',
+  'sentry.server.config.ts',
+  'sentry.edge.config.ts',
+];
 
 const SOURCE_EXT = ['.ts', '.tsx', '.mjs', '.yml', '.yaml'];
 
@@ -77,7 +94,10 @@ function blankComments(source: string, file: string): string {
   return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, blank);
 }
 
-const files = ROOTS.flatMap((r) => walk(path.resolve(__dirname, '../..', r)));
+const files = [
+  ...ROOTS.flatMap((r) => walk(path.resolve(__dirname, '../..', r))),
+  ...ROOT_FILES.map((f) => path.resolve(__dirname, '../..', f)).filter((f) => fs.existsSync(f)),
+];
 
 describe('every published Jigged URL names the canonical host', () => {
   it('finds source files to check', () => {

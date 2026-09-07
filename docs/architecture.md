@@ -461,10 +461,20 @@ from a preview deployment would encode *that deployment's* hostname onto a stick
 by years. Set it in the Vercel **Production** environment only, and note the heading above: it is
 inlined at build time, so **setting the variable is not enough — a redeploy has to follow it.**
 
-It moved from `www.jigged.app` to the apex in #695. **Labels already printed on `www` keep
-working** — Vercel now redirects that way instead, and a phone camera follows a redirect happily —
-so this was safe to change without reprinting anything. That asymmetry is the whole reason the
-domain was worth settling before labels go on shelves rather than after.
+**As of #695 this variable is not actually set in Vercel Production, and never has been** — the
+paragraph above described an intent, not the deployment. In practice production has always fallen
+through to `window.location.origin`, which is why printed labels have tracked whatever host served
+the page and why the apex migration needed no reprint. Two consequences, neither urgent:
+
+- The hazard the variable exists for is live: **a label printed from a preview deployment bakes
+  that preview's hostname into a sticker** that outlives it. It has not bitten because nobody
+  prints production labels from a preview — that is a habit, not a guard.
+- Setting it is still the right fix, and the value is `https://jigged.app`. It was deliberately
+  left unset during the #695 migration rather than introduced mid-flip.
+
+**Labels already printed on `www` keep working** — Vercel redirects that way now instead, and a
+phone camera follows a redirect happily. That asymmetry is the whole reason the domain was worth
+settling before labels go on shelves rather than after.
 
 Both `NEXT_PUBLIC_SUPABASE_*` are **required, with no fallback**:
 [`lib/supabase.ts`](../lib/supabase.ts) creates the client at module scope, so a

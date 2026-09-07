@@ -110,7 +110,10 @@ export async function submitChatQuery(
     // _map_llm_error keeps it one, because this line renders it into an Alert and
     // an object would show the user "[object Object]".
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Failed to submit chat query (${response.status})`);
+    throw new ChatEnqueueError(
+      errorData.detail || `Failed to submit chat query (${response.status})`,
+      response.status,
+    );
   }
 
   return (await response.json()) as ChatEnqueued;
@@ -124,6 +127,23 @@ export interface ChatEnqueued {
   job_id: string;
   status: string;
   executor: 'worker' | 'backend';
+}
+
+/**
+ * An enqueue failure that carries the HTTP status, so the ask bar can BRANCH on
+ * the status and never on the sentence. 503 is the AI box being offline: expected
+ * downtime, rendered as the same quiet notice a mid-job outage gets. 429 and 403
+ * are the shop's own cap and kill-switch. `message` is the backend's `detail`
+ * verbatim -- which is why _map_llm_error keeps that a plain string.
+ */
+export class ChatEnqueueError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ChatEnqueueError';
+  }
 }
 
 /**

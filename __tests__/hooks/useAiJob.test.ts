@@ -146,6 +146,46 @@ describe('verdictFor', () => {
     });
   });
 
+  describe('an in-flight worker job whose heartbeat has gone stale', () => {
+    // The laptop-asleep case. The box stops beating within 15 seconds of the lid
+    // closing but holds a 300-second lease, and nothing server-side can help: the
+    // only sweeper on the worker path IS the sleeping worker.
+    const held = (status: string, over: Partial<AiJob> = {}) =>
+      job({ status, lease_expires_at: iso(200_000), created_at: iso(-90_000), ...over });
+
+    it.each(['claimed', 'running'])('%s with no live worker reads as offline', (status) => {
+      expect(verdictFor(held(status), opts({ workerLive: false })).phase).toBe('offline');
+    });
+
+    it('stays pending while a worker is alive', () => {
+      expect(verdictFor(held('running'), opts({ workerLive: true })).phase).toBe('pending');
+    });
+
+    it('never flips on an unchecked heartbeat', () => {
+      expect(verdictFor(held('running'), opts({ workerLive: null })).phase).toBe('pending');
+    });
+
+    it('leaves a backend row alone, since no worker will ever advertise its model', () => {
+      const v = verdictFor(
+        held('running', {
+          executor: 'backend',
+          model: 'claude-sonnet-4-6',
+          expires_at: iso(60_000),
+          lease_expires_at: iso(60_000),
+        }),
+        opts({ workerLive: false }),
+      );
+      expect(v.phase).toBe('pending');
+    });
+
+    it('is left alone inside one heartbeat window', () => {
+      // A worker that claimed 5 seconds ago cannot be 60 seconds stale; a false
+      // heartbeat read here must not kill a job that is about to run.
+      const v = verdictFor(held('claimed', { created_at: iso(-5_000) }), opts({ workerLive: false }));
+      expect(v.phase).toBe('pending');
+    });
+  });
+
   describe('the wall', () => {
     it('renders a failure rather than stopping silently', () => {
       // A poller that reaches its limit and just stops is a spinner that never

@@ -74,9 +74,9 @@ interface Verdict {
 /**
  * The deadline table, as one function so it can be tested without a timer.
  *
- * `workerLive` is only consulted for rule 3, and is `null` when it has not been
- * checked -- which is most of the time, because that rule needs a worker job that
- * has been queued past one heartbeat window before it can apply.
+ * `workerLive` is consulted for rules 2b and 3 only, and is `null` when it has
+ * not been checked -- which is most of the time, because both rules need a worker
+ * job that is past one heartbeat window old before they can apply.
  */
 export function verdictFor(
   job: AiJob | null,
@@ -99,6 +99,20 @@ export function verdictFor(
   //    platform-killed inline request -- the case nothing server-side will collect
   //    while this tab is the only thing watching.
   if (isInFlight(job) && past(job.lease_expires_at)) {
+    return { phase: 'offline', message: OFFLINE_COPY };
+  }
+
+  // 2b. Held by a worker whose heartbeat has stopped. A laptop that sleeps
+  //     mid-job stops beating within 15 seconds but keeps a 300-second lease, so
+  //     without this the user waits out the lease to be told what the heartbeat
+  //     already said. Worker rows only, and only once the row is past one
+  //     heartbeat window old -- a fresh claim cannot be 60 seconds stale.
+  if (
+    isInFlight(job) &&
+    job.executor === 'worker' &&
+    opts.workerLive === false &&
+    opts.nowMs - Date.parse(job.created_at) > WORKER_STALE_AFTER_MS
+  ) {
     return { phase: 'offline', message: OFFLINE_COPY };
   }
 
@@ -245,13 +259,16 @@ export function useAiJob(
       if (stopped || id !== runId.current) return;
 
       let workerLive: boolean | null = null;
+      // Queued OR in flight: rule 3 covers a job nobody has claimed, rule 2b a
+      // job the worker claimed before it went to sleep.
       const stale =
-        next?.status === 'queued' &&
+        !!next &&
         next.executor === 'worker' &&
+        (next.status === 'queued' || isInFlight(next)) &&
         Date.now() - Date.parse(next.created_at) > WORKER_STALE_AFTER_MS;
       if (stale) {
-        // Only asked when rule 3's other conditions already hold, so the common
-        // path is one query per tick rather than two.
+        // Only asked when the other conditions of rules 2b and 3 already hold,
+        // so the common path is one query per tick rather than two.
         workerLive = await isAiWorkerAvailable(next!.model).catch(() => null);
         if (stopped || id !== runId.current) return;
       }

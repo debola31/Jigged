@@ -190,8 +190,9 @@ answer is the eval's job and a human's.
 
 Two things this does not do. `ai_calls` has no `error_kind`, and the provider call genuinely
 succeeded — so a gated run appears in the ledger as a **successful** call, with the verdict on the
-`ai_jobs` row. And a gated run never reaches `_log_chat_query`, so it does not count against the
-hourly cap, exactly like `LLMToolLoopExhausted`.
+`ai_jobs` row. And a gated run **does** count against the hourly cap: the cap counts `ai_jobs` rows
+at enqueue, so every attempt counts whether or not it produced an answer. *(This used to say the
+opposite, when the cap counted `ai_chat_queries` — see "Feature gating, limits and cost".)*
 
 **No worked answer appears in the assembled prompt, and that is a rule.** A local arm answered the
 payroll question by pasting `semantics.md`'s model answer back verbatim — placeholders and all,
@@ -366,7 +367,11 @@ the failure mode of failing closed here is a silently dead product surface.
 | SQL statement timeout | 5,000 ms |
 | SQL row limit | 200 |
 
-Rate limiting counts recent `ai_chat_queries` rows for the company.
+Rate limiting counts the company's `ai_jobs` rows from the last hour, whichever executor served them
+(`_check_chat_rate_limit`). **Withdrawn:** counting `ai_chat_queries` — wrong because only the inline
+backend path writes that table, so once insights routed to the desktop worker the cap counted zero and
+a worker-served shop had no hourly limit at all. Failed and refused attempts count: each spent model
+time.
 
 ---
 
@@ -423,8 +428,15 @@ old wording attributed to it.
 **Frontend:** `components/insights/` (`InsightsChat`, `InsightCard`, `InsightChart`) and
 `components/dashboard/InsightsSection`.
 
-**Env:** `ANTHROPIC_API_KEY` and `AI_READONLY_DATABASE_URL` (the read-only connection string) on
-top of the standard Supabase vars.
+**Env:** `LLM_CHAIN_INSIGHTS` selects the chain. Unset, it is `anthropic` (needs `ANTHROPIC_API_KEY`)
+and the route works the job inline; `ollama:<tag>` routes every question to the desktop worker, whose
+`WORKER_MODELS` must hold the **identical** tag — `worker_can_serve`, `sweep_ai_jobs()`,
+`claim_ai_jobs()` and `isAiWorkerAvailable` compare it byte for byte, so `qwen3:32b` against
+`qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production flipped to
+`ollama:qwen3:32b` in September 2026; the revert is unsetting the variable. `AI_READONLY_DATABASE_URL`
+is the sandbox connection for the backend; the worker carries its own
+(`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)). All on top of the standard
+Supabase vars.
 
 ## Dashboard surfaces
 
@@ -587,3 +599,9 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   and spends credits against its cap. Operators cannot reach the surface, but that is routing, not
   enforcement.
 - **Multi-turn chat is not built**; `ai_chat_queries` is write-only today.
+- **An enqueue-time offline fires no PostHog event.** A 503 from the route leaves no job row, so the
+  ask bar's `ai job settled` never fires and the offline-to-done ratio undercounts a box that was off
+  when someone asked. The 503 renders as the same quiet notice a mid-job outage gets; it is not counted.
+- **Worker-served transcripts live on `ai_jobs`, not `ai_chat_queries`.** Only the inline backend path
+  writes the transcript table (`_log_chat_query`); a worker turn's question and answer are
+  `ai_jobs.payload` and `result`. Nothing in the UI reads either as history.

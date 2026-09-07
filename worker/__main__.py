@@ -12,6 +12,13 @@ WHAT MAKES IT SAFE TO KILL. Ctrl-C releases unstarted claims back to `queued`,
 fails whatever was mid-flight as `ai_offline`, and backdates the heartbeat -- so
 the UI reaches its offline state within one poll instead of after a two-minute
 silence.
+
+WHAT MAKES IT SAFE TO SLEEP. macOS freezes this process rather than killing it,
+and the pooler drops the socket while it is frozen. The first statement on wake
+therefore raises, and for a while that raise escaped run() and ended the process
+-- one nap killed the worker until someone noticed. A batch that fails is now
+logged and the loop carries on; WorkerDb reconnects on the next statement and the
+lease sweep collects whatever the batch still held.
 """
 from __future__ import annotations
 
@@ -232,7 +239,14 @@ class Worker:
                 continue
 
             logger.info("claimed %s job(s) of %s", len(batch), batch[0]["model"])
-            await self._drain(batch)
+            try:
+                await self._drain(batch)
+            except Exception:  # noqa: BLE001 - a batch failing must not end the worker
+                # A report over a dead connection -- the box slept, or the pooler
+                # recycled the socket. Nothing is lost: the lease sweep times out
+                # whatever this batch still held, and the next statement
+                # reconnects. Same shape as the `claim failed` branch above.
+                logger.exception("batch failed; the lease sweep collects what was held")
 
         await self._shutdown()
 

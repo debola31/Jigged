@@ -1,7 +1,8 @@
 """The insights tool loop, running wherever the job runs.
 
 ONE HANDLER, TWO HOSTS. The desktop worker calls this after claiming a job; the
-FastAPI route calls it inline for a feature still on Anthropic. Neither has its
+FastAPI route calls it inline for a feature whose chain head is a hosted
+provider. Neither has its
 own copy, because two copies of a five-iteration agentic loop would drift and the
 drift would only show up as "the local one answers differently".
 

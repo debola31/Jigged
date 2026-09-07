@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # Dark by default: every chain is anthropic, so merging this layer changes no
 # production behaviour at all. Each surface flips to a local model by setting its
 # LLM_CHAIN_* variable, one surface at a time, after its golden check passes --
-# and reverts with one env change.
+# and reverts with one env change. Insights flipped to ollama:qwen3:32b by env in
+# September 2026; the anthropic default below IS the revert, so leave it.
 _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
     "insights": ("anthropic",),
     "insights_dev": ("ollama:qwen3:8b",),

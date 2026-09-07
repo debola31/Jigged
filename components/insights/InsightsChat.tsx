@@ -18,7 +18,7 @@ import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import InsightChart from './InsightChart';
 import { useAiJob } from '@/hooks/useAiJob';
-import { submitChatQuery, type ChartConfig } from '@/utils/insightsAccess';
+import { ChatEnqueueError, submitChatQuery, type ChartConfig } from '@/utils/insightsAccess';
 import { saveInsight } from '@/utils/savedInsightsAccess';
 
 const EXAMPLE_PROMPTS = [
@@ -60,7 +60,10 @@ interface ChatResult {
 export default function InsightsChat({ companyId, onInsightSaved }: InsightsChatProps) {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The status rides with the message so the render can tell downtime (503, the
+  // quiet offline notice) from a refusal (429 / 403, an error) without matching
+  // on the sentence.
+  const [error, setError] = useState<{ message: string; status?: number } | null>(null);
   const [askedQuestion, setAskedQuestion] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -157,10 +160,13 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       // its own cap, or a box being off, is not an incident.
       const message =
         err instanceof Error ? err.message : 'Failed to send your question. Please try again.';
-      if (!/offline|rate limit|disabled/i.test(message)) {
+      const status = err instanceof ChatEnqueueError ? err.status : undefined;
+      // 403 is the kill-switch, 429 the shop's own cap, 503 the box being off:
+      // none of them is ours to page on. Everything else is.
+      if (!(status !== undefined && [403, 429, 503].includes(status))) {
         Sentry.captureException(err);
       }
-      setError(message);
+      setError({ message, status });
     } finally {
       setAsking(false);
     }
@@ -194,7 +200,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
     } catch (err) {
       Sentry.captureException(err);
       const msg = err instanceof Error ? err.message : 'Failed to save';
-      setError(msg);
+      setError({ message: msg });
     } finally {
       setSaving(false);
     }
@@ -289,9 +295,18 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
         </Alert>
       )}
 
-      {error && (
+      {/* An enqueue-time 503 is the SAME state as a mid-job outage -- the box is
+          off -- and gets the same quiet notice. Rendering it red, like every other
+          enqueue failure, told the user their question had gone wrong when nothing
+          had. */}
+      {error && error.status === 503 && (
+        <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />} sx={{ mt: 2 }}>
+          {error.message}
+        </Alert>
+      )}
+      {error && error.status !== 503 && (
         <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
+          {error.message}
         </Alert>
       )}
 

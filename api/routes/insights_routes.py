@@ -107,10 +107,18 @@ def _seconds_until_window_frees(oldest_created_at, now: datetime) -> int:
 
 def _check_chat_rate_limit(company_id: str, limit: int) -> None:
     """
-    Enforce the company's chat rate limit (queries in the last hour).
+    Enforce the company's chat rate limit (AI jobs enqueued in the last hour).
+
+    COUNTS ai_jobs, NOT ai_chat_queries. The cap guards the one door that creates
+    AI work, and ai_jobs is the one table both executors write at that door. The
+    transcript table is written only by the inline backend path (_run_inline), so
+    once insights routed to the desktop worker it recorded nothing and the cap
+    silently counted zero -- a worker-served shop had no hourly limit at all.
+    Every enqueued row counts, including attempts that later failed or were
+    refused as non-answers: each one spent model time on the box.
 
     On breach, raises 429 with a message reflecting the company's actual limit
-    and a Retry-After header set to the seconds until the oldest in-window query
+    and a Retry-After header set to the seconds until the oldest in-window job
     ages out. A read error is non-fatal (allow the request through).
     """
     supabase = _get_supabase_service_role()
@@ -119,9 +127,12 @@ def _check_chat_rate_limit(company_id: str, limit: int) -> None:
 
     try:
         response = (
-            supabase.table("ai_chat_queries")
+            supabase.table("ai_jobs")
             .select("created_at")
             .eq("company_id", company_id)
+            # insights and insights_dev alike: the cap is per surface, whichever
+            # chain served it. Reports are insights jobs too and count.
+            .like("feature", "insights%")
             .gte("created_at", one_hour_ago.isoformat())
             .order("created_at", desc=False)
             .execute()
@@ -157,7 +168,10 @@ def _map_llm_error(exc: Exception) -> HTTPException:
     `throw new Error(errorData.detail || ...)` and renders the message straight
     into an Alert, so a {"code","message"} dict shows the user "[object Object]".
     The repo's rule is structured detail only when the browser must BRANCH on the
-    failure, and here it must not -- it only has to say the sentence.
+    failure. Here it branches on the HTTP STATUS alone -- utils/insightsAccess.ts
+    raises a ChatEnqueueError carrying it, and the ask bar renders a 503 as the
+    same quiet offline notice a mid-job outage gets -- so the sentence stays a
+    sentence.
 
     Status choices are deliberate against Sentry's 5xx-only capture:
       503 offline   -- a desktop that is asleep is expected downtime, not an
@@ -324,10 +338,18 @@ async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
 
 
 def _log_chat_query(db, company_id: str, question: str, result: dict, duration_ms: int) -> None:
-    """Keep ai_chat_queries current: it backs saved insights, the /admin view AND
-    the rate limiter, so dropping it would quietly disable the cap.
+    """Transcript row for a BACKEND-executed job, and only those.
 
-    provider and model now carry whoever ACTUALLY answered rather than a hardcoded
+    The worker path never reaches this function, so ai_chat_queries holds inline
+    turns alone; a worker turn's transcript is ai_jobs.payload->>'question' and
+    result->>'answer'. This docstring used to claim the table backed saved
+    insights, the /admin view and the rate limiter. None of that holds: pins live
+    in saved_insights via the browser, nothing in the UI reads this table, and the
+    cap counts ai_jobs (see _check_chat_rate_limit) precisely because this table
+    went quiet when insights moved to the worker. It stays for the eval's question
+    seed (evals/insights_ab.py) and for debugging the hosted path.
+
+    provider and model carry whoever ACTUALLY answered rather than a hardcoded
     "anthropic" -- the point of a chain is that the answer's origin varies.
     """
     try:

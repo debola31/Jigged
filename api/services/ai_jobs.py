@@ -7,9 +7,9 @@ polling design rests on -- a poll may DISCOVER work and may never create it --
 so the creation path lives in one place where it can be read whole.
 
 TWO EXECUTORS, ONE LIFECYCLE. A feature whose chain resolves to a local model is
-routed to the desktop worker; one still on Anthropic is worked inline by the
-enqueueing request. Both produce the same status vocabulary, so the frontend has
-one state machine rather than two.
+routed to the desktop worker; one whose chain head is a hosted provider is worked
+inline by the enqueueing request. Both produce the same status vocabulary, so the
+frontend has one state machine rather than two.
 """
 from __future__ import annotations
 

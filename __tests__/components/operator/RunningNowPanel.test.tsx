@@ -35,11 +35,10 @@ vi.mock('@/components/operator/OperatorIntervalContext', () => ({
   }),
 }));
 
-vi.mock('next/navigation', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('next/navigation');
-  return { ...actual, useParams: () => ({ companyId: 'co1' }) };
-});
-
+// NO `next/navigation` MOCK HERE. `@/__tests__/test-utils` already registers one
+// for the whole suite, and a second registration for the same module is a race
+// nobody can read off the file. Its `useParams` returns `companyId:
+// 'test-company-id'`, which is what the route assertions below expect.
 import RunningNowPanel from '@/components/operator/RunningNowPanel';
 
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000).toISOString();
@@ -101,7 +100,7 @@ describe('RunningNowPanel', () => {
 
     return userEvent.click(screen.getByText(/J-0007 · Mill OP 10/)).then(() => {
       expect(nav.push).toHaveBeenCalledWith(
-        '/operator/co1/jobs/job1/parts/jp1/operations/op1',
+        '/operator/test-company-id/jobs/job1/parts/jp1/operations/op1',
       );
     });
   });

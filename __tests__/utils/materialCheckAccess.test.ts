@@ -122,6 +122,23 @@ describe('getJobPartMaterialCheck', () => {
     expect(rows[0].shortBy).toBe(0); // 15 on hand
   });
 
+  // The heats on this job's takes of a material, distinct, in first-taken order — what the
+  // packing slip prints. A take with no heat contributes nothing; a material never taken has [].
+  it('lists the distinct heat numbers issued to the job, per material', async () => {
+    tableData.inventory_transactions = [
+      { job_id: 'job0', part_id: 'steel', converted_quantity: 2, has_discrepancy: false, heat_number: '4471' },
+      { job_id: 'job0', part_id: 'steel', converted_quantity: 2, has_discrepancy: false, heat_number: '4471' },
+      { job_id: 'job0', part_id: 'steel', converted_quantity: 1, has_discrepancy: false, heat_number: '8823' },
+      { job_id: 'job0', part_id: 'oring', converted_quantity: 4, has_discrepancy: false, heat_number: null },
+    ];
+    const rows = await getJobPartMaterialCheck({
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0',
+      madePartId: 'made1', orderQuantity: 2,
+    });
+    expect(rows.map((r) => r.heatNumbers)).toEqual([['4471', '8823'], [], []]);
+    expect(rows[0].issued).toBe(5);
+  });
+
   it('returns nothing when the made part has no BOM', async () => {
     tableData.parts_bom = [];
     const rows = await getJobPartMaterialCheck({

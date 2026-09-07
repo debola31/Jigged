@@ -57,11 +57,25 @@ import { getCurrentMember } from '@/utils/operatorAccess';
 import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import { useLoad } from '@/hooks/useLoad';
 import { commitCount } from '@/utils/inventoryCountAccess';
-import { committableVariances } from '@/lib/inventoryCountPlan';
+import { committableVariances, refreshedKey } from '@/lib/inventoryCountPlan';
 import type { CountVariance } from '@/types/inventoryCount';
 import type { LocationContent } from '@/types/inventoryLocations';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+/**
+ * What one row of this form IS: a part, at this bin, of one lot.
+ *
+ * Keyed by part alone, a heat-tracked bar holding two heats here would render two rows sharing a
+ * single typed number — so counting 8 of heat 4471 would silently commit 8 to heat 8823 as well.
+ * That is the same fault `countRowKey` exists to prevent on the worksheet, one grain down, and it
+ * reuses the worksheet's key rather than inventing a second format for the same idea.
+ */
+const rowKey = (c: LocationContent) => refreshedKey(c.part_id, c.lot_id);
+
+/** The heat to show beside a row's part name, or null for an untracked part. */
+const rowHeat = (c: LocationContent) =>
+  c.lot_id ? (c.heat_number ? `Heat ${c.heat_number}` : (c.lot_code ?? null)) : null;
 
 export interface PlaceAdjustFormProps {
   companyId: string;
@@ -70,6 +84,14 @@ export interface PlaceAdjustFormProps {
   locationName: string;
   /** Narrow to ONE part — set when this is opened from a part rather than from a place. */
   restrictToPartId?: string;
+  /**
+   * Narrow further, to one heat.
+   *
+   * The callers that pass it open this form from a row that is already a (place, lot), so
+   * counting the `Heat 4471` line and being handed all three heats of the bar ignores the tap.
+   * Absent means every lot of the part here, which is right for an untracked one.
+   */
+  restrictToLotId?: string | null;
   /** Back to the place overview. The drawer stays open. */
   onCancel: () => void;
   onDone: () => void | Promise<void>;
@@ -80,6 +102,7 @@ export default function PlaceAdjustForm({
   locationId,
   locationName,
   restrictToPartId,
+  restrictToLotId,
   onCancel,
   onDone,
 }: PlaceAdjustFormProps) {
@@ -100,8 +123,13 @@ export default function PlaceAdjustForm({
   );
   const rows: LocationContent[] = useMemo(() => {
     const all = data?.contents ?? [];
-    return restrictToPartId ? all.filter((c) => c.part_id === restrictToPartId) : all;
-  }, [data, restrictToPartId]);
+    if (!restrictToPartId) return all;
+    return all.filter(
+      (c) =>
+        c.part_id === restrictToPartId &&
+        (restrictToLotId == null || c.lot_id === restrictToLotId),
+    );
+  }, [data, restrictToPartId, restrictToLotId]);
   /** Set when the bin holds more than one read returns, so the cap is said rather than hidden. */
   const clipped = data ? Math.max(0, data.total - data.contents.length) : 0;
 
@@ -113,7 +141,7 @@ export default function PlaceAdjustForm({
   const counted = useMemo(
     () =>
       rows
-        .map((r) => ({ row: r, value: parseFloat(entries[r.part_id] ?? '') }))
+        .map((r) => ({ row: r, value: parseFloat(entries[rowKey(r)] ?? '') }))
         .filter((c) => Number.isFinite(c.value) && c.value >= 0),
     [rows, entries],
   );
@@ -132,10 +160,12 @@ export default function PlaceAdjustForm({
        * open. The worksheet re-reads for the same reason at its own save.
        */
       const fresh = await getLocationContents(locationId);
-      const nowByPart = new Map(fresh.contents.map((c) => [c.part_id, c.quantity] as const));
+      // By ROW, not by part: with two heats of one bar in this bin, keying by part would let one
+      // heat's balance overwrite the other's and measure both counts against whichever landed last.
+      const nowByRow = new Map(fresh.contents.map((c) => [rowKey(c), c.quantity] as const));
 
       const variances: CountVariance[] = counted.map(({ row, value }) => {
-        const systemQuantity = nowByPart.get(row.part_id) ?? row.quantity;
+        const systemQuantity = nowByRow.get(rowKey(row)) ?? row.quantity;
         return {
           candidate: {
             partId: row.part_id,
@@ -143,6 +173,9 @@ export default function PlaceAdjustForm({
             description: null,
             unit: row.primary_unit || 'ea',
             systemQuantity,
+            lotId: row.lot_id,
+            lotCode: row.lot_code,
+            heatNumber: row.heat_number,
             target: {
               locationId,
               locationName,
@@ -282,14 +315,16 @@ export default function PlaceAdjustForm({
 
               <Stack spacing={1} sx={{ mt: 1 }}>
                 {rows.map((r) => {
-                  const typed = entries[r.part_id] ?? '';
+                  const key = rowKey(r);
+                  const typed = entries[key] ?? '';
                   const value = parseFloat(typed);
                   const has = Number.isFinite(value) && value >= 0;
                   const delta = has ? value - r.quantity : 0;
                   const unit = r.primary_unit || 'ea';
+                  const heat = rowHeat(r);
                   return (
                     <Stack
-                      key={r.part_id}
+                      key={key}
                       direction={{ xs: 'column', sm: 'row' }}
                       spacing={{ xs: 0.5, sm: 1.5 }}
                       alignItems={{ xs: 'stretch', sm: 'center' }}
@@ -299,8 +334,14 @@ export default function PlaceAdjustForm({
                         <Typography variant="body2" noWrap title={r.part_name}>
                           {r.part_name}
                         </Typography>
+                        {/*
+                          The heat is what tells two rows of one part apart, so it sits on the
+                          identity line beside the unit rather than anywhere further away. Absent
+                          entirely for an untracked part — most parts — which keeps the ordinary
+                          bin looking exactly as it did.
+                        */}
                         <Typography variant="caption" color="text.secondary">
-                          {unit}
+                          {heat ? `${unit} · ${heat}` : unit}
                         </Typography>
                       </Box>
 
@@ -330,9 +371,7 @@ export default function PlaceAdjustForm({
                         size="small"
                         type="number"
                         value={typed}
-                        onChange={(e) =>
-                          setEntries((s) => ({ ...s, [r.part_id]: e.target.value }))
-                        }
+                        onChange={(e) => setEntries((s) => ({ ...s, [key]: e.target.value }))}
                         sx={{ width: 96 }}
                         /*
                          * The name goes on the INPUT, not on the TextField.
@@ -346,7 +385,12 @@ export default function PlaceAdjustForm({
                           htmlInput: {
                             min: 0,
                             step: 'any',
-                            'aria-label': `Counted ${r.part_name}`,
+                            // The heat is part of the name here for the same reason it is on
+                            // screen: without it two rows of one bar announce themselves
+                            // identically, and a screen reader has no other way to tell them apart.
+                            'aria-label': heat
+                              ? `Counted ${r.part_name}, ${heat}`
+                              : `Counted ${r.part_name}`,
                           },
                         }}
                       />

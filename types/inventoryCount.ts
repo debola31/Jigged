@@ -57,6 +57,16 @@ export interface CountCandidate {
    */
   systemQuantity: number;
   target: CountTarget;
+  /**
+   * Which lot this line counts, or null for a part that is not lot-tracked.
+   *
+   * A count is an ABSOLUTE ("there are 12 here"), and "12 here" has no meaning when a bin holds
+   * two heats — there is 8 of one and 4 of the other. So a lot-tracked part gets a row per heat,
+   * and `adjust_stock_at_location` refuses a lot-less count of one.
+   */
+  lotId: string | null;
+  lotCode: string | null;
+  heatNumber: string | null;
 }
 
 /**

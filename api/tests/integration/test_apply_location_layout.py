@@ -115,7 +115,13 @@ def shop(db):
             "INSERT INTO user_company_access (user_id, company_id, role) VALUES (%s, %s, 'admin')",
             (user, company),
         )
-        cur.execute("SELECT inv_get_or_create_unassigned(%s)", (company,))
+        # An ordinary root, not the old auto-minted bucket (gone in 20260906182638). These
+        # cases only ever needed "a place outside the unit being reshaped".
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, name) VALUES (%s, 'Put-away')"
+            " RETURNING id",
+            (company,),
+        )
         unassigned = cur.fetchone()[0]
 
         def location(name, parent=None, sort_order=0, cid=company):
@@ -155,6 +161,11 @@ def shop(db):
         for cid in (company, other):
             cur.execute("DELETE FROM part_location_stock WHERE company_id = %s", (cid,))
             cur.execute("DELETE FROM inventory_transactions WHERE company_id = %s", (cid,))
+            # Before the parts: `material_lots.part_id` is ON DELETE RESTRICT on purpose — a lot is
+            # the evidence trail for material that has shipped, so a hard delete of the part must
+            # not silently take the proof with it. Nothing in the app hard-deletes a part (they
+            # archive), so the constraint only ever bites a fixture like this one.
+            cur.execute("DELETE FROM material_lots WHERE company_id = %s", (cid,))
             cur.execute("DELETE FROM parts WHERE company_id = %s", (cid,))
             # Three passes: the deepest tree a test builds is cabinet › row › bin.
             for _ in range(3):
@@ -503,7 +514,7 @@ def test_a_ref_naming_a_location_outside_the_unit_is_refused(db, shop):
 
     with db.cursor() as cur:
         cur.execute("SELECT name FROM inventory_locations WHERE id = %s", (shop["unassigned"],))
-        assert cur.fetchone()[0] == "Unassigned"
+        assert cur.fetchone()[0] == "Put-away"
 
 
 def test_a_duplicate_sibling_name_reads_as_a_sentence(db, shop):
@@ -519,12 +530,20 @@ def test_a_duplicate_sibling_name_reads_as_a_sentence(db, shop):
     assert "both called" in str(exc.value)
 
 
-def test_the_put_away_pile_has_no_layout_to_change(db, shop):
+def test_a_plain_root_reshapes_like_any_other(db, shop):
+    """What used to be `the put-away pile has no layout to change`.
+
+    That refusal existed because `Unassigned` was a system bucket every surface had to special-case
+    — you could not divide it, and the RPC said so. 20260906182638 removed the concept, so the same
+    location is now an ordinary root and dividing it is an ordinary reshape. The test is kept
+    pointing at the same fixture on purpose: it is the one that proves the special case is gone
+    rather than merely unreferenced.
+    """
     with user_session(shop["user"]) as (conn, cur):
-        with pytest.raises(errors.CheckViolation) as exc:
-            apply_layout(cur, shop["unassigned"], [create("new:a", "Left", 0)])
-        conn.rollback()
-    assert "no layout to change" in str(exc.value)
+        apply_layout(cur, shop["unassigned"], [create("new:a", "Left", 0)])
+        conn.commit()
+
+    assert names_under(db, shop["unassigned"]) == ["Left"]
 
 
 def test_a_non_member_cannot_reshape_a_foreign_cabinet(db, shop):
@@ -732,3 +751,123 @@ def test_the_cap_also_refuses_a_reshape_that_would_break_it(db, shop):
                 ],
             )
         conn.rollback()
+
+
+# ── A reshape of traced material (20260906160314) ────────────────────────────
+#
+# `transfer_stock` refuses a lot-less move of a heat-tracked part -- there is no such thing as
+# "move 12 of this bar" when the shelf holds 8 of one heat and 4 of another. This RPC delegates
+# every redistribution to it and passed no lot, so reshaping a unit holding traced material raised
+# outright. Nothing caught it because every other test here uses an untracked part.
+
+
+def place_stock_with_heat(shop, location_id, qty, heat):
+    """Receive with a heat, which also turns tracking on for the part (20260906153732)."""
+    with user_session(shop["user"]) as (conn, cur):
+        cur.execute(
+            "SELECT add_stock_at_location(%s, %s, %s, 'each', %s, p_heat_number => %s)",
+            (shop["part"], location_id, qty, qty, heat),
+        )
+        conn.commit()
+
+
+def lot_of(db, part, heat):
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM material_lots WHERE part_id = %s AND heat_number = %s", (part, heat)
+        )
+        return cur.fetchone()[0]
+
+
+def stock_by_heat(db, location_id, part):
+    """(heat, quantity) at one place -- one row per lot, which is the whole point."""
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT l.heat_number, s.quantity
+              FROM part_location_stock s
+              LEFT JOIN material_lots l ON l.id = s.lot_id
+             WHERE s.location_id = %s AND s.part_id = %s
+             ORDER BY l.heat_number NULLS FIRST
+            """,
+            (location_id, part),
+        )
+        return [(r[0], float(r[1])) for r in cur.fetchall()]
+
+
+def test_a_move_that_names_no_heat_is_refused_for_a_tracked_part(db, shop):
+    """The failure the fix exists for, asserted as a failure rather than assumed away.
+
+    A payload without `lot_id` is exactly what the client sent before 20260906160314, and it must
+    not quietly move the wrong pile -- it raises, and the whole reshape rolls back.
+    """
+    r1, r2, r3 = shop["rows"]
+    place_stock_with_heat(shop, r3, 8, "4471")
+
+    with user_session(shop["user"]) as (conn, cur):
+        with pytest.raises(errors.CheckViolation) as exc:
+            apply_layout(
+                cur,
+                shop["cabinet"],
+                [keep(r1, "Row 1", 0), keep(r2, "Row 2", 1)],
+                moves=[move(shop["part"], r3, f"id:{r1}", 8)],
+                removals=[r3],
+            )
+        conn.rollback()
+    assert "heat" in str(exc.value).lower()
+
+
+def test_each_heat_moves_to_where_it_was_sent(db, shop):
+    """Two heats in the bin being removed, sent to two different rows.
+
+    Lot-blind this could not happen at all; lot-aware it is two ordinary transfers, and the split
+    survives the reshape rather than being merged into one pile on the way.
+    """
+    r1, r2, r3 = shop["rows"]
+    place_stock_with_heat(shop, r3, 8, "4471")
+    place_stock_with_heat(shop, r3, 4, "8823")
+    assert stock_by_heat(db, r3, shop["part"]) == [("4471", 8.0), ("8823", 4.0)]
+
+    with user_session(shop["user"]) as (conn, cur):
+        apply_layout(
+            cur,
+            shop["cabinet"],
+            [keep(r1, "Row 1", 0), keep(r2, "Row 2", 1)],
+            moves=[
+                {
+                    **move(shop["part"], r3, f"id:{r1}", 8),
+                    "lot_id": lot_of(db, shop["part"], "4471"),
+                },
+                {
+                    **move(shop["part"], r3, f"id:{r2}", 4),
+                    "lot_id": lot_of(db, shop["part"], "8823"),
+                },
+            ],
+            removals=[r3],
+        )
+        conn.commit()
+
+    assert stock_by_heat(db, r1, shop["part"]) == [("4471", 8.0)]
+    assert stock_by_heat(db, r2, shop["part"]) == [("8823", 4.0)]
+    assert stock_by_heat(db, r3, shop["part"]) == []
+
+
+def test_an_untracked_part_reshapes_exactly_as_it_always_did(db, shop):
+    """The other half of the promise: a shop that never records a heat sees no change at all.
+
+    An absent `lot_id` is "no lot", not "unspecified" -- so the old payload shape still works.
+    """
+    r1, r2, r3 = shop["rows"]
+    place_stock(shop, r3, 100)
+
+    with user_session(shop["user"]) as (conn, cur):
+        apply_layout(
+            cur,
+            shop["cabinet"],
+            [keep(r1, "Row 1", 0), keep(r2, "Row 2", 1)],
+            moves=[move(shop["part"], r3, f"id:{r1}", 100)],
+            removals=[r3],
+        )
+        conn.commit()
+
+    assert stock_by_heat(db, r1, shop["part"]) == [(None, 100.0)]

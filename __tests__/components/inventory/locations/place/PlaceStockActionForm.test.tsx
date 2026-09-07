@@ -510,4 +510,173 @@ describe('PlaceStockActionForm', () => {
     setup('add');
     expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();
   });
+/**
+ * A bin holding two heats of one bar.
+ *
+ * `getLocationContents` returns one row per (part, location, lot), so this is two lines about two
+ * different piles of steel that happen to share a name. Every piece of per-line state used to be
+ * keyed by part id, which made them one line wearing two balances: typing into the first filled
+ * the second, both React children carried the same key, and the write sent whichever lot the
+ * shared picker happened to hold.
+ */
+describe('a bin holding two heats of one part', () => {
+  const TWO_HEATS = {
+    contents: [
+      {
+        part_id: 'p-steel',
+        part_name: 'RAW-STEEL-BLANK',
+        primary_unit: 'ea',
+        quantity: 8,
+        location_id: 'bin5',
+        lot_id: 'lot-1',
+        lot_code: '4471',
+        heat_number: '4471',
+      },
+      {
+        part_id: 'p-steel',
+        part_name: 'RAW-STEEL-BLANK',
+        primary_unit: 'ea',
+        quantity: 4,
+        location_id: 'bin5',
+        lot_id: 'lot-2',
+        lot_code: '8823',
+        heat_number: '8823',
+      },
+    ],
+    total: 2,
+  };
+
+  beforeEach(() => {
+    vi.mocked(getLocationContents).mockResolvedValue(
+      TWO_HEATS as unknown as Awaited<ReturnType<typeof getLocationContents>>,
+    );
+  });
+
+  const qtyForHeat = (heat: string) =>
+    screen.getByLabelText(`Quantity for RAW-STEEL-BLANK, Heat ${heat}`);
+
+  it('shows each heat and its own balance, rather than one line twice', async () => {
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    expect(screen.getByText(/Heat 4471 · 8 ea here/)).toBeInTheDocument();
+    expect(screen.getByText(/Heat 8823 · 4 ea here/)).toBeInTheDocument();
+  });
+
+  /** The 828-to-both-shelves bug, one grain down. */
+  it('keeps the two quantity boxes independent', async () => {
+    const user = userEvent.setup();
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    await user.type(qtyForHeat('4471'), '3');
+
+    expect(qtyForHeat('4471')).toHaveValue(3);
+    expect(qtyForHeat('8823')).toHaveValue(null);
+  });
+
+  it('sends each line against its OWN lot', async () => {
+    const user = userEvent.setup();
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    await user.type(qtyForHeat('4471'), '3');
+    await user.type(qtyForHeat('8823'), '1');
+    // Two lines, so the button counts them — which is itself the proof they did not collapse.
+    await user.click(screen.getByRole('button', { name: /^remove stock \(2\)$/i }));
+
+    expect(depleteStockAtLocation).toHaveBeenCalledWith(
+      'p-steel',
+      'bin5',
+      3,
+      'ea',
+      expect.objectContaining({ lotId: 'lot-1' }),
+    );
+    expect(depleteStockAtLocation).toHaveBeenCalledWith(
+      'p-steel',
+      'bin5',
+      1,
+      'ea',
+      expect.objectContaining({ lotId: 'lot-2' }),
+    );
+  });
+
+  /**
+   * There is no lot picker on the way out, and that is the point: the line already IS a lot, so a
+   * control asking which heat a line about heat 4471 was about could only ever contradict it.
+   */
+  it('offers no heat control to contradict the line', async () => {
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    expect(screen.queryByRole('combobox', { name: /^heat/i })).not.toBeInTheDocument();
+  });
+
+  /**
+   * Opened from a row that IS a heat — the operator lookup and the part drawer both do this.
+   *
+   * Handing back all three heats of the bar ignores the tap, and on a phone turns a one-line form
+   * into a list to re-choose from.
+   */
+  it('narrows to the one heat when the caller names a lot', async () => {
+    render(
+      <PlaceStockActionForm
+        action="deplete"
+        companyId="co1"
+        locationId="bin5"
+        locationName="Bin 5"
+        moveDestinations={DESTINATIONS}
+        restrictTo={{
+          partId: 'p-steel',
+          partName: 'RAW-STEEL-BLANK',
+          primaryUnit: 'ea',
+          lotId: 'lot-2',
+        }}
+        onCancel={onCancel}
+        onDone={vi.fn()}
+      />,
+    );
+    await screen.findByText(/Heat 8823/);
+
+    expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('RAW-STEEL-BLANK')).toHaveLength(1);
+  });
+
+  /**
+   * An `add` is ALWAYS one line: it puts NEW material down and names its heat by typing it, so
+   * binding lines to the heats already on the shelf would offer three boxes for one delivery.
+   */
+  it('offers a single line for an add, whatever the bin already holds', async () => {
+    render(
+      <PlaceStockActionForm
+        action="add"
+        companyId="co1"
+        locationId="bin5"
+        locationName="Bin 5"
+        moveDestinations={DESTINATIONS}
+        restrictTo={{ partId: 'p-steel', partName: 'RAW-STEEL-BLANK', primaryUnit: 'ea' }}
+        onCancel={onCancel}
+        onDone={vi.fn()}
+      />,
+    );
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    expect(screen.getAllByText('RAW-STEEL-BLANK')).toHaveLength(1);
+    // Summed across heats — what is already here is worth knowing while you put more down.
+    expect(screen.getByText(/12 ea here/)).toBeInTheDocument();
+    expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
+  });
+
+  /** `All` fills the balance of the line it sits on, not the part's total across heats. */
+  it('fills only its own line from All', async () => {
+    const user = userEvent.setup();
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    await user.click(screen.getByRole('button', { name: /Use all 8 ea of RAW-STEEL-BLANK/i }));
+
+    expect(qtyForHeat('4471')).toHaveValue(8);
+    expect(qtyForHeat('8823')).toHaveValue(null);
+  });
+});
 });

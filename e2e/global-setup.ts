@@ -292,7 +292,15 @@ interface PartSpec {
   description: string;
   source: 'made' | 'bought';
   primary_unit: string | null;
-  quantity: number;
+  /*
+   * NO `quantity` — deliberately, and not merely defaulted to 0.
+   *
+   * A part carrying an opening quantity is REFUSED at insert since 20260906182638: the
+   * `Unassigned` bucket that used to absorb it is gone, and stock enters through a location.
+   * Leaving the field here with a 0 default would let a future fixture pass 10 and discover
+   * that in CI, which is exactly how this file broke twice in one afternoon. Removing it makes
+   * the mistake untypeable — stock goes through `ensureStockAt`, which names a place.
+   */
   /** Persisted onto the part's tier row at quantity 1 for bought parts.
    *  Ignored for made parts, whose cost is the routing + BOM rollup. */
   cost_per_unit: number | null;
@@ -323,7 +331,6 @@ async function ensurePart(
         description: spec.description,
         source: spec.source,
         primary_unit: spec.primary_unit,
-        quantity: spec.quantity,
       })
       .select('id')
       .single();
@@ -713,32 +720,31 @@ export default async function globalSetup(): Promise<void> {
     // parts_requires_unit CHECK constraint (20260602…) makes primary_unit
     // NOT NULL for every part. 'ea' is the canonical unit for discrete parts.
     primary_unit: 'ea',
-    quantity: 0,
     cost_per_unit: null,
   });
-  await ensurePart(supabase, companyId, {
+  const rawPartId = await ensurePart(supabase, companyId, {
     part_name: PART_RAW_NAME,
     description: 'E2E stocked raw material',
     source: 'bought',
     primary_unit: 'lbs',
-    quantity: 100,
     cost_per_unit: 5.5,
   });
+  await ensureStockAt(supabase, companyId, rawPartId, E2E_RAW_SHELF, 100);
   const subPartId = await ensurePart(supabase, companyId, {
     part_name: PART_SUB_NAME,
     description: 'E2E sub-assembly (BOM child of MFG-001)',
     source: 'made',
     primary_unit: 'ea',
-    quantity: 10,
     cost_per_unit: 12.0,
   });
+  // Its stock, at a named place — the sub-assembly is a BOM child that specs consume.
+  await ensureStockAt(supabase, companyId, subPartId, E2E_SUB_SHELF, 10);
 
   const lengthPartId = await ensurePart(supabase, companyId, {
     part_name: PART_LENGTH_NAME,
     description: 'E2E made part sold by length (inches)',
     source: 'made',
     primary_unit: 'inches',
-    quantity: 0,
     cost_per_unit: null,
   });
 
@@ -831,6 +837,38 @@ async function ensureLocation(
   return data.id;
 }
 
+/** Where the raw material sits. Its own shelf, so no spec's fixture leans on another's. */
+export const E2E_RAW_SHELF = 'E2E Raw Shelf';
+
+/** Where the sub-assembly sits, for the same reason. */
+export const E2E_SUB_SHELF = 'E2E Sub Shelf';
+
+/**
+ * Put an exact quantity of one part at one named place.
+ *
+ * ABSOLUTE, like `ensureSplitStock` below and for the same reason: CI starts clean and a dev
+ * machine does not, so a helper that skipped when a row existed would leave whatever the first run
+ * created and quietly stop reflecting later edits.
+ *
+ * Written straight to the balance rather than through `add_stock_at_location` because that RPC is
+ * a DELTA — running the seeder twice would add 100 twice. The balance is what the fixture is
+ * asserting about, and `parts.quantity` follows through the rollup trigger either way.
+ */
+async function ensureStockAt(
+  supabase: SupabaseClient,
+  companyId: string,
+  partId: string,
+  placeName: string,
+  quantity: number,
+): Promise<void> {
+  const locationId = await ensureLocation(supabase, companyId, placeName);
+  const { error } = await supabase.from('part_location_stock').upsert(
+    [{ company_id: companyId, part_id: partId, location_id: locationId, quantity }],
+    { onConflict: 'part_id,location_id,lot_key' },
+  );
+  if (error) throw new Error(`stock upsert failed (${placeName}): ${error.message}`);
+}
+
 /**
  * One part, stock at two shelves — the fixture for `inventory-count.spec.ts`.
  *
@@ -849,11 +887,6 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
     primary_unit: 'each',
-    // Zero, so no Unassigned row is created at all: `seed_new_part_balance` only seeds a row for
-    // a non-zero quantity, and the table CHECKs `quantity > 0` (20260802144310). The spec then
-    // sees exactly the two shelf rows the upserts below create — naturally, rather than because a
-    // filter was hiding a third.
-    quantity: 0,
     cost_per_unit: null,
   });
 
@@ -865,7 +898,12 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
       { company_id: companyId, part_id: partId, location_id: shelfA, quantity: 40 },
       { company_id: companyId, part_id: partId, location_id: shelfB, quantity: 12 },
     ],
-    { onConflict: 'part_id,location_id' },
+    // `lot_key` joined the key in 20260906121901 so a part can hold two heats in one bin. It is a
+    // generated column (lot_id, with NULL collapsed to a sentinel), so it is never written here —
+    // but it MUST be named, or PostgREST cannot infer the index and every upsert fails with
+    // "no unique or exclusion constraint matching the ON CONFLICT specification". This fixture is
+    // lot-less, which is what an untracked part looks like.
+    { onConflict: 'part_id,location_id,lot_key' },
   );
   if (error) throw new Error(`split stock upsert failed: ${error.message}`);
 }

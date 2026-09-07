@@ -123,12 +123,18 @@ class MockSupabase:
         upsert_log=None,
         insert_log=None,
         existing_balances=None,
-        unassigned_id="loc-unassigned",
+        existing_locations=None,
     ):
         self._existing_parts = existing_parts or []
         # part_location_stock rows the company already has, as {part_id, location_id, quantity}.
         self._existing_balances = existing_balances or []
-        self._unassigned_id = unassigned_id
+        # The shop's storage. Since 20260906182638 an imported quantity has to name one of
+        # these; there is no bucket to fall back to. One flat leaf is enough for most cases.
+        self._existing_locations = (
+            existing_locations
+            if existing_locations is not None
+            else [{"id": "loc-shelf-a", "name": "Shelf A", "parent_id": None}]
+        )
         self.rpc_calls: list[tuple[str, dict]] = []
         self._existing_customers = existing_customers or []
         self._existing_vendors = existing_vendors or []
@@ -176,6 +182,10 @@ class MockSupabase:
             self._table_instance = MockSupabaseTable(
                 data=[dict(b) for b in self._existing_balances]
             )
+        elif name == "inventory_locations":
+            self._table_instance = MockSupabaseTable(
+                data=[dict(l) for l in self._existing_locations]
+            )
         else:
             self._table_instance = MockSupabaseTable()
         # Wrap insert for inspection
@@ -183,9 +193,9 @@ class MockSupabase:
         return self._table_instance
 
     def rpc(self, name, params=None):
-        """Only `inv_get_or_create_unassigned` is called from the import path."""
+        """Recorded, not answered. The import path calls no RPC since the bucket went."""
         self.rpc_calls.append((name, params or {}))
-        return MockSupabaseTable(data=self._unassigned_id)
+        return MockSupabaseTable(data=None)
 
 
 def create_mock_supabase_override(
@@ -195,6 +205,7 @@ def create_mock_supabase_override(
     upsert_log=None,
     insert_log=None,
     existing_balances=None,
+    existing_locations=None,
 ):
     """Create a dependency override function for get_supabase."""
     mock = MockSupabase(
@@ -204,6 +215,7 @@ def create_mock_supabase_override(
         upsert_log=upsert_log,
         insert_log=insert_log,
         existing_balances=existing_balances,
+        existing_locations=existing_locations,
     )
     def override():
         return mock
@@ -736,6 +748,7 @@ class TestPartsExecuteEndpoint:
                 "Part Name": "part_name",
                 "Unit": "primary_unit",
                 "Quantity": "quantity",
+                "Where": "location_name",
                 "Cost": "cost_per_unit",
             },
             "pricing_columns": [],
@@ -744,6 +757,7 @@ class TestPartsExecuteEndpoint:
                     "Part Name": "STEEL-4140",
                     "Unit": "lbs",
                     "Quantity": "250",
+                    "Where": "Shelf A",
                     "Cost": "12.50",
                 },
             ],
@@ -775,11 +789,12 @@ class TestPartsExecuteEndpoint:
         assert inserted["source"] == "bought"
         assert inserted["primary_unit"] == "pounds"
         # NOT on the part row — `parts.quantity` is a trigger-maintained rollup since
-        # 20260802015837. It lands as a balance at the Unassigned bucket instead.
+        # 20260802015837. It lands as a balance at the location the CSV named, which since
+        # 20260906182638 is the only place it can land: there is no bucket to fall back to.
         assert "quantity" not in inserted
         balance = [r for r in insert_log if r["table"] == "part_location_stock"][0]["data"][0]
         assert balance["quantity"] == 250.0
-        assert balance["location_id"] == "loc-unassigned"
+        assert balance["location_id"] == "loc-shelf-a"
         # cost_per_unit was dropped from parts in migration 20260514; the CSV
         # cost is routed onto the part's tier row instead. Assert the row was
         # emitted with the right shape.
@@ -855,9 +870,12 @@ class TestPartsExecuteEndpoint:
                 "Part Name": "part_name",
                 "Unit": "primary_unit",
                 "Qty": "quantity",
+                "Where": "location_name",
             },
             "pricing_columns": [],
-            "rows": [{"Part Name": "STEEL-4140", "Unit": "lbs", "Qty": "250"}],
+            "rows": [
+                {"Part Name": "STEEL-4140", "Unit": "lbs", "Qty": "250", "Where": "Shelf A"}
+            ],
             "skip_conflicts": False,
             "uom_resolutions": {1: "pounds"},
         }
@@ -989,7 +1007,7 @@ class TestPartsExecuteEndpoint:
         assert upserted["primary_unit"] == "pounds"
 
     @pytest.mark.unit
-    async def test_execute_writes_an_opening_balance_at_unassigned(self, test_client):
+    async def test_execute_writes_an_opening_balance_at_the_named_place(self, test_client):
         """The normal onboarding case: a quantity lands as a balance, never on the part row.
 
         `parts.quantity` became a trigger-maintained rollup of `part_location_stock` in
@@ -1005,9 +1023,12 @@ class TestPartsExecuteEndpoint:
                 "Part Name": "part_name",
                 "Unit": "primary_unit",
                 "Qty": "quantity",
+                "Where": "location_name",
             },
             "pricing_columns": [],
-            "rows": [{"Part Name": "BRAND-NEW", "Unit": "lbs", "Qty": "40"}],
+            "rows": [
+                {"Part Name": "BRAND-NEW", "Unit": "lbs", "Qty": "40", "Where": "Shelf A"}
+            ],
             "skip_conflicts": False,
             "uom_resolutions": {1: "pounds"},
         }
@@ -1030,7 +1051,7 @@ class TestPartsExecuteEndpoint:
         assert len(balances) == 1
         row = balances[0]["data"][0]
         assert row["quantity"] == 40.0
-        assert row["location_id"] == "loc-unassigned"
+        assert row["location_id"] == "loc-shelf-a"
 
         # Prior is 0 for a new part, so the ledger row explains 0 -> 40.
     @pytest.mark.unit

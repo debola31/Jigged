@@ -13,6 +13,7 @@ const entry = (over: Partial<LocationHistoryEntry> = {}): LocationHistoryEntry =
   quantity: 12,
   unit: 'ea',
   notes: null,
+  heatNumber: null,
   actorName: 'Ada Lovelace',
   photoUrl: null,
   hasDiscrepancy: false,
@@ -27,6 +28,26 @@ describe('BinHistory — "what happened here, and who did it"', () => {
     expect(screen.getByText('+12 ea')).toBeInTheDocument();
     expect(screen.getByText('RAW-AL6061-BLANK')).toBeInTheDocument();
     expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
+  });
+
+  /**
+   * The heat the bar carried, read back off its tag — shown only when one was recorded, as the
+   * heat itself and never as a count of heats. This is an operator surface: the guardrail in
+   * docs/modules/operator-view.md forbids any tally, and a new element is exactly where one
+   * would creep in unnoticed.
+   */
+  it('shows the heat number a movement carried, and nothing when none was recorded', () => {
+    const { container } = render(
+      <BinHistory
+        entries={[entry({ id: 'a', heatNumber: '4471' }), entry({ id: 'b', heatNumber: null })]}
+        loading={false}
+      />,
+    );
+    expect(screen.getByText('Heat 4471')).toBeInTheDocument();
+    expect(screen.getAllByText(/^Heat /)).toHaveLength(1);
+    for (const forbidden of [/streak/i, /rank/i, /leaderboard/i, /top \d/i, /total/i, /points?\b/i]) {
+      expect(container.textContent ?? '').not.toMatch(forbidden);
+    }
   });
 
   /**

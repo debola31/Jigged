@@ -30,7 +30,6 @@
  */
 import type { LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
 import { compareLocationNames, computePathNames } from '@/lib/locationTree';
-import { SYSTEM_KIND } from '@/lib/locationKinds';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
 import type {
   InventoryLocation,
@@ -79,7 +78,6 @@ export function stockDestinationOptions(
     .filter(
       (l) =>
         l.id !== excludeId &&
-        l.kind !== SYSTEM_KIND &&
         // The rule this module exists for: a container holds its children, not stock.
         !parents.has(l.id),
     )
@@ -141,7 +139,6 @@ export function locationParentOptions(
   return locations
     .filter(
       (l) =>
-        l.kind !== SYSTEM_KIND &&
         !isUnder(l) &&
         occupancyFor(occupancy, l.id).directParts === 0,
     )

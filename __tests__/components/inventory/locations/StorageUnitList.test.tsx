@@ -100,19 +100,14 @@ describe('StorageUnitList', () => {
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
-  it('names the pile as what it is, and sorts it last', () => {
-    const tree = [
-      node('Unassigned', [], { kind: 'system', sort_order: 0 }),
-      node('Cabinet 1', run('Row', 2), { sort_order: 1 }),
-    ];
-    renderList(tree);
+  /*
+   * `names the pile as what it is, and sorts it last` is gone — 20260906182638.
+   *
+   * `orderUnits` used to float the `Unassigned` bucket to the bottom, because the pile you are
+   * trying to empty should not lead the page. Every root is a place someone named and ordered
+   * deliberately now, so the shop's own `sort_order` is the whole rule.
+   */
 
-    expect(screen.getByText('Not stored yet')).toBeInTheDocument();
-    expect(screen.getByText(/parts with no location yet/i)).toBeInTheDocument();
-
-    const names = screen.getAllByText(/Unassigned|Cabinet 1/).map((n) => n.textContent);
-    expect(names[names.length - 1]).toBe('Unassigned');
-  });
 
   it('opens a unit when the card is tapped', async () => {
     const user = userEvent.setup();

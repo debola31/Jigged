@@ -34,6 +34,7 @@ import type { Company } from '@/utils/companyAccess';
 import type { AddressSnapshot } from '@/types/documentSnapshot';
 import {
   SHIPPING_METHOD_LABELS,
+  describeHeatNumbers,
   describeShipmentFreight,
   type ShipmentWithRelations,
 } from '@/types/shipment';
@@ -861,6 +862,15 @@ export async function generatePackingSlipPdf(
   // 4 characters or fewer has no last-4, since showing 3 of 4 is not redaction.
   const freightLine = describeShipmentFreight(shipment);
   if (freightLine) details.push(['Freight', freightLine]);
+  // Material heat numbers, also from a FROZEN snapshot: the slip in a customer's hands must keep
+  // saying what it said even after the office corrects a typo on the ledger (void and reissue is
+  // the path to a different slip). Omitted entirely when nothing was recorded — most shops do not
+  // track heats, and a blank line reads as a missing value on a receiving dock. One job per part
+  // since #812, so this is per shipped part for every job made from a quote; a legacy multi-part
+  // job prints the same set once. A details line, not a table column: the fixed widths above
+  // leave Description 140pt at worst, and that is what decides whether a column can ever be added.
+  const heatLine = describeHeatNumbers(shipment);
+  if (heatLine) details.push(['Material heat no(s).', heatLine]);
 
   if (details.length > 0) {
     doc.setFont('helvetica', 'bold');

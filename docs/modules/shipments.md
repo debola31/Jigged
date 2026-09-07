@@ -50,6 +50,7 @@ triggers. The standalone discovery PRD was folded in and removed; its revisions 
 | `customer_carrier_account_id` | FK → `customer_carrier_accounts` (`ON DELETE SET NULL`). Navigation only; the document renders the snapshot. |
 | `freight_account_snapshot` | jsonb **redacted** freeze at ship time: `{carrier, bill_to_party, has_account, account_last4}`. Never the full account number — the slip leaves the building. `account_last4` is NULL at ≤ 4 chars, because showing 3 of 4 is not redaction. |
 | `customer_name`, `bill_to_address`, `ship_to_address` | Document snapshot frozen at insert by `snapshot_shipment_party` (`bill_to_address` = the customer's `default_billing`). The PDF renders these, never the live address rows. |
+| `heat_numbers_snapshot` | jsonb array, `NOT NULL DEFAULT '[]'`, frozen by the RPC at creation (2026-09-04): the DISTINCT `(heat_number, item_name)` pairs on the job's `inventory_transactions` depletions, as `[{heat_number, material_name}]` ordered by material then heat. The slip prints one `Material heat no(s).` line in SHIPMENT DETAILS **only when the array is non-empty** — most shops record no heats, and a blank line would read as a missing value on a dock. A heat corrected on the ledger afterwards never rewrites a slip a customer holds: void and reissue. Read through `parseHeatNumbersSnapshot` / `describeHeatNumbers` in `types/shipment.ts`. Why the heat lives on the movement and not on a lot: [inventory.md §5.6](inventory.md#56-lots--resolved-dont-build-them). |
 | `created_by` | FK → `auth.users`, `ON DELETE SET NULL`. |
 | `voided_at`, `voided_by` | |
 
@@ -115,8 +116,12 @@ nudges past it, so voiding a shipment does not yank on what you can invoice. A t
 
 `VOLATILE SECURITY DEFINER`. Derives the single job behind the line items (raises on zero **or more than
 one**), takes `pg_advisory_xact_lock` on it, mints `PS-{jobBase}-{n}` inline (`n` = existing shipments + 1,
-collision-free under the lock), inserts shipment + lines, snapshots `fulfillment_status` pre/post, writes the
-audit row when the job crosses forward, and returns the shipment **id**. `createShipment` reads the minted
+collision-free under the lock), freezes the job's material heat numbers into `heat_numbers_snapshot`
+(2026-09-04 — `[]` when none was recorded), inserts shipment + lines, snapshots `fulfillment_status`
+pre/post, writes the audit row when the job crosses forward, and returns the shipment **id**. Since
+`20260904063844` its EXECUTE is granted by name to `authenticated` and `service_role` and revoked from
+`PUBLIC`/`anon` — before that it was reachable only through PUBLIC's built-in default, which the 2026-08-01
+recreation had silently left it on. `createShipment` reads the minted
 number back in a second query so callers get `{shipmentId, packingSlipNumber}`. Parameters mirror
 `CreateShipmentPayload` in `types/shipment.ts`; `job_id` is **not** one — it is derived.
 
@@ -134,6 +139,17 @@ Two traps, recorded in migration `20260801030048`, both of which apply cleanly a
 - **`DROP FUNCTION IF EXISTS` against a wrong signature succeeds and does nothing**, leaving the old
   `SECURITY DEFINER` overload alive with its grants and letting PostgREST pick. The migration ends with a
   `DO $$` block asserting exactly one overload exists, turning a silent miss into a failed migration.
+
+### Certificate of Conformance text — built, then dropped (2026-06-21)
+
+The baseline schema carried a three-level CoC cascade — `shipments.coc_text` →
+`customers.default_coc_text` → `companies.default_coc_text` — printed as a block on the packing slip.
+Migration `20260621161856` dropped all three (with tracking number, weight, package count and type) as
+*"fields the shop doesn't need at packing-slip time"*, and nothing survives in schema or UI. Recorded here
+because it was re-discovered from the migration alone on 2026-09-03 while planning heat numbers, which are a
+different thing (a fact about the material, on the movement — [inventory.md §5.6](inventory.md#56-lots--resolved-dont-build-them))
+and deliberately do **not** bring CoC text back. If a customer ever asks for a conformance statement, it is a
+fresh build on the snapshot pattern, not a revival.
 
 ---
 

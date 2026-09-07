@@ -25,6 +25,12 @@ export interface InventoryTransaction {
   job_operation_id: string | null;
   operator_id: string | null;
   notes: string | null;
+  /**
+   * The mill heat / lot number this movement carried — typed off the tag at receiving, read back
+   * off the bar at a take. Null when none was recorded, the normal case. Like `notes`, and unlike
+   * every other column, it is correctable afterwards: a transcription, not a balance fact.
+   */
+  heat_number: string | null;
   has_discrepancy: boolean;
   // Location where this happened (null for non-location-tracked parts). Nulled
   // if the location is later deleted; location_name keeps the snapshot.

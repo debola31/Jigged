@@ -122,14 +122,14 @@ describe('LocationsManager', () => {
   });
 
   /** The empty state that never rendered. */
-  it('treats a company with only the system bucket as having no storage', async () => {
-    vi.mocked(getLocationBoard).mockResolvedValue(
-      board([loc({ id: 'un', name: 'Unassigned', kind: 'system' })], [['un', 9428]]),
-    );
-    render(<LocationsManager companyId="co1" />);
-
-    expect(await screen.findByText(/9,428 parts, nowhere in particular/i)).toBeInTheDocument();
-  });
+  /*
+   * `treats a company with only the system bucket as having no storage` is gone — 20260906182638.
+   *
+   * The empty state used to be unreachable for every real tenant, because the auto-track trigger
+   * minted a top-level `Unassigned` the moment any stocked part existed — so an owner who had
+   * built nothing got one action-less row instead of the CTAs. No bucket is minted now, so a shop
+   * with no storage simply has no rows, which the case below already covers.
+   */
 
   it('does not claim "nowhere in particular" once real storage exists', async () => {
     render(<LocationsManager companyId="co1" />);

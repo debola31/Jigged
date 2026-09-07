@@ -21,6 +21,9 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+  // The heat suggestions a removal offers once a location is picked; empty here.
+  // Nothing on this shelf: the lot picker stays hidden and these specs test the rest.
+  getLotsAtLocationForPart: vi.fn(async () => ({ lots: [], tracked: false })),
 }));
 
 /** The modal resolves the acting member so owner-side writes carry an author. */
@@ -76,10 +79,10 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l2', 1, 'ea', {
-        notes: undefined,
-        operatorId: 'member-1',
-      }),
+      expect(transferStock).toHaveBeenCalledWith(
+        'p1', 'l1', 'l2', 1, 'ea',
+        expect.objectContaining({ notes: undefined, operatorId: 'member-1' }),
+      ),
     );
   });
 
@@ -111,10 +114,10 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l3', 1, 'ea', {
-        notes: undefined,
-        operatorId: 'member-1',
-      }),
+      expect(transferStock).toHaveBeenCalledWith(
+        'p1', 'l1', 'l3', 1, 'ea',
+        expect.objectContaining({ notes: undefined, operatorId: 'member-1' }),
+      ),
     );
   });
 });

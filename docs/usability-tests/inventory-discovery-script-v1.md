@@ -42,7 +42,7 @@ one drove are in [`inventory.md`](../modules/inventory.md) §9.
 
 | Question | Answer |
 |---|---|
-| Certs / heat numbers / traceability | **No** — re-confirmed 2026-08-01; they do not want it. Phase 4 traceability cut |
+| Certs / heat numbers / traceability | **No** — re-confirmed 2026-08-01; they do not want it. Phase 4 traceability cut. *Heat numbers were built 2026-09-04 for a different customer, as an optional field that stays blank and prints nothing when unused — Contour's answer is unchanged, and this is still not to be re-asked* |
 | Staging vs grab-at-the-machine (§5.2, "is a job a place?") | **Grabbed at the machine.** Job ≠ place |
 | Stock vs buy-per-job | **They stock**, for rush jobs — which is what J4 is for |
 | Who moves material | The **operator** |

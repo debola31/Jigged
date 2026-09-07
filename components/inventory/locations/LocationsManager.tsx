@@ -37,6 +37,7 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import StorageSearch, { type StorageHit } from './StorageSearch';
+import StorageActivity from './StorageActivity';
 import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
@@ -363,16 +364,16 @@ export default function LocationsManager({
     return siblings.map((n) => n.name);
   }, [formState.location, formState.parentId, byNodeId, tree]);
 
-  /**
-   * "Nothing here yet" can't be `tree.length === 0`.
+  /*
+   * The empty state is simply an empty tree — 20260906182638.
    *
-   * `trg_auto_track_stocked_part` creates a top-level `('Unassigned', kind='system')` row the
-   * moment any stocked part exists, so `tree.length === 0` was **false for every real tenant** —
-   * the empty state below and both its CTAs were unreachable, and what an owner actually got was
-   * one action-less row reading "Unassigned". `tree.length === 0` is kept for the genuinely
-   * fresh company (flag on, no stocked parts yet).
+   * It used to be `tree.length > 0 && every node is the system bucket`, because the auto-track
+   * trigger minted a top-level `Unassigned` the moment any stocked part existed. That made
+   * `tree.length === 0` false for every real tenant, so the empty state and both its CTAs were
+   * unreachable and an owner got one action-less row reading "Unassigned" instead. No bucket is
+   * minted now, so a shop with no storage has no rows and the plain check is the true one.
    */
-  const noRealStorage = tree.length > 0 && tree.every((n) => n.kind === 'system');
+  const noRealStorage = tree.length === 0;
 
 
   // A unit's own actions. Everything that belongs to a PLACE lives in the drawer instead, so this
@@ -780,6 +781,10 @@ export default function LocationsManager({
           setToast(message);
         }}
       />
+
+      {/* What has moved anywhere lately — the shop floor's feed, on the office's own home for
+          storage, so the same question is answered on both surfaces rather than only one. */}
+      <StorageActivity companyId={companyId} onOpenPlace={openPlaceFromPart} />
 
       {/* A whole unit, bin by bin, without leaving the page it belongs to. */}
       <UnitAdjustDrawer

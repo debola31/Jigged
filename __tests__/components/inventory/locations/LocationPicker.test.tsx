@@ -62,14 +62,13 @@ describe('LocationPicker — what it offers', () => {
    * Putting something away *into* the pile of unplaced things is the situation you're escaping, so
    * the system bucket is never a destination — even though it's a perfectly good source.
    */
-  it('excludes the system bucket when asked', async () => {
-    const user = userEvent.setup();
-    renderPicker({ excludeSystem: true });
-    await open(user);
+  /*
+   * `excludes the system bucket when asked` went with the `excludeSystem` prop — 20260906182638.
+   *
+   * Four surfaces passed it to keep the `Unassigned` bucket out of a destination list. There is
+   * no bucket, so the prop had nothing left to exclude and the picker offers every place.
+   */
 
-    await screen.findByRole('option', { name: /^Yard/ });
-    expect(screen.queryByRole('option', { name: /^Unassigned/ })).not.toBeInTheDocument();
-  });
 
   it('still offers the system bucket when it is a legitimate choice', async () => {
     const user = userEvent.setup();

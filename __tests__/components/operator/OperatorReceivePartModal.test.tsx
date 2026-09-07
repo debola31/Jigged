@@ -168,4 +168,68 @@ describe('OperatorReceivePartModal', () => {
       expect(addStockAtLocation).not.toHaveBeenCalled();
     });
   });
+  /**
+   * Recording the first heat against a part turns tracking on for it, and from then on every
+   * removal asks which heat. That is a change to how the part works, caused by the person standing
+   * here holding the bar — so this is the one save the dialog does not close on.
+   */
+  describe('when this receipt is what started tracing the part', () => {
+    const receiveWithHeat = async (started: boolean) => {
+      (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({
+        location_balance: 10,
+        part_quantity: 10,
+        started_tracking: started,
+      });
+      const onClose = vi.fn();
+      const user = userEvent.setup();
+      renderModal({ onClose });
+
+      await openPartPicker();
+      await user.click(await screen.findByRole('option', { name: 'Part A' }));
+      await user.type(screen.getByRole('spinbutton', { name: 'Quantity' }), '10');
+      await user.type(screen.getByRole('textbox', { name: /heat number/i }), '4471');
+      await user.click(screen.getByRole('button', { name: /^add$/i }));
+      return { onClose, user };
+    };
+
+    it('stays open and says what just changed, instead of closing silently', async () => {
+      const { onClose } = await receiveWithHeat(true);
+
+      const notice = await screen.findByRole('alert');
+      // Names the part, and says what will happen next rather than only that something did.
+      expect(notice).toHaveTextContent(/Part A is now tracked by heat/i);
+      expect(notice).toHaveTextContent(/ask which heat/i);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The form is replaced, not left beside the message. The write has landed, so the obvious next
+     * tap on a still-armed Add would put a second bar in a bin that already has the first.
+     */
+    it('leaves nothing to re-submit', async () => {
+      await receiveWithHeat(true);
+
+      await screen.findByRole('alert');
+      expect(screen.queryByRole('button', { name: /^add$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^done$/i })).toBeInTheDocument();
+    });
+
+    /** Says nothing about the operator: no count of heats, no tally, no standing. */
+    it('states a rule about the part, never anything about the person', async () => {
+      await receiveWithHeat(true);
+
+      const notice = await screen.findByRole('alert');
+      for (const forbidden of [/streak/i, /rank/i, /leaderboard/i, /total/i, /points?\b/i]) {
+        expect(notice.textContent ?? '').not.toMatch(forbidden);
+      }
+    });
+
+    /** The ordinary receipt — an already-traced part, or no heat at all — closes as it always did. */
+    it('closes as usual when nothing changed about the part', async () => {
+      const { onClose } = await receiveWithHeat(false);
+
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
 });

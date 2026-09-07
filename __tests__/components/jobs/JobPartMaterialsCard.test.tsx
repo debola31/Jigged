@@ -29,6 +29,7 @@ const row = (over: Partial<MaterialRequirement> & { partId: string }): MaterialR
   onHand: 20,
   issued: 0,
   hasDiscrepancy: false,
+  heatNumbers: [],
   remainingToIssue: 8,
   shortBy: 0,
   status: 'ok',
@@ -133,6 +134,21 @@ describe('JobPartMaterialsCard', () => {
     ]);
     renderCard();
     expect(await screen.findByText(/shortfall recorded/i)).toBeInTheDocument();
+  });
+
+  // The heats issued to this job for a material — what the packing slip will print — one chip
+  // each, and none at all when nothing was recorded, which is the normal state.
+  it('lists the heat numbers issued for a material, and nothing when none was recorded', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([
+      row({ partId: 'steel', heatNumbers: ['4471', '8823'] }),
+      row({ partId: 'oring' }),
+    ]);
+    renderCard();
+    const steel = await rowFor('STEEL');
+    expect(within(steel).getByText('Heat 4471')).toBeInTheDocument();
+    expect(within(steel).getByText('Heat 8823')).toBeInTheDocument();
+    const oring = await rowFor('ORING');
+    expect(within(oring).queryByText(/^Heat /)).not.toBeInTheDocument();
   });
 
   // Dropping the row would be worse than showing it flagged. `not_stocked` was the other member

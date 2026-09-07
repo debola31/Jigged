@@ -4,7 +4,8 @@
 > (`wc -w`) — a 26% cut *while adding* the freight model the doc had omitted entirely. Cut: the acceptance-criteria block (39% of
 > the doc — every bullet restated the test it cited); the "Feature flag (removed)" section, which repeated the
 > Overview; UI prose a component open reproduces. Kept: the one-slip-one-job invariant, the
-> dead-but-undroppable `p_notes` parameter, the dormant customer-mode branch, invoicing-is-decoupled, every gap.
+> dead-but-undroppable `p_notes` parameter, invoicing-is-decoupled, every gap. *(The dormant
+> customer-mode branch it also kept was deleted on 2026-09-07 — see "Multi-job packing slips" below.)*
 >
 > **Corrections against the code.** *(1) The data model omitted three shipped columns — `freight_terms`,
 > `customer_carrier_account_id`, `freight_account_snapshot` — with their two CHECK constraints, and the access
@@ -157,15 +158,15 @@ fresh build on the snapshot pattern, not a revival.
 
 There is **no `/dashboard/{companyId}/shipments` list page and no `/shipments/new` wizard** — both, and the
 sidebar entry, went when a packing slip became one-job (commit `c233b50`). Everything lives on the **job
-detail page**. The residual `components/layout/Header.tsx` "Shipments" / "New Shipment" title mappings are
-dead route matches with no page behind them.
+detail page**. `components/layout/Header.tsx` kept "Shipments" / "New Shipment" title mappings for those
+dead routes until 2026-09-07; they are gone too.
 
 - **`components/jobs/ShipmentsMenu.tsx`** — toolbar dropdown (mirrors `InvoicesMenu`), rendered whenever the
   job has ≥1 part; reads `Shipments (n)` and opens `PackingSlipPreviewDialog`. **Voiding is deliberately not
   on this menu** — it lives inside the preview, so the destructive action is only reachable once the slip is
   on screen.
-- **`components/shipments/CreateShipmentModal.tsx`** — thin `Dialog` around `ShipmentForm` in **`job` mode**;
-  the job page auto-opens the preview for the new slip.
+- **`components/shipments/CreateShipmentModal.tsx`** — thin `Dialog` around `ShipmentForm`, which it hands
+  a `jobId`; the job page auto-opens the preview for the new slip.
 - **`components/shipments/ShipmentForm.tsx`** — per-part table (Ordered / Already Shipped / Remaining / Ship
   Now) pre-filled with the full remaining qty and captioned by `lineShipConsequence`. Over-shipping **warns,
   never blocks**; submit is blocked only when every qty is zero. No notes field.
@@ -177,10 +178,18 @@ forced value, because a shipment genuinely can move on a different carrier than 
 `carrierAccountMismatch` returns a *message*, never a verdict, and is computed **outside** the validation memo
 so freight can never reach `canSubmit`.
 
-**Job mode is the only reachable path.** `ShipmentForm` still carries a `source: {kind: 'customer'}` branch (a
-cross-job open-lines picker fed by `getOpenJobPartsForCustomer`) but **nothing routes to it**. Dead code
-awaiting excision — **untracked gap** *(was "Planned — see #550"; #550 is closed)*. Its behaviour is excluded
-from this doc.
+### Multi-job packing slips — built, never wired, removed
+
+**Deleted 2026-09-07 under [#690](https://github.com/debola31/Jigged/issues/690).** `ShipmentForm` carried a
+second source — `{kind: 'customer'}`, a cross-job open-lines picker fed by `getOpenJobPartsForCustomer` — for
+shipping several of a customer's jobs on one slip. Nothing ever routed to it: the `/shipments/new` wizard it
+was built for went with `c233b50`, and no entry point replaced it. It was found when a defect fixed inside it
+(PR #655: customer mode never resolved `carrier_accounts`, so freight saved NULL) could not be verified,
+because the path could not be reached.
+
+It is gone rather than wired up — the form now takes a `jobId`, not a source union. **A slip is one job.**
+Shipping several jobs on one slip is real shop behaviour, so this can come back, but it should come back
+with a shop asking for it rather than as scaffolding nobody can reach.
 
 ---
 
@@ -213,7 +222,6 @@ block was never orphaned at the foot of a page. Asserted by
 | `getShippedBeforeShipment(shipment)` | `Map<job_part_id, qty>` for the slips ordered **before** this one — the packing slip's point-in-time backlog. One query on `shipments.job_id` (one slip = one job); voided siblings excluded in SQL; the tuple predicate is applied in TS because PostgREST has no compound `<` |
 | `compareShipmentOrder(a, b)` | Total order over a job's slips: `ship_date` → `created_at` (parsed as an instant, not text) → `id` |
 | `getJobShipmentSummary(jobId)` | Job rollup: ordered/shipped/remaining, last ship date, latest slip #, count |
-| `getOpenJobPartsForCustomer(companyId, customerId, filter?)` | Feeds only the dormant customer-mode branch; same untracked-excision gap |
 | `getJobLastShipDate(jobId)` | Wrapper over the `job_last_ship_date(uuid)` SQL helper |
 | `resolveAttentionLine(shipment)` | ATTN line from the frozen `ship_to_address` snapshot — shared by form preview + PDF so they cannot drift |
 | `resolveFreightLine(args)` | → `{terms, account, requiresChoice, source}`. **The job wins over the customer default:** a customer who normally ships collect can send one PO saying "this one prepaid", and re-deriving at pack time would quietly contradict it. Returns `requiresChoice: true` rather than guessing when the customer holds >1 live account and the job named none |
@@ -236,7 +244,7 @@ As-built, verified 2026-08-03. Each row names the file + `describe`/class that e
 | Cross-customer line items and any `customer_id` change are rejected by trigger; other field updates still succeed | `api/tests/integration/test_shipment_customer_consistency.py` (4 module-level tests) |
 | Cross-tenant select/insert/update/delete is empty or blocked | `api/tests/database/test_rls_policies.py` — `TestShipmentsRLS` |
 | `voidShipment` stamps, is re-void-guarded, and throws without writing when there is no session | `__tests__/utils/shipmentsAccess.test.ts` — `voidShipment` |
-| Row consequence captions; projected job status counting prior shipments cross-slip | `__tests__/components/shipments/shipmentFormHelpers.test.ts` — `lineShipConsequence`, `projectSlip` |
+| Row consequence captions | `__tests__/components/shipments/shipmentFormHelpers.test.ts` — `lineShipConsequence` |
 | Carrier/account mismatch produces a message, and none when they match or either is blank | same file — `carrierAccountMismatch` |
 | Freight precedence (job over customer); refusing to guess at >1 account; printed freight comes only from the snapshot | `__tests__/utils/customerCarrierAccountsAccess.test.ts` — `resolveFreightLine — the job wins over the customer default`, `pickCarrierAccount — refuses to guess`, `describeShipmentFreight — everything printed comes from the snapshot` |
 | Raising an ordered quantity above the shipped total recomputes fulfillment; reducing below shipped is blocked | `__tests__/utils/jobsAccess.test.ts` — `updateJobPartQuantity` |

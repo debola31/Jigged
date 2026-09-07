@@ -3,7 +3,6 @@
 import ErrorAlert from '@/components/common/ErrorAlert';
 import {
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useState,
@@ -12,18 +11,13 @@ import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Checkbox from '@mui/material/Checkbox';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import FormControl from '@mui/material/FormControl';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import Stack from '@mui/material/Stack';
-import Switch from '@mui/material/Switch';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -31,7 +25,6 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import SearchIcon from '@mui/icons-material/Search';
 
 import { getSupabase } from '@/lib/supabase';
 import type { Company } from '@/utils/companyAccess';
@@ -43,7 +36,6 @@ import {
 import { resolveFreightLine, type ResolvedFreight } from '@/utils/shipmentsAccess';
 import type {
   CreateShipmentPayload,
-  OpenJobPartRow,
   ShippingMethod,
 } from '@/types/shipment';
 import {
@@ -56,7 +48,6 @@ import {
 import {
   createShipment,
   getJobPartShipmentSummaries,
-  getOpenJobPartsForCustomer,
 } from '@/utils/shipmentsAccess';
 import {
   lineShipConsequence,
@@ -78,9 +69,8 @@ function todayLocalISODate(): string {
 }
 
 /**
- * Loaded customer context. In both modes we end up with the same shape:
- * the customer's name + default carrier/arrangement/coc + the list of
- * addresses available for ship-to.
+ * Loaded customer context — the customer's name, credit standing and the
+ * addresses available for ship-to, read through the job.
  */
 interface CustomerContext {
   id: string;
@@ -97,10 +87,7 @@ interface CustomerContext {
   carrier_accounts?: CustomerCarrierAccount[];
 }
 
-/**
- * One line in the form's picker. job mode has all rows sharing one
- * job_number; customer mode mixes jobs.
- */
+/** One line in the form's picker: one row per job_part on the job being shipped. */
 interface LineRow {
   job_part_id: string;
   job_id: string;
@@ -114,16 +101,10 @@ interface LineRow {
   production_status: 'not_started' | 'in_progress' | 'completed' | 'cancelled';
   /** User-edited input string so an empty box doesn't collapse to 0. */
   qty_input: string;
-  /** Customer mode only — whether the user has ticked this row. */
-  selected: boolean;
 }
 
-export type ShipmentFormSource =
-  | { kind: 'job'; jobId: string }
-  | { kind: 'customer'; customerId: string };
-
 export interface ShipmentFormProps {
-  source: ShipmentFormSource;
+  jobId: string;
   companyId: string;
   onCreated: (result: {
     shipmentId: string;
@@ -134,7 +115,7 @@ export interface ShipmentFormProps {
 }
 
 export default function ShipmentForm({
-  source,
+  jobId,
   companyId,
   onCreated,
   onCancel,
@@ -167,13 +148,6 @@ export default function ShipmentForm({
 
   const [lines, setLines] = useState<LineRow[]>([]);
 
-  // Customer-mode UI state. Ignored in job mode.
-  const [readyToShipOnly, setReadyToShipOnly] = useState(true);
-  const [searchInput, setSearchInput] = useState('');
-  const deferredSearch = useDeferredValue(searchInput);
-
-  const isCustomerMode = source.kind === 'customer';
-
   // ---------- Initial load ----------
   // `loading` starts true (useState init), so the effect needs no synchronous
   // setLoading(true) here (which would trip react-hooks/set-state-in-effect);
@@ -201,137 +175,13 @@ export default function ShipmentForm({
           throw new Error(companyErr?.message ?? 'Company not found.');
         }
 
-        // 2. Customer context + lines, depending on source.
-        let ctx: CustomerContext;
-        let initialLines: LineRow[];
-
-        if (source.kind === 'job') {
-          const { data: jobRow, error: jobErr } = await supabase
-            .from('jobs')
-            .select(
-              `id, job_number, company_id,
-               customer:customers!left (
-                 id, name, credit_status, credit_hold_note,
-                 addresses:customer_addresses (
-                   id, customer_id, address_line1, address_line2, city, state,
-                   postal_code, country, default_billing, default_shipping, attention_to
-                 ),
-                 carrier_accounts:customer_carrier_accounts (
-                   id, company_id, customer_id, carrier, bill_to_party, account_number,
-                   account_postal_code, account_country_code, notes,
-                   created_at, updated_at, deleted_at
-                 )
-               ),
-               customer_po_number, freight_terms, customer_carrier_account_id, ship_via,
-               shipping_instructions,
-               job_parts (
-                 id, sequence, quantity, production_status, fulfillment_status,
-                 parts (id, part_name, description)
-               )`,
-            )
-            .eq('id', source.jobId)
-            .single();
-          if (jobErr || !jobRow) {
-            throw new Error(jobErr?.message ?? 'Job not found.');
-          }
-
-          type JobShape = {
-            id: string;
-            job_number: string;
-            customer_po_number: string | null;
-            freight_terms: FreightTerms | null;
-            customer_carrier_account_id: string | null;
-            ship_via: string | null;
-            shipping_instructions: string | null;
-            customer: CustomerContext | null;
-            job_parts: Array<{
-              id: string;
-              sequence: number;
-              quantity: number;
-              production_status: LineRow['production_status'];
-              fulfillment_status: 'unshipped' | 'partially_shipped' | 'fully_shipped';
-              parts: { id: string; part_name: string; description: string | null } | null;
-            }>;
-          };
-          const job = jobRow as unknown as JobShape;
-          if (!job.customer) {
-            throw new Error('Job is missing customer.');
-          }
-          ctx = job.customer;
-          setJobNumberForTitle(job.job_number);
-          // Resolve freight once, here: the JOB's instruction (what the PO said)
-          // beats the customer's standing arrangement. Doing it at load rather
-          // than at submit means the shipper SEES what will happen and can
-          // override it, instead of discovering it on the packing slip.
-          const freight = resolveFreightLine({
-            jobFreightTerms: job.freight_terms,
-            jobCarrierAccountId: job.customer_carrier_account_id,
-            customerAccounts: billableCarrierAccounts(
-              job.customer.carrier_accounts,
-              job.customer_carrier_account_id,
-            ),
-          });
-          setResolvedFreight(freight);
-          // Seed the controls here, inside the async loader, rather than from an
-          // effect watching resolvedFreight — a setState in an effect body
-          // triggers the cascading-render lint rule and this is the same data
-          // arriving at the same moment anyway.
-          setFreightTerms(freight.terms ?? '');
-          setFreightAccountId(freight.account?.id ?? '');
-          // Seed the carrier from the account we just resolved. Without this the
-          // packer picks a carrier from an empty field with the account sitting
-          // right beside it, and the slip prints "Carrier: FedEx" directly above
-          // "Freight: … — UPS ••••72W9". Seeding rather than forcing is the
-          // point: it is a visible default they can change, not a value written
-          // over them — a shipment genuinely can move on a different carrier
-          // than the account it bills to.
-          if (freight.account?.carrier) {
-            const match = CARRIER_OPTIONS.find(
-              (c) => c.toLowerCase() === freight.account!.carrier.trim().toLowerCase(),
-            );
-            if (match) setCarrierChoice(match);
-            else {
-              setCarrierChoice('other');
-              setCarrierOther(freight.account.carrier);
-            }
-          }
-          setJobShipVia(job.ship_via);
-          setJobShippingInstructions(job.shipping_instructions);
-
-          const summaries = await getJobPartShipmentSummaries(source.jobId);
-          const summaryByPart = new Map(summaries.map((s) => [s.job_part_id, s]));
-
-          initialLines = (job.job_parts ?? [])
-            .slice()
-            .sort((a, b) => a.sequence - b.sequence)
-            .map((jp) => {
-              const summary = summaryByPart.get(jp.id);
-              const qtyOrdered = Number(jp.quantity);
-              const qtyShippedPrior = summary?.qty_shipped ?? 0;
-              const qtyRemaining = summary?.qty_remaining ?? qtyOrdered;
-              return {
-                job_part_id: jp.id,
-                job_id: job.id,
-                job_number: job.job_number,
-                customer_po_number: job.customer_po_number,
-                part_name: jp.parts?.part_name ?? 'Part',
-                description: jp.parts?.description ?? null,
-                qty_ordered: qtyOrdered,
-                qty_shipped_prior: qtyShippedPrior,
-                qty_remaining: qtyRemaining,
-                production_status: jp.production_status,
-                qty_input: qtyRemaining > 0 ? String(qtyRemaining) : '0',
-                // Job mode: every line is implicitly "selected"; the qty
-                // input alone decides whether it's included on submit.
-                selected: true,
-              };
-            });
-        } else {
-          // Customer mode
-          const { data: customerRow, error: customerErr } = await supabase
-            .from('customers')
-            .select(
-              `id, name, credit_status, credit_hold_note,
+        // 2. Customer context + lines, from the job being shipped.
+        const { data: jobRow, error: jobErr } = await supabase
+          .from('jobs')
+          .select(
+            `id, job_number, company_id,
+             customer:customers!left (
+               id, name, credit_status, credit_hold_note,
                addresses:customer_addresses (
                  id, customer_id, address_line1, address_line2, city, state,
                  postal_code, country, default_billing, default_shipping, attention_to
@@ -340,68 +190,109 @@ export default function ShipmentForm({
                  id, company_id, customer_id, carrier, bill_to_party, account_number,
                  account_postal_code, account_country_code, notes,
                  created_at, updated_at, deleted_at
-               )`,
-            )
-            .eq('id', source.customerId)
-            .single();
-          if (customerErr || !customerRow) {
-            throw new Error(customerErr?.message ?? 'Customer not found.');
-          }
-          ctx = customerRow as unknown as CustomerContext;
-
-          // Customer mode has no job to name a freight instruction, so the
-          // customer's standing arrangement IS the answer — resolveFreightLine
-          // with no job inputs falls straight to pickCarrierAccount. Without
-          // this the panel never rendered here and every shipment created from
-          // the customer surface saved NULL freight, even for a customer whose
-          // whole point is that shipping bills to their own account.
-          const customerFreight = resolveFreightLine({
-            jobFreightTerms: null,
-            jobCarrierAccountId: null,
-            // `null` job account: no job is naming one here, so this is the plain
-            // live-only case. Passing the raw list is what billed freight to
-            // archived accounts — see billableCarrierAccounts.
-            customerAccounts: billableCarrierAccounts(
-              customerRow.carrier_accounts as unknown as CustomerCarrierAccount[],
-              null,
-            ),
-          });
-          setResolvedFreight(customerFreight);
-          setFreightTerms(customerFreight.terms ?? '');
-          setFreightAccountId(customerFreight.account?.id ?? '');
-          if (customerFreight.account?.carrier) {
-            const match = CARRIER_OPTIONS.find(
-              (c) =>
-                c.toLowerCase() === customerFreight.account!.carrier.trim().toLowerCase(),
-            );
-            if (match) setCarrierChoice(match);
-            else {
-              setCarrierChoice('other');
-              setCarrierOther(customerFreight.account.carrier);
-            }
-          }
-
-          const openParts = await getOpenJobPartsForCustomer(
-            companyId,
-            source.customerId,
-          );
-          initialLines = openParts.map((p: OpenJobPartRow) => ({
-            job_part_id: p.job_part_id,
-            job_id: p.job_id,
-            job_number: p.job_number,
-            customer_po_number: p.customer_po_number,
-            part_name: p.part_name,
-            description: p.description,
-            qty_ordered: p.qty_ordered,
-            qty_shipped_prior: p.qty_shipped,
-            qty_remaining: p.qty_remaining,
-            production_status: p.production_status,
-            qty_input: p.qty_remaining > 0 ? String(p.qty_remaining) : '0',
-            // Customer mode: nothing checked by default — the shipping
-            // clerk picks what they're actually boxing.
-            selected: false,
-          }));
+               )
+             ),
+             customer_po_number, freight_terms, customer_carrier_account_id, ship_via,
+             shipping_instructions,
+             job_parts (
+               id, sequence, quantity, production_status, fulfillment_status,
+               parts (id, part_name, description)
+             )`,
+          )
+          .eq('id', jobId)
+          .single();
+        if (jobErr || !jobRow) {
+          throw new Error(jobErr?.message ?? 'Job not found.');
         }
+
+        type JobShape = {
+          id: string;
+          job_number: string;
+          customer_po_number: string | null;
+          freight_terms: FreightTerms | null;
+          customer_carrier_account_id: string | null;
+          ship_via: string | null;
+          shipping_instructions: string | null;
+          customer: CustomerContext | null;
+          job_parts: Array<{
+            id: string;
+            sequence: number;
+            quantity: number;
+            production_status: LineRow['production_status'];
+            fulfillment_status: 'unshipped' | 'partially_shipped' | 'fully_shipped';
+            parts: { id: string; part_name: string; description: string | null } | null;
+          }>;
+        };
+        const job = jobRow as unknown as JobShape;
+        if (!job.customer) {
+          throw new Error('Job is missing customer.');
+        }
+        const ctx: CustomerContext = job.customer;
+        setJobNumberForTitle(job.job_number);
+        // Resolve freight once, here: the JOB's instruction (what the PO said)
+        // beats the customer's standing arrangement. Doing it at load rather
+        // than at submit means the shipper SEES what will happen and can
+        // override it, instead of discovering it on the packing slip.
+        const freight = resolveFreightLine({
+          jobFreightTerms: job.freight_terms,
+          jobCarrierAccountId: job.customer_carrier_account_id,
+          customerAccounts: billableCarrierAccounts(
+            job.customer.carrier_accounts,
+            job.customer_carrier_account_id,
+          ),
+        });
+        setResolvedFreight(freight);
+        // Seed the controls here, inside the async loader, rather than from an
+        // effect watching resolvedFreight — a setState in an effect body
+        // triggers the cascading-render lint rule and this is the same data
+        // arriving at the same moment anyway.
+        setFreightTerms(freight.terms ?? '');
+        setFreightAccountId(freight.account?.id ?? '');
+        // Seed the carrier from the account we just resolved. Without this the
+        // packer picks a carrier from an empty field with the account sitting
+        // right beside it, and the slip prints "Carrier: FedEx" directly above
+        // "Freight: … — UPS ••••72W9". Seeding rather than forcing is the
+        // point: it is a visible default they can change, not a value written
+        // over them — a shipment genuinely can move on a different carrier
+        // than the account it bills to.
+        if (freight.account?.carrier) {
+          const match = CARRIER_OPTIONS.find(
+            (c) => c.toLowerCase() === freight.account!.carrier.trim().toLowerCase(),
+          );
+          if (match) setCarrierChoice(match);
+          else {
+            setCarrierChoice('other');
+            setCarrierOther(freight.account.carrier);
+          }
+        }
+        setJobShipVia(job.ship_via);
+        setJobShippingInstructions(job.shipping_instructions);
+
+        const summaries = await getJobPartShipmentSummaries(jobId);
+        const summaryByPart = new Map(summaries.map((s) => [s.job_part_id, s]));
+
+        const initialLines: LineRow[] = (job.job_parts ?? [])
+          .slice()
+          .sort((a, b) => a.sequence - b.sequence)
+          .map((jp) => {
+            const summary = summaryByPart.get(jp.id);
+            const qtyOrdered = Number(jp.quantity);
+            const qtyShippedPrior = summary?.qty_shipped ?? 0;
+            const qtyRemaining = summary?.qty_remaining ?? qtyOrdered;
+            return {
+              job_part_id: jp.id,
+              job_id: job.id,
+              job_number: job.job_number,
+              customer_po_number: job.customer_po_number,
+              part_name: jp.parts?.part_name ?? 'Part',
+              description: jp.parts?.description ?? null,
+              qty_ordered: qtyOrdered,
+              qty_shipped_prior: qtyShippedPrior,
+              qty_remaining: qtyRemaining,
+              production_status: jp.production_status,
+              qty_input: qtyRemaining > 0 ? String(qtyRemaining) : '0',
+            };
+          });
 
         if (cancelled) return;
 
@@ -426,45 +317,7 @@ export default function ShipmentForm({
     return () => {
       cancelled = true;
     };
-  }, [source, companyId]);
-
-  // ---------- Derived: filtered + grouped lines (customer mode) ----------
-  const filteredLines = useMemo(() => {
-    if (!isCustomerMode) return lines;
-    const term = deferredSearch.trim().toLowerCase();
-    return lines.filter((l) => {
-      if (readyToShipOnly && l.production_status !== 'completed') {
-        // Always keep already-selected rows visible so a previously-ticked
-        // line doesn't silently disappear when the filter toggles.
-        if (!l.selected) return false;
-      }
-      if (term) {
-        const hay = `${l.part_name} ${l.job_number} ${l.customer_po_number ?? ''}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [lines, isCustomerMode, readyToShipOnly, deferredSearch]);
-
-  const linesByJob = useMemo(() => {
-    if (!isCustomerMode) return null;
-    const groups = new Map<string, { job_number: string; customer_po_number: string | null; rows: LineRow[] }>();
-    for (const l of filteredLines) {
-      const existing = groups.get(l.job_id);
-      if (existing) {
-        existing.rows.push(l);
-      } else {
-        groups.set(l.job_id, {
-          job_number: l.job_number,
-          customer_po_number: l.customer_po_number,
-          rows: [l],
-        });
-      }
-    }
-    return Array.from(groups.values()).sort((a, b) =>
-      a.job_number.localeCompare(b.job_number, undefined, { numeric: true, sensitivity: 'base' }),
-    );
-  }, [filteredLines, isCustomerMode]);
+  }, [jobId, companyId]);
 
   const selectedAddress = useMemo(() => {
     if (!shippingAddressId || !customer) return null;
@@ -476,8 +329,6 @@ export default function ShipmentForm({
   // ---------- Validation ----------
   type Validation = {
     contributing: Array<{ job_part_id: string; quantity: number; warn: boolean; row: LineRow }>;
-    /** The single job being shipped (null when none, or >1 — a blocking error). */
-    selectedJobId: string | null;
     canSubmit: boolean;
     warnings: string[];
     blockingMessages: string[];
@@ -506,16 +357,7 @@ export default function ShipmentForm({
         const warn = quantity > row.qty_remaining;
         return { job_part_id: row.job_part_id, quantity, warn, row };
       })
-      .filter((c) => {
-        // Job mode: include any positive-qty row.
-        // Customer mode: only checked rows with positive qty.
-        if (isCustomerMode && !c.row.selected) return false;
-        return c.quantity > 0;
-      });
-
-    // One packing slip belongs to exactly one job.
-    const jobIds = Array.from(new Set(contributing.map((c) => c.row.job_id)));
-    const selectedJobId = jobIds.length === 1 ? jobIds[0] : null;
+      .filter((c) => c.quantity > 0);
 
     const warnings: string[] = [];
     const blockingMessages: string[] = [];
@@ -528,16 +370,7 @@ export default function ShipmentForm({
       }
     }
     if (contributing.length === 0) {
-      blockingMessages.push(
-        isCustomerMode
-          ? 'Select at least one line and set a non-zero quantity to ship.'
-          : 'At least one line item must have a non-zero quantity.',
-      );
-    }
-    if (jobIds.length > 1) {
-      blockingMessages.push(
-        'A packing slip can only cover one job — deselect lines from the other job(s).',
-      );
+      blockingMessages.push('At least one line item must have a non-zero quantity.');
     }
     if (!shippingAddressId) {
       blockingMessages.push('Shipping address is required.');
@@ -555,14 +388,12 @@ export default function ShipmentForm({
 
     return {
       contributing,
-      selectedJobId,
       canSubmit: blockingMessages.length === 0,
       warnings,
       blockingMessages,
     };
   }, [
     lines,
-    isCustomerMode,
     shippingAddressId,
     shippingMethod,
     carrierChoice,
@@ -784,7 +615,7 @@ export default function ShipmentForm({
         </Box>
       )}
 
-      {jobNumberForTitle && !isCustomerMode && (
+      {jobNumberForTitle && (
         <Typography variant="subtitle1" sx={{ color: 'text.secondary' }}>
           Job {jobNumberForTitle}
         </Typography>
@@ -907,52 +738,7 @@ export default function ShipmentForm({
           Line Items
         </Typography>
 
-        {isCustomerMode && (
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={2}
-            alignItems={{ xs: 'flex-start', sm: 'center' }}
-            sx={{ mb: 2 }}
-          >
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={readyToShipOnly}
-                  onChange={(e) => setReadyToShipOnly(e.target.checked)}
-                />
-              }
-              label="Ready to Ship only"
-            />
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Lines where production is complete
-            </Typography>
-            <Box sx={{ flex: 1 }} />
-            <TextField
-              size="small"
-              placeholder="Search part, job, or PO"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ width: { xs: '100%', sm: 280 } }}
-            />
-          </Stack>
-        )}
-
-        {isCustomerMode && (
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-            One packing slip per job — selecting a line locks the slip to that job.
-          </Typography>
-        )}
-
-        {isCustomerMode
-          ? renderCustomerLineGroups(linesByJob ?? [], patchLine, validation.selectedJobId)
-          : renderJobLineTable(filteredLines, patchLine, validation)}
+        {renderJobLineTable(lines, patchLine, validation)}
 
         {validation.warnings.length > 0 && (
           <Alert severity="warning" sx={{ mt: 2 }}>
@@ -1070,121 +856,6 @@ function renderJobLineTable(
         )}
       </TableBody>
     </Table>
-  );
-}
-
-function renderCustomerLineGroups(
-  groups: Array<{ job_number: string; customer_po_number: string | null; rows: LineRow[] }>,
-  patchLine: (id: string, patch: Partial<LineRow>) => void,
-  selectedJobId: string | null,
-) {
-  if (groups.length === 0) {
-    return (
-      <Typography variant="body2" sx={{ color: 'text.secondary', py: 2 }}>
-        No open lines match the current filter. Toggle &quot;Ready to Ship only&quot; off to see
-        lines whose production is still in progress.
-      </Typography>
-    );
-  }
-  return (
-    <Stack spacing={2}>
-      {groups.map((group) => {
-        const groupJobId = group.rows[0]?.job_id ?? null;
-        // One slip per job: once a job is selected, lines from other jobs
-        // are locked out until the selection is cleared.
-        const lockedOut = selectedJobId !== null && groupJobId !== selectedJobId;
-        return (
-          <Box key={group.job_number} sx={{ opacity: lockedOut ? 0.5 : 1 }}>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                Job {group.job_number}
-              </Typography>
-              {group.customer_po_number && (
-                <Chip
-                  size="small"
-                  label={`PO ${group.customer_po_number}`}
-                  variant="outlined"
-                />
-              )}
-              {lockedOut && (
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Locked — another job is selected
-                </Typography>
-              )}
-            </Stack>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell padding="checkbox" />
-                  <TableCell>Part</TableCell>
-                  <TableCell align="right">Ordered</TableCell>
-                  <TableCell align="right">Shipped</TableCell>
-                  <TableCell align="right">Remaining</TableCell>
-                  <TableCell align="right" sx={{ width: 230 }}>Ship Now</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {group.rows.map((row) => {
-                  const fullyShipped = row.qty_remaining === 0;
-                  const rowDisabled = fullyShipped || lockedOut;
-                  return (
-                    <TableRow key={row.job_part_id} hover>
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          checked={row.selected && !fullyShipped}
-                          disabled={rowDisabled}
-                          onChange={(e) =>
-                            patchLine(row.job_part_id, { selected: e.target.checked })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Stack spacing={0}>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {row.part_name}
-                          </Typography>
-                          {fullyShipped && (
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                              Already shipped in full
-                            </Typography>
-                          )}
-                        </Stack>
-                      </TableCell>
-                      <TableCell align="right">{row.qty_ordered}</TableCell>
-                      <TableCell align="right">{row.qty_shipped_prior}</TableCell>
-                      <TableCell align="right">{row.qty_remaining}</TableCell>
-                      <TableCell align="right">
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
-                          {row.selected && !rowDisabled && (
-                            <ConsequenceCaption
-                              qtyInput={row.qty_input}
-                              qtyRemaining={row.qty_remaining}
-                            />
-                          )}
-                          <TextField
-                            value={row.qty_input}
-                            onChange={(e) =>
-                              patchLine(row.job_part_id, { qty_input: e.target.value })
-                            }
-                            size="small"
-                            disabled={rowDisabled || !row.selected}
-                            inputProps={{
-                              inputMode: 'decimal',
-                              style: { textAlign: 'right' },
-                            }}
-                            sx={{ width: 90, flexShrink: 0 }}
-                          />
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Box>
-        );
-      })}
-    </Stack>
   );
 }
 

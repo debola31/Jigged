@@ -68,10 +68,11 @@ describe('pickCarrierAccount — refuses to guess', () => {
 });
 
 describe('billableCarrierAccounts — archived rows change the answer, not just the list', () => {
-  // These two cases ARE the bug this function was extracted for. ShipmentForm's
-  // customer mode passed carrier_accounts unfiltered, and because
-  // pickCarrierAccount resolves only at exactly one candidate, an archived row
-  // is not cosmetic — it moves the count across the threshold in both directions.
+  // These two cases ARE the bug this function was extracted for: one of
+  // ShipmentForm's two copies of this filter passed carrier_accounts unfiltered,
+  // and because pickCarrierAccount resolves only at exactly one candidate, an
+  // archived row is not cosmetic — it moves the count across the threshold in
+  // both directions.
 
   it('one live + one archived does not silently resolve to nothing', () => {
     const live = account({ id: 'live' });

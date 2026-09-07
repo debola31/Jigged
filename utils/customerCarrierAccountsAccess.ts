@@ -184,11 +184,11 @@ export function pickCarrierAccount(
  * under. Re-opening a historical job and finding its freight blank — or worse,
  * re-resolved to a different account — is the failure this exception prevents.
  *
- * Passing `null` for `jobCarrierAccountId` (customer mode, where no job names an
- * account) is the plain "live only" case.
+ * Passing `null` for `jobCarrierAccountId` (no job names an account) is the
+ * plain "live only" case.
  *
  * This lives here, rather than inline at the call sites, because it was written
- * twice in ShipmentForm and only the job-mode copy was correct — the customer-mode
+ * twice in ShipmentForm and only one copy was correct — the other
  * copy passed accounts unfiltered and could bill to an archived account.
  */
 export function billableCarrierAccounts(

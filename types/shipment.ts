@@ -254,35 +254,6 @@ export type FulfillmentStatus =
   | 'fully_shipped';
 
 /**
- * Row shape returned by getOpenJobPartsForCustomer (Phase 1.5 / FR-NEW-5).
- * One row per job_part across all of the customer's jobs that match the
- * filter. qty_remaining is clamped to zero — never negative — so the
- * line picker can do non-negative math even when an over-shipment was
- * confirmed via the FR-4 soft warning.
- */
-export interface OpenJobPartRow {
-  job_part_id: string;
-  job_id: string;
-  job_number: string;
-  customer_po_number: string | null;
-  part_id: string;
-  part_name: string;
-  description: string | null;
-  qty_ordered: number;
-  qty_shipped: number;
-  qty_remaining: number;
-  production_status: ProductionStatus;
-  fulfillment_status: FulfillmentStatus;
-}
-
-export interface OpenJobPartFilter {
-  /** Default true. Drops lines already at fulfillment_status = 'fully_shipped'. */
-  excludeFullyShipped?: boolean;
-  /** Default true. Drops lines at production_status = 'cancelled'. */
-  excludeCancelled?: boolean;
-}
-
-/**
  * Display config for shipping_method values. Single source of truth for the
  * human-readable label — the shipment form, the shipments list, and the
  * packing-slip PDF all read from this map. Adding a method adds it here once.

@@ -342,7 +342,7 @@ templates serve Supabase's own `invite_user_by_email`, used by
 | Env var (Edge Function secret) | Purpose | Default |
 |---|---|---|
 | `RESEND_API_KEY` | Resend auth | none — 500 if unset |
-| `SITE_URL` | `getEmailBaseUrl()` — base for the logo and the `/auth/confirm` link | `https://jigged.app` |
+| `SITE_URL` | `getEmailBaseUrl()` — base for the logo and the `/auth/confirm` link | `https://jigged.app` (the canonical host — must never name a host that 307s, or Outlook drops the logo: #722, #695) |
 | `JIGGED_FROM_EMAIL` | `getEmailFrom()` — sender | `Jigged <hello@jigged.app>` |
 | `NEXT_PUBLIC_APP_URL` | legacy fallback inside `getOriginUrl` only | `http://localhost:3000` |
 

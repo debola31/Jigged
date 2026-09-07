@@ -340,11 +340,16 @@ the Stripe Dashboard / Vercel label (so the unused `STRIPE_SECRET_KEY` /
 backend loads env at startup — restart `python api/index.py` after changing them
 (`--reload` watches `.py`, not `.env.local`).
 
-### The production webhook URL must be `www.jigged.app` (verified 2026-08-03)
+### The production webhook URL must be the canonical host (verified 2026-08-03)
 
-Register the live endpoint as `https://www.jigged.app/api/stripe/webhook` — **on `www`, not the
-apex**. Vercel serves `www` as primary and answers `https://jigged.app/…` with a `307` from its
-edge router, and **Stripe does not follow redirects**: only `2xx` counts as delivered.
+Register the live endpoint as `https://jigged.app/api/stripe/webhook` — **on the apex, not `www`**.
+Vercel serves one host as primary and answers the other with a `307` from its edge router, and
+**Stripe does not follow redirects**: only `2xx` counts as delivered.
+
+**Which host is primary flipped in #695** — it was `www` from launch until then, which is why older
+comments and any endpoint you find still registered there say the opposite. The rule survived the
+flip unchanged, because the rule was never about the apex: *register on whichever host answers
+`200`, and move this endpoint inside the same change that moves the domain.*
 
 This is as-built, not preference. The endpoint was registered on the apex on 2026-07-26 and
 **every live event failed for five days** until Stripe's auto-disable warning surfaced it. Sentry
@@ -358,9 +363,12 @@ delivery.
 backend not deployed, `401` = Vercel deployment protection. `GET` is deliberate: it never reaches
 the signature path, so the probe generates no Sentry events.
 
-The apex is still what the code advertises as canonical (`metadataBase`, `og:url`, email
-`SITE_URL`) — that inconsistency is tracked separately. If it is ever resolved by making the apex
-primary in Vercel, **this URL must move back in the same change.**
+The code advertises the same host (`metadataBase`, `og:url`, email `SITE_URL`), and
+`__tests__/app/canonicalHost.test.ts` fails CI if any of them drift apart again. **That test cannot
+see the registrations that actually broke** — Stripe's and Intuit's dashboards, Supabase's
+`SITE_URL` secret and redirect allowlist, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_SCAN_ORIGIN`, and the
+PostHog and Sentry origin allowlists all live outside this repo. The daily
+`.github/workflows/webhook-reachability.yml` probe is the only thing that catches the two webhooks.
 
 ## 11. Testing
 

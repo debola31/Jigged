@@ -41,11 +41,14 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  // www, not the apex: Vercel serves www and answers the apex with a 307. Publishing the apex as
-  // canonical means every URL we hand out points at a redirect — browsers follow it silently,
-  // machines often don't, and that asymmetry is what silently broke the live Stripe webhook for
-  // five days (#695). Name the host that actually answers 200.
-  metadataBase: new URL('https://www.jigged.app'),
+  // The apex, and Vercel serves the apex as primary — those two facts have to stay married. This
+  // said `www.jigged.app` until #695, because Vercel served `www` and answered the apex with a
+  // 307; publishing a host that redirects means every URL we hand out points at a redirect, which
+  // browsers follow silently and machines often don't. That asymmetry broke the live Stripe
+  // webhook for five days and rendered the invite logo as a broken box in Outlook. The mismatch
+  // was the bug, not the choice of host — so if the primary domain ever moves again, this line and
+  // `openGraph.url` below move with it in the same change.
+  metadataBase: new URL('https://jigged.app'),
   title: {
     template: '%s | Jigged',
     default: 'Jigged — Manufacturing Operations System',
@@ -86,7 +89,7 @@ export const metadata: Metadata = {
     title: 'Jigged — Manufacturing Operations System',
     description:
       'The operations system built for small manufacturing shops. Track jobs, manage inventory, and empower your operators.',
-    url: 'https://www.jigged.app',
+    url: 'https://jigged.app',
     siteName: 'Jigged',
     locale: 'en_US',
     type: 'website',

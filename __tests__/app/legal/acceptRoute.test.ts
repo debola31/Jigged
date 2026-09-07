@@ -45,7 +45,7 @@ vi.mock('@supabase/supabase-js', () => ({
 import { POST, parseAcceptBody, isSameOrigin } from '@/app/legal/accept/route';
 import { CURRENT_LEGAL_VERSIONS } from '@/lib/legal/manifest';
 
-const ORIGIN = 'https://www.jigged.app';
+const ORIGIN = 'https://jigged.app';
 
 function post(body: unknown, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest(new URL('/legal/accept', ORIGIN), {

@@ -100,7 +100,7 @@ async function renderAndGetOpsTable(t: JobTraveler) {
     company,
     bom: [],
     companyId: CO,
-    baseUrl: 'https://www.jigged.app',
+    baseUrl: 'https://jigged.app',
     supabase: null,
   });
   // The operations table is the autoTable call whose header starts with 'Step'.
@@ -194,7 +194,7 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
       company,
       bom: [],
       companyId: CO,
-      baseUrl: 'https://www.jigged.app',
+      baseUrl: 'https://jigged.app',
       supabase: null,
     });
 
@@ -202,9 +202,9 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
     // that the sheet prints the canonical payload, not that someone retyped it correctly here.
     const expected = buildScanUrl(
       { kind: 'traveler', companyId: CO, jobPartId: JOB_PART },
-      'https://www.jigged.app',
+      'https://jigged.app',
     );
-    expect(expected).toHaveLength(77);
+    expect(expected).toHaveLength(73);
     // The job id is NOT in it — that is what bought the QR version.
     expect(expected).not.toContain(uuidToBase32(JOB));
 
@@ -246,7 +246,7 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
         },
       ] as never,
       companyId: CO,
-      baseUrl: 'https://www.jigged.app',
+      baseUrl: 'https://jigged.app',
       supabase: null,
     });
     const call = autoTableFn.mock.calls.find(

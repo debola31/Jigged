@@ -11,14 +11,17 @@
  * email that points at an ephemeral preview URL that gets torn down. Set the
  * SITE_URL secret per environment (the staging URL on staging).
  *
- * The default is `www`, the host Vercel actually serves; the apex answers with a
- * 307. In an email that redirect is not free — Outlook commonly declines to
- * follow one when loading a remote image, so the apex default rendered our logo
- * as a broken box on exactly the message that most needs to look legitimate
- * (#722), and the same mismatch cost five days of Stripe webhooks (#695).
+ * The default must always name the host Vercel serves as primary — currently the
+ * apex (#695). In an email a redirect is not free: Outlook commonly declines to
+ * follow one when loading a remote image, so while this default named the host
+ * that 307s, our logo rendered as a broken box on exactly the message that most
+ * needs to look legitimate (#722), and the same mismatch cost five days of
+ * Stripe webhooks. **The `SITE_URL` secret overrides this in every deployed
+ * environment, so changing the line below is not enough** — the secret has to
+ * move too, and it is set outside this repo.
  */
 export function getEmailBaseUrl(): string {
-  return Deno.env.get('SITE_URL') ?? 'https://www.jigged.app';
+  return Deno.env.get('SITE_URL') ?? 'https://jigged.app';
 }
 
 /**

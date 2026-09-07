@@ -4,12 +4,19 @@
 # WHY THIS EXISTS, AND WHY IT IS AN ACTIONS WORKFLOW RATHER THAN A SENTRY MONITOR
 # ═══════════════════════════════════════════════════════════════════════════════
 # A webhook registered on the wrong host fails SILENTLY and totally. Vercel serves
-# www.jigged.app as primary and answers https://jigged.app/... with a 307 from its
-# edge router BEFORE the function is invoked, so nothing reaches our code, nothing
-# reaches Sentry, and the vendor simply records a failed delivery in a dashboard
-# nobody is looking at. Stripe's endpoint was registered on the apex on 2026-07-26
-# and every live event failed for five days — see
-# docs/modules/billing.md § "The production webhook URL must be www.jigged.app".
+# ONE host as primary and answers the other with a 307 from its edge router BEFORE
+# the function is invoked, so nothing reaches our code, nothing reaches Sentry, and
+# the vendor simply records a failed delivery in a dashboard nobody is looking at.
+# Stripe's endpoint was registered on the redirecting host on 2026-07-26 and every
+# live event failed for five days — see docs/modules/billing.md § "The production
+# webhook URL".
+#
+# WHICH host is primary has since flipped: www.jigged.app was primary when this
+# workflow was written, and #695 made the apex canonical. The direction does not
+# matter to this check and never did — it asserts that the URL we registered is the
+# one that answers 200, whichever that is. If the primary domain moves again, the
+# ENDPOINTS list below moves with it in the same change, or this goes red the next
+# time it runs, which is the correct outcome.
 #
 # Sentry can watch this and there is a detector for each endpoint, but Sentry bills
 # uptime monitors PER ACTIVE MONITOR and this org has one seat, already spent on
@@ -85,8 +92,8 @@ jobs:
           # probes is one that can be silently misregistered, and there is no
           # cheaper moment to add a row than when the endpoint is created.
           ENDPOINTS: |
-            Stripe|https://www.jigged.app/api/stripe/webhook
-            QuickBooks|https://www.jigged.app/api/quickbooks/webhook
+            Stripe|https://jigged.app/api/stripe/webhook
+            QuickBooks|https://jigged.app/api/quickbooks/webhook
           # GET is deliberate on all of them: it never reaches the signature
           # verification path, so the probe itself files no Sentry events and
           # cannot be mistaken for an attacker driving the reject branch. A
@@ -113,7 +120,7 @@ jobs:
           # the endpoint eight months earlier.
           explain() {
             case "$1" in
-              307|308) echo "registered on the APEX (jigged.app). Vercel's edge router redirects before the function runs, and neither Stripe nor Intuit follows redirects. Re-register it on www.jigged.app." ;;
+              307|308) echo "registered on a NON-CANONICAL host (almost certainly www.jigged.app, the primary until #695). Vercel's edge router redirects before the function runs, and neither Stripe nor Intuit follows redirects. Re-register it on the apex, jigged.app." ;;
               404)     echo "route not found — the backend did not deploy, or the path changed. Check the latest Deploy Production run." ;;
               401|403) echo "Vercel Deployment Protection is answering instead of the app. Production should not be protected; check Settings → Deployment Protection." ;;
               302)     echo "redirected to a login page — Deployment Protection, or the domain points somewhere unexpected." ;;

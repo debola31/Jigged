@@ -7,8 +7,8 @@ export const metadata: Metadata = {
   // "Pricing — $399/month for your whole shop | Jigged". Don't append the suffix by hand.
   title: PRICING.meta.title,
   description: PRICING.meta.description,
-  // Resolves against metadataBase (https://www.jigged.app). The Terms of Service cites
-  // the apex https://jigged.app/pricing, which 307s to www like every other Jigged URL.
+  // Resolves against metadataBase (https://jigged.app), which as of #695 is finally the same
+  // host the Terms of Service cites for https://jigged.app/pricing — no redirect between them.
   alternates: { canonical: '/pricing' },
   // Deliberately NO openGraph override. A child openGraph replaces the parent's resolved
   // object wholesale — there is no per-field merge — so adding one here would silently

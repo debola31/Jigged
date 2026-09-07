@@ -78,7 +78,7 @@ in PostHog, which is why they are written down here.
 |---|---|---|
 | `session_recording_opt_in` | `true` | The change itself |
 | `session_recording_masking_config` | `{ maskAllInputs: true }` | Never record keystrokes — passwords, prices, quantities. Rendered text stays visible, because a replay with every label masked cannot teach you anything |
-| `recording_domains` | `https://www.jigged.app` | Belt-and-braces production-only. The token already gates this, but a domain allowlist survives someone re-adding it to `.env.local` |
+| `recording_domains` | `https://jigged.app` | Belt-and-braces production-only. The token already gates this, but a domain allowlist survives someone re-adding it to `.env.local` |
 | `capture_console_log_opt_in` | `false` | Console output routinely holds API responses and user objects. It was `true` and inert while replay was off — enabling replay is what would have armed it |
 | `capture_performance_opt_in` | `false` | **See below** |
 | `session_recording_retention_period` | `30d` | Shortest available |
@@ -456,10 +456,11 @@ things about how it was made are the reusable part:
   keeps describing. Scope an uptime workflow to the DETECTOR and leave the environment open.
 
 **There are two inbound webhooks to watch, and both need the same monitor.** Stripe's is the one
-above; Intuit's is `GET https://www.jigged.app/api/quickbooks/webhook`, expecting **405** — route
+above; Intuit's is `GET https://jigged.app/api/quickbooks/webhook`, expecting **405** — route
 reachable, method not allowed. The code is the whole diagnosis: `405` healthy · `307` the endpoint
-got registered on the **apex**, where Vercel's edge router redirects before the function runs (the
-2026-07-26 Stripe outage, [billing.md](modules/billing.md#the-production-webhook-url-must-be-wwwjiggedapp-verified-2026-08-03), and Intuit no
+got registered on the **non-canonical host** (`www.`, primary until #695), where Vercel's edge
+router redirects before the function runs (the
+2026-07-26 Stripe outage, [billing.md](modules/billing.md#the-production-webhook-url-must-be-the-canonical-host-verified-2026-08-03), and Intuit no
 more follows redirects than Stripe does) · `404` backend not deployed · `401` Vercel deployment
 protection. `GET` is deliberate on both: it never reaches the signature path, so the probe files no
 Sentry events. **Nothing in this repo creates either detector** — they are server-side config like

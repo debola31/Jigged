@@ -25,7 +25,7 @@ vi.mock('@/utils/supabase/server', () => ({
 
 import { GET } from '@/app/auth/confirm/route';
 
-const ORIGIN = 'https://www.jigged.app';
+const ORIGIN = 'https://jigged.app';
 const INVITE_NEXT = '/accept-invite/59df141a-874e-41aa-b176-caa512c76b53';
 
 function confirmUrl(params: Record<string, string>): NextRequest {

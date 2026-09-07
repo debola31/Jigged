@@ -36,8 +36,16 @@ const PART = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
  * A preview deployment's hostname is much longer and would push these codes a version or two
  * higher; that is fine on a preview (nobody sticks those labels to a shelf) but it must not be able
  * to make this test pass or fail. What ships is measured against what production prints.
+ *
+ * This was `https://www.jigged.app` until #695 moved the canonical host to the apex. **Worth
+ * knowing before anyone cites QR density as a reason to move it again: the four characters bought
+ * nothing here.** Both codes were already comfortably inside their ceilings on `www` and neither
+ * changed version — the traveler stayed at 4 (77 → 73 chars, against a 90-char version-4 budget at
+ * EC M) and the label stayed at 6 (against 84 at EC H). What the apex bought is headroom, from 7
+ * spare characters to 11 on the tighter of the two, and the payload is fixed-length by
+ * construction, so nothing can grow into it without a deliberate redesign.
  */
-const CANONICAL_ORIGIN = 'https://www.jigged.app';
+const CANONICAL_ORIGIN = 'https://jigged.app';
 
 /** The QR alphanumeric charset: the only characters that get the cheap encoding mode. */
 const QR_ALPHANUMERIC = /^[0-9A-Z $%*+\-./:]+$/;

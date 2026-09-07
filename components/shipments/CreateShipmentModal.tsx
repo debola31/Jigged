@@ -27,7 +27,7 @@ export interface CreateShipmentModalProps {
 /**
  * Job-detail entry point for shipment creation — the single way to create
  * a shipment now that a packing slip belongs to one job. Thin wrapper
- * around ShipmentForm running in `job` mode.
+ * around ShipmentForm.
  */
 export default function CreateShipmentModal({
   open,
@@ -42,7 +42,7 @@ export default function CreateShipmentModal({
       <DialogTitle>Create Shipment</DialogTitle>
       <DialogContent dividers>
         <ShipmentForm
-          source={{ kind: 'job', jobId }}
+          jobId={jobId}
           companyId={companyId}
           onCreated={async (result) => {
             await onCreated({ ...result, pdfError: null });

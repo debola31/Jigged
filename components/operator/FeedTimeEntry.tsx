@@ -1,12 +1,13 @@
 'use client';
 
 import { Box, Button, Typography } from '@mui/material';
+import PauseIcon from '@mui/icons-material/Pause';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { formatClockTime, formatDuration, intervalMs } from '@/lib/duration';
 import type { OperationIntervalWithContext } from '@/types/operationInterval';
 
 /**
- * One recorded time event in the job feed — a start, or a finish.
+ * One recorded time event in the job feed — a start, or an end.
  *
  * TWO ROWS PER INTERVAL, NOT ONE THAT MUTATES. A feed is a log, and a log entry
  * that rewrites itself after the fact reads as the surface losing track. So
@@ -15,6 +16,14 @@ import type { OperationIntervalWithContext } from '@/types/operationInterval';
  * both edit the same underlying row — the finish row edits the end, the start
  * row edits the start — so a correction is made where the operator sees the
  * wrong number rather than in a dialog that asks about both.
+ *
+ * A PAUSED SPAN ENDS WITH "Paused", NOT "Finished", and this is not cosmetic. A
+ * step worked in three sittings produces Started / Paused / Started / Paused /
+ * Started / Finished, and rendering every end as "Finished" would claim the step
+ * was completed three times. Resuming appends a fresh Started row above, so the
+ * log stays a log. The row keeps its duration and its Adjust: a paused span is
+ * closed, so job_op_intervals_adjust_only_when_closed is satisfied and its minutes
+ * count toward the operation's actual exactly like any other closed span.
  *
  * THESE ARE THE OPERATOR'S OWN ENTRIES ONLY. Notes in this feed belong to
  * everyone; time entries do not. A job-scoped feed showing when each named
@@ -55,6 +64,10 @@ export default function FeedTimeEntry({
   const closed = interval.ended_at != null;
 
   const label = interval.operation_name || 'this step';
+  // A closed span the operator paused. `switched` and `completed` both read
+  // "Finished": the first is the chain handing the machine on, which from the
+  // operator's side is work that stopped, and the second is the real thing.
+  const isPaused = kind === 'finish' && interval.close_reason === 'paused';
   // The raw pair, shown only where it diverges from what is displayed. Stated as
   // a fact with no actor and no edit count — this says what the record holds, it
   // does not accuse.
@@ -63,14 +76,22 @@ export default function FeedTimeEntry({
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-      <ScheduleIcon
-        fontSize="small"
-        sx={{ color: 'text.secondary', mt: 0.25, flexShrink: 0 }}
-        aria-hidden
-      />
+      {isPaused ? (
+        <PauseIcon
+          fontSize="small"
+          sx={{ color: 'text.secondary', mt: 0.25, flexShrink: 0 }}
+          aria-hidden
+        />
+      ) : (
+        <ScheduleIcon
+          fontSize="small"
+          sx={{ color: 'text.secondary', mt: 0.25, flexShrink: 0 }}
+          aria-hidden
+        />
+      )}
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Typography variant="body2">
-          {kind === 'start' ? 'Started' : 'Finished'} {label}
+          {kind === 'start' ? 'Started' : isPaused ? 'Paused' : 'Finished'} {label}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
           {formatClockTime(at)}

@@ -215,6 +215,16 @@ interface ReadyRow {
    * operator surface at once.
    */
   has_open_interval: boolean;
+  /**
+   * The last span on this operation was PAUSED and nothing is running on it now.
+   *
+   * The FOURTH reason a step can be on this list (20260907203956), and it exists
+   * for exactly the reason the third one does: a paused step has produced nothing,
+   * so it reads `pending`, and its interval is CLOSED, so `has_open_interval`
+   * misses it. Out of sequence as well and Pause would be a control that hides the
+   * work it is used on.
+   */
+  has_paused_interval: boolean;
 }
 
 async function getReadyOperationsForStation(
@@ -252,7 +262,7 @@ async function getReadyOperationsForStation(
  * That third case is not a nicety. Op status derives from recorded quantity, so
  * a step somebody started but has produced nothing on reads `pending`; if it is
  * also out of sequence — which starting permits, deliberately — it used to
- * appear on NO operator surface, while the office Still-running card showed it.
+ * appear on NO operator surface, while the office unfinished-work card showed it.
  * And the station list is the only place an abandoned interval can be cleared
  * from: `close_operation_interval` refuses a non-owner, so the recovery is to
  * start on the same work centre and let the chain close it as `switched`.
@@ -392,6 +402,7 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       // Partial progress on the CURRENT operation (good pieces / order qty).
       current_op_qty_good: goodByOp.get(row.job_operation_id) ?? 0,
       has_open_interval: row.has_open_interval,
+      has_paused_interval: row.has_paused_interval,
     };
   });
 }
@@ -496,9 +507,13 @@ async function getCompletedOperationRows(
         // carry an open interval (an office-side completion closes none), but
         // this list exists to undo a mis-tapped completion, and marking a row
         // "running" in a list headed "Completed" states a contradiction the
-        // operator has no control to resolve. The office Still-running card is
+        // operator has no control to resolve. The office unfinished-work card is
         // where that combination is meant to be noticed.
         has_open_interval: false,
+        // Same reasoning: a completed step can carry a paused span, but marking a
+        // row "Paused" inside a list headed "Completed" states a contradiction
+        // the operator has no control to resolve.
+        has_paused_interval: false,
       },
       work_center_id: r.work_center_id,
       completed_at: r.completed_at,

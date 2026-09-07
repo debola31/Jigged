@@ -60,6 +60,61 @@ describe('FeedTimeEntry', () => {
     expect(screen.queryByText(/part/)).not.toBeInTheDocument();
   });
 
+
+  it('ends a paused span with "Paused", never "Finished"', () => {
+    // A step worked in three sittings produces Started / Paused / Started /
+    // Paused / Started / Finished. Rendering every end as "Finished" would claim
+    // the step was completed three times.
+    render(
+      <FeedTimeEntry
+        interval={interval({ close_reason: 'paused', quantity_good: null })}
+        kind="finish"
+        onAdjust={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/^Paused Final Inspection$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Finished/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the duration and Adjust on a paused span', () => {
+    // A paused span is CLOSED — its minutes count toward the operation's actual
+    // exactly like any other closed span, and both its ends are known, so
+    // job_op_intervals_adjust_only_when_closed is satisfied.
+    render(
+      <FeedTimeEntry
+        interval={interval({ close_reason: 'paused', quantity_good: null })}
+        kind="finish"
+        onAdjust={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/1h 41m/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /adjust/i })).toBeInTheDocument();
+  });
+
+  it('still says "Started" when a paused span is rendered as its start row', () => {
+    // The close reason describes the END. Reading it on the start row would make
+    // the resume history unreadable — two "Paused" rows and no "Started".
+    render(
+      <FeedTimeEntry
+        interval={interval({ close_reason: 'paused', quantity_good: null })}
+        kind="start"
+        onAdjust={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/^Started Final Inspection$/)).toBeInTheDocument();
+  });
+
+  it('claims no quantity on a paused span', () => {
+    render(
+      <FeedTimeEntry
+        interval={interval({ close_reason: 'paused', quantity_good: null })}
+        kind="finish"
+        onAdjust={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/part/)).not.toBeInTheDocument();
+  });
+
   it('offers no Adjust while the interval is still running', () => {
     // A running interval has no finish to check a new start against, so a
     // correction made now can be contradicted by the finish that follows —

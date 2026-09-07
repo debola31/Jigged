@@ -155,3 +155,56 @@ export function nudgeIso(iso: string, deltaMinutes: number): string {
   if (Number.isNaN(d.getTime())) return iso;
   return new Date(d.getTime() + deltaMinutes * MS_PER_MINUTE).toISOString();
 }
+
+/**
+ * How long a step may run before the office should look at it.
+ *
+ * THE RULE IN ONE SENTENCE: flagged after six hours, or sooner if the step was
+ * estimated at under two hours.
+ *
+ * The six-hour ceiling is not new — it is `STALE_HOURS`, which the office card
+ * carried as a local constant from 20260816203641 until this moved it here. What
+ * is new is the middle term. A flat ceiling cannot tell a 20-minute deburr left
+ * running over lunch from a 5-hour EDM burn doing exactly what it should, so the
+ * short job was invisible for five and a half hours it had no business running.
+ *
+ * `expected` is `setup + quantity × run-per-unit`, and it arrives as 0 rather than
+ * null when the step carries no estimate — both estimate columns are nullable and
+ * a step with neither is ordinary. Zero selects the flat ceiling, which is why the
+ * branch is `> 0` and not a null check.
+ *
+ * THE FACTOR AND THE FLOOR ARE JUDGEMENTS, NOT FINDINGS, and should be revisited
+ * against the `running timer discarded` rate once there is one. Three times the
+ * estimate is loose enough that ordinary variation does not trip it; the one-hour
+ * floor stops a five-minute deburr flagging at fifteen minutes, which would train
+ * the office to ignore the flag — the failure this is most likely to have.
+ *
+ * NOT FOR OPERATOR SURFACES. An estimate-derived figure beside a live clock is the
+ * adjacent comparison that turns informational feedback into controlling feedback,
+ * and hiding the estimate from a running step is the load-bearing half of
+ * docs/modules/operator-view.md#surveillance-guardrail-non-negotiable. The operator
+ * side uses `LONG_RUNNING_CEILING_MINUTES` on its own — a forgotten timer is an
+ * absolute-duration fact, and it needs no estimate to notice one.
+ */
+export const LONG_RUNNING_CEILING_MINUTES = 360;
+export const LONG_RUNNING_FLOOR_MINUTES = 60;
+export const LONG_RUNNING_ESTIMATE_FACTOR = 3;
+
+export function longRunningThresholdMinutes(expectedMinutes: number | null | undefined): number {
+  const expected = Number(expectedMinutes);
+  if (!Number.isFinite(expected) || expected <= 0) return LONG_RUNNING_CEILING_MINUTES;
+  return Math.min(
+    LONG_RUNNING_CEILING_MINUTES,
+    Math.max(LONG_RUNNING_FLOOR_MINUTES, LONG_RUNNING_ESTIMATE_FACTOR * expected),
+  );
+}
+
+/**
+ * Has this span been open longer than it should be?
+ *
+ * Takes the instant the clock started and the step's estimate. Omit the estimate
+ * (or pass 0) for the flat-ceiling form the operator surface uses.
+ */
+export function isLongRunning(startedAt: string, expectedMinutes?: number | null): boolean {
+  return elapsedMs(startedAt) > longRunningThresholdMinutes(expectedMinutes) * MS_PER_MINUTE;
+}

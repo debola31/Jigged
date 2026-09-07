@@ -69,6 +69,8 @@ and doubly so now; the bar's shape depends on the station, not on the tenant.
 | Find work when my station is idle | `jobs` → **All Stations** | The whole plant, grouped by station. Tapping a row at another station works — the mismatch only warns. |
 | Find a named job on the floor | `jobs` → the find field | Type a job number, part or customer; narrows whichever lens is showing, from rows already in memory. See [Finding one job](#finding-one-job). |
 | Check something I already finished | `jobs` → **Show completed** | Completed work at the current lens, so a step can be reopened and undone. |
+| **See everything I have running or paused** | `jobs`, above the queue | [`RunningNowPanel`](../../components/operator/RunningNowPanel.tsx). One row per span, own rows only, every row a link to its step. The chain keys on the **work centre**, so holding three at once is ordinary and the step screen shows only one of them. **No count, total or average anywhere on it** — see the [guardrail](#surveillance-guardrail-non-negotiable). |
+| **Stop for lunch without losing the time** | step → `Pause — keep my time` | Closes the span and frees the machine. The primary button then reads `RESUME THIS STEP`. [Pause and resume](#pause-and-resume-2026-09-07). |
 | Work a step | `jobs` → row → step | Land on the ready operation, or the part's step list when no single step is ready. |
 | **Record what I finished** | step → `Parts finished` | A quantity, then `RECORD COMPLETION`. Partial is normal. |
 | Write down what I learned | step → the same block | One optional field + camera, submitted by the same button. |
@@ -83,6 +85,13 @@ and doubly so now; the bar's shape depends on the station, not on the tenant.
 **Not built on this surface:** scrap or defect capture ([discovery](#scrap-and-defect-capture-discovery)),
 any offline mode, real-time push ([manual refresh](#freshness-manual-refresh)), and any view of an
 operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotiable)).
+
+**Named gap, 2026-09-07: the traveler shows no interval state at all.**
+`parts/{jobPartId}` renders each step from `job_operations.status` alone, so a step that is running
+or paused reads only as `In progress` — or as `Pending` when nothing has been produced on it. It
+predates pause and was not widened with it; the dispatch list and
+[`RunningNowPanel`](../../components/operator/RunningNowPanel.tsx) both carry the marks, so the
+information is one tab away rather than missing. Worth closing when somebody is next in that file.
 
 **Journeys that were once proposed here, and where they landed:**
 
@@ -238,8 +247,10 @@ new target — the same behaviour the fulfillment and invoicing families already
 
 **Corrected 2026-08-02.** This doc previously said an operation was `pending → completed` by a
 single tap and that there was "no operation-level in-progress concept". Both are false. What
-survives is the narrower and still-true claim: **there is no manual start or pause — WIP is
-derived from quantity, never asserted by a human.** At the job/part level, `production_status` is
+survives, narrowed again 2026-09-07: **WIP is derived from quantity, never asserted by a human.**
+Start came back 2026-08-16 and pause 2026-09-07, but neither writes `status` — a paused step with
+zero quantity is still `pending`, which is exactly why it needed
+[a fourth branch on the dispatch list](#a-step-with-a-timer-open-is-on-the-list-whatever-the-sequence-says). At the job/part level, `production_status` is
 derived as before, and a `sent` op counts as *not completed*, so it holds its part at
 `in_progress` and blocks downstream internal steps until the parts are received.
 
@@ -331,17 +342,19 @@ offer, and a pre-completion sheet writes nothing until confirmed, so it never re
 one fact, and once the feed carries the record there is nothing for a sheet to add. Completion is
 one tap again, with the inline composer riding along exactly as B4 requires.
 
-**Withdrawn 2026-08-17: the running-timer strip in the shell.** A bar above the job card duplicated
-what the step screen's own clock and feed already say. **The cost is real and was accepted
-knowingly:** with no notification channel either (see below), *nothing outside the step screen
-indicates a timer is running*, so a forgotten stop is caught by the office Still-running list the
-next morning rather than by the operator in the moment — which makes that correction a recall
-estimate. An E2E assertion checks the strip has not crept back.
+**Withdrawn 2026-08-17: the running-timer strip in the shell. Half-reversed 2026-09-07.** A bar
+above the job card duplicated what the step screen's own clock and feed already say — true of ONE
+timer, false of several, since the chain keys on the work centre and the step screen only ever shows
+the step being looked at. [`RunningNowPanel`](../../components/operator/RunningNowPanel.tsx) now
+answers *"what else am I holding?"* at the top of the jobs list. **What still stands is the half that
+was load-bearing: no step-level CONTROL leaves the step screen**, and nothing is added to the shell —
+the panel is a list of links on one page. The E2E assertion was rewritten rather than deleted: it now
+checks that no RECORD, Pause or `Cancel activity` appears on that list, and that no estimate does.
 
 **Withdrawn 2026-08-18: `Stop without finishing`, and the `done_for_day` / `left_running` reasons
 behind it.** Built and removed. They asked the operator to classify a stop — a second decision on
 top of the one that matters — and an interval left open already says "nobody closed this" on the
-office Still-running list without anyone having to name why. `close_reason` is now only `completed`
+office unfinished-work card without anyone having to name why. `close_reason` was then only `completed`
 or `switched`, and `close_operation_interval` has no reason parameter at all.
 
 **So an interval closes exactly two ways: you record what you finished, or the chain closes it when
@@ -349,6 +362,48 @@ the next start takes the work centre.** An operator who walks away leaves it run
 the times from the feed afterwards, which is the same correction path every other mistake uses. The
 accepted cost is that a deliberate lights-out run and a forgotten stop now look identical until
 someone says otherwise.
+
+### Pause and resume (2026-09-07)
+
+[`20260907203755`](../../supabase/migrations/20260907203755_operator_can_pause_and_resume_an_activity.sql)
+widens `job_op_intervals_close_reason_check` by one value and adds
+`pause_operation_interval`. **A span closes exactly three ways now** — you record what you finished,
+the chain closes it when the next start takes the work centre, or you pause — and is still
+*discarded* a fourth by [`Cancel activity`](#cancel-activity--the-third-end-added-2026-08-26).
+
+| Decision | Why, and what it rejects |
+|---|---|
+| **Pause CLOSES the span; it is not a flag on an open row** | Both partial unique indexes key on `ended_at IS NULL`, so a paused-but-open row would keep holding the work centre — an operator at lunch would block the machine for the whole shop. Closing frees the slot immediately, and `get_operation_actuals` already SUMs every closed non-voided span, so a step worked in three sittings totals correctly with no change there. |
+| **Resume is `start_operation_interval`, unchanged** | There is no resume RPC. A dedicated one would be that function under a second name with a second copy of the membership, billing and outside-op guards to drift out of sync. Resuming therefore opens a **new** span, which is what keeps the feed a log. |
+| **Owner-asserted, unlike starting** | Pausing states *your* intent to come back and nobody can state it for you. A colleague who needs the machine **starts** on it, and the chain closes yours as `switched` — the shift handoff, untouched. |
+| **No reason, and no confirm dialog** | The reason: `done_for_day` / `left_running` were removed 2026-08-18 for asking the operator to classify a stop, and that argument stands. The dialog: [interaction-standards.md](../interaction-standards.md) scales friction to consequence, and pause loses nothing with RESUME one tap away — where `Cancel activity` destroys a measured span and keeps its confirm. |
+| **A zero-length pause is refused in words** | `job_op_intervals_ordered` is strict (`ended_at > started_at`). The function raises *"cancel the activity instead"* rather than letting a constraint name reach the floor — and rather than nudging the end forward a second, which would fabricate a measurement. |
+
+**Two behaviours deliberately unchanged, because both look like bugs and are not.** A paused span
+carries no `completion_id`, so `void_intervals_with_completion` leaves it standing when a completion
+is undone — the same treatment `switched` spans get, and for the same reason: real work no completion
+ever claimed. And `void_open_intervals_for_operation` touches `ended_at IS NULL` rows only, so the
+office completing a paused step **keeps** its recorded minutes.
+
+**The feed reads Started / Paused / Started / Finished** — four rows for a step worked in two
+sittings, never one that rewrites itself. A paused row keeps its duration and its `Adjust`, because
+a paused span is closed and both its ends are known.
+
+**What made the reversal safe is that a pause is visible from both sides**, which is the whole answer
+to the objection the non-goal raised. On the floor,
+[`RunningNowPanel`](../../components/operator/RunningNowPanel.tsx) lists it under **Paused** and the
+dispatch row is marked; in the office it is the second group on the unfinished-work card. Without
+those, Pause would be a control that hides the work it is used on.
+
+**One horizon, accepted rather than overlooked.** `get_my_paused_operations` is `SECURITY INVOKER`,
+so its "has anything happened on this step since?" check reads the table **as the caller** and cannot
+see a colleague's span. If somebody takes a step over while you are away, your row keeps reading
+`Paused` until you touch it. Closing that gap means a `SECURITY DEFINER` version with a hand-written
+`operator_id` filter, and a bug in that one line is a per-person time view — which
+[no path in this product](#surveillance-guardrail-non-negotiable) provides. The cost is small and
+self-correcting: tapping the row lands on the step, whose primary reads `RESUME`, and resuming takes
+the machine through the chain, which is the documented shift handoff. The **office** list is
+`SECURITY DEFINER` and has no horizon.
 
 ### `Cancel activity` — the third end, added 2026-08-26
 
@@ -492,10 +547,35 @@ reach is ~48%, and the errors correlate the wrong way — the operator disciplin
 a PWA is the same one who remembers to close their interval. **The correction prompt arrives at the
 operator's next tap instead**, which is on-shift, phone in hand, and has a delivery receipt.
 
-**The office keeps the detection half.** `get_open_intervals` backs a Still-running list, which is
+**The office keeps the detection half.** `get_open_intervals` backs the unfinished-work card, which is
 also the *only* route to an interval whose owner has gone home — `close_operation_interval` and
 `cancel_operation_interval` both refuse a non-owner by design, so without that list the row would be
 unreachable.
+
+**When a step counts as running too long — one rule, no company setting.** Flagged after **six
+hours, or sooner if the step was estimated at under two**:
+`clamp(3 × expected, 60, 360)` minutes, where `expected = setup + quantity × run-per-unit`
+([`longRunningThresholdMinutes`](../../lib/duration.ts)). Six hours was the whole rule until
+2026-09-07 and could not tell a 20-minute deburr left running over lunch from a 5-hour EDM burn
+doing exactly what it should, so the short job was invisible for five and a half hours. The floor
+stops a five-minute step flagging at fifteen minutes, which would train the office to ignore the
+flag. **The factor and the floor are judgements, not findings** — retune them against the
+`running timer discarded` rate. `expected_minutes` arrives as **0, never NULL**, when the step
+carries no estimate, and 0 selects the flat ceiling.
+
+**The operator side uses the flat ceiling alone, and that split must not be tidied away.** The
+estimate is hidden from a running step because beside a live counter it is a target, and a badge
+*derived* from it is that comparison wearing a hat — the [guardrail](#surveillance-guardrail-non-negotiable)
+calls this the half that must not move. It is enforced in SQL rather than in review:
+`get_my_paused_operations` does not return the column at all, where its admin sibling
+`get_paused_operations` does. The split is honest on the merits too — the operator prompt catches a
+**forgotten** timer, which is absolute; the office prompt catches an **overrun**, which is relative.
+
+**And the card's subject widened with pause.** It is now
+[`UnfinishedWorkCard`](../../components/dashboard/UnfinishedWorkCard.tsx), headed *Unfinished on the
+floor*, with a **Running** group and a **Paused** group backed by `get_paused_operations`. `Stop`
+appears on running rows only: a paused span is already closed, its minutes are recorded and correct,
+and the machine is free, so there is nothing there to stop.
 
 **And, since 2026-08-28, the correction half.** That "only route" claim was aspirational for twelve
 days: the list rendered rows and no control, so the route led to a read. J-0001 is what it cost —
@@ -796,6 +876,8 @@ schema rather than in review:
 | Operator sees | Operator never sees |
 |---|---|
 | The interval running **right now**, as a large monospace clock | A total across jobs, a weekly figure, an average, a rate |
+| **Every span they are holding at once**, each with its own clock, on the jobs list | A count of them, or any scalar over the list — the rows are the record |
+| That a step they paused is still paused, and for how long | Whether that is longer than the step *should* take: the estimate-relative flag is office-only, in SQL |
 | Their own start and finish entries in the job feed, each correctable | Anyone else's start or finish, on any surface |
 | That the **office** completed a step on this job, unnamed and untimed | Who in the office did it, or what any other operator finished |
 | A journal of their own recorded intervals, each naming its job and step | A row count, an entry total, or any scalar over that journal |
@@ -1170,7 +1252,7 @@ carries the guardrail regex block in its own suite.
 
 Added [`20260826010648`](../../supabase/migrations/20260826010648_station_dispatch_includes_running_steps.sql)
 after a production sighting: J-0118 / OP 30 EDM had an interval open since 3:01 PM, showed on the
-office [Still-running card](#recording-time), and appeared **on no operator surface at all** — not
+office [unfinished-work card](#recording-time), and appeared **on no operator surface at all** — not
 My Station at EDM, not Completed, not All Stations. The step the floor was actually running was the
 one step the floor could not see.
 
@@ -1182,8 +1264,17 @@ what a dispatch list is. But **starting does not require sequence-readiness** (t
 the read path then hid. J-0118's OP 10 and OP 20 were both pending, so EDM was neither ready nor
 "in progress", and fell through every branch.
 
-So there are now **three** ways onto the list, and an open interval is the third: *sequence-ready*,
-*has quantity recorded*, or *somebody is on it right now*. The row is marked `Running`.
+So there are now **four** ways onto the list: *sequence-ready*, *has quantity recorded*, *somebody is
+on it right now* (marked `Running`), or — since
+[`20260907203956`](../../supabase/migrations/20260907203956_paused_work_is_visible_to_the_floor_and_the_office.sql)
+— *somebody paused it and has not come back* (marked `Paused`).
+
+**The fourth branch is the same bug caught before it shipped.** A paused step has produced nothing,
+so it derives to `pending`; its span is **closed**, so the open-interval branch misses it. Out of
+sequence as well and it satisfied none of the branches — meaning Pause would have been a control that
+hid the work it was used on. Rows sort running-first, then paused, then by job number: paused work
+outranks plain ready work because picking it up **finishes** something, and ranks below running
+because a turning machine is what the operator walking up has to deal with first.
 
 **This is also the only route to an abandoned interval.** `close_operation_interval` refuses a
 non-owner, so the office cannot clear one — what can is `start_operation_interval`, which closes
@@ -1193,7 +1284,8 @@ through the station list, which was the one place the forgotten interval did not
 **The mark carries no person, and that is enforced in SQL rather than in the card.** The dispatch
 RPC is `SECURITY INVOKER`, and `job_op_intervals_select_own` scopes the interval table to the
 caller's own rows — so the fact is fetched through
-`get_running_operation_ids_for_station`, a `SECURITY DEFINER` helper that returns **operation ids
+`get_running_operation_ids_for_station` and its 2026-09-07 twin
+`get_paused_operation_ids_for_station`, `SECURITY DEFINER` helpers that return **operation ids
 and nothing else**: no `operator_id`, no `started_at`, no elapsed figure, no count. "OP 30 at EDM is
 running" is a fact about a machine, the same class of disclosure as the office card, and the only
 form of it that stays clear of the [guardrail](#surveillance-guardrail-non-negotiable). A `since
@@ -1202,7 +1294,7 @@ assertion still watches for.
 
 **Two holes are left open on purpose**, both named in the migration: an interval on a job that was
 later **cancelled**, and one on a step an **office-side completion** marked `completed` (which
-closes no interval). Both still show on the office Still-running card; neither has been observed.
+closes no interval). Both still show on the office unfinished-work card; neither has been observed.
 
 ## QR codes and scanning
 
@@ -1281,12 +1373,12 @@ as possible.
 
 | Non-goal | Rationale |
 |---|---|
-| **No pause / resume** | **Amended 2026-08-16.** Start came back ([Recording time](#recording-time)); pause and resume did not, and will not. A paused state is one more thing to remember to undo, and the chain already expresses "I stopped doing this" as "I started doing something else". |
+| ~~**No pause / resume**~~ | **Withdrawn 2026-09-07** ([`20260907203755`](../../supabase/migrations/20260907203755_operator_can_pause_and_resume_an_activity.sql)) — *"the chain already expresses 'I stopped doing this' as 'I started doing something else'"* was wrong because the chain expresses it only when there IS a next thing. Walking away had no expression, leaving two bad moves: `Cancel activity`, which discards real measured minutes, or leaving the clock running, which holds the machine against everyone. **The other half of that rationale — "one more thing to remember to undo" — is NOT withdrawn**; it is answered by the paused step staying on the dispatch list and on the office card. See [Pause and resume](#pause-and-resume-2026-09-07). |
 | ~~**No per-operation time tracking**~~ | **Withdrawn 2026-08-16** — wrong because it read the 2026-06 evidence as "actual time cannot be captured" when what the evidence said was "a start/stop lifecycle the operator must maintain cannot be captured". The chain does not ask them to maintain one. **Costing and quoting still use estimated times only**; actuals are reported beside them and never substituted. |
 | **No manually-set WIP status** | WIP is **derived from recorded quantity**, never asserted by a human — see [Status model](#status-model). *Exception:* an **outside step** carries a `sent` waypoint, because the part is physically out of the shop and invisible while it is away — that exists for visibility, not to track in-shop WIP. |
 | **No permanent operator↔station assignment** | Operators roam; the station is chosen per device and changed from the header any time. |
 | **No shift management / clock-in** | Out of scope. Sign-in time is whatever Supabase Auth records, nothing more. |
-| **No downtime / stoppage reasons** | Follows from having no paused state to attribute one to. |
+| **No downtime / stoppage reasons** | **Still a non-goal, on its own reasoning since 2026-09-07.** It used to follow from having no paused state to attribute one to; there is one now, and Pause deliberately does not ask why. `done_for_day` / `left_running` were built and removed 2026-08-18 because classifying a stop is a second decision on top of the one that matters, and that argument is untouched by pause existing. |
 | **No real-time push** | See below. |
 
 ### Freshness: manual refresh

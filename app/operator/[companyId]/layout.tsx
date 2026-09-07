@@ -714,13 +714,18 @@ function OperatorShell({
           Applies to every operator screen, deliberately — Jobs and Me had the same problem and
           nobody had noticed because nobody opens them on a monitor.
         */}
-        {/* NO RUNNING-TIMER STRIP, decided 2026-08-17. A bar above the job card
-            duplicated what the step screen's own clock and job feed already say,
-            and the shell is not where a step's state belongs. The cost is real
-            and accepted: with no notification channel either, nothing outside
-            the step screen indicates a timer is running, so a forgotten stop is
-            caught by the office Still-running list rather than by the operator.
-            See docs/modules/operator-view.md#recording-time. */}
+        {/* STILL NO RUNNING-TIMER STRIP IN THE SHELL, decided 2026-08-17 and
+            re-affirmed 2026-09-07. A bar HERE duplicated what the step screen's
+            own clock and job feed already say, and the shell is not where a
+            step's state belongs.
+
+            What changed on 2026-09-07 is that the QUESTION the strip half-answered
+            got a proper home: RunningNowPanel, at the top of the jobs list, shows
+            everything this operator is holding at once — which the step screen
+            structurally cannot, because the chain keys on the work centre. That is
+            one page, not every screen, and it carries links rather than controls.
+            Do not promote it up here. See
+            docs/modules/operator-view.md#recording-time. */}
         <Box sx={{ maxWidth: 680, mx: 'auto' }}>{children}</Box>
       </Box>
 

@@ -1318,7 +1318,7 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
  * ORDER IS LOAD-BEARING: the completion lands FIRST. It is the durable
  * production fact, and the same ordering the step screen uses for the same
  * reason. If the discard then fails, the completion still stands and the orphan
- * interval is reachable from the dashboard's Still-running Stop control — which
+ * interval is reachable from the dashboard's unfinished-work Stop control — which
  * is strictly better than discarding an operator's measured minutes and then
  * failing to record the work they were measuring.
  */
@@ -1390,7 +1390,7 @@ export async function completeJobOperation(
 
     // NOT SWALLOWED. The step screen swallows its close failure because an
     // operator cannot act on it from the shop floor; here the caller IS the
-    // office, the one party who can see the Still-running list and retry from
+    // office, the one party who can see the unfinished-work card and retry from
     // it. Reporting the completion as a clean success while a timer it
     // overrode keeps running is the exact silence this whole change is about.
     discardedRunningTimers = await voidOpenIntervalsForOperation(operationId);

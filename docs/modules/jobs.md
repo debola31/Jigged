@@ -503,7 +503,7 @@ missing one because the estimating loop reads it back as measurement. So the int
 better no data than bad data. The dialog says so *before* the click when
 `get_operation_actuals` reports an open interval, and the snackbar says how many were discarded
 after. The completion is written **first** — it is the durable production fact — so a failed discard
-leaves an orphan the dashboard's Still-running **Stop** can clear, rather than destroying an
+leaves an orphan the dashboard's unfinished-work **Stop** can clear, rather than destroying an
 operator's measured minutes and then failing to record the work they were measuring.
 
 **A second completion against work someone already recorded is refused, not added.** Completions are

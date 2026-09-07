@@ -61,6 +61,23 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<s
 
 const qtyField = (page: Page) => page.getByLabel('Parts finished');
 const startButton = (page: Page) => page.getByRole('button', { name: /start this step/i });
+const resumeButton = (page: Page) => page.getByRole('button', { name: /resume this step/i });
+/**
+ * The IDLE primary, whichever word it is wearing.
+ *
+ * START and RESUME are the same act — `start_operation_interval`, a new span —
+ * and every helper below cares only that the step is idle. The distinction is
+ * asserted explicitly in the pause test and nowhere else.
+ *
+ * THIS EXISTS BECAUSE A PAUSED SPAN IS PERMANENT. Nothing an operator can tap
+ * removes one: `cancel_operation_interval` refuses a closed row, and undoing a
+ * completion voids only the spans that completion closed. That is correct — a
+ * paused span is measured work — but it means the pause test cannot restore the
+ * shared seeded step to a state where the primary says START. Matching either
+ * word is what keeps this serial suite order-independent.
+ */
+const idlePrimary = (page: Page) =>
+  page.getByRole('button', { name: /(start|resume) this step/i });
 // `.first()` for the same reason as the feed locators — one Adjust per entry.
 // First is the NEWEST row (the feed sorts newest first), which is the interval
 // the test just started, so this is semantically right and not just a silencer.
@@ -117,11 +134,11 @@ async function openIdleStep(page: Page): Promise<void> {
   await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
 
   // Heal a timer left running by an earlier aborted run.
-  await expect(startButton(page).or(runningOnStep(page))).toBeVisible({ timeout: 30_000 });
+  await expect(idlePrimary(page).or(runningOnStep(page))).toBeVisible({ timeout: 30_000 });
   if (await runningOnStep(page).isVisible()) {
     await stopTimer(page);
   }
-  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+  await expect(idlePrimary(page)).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -154,7 +171,7 @@ async function stopTimer(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: /^cancel activity$/i }).click();
 
   await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
-  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+  await expect(idlePrimary(page)).toBeVisible({ timeout: 30_000 });
 }
 
 /**
@@ -184,7 +201,7 @@ async function stopTimer(page: Page): Promise<void> {
  *
  * `toPass` re-runs the DECISION as well as the action, and the short per-click
  * timeout fails fast into the next attempt instead of swallowing the run. The
- * early return on `startButton` makes it idempotent, so a retry after a click
+ * early return on `idlePrimary` makes it idempotent, so a retry after a click
  * that did land is a no-op rather than a second undo.
  */
 async function returnStepToIdle(page: Page): Promise<void> {
@@ -193,14 +210,17 @@ async function returnStepToIdle(page: Page): Promise<void> {
 
   await expect(async () => {
     // Already idle — a previous attempt landed, or there was nothing to undo.
-    if (await startButton(page).isVisible()) return;
+    // EITHER idle word counts: undoing a completion on a step that was paused
+    // earlier leaves the primary reading RESUME, and a strict START check here
+    // would loop until the 60s budget ran out.
+    if (await idlePrimary(page).isVisible()) return;
 
     if (await completeBanner(page).isVisible()) {
       await completeBanner(page).click({ timeout: 5_000 });
     } else {
       await undo.click({ timeout: 5_000 });
     }
-    await expect(startButton(page)).toBeVisible({ timeout: 10_000 });
+    await expect(idlePrimary(page)).toBeVisible({ timeout: 10_000 });
   }).toPass({ timeout: 60_000 });
 }
 
@@ -216,12 +236,14 @@ test.describe('operator time capture', () => {
     // selector that never matched anything.
     const hadEstimate = await estimateLine(page).isVisible();
 
-    await startButton(page).click();
+    await idlePrimary(page).click();
 
     // The primary flipped, which is the whole point of making start mandatory:
-    // there is no completion action on screen until a timer is running.
+    // there is no completion action on screen until a timer is running. Asserted
+    // against EITHER idle word, so a paused step left by the pause test does not
+    // make this pass for the wrong reason.
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
-    await expect(startButton(page)).toHaveCount(0);
+    await expect(idlePrimary(page)).toHaveCount(0);
 
     // THE GUARDRAIL. A live elapsed figure beside a quoted standard is a pace
     // gauge with a target — see
@@ -233,31 +255,98 @@ test.describe('operator time capture', () => {
     // Starting is RECORDED IN THE FEED, which is where the operator corrects it.
     await expect(feedStarted(page)).toBeVisible({ timeout: 30_000 });
 
-    // And NOT in a header strip: that was removed deliberately, so no other
-    // screen carries running state.
+    // AND ON THE JOBS LIST, WHICH IS A DELIBERATE REVERSAL — read this before
+    // "restoring" the old assertion.
     //
-    // WEAK ASSERTION, AND SAYING SO RATHER THAN IMPLYING COVERAGE IT LACKS. It
-    // matches the copy the DELETED strip used ("since 9:12 AM"), so a strip
-    // reintroduced with any other wording sails past it — this can effectively
-    // only pass. It is kept because it costs nothing and catches a literal
-    // revert, not because it guards the decision. The decision is guarded by
-    // docs/modules/operator-view.md#recording-time and by review.
+    // Until 2026-09-07 this block asserted `/^since \d/` had count 0, guarding the
+    // header strip withdrawn on 2026-08-17. It also said, accurately, that it was a
+    // WEAK assertion: it matched the deleted strip's exact copy, so any rewording
+    // sailed past it, and it could effectively only pass.
+    //
+    // The strip's withdrawal reasoning was that it duplicated a single step
+    // screen's own clock. That holds for ONE timer and fails for several: the chain
+    // keys on the WORK CENTRE, so an operator legitimately runs three machines, and
+    // the step screen only ever shows the one being looked at. RunningNowPanel
+    // answers the question the step screen structurally cannot.
+    //
+    // WHAT STILL STANDS, and is what these assertions now guard: no step-level
+    // CONTROL may leave the step screen, and the SHELL carries nothing. The panel
+    // is a list of links on one page.
     await page.goto(`/operator/${companyId}/jobs`);
-    await expect(page.getByText(/^since \d/i)).toHaveCount(0);
-    // This half is real: no step-level running control may leak into the shell.
-    // Both of them — `Cancel activity` is a step-level running control too, and
-    // an assertion naming only RECORD would cover half of what this comment says.
+    await expect(page.getByText(/^running now$/i)).toBeVisible({ timeout: 30_000 });
+    // No step-level running control on the list. `Cancel activity` counts too — an
+    // assertion naming only RECORD would cover half of what this comment says.
     await expect(recordButton(page)).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^cancel activity$/i })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^pause/i })).toHaveCount(0);
+    // THE GUARDRAIL TRAVELS WITH THE PANEL. The office flags a long-running step
+    // against its estimate; this surface must not, because an estimate-derived
+    // figure beside a live clock is the adjacent comparison the guardrail refuses.
+    await expect(page.getByText(/est\.|estimated/i)).toHaveCount(0);
 
     await page.goBack();
     await stopTimer(page);
   });
 
+  test('pause keeps the time, resume opens a new span, and the feed reads as a log', async ({
+    page,
+  }) => {
+    // THE REVERSAL OF THE "No pause / resume" NON-GOAL, end to end. The unit tests
+    // cover the button states and the pytest suite covers the two column values;
+    // what only a browser can show is that the FEED reads correctly afterwards —
+    // Started / Paused / Started, three rows, none of them rewritten.
+    //
+    // ITS OWN JOB, AND THAT IS LOAD-BEARING. A paused span is permanent: nothing
+    // an operator can tap removes one (cancel refuses a closed row; undo voids
+    // only the spans a completion closed). On the shared E2E-JS-NOTSTARTED step
+    // this would leave two feed rows and two Adjust buttons behind, and three
+    // assertions in the two tests below count exactly those to zero — in a serial
+    // suite, so the first failure aborts the rest.
+    await openTravelerWithStation(page, 'E2E-PAUSE');
+    await openIdleStep(page);
+
+    await idlePrimary(page).click();
+    await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
+
+    await page.getByRole('button', { name: /^pause/i }).first().click();
+
+    // The primary says RESUME, not START. That is the whole visible difference,
+    // and getting it wrong tells an operator the app has forgotten work the feed
+    // right below is still showing. This is the ONE place the two words are told
+    // apart; every helper matches either.
+    await expect(resumeButton(page)).toBeVisible({ timeout: 30_000 });
+    await expect(startButton(page)).toHaveCount(0);
+
+    // The span is CLOSED, not discarded: it says Paused and it kept its duration.
+    // `Cancel activity` is the control that would have left nothing here at all.
+    await expect(page.getByText(/^Paused /).first()).toBeVisible({ timeout: 30_000 });
+
+    await resumeButton(page).click();
+    await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
+
+    // TWO Started rows now. One that rewrote itself would be a log losing track,
+    // which is the property the whole feed design turns on.
+    await expect(feedStartedRows(page)).toHaveCount(2, { timeout: 30_000 });
+
+    await stopTimer(page);
+
+    // AND THE PAUSED STEP IS STILL REACHABLE FROM THE JOBS LIST, which is what
+    // stops Pause being a control that hides the work it is used on. The running
+    // span was just discarded, so the panel's Paused group is what is left.
+    const companyId = page.url().match(/\/operator\/([0-9a-f-]{36})/)?.[1];
+    await page.goto(`/operator/${companyId}/jobs`);
+    // Case-insensitive because the group label is a MUI `overline`, which
+    // uppercases in CSS, and `.first()` because the QUEUE row below carries a
+    // `Paused` chip too — correctly, since the fourth dispatch branch put the step
+    // there — so a bare locator resolves to two nodes and strict mode throws.
+    await expect(page.getByText(/^paused$/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('E2E-PAUSE').first()).toBeVisible({ timeout: 30_000 });
+  });
+
   test('a running row offers no Adjust, and a finished one does', async ({ page }) => {
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
-    await startButton(page).click();
+    await idlePrimary(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
     // The start row is a READ-ONLY record while the clock runs. There is no
@@ -297,7 +386,7 @@ test.describe('operator time capture', () => {
     // There is no Stop button on the happy path, and this is why.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
-    await startButton(page).click();
+    await idlePrimary(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
     await qtyField(page).fill('1');
@@ -342,7 +431,7 @@ test.describe('operator time capture', () => {
     // operator who forgot to start got no acknowledgement anything was kept.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
-    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+    await expect(idlePrimary(page)).toBeVisible({ timeout: 30_000 });
 
     await qtyField(page).fill('1');
     await page.getByRole('button', { name: /complete without timing/i }).click();

@@ -31,6 +31,7 @@ import {
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
 import NoteUsageBanner from '@/components/operator/NoteUsageBanner';
+import RunningNowPanel from '@/components/operator/RunningNowPanel';
 import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import { filterOperatorJobs } from '@/lib/operatorJobSearch';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
@@ -299,13 +300,18 @@ function OperatorJobsPageContent() {
                   the fact is about THIS operation, and the top-right belongs to
                   the completed stamp.
 
-                  ONE WORD, AND THE OMISSIONS ARE THE DESIGN. No name, no start
-                  time, no elapsed clock — "OP 30 at EDM is running" is a fact
-                  about a machine, which is the same thing the office
-                  Still-running card says and the only form of it that stays
-                  clear of the surveillance guardrail. A `since 4:01 PM` here
-                  would also revive the copy of the deliberately-removed header
-                  strip, which an E2E assertion still watches for on this page. */}
+                  ONE WORD, AND THE OMISSIONS ARE STILL THE DESIGN. No name, no
+                  start time, no elapsed clock — "OP 30 at EDM is running" is a
+                  fact about a MACHINE, and this chip reports ANYONE's timer,
+                  including a colleague's. That is the only form of it that stays
+                  clear of the surveillance guardrail.
+
+                  RunningNowPanel above this list may say more — a clock, a start
+                  time — and the difference is not inconsistency: that panel shows
+                  the CALLER'S OWN spans, scoped by RLS, which is the operator
+                  looking at their own work. Widening this chip toward it would
+                  publish one operator's pace to the next person who walks up to
+                  the station. Keep it at one word. */}
               {row.has_open_interval && (
                 <Chip
                   size="small"
@@ -314,6 +320,20 @@ function OperatorJobsPageContent() {
                   label="Running"
                   sx={{ fontWeight: 600 }}
                 />
+              )}
+              {/* Mutually exclusive with Running by construction — the RPC
+                  excludes an operation that has an open span — but written as a
+                  separate conditional rather than a ternary, so a future change to
+                  either predicate shows up as two chips instead of silently
+                  dropping one.
+
+                  DEFAULT COLOUR, NOT WARNING. Amber means needs attention;
+                  paused work is set down on purpose and most of it will be picked
+                  straight back up. The office card is where a pause that has gone
+                  stale gets flagged, against a threshold this chip has no way to
+                  know. */}
+              {row.has_paused_interval && (
+                <Chip size="small" variant="outlined" label="Paused" sx={{ fontWeight: 600 }} />
               )}
             </Box>
           )}
@@ -363,6 +383,32 @@ function OperatorJobsPageContent() {
           onOpenDetail={() => router.push(`/operator/${companyId}/my-work`)}
         />
       )}
+
+      {/* WHAT THIS OPERATOR ALREADY HAS ON, above the queue of what they could
+          start next — which is the right order, because work in progress outranks
+          work not begun.
+
+          It renders on BOTH lenses and is deliberately not scoped to the selected
+          station: the whole reason it exists is that the chain keys on the work
+          centre, so an operator's running spans are spread across machines and the
+          station lens is exactly the filter that would hide most of them.
+
+          It also renders behind `!showStationSelector` like the banner above. The
+          picker is a full-screen commit to a working context and the shell hides
+          the nav there; a list of running work on top of it would be a second
+          decision on the one screen built for one. */}
+      {/* HIDDEN WHILE A SEARCH IS ACTIVE, and that is a correctness fix rather
+          than a preference. The find field narrows the DISPATCH LIST, not this
+          panel, so leaving it up during a search puts rows on screen directly
+          above the words "No jobs match" — the surface contradicting itself, and
+          an E2E assertion counting job-shaped buttons to zero caught it.
+
+          Losing the panel for the duration of a search costs nothing: it is
+          transient, and every running or paused step is guaranteed to be on the
+          dispatch list anyway by the third and fourth eligibility branches of
+          get_ready_operations_for_station, so the work is still findable by the
+          very query being typed. */}
+      {!showStationSelector && !queryInput.trim() && <RunningNowPanel />}
 
       {/* Toolbar: scope segmented control (primary) + a "Show completed"
           checkbox (secondary — an explicit on/off so it's clear whether you're

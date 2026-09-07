@@ -12,15 +12,22 @@
  */
 
 /**
- * Why an interval stopped, and there are only two ways.
+ * Why a span stopped. Three ways since 20260907203755.
  *
  * `completed` is the operator recording what they finished; `switched` is the
  * chain closing this one because the next start took the work centre — written
- * server-side, never by a tap. `done_for_day` and `left_running` were built and
- * removed: they asked the operator to classify a stop, and an interval left open
- * already says that on the office Still-running list.
+ * server-side, never by a tap; `paused` is the operator stopping deliberately and
+ * meaning to come back.
+ *
+ * PAUSE IS NOT A REVIVAL OF `done_for_day` / `left_running`, which were built and
+ * removed on 2026-08-18. Those asked the operator to CLASSIFY a stop — a second
+ * decision on top of the one that matters. This is one unlabelled tap, and the
+ * classification question stays closed.
+ *
+ * Resuming opens a NEW span rather than reopening this one, so the feed stays a
+ * log where no row rewrites itself, and `get_operation_actuals` sums the spans.
  */
-export type IntervalCloseReason = 'completed' | 'switched';
+export type IntervalCloseReason = 'completed' | 'switched' | 'paused';
 
 /** Where the interval came from. Only `operator` is produced today. */
 export type IntervalCaptureSource = 'operator' | 'sensor' | 'system';
@@ -108,7 +115,7 @@ export interface OperationActuals {
   last_ended_at: string | null;
 }
 
-/** An interval that is still running, for the office Still-running list. */
+/** An interval that is still running, for the office unfinished-work card. */
 export interface OpenInterval {
   interval_id: string;
   job_operation_id: string;
@@ -119,6 +126,66 @@ export interface OpenInterval {
   work_center_name: string | null;
   started_at: string;
   capture_source: IntervalCaptureSource;
+  /**
+   * The whole step's estimate: setup + quantity × run-per-unit, in minutes.
+   *
+   * 0, NEVER NULL, when the step carries no estimate — both estimate columns are
+   * nullable and a step with neither is ordinary. Zero is not a fabricated
+   * duration; it is what selects the flat ceiling in `longRunningThresholdMinutes`.
+   *
+   * OFFICE ONLY. The operator's own equivalents deliberately do not carry it —
+   * see `PausedOperation` below and the guardrail it cites.
+   */
+  expected_minutes: number;
+}
+
+/**
+ * A step the floor paused and has not resumed — the office's view.
+ *
+ * The other half of the forgotten-work channel `OpenInterval` opened, and the
+ * direct answer to the objection recorded against pause ("one more thing to
+ * remember to undo"). Carries no operator identity, like every office read of this
+ * table.
+ */
+export interface PausedOperation {
+  interval_id: string;
+  job_operation_id: string;
+  job_id: string;
+  job_number: string;
+  part_name: string | null;
+  operation_name: string;
+  work_center_name: string | null;
+  /** When the last span was closed as `paused`. */
+  paused_at: string;
+  /** See `OpenInterval.expected_minutes`. */
+  expected_minutes: number;
+}
+
+/**
+ * A step the CALLER paused and has not resumed — the operator's own view.
+ *
+ * Deliberately the same shape as `PausedOperation` MINUS `expected_minutes`, and
+ * the omission is the point rather than an oversight. This list renders beside
+ * live clocks, and an estimate-derived figure there is the adjacent comparison
+ * that turns informational feedback into controlling feedback — see
+ * docs/modules/operator-view.md#surveillance-guardrail-non-negotiable, which calls
+ * hiding the estimate from a running step the half that must not move. The
+ * omission is enforced in SQL too: `get_my_paused_operations` does not return the
+ * column, so a component cannot reach it by accident.
+ *
+ * It carries `job_part_id` where the office shape does not, because the operator
+ * row routes to the step screen and that path needs it.
+ */
+export interface MyPausedOperation {
+  interval_id: string;
+  job_operation_id: string;
+  job_id: string;
+  job_part_id: string;
+  job_number: string;
+  part_name: string | null;
+  operation_name: string;
+  work_center_name: string | null;
+  paused_at: string;
 }
 
 /** The adjustment an operator submits. Both ends optional — either can be corrected alone. */

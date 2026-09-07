@@ -22,10 +22,12 @@ import { toError, toFriendlyError, shouldReportSupabaseError } from '@/lib/supab
 import type { Database } from '@/types/database';
 import type {
   IntervalAdjustment,
+  MyPausedOperation,
   OpenInterval,
   OperationActuals,
   OperationInterval,
   OperationIntervalWithContext,
+  PausedOperation,
   RunningInterval,
 } from '@/types/operationInterval';
 
@@ -148,6 +150,44 @@ export async function closeOperationInterval(
 }
 
 /**
+ * Pause a running interval — the operator is stopping and means to come back.
+ *
+ * CLOSES THE SPAN, unlike `cancelOperationInterval` which discards it. The
+ * measured minutes are kept and `get_operation_actuals` sums them with every later
+ * span, so a step worked in three sittings totals correctly. Resuming is
+ * `startOperationInterval` on the same operation — there is no resume RPC, because
+ * one would be `start_operation_interval` under a second name with a second copy
+ * of the membership, billing and outside-op guards to drift out of sync.
+ *
+ * It also frees the work centre immediately: both partial unique indexes key on
+ * `ended_at IS NULL`, so an operator at lunch stops holding the machine against
+ * everyone else. That is the reason a `paused` FLAG on an open row was rejected.
+ *
+ * Owner-asserted server-side, unlike starting. Pausing states YOUR intent to come
+ * back and nobody can state it for you; a colleague who needs the machine starts
+ * on it, and the chain closes yours as `switched` exactly as before.
+ *
+ * Pausing an already-closed interval is a no-op rather than an error, like its
+ * siblings, so a gloved double-tap and a retry after a dropped cellular response
+ * are both harmless.
+ */
+export async function pauseOperationInterval(intervalId: string): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error } = await supabase.rpc('pause_operation_interval', {
+    p_interval_id: intervalId,
+  });
+
+  if (error) {
+    reportRpcError(error, 'pause interval');
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not pause this step.',
+    });
+  }
+}
+
+/**
  * Discard a running interval — the operator started a step and produced nothing.
  *
  * VOIDS RATHER THAN CLOSES, so nothing is asserted about when the work stopped:
@@ -194,7 +234,7 @@ export async function cancelOperationInterval(intervalId: string): Promise<void>
  * measurement.
  *
  * Two callers: the job page's Complete (first write wins — the office overrode a
- * timer it cannot honestly end) and the dashboard Still-running card's Stop.
+ * timer it cannot honestly end) and the dashboard unfinished-work card's Stop.
  * Returns how many were discarded, which is 0 on the common path.
  */
 export async function voidOpenIntervalsForOperation(jobOperationId: string): Promise<number> {
@@ -436,4 +476,75 @@ export async function getOpenIntervals(companyId: string): Promise<OpenInterval[
     });
   }
   return (data ?? []) as OpenInterval[];
+}
+
+/**
+ * The caller's own paused steps — what they have set down and not picked back up.
+ *
+ * An RPC rather than a `.from()` select, which is the deviation worth explaining
+ * in a file whose header says reads of your own rows are ordinary selects: "the
+ * latest span on this operation was paused AND nothing later exists on it" is a
+ * per-group predicate, and expressing it through PostgREST means either two round
+ * trips or an embedded filter that cannot say `NOT EXISTS`. It is SECURITY
+ * INVOKER, so `job_op_intervals_select_own` still does the scoping — there is no
+ * hand-written owner filter to get wrong, and it needs no `function_execute_leaks`
+ * entry.
+ *
+ * IT HAS A HORIZON, and callers should not paper over it. Because the function
+ * runs as the caller, its "has anything happened since?" check cannot see a
+ * COLLEAGUE who took the step over, so a row keeps reading `Paused` until this
+ * operator touches it. That is accepted rather than overlooked: closing it needs a
+ * definer version with a hand-written owner filter, and a bug in that line is a
+ * per-person time view. Tapping the row goes to the step, whose primary reads
+ * RESUME, and resuming takes the machine through the chain — the same shift
+ * handoff as tapping START on a step somebody else is running. `getPausedOperations`
+ * (admin, definer) has no horizon.
+ *
+ * IT CARRIES NO ESTIMATE AND MUST NOT GROW ONE. The office siblings below do. See
+ * `MyPausedOperation` and the guardrail it cites: an estimate-derived figure
+ * beside a live clock is the comparison this product refuses to show an operator.
+ *
+ * `.rpc()` is outside Sentry's Supabase integration, so this reports by hand.
+ */
+export async function getMyPausedOperations(companyId: string): Promise<MyPausedOperation[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('get_my_paused_operations', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    reportRpcError(error, 'load my paused operations');
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not load what you have paused.',
+    });
+  }
+  return (data ?? []) as MyPausedOperation[];
+}
+
+/**
+ * Steps the floor paused and did not resume — the office's half.
+ *
+ * Admin-only, enforced inside the function, and carrying no operator identity like
+ * every office read of this table. This is the answer to the objection recorded
+ * against pause — "a paused state is one more thing to remember to undo" — so it
+ * is not optional garnish on the feature; without it Pause is a control that can
+ * hide work.
+ */
+export async function getPausedOperations(companyId: string): Promise<PausedOperation[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('get_paused_operations', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    reportRpcError(error, 'load paused operations');
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not load what is paused.',
+    });
+  }
+  return (data ?? []) as PausedOperation[];
 }

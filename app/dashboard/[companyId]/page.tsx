@@ -7,7 +7,7 @@ import Box from '@mui/material/Box';
 import { InsightsSection, DashboardMetrics, RecentActivity } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
-import StillRunningCard from '@/components/dashboard/StillRunningCard';
+import UnfinishedWorkCard from '@/components/dashboard/UnfinishedWorkCard';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { isDashboardEmpty, getDashboardActivity, type ActivityItem } from '@/utils/dashboardAccess';
 
@@ -64,11 +64,13 @@ export default function DashboardPage() {
         <DashboardMetrics companyId={companyId} revenueEnabled={revenueEnabled} />
       </Box>
 
-      {/* Still running — open time intervals, and the only route to one whose
-          owner has gone home. Renders nothing on the normal day when everything
-          has been closed, so it costs no space until it matters. */}
+      {/* Unfinished on the floor — open time intervals, and steps the floor
+          paused and did not resume. The only route to a running clock whose owner
+          has gone home, and since 2026-09-07 the only place a forgotten PAUSE is
+          visible to anyone. Renders nothing on the normal day when everything has
+          been closed, so it costs no space until it matters. */}
       <Box sx={{ mb: 4 }}>
-        <StillRunningCard companyId={companyId} />
+        <UnfinishedWorkCard companyId={companyId} />
       </Box>
 
       {/* Recent Activity — compact business-milestone feed + "View all" hop */}

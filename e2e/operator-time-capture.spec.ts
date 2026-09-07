@@ -273,7 +273,7 @@ test.describe('operator time capture', () => {
     // CONTROL may leave the step screen, and the SHELL carries nothing. The panel
     // is a list of links on one page.
     await page.goto(`/operator/${companyId}/jobs`);
-    await expect(page.getByText('Running now')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/^running now$/i)).toBeVisible({ timeout: 30_000 });
     // No step-level running control on the list. `Cancel activity` counts too — an
     // assertion naming only RECORD would cover half of what this comment says.
     await expect(recordButton(page)).toHaveCount(0);
@@ -294,8 +294,15 @@ test.describe('operator time capture', () => {
     // THE REVERSAL OF THE "No pause / resume" NON-GOAL, end to end. The unit tests
     // cover the button states and the pytest suite covers the two column values;
     // what only a browser can show is that the FEED reads correctly afterwards —
-    // Started / Paused / Started / Finished, four rows, none of them rewritten.
-    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    // Started / Paused / Started, three rows, none of them rewritten.
+    //
+    // ITS OWN JOB, AND THAT IS LOAD-BEARING. A paused span is permanent: nothing
+    // an operator can tap removes one (cancel refuses a closed row; undo voids
+    // only the spans a completion closed). On the shared E2E-JS-NOTSTARTED step
+    // this would leave two feed rows and two Adjust buttons behind, and three
+    // assertions in the two tests below count exactly those to zero — in a serial
+    // suite, so the first failure aborts the rest.
+    await openTravelerWithStation(page, 'E2E-PAUSE');
     await openIdleStep(page);
 
     await idlePrimary(page).click();
@@ -321,9 +328,19 @@ test.describe('operator time capture', () => {
     // which is the property the whole feed design turns on.
     await expect(feedStartedRows(page)).toHaveCount(2, { timeout: 30_000 });
 
-    // And the paused step is visible from the jobs list, which is what stops Pause
-    // being a control that hides the work it is used on.
     await stopTimer(page);
+
+    // AND THE PAUSED STEP IS STILL REACHABLE FROM THE JOBS LIST, which is what
+    // stops Pause being a control that hides the work it is used on. The running
+    // span was just discarded, so the panel's Paused group is what is left.
+    const companyId = page.url().match(/\/operator\/([0-9a-f-]{36})/)?.[1];
+    await page.goto(`/operator/${companyId}/jobs`);
+    // Case-insensitive because the group label is a MUI `overline`, which
+    // uppercases in CSS, and `.first()` because the QUEUE row below carries a
+    // `Paused` chip too — correctly, since the fourth dispatch branch put the step
+    // there — so a bare locator resolves to two nodes and strict mode throws.
+    await expect(page.getByText(/^paused$/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('E2E-PAUSE').first()).toBeVisible({ timeout: 30_000 });
   });
 
   test('a running row offers no Adjust, and a finished one does', async ({ page }) => {

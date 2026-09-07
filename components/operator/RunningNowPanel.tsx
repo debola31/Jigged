@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -62,20 +62,14 @@ export default function RunningNowPanel() {
   const nav = useOperatorNav();
   const { openIntervals, pausedOperations, serverSkewMs } = useIntervalContext();
 
-  /**
-   * A repaint tick for the running clocks — NOT a counter.
-   *
-   * Every figure is recomputed from its stored instant on each render (see
-   * lib/duration.ts `elapsedMs`), so a phone that spent an hour in a pocket comes
-   * back correct rather than an hour short. This only forces the repaint, and it
-   * does not run at all when nothing is running.
-   */
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (openIntervals.length === 0) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [openIntervals.length]);
+  // A repaint tick, subscribed only while something is actually running. See
+  // `subscribeToSecond` at the bottom of this file for why it is an external
+  // store rather than the obvious setInterval-plus-setState.
+  useSyncExternalStore(
+    openIntervals.length > 0 ? subscribeToSecond : subscribeToNothing,
+    getSecond,
+    getServerSecond,
+  );
 
   // Renders nothing rather than an empty state, like OutsideWorkStrip and
   // MachineOpenItems. An operator with nothing running does not need to be told.
@@ -266,3 +260,53 @@ function Row({
     </ButtonBase>
   );
 }
+
+/**
+ * ONE SHARED ONE-SECOND CLOCK, as an external store rather than the obvious
+ * `useEffect(() => setInterval(() => setTick(n => n + 1), 1000))`.
+ *
+ * WHY NOT THE OBVIOUS ONE. `react-hooks/set-state-in-effect` flags every setState
+ * reachable from an effect — an interval callback included — and eslint.config.mjs
+ * keeps that rule at `warn` under a `--max-warnings` budget that, in its own
+ * words, only ratchets DOWN. A new warning here would have to come out of
+ * somebody else's. The step screen's own clock predates that budget and is inside
+ * it; this one would not have been.
+ *
+ * IT IS ALSO JUST BETTER. One interval serves every consumer instead of one per
+ * mounted component, and it stops entirely when the last one unsubscribes — which
+ * on a phone is battery rather than pedantry.
+ *
+ * NOTHING IS ACCUMULATED HERE. `second` is a change token, never a duration: every
+ * figure on screen is recomputed from its stored instant by `elapsedMs`, so a
+ * phone that spent an hour in a pocket comes back correct rather than an hour
+ * short. A backgrounded tab throttles this interval to a crawl and that is fine —
+ * the numbers are right on the first repaint after it wakes.
+ */
+let second = 0;
+let ticker: ReturnType<typeof setInterval> | null = null;
+const listeners = new Set<() => void>();
+
+function subscribeToSecond(onStoreChange: () => void): () => void {
+  listeners.add(onStoreChange);
+  ticker ??= setInterval(() => {
+    second += 1;
+    listeners.forEach((notify) => notify());
+  }, 1000);
+
+  return () => {
+    listeners.delete(onStoreChange);
+    if (listeners.size === 0 && ticker !== null) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  };
+}
+
+/** The no-running-work branch. A stable identity, so React does not resubscribe. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+const getSecond = () => second;
+/** Server render has no clock. Returning 0 keeps the first client paint stable. */
+const getServerSecond = () => 0;

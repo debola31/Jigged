@@ -786,6 +786,27 @@ export default async function globalSetup(): Promise<void> {
     fulfillmentStatus: 'unshipped',
   });
 
+  // A step of its own for the pause/resume test, and it needs one for a reason
+  // that is not tidiness: A PAUSED SPAN IS PERMANENT. Nothing an operator can tap
+  // removes one — cancel_operation_interval refuses a closed row (20260826105251),
+  // and undoing a completion voids only the spans that completion closed. That is
+  // correct, because a paused span is measured work, but it means the pause test
+  // cannot restore the step it used. Run on the shared E2E-JS-NOTSTARTED step it
+  // would leave two feed rows and two Adjust buttons behind, and the serial
+  // operator-time-capture suite has three later assertions that count exactly
+  // those to zero.
+  //
+  // DELIBERATELY NOT PREFIXED `E2E-JS-`. That prefix is jobs-list-status.spec.ts's
+  // isolation filter and its header enumerates the four jobs it expects; a fifth
+  // would make that comment false without failing anything, which is the worst
+  // kind of drift.
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, mfgRoutingId, {
+    jobNumber: 'E2E-PAUSE',
+    productionStatus: 'not_started',
+    fulfillmentStatus: 'unshipped',
+    quantity: 5,
+  });
+
   // After the jobs, so the note's provenance job resolves.
   await ensureDurableNote(supabase, companyId, mfgPartId, 'E2E-JS-DONE');
 

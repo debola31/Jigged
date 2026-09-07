@@ -135,6 +135,23 @@ describe('UnfinishedWorkCard', () => {
     await waitFor(() => expect(voidOpenIntervalsForOperation).toHaveBeenCalledWith('jo1'));
   });
 
+  it('re-reads the PAUSED list after a Stop too, not just the running one', async () => {
+    // Discarding the open span can MOVE a step into the Paused group rather than
+    // out of the card: get_paused_operations ignores voided spans, so an operation
+    // A paused and B then left running becomes paused-eligible the instant Stop
+    // voids B's. Refreshing only the running list makes the step vanish, which
+    // reads as the Stop having finished the work.
+    render(<UnfinishedWorkCard companyId="co1" />);
+    await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
+
+    mock(getOpenIntervals).mockResolvedValue([]);
+    mock(getPausedOperations).mockResolvedValue([pausedOperation()]);
+    await userEvent.click(await screen.findByRole('button', { name: /discard the timer/i }));
+
+    expect(await screen.findByRole('link', { name: 'J-0042' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'J-0001' })).not.toBeInTheDocument();
+  });
+
   it('re-reads the list rather than splicing the row out', async () => {
     // The RPC is per-operation, so an ad-hoc step with two open intervals loses
     // both. Splicing would leave the other one on screen claiming a machine is

@@ -160,6 +160,7 @@ const pausedOperation = {
 const intervalState: {
   running: typeof runningInterval | null;
   paused: typeof pausedOperation | null;
+  loading: boolean;
   cancel: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
@@ -167,6 +168,7 @@ const intervalState: {
 } = {
   running: null,
   paused: null,
+  loading: false,
   cancel: vi.fn(),
   close: vi.fn(),
   pause: vi.fn(),
@@ -178,7 +180,7 @@ vi.mock('@/components/operator/OperatorIntervalContext', () => ({
     openIntervals: intervalState.running ? [intervalState.running] : [],
     pausedOperations: intervalState.paused ? [intervalState.paused] : [],
     serverSkewMs: 0,
-    loading: false,
+    loading: intervalState.loading,
     intervalFor: () => intervalState.running,
     pausedFor: () => intervalState.paused,
     start: vi.fn(),
@@ -705,6 +707,7 @@ describe('pause and resume', () => {
   beforeEach(() => {
     intervalState.running = null;
     intervalState.paused = null;
+    intervalState.loading = false;
     intervalState.cancel = vi.fn(async () => undefined);
     intervalState.close = vi.fn(async () => undefined);
     intervalState.pause = vi.fn(async () => undefined);
@@ -716,6 +719,22 @@ describe('pause and resume', () => {
   afterEach(() => {
     intervalState.running = null;
     intervalState.paused = null;
+    intervalState.loading = false;
+  });
+
+  it('holds the primary busy until the interval lists have loaded', async () => {
+    // A cold load straight to this URL is where the printed per-operation QR
+    // lands. pausedFor() is empty until the paused read settles, so without this
+    // gate the button paints START THIS STEP and then swaps to RESUME — which
+    // reads as the app having forgotten the work, the exact impression the RESUME
+    // label exists to prevent.
+    intervalState.loading = true;
+    intervalState.paused = pausedOperation;
+    renderPage();
+    await screen.findByLabelText('Parts finished');
+
+    expect(screen.queryByRole('button', { name: /start this step/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume this step/i })).not.toBeInTheDocument();
   });
 
   it('offers Pause beside Cancel activity while a timer runs', async () => {

@@ -128,6 +128,7 @@ export default function OperatorOperationActionPage() {
     close: closeInterval,
     cancel: cancelInterval,
     serverSkewMs,
+    loading: intervalLoading,
   } = useIntervalContext();
   const running = intervalFor(jobOperationId);
   // A span this operator closed as `paused` with nothing later on the step. Null
@@ -1305,10 +1306,18 @@ export default function OperatorOperationActionPage() {
                     ? handleStart
                     : handleRecord
               }
-              disabled={actionLoading || primaryAction === 'none'}
+              // BUSY WHILE THE INTERVAL LISTS LOAD, not just while a write is in
+              // flight. `primaryAction` reads pausedFor(), which is empty until
+              // that load settles — so a cold load straight to this URL (where the
+              // printed per-operation QR lands) would paint START THIS STEP and
+              // then swap to RESUME THIS STEP. Both write the same thing, so the
+              // risk is not data; it is that the swap reads as the app having
+              // forgotten the work, which is the exact impression the RESUME label
+              // exists to prevent. A spinner for one paint says "still looking".
+              disabled={actionLoading || intervalLoading || primaryAction === 'none'}
               sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
             >
-              {actionLoading ? (
+              {actionLoading || intervalLoading ? (
                 <CircularProgress size={24} />
               ) : primaryAction === 'resume' ? (
                 // Same write as START — a new span — but not the same words.

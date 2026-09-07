@@ -101,8 +101,23 @@ function overrun(since: string, expectedMinutes: number) {
 }
 
 export default function UnfinishedWorkCard({ companyId }: { companyId: string }) {
-  const [rows, setRows] = useState<OpenInterval[]>([]);
-  const [paused, setPaused] = useState<PausedOperation[]>([]);
+  /**
+   * ONE STATE OBJECT FOR BOTH LISTS, not two.
+   *
+   * They are always written together — the mount load sets both, and a Stop can
+   * MOVE a step from one to the other — so two setters is two chances to update
+   * half of a pair and render a moment that never existed. It also keeps this
+   * effect at the two setState call sites it already had, which matters because
+   * `react-hooks/set-state-in-effect` counts every setState reachable from a
+   * useEffect (await or not) and `--max-warnings` in package.json only ratchets
+   * DOWN. A third setter here would have to come out of somebody else's budget.
+   */
+  const [lists, setLists] = useState<{ open: OpenInterval[]; paused: PausedOperation[] }>({
+    open: [],
+    paused: [],
+  });
+  const rows = lists.open;
+  const paused = lists.paused;
   const [loaded, setLoaded] = useState(false);
   // The row whose Stop is being confirmed. Discarding measured time is not
   // undoable — `voided_at` has no inverse — so it is a confirm, per
@@ -122,11 +137,13 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
     Promise.allSettled([getOpenIntervals(companyId), getPausedOperations(companyId)])
       .then(([open, pausedResult]) => {
         if (cancelled) return;
-        if (open.status === 'fulfilled') setRows(open.value);
-        if (pausedResult.status === 'fulfilled') setPaused(pausedResult.value);
         // Silent on rejection: this is a supplementary panel, and an error banner
         // on the dashboard for a list that is empty most days is worse than its
         // absence. Both `.rpc()` call sites have already reported to Sentry.
+        setLists({
+          open: open.status === 'fulfilled' ? open.value : [],
+          paused: pausedResult.status === 'fulfilled' ? pausedResult.value : [],
+        });
       })
       .finally(() => {
         if (!cancelled) setLoaded(true);
@@ -147,10 +164,20 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
       // reason there is nothing else to send.
       posthog.capture('running timer discarded', { surface: 'office' });
       setStopping(null);
-      // Re-read rather than splice: the RPC is per-OPERATION, so an ad-hoc step
-      // with two open intervals loses both and the list would otherwise keep
-      // showing the one this row did not name.
-      setRows(await getOpenIntervalsQuietly(companyId));
+      // Re-read rather than splice, and re-read BOTH lists.
+      //
+      // Per-operation: the RPC discards every open span on the step, so an ad-hoc
+      // step with two loses both and splicing would keep showing the one this row
+      // did not name.
+      //
+      // Both lists: discarding the open span can MOVE the step into the Paused
+      // group rather than out of the card. get_paused_operations' not-exists
+      // clause ignores voided spans, so an operation A paused and B then left
+      // running becomes paused-eligible the instant Stop voids B's span. Refreshing
+      // only the running list makes it vanish from the card entirely until someone
+      // reloads the dashboard — which reads as the Stop having finished the work.
+      const [openAfter, pausedAfter] = await refreshBothQuietly(companyId);
+      setLists({ open: openAfter, paused: pausedAfter });
     } catch (err) {
       setStopError(err instanceof Error ? err.message : 'Could not stop that timer.');
     } finally {
@@ -204,80 +231,84 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
         {rows.map((row, i) => {
           const { ms, isLong } = overrun(row.started_at, row.expected_minutes);
           return (
-          <Box
-            key={row.interval_id}
-            sx={{
-              // Amber means BEHIND, not broken — docs/design-system.md. Red stays
-              // for things that are actually wrong, and a timer running long is a
-              // question rather than a fault. No green counterpart: colouring the
-              // healthy rows would make this a scoreboard, which is the same
-              // objection OperationCard.tsx records against grading actual
-              // against estimate.
-              ...(isLong && {
-                borderLeft: '3px solid',
-                borderColor: 'warning.main',
-                bgcolor: 'rgba(245, 158, 11, 0.08)',
-                pl: 1.5,
-                py: 1,
-                borderRadius: 0.5,
-              }),
-            }}
-          >
-            {i > 0 && <Divider sx={{ my: 1.5 }} />}
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-              {/* `?op=` SCROLLS TO AND HIGHLIGHTS THE EXACT STEP (OperationsPanel
-                  reads it). Added 2026-08-28 with the rest of this change,
-                  because linking to the job alone is what produced the report:
-                  every operation on J-0001 was named `HAAS VF-3SSYT` — they are
-                  named after the work centre, so a job routing four parts through
-                  one machine has four identically-named steps — and the office
-                  landed on the job, opened the one that looked right, and found a
-                  completed step with no timer. It was a different part's. */}
-              <Typography
-                component={Link}
-                href={`/dashboard/${companyId}/jobs/${row.job_id}?op=${row.job_operation_id}`}
-                variant="body2"
-                sx={{ fontWeight: 600, textDecoration: 'none', color: 'primary.light' }}
-              >
-                {row.job_number}
-              </Typography>
-              <Typography variant="body2">
-                {row.operation_name}
-                {row.part_name ? ` · ${row.part_name}` : ''}
-              </Typography>
-              {row.capture_source !== 'operator' && (
-                <Chip size="small" variant="outlined" label={row.capture_source} />
-              )}
+            <Box
+              key={row.interval_id}
+              sx={{
+                // Amber means BEHIND, not broken — docs/design-system.md. Red stays
+                // for things that are actually wrong, and a timer running long is a
+                // question rather than a fault. No green counterpart: colouring the
+                // healthy rows would make this a scoreboard, which is the same
+                // objection OperationCard.tsx records against grading actual
+                // against estimate.
+                ...(isLong && {
+                  borderLeft: '3px solid',
+                  borderColor: 'warning.main',
+                  bgcolor: 'rgba(245, 158, 11, 0.08)',
+                  pl: 1.5,
+                  py: 1,
+                  borderRadius: 0.5,
+                }),
+              }}
+            >
+              {i > 0 && <Divider sx={{ my: 1.5 }} />}
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+                {/* `?op=` SCROLLS TO AND HIGHLIGHTS THE EXACT STEP (OperationsPanel
+                    reads it). Added 2026-08-28 with the rest of this change,
+                    because linking to the job alone is what produced the report:
+                    every operation on J-0001 was named `HAAS VF-3SSYT` — they are
+                    named after the work centre, so a job routing four parts through
+                    one machine has four identically-named steps — and the office
+                    landed on the job, opened the one that looked right, and found a
+                    completed step with no timer. It was a different part's. */}
+                <Typography
+                  component={Link}
+                  href={`/dashboard/${companyId}/jobs/${row.job_id}?op=${row.job_operation_id}`}
+                  variant="body2"
+                  sx={{ fontWeight: 600, textDecoration: 'none', color: 'primary.light' }}
+                >
+                  {row.job_number}
+                </Typography>
+                <Typography variant="body2">
+                  {row.operation_name}
+                  {row.part_name ? ` · ${row.part_name}` : ''}
+                </Typography>
+                {row.capture_source !== 'operator' && (
+                  <Chip size="small" variant="outlined" label={row.capture_source} />
+                )}
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+                <Typography
+                  variant="caption"
+                  sx={{ flex: 1, color: isLong ? 'warning.light' : 'text.secondary' }}
+                >
+                  {row.work_center_name ? `${row.work_center_name} · ` : ''}
+                  since {formatClockTime(row.started_at)}
+                  {' · '}
+                  {formatDuration(ms)} so far
+                  {/* THE REASON, on flagged rows only. Without it the amber is a
+                      mood; with it the reader can judge whether the flag is fair —
+                      which matters most when it is not, because that is the row
+                      where the estimate needs fixing rather than the clock.
+                      Suppressed when the step has no estimate, where the flat
+                      ceiling did the flagging and "est. 0m" would be a lie. */}
+                  {isLong && row.expected_minutes > 0 &&
+                    ` · est. ${formatDuration(row.expected_minutes * 60_000)}`}
+                </Typography>
+                {/* LOW-EMPHASIS, and it earns that: on most rows the right answer
+                    is to leave it alone and let the operator close it themselves.
+                    This is the correction for the one that will never be closed. */}
+                <Button
+                  size="small"
+                  color="inherit"
+                  onClick={() => {
+                    setStopError(null);
+                    setStopping(row);
+                  }}
+                >
+                  Stop
+                </Button>
+              </Box>
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-              <Typography
-                variant="caption"
-                sx={{ flex: 1, color: isLong ? 'warning.light' : 'text.secondary' }}
-              >
-                {row.work_center_name ? `${row.work_center_name} · ` : ''}
-                since {formatClockTime(row.started_at)}
-                {' · '}
-                {formatDuration(ms)} so far
-                {/* THE REASON, on flagged rows only. Without it the amber is a
-                    mood; with it the reader can judge whether the flag is fair —
-                    which matters most when it is not, because that is the row
-                    where the estimate needs fixing rather than the clock.
-                    Suppressed when the step has no estimate, where the flat
-                    ceiling did the flagging and "est. 0m" would be a lie. */}
-                {isLong && row.expected_minutes > 0 &&
-                  ` · est. ${formatDuration(row.expected_minutes * 60_000)}`}
-              </Typography>
-              {/* LOW-EMPHASIS, and it earns that: on most rows the right answer
-                  is to leave it alone and let the operator close it themselves.
-                  This is the correction for the one that will never be closed. */}
-              <Button size="small" color="inherit" onClick={() => {
-                setStopError(null);
-                setStopping(row);
-              }}>
-                Stop
-              </Button>
-            </Box>
-          </Box>
           );
         })}
 
@@ -392,15 +423,23 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
 }
 
 /**
- * Re-read after a Stop, swallowing a read failure the same way the mount load
- * does — the write already succeeded, and turning a failed refresh into an error
- * banner would report the one thing that went right as the thing that went
- * wrong. A stale row disappears on the next dashboard visit.
+ * Re-read both lists after a Stop, swallowing a read failure the same way the
+ * mount load does — the write already succeeded, and turning a failed refresh
+ * into an error banner would report the one thing that went right as the thing
+ * that went wrong. A stale row disappears on the next dashboard visit.
+ *
+ * Returns `[]` for a half that failed rather than leaving the previous value, so
+ * the two halves can never end up describing different moments.
  */
-async function getOpenIntervalsQuietly(companyId: string): Promise<OpenInterval[]> {
-  try {
-    return await getOpenIntervals(companyId);
-  } catch {
-    return [];
-  }
+async function refreshBothQuietly(
+  companyId: string,
+): Promise<[OpenInterval[], PausedOperation[]]> {
+  const [open, paused] = await Promise.allSettled([
+    getOpenIntervals(companyId),
+    getPausedOperations(companyId),
+  ]);
+  return [
+    open.status === 'fulfilled' ? open.value : [],
+    paused.status === 'fulfilled' ? paused.value : [],
+  ];
 }

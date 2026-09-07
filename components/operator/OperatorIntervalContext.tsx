@@ -131,13 +131,20 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
    * drops a stale in-flight response — which matters here because starting and
    * closing both refresh, and on cellular those can easily land out of order.
    *
-   * A failed read is swallowed: it must not break every operator screen. The step
-   * screen simply shows START, and the next action reloads the list. The `.from()`
-   * read has already reported itself through the Supabase integration.
+   * A failed read is swallowed: it must not break every operator screen. The
+   * `.from()` read has already reported itself through the Supabase integration.
+   *
+   * THE COST IS NOT SYMMETRIC and both halves are worth naming. A failed OPEN read
+   * leaves the step screen showing START on a step that is running, and tapping it
+   * chain-closes the old span as `switched` — a real span, correctly ended, so the
+   * data survives. A failed PAUSED read leaves it showing START on a step you
+   * paused; tapping that opens a second span, which is also what RESUME does. So
+   * the worst case on either side is a mislabelled button and a correct write, and
+   * the next action reloads both lists.
    */
   const {
     data,
-    loading,
+    loading: openLoading,
     reload: refreshOpen,
   } = useLoad(() => getMyOpenIntervals(companyId), [companyId]);
 
@@ -148,10 +155,23 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
    * running, which the next action corrects. A failed paused read costs a list
    * entry. Merging them makes the cheap failure take out the expensive one.
    */
-  const { data: pausedData, reload: refreshPaused } = useLoad(
+  const { data: pausedData, loading: pausedLoading, reload: refreshPaused } = useLoad(
     () => getMyPausedOperations(companyId),
     [companyId],
   );
+
+  /**
+   * TRUE UNTIL BOTH HAVE SETTLED, and the paused half is the one that matters.
+   *
+   * `primaryAction` on the step screen reads `pausedFor()`, which is empty while
+   * that load is in flight — so on a cold load straight to a step URL (the printed
+   * per-operation QR lands exactly there) the button would render START THIS STEP
+   * and then swap to RESUME THIS STEP. Harmless for data, since both write the
+   * same thing, but it is precisely the "the app has forgotten what I was doing"
+   * impression the RESUME label exists to prevent. Consumers hold the button busy
+   * on this instead.
+   */
+  const loading = openLoading || pausedLoading;
 
   // Memoised: `data ?? []` allocates a new array every render, which would make
   // the `intervalFor` callback below change identity on every render and defeat

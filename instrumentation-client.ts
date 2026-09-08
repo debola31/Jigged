@@ -90,6 +90,13 @@ if (posthogToken) {
     // means double ingest and two places to look during an incident. Turning this
     // on also makes PostHog source-map upload a hard requirement in CI — this is
     // what removes that work item.
+    //
+    // It MUST be written, not just described. When it is unset the SDK follows the
+    // project's server-side exception-autocapture setting, so the intent above only
+    // holds while this line does — the 1.427.2 upgrade (2026-09-08) proved that by
+    // filing a stackless cross-origin `Script error.`. A guard asserts this literal
+    // stays here: __tests__/standards/captureExceptions.test.ts.
+    capture_exceptions: false,
     debug: process.env.NODE_ENV === "development",
   });
 }

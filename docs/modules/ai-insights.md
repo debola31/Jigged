@@ -351,6 +351,44 @@ compaction timing and its failure modes, the budget floor against the real promp
 `api/tests/integration/test_ai_chat_threads.py` (RLS, the trigger under the real worker role, the
 guards).
 
+### The eval matrix, measured on the serving Mac (2026-09-07)
+
+Twelve runs of [`evals/insights_ab.py`](../../api/evals/insights_ab.py) against the local seeded shop
+(the data we control and can check answers against), three per phase from the tagged worktrees, the
+`ollama` arm on `qwen3:32b` through this box and the `anthropic` arm on Claude. `charts` counts valid
+`chart_config`s; `expected` is the two questions that should chart (revenue trend, work-centre queue) over
+three runs; `forbidden` is every question that must not.
+
+| Phase (tag) | Arm | Questions | Answered | Ran SQL | Charts | Expected | Forbidden | p50 |
+|---|---|---|---|---|---|---|---|---|
+| `phase-1` (`/v1` adapter) | ollama | 33 | 32 | 29 | 0 | 0/6 | 0/18 | 11 s |
+| `phase-2-adapter` (native) | ollama | 33 | 32 | 29 | 3 | 3/6 | 0/18 | 9 s |
+| `phase-2-adapter` | anthropic | 33 | 31 | 28 | 4 | 3/6 | 0/18 | 7 s |
+| `phase-3-before` | ollama | 33 | 33 | 30 | 1 | 1/6 | 0/18 | 8 s |
+| `phase-3-before` | anthropic | 33 | 30 | 28 | 5 | 3/6 | 0/18 | 7 s |
+| `phase-3-after` (ships) | ollama | 39 | 38 | 33 | 4 | 3/6 | 0/24 | 9 s |
+| `phase-3-after` | anthropic | 39 | 38 | 32 | 11 | 6/6 | 0/24 | 7 s |
+
+**Adapter parity (plan 2.7): met.** The native adapter answers and runs SQL exactly as often as the `/v1`
+path it replaced (32 and 29 of 33), and at least as often as Claude in the same phase (31 and 28). One
+caveat the numbers hide: the `/v1` runs happened while the box already held a 32K runner from earlier
+native calls, so they never met the truncation the adapter exists to prevent. The blind side-by-side
+human verdict is still owed.
+
+**Chart emission (plan 3): half met.** The exemplar took the local arm from zero charts to the revenue
+trend in every run, with nothing on the forbidden set in any phase or arm, and both scope controls behave
+(the poem is refused with no query in two runs of three and timed out in the third; the casual question
+ran a query every time). The local arm never charts the work-centre question, which Claude charts every
+time: its answers name the single top centre ("Final Inspection, with 12"), which is what a top-one
+query returns, and the chart rule needs three rows. Inferred from the answers; the stage dump is written
+only for the pipeline arms. The bar "on each chart-expected
+question in two of three runs, and not below the Claude arm" is therefore met for one of the two
+questions and not met against Claude (3 against 6).
+
+Nine of the 468 question-runs failed, none of them a wrong answer: six were 30 s timeouts on the Claude
+arm (the `_DEFAULT_TIMEOUTS` hosted value is tight for a two-query question), two were local timeouts on
+a cold first call at the older 120 s and 240 s constants, and one poem refusal timed out.
+
 ### What the first live thread showed
 
 The 25-turn conversation through the real route, queue, worker and trigger (2026-09-07, seeded shop,

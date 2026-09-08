@@ -43,10 +43,12 @@ import { listQuickBooksTerms } from '@/utils/quickbooksAccess';
  * on their side: it ships "Due on receipt" against our "Due on Receipt", and two
  * rows for one term is the drift this removes.
  *
- * PICK-ONLY. New wording is entered through the "Add New" row, which reveals an
- * inline field below the picker and saves the term to the company's list for
- * reuse. Free-typing into the combobox would let one shop accumulate "Net 30",
- * "net 30" and "Net30" without ever seeing them side by side.
+ * PICK-ONLY. New wording is entered through the "Add New" row, which leads the
+ * menu, reveals an inline field below the picker and saves the term to the
+ * company's list for reuse. Free-typing into the combobox would let one shop
+ * accumulate "Net 30", "net 30" and "Net30" without ever seeing them side by
+ * side — which is exactly why that row has to be the first thing in the menu
+ * and not something you find by scrolling past a dozen QuickBooks terms.
  */
 
 type PaymentTermOption = { value: string; group: string };
@@ -182,9 +184,12 @@ export default function PaymentTermsPicker({
         isOptionEqualToValue={(option, val) => option.value === val.value}
         filterOptions={(opts, params) => {
           const filtered = paymentTermFilter(opts, params);
-          // The "Add New" action is always the last row, and is pushed AFTER
-          // filtering so it survives typing.
-          filtered.push({ value: ADD_NEW_TERM, group: 'Add new' });
+          // The "Add New" action is always the FIRST row, and is added AFTER
+          // filtering so it survives typing. It leads rather than trails
+          // because a shop with a long QuickBooks list never scrolls to the
+          // bottom of the menu, and the one thing they cannot reach any other
+          // way — the picker is pick-only — was the row they never saw.
+          filtered.unshift({ value: ADD_NEW_TERM, group: 'Add new' });
           return filtered;
         }}
         value={options.find((o) => o.value === value) ?? null}
@@ -203,7 +208,7 @@ export default function PaymentTermsPicker({
               <li
                 key={key}
                 {...liProps}
-                style={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)' }}
+                style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.12)' }}
               >
                 <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
                 <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>

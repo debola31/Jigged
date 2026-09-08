@@ -150,10 +150,9 @@ const ADD_NEW_ADDRESS_ID = '__add_new_address__';
 /**
  * One option in the payment-terms picker. `group` tags whether the term is one
  * of the shop's saved custom terms (which get a remove control) or a built-in
- * preset. Adding a new term happens via the dropdown's "Add New" footer, not by
- * free-typing, so there's no synthetic create option in the list.
+ * preset. Adding a new term happens via the dropdown's leading "Add New" row,
+ * not by free-typing, so there's no synthetic create option in the list.
  */
-/** Sentinel value for the "Add New" action row at the bottom of the picker. */
 
 /**
  * The quote fields that can be pre-filled from the customer's standing terms.
@@ -378,8 +377,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [contactFormOpen, setContactFormOpen] = useState(false);
 
   // The company's saved custom payment terms (free-text terms kept for reuse),
-  // loaded in loadData. They render first in the payment-terms picker (each with
-  // a remove control); choosing "Add New" and submitting a term appends here.
+  // loaded in loadData. They render below the picker's leading "Add New" row and
+  // ahead of the presets (each with a remove control); choosing "Add New" and
+  // submitting a term appends here.
   /** The shop-wide default payment terms, used when the customer has none. */
   const [shopDefaultTerms, setShopDefaultTerms] = useState<string | null>(null);
   // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets

@@ -31,6 +31,8 @@ import type { ReportBlock, ReportCell, ReportSpec, ReportTableBlock } from '@/ut
 
 const MARGIN = 40;
 const FOOTER_RESERVE = 30;
+/** Header depth handed to the shop block when a logo exists: a ~38pt mark above name and address. */
+const LOGO_HEADER_DEPTH = 96;
 const KPI_BAND_HEIGHT = 52;
 const BLOCK_GAP = 16;
 const SECTION_TITLE_H = 14;
@@ -190,14 +192,21 @@ export async function generateReportPdf(
   meta.forEach((row, i) => doc.text(row, pageWidth - MARGIN, headerTop + 38 + i * 12, { align: 'right' }));
   const metaBottom = headerTop + 38 + meta.length * 12;
 
+  // A quote's right column runs four or five rows deep, so `drawShopHeaderBlock`
+  // finds room for a logo in space that header already pays for. This right
+  // column is a title and two lines -- 62pt -- which after the name and address
+  // leaves a logo 4pt tall (measured on the real render, 2026-09-07). So when a
+  // logo exists the header is given the depth a five-row quote reaches anyway,
+  // paid out of the page: about 32pt of a one-pager for a mark the reader can see.
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, supabase ?? null);
+  const availableBottom = logoDataUrl ? Math.max(metaBottom, headerTop + LOGO_HEADER_DEPTH) : metaBottom;
   const shopBottom = drawShopHeaderBlock(doc, {
     company,
     logoDataUrl,
     logoIncludesName: readLogoIncludesName(company),
     x: MARGIN,
     y: headerTop,
-    availableBottom: metaBottom,
+    availableBottom,
     nameSize: 14,
   });
 

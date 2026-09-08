@@ -571,7 +571,7 @@ the guardrails moved from the model into a schema and a renderer.
 | Guardrail | Enforced by |
 |---|---|
 | One page | The renderer measures each block and stops at the footer, naming what it left out ("Not shown (one page): …"); `addPage` is never called and a test asserts it. The schema's caps — ≤4 KPIs, ≤4 blocks, tables ≤8×5, charts 3–12 points — make cuts rare |
-| Company name/logo top-left, AI-inferred title top-right | `drawShopHeaderBlock` sized against the right meta column (the contract every document uses); `title ≤ 40` from the schema, drawn uppercase at 22pt with `Period:` and `Generated:` beneath, the reference's arrangement |
+| Company name/logo top-left, AI-inferred title top-right | `drawShopHeaderBlock`, the block every document uses, sized against the right column — except that this right column is a title and two lines, which on the first real render left the logo 4pt tall; so when a logo exists the header is given `LOGO_HEADER_DEPTH` (96pt, what a five-row quote reaches) out of the page instead. `title ≤ 40` from the schema, drawn uppercase at 22pt with `Period:` and `Generated:` beneath, the reference's arrangement |
 | Minimal prose | Schema: `headline ≤ 200`, at most one text block ≤ 240 chars, notes ≤ 120 |
 | Every figure comes from a query | `untraceable_figures()` in [`api/services/ai_features/report.py`](../../api/services/ai_features/report.py): every number in a KPI, a table cell or a chart point must equal (to half a unit or half a percent) a value in a tool result of *this* job. Derived figures are computed in SQL. One repair turn names the offenders; a second failure is an `error_echo` job (`[ungrounded_figures]`). No successful query → no report (`[report_no_data]`) |
 | The model never formats | Values are raw; each declares `currency \| integer \| percent \| plain` and the renderer formats (`$13,367`, `$99.3k` on a tile) |
@@ -600,9 +600,18 @@ prototype made outside this repo; its layout is reproduced, its stack is not.
 Tests: `api/tests/unit/test_report_spec.py`, `api/tests/unit/test_report_handler.py`,
 `__tests__/utils/reportSpec.test.ts`, `__tests__/utils/pdfCharts.test.ts`,
 `__tests__/utils/reportPdf.test.ts`, `__tests__/components/insights/ReportPreviewDialog.test.tsx`.
-What a mocked jsPDF cannot see — wrap width, overflow, how a page looks — is the real-render checklist
-in the PR: one report per chart type, long customer names, a request that yields five blocks, logo
-present and absent, a shop with no shipments.
+What a mocked jsPDF cannot see — wrap width, overflow, how a page looks — is the real render:
+[`__tests__/utils/reportRender.test.ts`](../../__tests__/utils/reportRender.test.ts) is skipped unless
+`RENDER_REPORT_PDFS=<dir>` names an output directory, and then draws seven PDFs with the real jsPDF
+(the reference layout without a logo, with one, and with one that carries the name; every chart type
+with 30-character customer names; a spec too tall for the page; a shop with no shipments), which
+`pypdfium2` — the worker's PDF dependency — rasterises for a person to look at. **The first run
+(2026-09-07) found four defects the mocked suite had passed:** a logo 4pt tall (the header depth
+above); customer names cut to twelve characters beside 60pt of empty gutter (the screen formatter's
+cut, applied before any width was measured — the PDF now fits full labels to the room it has);
+only every other label on a twelve-bar chart (now two staggered rows, every bar named); and a
+month axis in value order under a user-requested bar chart (time axes now keep calendar order).
+Each has a test in `pdfCharts.test.ts` or `reportPdf.test.ts` named for it.
 
 ## Withdrawn — the predefined metric functions
 
@@ -766,9 +775,10 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   `context_overflow` rather than a schema-less answer.
 - **A summary is instructed, not verified.** The compaction prompt demands every figure and period;
   nothing checks the summary kept them. A multi-turn scenario in `evals/insights_ab.py` is the follow-up.
-- **No real-render test for the PDF.** The mocked suite proves ordering, arguments and font state; wrap
-  width, overflow and how the page looks are a PR checklist. Pie arcs are cubic approximations (≤ 90°
-  per segment).
+- **The real render is looked at by a person.** `reportRender.test.ts` draws the seven checklist PDFs
+  only when `RENDER_REPORT_PDFS` is set, and nothing but a reviewer's eye judges the PNGs; CI runs the
+  mocked suite, which proves ordering, arguments and font state and passed all four defects the first
+  real render found. Pie arcs are cubic approximations (≤ 90° per segment).
 - **A report holds the box's single slot for minutes.** Other shops' questions queue behind it. If that
   bites, `kind = 'report'` can enqueue at `PRIORITY_BATCH` so questions preempt at claim boundaries.
 - **The traceability guard checks numbers, not labels or dates.** A figure attached to the wrong label

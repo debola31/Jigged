@@ -142,6 +142,32 @@ describe('generateReportPdf', () => {
     expect(docInstance.calls.addImage).toBeUndefined();
     expect(texts()).toContain('Contour Tool & Machine');
   });
+
+  it('gives a logo the depth the shallow right column cannot lend it', async () => {
+    // A title and two meta lines is 62pt of header; after the name and address
+    // that left a 4pt logo on the first real render (2026-09-07). With a logo the
+    // header is deepened instead, and the mark is drawn at a size a reader sees.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['x'], { type: 'image/png' }) }));
+    const client = {
+      storage: {
+        from: () => ({
+          createSignedUrl: async () => ({ data: { signedUrl: 'https://signed.example/l.png' }, error: null }),
+        }),
+      },
+    };
+    await generateReportPdf(spec, { ...company, logo_url: 'co-1/company/logo.png' }, GENERATED, client as never);
+    vi.unstubAllGlobals();
+
+    const drawn = docInstance.calls.addImage;
+    expect(drawn).toHaveLength(1);
+    const [, format, , y, w, h] = drawn[0] as [string, string, number, number, number, number];
+    expect(format).toBe('PNG');
+    expect(y).toBe(40);
+    expect(h).toBeGreaterThanOrEqual(36);
+    expect(w / h).toBeCloseTo(4, 5); // 200×50 fitted, never squashed
+    // The name still prints under it: this logo does not claim to carry it.
+    expect(texts()).toContain('Contour Tool & Machine');
+  });
 });
 
 describe('reportPdfFilename', () => {

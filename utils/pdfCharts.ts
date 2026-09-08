@@ -1,6 +1,6 @@
 import type { jsPDF } from 'jspdf';
 import type { ChartConfig } from '@/utils/insightsAccess';
-import { formatCompact, formatLabel } from '@/utils/chartFormat';
+import { formatCompact, formatLabel, isDateLabel } from '@/utils/chartFormat';
 
 /**
  * Charts drawn into a PDF as vectors, from the same `chart_config` the dashboard
@@ -113,12 +113,21 @@ interface Point {
   value: number;
 }
 
+/**
+ * The rows as label/value pairs. Labels are formatted but never cut here -- each
+ * drawer fits them to the room it actually has. Bars are value-sorted only when
+ * the axis is nominal: a month axis that a user asked to see "as a bar chart"
+ * keeps its order, because "Mar, Feb, Jan, Dec" is a scrambled calendar, not a
+ * ranking.
+ */
 function pointsOf(config: ChartConfig, sortDesc: boolean): Point[] {
-  const points = config.data.map((row) => ({
-    label: formatLabel(String(row[config.x_key] ?? '')),
-    value: Number(row[config.y_key] ?? 0),
+  const raw = config.data.map((row) => String(row[config.x_key] ?? ''));
+  const points = raw.map((label, i) => ({
+    label: formatLabel(label, Number.POSITIVE_INFINITY),
+    value: Number(config.data[i][config.y_key] ?? 0),
   }));
-  return sortDesc ? points.sort((a, b) => b.value - a.value) : points;
+  const temporal = raw.every(isDateLabel);
+  return sortDesc && !temporal ? points.sort((a, b) => b.value - a.value) : points;
 }
 
 interface Plot {
@@ -161,7 +170,13 @@ function drawBars(doc: ChartDoc, points: Point[], frame: ChartFrame): void {
   const top = drawValueGrid(doc, plot, niceTicks(Math.max(...points.map((p) => p.value))));
   const band = plot.w / points.length;
   const barW = Math.min(MAX_BAR, band * 0.65);
-  const labelEvery = Math.ceil(points.length / 8);
+  // Every bar keeps its label: a bar nobody can name is a shape, not a fact. When
+  // the bands are too narrow for one row, labels alternate between two rows so
+  // each gets two bands of room. A report chart has at most twelve points
+  // (CHART_POINTS_MAX), which the two rows hold at 7pt.
+  ink(doc, PDF_PALETTE.muted, 7);
+  const stagger = points.some((p) => doc.getTextWidth(p.label) > band - 2);
+  const labelRoom = (stagger ? 2 * band : band) - 2;
 
   points.forEach((p, i) => {
     const h = (Math.max(p.value, 0) / top) * plot.h;
@@ -179,19 +194,19 @@ function drawBars(doc: ChartDoc, points: Point[], frame: ChartFrame): void {
       ink(doc, PDF_PALETTE.ink, 7);
       doc.text(formatCompact(p.value), x + barW / 2, y - 3, { align: 'center' });
     }
-    if (i % labelEvery === 0 || i === points.length - 1) {
-      ink(doc, PDF_PALETTE.muted, 7);
-      doc.text(fitLabel(doc, p.label, band - 2), x + barW / 2, plot.bottom + 10, { align: 'center' });
-    }
+    ink(doc, PDF_PALETTE.muted, 7);
+    const row = stagger ? i % 2 : 0;
+    doc.text(fitLabel(doc, p.label, labelRoom), x + barW / 2, plot.bottom + 10 + row * 9, { align: 'center' });
   });
 }
 
 function drawHorizontalBars(doc: ChartDoc, points: Point[], frame: ChartFrame): void {
-  const plot = plotArea(frame, { left: 96, right: 40, top: 6, bottom: 18 });
-  const top = niceTicks(Math.max(...points.map((p) => p.value)))[TICK_COUNT] ?? 1;
+  // The gutter holds a customer's name in full at 8pt more often than not; what
+  // still overruns is fitted with an ellipsis against the measured width.
+  const gutter = 112;
+  const plot = plotArea(frame, { left: gutter, right: 40, top: 6, bottom: 18 });
   const ticks = niceTicks(Math.max(...points.map((p) => p.value)));
   const axisTop = ticks[ticks.length - 1];
-  void top;
   stroke(doc, PDF_PALETTE.grid, 0.5);
   ink(doc, PDF_PALETTE.muted, 7);
   for (const t of ticks) {
@@ -207,7 +222,7 @@ function drawHorizontalBars(doc: ChartDoc, points: Point[], frame: ChartFrame): 
     const y = plot.y + i * rowH + (rowH - barH) / 2;
     const r = Math.min(BAR_END_RADIUS, barH / 2, w / 2);
     ink(doc, PDF_PALETTE.ink, 8);
-    doc.text(fitLabel(doc, p.label, 88), plot.x - 6, y + barH / 2 + 3, { align: 'right' });
+    doc.text(fitLabel(doc, p.label, gutter - 8), plot.x - 6, y + barH / 2 + 3, { align: 'right' });
     fill(doc, PDF_PALETTE.accent);
     if (w > r) doc.rect(plot.x, y, w - r, barH, 'F');
     if (w > 0) doc.roundedRect(plot.x + Math.max(w - 2 * r, 0), y, Math.min(w, 2 * r), barH, r, r, 'F');
@@ -336,8 +351,8 @@ function drawPie(doc: ChartDoc, raw: Point[], frame: ChartFrame): void {
 /**
  * Draw one chart_config into `frame` and return the height consumed.
  *
- * Bars are value-sorted like the dashboard; area and pie keep their order. A
- * config with no rows or missing keys draws an explicit "No chartable data" --
+ * Nominal bars are value-sorted like the dashboard; time-axis bars, area and pie
+ * keep their order. A config with no rows or missing keys draws an explicit "No chartable data" --
  * never blank axes -- mirroring InsightChart's guard.
  */
 export function drawChartConfig(doc: ChartDoc, config: ChartConfig, frame: ChartFrame): number {

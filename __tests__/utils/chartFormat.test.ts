@@ -11,6 +11,13 @@ describe('formatLabel', () => {
   it('shortens a long nominal label', () => {
     expect(formatLabel('Hastings Machine Company')).toBe('Hastings Mac...');
   });
+  it('trims the space a cut would leave dangling before the ellipsis', () => {
+    expect(formatLabel('Helix Steel Fabrication')).toBe('Helix Steel...');
+  });
+  it('keeps the whole label when the caller lifts the cap', () => {
+    // The PDF renderer measures real widths and fits labels itself.
+    expect(formatLabel('Hastings Machine Company', Number.POSITIVE_INFINITY)).toBe('Hastings Machine Company');
+  });
 });
 
 describe('formatCompact', () => {

@@ -6,8 +6,18 @@
  * reads "7.7K" on the dashboard must read "7.7K" on the page.
  */
 
+/** Whether a category label is an ISO date or timestamp: the axis is time, not names. */
+export function isDateLabel(value: string): boolean {
+  return /^\d{4}-\d{2}/.test(value);
+}
+
 /**
  * Format ISO timestamps and date strings into clean short labels.
+ *
+ * A nominal label longer than `maxChars` is cut with an ellipsis. The screen chart
+ * keeps the default, sized for an axis tick; the PDF renderer passes `Infinity`
+ * and fits the full label to the room it measures, since a 12-character cut in a
+ * 100pt gutter would throw away half of every customer's name.
  *
  * A date-only value ("2026-06-01") is parsed from its PARTS, not through
  * `new Date(string)`: that constructor reads a bare date as UTC midnight, which
@@ -15,7 +25,7 @@
  * June rendered as "May 31" and never matched the first-of-month rule. The same
  * trap `formatDate` in utils/packingSlipPdf.ts documents, fixed the same way.
  */
-export function formatLabel(value: string): string {
+export function formatLabel(value: string, maxChars = 12): string {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (dateOnly) {
     const [, y, m, d] = dateOnly;
@@ -26,7 +36,7 @@ export function formatLabel(value: string): string {
         : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
   }
-  if (/^\d{4}-\d{2}/.test(value)) {
+  if (isDateLabel(value)) {
     const date = new Date(value);
     if (!isNaN(date.getTime())) {
       if (date.getDate() === 1 || value.includes('T00:00:00')) {
@@ -35,7 +45,7 @@ export function formatLabel(value: string): string {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
   }
-  return value.length > 12 ? value.slice(0, 12) + '...' : value;
+  return value.length > maxChars ? value.slice(0, maxChars).trimEnd() + '...' : value;
 }
 
 /** Abbreviate large numbers for axis ticks: 7749 -> "7.7K", 1.2e6 -> "1.2M". */

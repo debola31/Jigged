@@ -75,15 +75,62 @@ describe('drawChartConfig', () => {
   });
 
   it('horizontal bars: labels fitted to the gutter and a value at every tip', () => {
-    // A wide fake glyph, so a label the shared formatter already shortened still
-    // overruns the 88pt gutter and has to be fitted with an ellipsis.
+    // A wide fake glyph, so the longest name overruns the gutter and is fitted
+    // with an ellipsis against the measured width; the short ones print whole.
     const { doc, calls } = fakeDoc(10);
     drawChartConfig(doc, cfg('bar_horizontal', [['Hastings Machine Company Ltd', 29084], ['Helix', 7991], ['Deister', 8154]]), FRAME);
 
     const drawn = texts(calls);
     expect(drawn.some((t) => t.endsWith('…') && t.startsWith('Hast') && t.length < 12)).toBe(true);
-    expect(drawn).toEqual(expect.arrayContaining(['29.1K', '8.2K', '8K']));
+    expect(drawn).toEqual(expect.arrayContaining(['Helix', 'Deister', '29.1K', '8.2K', '8K']));
     expect(calls.rect).toHaveLength(3);
+  });
+
+  it('horizontal bars: a name the gutter holds prints whole, never cut at twelve characters', () => {
+    // The first real render showed "Hastings Mac..." beside 60pt of empty gutter:
+    // the screen formatter's cut, applied before the width was ever measured.
+    const { doc, calls } = fakeDoc();
+    drawChartConfig(doc, cfg('bar_horizontal', [['Hastings Machine Company', 29084], ['Helix', 7991], ['Deister', 8154]]), FRAME);
+    expect(texts(calls)).toContain('Hastings Machine Company');
+  });
+
+  it('bars with a time axis keep calendar order, not value order', () => {
+    // "Show me a bar chart of monthly bookings" reaches the renderer as bars over
+    // dates. Ranking those prints Mar, Feb, Jan, Dec: a scrambled calendar.
+    const { doc, calls } = fakeDoc();
+    drawChartConfig(doc, cfg('bar', [['2026-01-01', 300], ['2026-02-01', 100], ['2026-03-01', 200]]), FRAME);
+
+    const heights = calls.rect.map((a) => a[3] as number);
+    expect(heights[0]).toBeGreaterThan(heights[1]);
+    expect(heights[2]).toBeGreaterThan(heights[1]);
+    expect(texts(calls).filter((t) => t.endsWith('2026'))).toEqual(['Jan 2026', 'Feb 2026', 'Mar 2026']);
+  });
+
+  it('bars: every one of twelve long labels is drawn, staggered over two rows', () => {
+    // Twelve bands of 40pt cannot each hold a name in one row, and dropping every
+    // other label leaves half the bars anonymous. Two rows, each label fitted to
+    // two bands.
+    const { doc, calls } = fakeDoc();
+    const rows: [string, number][] = Array.from({ length: 12 }, (_, i) => [`Customer Number ${i + 1} Incorporated`, 12 - i]);
+    drawChartConfig(doc, cfg('bar', rows), FRAME);
+
+    const labels = (calls.text ?? []).filter((a) => String(a[0]).startsWith('Customer'));
+    expect(labels).toHaveLength(12);
+    expect(new Set(labels.map((a) => a[2] as number)).size).toBe(2);
+    expect(labels.every((a) => String(a[0]).endsWith('…'))).toBe(true);
+  });
+
+  it('bars: a handful of short labels sit on one row', () => {
+    const { doc, calls } = fakeDoc();
+    drawChartConfig(doc, cfg('bar', [['A', 1], ['B', 2], ['C', 3]]), FRAME);
+    const labels = (calls.text ?? []).filter((a) => /^[ABC]$/.test(String(a[0])));
+    expect(new Set(labels.map((a) => a[2] as number)).size).toBe(1);
+  });
+
+  it('pie: legend names print whole while the legend has room', () => {
+    const { doc, calls } = fakeDoc();
+    drawChartConfig(doc, cfg('pie', [['Hastings Machine Company', 50], ['Advance Turning', 30], ['Helix', 20]]), FRAME);
+    expect(texts(calls)).toContain('Hastings Machine Company 50%');
   });
 
   it('area: a wash fill then a stroked line, a ringed marker per point, the endpoint labelled', () => {

@@ -94,6 +94,8 @@ The other two were both on a discovery watch list and both came off it, in the s
 
 > **customer's own terms → shop-wide default → leave empty**
 
+Settings edits it through the same shared `PaymentTermsPicker` as the quote and the customer — so `＋ Add New` and the ✕ on a saved term are available on the one screen where a shop would actually curate its house list. It had its own free-text combobox until September 2026, which is why a term set there could reach a quote as a value the picker did not recognise: it never joined `custom_payment_terms`. Adding or removing a term commits immediately (it is a list edit); the chosen default lands on Save.
+
 The shop-wide default lives at **`companies.settings.default_payment_terms`** — a **jsonb key, not a column**. Its writer read-modify-writes the whole `settings` object; writing the key alone would silently drop every feature flag on the company. Blank stores `null`, never `''`, so "unset" has one representation.
 
 It is deliberately **not** in `KNOWN_DEFAULTS` (`lib/companyDefaults.ts`): that registry is numeric to the floor (`coerceInt`, numeric `fallback`, `readCompanyDefault(): number`, a card rendering `type="number"`), so threading one string through it would need a discriminated union across five call sites. `custom_payment_terms` set the precedent for a string setting living beside the numeric block.

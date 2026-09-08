@@ -114,13 +114,7 @@ export function homePathForRole(role: string | null | undefined, companyId: stri
 }
 
 /**
- * Get all companies the user has access to.
- *
- * `logo_url` and `settings` are here for the workspace switcher and the login picker, which show a
- * shop's wordmark in place of its name when `settings.logo_includes_name` says the logo carries it
- * (see `CompanyIdentity`). They are two more columns on a row already being fetched, not a second
- * query — and without them the switcher would need one round trip per workspace to decide how to
- * draw a row.
+ * Get all companies the user has access to
  */
 export async function getUserCompanies(userId: string): Promise<UserCompanyAccess[]> {
   const supabase = getSupabase();
@@ -133,9 +127,7 @@ export async function getUserCompanies(userId: string): Promise<UserCompanyAcces
       companies (
         id,
         name,
-        is_demo,
-        logo_url,
-        settings
+        is_demo
       )
     `)
     .eq('user_id', userId);

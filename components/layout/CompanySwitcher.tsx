@@ -8,24 +8,42 @@ import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
+import Avatar from '@mui/material/Avatar';
 import Divider from '@mui/material/Divider';
 import Skeleton from '@mui/material/Skeleton';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CheckIcon from '@mui/icons-material/Check';
 import { useCompanies } from '@/hooks/useCompanies';
-import { useCompanyLogos } from '@/hooks/useCompanyLogos';
 import { homePathForRole } from '@/utils/companyAccess';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { JiggedLogo } from '@/components/branding';
-import CompanyIdentity from '@/components/common/CompanyIdentity';
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((word) => word[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function getAvatarColor(name: string): string {
+  const colors = [
+    '#4682B4', '#6FA3D8', '#2E5A8A', '#3B82F6',
+    '#8B5CF6', '#10B981', '#F59E0B', '#EF4444'
+  ];
+  const index = name.charCodeAt(0) % colors.length;
+  return colors[index];
+}
 
 export default function CompanySwitcher() {
   const router = useRouter();
   const params = useParams();
   const currentCompanyId = params.companyId as string;
   const { companies, loading } = useCompanies();
-  const { logoUrls, refreshLogoUrls } = useCompanyLogos(companies);
   const { isDemoMode, realCompanyName } = useDemoMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const hasMultipleCompanies = companies.length > 1;
@@ -37,9 +55,6 @@ export default function CompanySwitcher() {
   const handleOpen = () => {
     if (hasMultipleCompanies) {
       setDrawerOpen(true);
-      // Re-mint on open: signed logo URLs outlive an hour and an office tab does not get reloaded
-      // that often. `refresh` keeps the current artwork on screen while the new URLs land.
-      void refreshLogoUrls();
     }
   };
   const handleClose = () => setDrawerOpen(false);
@@ -68,19 +83,9 @@ export default function CompanySwitcher() {
     ? realCompanyName || 'Select Company'
     : currentCompany?.companies?.name || 'Select Company';
 
-  // Demo mode keeps the initials. The name above is substituted for the demo company's own, and a
-  // real shop's wordmark pinned over a substituted name would say something false about which
-  // workspace this is.
-  const triggerLogoUrl = isDemoMode
-    ? null
-    : (currentCompany && logoUrls.get(currentCompany.company_id)) || null;
-
   return (
     <>
-      {/* No bottom padding: the switcher and the nav below it read as one block, and the button's
-          own 12px already separates them. This used to stack 12px here onto the nav's 16px for a
-          40px trough that left the company mark stranded at the top of the sidebar. */}
-      <Box sx={{ px: 1.5, pt: 1.5, pb: 0 }}>
+      <Box sx={{ p: 1.5 }}>
         <ButtonBase
           onClick={handleOpen}
           disabled={!hasMultipleCompanies}
@@ -98,16 +103,36 @@ export default function CompanySwitcher() {
             },
           }}
         >
-          <CompanyIdentity
-            name={companyName}
-            logoUrl={triggerLogoUrl}
-            variant="trigger"
-            trailing={
-              hasMultipleCompanies ? (
-                <KeyboardArrowDownIcon sx={{ color: 'rgba(255, 255, 255, 0.7)' }} />
-              ) : null
-            }
-          />
+          <Avatar
+            sx={{
+              width: 36,
+              height: 36,
+              bgcolor: getAvatarColor(companyName),
+              fontSize: '0.875rem',
+              fontWeight: 600,
+            }}
+          >
+            {getInitials(companyName)}
+          </Avatar>
+          <Box sx={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: 600,
+                color: 'white',
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                lineHeight: 1.3,
+              }}
+            >
+              {companyName}
+            </Typography>
+          </Box>
+          {hasMultipleCompanies && (
+            <KeyboardArrowDownIcon sx={{ color: 'rgba(255, 255, 255, 0.7)' }} />
+          )}
         </ButtonBase>
       </Box>
 
@@ -163,17 +188,41 @@ export default function CompanySwitcher() {
                     },
                   }}
                 >
-                  <CompanyIdentity
-                    name={name}
-                    role={role.charAt(0).toUpperCase() + role.slice(1)}
-                    logoUrl={logoUrls.get(company.company_id) ?? null}
-                    emphasised={isSelected}
-                    trailing={
-                      isSelected ? (
-                        <CheckIcon sx={{ fontSize: 20, color: 'primary.main' }} />
-                      ) : null
-                    }
+                  <ListItemIcon>
+                    <Avatar
+                      sx={{
+                        width: 40,
+                        height: 40,
+                        bgcolor: getAvatarColor(name),
+                        fontSize: '0.9rem',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {getInitials(name)}
+                    </Avatar>
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={name}
+                    secondary={role.charAt(0).toUpperCase() + role.slice(1)}
+                    slotProps={{
+                      primary: {
+                        sx: {
+                          fontWeight: isSelected ? 600 : 500,
+                          fontSize: '0.95rem',
+                          color: 'white',
+                        },
+                      },
+                      secondary: {
+                        sx: {
+                          fontSize: '0.75rem',
+                          color: 'rgba(255, 255, 255, 0.5)',
+                        },
+                      },
+                    }}
                   />
+                  {isSelected && (
+                    <CheckIcon sx={{ fontSize: 20, color: 'primary.main' }} />
+                  )}
                 </ListItemButton>
               </ListItem>
             );

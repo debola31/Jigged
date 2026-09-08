@@ -89,3 +89,60 @@ def test_a_write_over_a_dead_connection_does_not_end_the_loop():
     asyncio.run(worker.run())  # escaped as OperationalError before the guard existed
 
     assert db.claims == 2, "the loop did not come back for the next claim"
+
+
+
+class _DbCountingBeats(_DbThatDiesOnReport):
+    """One job that takes a while; counts what the worker did meanwhile."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.beats = 0
+        self.renewals = 0
+
+    def heartbeat(self, *args, **kwargs) -> None:
+        self.beats += 1
+
+    def renew_leases(self, *args, **kwargs) -> int:
+        self.renewals += 1
+        return 1
+
+    def mark_running(self, job_id: str, lease_seconds: int) -> None:
+        pass
+
+    def mark_succeeded(self, *args, **kwargs) -> None:
+        pass
+
+
+def test_the_heartbeat_and_the_lease_renewal_keep_going_during_a_job(monkeypatch):
+    """A 116 s question made the box read as offline to the next question: the
+    heartbeat ticked only between jobs and went stale at 60 s, so the route
+    answered 503 twice in the middle of a healthy run. With 480 s calls a job
+    could also outlive its 300 s lease. Both now beat on their own task."""
+    import worker.__main__ as worker_main
+
+    db = _DbCountingBeats()
+    cfg = worker_config.Config(
+        worker_id="desktop-1",
+        database_url="postgresql://jigged_ai_worker:pw@remote:5432/postgres",
+        readonly_database_url="postgresql://jigged_ai_readonly:pw@remote:5432/postgres",
+        ollama_base_url="http://localhost:11434/v1",
+        models=("qwen3:32b",),
+        poll_seconds=0.0,
+        heartbeat_seconds=0.01,
+    )
+    w = Worker(cfg)
+    db.worker = w
+    w.db = db  # type: ignore[assignment]
+    monkeypatch.setattr(worker_main, "LEASE_RENEW_SECONDS", 0.0)
+
+    async def slow_job(job):
+        await asyncio.sleep(0.12)
+
+    monkeypatch.setattr(w, "_run_one", slow_job)
+    asyncio.run(w.run())
+
+    # Before: one beat at start and one after the job. During a 0.12 s job at a
+    # 0.01 s cadence there are several more, and the held lease is renewed.
+    assert db.beats >= 5, db.beats
+    assert db.renewals >= 1, db.renewals

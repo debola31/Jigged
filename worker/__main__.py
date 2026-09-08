@@ -23,6 +23,7 @@ lease sweep collects whatever the batch still held.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -121,6 +122,22 @@ class Worker:
         except Exception as exc:  # noqa: BLE001
             logger.warning("lease renewal failed: %s", exc)
 
+    async def _keepalive(self) -> None:
+        """Heartbeat and lease renewal on their own task, so they happen DURING a job.
+
+        Both used to tick only between jobs. A 116 s question then made the box
+        read as offline to every new question -- the heartbeat went stale at 60 s
+        and the route answered 503 "the AI box is offline" -- until the answer
+        landed; and with 480 s calls a single job could outlive its own 300 s
+        lease and be swept mid-run. The model call is an awaited HTTP request, so
+        the loop is free to beat while it runs. Measured 2026-09-07 on the
+        eight-turn re-test: two 503s in the middle of a healthy run.
+        """
+        while not self._stopping:
+            await asyncio.sleep(self.cfg.heartbeat_seconds)
+            self._tick_heartbeat(force=True)
+            self._tick_leases()
+
     # ----------------------------------------------------------------- work
 
     async def _run_one(self, job: dict[str, Any]) -> None:
@@ -208,6 +225,7 @@ class Worker:
     async def run(self) -> None:
         self.db.connect()
         self._tick_heartbeat(force=True)
+        keepalive = asyncio.create_task(self._keepalive())
         # The sandbox target is in the banner because "which database answered"
         # is not something anyone should have to infer from a wrong number later.
         from tools.sql_executor import describe_dsn
@@ -251,6 +269,9 @@ class Worker:
                 # reconnects. Same shape as the `claim failed` branch above.
                 logger.exception("batch failed; the lease sweep collects what was held")
 
+        keepalive.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await keepalive
         await self._shutdown()
 
     async def _shutdown(self) -> None:

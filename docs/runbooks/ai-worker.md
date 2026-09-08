@@ -105,7 +105,10 @@ and the UI says the box is off.
 ## 4. What the loop does, and the two things that are easy to get wrong
 
 Each tick: sweep → claim (up to 8, single model) → run them one at a time →
-report. Heartbeat every 15 s; leases renewed every 60 s.
+report. Heartbeat every 15 s and leases renewed every 60 s **on their own task, during a job as
+well** — until 2026-09-07 both ticked only between jobs, so a two-minute question made the box read
+as offline to the next question (503 at enqueue) until it finished, and a job longer than its lease
+would have been swept mid-run.
 
 **The claim is capped at 8 for every model, and that is correctness rather than
 tuning.** Preemption happens only at a claim boundary, so the claim size *is* the

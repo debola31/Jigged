@@ -145,7 +145,7 @@ Options in priority order, deduped **case-insensitively with first-wins**:
 2. **Your saved terms** — `companies.settings.custom_payment_terms`, each removable, capped at 15
 3. **Standard terms** — `Due on Receipt, Net 15, Net 30, Net 60, 2/10 Net 30, 50% Deposit / Balance Net 30, Prepay, Cash on Delivery`
 
-QuickBooks' spelling wins on a collision — it ships `Due on receipt` (lowercase r) against our `Due on Receipt`, and one term must not occupy two rows. The group names drive ordering and the remove-icon branch only; they are **not** rendered as headers. An "Add New" row is pinned last and survives typing.
+QuickBooks' spelling wins on a collision — it ships `Due on receipt` (lowercase r) against our `Due on Receipt`, and one term must not occupy two rows. The group names drive ordering and the remove-icon branch only; they are **not** rendered as headers. An "Add New" row is pinned first — ahead of every term, so it is visible without scrolling a long QuickBooks list — and survives typing.
 
 QuickBooks terms are fetched in their **own effect**, outside the form's main load, so the quote form never waits on Intuit. `listQuickBooksTerms` resolves to `{connected:false, terms:[]}` on any error, so a shop with no QuickBooks and a shop whose connection is momentarily down take the identical path — the local list. A term typed here is created in QuickBooks at push time, so an unlisted term is never a dead end.
 

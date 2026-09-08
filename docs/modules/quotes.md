@@ -306,8 +306,10 @@ Balance Net 30 · Prepay · Cash on Delivery — QuickBooks' built-ins plus the 
 COD / early-pay terms shops use). Presets are **not** removable. Saved terms live in
 `companies.settings.custom_payment_terms` (a jsonb key, no migration).
 
-**`＋ Add New` is pinned as the last row, and its input appears *below* the picker, not inside
-the menu** — a menu closes on selection, so an in-menu input cannot reliably hold focus.
+**`＋ Add New` is pinned as the FIRST row, and its input appears *below* the picker, not inside
+the menu** — a menu closes on selection, so an in-menu input cannot reliably hold focus. It
+leads rather than trails because the list runs long once QuickBooks' terms fold in, and on a
+pick-only control the row you scroll past is the only way to state a term the list lacks.
 Presets: `PAYMENT_TERM_PRESETS` ([types/quote.ts](../../types/quote.ts)); read/write via
 `getCustomPaymentTerms` / `addCustomPaymentTerm` / `removeCustomPaymentTerm`
 ([utils/companyAccess.ts](../../utils/companyAccess.ts)).

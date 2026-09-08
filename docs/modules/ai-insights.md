@@ -418,7 +418,10 @@ single-turn eval every question ran a query. With history in front of it, the mo
   30-turn history the chars/4 estimate put at 5.7K tokens the model counted at 9.5K: conversation text
   tokenises at 2.4–3.3 chars/token against the prose prompt's 4.0, so the window thought it had room
   and the undercount was eating the tool-result headroom. Turns and summaries are estimated at 3
-  chars/token now (`HISTORY_CHARS_PER_TOKEN`), the prompt still at 4.
+  chars/token now (`HISTORY_CHARS_PER_TOKEN`), the prompt still at 4. Verified live after the change: a
+  24-turn synthetic history past the 5K cap folded its first 26 messages into a 225-token prose summary
+  (`covers_through_seq` 26, no `summary_error`) in 52 s on a 16.3K-token call, after an answer call of
+  19.1K tokens; the summary kept every customer name and the figures' pattern.
 
 ## Chart decisioning
 

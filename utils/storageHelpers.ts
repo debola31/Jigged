@@ -241,16 +241,20 @@ export async function getSignedUrl(
  * Returns a `path → url` map rather than an array, so a caller can look up by the value it already
  * holds. **Paths that fail are simply absent** rather than throwing: one unreadable photo must not
  * blank an entire history, and the callers all render a placeholder when a path has no URL.
+ *
+ * `bucketName` mirrors `getSignedUrl`'s third argument; it defaults to the attachments bucket, and
+ * the workspace switcher passes `LOGOS_BUCKET` to mint every visible company logo in one request.
  */
 export async function getSignedUrls(
   paths: string[],
   expiresIn: number = 3600,
+  bucketName?: string,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (paths.length === 0) return out;
 
   const supabase = getSupabase();
-  const bucket = getStorageBucket();
+  const bucket = bucketName ?? getStorageBucket();
 
   const { data, error } = await supabase.storage
     .from(bucket)

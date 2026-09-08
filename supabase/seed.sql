@@ -26,6 +26,15 @@
 --                          is produced by the same DB logic the app uses, so the
 --                          seed stays correct as the schema evolves.
 --
+-- TWO COMPANIES, deliberately opposite. Vanguard Precision Works is the mature
+-- shop with a year of history; Northgate Sheet Metal Co. is a seven-week-old
+-- fabricator that takes the other branch of nearly every decision the app makes
+-- (different country, units, roles, flags, billing, archived rows, and no
+-- inventory or overdue work at all). The full axis-by-axis table is at the
+-- Northgate section near the bottom of this file. A second company is also what
+-- makes the workspace switcher's chevron, the Workspaces drawer and
+-- /select-company reachable — on a one-company seed none of them can be seen.
+--
 -- Logins after reset — all password `jigged-dev-1234`.
 -- Vanguard Precision Works team:
 --   dev@jigged.test         admin     (Dev Seed User)
@@ -34,6 +43,13 @@
 --   user2@jigged.test       user      (Jamie Lin)
 --   operator1@jigged.test   operator  (Diego Alvarez)
 --   operator2@jigged.test   operator  (Priya Nair)
+-- Northgate Sheet Metal Co. team — the SAME people, deliberately not the same
+-- standing, so role-per-company is reachable by switching workspaces:
+--   dev@jigged.test         admin     (Dev Seed User)
+--   user1@jigged.test       admin     (Sam Carter — a `user` at Vanguard)
+--   operator1@jigged.test   user      (Diego Alvarez — an `operator` at Vanguard,
+--                                      so switching moves him between the shop
+--                                      floor and the office)
 -- Platform-level system admin (spans all companies; only the /admin surface,
 -- deliberately NOT a member of any company):
 --   sysadmin@jigged.test    system admin  (System Admin)
@@ -1786,3 +1802,252 @@ where not exists (
     and t.document_type = d.document_type
     and t.version = d.version
 );
+
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- SECOND COMPANY — Northgate Sheet Metal Co.
+--
+-- Vanguard Precision Works is a mature CNC machine shop with a year of history:
+-- a full inventory, seven deliberately-overdue jobs, an invoiced book and a deep
+-- quote pipeline. Seeding a second shop that looked like it would have doubled
+-- the file and tested nothing new.
+--
+-- Northgate is its opposite on every axis that changes what the app renders, so
+-- a reviewer can switch workspaces and see the OTHER branch of each decision:
+--
+--   axis                  Vanguard                    Northgate
+--   ────────────────────  ──────────────────────────  ─────────────────────────
+--   trade                 CNC machining               sheet metal + weldments
+--   country               Detroit, USA                Hamilton, Ontario, Canada
+--   age                   ~1 year of history          7 weeks old
+--   team                  6 people                    3, WITH DIFFERENT ROLES
+--   work centres          6, no machine details       3, make/model/serial/year
+--   inventory             receipts + locations        none — every empty state
+--   jobs                  8 scenarios, 7 overdue      2, both comfortably on time
+--   payment terms         shop default set            NONE (the other branch)
+--   feature flags         none (all defaults on)      dashboard_revenue OFF
+--   billing               billing_exempt = true       real 'active' subscription
+--   archived rows         NONE ANYWHERE               a vendor, a customer, a part
+--   credit status         every customer open         one on credit hold
+--   logo_includes_name    absent                      true
+--
+-- Two of those matter more than the rest:
+--
+--   * ARCHIVED ROWS. Nothing in the seed had a `deleted_at` before this, so
+--     every list rendered identically whether or not it filtered them out — and
+--     a missing `deleted_at IS NULL` is both the most-violated rule in the repo
+--     and a silent failure. Northgate carries one archived vendor, customer and
+--     part, so a list that forgets the filter now LOOKS wrong in dev.
+--
+--   * ROLES DIFFER PER PERSON PER COMPANY. Sam Carter is a `user` at Vanguard
+--     and an `admin` here; Diego Alvarez is an `operator` at Vanguard and an
+--     office `user` here. Switching companies as Diego changes which app he
+--     lands in, which is the whole reason homePathForRole exists and was
+--     previously unreachable in dev.
+--
+-- It also gives dev@jigged.test a SECOND workspace, so the switcher's chevron,
+-- the Workspaces drawer and /select-company are reachable at all — none of them
+-- could be seen on a one-company seed.
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- ── Company ──────────────────────────────────────────────────────────────────
+insert into public.companies (
+  id, name, address_line1, city, state, postal_code, country, phone, email, website,
+  default_markup_made_percent, default_markup_bought_percent, default_material_charge_basis,
+  settings, created_at
+) values
+  ('33333333-3333-3333-3333-333333333333', 'Northgate Sheet Metal Co.',
+   '88 Burlington Street East', 'Hamilton', 'ON', 'L8L 4H4', 'Canada',
+   '(905) 555-0177', 'orders@northgatesheet.test', 'northgatesheet.test',
+   -- Vanguard leaves these at 0 (price = cost). A shop that marks up is the
+   -- other half of the pricing story, and 35/18 makes made-vs-bought visible.
+   35, 18, 'price',
+   -- `logo_includes_name` is TRUE so that the moment a wordmark is uploaded on the
+   -- Settings page, the workspace switcher and /select-company show it INSTEAD of
+   -- the company name. Vanguard leaves the key absent (the false default), so both
+   -- branches of that rule are reachable by switching workspaces.
+   --
+   -- `features.dashboard_revenue: false` is the only explicit flag in the seed, and
+   -- deliberately an OPT-OUT one turned off: it is a real production shape (a shop
+   -- that asked for the money lines to come off a screen other people walk past),
+   -- and nothing in dev could reach the flag-off path before. Vanguard keeps no
+   -- features block at all, which is what a new company actually gets.
+   --
+   -- NO default_payment_terms, also deliberately: Vanguard has one, so quoting
+   -- a customer without terms of their own credits the shop default there and
+   -- falls through to nothing here.
+   '{"logo_includes_name": true, "features": {"dashboard_revenue": false}}'::jsonb,
+   now() - interval '49 days')
+on conflict (id) do nothing;
+
+-- Billing: a real subscription rather than an exemption. `company_can_write`
+-- takes 'active' as writable without touching billing_exempt, so this exercises
+-- the subscription branch of the entitlement rule that Vanguard's exemption
+-- short-circuits — while leaving the shop fully writable.
+insert into public.company_billing (
+  company_id, billing_exempt, stripe_customer_id, stripe_subscription_id,
+  subscription_status, current_period_end, subscription_event_at, synced_at
+) values
+  ('33333333-3333-3333-3333-333333333333', false,
+   'cus_seedNorthgate01', 'sub_seedNorthgate01', 'active',
+   now() + interval '18 days', now() - interval '12 days', now() - interval '12 days')
+on conflict (company_id) do nothing;
+
+-- ── Team: the same people, different standing ────────────────────────────────
+insert into public.user_company_access (id, user_id, company_id, role, name) values
+  ('34000000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111',
+   '33333333-3333-3333-3333-333333333333','admin',    'Dev Seed User'),
+  -- `user` at Vanguard, admin here.
+  ('34000000-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111113',
+   '33333333-3333-3333-3333-333333333333','admin',    'Sam Carter'),
+  -- `operator` at Vanguard, office `user` here: switching workspaces moves him
+  -- between /operator/{id} and /dashboard/{id}.
+  ('34000000-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111115',
+   '33333333-3333-3333-3333-333333333333','user',     'Diego Alvarez')
+on conflict do nothing;
+
+-- Land the dev user on Vanguard at login rather than the company picker.
+-- getPostLoginRoute sends a multi-company user straight to their last company
+-- when there is one, so this keeps `dev@jigged.test`'s login exactly as it was
+-- before a second workspace existed. DELETE THIS ROW to meet /select-company.
+insert into public.user_preferences (user_id, last_company_id) values
+  ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')
+on conflict (user_id) do nothing;
+
+-- ── Work centres (3, with the machine details Vanguard leaves null) ──────────
+insert into public.work_centers (id, company_id, name, labor_rate, description, make, model, serial_number, year_built, purchased_on) values
+  ('35000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','Fiber Laser',  95.00, '4 kW flat sheet cutting, 60 x 120 table.', 'Bystronic','ByStar Fiber 3015','BY-3015-88214', 2021, (now() - interval '44 days')::date),
+  ('35000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','Press Brake',  88.00, 'CNC brake, 100 ton, 10 ft.',              'Amada',    'HG 1003','AM-HG-40977', 2019, (now() - interval '44 days')::date),
+  ('35000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333','Weld Bay',     78.00, 'TIG and MIG, stainless and aluminium.',    'Miller',   'Dynasty 400','ML-DY-11532', 2020, (now() - interval '40 days')::date)
+on conflict (id) do nothing;
+
+-- ── Vendors, one of them archived ────────────────────────────────────────────
+insert into public.vendors (id, company_id, name, deleted_at) values
+  ('36000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','Lakeshore Steel Supply', null),
+  -- Archived: must not appear in any vendor list, picker or count. It stays
+  -- resolvable by id, because documents that referenced it still do.
+  ('36000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','Grimsby Powder Coating', now() - interval '9 days')
+on conflict (id) do nothing;
+
+-- ── Customers: one on credit hold, one archived ──────────────────────────────
+insert into public.customers (id, company_id, name, default_payment_terms, credit_status, credit_hold_note, deleted_at, created_at) values
+  ('37000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','Halton Hydro',                 'Net 45', 'open', null, null, now() - interval '47 days'),
+  ('37000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','Escarpment Brewing Co.',        null,     'open', null, null, now() - interval '40 days'),
+  -- Credit hold: no customer at Vanguard is on one, so the hold banner, the
+  -- quote-time warning and any gating around it were unreachable in dev.
+  ('37000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333','Stelco Fabrication Partners',   'Net 30', 'hold', 'Two invoices past 60 days. Release requires owner approval.', null, now() - interval '38 days'),
+  ('37000000-0000-0000-0000-000000000004','33333333-3333-3333-3333-333333333333','Dundas Signal Works',           null,     'open', null, now() - interval '6 days', now() - interval '35 days')
+on conflict (id) do nothing;
+
+insert into public.customer_addresses (id, customer_id, address_line1, city, state, postal_code, country, default_billing, default_shipping, attention_to) values
+  ('38000000-0000-0000-0000-000000000001','37000000-0000-0000-0000-000000000001','1 Hydro Way',        'Oakville','ON','L6H 5R7','Canada', true, true, 'Accounts Payable'),
+  ('38000000-0000-0000-0000-000000000002','37000000-0000-0000-0000-000000000002','420 Vineyard Road',  'Grimsby', 'ON','L3M 4E8','Canada', true, true, null),
+  ('38000000-0000-0000-0000-000000000003','37000000-0000-0000-0000-000000000003','700 Industrial Ave', 'Hamilton','ON','L8H 7S3','Canada', true, true, null)
+on conflict (id) do nothing;
+
+insert into public.customer_contacts (id, customer_id, name, role, role_label, email, phone, is_primary) values
+  ('39000000-0000-0000-0000-000000000001','37000000-0000-0000-0000-000000000001','Ruth Kelleher','buyer',null,'ruth.kelleher@haltonhydro.test','(905) 555-0201', true),
+  ('39000000-0000-0000-0000-000000000002','37000000-0000-0000-0000-000000000002','Owen Marchetti','other','Owner','owen@escarpmentbrewing.test','(905) 555-0233', true),
+  ('39000000-0000-0000-0000-000000000003','37000000-0000-0000-0000-000000000003','Bev Okonkwo','accounts_payable',null,'b.okonkwo@stelcofab.test','(905) 555-0288', true)
+on conflict (id) do nothing;
+
+-- ── Parts: sheet-metal vocabulary, metric-ish units, one archived ────────────
+-- Vanguard's catalogue is machined assemblies priced per `each`. A fabricator
+-- buys stock by the sheet, filler by the kilogram and gasket by the metre, so
+-- this is also the only place a non-`each` unit reaches a document.
+insert into public.parts (id, company_id, part_name, description, primary_unit, source, quantity, reorder_point, preferred_vendor_id, lot_tracked, deleted_at, created_at) values
+  ('3a000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','ENC-1200 Control Enclosure','NEMA 4X stainless enclosure, 1200 x 800 x 300.','each','made', 0, 0, null, false, null, now() - interval '46 days'),
+  ('3a000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','BRK-90 Mounting Bracket','90 degree formed bracket, 6 mm mild steel.','each','made', 0, 0, null, false, null, now() - interval '45 days'),
+  ('3a000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333','PNL-48 Access Panel','Hinged access panel with gasket channel.','each','made', 0, 0, null, false, null, now() - interval '44 days'),
+  ('3a000000-0000-0000-0000-000000000004','33333333-3333-3333-3333-333333333333','SHT-304-16GA Stainless Sheet','304 stainless, 16 ga, 4 ft x 8 ft.','sheet','bought', 0, 12, '36000000-0000-0000-0000-000000000001', false, null, now() - interval '46 days'),
+  ('3a000000-0000-0000-0000-000000000005','33333333-3333-3333-3333-333333333333','WIRE-308L Filler Wire','308L TIG filler, 1.6 mm.','kg','bought', 0, 5, '36000000-0000-0000-0000-000000000001', false, null, now() - interval '43 days'),
+  -- Archived part. Parts do NOT revive on a name collision — a new part takes
+  -- the name and this one is renamed — so an archived part is exactly the row a
+  -- list, picker or count must not show.
+  ('3a000000-0000-0000-0000-000000000006','33333333-3333-3333-3333-333333333333','GSKT-EPDM Gasket Stock','EPDM gasket roll, 10 mm x 3 mm.','m','bought', 0, 0, null, false, now() - interval '5 days', now() - interval '42 days')
+on conflict (id) do nothing;
+
+insert into public.part_pricing_tiers (id, part_id, company_id, sequence, quantity, markup_percent, cost_per_unit) values
+  ('3b000000-0000-0000-0000-000000000001','3a000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333', 1, 1,  35, 610.0000),
+  ('3b000000-0000-0000-0000-000000000002','3a000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333', 1, 1,  35,  24.5000),
+  ('3b000000-0000-0000-0000-000000000003','3a000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333', 1, 1,  35,  88.0000)
+on conflict (id) do nothing;
+
+-- ── Routings for the two parts that actually run through the shop ────────────
+insert into public.routings (id, company_id, part_id, name, description, created_by) values
+  ('3c000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000001','Enclosure build','Laser, brake, weld.', '11111111-1111-1111-1111-111111111111'),
+  ('3c000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000002','Bracket form','Laser then brake.', '11111111-1111-1111-1111-111111111111')
+on conflict (id) do nothing;
+
+insert into public.routing_operations (id, routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, instructions) values
+  ('3d000000-0000-0000-0000-000000000001','3c000000-0000-0000-0000-000000000001','35000000-0000-0000-0000-000000000001', 10, 20, 14, 'Nest all five panels on one sheet. Deburr edges before forming.'),
+  ('3d000000-0000-0000-0000-000000000002','3c000000-0000-0000-0000-000000000001','35000000-0000-0000-0000-000000000002', 20, 25, 18, 'Bend sequence per flat pattern. Check the 300 mm depth before the last flange.'),
+  ('3d000000-0000-0000-0000-000000000003','3c000000-0000-0000-0000-000000000001','35000000-0000-0000-0000-000000000003', 30, 15, 22, 'Seam weld corners, dress to 4A finish. No weld spatter inside the seal channel.'),
+  ('3d000000-0000-0000-0000-000000000004','3c000000-0000-0000-0000-000000000002','35000000-0000-0000-0000-000000000001', 10, 10,  3, 'Two-up nest.'),
+  ('3d000000-0000-0000-0000-000000000005','3c000000-0000-0000-0000-000000000002','35000000-0000-0000-0000-000000000002', 20, 12,  4, 'Single 90 degree bend, air bend, no coining.')
+on conflict (id) do nothing;
+
+-- ── Quotes: a small pipeline, no overdue drama ───────────────────────────────
+insert into public.quotes (id, company_id, quote_number, customer_id, billing_address_id, shipping_address_id, contact_id,
+  status, lead_time_text, payment_terms, expiration_date, created_by, created_at, status_changed_at) values
+  ('3e000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','','37000000-0000-0000-0000-000000000001',
+   '38000000-0000-0000-0000-000000000001','38000000-0000-0000-0000-000000000001','39000000-0000-0000-0000-000000000001',
+   'active','15 days','Net 45',(now() + interval '22 days')::date,'11111111-1111-1111-1111-111111111111', now() - interval '11 days', now() - interval '11 days'),
+  ('3e000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','','37000000-0000-0000-0000-000000000002',
+   '38000000-0000-0000-0000-000000000002','38000000-0000-0000-0000-000000000002','39000000-0000-0000-0000-000000000002',
+   'expired','10 days','Net 30',(now() - interval '4 days')::date,'11111111-1111-1111-1111-111111111111', now() - interval '34 days', now() - interval '4 days'),
+  -- The one that became a job.
+  ('3e000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333','','37000000-0000-0000-0000-000000000001',
+   '38000000-0000-0000-0000-000000000001','38000000-0000-0000-0000-000000000001','39000000-0000-0000-0000-000000000001',
+   'active','20 days','Net 45',(now() + interval '9 days')::date,'11111111-1111-1111-1111-111111111111', now() - interval '21 days', now() - interval '19 days')
+on conflict (id) do nothing;
+
+insert into public.quote_line_items (id, quote_id, company_id, part_id, source_tier_id, sequence, quantity, unit_price, total_price, markup_percent, base_cost_per_unit) values
+  ('3f000000-0000-0000-0000-000000000001','3e000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000001','3b000000-0000-0000-0000-000000000001', 1,  4, 823.5000, 3294.0000, 35, 610.0000),
+  ('3f000000-0000-0000-0000-000000000002','3e000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000002','3b000000-0000-0000-0000-000000000002', 2, 16,  33.0750,  529.2000, 35,  24.5000),
+  ('3f000000-0000-0000-0000-000000000003','3e000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000003','3b000000-0000-0000-0000-000000000003', 1, 12, 118.8000, 1425.6000, 35,  88.0000),
+  ('3f000000-0000-0000-0000-000000000004','3e000000-0000-0000-0000-000000000003','33333333-3333-3333-3333-333333333333','3a000000-0000-0000-0000-000000000001','3b000000-0000-0000-0000-000000000001', 1,  6, 823.5000, 4941.0000, 35, 610.0000)
+on conflict (id) do nothing;
+
+-- ── Jobs: two, both comfortably inside their dates ───────────────────────────
+-- Vanguard's overdue jobs exist so the Overdue tile and the alert tone are
+-- reachable. Northgate is the control: a shop where nothing is late, so "no
+-- overdue work" renders as a real state rather than only as a loading artefact.
+do $$
+declare v_jp uuid;
+begin
+  insert into public.jobs (id, company_id, quote_id, customer_id, job_number, production_status, fulfillment_status,
+    due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at, payment_terms)
+  values ('40000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333','3e000000-0000-0000-0000-000000000003',
+    '37000000-0000-0000-0000-000000000001','J-0001','not_started','unshipped',
+    (now() + interval '14 days')::date,'PO-HH-2291',
+    '38000000-0000-0000-0000-000000000001','38000000-0000-0000-0000-000000000001','39000000-0000-0000-0000-000000000001',
+    '11111111-1111-1111-1111-111111111111', now() - interval '19 days','Net 45');
+
+  insert into public.job_parts (id, job_id, company_id, part_id, source_quote_line_item_id, sequence, quantity,
+    unit_price, total_price, production_status, fulfillment_status, created_at)
+  values ('41000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001','33333333-3333-3333-3333-333333333333',
+    '3a000000-0000-0000-0000-000000000001','3f000000-0000-0000-0000-000000000004', 1, 6, 823.5000, 4941.0000,
+    'not_started','unshipped', now() - interval '19 days')
+  returning id into v_jp;
+  perform public.create_job_part_operations_from_routing(v_jp, '3c000000-0000-0000-0000-000000000001');
+
+  update public.quotes set converted_at = now() - interval '19 days' where id = '3e000000-0000-0000-0000-000000000003';
+
+  -- Direct job, no quote behind it.
+  insert into public.jobs (id, company_id, customer_id, job_number, production_status, fulfillment_status,
+    due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
+  values ('40000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333',
+    '37000000-0000-0000-0000-000000000003','J-0002','in_progress','unshipped',
+    (now() + interval '25 days')::date,'PO-SFP-7741',
+    '38000000-0000-0000-0000-000000000003','38000000-0000-0000-0000-000000000003','39000000-0000-0000-0000-000000000003',
+    '11111111-1111-1111-1111-111111111111', now() - interval '8 days');
+
+  insert into public.job_parts (id, job_id, company_id, part_id, sequence, quantity,
+    unit_price, total_price, production_status, fulfillment_status, created_at)
+  values ('41000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000002','33333333-3333-3333-3333-333333333333',
+    '3a000000-0000-0000-0000-000000000002', 1, 40, 33.0750, 1323.0000,
+    'in_progress','unshipped', now() - interval '8 days')
+  returning id into v_jp;
+  perform public.create_job_part_operations_from_routing(v_jp, '3c000000-0000-0000-0000-000000000002');
+end $$;

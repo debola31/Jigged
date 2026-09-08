@@ -505,4 +505,25 @@ describe('getSignedUrls', () => {
     mockStorage.createSignedUrls.mockResolvedValue({ data: null, error: { message: 'boom' } });
     expect((await getSignedUrls(['a.jpg'])).size).toBe(0);
   });
+
+  it('defaults to the attachments bucket', async () => {
+    mockStorage.createSignedUrls.mockResolvedValue({ data: [], error: null });
+
+    await getSignedUrls(['a.jpg']);
+
+    expect(mockSupabase.storage.from).toHaveBeenCalledWith('test-bucket');
+  });
+
+  /** The workspace switcher mints company logos, which live in their own private bucket. */
+  it('honours an explicit bucket, like its single-path sibling', async () => {
+    mockStorage.createSignedUrls.mockResolvedValue({
+      data: [{ path: 'co1/company/logo_ab12_acme.png', signedUrl: 'https://s/logo', error: null }],
+      error: null,
+    });
+
+    const urls = await getSignedUrls(['co1/company/logo_ab12_acme.png'], 3600, 'logos');
+
+    expect(mockSupabase.storage.from).toHaveBeenCalledWith('logos');
+    expect(urls.get('co1/company/logo_ab12_acme.png')).toBe('https://s/logo');
+  });
 });

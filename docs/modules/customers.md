@@ -94,6 +94,8 @@ The other two were both on a discovery watch list and both came off it, in the s
 
 > **customer's own terms → shop-wide default → leave empty**
 
+Settings edits it through the same shared `PaymentTermsPicker` as the quote and the customer — so `＋ Add New` and the ✕ on a saved term are available on the one screen where a shop would actually curate its house list. It had its own free-text combobox until September 2026, which is why a term set there could reach a quote as a value the picker did not recognise: it never joined `custom_payment_terms`. Adding or removing a term commits immediately (it is a list edit); the chosen default lands on Save.
+
 The shop-wide default lives at **`companies.settings.default_payment_terms`** — a **jsonb key, not a column**. Its writer read-modify-writes the whole `settings` object; writing the key alone would silently drop every feature flag on the company. Blank stores `null`, never `''`, so "unset" has one representation.
 
 It is deliberately **not** in `KNOWN_DEFAULTS` (`lib/companyDefaults.ts`): that registry is numeric to the floor (`coerceInt`, numeric `fallback`, `readCompanyDefault(): number`, a card rendering `type="number"`), so threading one string through it would need a discriminated union across five call sites. `custom_payment_terms` set the precedent for a string setting living beside the numeric block.
@@ -145,7 +147,7 @@ Options in priority order, deduped **case-insensitively with first-wins**:
 2. **Your saved terms** — `companies.settings.custom_payment_terms`, each removable, capped at 15
 3. **Standard terms** — `Due on Receipt, Net 15, Net 30, Net 60, 2/10 Net 30, 50% Deposit / Balance Net 30, Prepay, Cash on Delivery`
 
-QuickBooks' spelling wins on a collision — it ships `Due on receipt` (lowercase r) against our `Due on Receipt`, and one term must not occupy two rows. The group names drive ordering and the remove-icon branch only; they are **not** rendered as headers. An "Add New" row is pinned last and survives typing.
+QuickBooks' spelling wins on a collision — it ships `Due on receipt` (lowercase r) against our `Due on Receipt`, and one term must not occupy two rows. The group names drive ordering and the remove-icon branch only; they are **not** rendered as headers. An "Add New" row is pinned first — ahead of every term, so it is visible without scrolling a long QuickBooks list — and survives typing.
 
 QuickBooks terms are fetched in their **own effect**, outside the form's main load, so the quote form never waits on Intuit. `listQuickBooksTerms` resolves to `{connected:false, terms:[]}` on any error, so a shop with no QuickBooks and a shop whose connection is momentarily down take the identical path — the local list. A term typed here is created in QuickBooks at push time, so an unlisted term is never a dead end.
 

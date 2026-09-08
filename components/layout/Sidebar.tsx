@@ -85,7 +85,7 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
       </Box>
 
       {/* Navigation */}
-      <Box component="nav" aria-label="Main navigation" sx={{ flex: 1, py: 2, px: 1.5 }}>
+      <Box component="nav" aria-label="Main navigation" sx={{ flex: 1, pt: 0.5, pb: 2, px: 1.5 }}>
         <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           {menuItems
             .filter((item) => !item.adminOnly || isAdmin)

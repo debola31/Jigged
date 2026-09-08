@@ -560,15 +560,34 @@ describe('QuoteForm', () => {
     expect(screen.getByRole('option', { name: 'Due on Receipt' })).toBeInTheDocument();
   });
 
-  it('shows a highlighted "Add New" row at the bottom of the dropdown', async () => {
+  it('leads the dropdown with a highlighted "Add New" row', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
     );
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
-    // The "Add New" affordance is visible in the open dropdown.
+    // The "Add New" affordance is visible in the open dropdown…
     expect(await screen.findByRole('option', { name: /add new/i })).toBeInTheDocument();
+    // …and it is the FIRST row: with a long QuickBooks list it was the one
+    // thing you could not reach without scrolling, on a pick-only control.
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent(/add new/i);
+  });
+
+  it('keeps "Add New" first while the list is being filtered by typing', async () => {
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    const combobox = await screen.findByRole('combobox', { name: /payment terms/i });
+    await user.click(combobox);
+    await user.type(combobox, 'Net 3');
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('option')[0]).toHaveTextContent(/add new/i);
+    });
+    expect(screen.getByRole('option', { name: 'Net 30', exact: true })).toBeInTheDocument();
   });
 
   it('calls updateQuote with the payload and navigates on success', async () => {

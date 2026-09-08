@@ -253,6 +253,7 @@ As-built, verified 2026-08-03. Each row names the file + `describe`/class that e
 | Prior-shipment lookup skips itself, later slips and same-timestamp-greater-id siblings, and throws rather than reporting zero prior | `__tests__/utils/shipmentsAccess.test.ts` — `compareShipmentOrder`, `getShippedBeforeShipment` |
 | The footer carries `Generated {date} with jigged.app` and no longer restates the company name | `__tests__/utils/packingSlipPdf.test.ts` — `generatePackingSlipPdf — document branding` |
 | The shop header stacks logo → name → address, sized to the space the header already occupies so it never pushes content down, and drops the name when the logo already carries it | `__tests__/utils/shopHeaderBlock.test.ts` — `drawShopHeaderBlock` |
+| The one-page report (`utils/reportPdf.ts`, [ai-insights.md](ai-insights.md#reports-one-page-executive-summaries)) draws the same header block under an AI-inferred title, then a KPI band, tables and vector charts, on exactly one page | `__tests__/utils/reportPdf.test.ts` — `generateReportPdf` |
 
 **Gaps, automation-pending ([#367](https://github.com/debola31/Jigged/issues/367)):** reload-persistence E2E
 for create and void; `ShipmentsMenu` rendering; the packing-slip PDF rendering Bill To / Ship To / ATTN from

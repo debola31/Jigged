@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '@/lib/api';
-import type { Database } from '@/types/database';
+import type { Database, Json } from '@/types/database';
 import { getSupabase } from '@/lib/supabase';
 import { todayLocalISODate } from '@/lib/localDate';
 
@@ -130,6 +130,28 @@ export async function submitChatQuery(
   return (await response.json()) as ChatEnqueued;
 }
 
+/**
+ * Ask for a one-page executive summary. Same door as a question -- flag, cap,
+ * heartbeat -- and the same 202 with a job id; the ReportSpec lands on the job's
+ * result and the browser renders it to PDF itself (utils/reportPdf.ts).
+ */
+export async function submitReportRequest(companyId: string, request: string): Promise<ChatEnqueued> {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/report`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ request, today: todayLocalISODate() }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new ChatEnqueueError(
+      errorData.detail || `Failed to request a report (${response.status})`,
+      response.status,
+    );
+  }
+  return (await response.json()) as ChatEnqueued;
+}
+
 // ============================================================
 // The job row, read straight from Supabase
 // ============================================================
@@ -243,6 +265,57 @@ export async function getAiJob(jobId: string): Promise<AiJob | null> {
 
   if (error) throw error;
   return data;
+}
+
+/** A finished report: the spec the model filled, ready for utils/reportPdf.ts. */
+export interface ReportSummary {
+  id: string;
+  created_at: string;
+  report: unknown;
+  /** Chart blocks the handler dropped at the gate; the page footer names them. */
+  dropped: string[];
+}
+
+function reportOf(raw: Json | null): { report: unknown; dropped: string[] } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (!candidate.report || typeof candidate.report !== 'object') return null;
+  const dropped = Array.isArray(candidate.dropped)
+    ? candidate.dropped.filter((d): d is string => typeof d === 'string')
+    : [];
+  return { report: candidate.report, dropped };
+}
+
+/** The report on a settled job row, or null when the row carries none. */
+export function reportResultOf(job: AiJob | null): ReportSummary | null {
+  if (!job) return null;
+  const parsed = reportOf(job.result);
+  return parsed ? { id: job.id, created_at: job.created_at, ...parsed } : null;
+}
+
+/**
+ * The shop's recent reports, newest first. `kind` is a real column, so this reads
+ * exactly the rows the Reports card should list -- and RLS scopes it to the shop.
+ */
+export async function listReports(companyId: string, limit = 10): Promise<ReportSummary[]> {
+  const { data, error } = await getSupabase()
+    .from('ai_jobs')
+    .select('id, created_at, result')
+    .eq('company_id', companyId)
+    .eq('kind', 'report')
+    .eq('status', 'succeeded')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  const out: ReportSummary[] = [];
+  for (const row of data ?? []) {
+    const parsed = reportOf(row.result);
+    // A row an older handler wrote, or a shape the renderer no longer knows, is
+    // left out rather than listed as a report that cannot open.
+    if (parsed) out.push({ id: row.id, created_at: row.created_at, ...parsed });
+  }
+  return out;
 }
 
 /**

@@ -9,14 +9,32 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGetSession } = vi.hoisted(() => ({ mockGetSession: vi.fn() }));
+const { mockGetSession, mockFrom } = vi.hoisted(() => ({ mockGetSession: vi.fn(), mockFrom: vi.fn() }));
 
 vi.mock('@/lib/supabase', () => ({
-  getSupabase: () => ({ auth: { getSession: mockGetSession } }),
+  getSupabase: () => ({ auth: { getSession: mockGetSession }, from: mockFrom }),
 }));
+
+function queryStub(data: unknown) {
+  const builder: Record<string, unknown> = {};
+  ['select', 'eq', 'order', 'limit'].forEach((m) => {
+    builder[m] = vi.fn().mockImplementation(() => builder);
+  });
+  builder.data = data;
+  builder.error = null;
+  return builder as Record<string, ReturnType<typeof vi.fn>> & { data: unknown; error: unknown };
+}
 vi.mock('@/lib/api', () => ({ API_BASE_URL: 'http://api.test' }));
 
-import { ChatEnqueueError, chatResultOf, submitChatQuery, type AiJob } from '@/utils/insightsAccess';
+import {
+  ChatEnqueueError,
+  chatResultOf,
+  listReports,
+  reportResultOf,
+  submitChatQuery,
+  submitReportRequest,
+  type AiJob,
+} from '@/utils/insightsAccess';
 
 function response(status: number, body: unknown): Response {
   return {
@@ -126,5 +144,69 @@ describe('submitChatQuery', () => {
     expect(err).toBeInstanceOf(ChatEnqueueError);
     expect((err as ChatEnqueueError).status).toBe(500);
     expect((err as ChatEnqueueError).message).toBe('Failed to submit chat query (500)');
+  });
+});
+
+describe('submitReportRequest', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSession.mockResolvedValue({ data: { session: { access_token: 'tok' } } });
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts the request through the report door with the local date', async () => {
+    fetchMock.mockResolvedValue(response(202, { job_id: 'job-r', status: 'queued', executor: 'worker' }));
+
+    const enqueued = await submitReportRequest('co-1', 'operations summary for this quarter');
+
+    expect(enqueued.job_id).toBe('job-r');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/api/insights/co-1/report');
+    const body = JSON.parse(init.body as string);
+    expect(body.request).toBe('operations summary for this quarter');
+    expect(body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('carries the status like a question does', async () => {
+    fetchMock.mockResolvedValue(response(503, { detail: 'The AI box is offline right now, so this can\'t run.' }));
+    const err = await submitReportRequest('co-1', 'x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ChatEnqueueError);
+    expect((err as ChatEnqueueError).status).toBe(503);
+  });
+});
+
+describe('listReports / reportResultOf', () => {
+  const job = (result: unknown, id = 'j'): AiJob => ({
+    id, status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+  });
+
+  it('reads only succeeded report jobs for the shop, newest first', async () => {
+    const q = queryStub([
+      { id: 'j1', created_at: 'c1', result: { report: { title: 'A' }, dropped: ['Flat'] } },
+      { id: 'j2', created_at: 'c2', result: { answer: 'not a report' } },
+    ]);
+    mockFrom.mockReturnValue(q);
+
+    const reports = await listReports('co-1');
+
+    expect(mockFrom).toHaveBeenCalledWith('ai_jobs');
+    expect(q.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    expect(q.eq).toHaveBeenCalledWith('kind', 'report');
+    expect(q.eq).toHaveBeenCalledWith('status', 'succeeded');
+    expect(q.order).toHaveBeenCalledWith('created_at', { ascending: false });
+    // A row with no report on it is left out rather than listed as one that cannot open.
+    expect(reports).toEqual([{ id: 'j1', created_at: 'c1', report: { title: 'A' }, dropped: ['Flat'] }]);
+  });
+
+  it('narrows a settled job to its report, or null', () => {
+    expect(reportResultOf(job({ report: { title: 'A' } }))?.report).toEqual({ title: 'A' });
+    expect(reportResultOf(job({ report: { title: 'A' } }))?.dropped).toEqual([]);
+    expect(reportResultOf(job({ answer: 'Four.' }))).toBeNull();
+    expect(reportResultOf(null)).toBeNull();
   });
 });

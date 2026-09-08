@@ -533,11 +533,67 @@ Supabase vars.
 > `MetricPickerModal` do not exist**, and `20260812211807_prune_dashboard_metric_preferences.sql`
 > removed the preference keys. The metric row is not user-configurable.
 
-**Ask bar** — input plus example prompt chips, inline response, rotating loading messages, and a
-**Save button shown only when a chart survived validation**. Single Q&A per interaction.
+**Ask bar** — input plus example prompt chips, rotating loading messages, and a **Save button shown
+only when a chart survived validation**. Since September 2026 it is a conversation: the answered
+exchanges render newest-first under the input, and a recent-conversations menu switches or archives
+threads (see *Long conversations on a 32K context*).
 
 **Your Charts** — the current user's saved cards in a responsive grid, each with question, chart,
 summary and a remove button; a dashed empty state inviting the first question.
+
+**Reports** — a card between the ask bar and the saved charts: **New report** opens a dialog that
+asks what the page should cover, and the shop's recent one-page summaries are listed from their own
+job rows (`ai_jobs.kind = 'report'`), each re-drawn from its stored spec on open. See *Reports:
+one-page executive summaries*.
+
+## Reports: one-page executive summaries
+
+**What the owner asks for → what ships.** They type what the page should cover — "operations summary
+for June to September", "how is Hastings Machine doing this year", "backlog and late jobs". One
+insights job with `kind = 'report'` runs the **same tool loop** as chat (same system turn, so the
+prefix is shared), then one schema-constrained compose call fills a `ReportSpec`
+([`api/models/report_spec.py`](../../api/models/report_spec.py)): an AI-inferred title, the period as
+dates, a headline, up to four KPI tiles and four blocks. The browser renders it to PDF
+([`utils/reportPdf.ts`](../../utils/reportPdf.ts)) with the shop's header block top-left, the title
+top-right, a KPI band, then tables and vector charts — on **exactly one page**. The reference this
+grew from was a fixed set of period aggregates; this is that shape opened to whatever is asked, with
+the guardrails moved from the model into a schema and a renderer.
+
+| Guardrail | Enforced by |
+|---|---|
+| One page | The renderer measures each block and stops at the footer, naming what it left out ("Not shown (one page): …"); `addPage` is never called and a test asserts it. The schema's caps — ≤4 KPIs, ≤4 blocks, tables ≤8×5, charts 3–12 points — make cuts rare |
+| Company name/logo top-left, AI-inferred title top-right | `drawShopHeaderBlock` sized against the right meta column (the contract every document uses); `title ≤ 40` from the schema, drawn uppercase at 22pt with `Period:` and `Generated:` beneath, the reference's arrangement |
+| Minimal prose | Schema: `headline ≤ 200`, at most one text block ≤ 240 chars, notes ≤ 120 |
+| Every figure comes from a query | `untraceable_figures()` in [`api/services/ai_features/report.py`](../../api/services/ai_features/report.py): every number in a KPI, a table cell or a chart point must equal (to half a unit or half a percent) a value in a tool result of *this* job. Derived figures are computed in SQL. One repair turn names the offenders; a second failure is an `error_echo` job (`[ungrounded_figures]`). No successful query → no report (`[report_no_data]`) |
+| The model never formats | Values are raw; each declares `currency \| integer \| percent \| plain` and the renderer formats (`$13,367`, `$99.3k` on a tile) |
+| Charts valid | Each chart block becomes a `chart_config` and goes through the chat gate (`_validate_chart_config` → `_drop_exemplar_echo` → `_select_chart_type`); a refused block is dropped and named in `result.dropped` and on the page |
+| Same safety boundary as chat | Same `execute_sql`, validator, sandbox, cap and heartbeat; one job that makes several model calls and holds the box's single slot for a few minutes |
+
+**Strict-output shape, on purpose.** Ollama's `format` and Anthropic's structured output want closed
+objects with every property required and no `$defs`, so a table row is a list of cells aligned with
+its columns, a chart is a list of `{label, value}` points, every optional field is nullable, and
+`ReportSpec.model_json_schema` inlines the nested models. `__tests__/fixtures/reportSpecExample.json`
+is validated by pytest against the model and by vitest against `utils/reportSpec.ts`, so the two ends
+cannot drift unnoticed.
+
+**Charts are vectors, not screenshots.** `utils/pdfCharts.ts` draws bar, horizontal bar, area, pie
+and sparkline with jsPDF primitives from the same `chart_config` the dashboard renders: one hue for a
+single series, a validated six-hue order for pie slices (adjacent-pair CVD ΔE 9.1 on white; three
+slots under 3:1 contrast, relieved by the legend's ink labels), a hairline grid, text in ink never in
+the series colour. The on-screen chart's emotion classes do not survive an SVG serialisation, and a
+raster on paper is soft where a vector is crisp.
+
+**Why not a backend job.** A `reportlab` + chart-renderer stack in the Vercel Python bundle runs
+against `api/requirements.txt`'s written no-weight policy and `scripts/licenseCheck.ts`'s AGPL ban;
+a non-AI job through `ai_jobs` would need executor special-casing. The reference PDF was a ReportLab
+prototype made outside this repo; its layout is reproduced, its stack is not.
+
+Tests: `api/tests/unit/test_report_spec.py`, `api/tests/unit/test_report_handler.py`,
+`__tests__/utils/reportSpec.test.ts`, `__tests__/utils/pdfCharts.test.ts`,
+`__tests__/utils/reportPdf.test.ts`, `__tests__/components/insights/ReportPreviewDialog.test.tsx`.
+What a mocked jsPDF cannot see — wrap width, overflow, how a page looks — is the real-render checklist
+in the PR: one report per chart type, long customer names, a request that yields five blocks, logo
+present and absent, a shop with no shipments.
 
 ## Withdrawn — the predefined metric functions
 
@@ -663,6 +719,14 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** the settings read fails, **then** the request proceeds enabled at the default limit — failing open is deliberate — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
 - [ ] **Given** an operator, **then** no ask bar is reachable — they land on `/operator/{companyId}` and the bar renders only on the dashboard. *This used to read "the endpoint refuses", deferred to #367; #367 is the E2E reload convention, so the criterion was parked behind an E2E ticket waiting to prove a backend refusal that does not exist.*
 
+**Reports**
+
+- [ ] **Given** a report request, **then** the job carries `kind = 'report'`, goes through the same flag, cap and heartbeat as a question, and its handler runs the same tool loop under the identical system turn — *verified by `api/tests/unit/test_insights_enqueue.py` (`TestTheReportDoor`) and `api/tests/unit/test_report_handler.py`*.
+- [ ] **Given** a composed report with a figure that appears in no query result, **then** one repair turn names it and a second failure fails the job as `error_echo`; **given** no successful query, **then** no report — *verified by `api/tests/unit/test_report_handler.py`*.
+- [ ] **Given** a spec past the one-page caps, **then** validation refuses it; **given** more blocks than fit, **then** the renderer drops the rest and prints "Not shown", never a second page — *verified by `api/tests/unit/test_report_spec.py` and `__tests__/utils/reportPdf.test.ts`*.
+- [ ] **Given** the shared fixture, **then** the Python model and the TypeScript narrowing both accept it — *verified by `api/tests/unit/test_report_spec.py` and `__tests__/utils/reportSpec.test.ts`*.
+- [ ] **Given** a download from the preview, **then** `report exported` fires with counts only — *verified by `__tests__/components/insights/ReportPreviewDialog.test.tsx`*.
+
 **Saved insights**
 
 - [ ] **Given** a response with a surviving chart, **then** Save is offered and the pin is written; **given** one without, **then** Save is not shown — *automation-pending (#367)*.
@@ -693,6 +757,13 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   `context_overflow` rather than a schema-less answer.
 - **A summary is instructed, not verified.** The compaction prompt demands every figure and period;
   nothing checks the summary kept them. A multi-turn scenario in `evals/insights_ab.py` is the follow-up.
+- **No real-render test for the PDF.** The mocked suite proves ordering, arguments and font state; wrap
+  width, overflow and how the page looks are a PR checklist. Pie arcs are cubic approximations (≤ 90°
+  per segment).
+- **A report holds the box's single slot for minutes.** Other shops' questions queue behind it. If that
+  bites, `kind = 'report'` can enqueue at `PRIORITY_BATCH` so questions preempt at claim boundaries.
+- **The traceability guard checks numbers, not labels or dates.** A figure attached to the wrong label
+  is what the eval's human column exists for.
 - **An enqueue-time offline fires no PostHog event.** A 503 from the route leaves no job row, so the
   ask bar's `ai job settled` never fires and the offline-to-done ratio undercounts a box that was off
   when someone asked. The 503 renders as the same quiet notice a mid-job outage gets; it is not counted.

@@ -8,33 +8,11 @@ import { PieChart } from '@mui/x-charts/PieChart';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { ChartConfig } from '@/utils/insightsAccess';
+import { formatCompact, formatLabel } from '@/utils/chartFormat';
 
 interface InsightChartProps {
   chartConfig: ChartConfig;
   height?: number;
-}
-
-/** Format ISO timestamps and date strings into clean short labels. */
-function formatLabel(value: string): string {
-  if (/^\d{4}-\d{2}/.test(value)) {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) {
-      if (date.getDate() === 1 || value.includes('T00:00:00')) {
-        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      }
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-  }
-  return value.length > 12 ? value.slice(0, 12) + '...' : value;
-}
-
-/** Abbreviate large numbers for axis ticks: 7749 -> "7.7K", 1.2e6 -> "1.2M". */
-function formatCompact(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (abs >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (abs >= 1_000) return (value / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
-  return String(value);
 }
 
 /**

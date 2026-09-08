@@ -232,7 +232,9 @@ tooltip. Empty: "No recent activity." on the card, "No activity yet." on the pag
 Below Recent Activity: ask-bar (`InsightsChat`) + saved charts (`InsightsSection`), gated on the `ai_insights`
 flag, which is **opt-out** (on unless a system admin turns it off for the tenant) and stays hidden while the
 flag loads so it never flashes in then out. Full spec — text-to-SQL flow, persistence, prompts, and the "AI only
-on explicit user action" contract — is in [AI Insights & Charts](ai-insights.md).
+on explicit user action" contract — is in [AI Insights & Charts](ai-insights.md). A **Reports** card sits between
+the ask bar and the saved charts: one-page executive summaries the AI composes on request, drawn in the browser
+from a stored spec ([Reports](ai-insights.md#reports-one-page-executive-summaries)).
 
 **Nothing on this page may call a paid AI provider on mount.** `page.tsx`'s effects fire plain Supabase reads
 only (`isDashboardEmpty`, `getDashboardActivity`); the ask-bar is driven by a submit. This is stated here, not

@@ -138,13 +138,24 @@ class TestDefaults:
             assert [p.name for p in chain_for(feature)] == ["anthropic"]
 
     def test_the_local_timeout_is_longer_than_the_hosted_one(self, monkeypatch):
-        """Slow local hardware. The 120s only makes sense off Vercel, which is the
+        """Slow local hardware. The 240s only makes sense off Vercel, which is the
         whole reason ollama work is claimed by the desktop rather than executed by
-        a request handler."""
+        a request handler -- and it is the worker's own value, so the eval's
+        tool-loop arm (which resolves through here) times out where the worker
+        would, not sooner."""
+        import re
+        from pathlib import Path
+
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("LLM_CHAIN_INSIGHTS", "ollama:qwen3:8b,anthropic")
         ollama, anthropic_p = chain_for("insights")
-        assert (ollama.timeout_s, anthropic_p.timeout_s) == (120.0, 30.0)
+        assert (ollama.timeout_s, anthropic_p.timeout_s) == (240.0, 30.0)
+        # The worker package is not importable from here (it lives beside api/, not
+        # in it), so its default is read off the file -- the same way
+        # TestPackageBoundary reads services/ai.
+        worker_config = (Path(__file__).resolve().parents[3] / "worker" / "config.py").read_text()
+        worker_default = re.search(r"request_timeout_s: float = ([\d.]+)", worker_config)
+        assert worker_default and float(worker_default.group(1)) == ollama.timeout_s
 
     def test_the_local_provider_is_priced_at_exactly_zero(self, monkeypatch):
         """Not env-overridable: electricity is not billed per token, so any nonzero

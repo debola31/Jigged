@@ -42,7 +42,12 @@ _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
     "drawings_dev": ("ollama:qwen3-vl:4b",),
 }
 
-_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 120.0}
+# Ollama's matches the worker's request_timeout_s (worker/config.py) for the same
+# measured reason: on the serving Mac the first call to a cold qwen3:32b -- or the
+# first after the prompt changed, which re-pays the ~13K-token prefill -- ran past
+# 120 s; the warm median was 25 s. The eval's tool-loop arm resolves through here,
+# so a shorter value would score a timeout the worker would not have.
+_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 240.0}
 
 
 def _env(name: str, default: str | None = None) -> str | None:

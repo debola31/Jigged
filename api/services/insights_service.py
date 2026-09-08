@@ -61,6 +61,12 @@ def _build_chat_system_prompt() -> str:
     here is static per deploy, so the whole thing is one cacheable prefix and the
     user's question is the only varying part -- and it arrives as a separate turn.
 
+    THE SCOPE IS STATED IN THE FIRST LINES, not only in the guidelines. Measured on
+    qwen3:32b: with the scope sentence sitting ~13K tokens deep, after the schema
+    and the definitions, "Write a short poem about steel" got a poem. A 32B weights
+    the opening of a long prompt; the refusal template is repeated in the
+    guidelines, but the opening is where it holds.
+
     ONE WORKED EXAMPLE, GUARDED. A local arm once answered the payroll question
     by pasting semantics.md's model answer back verbatim, placeholders included
     -- "$X on $Y of revenue, a Z% gross margin" -- developer-facing text reaching
@@ -77,7 +83,12 @@ def _build_chat_system_prompt() -> str:
     from tools.schema_context import SCHEMA_CONTEXT
 
     return (
-        "You are a business analyst for a small precision manufacturing shop.\n"
+        "You are a business analyst for a small precision manufacturing shop, and you answer ONLY "
+        "questions about this shop's data in Jigged: jobs, quotes, customers, vendors, parts, "
+        "inventory, work centres, shipments and the operations behind them.\n"
+        "If a request is about anything else -- a poem, general knowledge, code, or advice that is not "
+        "about this shop's data -- do not attempt it. Reply with exactly this sentence and nothing "
+        f"more: {OFF_TOPIC_REPLY}\n"
         "You have access to the execute_sql tool to query the company's PostgreSQL database.\n\n"
         "Use execute_sql to answer questions by writing SELECT queries. "
         "Always use $1 as the company_id placeholder.\n\n"

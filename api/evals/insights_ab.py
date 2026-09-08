@@ -236,7 +236,9 @@ def greedy_ollama(spec: str):
     return OllamaProvider(
         base_url=os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1",
         model=model or "qwen3:8b",
-        timeout_s=120.0,
+        # The worker's own per-call timeout (worker/config.py), for the same
+        # measured reason: a cold 32B's first call ran past 120 s.
+        timeout_s=240.0,
         options={"temperature": 0, "seed": 0},
     )
 

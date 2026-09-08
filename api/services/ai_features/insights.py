@@ -298,6 +298,13 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     from tools.chat_tools import CHAT_TOOLS
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
+    if ctx.payload.get("kind") == "report":
+        # A one-page executive summary: same chain, same tools, same system turn,
+        # a different shape of answer. services/ai_features/report.py.
+        from services.ai_features import report
+
+        return await report.run(ctx)
+
     question = (ctx.payload.get("question") or "").strip()
     if not question:
         raise ValueError("insights job payload has no question")

@@ -1,0 +1,342 @@
+"""One-page executive summaries: the model gathers and fills, code decides.
+
+WHAT THE USER ASKED FOR, AND WHAT SHIPS. The user types what the report should
+cover -- "operations summary for June to September", "how is Hastings Machine
+doing this year", "backlog and late jobs". The model runs the SAME tool loop as
+chat to gather the figures, then fills a ReportSpec in one schema-constrained
+call; a deterministic renderer in the browser lays the spec out on exactly one
+page under the shop's header. The reference document this replaces was a fixed
+set of period aggregates; this is that shape opened to whatever the owner asks,
+with the guardrails moved from the model into a schema and a renderer.
+
+THE GUARDRAILS, AND WHO ENFORCES EACH.
+  * One page, minimal prose, an AI-inferred title -- models/report_spec.py caps
+    them; utils/reportPdf.ts measures and drops what still does not fit, naming
+    what it dropped.
+  * Every figure comes from a query -- untraceable_figures() below: every number
+    in a KPI, a table cell or a chart point must equal (to rounding) a value that
+    appeared in a tool result of THIS job. Derived figures are computed in SQL,
+    never in the model's head; the prompt says so and the guard makes it so. One
+    repair turn names the offenders; a second failure is an error_echo job.
+  * The model never formats -- values are raw; each declares a format the renderer
+    applies.
+  * Charts valid -- the chat gate (_validate_chart_config, _drop_exemplar_echo,
+    _select_chart_type) on every chart block; an invalid one is dropped and named.
+  * Same safety boundary as chat -- same execute_sql tool, validator, sandbox, and
+    the SAME system turn, so the KV prefix is shared with every chat job.
+
+Dispatched from insights.run on payload.kind == "report", so the two hosts, the
+chain, the ledger and the error kinds are all the ones chat already has.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import math
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from services import llm
+from services.ai_features import insights
+from services.ai_features.base import JobContext
+from services.insights_presentation import (
+    _drop_exemplar_echo,
+    _select_chart_type,
+    _validate_chart_config,
+    classify_non_answer,
+    echoes_exemplar,
+)
+from services.llm.base import Message
+from services.llm.errors import LLMErrorEcho, LLMToolLoopExhausted
+from models.report_spec import (
+    BLOCK_MAX, CHART_POINTS_MAX, CHART_POINTS_MIN, HEADLINE_MAX, KPI_MAX,
+    TABLE_COLUMNS_MAX, TABLE_ROWS_MAX, TEXT_BODY_MAX, TITLE_MAX,
+    ChartBlock, ReportSpec, TableBlock, TextBlock,
+)
+from tools.tool_json import dumps_tool_result
+
+logger = logging.getLogger(__name__)
+
+# More room than a question: a report gathers several figures. Still a cap,
+# because a model that keeps asking for one more query is not converging.
+MAX_REPORT_TOOL_ITERATIONS = 8
+# The compose call. A full spec is a few hundred tokens; this is headroom.
+REPORT_MAX_TOKENS = 3000
+
+# A figure "appears in a result" if it equals one to rounding: half a unit or
+# half a percent, whichever is larger. The model copies raw values, but a SQL
+# AVG returns 4774.8211 and the model may write 4774.82 -- that is a copy, not
+# an invention. Anything looser would let an invented number through.
+_ABS_TOLERANCE = 0.5
+_REL_TOLERANCE = 0.005
+
+REPORT_BRIEF = (
+    "You are preparing a ONE-PAGE executive summary for the shop owner, in two stages.\n"
+    "Stage 1, now: gather the figures with execute_sql. Decide which sections the request "
+    "needs, run the queries, and compute EVERY derived figure in SQL -- totals, averages, "
+    "rates, shares, month-by-month splits -- never in your head. Use $2 for today's date "
+    "and state the period you chose as dates. When the data is gathered, reply with the "
+    "single word READY and nothing else; do not write the report yet.\n"
+    "Stage 2, when asked: the report as JSON matching the schema you will be given. "
+    f"A title of at most {TITLE_MAX} characters naming the subject; the period as start and "
+    f"end dates plus a short label; a headline of at most {HEADLINE_MAX} characters; up to "
+    f"{KPI_MAX} KPI tiles; up to {BLOCK_MAX} blocks, each a table (at most {TABLE_ROWS_MAX} rows "
+    f"and {TABLE_COLUMNS_MAX} columns, cells aligned with the columns), a chart "
+    f"({CHART_POINTS_MIN} to {CHART_POINTS_MAX} points), or one text block of at most two "
+    f"sentences ({TEXT_BODY_MAX} characters). Numbers over words. Every number in the report "
+    "must be a value that appeared in a query result. Values are raw numbers: never format "
+    "them, declare a format (currency, integer, percent, plain) and the renderer will."
+)
+COMPOSE_REQUEST = (
+    "Now write the report as JSON matching the schema. Use only figures present in the "
+    "query results above, as raw numbers. period_start and period_end are YYYY-MM-DD."
+)
+
+
+def _numbers_in(value: Any, out: set[float]) -> None:
+    """Every numeric value reachable in a tool result, as floats."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float, Decimal)):
+        f = float(value)
+        if math.isfinite(f):
+            out.add(f)
+        return
+    if isinstance(value, str):
+        try:
+            f = float(value.replace(",", "").replace("$", "").strip())
+        except ValueError:
+            return
+        if math.isfinite(f):
+            out.add(f)
+        return
+    if isinstance(value, dict):
+        for v in value.values():
+            _numbers_in(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _numbers_in(v, out)
+
+
+def _traceable(x: float, seen: set[float]) -> bool:
+    if x in seen:
+        return True
+    return any(abs(x - v) <= max(_ABS_TOLERANCE, abs(v) * _REL_TOLERANCE) for v in seen)
+
+
+def _figures(spec: ReportSpec) -> list[tuple[str, float]]:
+    """Every number the report asserts, with where it sits."""
+    out: list[tuple[str, float]] = []
+    for i, kpi in enumerate(spec.kpis):
+        out.append((f"kpis[{i}] {kpi.label}", kpi.value))
+    for b, block in enumerate(spec.blocks):
+        if isinstance(block, TableBlock):
+            rows = list(block.rows) + ([block.total_row] if block.total_row else [])
+            for r, row in enumerate(rows):
+                for c, cell in enumerate(row):
+                    if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+                        out.append((f"blocks[{b}] {block.title} row {r} col {c}", float(cell)))
+        elif isinstance(block, ChartBlock):
+            for p, point in enumerate(block.points):
+                out.append((f"blocks[{b}] {block.title} point {p} {point.label}", point.value))
+    return out
+
+
+def untraceable_figures(spec: ReportSpec, seen: set[float]) -> list[tuple[str, float]]:
+    """The numbers in the spec that appeared in no query result."""
+    return [(where, x) for where, x in _figures(spec) if not _traceable(x, seen)]
+
+
+def _chart_config_for(block: ChartBlock, request: str) -> dict | None:
+    """A chart block through the chat gate: validate, refuse an echo, pick the type."""
+    config = {
+        "chart_type": block.chart_type,
+        "data": [{"label": p.label, "value": p.value} for p in block.points],
+        "x_key": "label",
+        "y_key": "value",
+        "x_label": block.x_label,
+        "y_label": block.y_label,
+    }
+    return _select_chart_type(_drop_exemplar_echo(_validate_chart_config(config)), request)
+
+
+def render_blocks(spec: ReportSpec, request: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """The blocks as the browser draws them, and the titles of any it will not see."""
+    blocks: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for block in spec.blocks:
+        if isinstance(block, ChartBlock):
+            config = _chart_config_for(block, request)
+            if config is None:
+                dropped.append(block.title)
+                continue
+            blocks.append({"type": "chart", "title": block.title, "note": block.note, "chart_config": config})
+        elif isinstance(block, TableBlock):
+            blocks.append(block.model_dump(mode="json"))
+        elif isinstance(block, TextBlock):
+            blocks.append(block.model_dump(mode="json"))
+    return blocks, dropped
+
+
+async def run(ctx: JobContext) -> dict[str, Any]:
+    """Gather, compose, check. Returns the shape ai_jobs.result stores."""
+    from services.insights_service import _build_chat_system_prompt
+    from tools.chat_tools import CHAT_TOOLS
+    from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
+
+    request = (ctx.payload.get("request") or "").strip()
+    if not request:
+        raise ValueError("report job payload has no request")
+    raw_today = ctx.payload.get("today")
+    today = date.fromisoformat(raw_today) if raw_today else None
+
+    # The SAME system turn as chat, so the KV prefix is shared. The brief is the
+    # first user turn, never part of the system prompt, for the same reason the
+    # conversation summary is not.
+    system_prompt = _build_chat_system_prompt()
+    messages = [
+        Message(role="system", content=system_prompt),
+        Message(role="user", content=f"{REPORT_BRIEF}\n\nThe request: {request}"),
+    ]
+
+    tool_names: list[str] = []
+    tool_trace: list[dict[str, Any]] = []
+    seen: set[float] = set()
+    tokens_used = 0
+    refused = 0
+    sql_ok = 0
+    sql_failed = 0
+    corrected = False
+    result = None
+
+    for _ in range(MAX_REPORT_TOOL_ITERATIONS):
+        result = await llm.complete(
+            ctx.feature, messages, max_tokens=insights.MAX_TOKENS, tools=CHAT_TOOLS,
+            request_id=ctx.request_id, chain=ctx.chain, audit_writer=ctx.audit_writer,
+        )
+        tokens_used += result.tokens_in + result.tokens_out
+
+        if not result.tool_calls:
+            if sql_failed and not sql_ok and not corrected:
+                corrected = True
+                messages = messages + insights._correction_turns(result.text)
+                continue
+            break
+
+        tool_results = [(call, await insights._run_tool(ctx.company_id, call, today)) for call in result.tool_calls]
+        refused += sum(1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND)
+        for call, r in tool_results:
+            if call.name != "execute_sql":
+                continue
+            trace: dict[str, Any] = {
+                "sql": call.arguments.get("sql", ""),
+                "description": call.arguments.get("description", ""),
+            }
+            if "error" not in r:
+                sql_ok += 1
+                trace["row_count"] = r.get("row_count")
+                # Every value the model may later assert. Counts too: "84 jobs" is
+                # legitimately COUNT(*), which arrives as a cell like any other.
+                _numbers_in(r.get("rows"), seen)
+                _numbers_in(r.get("row_count"), seen)
+            else:
+                trace["error_kind"] = r.get("error_kind")
+                if r.get("error_kind") == SQL_ERROR_KIND:
+                    sql_failed += 1
+            tool_trace.append(trace)
+
+        messages = messages + [
+            Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
+        ] + [
+            Message(role="tool", tool_call_id=call.id, content=dumps_tool_result(r))
+            for call, r in tool_results
+        ]
+        tool_names.extend(call.name for call in result.tool_calls)
+    else:
+        raise LLMToolLoopExhausted(
+            f"the report loop reached {MAX_REPORT_TOOL_ITERATIONS} iterations without gathering "
+            f"({refused} refused-object result(s))",
+            feature=ctx.feature, request_id=ctx.request_id,
+            provider=result.provider if result else None, model=result.model if result else None,
+            tokens_out=tokens_used,
+        )
+
+    if not sql_ok:
+        # No figure can be traced to a query, so no report can be written. Not an
+        # answer dressed as one.
+        raise LLMErrorEcho(
+            f"[report_no_data] no query succeeded before composing ({sql_failed} failed, {refused} refused)",
+            feature=ctx.feature, request_id=ctx.request_id,
+            provider=result.provider, model=result.model, tokens_out=tokens_used,
+        )
+
+    # Compose: one schema-constrained call over the gathered results. No tools,
+    # so the grammar applies cleanly; the same system turn, so the prefix holds.
+    compose = messages
+    if result.text.strip():
+        compose = compose + [Message(role="assistant", content=result.text)]
+    compose = compose + [Message(role="user", content=COMPOSE_REQUEST)]
+
+    spec: ReportSpec | None = None
+    for attempt in (1, 2):
+        composed = await llm.complete(
+            ctx.feature, compose, json_schema=ReportSpec, max_tokens=REPORT_MAX_TOKENS,
+            request_id=ctx.request_id, chain=ctx.chain, audit_writer=ctx.audit_writer,
+        )
+        tokens_used += composed.tokens_in + composed.tokens_out
+        spec = ReportSpec.model_validate_json(composed.text)
+
+        bad = untraceable_figures(spec, seen)
+        if not bad:
+            break
+        if attempt == 2:
+            raise LLMErrorEcho(
+                f"[ungrounded_figures] {len(bad)} figure(s) appear in no query result after one "
+                f"repair: {', '.join(f'{where}={x:g}' for where, x in bad[:6])}",
+                feature=ctx.feature, request_id=ctx.request_id,
+                provider=composed.provider, model=composed.model, tokens_out=tokens_used,
+            )
+        problems = "; ".join(f"{where} = {x:g}" for where, x in bad[:12])
+        compose = compose + [
+            Message(role="assistant", content=composed.text),
+            Message(role="user", content=(
+                f"These figures appear in no query result: {problems}. Replace each with a value "
+                f"that does appear in the results above, or remove it, and reply with the full "
+                f"report JSON again. Do not compute new figures."
+            )),
+        ]
+
+    assert spec is not None
+    for text in [spec.headline, *(b.body for b in spec.blocks if isinstance(b, TextBlock))]:
+        rule = classify_non_answer(text) or ("exemplar_echo" if echoes_exemplar(text) else None)
+        if rule:
+            raise LLMErrorEcho(
+                f"[report_prose:{rule}] {text[:insights._REJECTED_ECHO_CHARS]!r}",
+                feature=ctx.feature, request_id=ctx.request_id,
+                provider=composed.provider, model=composed.model, tokens_out=tokens_used,
+            )
+
+    blocks, dropped = render_blocks(spec, request)
+    report = {
+        "title": spec.title,
+        "period_start": spec.period_start.isoformat(),
+        "period_end": spec.period_end.isoformat(),
+        "period_label": spec.period_label,
+        "headline": spec.headline,
+        "kpis": [k.model_dump(mode="json") for k in spec.kpis],
+        "blocks": blocks,
+    }
+    return {
+        "report": report,
+        "dropped": dropped,
+        "tool_calls": tool_names,
+        "tool_trace": tool_trace,
+        "provider": composed.provider,
+        "model": composed.model,
+        "tokens_used": tokens_used,
+        "not_permitted": refused,
+    }
+
+
+__all__ = ["MAX_REPORT_TOOL_ITERATIONS", "REPORT_BRIEF", "REPORT_MAX_TOKENS", "render_blocks", "run", "untraceable_figures"]

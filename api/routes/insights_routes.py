@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
-from models.insights_models import ChatEnqueued, ChatRequest
+from models.insights_models import ChatEnqueued, ChatRequest, ReportRequest
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
 from services.llm.errors import (
@@ -386,6 +386,50 @@ async def chat(company_id: str, request: ChatRequest):
         return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
 
     await _run_inline(db, job, question=request.question, company_id=company_id)
+    return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
+
+
+@router.post("/{company_id}/report", response_model=ChatEnqueued, status_code=202)
+async def report(company_id: str, request: ReportRequest):
+    """Enqueue a one-page executive summary. The spec arrives on the job row.
+
+    The SAME door as a question: flag, cap, sweep, heartbeat. A report is one job
+    that makes several model calls, so it counts once against the cap and holds
+    the single slot for a few minutes; the browser renders the resulting spec to
+    PDF itself (utils/reportPdf.ts). No storage object, no backend rendering.
+    """
+    ai_enabled, chat_limit = _get_company_ai_settings(company_id)
+    if not ai_enabled:
+        raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
+    _check_chat_rate_limit(company_id, chat_limit)
+
+    db = _get_supabase_service_role()
+    ai_jobs.sweep(db)
+
+    try:
+        rows = ai_jobs.enqueue(
+            db,
+            company_id=company_id,
+            feature="insights",
+            payload={
+                "kind": "report",
+                "request": request.request,
+                "today": _client_today(request.today).isoformat(),
+            },
+            kind="report",
+        )
+    except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
+        raise _map_llm_error(exc) from exc
+    except Exception as exc:
+        logger.error("insights report enqueue failed: %s", exc, exc_info=True)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    job = rows[0]
+    if job["executor"] == "worker":
+        return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
+
+    await _run_inline(db, job, question=request.request, company_id=company_id)
     return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
 
 

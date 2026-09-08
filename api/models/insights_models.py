@@ -26,6 +26,18 @@ class ChatRequest(BaseModel):
     thread_id: UUID | None = Field(default=None, description="ai_chat_threads.id this question continues")
 
 
+class ReportRequest(BaseModel):
+    """What the owner wants a one-page summary of, in their words.
+
+    Same door as a question -- the flag, the cap, the worker's heartbeat -- and
+    the same job row with kind='report'. The answer is a ReportSpec on the job's
+    result, rendered to PDF in the browser.
+    """
+
+    request: str = Field(..., max_length=500, description="What the report should cover")
+    today: date = Field(..., description="The caller's LOCAL calendar date, bound as $2 in generated SQL")
+
+
 class ChatEnqueued(BaseModel):
     """What POST /chat returns now that answering is asynchronous.
 

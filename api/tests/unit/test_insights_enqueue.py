@@ -14,7 +14,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from models.insights_models import ChatRequest
+from models.insights_models import ChatRequest, ReportRequest
 from routes import insights_routes as routes
 from services import ai_jobs
 from services.llm.errors import (
@@ -359,6 +359,61 @@ class TestTheThread:
                 await self._post(thread_id=THREAD)
         assert exc.value.status_code == 500
         enqueue.assert_not_called()
+
+
+class TestTheReportDoor:
+    """A report is the same door as a question: flag, cap, sweep, heartbeat -- and one
+    job row with kind='report' whose payload says so too."""
+
+    async def _post(self, request="operations summary for June to September"):
+        return await routes.report(
+            "co-1", ReportRequest(request=request, today=datetime.now(timezone.utc).date()),
+        )
+
+    async def test_a_disabled_company_cannot_enqueue_a_report(self):
+        with patch.object(routes, "_get_company_ai_settings", return_value=(False, 20)), \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._post()
+        assert exc.value.status_code == 403
+        enqueue.assert_not_called()
+
+    async def test_the_cap_counts_a_report_like_a_question(self):
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit",
+                          side_effect=HTTPException(status_code=429, detail="Rate limit exceeded.")), \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._post()
+        assert exc.value.status_code == 429
+        enqueue.assert_not_called()
+
+    async def test_a_report_is_its_own_kind_with_the_request_in_the_payload(self):
+        job = {"id": "job-r", "status": "queued", "executor": "worker",
+               "feature": "insights", "request_id": "r", "payload": {}}
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes.ai_jobs, "enqueue", return_value=[job]) as enqueue:
+            res = await self._post()
+        assert res.job_id == "job-r" and res.executor == "worker"
+        kwargs = enqueue.call_args.kwargs
+        assert kwargs["kind"] == "report" and kwargs["feature"] == "insights"
+        assert kwargs["payload"]["kind"] == "report"
+        assert kwargs["payload"]["request"] == "operations summary for June to September"
+        assert "today" in kwargs["payload"]
+
+    async def test_an_offline_box_refuses_a_report_the_same_way(self):
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes.ai_jobs, "enqueue",
+                          side_effect=ai_jobs.AiUnavailable("The AI box is offline right now.")):
+            with pytest.raises(HTTPException) as exc:
+                await self._post()
+        assert exc.value.status_code == 503
 
 
 class TestTheClientsDate:

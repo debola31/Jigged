@@ -31,7 +31,13 @@ class Config:
     # Capped at 8 in SQL too. Claim size IS the worst-case interactive latency,
     # because preemption only happens at a claim boundary.
     claim_limit: int = 8
-    request_timeout_s: float = 120.0
+    # Per model call. MEASURED, not guessed: on the 48 GB M4 Max the FIRST call
+    # to a cold qwen3:32b -- load plus the ~13K-token prefill -- ran past 120 s and
+    # was reported as `ai_offline` while the box was alive; the warm median was 25 s
+    # because the prefix cache absorbs the prefill. 240 covers the cold path. The
+    # cost is a hung Ollama taking four minutes to fail a job, which the UI never
+    # waits for: its offline verdict comes from the heartbeat, not from this.
+    request_timeout_s: float = 240.0
     version: str = "1"
     extra: dict = field(default_factory=dict)
 

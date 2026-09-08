@@ -40,6 +40,8 @@ export interface ChatResponse {
   provider: string;
   model?: string | null;
   tokens_used: number | null;
+  /** The templated "I can only answer questions about this shop" refusal. */
+  off_topic?: boolean;
 }
 
 export interface SavedInsight {
@@ -220,6 +222,7 @@ export function chatResultOf(job: AiJob | null): ChatResponse | null {
     provider: typeof candidate.provider === 'string' ? candidate.provider : 'unknown',
     model: typeof candidate.model === 'string' ? candidate.model : null,
     tokens_used: typeof candidate.tokens_used === 'number' ? candidate.tokens_used : null,
+    off_topic: candidate.off_topic === true,
   };
 }
 

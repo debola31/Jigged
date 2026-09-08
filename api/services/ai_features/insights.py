@@ -35,6 +35,8 @@ from typing import Any
 from services import llm
 from services.ai_features.base import JobContext
 from services.insights_presentation import (
+    OFF_TOPIC_REPLY,
+    _drop_exemplar_echo,
     _extract_chart_config,
     _flatten_markdown_tables,
     _select_chart_type,
@@ -42,6 +44,7 @@ from services.insights_presentation import (
     _strip_inline_markdown,
     _validate_chart_config,
     classify_non_answer,
+    echoes_exemplar,
 )
 from services.llm.base import Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
@@ -434,6 +437,11 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # -- the final turn was not an answer -- and splitting it would cost a
     # migration to say something the reason in the message already says.
     non_answer = classify_non_answer(answer) if not sql_ok else None
+    if non_answer is None and echoes_exemplar(answer):
+        # THE ONE RULE APPLIED TO A GROUNDED ANSWER TOO. The format example's
+        # labels cannot be shop data, so a sentence carrying them is the example
+        # read back -- developer text reaching the user -- whatever query ran.
+        non_answer = "exemplar_echo"
     if non_answer:
         raise LLMErrorEcho(
             f"the model's final turn carried no answer and no successful query "
@@ -447,7 +455,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         )
 
     chart_config = _select_chart_type(
-        _validate_chart_config(_extract_chart_config(raw)), question
+        _drop_exemplar_echo(_validate_chart_config(_extract_chart_config(raw))), question
     )
 
     # COMPACTION, AFTER THE ANSWER. The answer is the deliverable and is already
@@ -490,6 +498,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # Zero is the acceptance bar: a refused object should end the turn, so a
         # non-zero count means the context is still advertising what it cannot read.
         "not_permitted": refused,
+        # The templated refusal for a question that is not about the shop, flagged
+        # so PostHog can count the rate without reading a question. Exact match:
+        # the template is prose with no markdown, so the scrub leaves it intact.
+        "off_topic": answer.strip() == OFF_TOPIC_REPLY,
         # Read by the ai_jobs trigger, never by the browser: a summary row is
         # written only when these are set.
         "summary": summary,

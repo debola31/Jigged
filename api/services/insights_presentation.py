@@ -117,6 +117,73 @@ def _strip_inline_markdown(content: str) -> str:
     return content.strip()
 
 
+# ---- the chart exemplar, and the guard that keeps it out of answers ----------
+#
+# WHY THE PROMPT CARRIES A WORKED CHART. A local 32B given only a key sketch of
+# chart_config emitted a valid chart on a fraction of the questions that wanted
+# one; a complete example -- question, one-sentence answer, fenced block -- is
+# what a smaller model imitates reliably. The prompt used to carry NO worked
+# answer at all because a local arm once pasted semantics.md's model answer back
+# to the user, placeholders and all. That failure class is the same one this
+# example risks: developer-facing text reaching the user. So the example is
+# labelled a placeholder, its labels are ones no shop's data can hold, and the
+# guard below discards any chart or sentence that carries them -- the one rule in
+# this file applied even to an answer with a successful query behind it, because
+# this vocabulary is ours and cannot be shop data.
+#
+# Vendor spend, deliberately: no eval question (evals/insights_ab.py
+# DEFAULT_QUESTIONS) and no ask-bar example chip concerns vendors, so the example
+# can never be the answer to a question the eval measures -- the control
+# ai-insights.md says never to hand-author an exemplar for.
+
+CHART_EXEMPLAR_QUESTION = "How much have we spent with each vendor this year?"
+CHART_EXEMPLAR_ANSWER = (
+    "Example Vendor A leads at $1,000, ahead of Example Vendor B ($750) and "
+    "Example Vendor C ($500)."
+)
+CHART_EXEMPLAR: dict = {
+    "chart_type": "bar",
+    "data": [
+        {"vendor": "Example Vendor A", "spend": 1000},
+        {"vendor": "Example Vendor B", "spend": 750},
+        {"vendor": "Example Vendor C", "spend": 500},
+    ],
+    "x_key": "vendor",
+    "y_key": "spend",
+    "x_label": "Vendor",
+    "y_label": "Spend ($)",
+}
+_EXEMPLAR_LABELS = frozenset(str(row["vendor"]).casefold() for row in CHART_EXEMPLAR["data"])
+
+# The templated refusal for a question that is not about the shop. Exact text,
+# so the handler can flag the turn (result.off_topic) and PostHog can count the
+# rate without reading a single question. Prose, so the answer gate lets it
+# through -- it is an answer, just not one that needed a query.
+OFF_TOPIC_REPLY = "I can only answer questions about this shop's data in Jigged."
+
+
+def echoes_exemplar(text: str) -> bool:
+    """True when the text carries one of the format example's placeholder labels."""
+    folded = (text or "").casefold()
+    return any(label in folded for label in _EXEMPLAR_LABELS)
+
+
+def _drop_exemplar_echo(config: dict | None) -> dict | None:
+    """The example's own labels in a chart mean the chart is the example, not data.
+
+    Separate from _validate_chart_config on purpose: the example itself must stay
+    shape-valid (a test asserts it), and the eval's `chart_valid` column reads the
+    validator alone.
+    """
+    if not isinstance(config, dict):
+        return None
+    x_key = config.get("x_key")
+    for row in config.get("data") or []:
+        if isinstance(row, dict) and str(row.get(x_key, "")).strip().casefold() in _EXEMPLAR_LABELS:
+            return None
+    return config
+
+
 # ---- is this an answer at all? ----------------------------------------------
 
 # OUR OWN MACHINE STRINGS. Whatever else they are, they are not English a shop
@@ -196,6 +263,10 @@ def classify_non_answer(answer: str) -> str | None:
         return "empty"
     if any(marker in text for marker in _MACHINE_STRINGS):
         return "machine_string"
+    # The one VOCABULARY rule here, permitted because the vocabulary is ours: the
+    # format example's placeholder labels cannot be shop data.
+    if echoes_exemplar(text):
+        return "exemplar_echo"
     if any(pattern.search(text) for pattern in _ERROR_ECHO):
         return "error_echo"
     if _TOOL_TAG.search(text):

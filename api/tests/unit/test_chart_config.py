@@ -15,6 +15,7 @@ from routes.insights_routes import (
     _strip_inline_markdown,
     _validate_chart_config,
 )
+from services.insights_presentation import CHART_EXEMPLAR, _drop_exemplar_echo
 
 pytestmark = pytest.mark.unit
 
@@ -31,6 +32,12 @@ def cfg(chart_type="bar", x_key="customer", y_key="revenue", data=None):
 class TestValidateChartConfig:
     def test_none_returns_none(self):
         assert _validate_chart_config(None) is None
+
+    def test_the_prompts_format_example_is_valid_but_downgraded_by_the_echo_guard(self):
+        """The handler's chain: validate, then drop an echo of the example, then
+        select. The example passes the first step by design and dies at the second."""
+        assert _validate_chart_config(CHART_EXEMPLAR) is CHART_EXEMPLAR
+        assert _select_chart_type(_drop_exemplar_echo(_validate_chart_config(CHART_EXEMPLAR))) is None
 
     def test_valid_multi_category_kept(self):
         c = cfg(data=[

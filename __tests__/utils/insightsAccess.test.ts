@@ -16,7 +16,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 vi.mock('@/lib/api', () => ({ API_BASE_URL: 'http://api.test' }));
 
-import { ChatEnqueueError, submitChatQuery } from '@/utils/insightsAccess';
+import { ChatEnqueueError, chatResultOf, submitChatQuery, type AiJob } from '@/utils/insightsAccess';
 
 function response(status: number, body: unknown): Response {
   return {
@@ -25,6 +25,23 @@ function response(status: number, body: unknown): Response {
     json: async () => body,
   } as unknown as Response;
 }
+
+describe('chatResultOf', () => {
+  const job = (result: unknown): AiJob => ({
+    id: 'j', status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+  });
+
+  it('narrows the off-topic flag to a boolean and defaults it off', () => {
+    expect(chatResultOf(job({ answer: 'I can only answer questions about this shop.', off_topic: true }))?.off_topic).toBe(true);
+    expect(chatResultOf(job({ answer: 'Four.' }))?.off_topic).toBe(false);
+    expect(chatResultOf(job({ answer: 'Four.', off_topic: 'yes' }))?.off_topic).toBe(false);
+  });
+
+  it('a result without an answer is no result', () => {
+    expect(chatResultOf(job({ chart_config: null }))).toBeNull();
+  });
+});
 
 describe('submitChatQuery', () => {
   const fetchMock = vi.fn();

@@ -179,6 +179,10 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       error_kind: job.job?.error_kind ?? null,
       has_chart: !!job.result?.chart_config,
       tool_call_count: job.result?.tool_calls?.length ?? 0,
+      // The templated refusal for a question that was not about the shop. The
+      // rate is the trigger for building an input gate; the question itself never
+      // leaves its row.
+      off_topic: !!job.result?.off_topic,
     });
   }, [job.phase, job.job, job.result]);
 

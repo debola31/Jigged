@@ -38,6 +38,7 @@ import pytest
 
 from services.ai_features import insights
 from services.ai_features.base import JobContext
+from services.insights_presentation import CHART_EXEMPLAR, CHART_EXEMPLAR_ANSWER, OFF_TOPIC_REPLY
 from services.llm.base import LLMResult, Message, ToolCall
 from services.llm.errors import LLMErrorEcho, LLMToolLoopExhausted
 from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
@@ -228,6 +229,57 @@ async def test_an_empty_answer_never_appends_an_empty_assistant_turn():
     for turn in convo.seen[-1]:
         if turn.role == "assistant" and not turn.tool_calls:
             assert turn.text().strip(), "an empty assistant turn reached the provider"
+
+
+# ---------------------------------------------- 1d: the example stays in the prompt
+
+EXAMPLE_PASTED_BACK = CHART_EXEMPLAR_ANSWER + "\n```json\n" + json.dumps(CHART_EXEMPLAR) + "\n```"
+
+
+async def test_the_format_example_pasted_back_with_no_query_is_refused():
+    convo = Conversation(turns=[_answer(EXAMPLE_PASTED_BACK)])
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+    assert "exemplar_echo" in str(exc.value)
+
+
+async def test_the_format_example_pasted_back_after_a_real_query_is_still_refused():
+    """THE ONE EXCEPTION to "if any query succeeded the answer passes": the example's
+    labels cannot be shop data, so this is developer text reaching the user
+    whatever ran before it."""
+    convo = Conversation(turns=[_asks_for_sql(), _answer(EXAMPLE_PASTED_BACK)], tool_results=[SQL_OK])
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+    assert "exemplar_echo" in str(exc.value)
+
+
+async def test_a_real_chart_after_a_real_query_survives_the_guard():
+    real = {**CHART_EXEMPLAR, "data": [
+        {"vendor": "Acme Steel", "spend": 12400},
+        {"vendor": "Helix Alloys", "spend": 9800},
+        {"vendor": "Northern Bar Stock", "spend": 4100},
+    ]}
+    text = "Acme Steel leads at $12,400.\n```json\n" + json.dumps(real) + "\n```"
+    convo = Conversation(turns=[_asks_for_sql(), _answer(text)], tool_results=[SQL_OK])
+    result = await run(convo)
+    assert result["answer"] == "Acme Steel leads at $12,400."
+    assert result["chart_config"] is not None
+    assert result["chart_config"]["data"][0]["vendor"] == "Acme Steel"
+
+
+async def test_the_off_topic_template_is_an_answer_and_is_flagged():
+    """No query, no figure, and not a non-answer: the shop asked for a poem and
+    was told what this assistant is for. Flagged so the rate is countable."""
+    convo = Conversation(turns=[_answer(OFF_TOPIC_REPLY)])
+    result = await run(convo)
+    assert result["answer"] == OFF_TOPIC_REPLY
+    assert result["off_topic"] is True
+
+
+async def test_an_ordinary_answer_is_not_flagged_off_topic():
+    convo = Conversation(turns=[_asks_for_sql(), _answer("You have 4 late jobs.")], tool_results=[SQL_OK])
+    result = await run(convo)
+    assert result["off_topic"] is False
 
 
 # --------------------------------------------------------- 1c: the answer gate

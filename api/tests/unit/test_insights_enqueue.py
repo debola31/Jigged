@@ -7,7 +7,9 @@ status a human sentence can go with, and that sentence is a plain string.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +19,7 @@ from routes import insights_routes as routes
 from services import ai_jobs
 from services.llm.errors import (
     LLMChainExhausted,
+    LLMContextOverflow,
     LLMErrorEcho,
     LLMNotConfigured,
     LLMRequestError,
@@ -34,6 +37,7 @@ ALL_FAILURES = [
     LLMNotConfigured("no chain"),
     LLMChainExhausted("insights", "rid", [LLMTimeout("slow", provider="ollama")]),
     LLMChainExhausted("insights", "rid", [LLMProviderError("500", provider="anthropic")]),
+    LLMChainExhausted("insights", "rid", [LLMContextOverflow("too long", provider="ollama")]),
     LLMToolLoopExhausted("too many turns"),
     LLMErrorEcho("the final turn was the tool's error text"),
     RuntimeError("something else entirely"),
@@ -78,6 +82,10 @@ def test_no_error_message_leaks_a_vendor_name_to_the_user():
     (LLMChainExhausted("insights", "r", [LLMTimeout("s", provider="ollama")]), "ai_offline"),
     (LLMChainExhausted("insights", "r", [LLMProviderError("s", provider="anthropic")]), "provider"),
     (LLMNotConfigured("none"), "ai_offline"),
+    # The prompt outgrew the window: the box is up, nothing broke, and only the
+    # user can fix it by starting a new conversation. Its own kind so the copy can
+    # say that instead of "you can ask again".
+    (LLMChainExhausted("insights", "r", [LLMContextOverflow("long", provider="ollama")]), "context_overflow"),
     # Its own kind, not 'internal'. A model reading a database error back is not
     # a bug in our code, and the whole reason the gate exists is so this failure
     # can be counted -- which needs it to be separable in the job rows.
@@ -99,7 +107,7 @@ class TestTheOnlyDoor:
     aborting the whole session. A unit file must never reach it.
     """
 
-    async def _post(self, question="how many jobs are late?", today=None):
+    async def _post(self, question="how many jobs are late?", today=None, thread_id=None):
         # `today` is the caller's LOCAL date and is required: the sandbox binds it
         # as $2 and refuses CURRENT_DATE, so there is no server-side fallback to
         # fall back TO. Defaulted to the server's own date here so these tests stay
@@ -110,6 +118,7 @@ class TestTheOnlyDoor:
             ChatRequest(
                 question=question,
                 today=today or datetime.now(timezone.utc).date(),
+                thread_id=thread_id,
             ),
         )
 
@@ -189,6 +198,167 @@ class TestTheOnlyDoor:
              patch.object(routes.ai_jobs, "enqueue", return_value=[job]):
             await self._post()
         sweep.assert_called_once()
+
+
+THREAD = UUID("00000000-0000-0000-0000-00000000aaaa")
+
+
+class _Chain:
+    """One PostgREST-shaped fluent fake: table(name)...execute().data."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getattr__(self, name):
+        return lambda *a, **k: self
+
+    def execute(self):
+        return SimpleNamespace(data=self._data)
+
+
+class _ThreadDb:
+    def __init__(self, threads, messages):
+        self.threads, self.messages = threads, messages
+
+    def table(self, name):
+        return _Chain(self.threads if name == "ai_chat_threads" else self.messages)
+
+
+def _msgs(*rows):
+    return [
+        {"seq": seq, "role": role, "content": content, "covers_through_seq": covers}
+        for seq, role, content, covers in rows
+    ]
+
+
+class TestTheThread:
+    """A conversation's replay set rides in the payload, built from the thread the
+    browser created -- and it is the only thing the route READS about a thread.
+    It never writes a message; the ai_jobs trigger does that when the job succeeds."""
+
+    # Same shape as TestTheOnlyDoor._post, not inherited: a subclass would collect
+    # that class's tests a second time.
+    async def _post(self, question="how many jobs are late?", today=None, thread_id=None):
+        return await routes.chat(
+            "co-1",
+            ChatRequest(
+                question=question,
+                today=today or datetime.now(timezone.utc).date(),
+                thread_id=thread_id,
+            ),
+        )
+
+    def test_the_replay_set_is_the_latest_summary_and_every_turn_after_it(self):
+        db = _ThreadDb(
+            threads=[{"id": str(THREAD), "company_id": "co-1", "deleted_at": None}],
+            messages=_msgs(
+                (1, "user", "q1", None), (2, "assistant", "a1", None),
+                (3, "summary", "S-old", 2),
+                (4, "user", "q2", None), (5, "assistant", "a2", None),
+                (6, "summary", "S-new", 4),
+                (7, "user", "q3", None), (8, "assistant", "a3", None),
+            ),
+        )
+        replay = routes._thread_replay(db, "co-1", str(THREAD))
+        assert replay["thread_id"] == str(THREAD)
+        # The NEWEST summary, and only what it does not already cover.
+        assert replay["summary"] == {"content": "S-new", "covers_through_seq": 4}
+        assert [(t["seq"], t["role"]) for t in replay["history"]] == [
+            (5, "assistant"), (7, "user"), (8, "assistant"),
+        ]
+
+    def test_a_thread_with_no_summary_replays_everything(self):
+        db = _ThreadDb(
+            threads=[{"id": str(THREAD), "company_id": "co-1", "deleted_at": None}],
+            messages=_msgs((1, "user", "q1", None), (2, "assistant", "a1", None)),
+        )
+        replay = routes._thread_replay(db, "co-1", str(THREAD))
+        assert replay["summary"] is None
+        assert [t["seq"] for t in replay["history"]] == [1, 2]
+
+    @pytest.mark.parametrize("threads", [
+        pytest.param([], id="unknown"),
+        pytest.param([{"id": "t", "company_id": "co-2", "deleted_at": None}], id="another-company"),
+        pytest.param([{"id": "t", "company_id": "co-1", "deleted_at": "2026-09-01T00:00:00Z"}], id="archived"),
+    ])
+    def test_a_thread_that_is_not_this_shops_live_one_is_not_available(self, threads):
+        """The route trusts thread_id from the body, so the company check is the
+        one integrity it can enforce itself. A plain-string 404, like every detail."""
+        with pytest.raises(HTTPException) as exc:
+            routes._thread_replay(_ThreadDb(threads, []), "co-1", str(THREAD))
+        assert exc.value.status_code == 404
+        assert isinstance(exc.value.detail, str) and "Start a new one" in exc.value.detail
+
+    async def test_a_one_off_question_touches_no_thread_and_writes_no_thread_columns(self):
+        job = {"id": "job-1", "status": "queued", "executor": "worker",
+               "feature": "insights", "request_id": "r", "payload": {}}
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes, "_thread_replay") as replay, \
+             patch.object(routes.ai_jobs, "enqueue", return_value=[job]) as enqueue:
+            await self._post()
+        replay.assert_not_called()
+        kwargs = enqueue.call_args.kwargs
+        assert kwargs["thread_id"] is None and kwargs["kind"] == "chat"
+        assert "history" not in kwargs["payload"] and "thread_id" not in kwargs["payload"]
+
+    async def test_a_conversation_carries_its_replay_set_in_the_payload_and_its_thread_on_the_row(self):
+        job = {"id": "job-1", "status": "queued", "executor": "worker",
+               "feature": "insights", "request_id": "r", "payload": {}}
+        replay = {"thread_id": str(THREAD),
+                  "summary": {"content": "S", "covers_through_seq": 2},
+                  "history": [{"seq": 3, "role": "user", "content": "q"}]}
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes, "_thread_replay", return_value=replay), \
+             patch.object(routes.ai_jobs, "enqueue", return_value=[job]) as enqueue:
+            await self._post(thread_id=THREAD)
+        kwargs = enqueue.call_args.kwargs
+        assert kwargs["thread_id"] == str(THREAD) and kwargs["kind"] == "chat"
+        payload = kwargs["payload"]
+        assert payload["thread_id"] == str(THREAD)
+        assert payload["summary"] == replay["summary"]
+        assert payload["history"] == replay["history"]
+        assert payload["question"] == "how many jobs are late?" and "today" in payload
+
+    async def test_a_second_question_while_one_is_in_flight_is_a_409_with_a_sentence(self):
+        """The unique index, as PostgREST reports it. Not an incident: the row the
+        first question made is the one to wait for."""
+        class APIError(Exception):
+            code = "23505"
+            message = 'duplicate key value violates unique constraint "ai_jobs_one_in_flight_per_thread"'
+
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes, "_thread_replay", return_value={"thread_id": str(THREAD), "summary": None, "history": []}), \
+             patch.object(routes.ai_jobs, "enqueue", side_effect=APIError("dup")), \
+             patch.object(routes.sentry_sdk, "capture_exception") as sentry:
+            with pytest.raises(HTTPException) as exc:
+                await self._post(thread_id=THREAD)
+        assert exc.value.status_code == 409
+        assert isinstance(exc.value.detail, str) and "Still working" in exc.value.detail
+        sentry.assert_not_called()
+
+    async def test_a_history_read_failure_is_a_500_never_a_context_free_answer(self):
+        """Fails VISIBLE, unlike the rate limiter's deliberate fail-open: a question
+        answered without its history is a silently wrong answer."""
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep", return_value=0), \
+             patch.object(routes, "_thread_replay", side_effect=RuntimeError("db down")), \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue, \
+             patch.object(routes.sentry_sdk, "capture_exception"):
+            with pytest.raises(HTTPException) as exc:
+                await self._post(thread_id=THREAD)
+        assert exc.value.status_code == 500
+        enqueue.assert_not_called()
 
 
 class TestTheClientsDate:

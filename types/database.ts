@@ -79,6 +79,73 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_chat_messages: {
+        Row: {
+          chart_config: Json | null
+          company_id: string
+          content: string
+          covers_through_seq: number | null
+          created_at: string
+          id: string
+          job_id: string | null
+          role: string
+          seq: number
+          thread_id: string
+          token_estimate: number | null
+          tool_trace: Json | null
+        }
+        Insert: {
+          chart_config?: Json | null
+          company_id: string
+          content: string
+          covers_through_seq?: number | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          role: string
+          seq: number
+          thread_id: string
+          token_estimate?: number | null
+          tool_trace?: Json | null
+        }
+        Update: {
+          chart_config?: Json | null
+          company_id?: string
+          content?: string
+          covers_through_seq?: number | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          role?: string
+          seq?: number
+          thread_id?: string
+          token_estimate?: number | null
+          tool_trace?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_messages_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_chat_messages_job_fk"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ai_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_chat_messages_thread_fk"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_chat_queries: {
         Row: {
           chart_config: Json | null
@@ -122,6 +189,44 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "ai_chat_queries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_chat_threads: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_chat_threads_company_fk"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -185,6 +290,7 @@ export type Database = {
           feature: string
           finished_at: string | null
           id: string
+          kind: string
           lease_expires_at: string | null
           model: string
           payload: Json
@@ -193,6 +299,7 @@ export type Database = {
           requested_by: string | null
           result: Json | null
           status: string
+          thread_id: string | null
           updated_at: string
         }
         Insert: {
@@ -209,6 +316,7 @@ export type Database = {
           feature: string
           finished_at?: string | null
           id?: string
+          kind?: string
           lease_expires_at?: string | null
           model: string
           payload?: Json
@@ -217,6 +325,7 @@ export type Database = {
           requested_by?: string | null
           result?: Json | null
           status?: string
+          thread_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -233,6 +342,7 @@ export type Database = {
           feature?: string
           finished_at?: string | null
           id?: string
+          kind?: string
           lease_expires_at?: string | null
           model?: string
           payload?: Json
@@ -241,6 +351,7 @@ export type Database = {
           requested_by?: string | null
           result?: Json | null
           status?: string
+          thread_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -249,6 +360,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_jobs_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "ai_chat_threads"
             referencedColumns: ["id"]
           },
         ]

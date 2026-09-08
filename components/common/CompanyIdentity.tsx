@@ -87,34 +87,63 @@ export default function CompanyIdentity({
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showLogo = Boolean(logoUrl) && failedUrl !== logoUrl;
 
+  /**
+   * The tallest a logo may draw. It is a CAP, not a height: the image keeps its own aspect ratio
+   * and the plate takes its size from the result.
+   *
+   * A wide wordmark (Contour is about 7:1) runs out of sidebar long before it reaches this, so it
+   * is width-bound and the cap never bites. A squarer mark (L&L is nearer 1.6:1) is height-bound,
+   * and this is what decides how big it gets to be.
+   */
+  const maxLogoHeight = variant === 'trigger' ? 44 : 52;
+
   const logo = (
     <Box
       component="img"
       src={logoUrl ?? undefined}
       alt={name}
       onError={() => setFailedUrl(logoUrl ?? null)}
-      sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
+      sx={{
+        maxWidth: '100%',
+        maxHeight: maxLogoHeight,
+        width: 'auto',
+        height: 'auto',
+        objectFit: 'contain',
+        display: 'block',
+      }}
     />
   );
 
-  // A white plate, for the same reason the settings preview forces one: shops upload the file they
-  // hand their printer — dark ink, transparent ground — which is invisible on the indigo chrome.
+  /**
+   * A white plate, for the same reason the settings preview forces one: shops upload the file they
+   * hand their printer — dark ink on a transparent ground — which is invisible on the indigo chrome.
+   *
+   * **The plate hugs the artwork; the artwork does not rattle around inside the plate.** A fixed
+   * box has to be tall enough for the tallest logo and wide enough for the widest, which leaves
+   * every other logo stranded in white and looking smaller than it is. Sizing to content instead
+   * means the padding is the only white, so each shop's mark draws as large as its own proportions
+   * allow.
+   */
   const plateSx = {
     bgcolor: 'common.white',
     borderRadius: 1.5,
-    display: 'flex',
+    display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+    width: 'fit-content',
+    maxWidth: '100%',
+    p: 0.75,
   } as const;
 
   if (variant === 'trigger') {
     if (showLogo) {
-      // Flexible, not a fixed width: the sidebar is 240px, and a fixed band plus the caret and the
-      // row's own gaps overflows it.
+      // The wrapper takes the row's free space so the caret keeps its own width — the sidebar is
+      // only 240px and a plate that grabbed all of it would push the caret off the edge. The plate
+      // sits at the start of that space, on the same left rail as the avatar it replaces.
       return (
         <>
-          <Box sx={{ ...plateSx, flex: 1, minWidth: 0, height: 40, px: 1.25, py: 0.75 }}>
-            {logo}
+          <Box sx={{ flex: 1, minWidth: 0, display: 'flex' }}>
+            <Box sx={plateSx}>{logo}</Box>
           </Box>
           {trailing}
         </>
@@ -160,7 +189,9 @@ export default function CompanyIdentity({
     // no baseline for a check mark to sit against.
     return (
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ ...plateSx, width: '100%', height: 46, px: 1.5, py: 0.875 }}>{logo}</Box>
+        <Box sx={{ display: 'flex' }}>
+          <Box sx={plateSx}>{logo}</Box>
+        </Box>
         {(role || trailing) && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.875 }}>
             {role && <Typography sx={{ ...ROLE_SX, flex: 1, minWidth: 0 }}>{role}</Typography>}

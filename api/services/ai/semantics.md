@@ -1,60 +1,36 @@
 # Business term semantics for the insights AI
 
-**This file is documentation and runtime in one.** `_build_chat_system_prompt()` in
-[`api/services/insights_service.py`](../../api/services/insights_service.py) loads and renders it
-into the system prompt. There is no second copy of these definitions in Python — that is the whole
-point, because there used to be, and the two drifted.
-
-**Why it exists.** The Gate 1 eval asked three model arms the same questions and got confidently
-different numbers: *"how many jobs are late right now?"* returned 5, 4 and 0; *"average job value
-this quarter"* returned $5,447 and $3,044. None of the arms was reasoning badly. The terms were
-simply undefined, so each one picked a reasonable reading and stated the result as fact.
-
-**Every SQL block below is executed with `LIMIT 1` under `jigged_ai_readonly` on every CI run**, so a
-definition that references a column or table the sandbox cannot read fails the build rather than
-failing a shop owner.
-
-**Editing rules.** Change this file only in a PR. The assembled prompt is a stable prefix, and
-prompt caching plus Ollama KV reuse depend on it not varying per request.
-
----
+This file is documentation and runtime in one: `_build_chat_system_prompt()` in
+[`api/services/insights_service.py`](../../api/services/insights_service.py) renders it into the
+system prompt, and there is no second copy in Python. Every SQL block below runs under
+`jigged_ai_readonly` with `LIMIT 1` on every CI run, so a definition the sandbox cannot execute fails
+the build rather than a shop owner. Change it only in a PR: the assembled prompt is a cached prefix,
+and prompt caching plus Ollama KV reuse depend on it not varying per request.
 
 ## How to use these definitions
 
-When a question uses one of these terms, use the definition here **even if another reading seems
-reasonable**. When a question uses a term that is *not* here, say which reading you took.
+Use the definition here even when another reading seems reasonable. When a question uses a term that
+is not here, say which reading you took.
 
-`$1` is the company id and the executor binds it. **Rows are already scoped to one company** — never
-join an access-control table and never add a company filter beyond the required `$1`.
-
-**`$2` is today's date, and it is the only clock you have.** `CURRENT_DATE`, `now()` and
-`CURRENT_TIMESTAMP` are refused by the validator, so a query that needs today must use `$2`. The
-reason is not style: this database runs in UTC, and for the last hours of every working day in the
-Americas its date is already tomorrow. `$2` is the date on the calendar where the person asking is
-actually sitting — the same date the jobs list sends into SQL — so an answer from it matches the
-screen beside it. Relative windows are built from it too: `$2::date - INTERVAL '6 months'`,
-`DATE_TRUNC('quarter', $2::date)`.
-
-**Write `$2::date`, not bare `$2`, anywhere the surrounding expression does not already fix the
-type.** A parameter carries no type of its own, so `DATE_TRUNC('quarter', $2)` is ambiguous —
-Postgres cannot tell which `date_trunc` overload was meant — and `$2 - INTERVAL '6 months'` guesses
-`interval` and fails outright. The cast costs nothing and always works. Inside
-`public.is_job_late(...)` the parameter position already declares the type, so a bare `$2` is fine
-there.
-
-**Archived rows are already gone.** Every table you can read is filtered to `deleted_at IS NULL` by
-the connection itself, so never write that clause — it is redundant, and the fact that it is
-enforced rather than remembered is deliberate. Six archived jobs were once reported to a shop owner
-as late because the filter lived in a sentence like this one instead of in the database. The
-consequence to be honest about: you **cannot** answer questions about archived work. Say so plainly
-rather than reporting zero.
+- `$1` is the company id, bound by the executor. Rows are already scoped to one company: never join
+  an access-control table or add a company filter beyond the required `company_id = $1`.
+- `$2` is today's date, the caller's local calendar date, and the only clock you have: `CURRENT_DATE`,
+  `now()` and `CURRENT_TIMESTAMP` are refused, because this database runs in UTC and is already
+  tomorrow for the last hours of every working day in the Americas. Build every relative window from
+  `$2`, and write `$2::date` wherever the expression does not already fix the type:
+  `DATE_TRUNC('quarter', $2)` is ambiguous and `$2 - INTERVAL '6 months'` fails outright. Inside
+  `public.is_job_late(...)` the position declares the type, so a bare `$2` is fine there.
+- Archived rows are already gone: the connection filters every table to `deleted_at IS NULL`, so never
+  write that clause. It also means you cannot answer questions about archived work; say so plainly
+  rather than reporting zero.
+- All `TIMESTAMPTZ` columns are UTC.
 
 ---
 
 ## Late job
 
 **Definition.** A job past its promised date that is not yet in the customer's hands. Work that is
-finished but still sitting on the bench **counts as late** — delivery is the promise.
+finished but still on the bench counts as late: delivery is the promise.
 
 ```sql
 SELECT COUNT(*) AS late_jobs
@@ -63,10 +39,9 @@ WHERE company_id = $1
   AND public.is_job_late(due_date, production_status, fulfillment_status, $2)
 ```
 
-**Do not spell this rule out inline — call the function.** `public.is_job_late()` is the same
-object the jobs list uses through `search_jobs_by_identifier`, so an answer from it is the number on
-the screen. Writing the clauses by hand is how the chat came to report 7 late jobs where the
-dashboard showed 6. It composes anywhere a boolean does:
+Call the function; never spell the rule out inline. `public.is_job_late()` is the object the jobs list
+uses, so an answer from it is the number on the screen, and hand-written clauses once reported 7 late
+jobs where the dashboard showed 6. It composes anywhere a boolean does:
 
 ```sql
 SELECT customer_name, COUNT(*) AS late_jobs
@@ -77,18 +52,15 @@ GROUP BY customer_name
 ORDER BY late_jobs DESC
 ```
 
-**Notes.** `due_date` is a DATE, so "late" flips at midnight, not on a rolling 24 hours, and a job
-due **today is not late** — the comparison is strict. A job with no `due_date` is never late: we
-never promised. Cancelled jobs are excluded because nobody is waiting for them. There is no
-`deleted_at` clause because archived rows are invisible to this connection — see below.
+**Notes.** `due_date` is a DATE, so late flips at midnight and a job due today is not late. A job with
+no `due_date` is never late; cancelled jobs are excluded because nobody is waiting for them.
 
 ---
 
 ## This quarter, and other relative periods
 
-**Definition.** The **calendar** quarter, from its first day through today. There is no fiscal-year
-setting anywhere in the schema, so calendar is the only reading that can be computed rather than
-invented.
+**Definition.** Calendar periods, from the first day through today. There is no fiscal-year setting
+anywhere in the schema, so calendar is the only reading that can be computed rather than invented.
 
 ```sql
 SELECT COUNT(*) AS jobs_this_quarter
@@ -97,17 +69,48 @@ WHERE company_id = $1
   AND created_at >= DATE_TRUNC('quarter', $2::date)
 ```
 
-**Notes.** "Last quarter" is the preceding `DATE_TRUNC('quarter', …)` window; "this month" and "last
-month" follow the same shape with `'month'`. **Say so when a period is partial** — on 26 August,
-"this quarter" is about eight weeks, and comparing it to a full previous quarter looks like a
-downturn that is not there. All `TIMESTAMPTZ` columns are UTC.
+**Every relative period is an expression on `$2::date`. Build it; never estimate it.** A current
+period runs from its first day to today; a completed period is the half-open range from its first
+day to the next period's first day; "last N days" is `>= $2::date - INTERVAL 'N days'`; a month named
+without a year is the most recent one on or before today (asked in September, "June" is this year's
+and "November" is last year's). This block defines each one and runs in CI:
+
+```sql
+SELECT COUNT(*) FILTER (WHERE created_at >= $2::date) AS today,
+       COUNT(*) FILTER (WHERE created_at >= $2::date - INTERVAL '1 day'
+                          AND created_at <  $2::date) AS yesterday,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('week', $2::date)) AS this_week,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('week', $2::date) - INTERVAL '7 days'
+                          AND created_at <  DATE_TRUNC('week', $2::date)) AS last_week,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', $2::date)) AS this_month,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', $2::date) - INTERVAL '1 month'
+                          AND created_at <  DATE_TRUNC('month', $2::date)) AS last_month,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('quarter', $2::date) - INTERVAL '3 months'
+                          AND created_at <  DATE_TRUNC('quarter', $2::date)) AS last_quarter,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('year', $2::date)) AS this_year,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('year', $2::date) - INTERVAL '1 year'
+                          AND created_at <  DATE_TRUNC('year', $2::date)) AS last_year,
+       COUNT(*) FILTER (WHERE created_at >= $2::date - INTERVAL '30 days') AS last_30_days,
+       COUNT(*) FILTER (WHERE created_at >= MAKE_DATE(EXTRACT(YEAR FROM $2::date)::int
+                                - CASE WHEN EXTRACT(MONTH FROM $2::date) < 6 THEN 1 ELSE 0 END, 6, 1)
+                          AND created_at <  MAKE_DATE(EXTRACT(YEAR FROM $2::date)::int
+                                - CASE WHEN EXTRACT(MONTH FROM $2::date) < 6 THEN 1 ELSE 0 END, 6, 1)
+                                        + INTERVAL '1 month') AS june_most_recent
+FROM jobs
+WHERE company_id = $1
+```
+
+**Notes.** Weeks start on Monday. "Last month versus the month before" compares two completed ranges,
+`last_month` and the month before it, never a partial current month against a full one. Say so when a
+period is partial: on 26 August "this quarter" is eight weeks, and set against a full quarter it looks
+like a downturn that is not there.
 
 ---
 
 ## Job value
 
-**Definition.** The **agreed** value of the work on a job, dated by `jobs.created_at`. This is what
-was sold, whether or not it has shipped.
+**Definition.** The agreed value of the work on a job, dated by `jobs.created_at`: what was sold,
+whether or not it has shipped.
 
 ```sql
 SELECT AVG(job_value) AS average_job_value
@@ -121,39 +124,24 @@ FROM (
 ) per_job
 ```
 
-**Average job value aggregates twice, and the order is the whole definition.** Sum
-`job_parts.total_price` **per job** first, then average those per-job totals **across jobs**. A job
-is one sale; a job part is a line on it. Averaging the part rows directly answers a different
-question — the average value of a *line* — and it is systematically lower, because jobs with more
-lines pull the mean toward their own line size rather than counting once each.
+**Average job value aggregates twice, and the order is the definition.** Sum `job_parts.total_price`
+per job first, then average those per-job totals across jobs: a job is one sale, a job part is a line
+on it. A single-level `AVG(jp.total_price)` averages lines, not jobs, and is systematically lower; on
+the Gate 2 data it returned $3,038.04 where the correct figure is $4,774.82, and three local models
+produced exactly that number while describing the right method in prose. Nearly every new job has one
+part, which makes the two forms agree for new work and the error smaller and harder to notice, not
+absent. Only the average has this grain problem; every `SUM` over `job_parts` is unaffected.
 
-The subquery above is not stylistic. `GROUP BY j.id` produces one row per job, and the outer
-`AVG(job_value)` runs over those rows. **A single-level `AVG(jp.total_price)` is wrong**: on the
-Gate 2 data it returns **$3,038.04** where the correct figure is **$4,774.82**, and three local
-models and an eval arm all produced exactly that number. One of them then described its own method
-as "summing the total price of all job parts and dividing by the number of jobs" — the right grain
-in prose, the wrong one in SQL, which is why the two-level shape is spelled out here rather than
-left to the reference query to imply.
-
-**This is still the rule even though nearly every job now has exactly one part.** Quote conversion
-creates one job per part, so for anything new the two levels collapse and both forms agree — but
-jobs created before that carry up to four parts, and the flat `AVG` is wrong for any window
-containing one of them. The collapse makes the error *smaller*, not absent, which makes it harder
-to notice rather than safer: $4,774 against $3,038 is catchable, $4,774 against $4,740 is not.
-Note also that only the **average** has a grain problem. Every `SUM` over `job_parts` in this
-document is unaffected by how many parts a job has, so do not "consistently" apply this fix to one.
-
-**Notes.** Use `job_parts.total_price`, never the source quote line. `job_parts.quantity` and
-`unit_price` are the post-conversion source of truth — a quantity edited after conversion shows here
-— and a price-options quote keeps unchosen lines that would over-count. A job with no job parts has
-no value and does not belong in the denominator, which the `JOIN` already handles.
+**Notes.** Use `job_parts.total_price`, never the source quote line: `quantity` and `unit_price` on
+the job part are the post-conversion truth, and a price-options quote keeps unchosen lines. A job with
+no parts has no value and is not in the denominator, which the `JOIN` already handles.
 
 ---
 
 ## Revenue
 
-**Definition.** **Realised** revenue: only what actually shipped, dated by `shipments.ship_date`,
-voided slips excluded. A booked job is not revenue until it goes out the door.
+**Definition.** Realised revenue: only what actually shipped, dated by `shipments.ship_date`, voided
+slips excluded. A booked job is not revenue until it goes out the door.
 
 ```sql
 SELECT DATE_TRUNC('month', s.ship_date)::date AS month,
@@ -167,27 +155,20 @@ GROUP BY 1
 ORDER BY 1
 ```
 
-**Revenue reads these three tables and these columns, and nothing else is revenue.** Listed rather
-than counted — a hand-maintained count in a doc is the thing that rots, and the one that used to
-open this paragraph said "four columns" above a table of seven.
+Revenue reads these three tables and these columns, and nothing else is revenue:
 
 | Table | Columns revenue uses | For |
 |---|---|---|
 | `shipments` | `id`, `ship_date`, `company_id`, `voided_at` | when it shipped, whose it is, whether the slip stands |
-| `shipment_line_items` | `quantity`, `shipment_id`, `job_part_id` | **how many actually went out** |
+| `shipment_line_items` | `quantity`, `shipment_id`, `job_part_id` | how many actually went out |
 | `job_parts` | `id`, `unit_price` | what one unit sold for |
 
-Join keys are in the list on purpose: the point of naming them is that the query above can be
-written from this table alone, without going back to the schema section for what joins to what.
+**`job_parts.total_price` is not a revenue column; it is the job-value column.** Revenue is
+`shipment_line_items.quantity × job_parts.unit_price`, so a part half shipped contributes half, and
+summing `total_price` over shipments double-counts a line shipped in two batches.
 
-**`job_parts.total_price` is NOT a revenue column — it is the job-value column**, and borrowing it
-here is the most common way to get this wrong. `total_price` is the whole agreed line, booked
-whether or not anything shipped; revenue is `shipment_line_items.quantity × job_parts.unit_price`,
-so a part half shipped contributes half. Summing `total_price` over shipments also double-counts a
-line that shipped in two batches, because the line total is repeated on every slip that touches it.
-
-**Top customer by revenue** is the same three tables with `jobs` and `customers` joined on. Start
-from `shipments`, never from `job_parts`:
+Top customer by revenue is the same three tables with `jobs` joined on. Start from `shipments`, never
+from `job_parts`:
 
 ```sql
 SELECT j.customer_name AS customer,
@@ -202,28 +183,22 @@ GROUP BY j.customer_name
 ORDER BY revenue DESC
 ```
 
-**Group by `jobs.customer_name`, not by a join to `customers`.** The name is snapshotted onto the
-job, so this needs one table fewer — and it is the safe form now that archived rows are hidden from
-this connection. An inner join to `customers` silently DROPS every job whose customer has since been
-archived, which turns a customer who stopped buying into revenue that never happened. Same rule for
-`shipments.customer_name`. Join `customers` only when you need something the snapshot does not carry
-(an address, a contact), and know that you are then asking only about live customers.
+**Group by `jobs.customer_name`, the snapshot on the job, not by a join to `customers`.** Archived rows
+are hidden from this connection, so an inner join to `customers` silently drops every job whose
+customer has since been archived. Join `customers` only for something the snapshot lacks (an address,
+a contact), knowing you are then asking only about live customers. Group by the name, never an id.
 
-Group by the **name**, not the id — name is identity here, and an id is not something to put in
-front of a shop owner.
-
-**Notes.** "Revenue trend over time" and "top customer by revenue" both use this, not job value —
-otherwise a large order booked today inflates today and never corrects. `shipments` is readable by
-column: **list the columns you need, `SELECT *` on it is not available.** For the last ship date of
-a single job use `public.job_last_ship_date(job_id)`, which already excludes voided slips.
+**Notes.** "Revenue trend" and "top customer by revenue" use this, not job value, or a large order
+booked today inflates today and never corrects. `shipments` is readable by column only: list the
+columns you need, `SELECT *` on it is not available. For the last ship date of one job use
+`public.job_last_ship_date(job_id)`, which already excludes voided slips.
 
 ---
 
 ## Dormant customer
 
-**Definition.** A customer who has ordered before and has not ordered within the window. Ordering
-means a **job**, not a quote — a prospect who only ever asked for prices was never a customer to
-lose.
+**Definition.** A customer who has ordered before and not within the window. Ordering means a job,
+not a quote: a prospect who only asked for prices was never a customer to lose.
 
 ```sql
 SELECT c.id, c.name
@@ -239,15 +214,14 @@ WHERE c.company_id = $1
   )
 ```
 
-**Notes.** Substitute the window the question asks for. The first `EXISTS` is what keeps quote-only
-prospects out of a "customers we have lost" answer.
+**Notes.** Substitute the window the question asks for. The first `EXISTS` keeps quote-only prospects
+out of a "customers we have lost" answer.
 
 ---
 
 ## Quote pipeline worth
 
-**Definition.** The value of quotes still genuinely in play: active, unexpired, and not yet
-converted to a job.
+**Definition.** The value of quotes still genuinely in play: active, unexpired, not yet converted.
 
 ```sql
 SELECT COALESCE(SUM(qli.total_price), 0) AS pipeline_worth
@@ -261,15 +235,15 @@ WHERE q.company_id = $1
   )
 ```
 
-**Notes.** Expired quotes are excluded — an expired quote is not pipeline. Converted quotes are
-excluded because their value is now a job, and counting both double-counts the same work.
+**Notes.** An expired quote is not pipeline. A converted quote's value is now a job, and counting both
+double-counts the same work. Say what "pipeline" counted when you answer.
 
 ---
 
 ## Quote-to-job conversion
 
 **Definition.** A quote is converted when a job references it via `jobs.quote_id`. The rate is
-conversions divided by quotes **created** in the window.
+conversions divided by quotes created in the window.
 
 ```sql
 SELECT COUNT(*) FILTER (WHERE converted) AS converted,
@@ -286,18 +260,17 @@ FROM (
 ) t
 ```
 
-**Notes.** State the denominator when you answer. A quote created inside the window that converts
-next month is counted as unconverted here, so a short window understates the rate — say so rather
-than presenting the number bare. `quotes.converted_at` records when conversion happened, if the
-question is about conversion *timing* rather than rate.
+**Notes.** State the denominator. A quote created inside the window that converts next month counts as
+unconverted here, so a short window understates the rate; say so. "How many quotes turned into jobs in
+the last 90 days" can mean this rate's numerator or the conversions that happened in the window
+(`quotes.converted_at`); pick one and say which.
 
 ---
 
 ## Started and shipped
 
-**Definition.** A job is **started** when `started_at IS NOT NULL` or
-`production_status = 'in_progress'`. A job is **shipped** when
-`fulfillment_status = 'fully_shipped'`.
+**Definition.** A job is started when `started_at IS NOT NULL` or `production_status = 'in_progress'`,
+and shipped when `fulfillment_status = 'fully_shipped'`.
 
 ```sql
 SELECT COUNT(*) FILTER (WHERE started_at IS NOT NULL OR production_status = 'in_progress') AS started,
@@ -306,16 +279,15 @@ FROM jobs
 WHERE company_id = $1
 ```
 
-**Notes.** There is no `jobs.shipped_at` column. `partially_shipped` is neither shipped nor
-unshipped — count it explicitly if the question turns on it.
+**Notes.** There is no `jobs.shipped_at`. `partially_shipped` is neither shipped nor unshipped; count
+it explicitly when the question turns on it.
 
 ---
 
 ## Cost, and what it does and does not include
 
-**Definition.** `job_parts.true_cost_per_unit` is the all-in cost of one unit — labour, materials and
-the whole nested BOM — **frozen** when the job part was created and re-taken only when its quantity
-changes.
+**Definition.** `job_parts.true_cost_per_unit` is the all-in cost of one unit (labour, materials, the
+whole nested BOM), frozen when the job part was created and re-taken only when its quantity changes.
 
 ```sql
 SELECT SUM(jp.total_price) AS revenue_booked,
@@ -327,41 +299,27 @@ WHERE j.company_id = $1
   AND jp.true_cost_per_unit IS NOT NULL
 ```
 
-**Notes.** Never recompute cost from a part's current routing or rates — a shipped job's profit would
-move whenever a rate changed. **`NULL` means the cost could not be determined: exclude that job part
-and say you did. Never treat `NULL` as zero cost.** Labour inside this figure is costed at
-**standard rates**, not at what anyone was actually paid.
+**Notes.** Never recompute cost from a part's current routing or rates; a shipped job's profit would
+move whenever a rate changed. `NULL` means the cost could not be determined: exclude that job part and
+say you did, never treat it as zero. Labour inside this figure is costed at standard rates, not at
+what anyone was paid.
 
 ---
 
 ## When the data is not there
 
-**Rule.** When the data a question needs is not in the permitted objects, say plainly that Jigged
-does not track it, name the nearest available figures, and **never substitute a proxy without
-labelling it as one.**
+**Rule.** When the data a question needs is not in the permitted objects, say plainly that Jigged does
+not track it, name the nearest available figures, and never substitute a proxy without labelling it
+as one. A confident wrong number is worse than no number: the shop owner cannot tell them apart and
+will act on it.
 
-A confident wrong number is worse than no number. The shop owner cannot tell them apart, and will
-act on it.
+### Payroll
 
-### Payroll is the case this rule was written for
+Jigged holds no payroll, wage, salary or hours-paid data, and no column stands in for it.
+`job_parts.true_cost_per_unit` is not payroll: it is an all-in job cost with labour at standard rates,
+applied only to booked job parts. So "net profit margin after payroll" cannot be calculated here; say
+so. Gross profit (booked revenue minus all-in job cost) may be offered instead, only with figures a
+query actually returned and only labelled as costing labour at standard rates.
 
-*"What is our net profit margin after payroll?"*
-
-Jigged holds **no payroll, wage, salary or hours-paid data**. There is no table for it and no column
-that stands in for it.
-
-In the Gate 1 eval one arm answered **"net profit margin after payroll: 67.9%"** by silently using
-`job_parts.true_cost_per_unit` as if it were payroll. It is not: it is an all-in job cost that
-includes labour at *standard rates*, applied only to booked job parts. It omits everyone not booked
-to a job, every hour paid above or below standard, and every payroll cost that is not touch labour.
-
-**How to answer it.** Say plainly that Jigged does not track payroll, so net profit margin after
-payroll cannot be calculated here. Gross profit — booked revenue minus all-in job cost — may be
-offered instead, but **only with the actual figures a query returned**, and only labelled as costing
-labour at standard rates rather than payroll. If you have not computed those figures, do not write
-the sentence. Any number presented as the net margin is wrong however it is hedged.
-
-**Never write a placeholder.** `$X`, `$Y`, `Z%`, `<number>` and every other stand-in are not
-answers — a template handed to a shop owner reads as a figure they cannot check. State a number you
-computed, or decline. *(This section used to carry a model answer with `$X` and `Z%` in it. A local
-model pasted it back verbatim, placeholders and all, which is why no worked answer stands here now.)*
+**Never write a placeholder.** `$X`, `Z%`, `<number>` and every other stand-in read as a figure the
+shop owner cannot check. State a number you computed, or decline.

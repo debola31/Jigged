@@ -1,0 +1,81 @@
+{
+  "title": "OPERATIONS SUMMARY",
+  "period_start": "2026-06-01",
+  "period_end": "2026-09-03",
+  "period_label": "Jun 1 – Sep 3, 2026",
+  "headline": "Booked $99,251 across 84 jobs since June; 32 jobs still open, 23 of them past due.",
+  "kpis": [
+    { "label": "Quotes issued", "value": 115, "format": "integer", "caption": null },
+    { "label": "Booked", "value": 99251, "format": "currency", "caption": "84 jobs" },
+    { "label": "Shipped", "value": 59002, "format": "currency", "caption": "69 shipments" },
+    { "label": "Invoiced", "value": 56381, "format": "currency", "caption": "67 invoices" }
+  ],
+  "blocks": [
+    {
+      "type": "table",
+      "title": "Monthly breakdown",
+      "columns": [
+        { "label": "Month", "format": "plain" },
+        { "label": "Quotes", "format": "integer" },
+        { "label": "Booked", "format": "currency" },
+        { "label": "Shipped", "format": "currency" }
+      ],
+      "rows": [
+        ["Jun", 17, 13367, 11702],
+        ["Jul", 44, 34444, 23187],
+        ["Aug", 50, 48971, 22819],
+        ["Sep (thru 3rd)", 4, 2470, 1294]
+      ],
+      "total_row": ["Total", 115, 99251, 59002],
+      "note": null
+    },
+    {
+      "type": "table",
+      "title": "Backlog aging",
+      "columns": [
+        { "label": "Bucket", "format": "plain" },
+        { "label": "Jobs", "format": "integer" },
+        { "label": "Value", "format": "currency" }
+      ],
+      "rows": [
+        ["Not yet due", 9, 11115],
+        ["1–30 days past due", 18, 25743],
+        ["31–60 days past due", 4, 1686],
+        ["61+ days past due", 1, 1706]
+      ],
+      "total_row": ["Total open", 32, 40249],
+      "note": null
+    },
+    {
+      "type": "table",
+      "title": "Quoting",
+      "columns": [
+        { "label": "Measure", "format": "plain" },
+        { "label": "Value", "format": "plain" }
+      ],
+      "rows": [
+        ["Quotes issued", 115],
+        ["Converted to jobs", 82],
+        ["Win rate", "71%"],
+        ["Open pipeline (17 active)", "$31,715"]
+      ],
+      "total_row": null,
+      "note": "Pipeline counts active, unexpired, unconverted quotes."
+    },
+    {
+      "type": "chart",
+      "title": "Top customers by booked value",
+      "chart_type": "bar_horizontal",
+      "x_label": "Customer",
+      "y_label": "Booked ($)",
+      "points": [
+        { "label": "Hastings Machine Company", "value": 29084 },
+        { "label": "Advance Turning & Mfg", "value": 13959 },
+        { "label": "Northern Precision Products", "value": 9008 },
+        { "label": "Deister Machine Co.", "value": 8154 },
+        { "label": "Helix Steel", "value": 7991 }
+      ],
+      "note": null
+    }
+  ]
+}

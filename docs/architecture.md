@@ -369,7 +369,7 @@ above.)*
 
 | Criterion | Reason | Example today |
 |---|---|---|
-| **AI-powered operations** | Needs an Anthropic/OpenAI/Google key that must not reach the browser | CSV column mapping (`/analyze`), insights chat |
+| **AI-powered operations** | Needs a vendor key that must not reach the browser, **or** hands work to the desktop AI worker through the `ai_jobs` queue (the browser may read the queue, never write it) | CSV column mapping (`/analyze`), insights chat (enqueue only, once `LLM_CHAIN_INSIGHTS` is `ollama:…`) |
 | **Supabase service-role key** | Needs `auth.admin.*` or `auth.users`, unreachable with the anon key | Admin company management |
 | **Complex multi-step business logic** | Validation pipelines, conflict detection, batch/transactional guarantees beyond one RPC | Import validate/execute |
 | **Third-party secret or inbound webhook** | A restricted vendor key can't live client-side, and the vendor must POST to a URL we own | Stripe checkout/portal/webhook, QuickBooks OAuth |

@@ -155,20 +155,34 @@ class WorkerDb:
             )
 
     def mark_succeeded(self, job_id: str, result: dict[str, Any]) -> None:
+        """Report success -- for a row that is still ours to report on.
+
+        `AND status IN ('claimed', 'running')`, because the sweep may have got
+        there first. A laptop that slept mid-job resumes the frozen Ollama call on
+        wake and usually completes it, minutes after its lease lapsed and the sweep
+        marked the row timed_out; an unguarded UPDATE then flipped a terminal row
+        back to succeeded, behind a UI that had already told the user it failed.
+        """
         with self._cursor() as cur:
             cur.execute(
                 "UPDATE public.ai_jobs SET status = 'succeeded', result = %s,"
-                " finished_at = now() WHERE id = %s",
+                " finished_at = now()"
+                " WHERE id = %s AND status IN ('claimed', 'running')",
                 (json.dumps(result), job_id),
             )
+            if cur.rowcount == 0:
+                logger.warning("job %s was already terminal; success report discarded", job_id)
 
     def mark_failed(self, job_id: str, error: str, error_kind: str) -> None:
         with self._cursor() as cur:
             cur.execute(
                 "UPDATE public.ai_jobs SET status = 'failed', error = %s, error_kind = %s,"
-                " finished_at = now() WHERE id = %s",
+                " finished_at = now()"
+                " WHERE id = %s AND status IN ('claimed', 'running')",
                 ((error or "unknown failure")[:2048], error_kind, job_id),
             )
+            if cur.rowcount == 0:
+                logger.warning("job %s was already terminal; failure report discarded", job_id)
 
     # ---------------------------------------------------------------- ledger
 

@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # Dark by default: every chain is anthropic, so merging this layer changes no
 # production behaviour at all. Each surface flips to a local model by setting its
 # LLM_CHAIN_* variable, one surface at a time, after its golden check passes --
-# and reverts with one env change.
+# and reverts with one env change. Insights flipped to ollama:qwen3:32b by env in
+# September 2026; the anthropic default below IS the revert, so leave it.
 _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
     "insights": ("anthropic",),
     "insights_dev": ("ollama:qwen3:8b",),
@@ -41,7 +42,12 @@ _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
     "drawings_dev": ("ollama:qwen3-vl:4b",),
 }
 
-_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 120.0}
+# Ollama's matches the worker's request_timeout_s (worker/config.py) for the same
+# measured reason: on the serving Mac the first call to a cold qwen3:32b -- or the
+# first after the prompt changed, which re-pays the ~13K-token prefill -- ran past
+# 120 s; the warm median was 25 s. The eval's tool-loop arm resolves through here,
+# so a shorter value would score a timeout the worker would not have.
+_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 480.0}
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -137,19 +143,19 @@ def _build(slug: str, model: str | None) -> LLMProvider | None:
         # NO KEY CHECK. Ollama is keyless BY DESIGN, so the skip-on-missing-key rule
         # is per-provider-kind rather than blanket -- applying it here would skip
         # the only provider a migrated surface has.
-        from services.llm.openai_compat import OpenAICompatProvider
+        #
+        # The NATIVE adapter, not OpenAICompatProvider. /v1 could not set the
+        # context window, so a ~13K-token prompt against Ollama's 4,096 default was
+        # truncated silently from the front -- the schema first. The native path
+        # pins num_ctx per request and fails an over-long prompt visibly. The URL
+        # may still carry /v1 (the embeddings module needs it); the adapter strips
+        # it.
+        from services.llm.ollama_provider import OllamaProvider
 
-        return OpenAICompatProvider(
+        return OllamaProvider(
             base_url=_env("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            api_key=None,
             model=model or "qwen3:8b",
-            price_in_per_mtok=Decimal("0"),
-            price_out_per_mtok=Decimal("0"),
-            name="ollama",
             timeout_s=_DEFAULT_TIMEOUTS["ollama"],
-            # `think: false` is the NATIVE /api/chat parameter and does nothing on
-            # this /v1 path. reasoning_effort is the knob that works here.
-            extra_body={"reasoning_effort": "none"},
         )
 
     raise LLMNotConfigured(

@@ -38,6 +38,7 @@ import pytest
 
 from services.ai_features import insights
 from services.ai_features.base import JobContext
+from services.insights_presentation import CHART_EXEMPLAR, CHART_EXEMPLAR_ANSWER, OFF_TOPIC_REPLY
 from services.llm.base import LLMResult, Message, ToolCall
 from services.llm.errors import LLMErrorEcho, LLMToolLoopExhausted
 from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
@@ -230,6 +231,59 @@ async def test_an_empty_answer_never_appends_an_empty_assistant_turn():
             assert turn.text().strip(), "an empty assistant turn reached the provider"
 
 
+# ---------------------------------------------- 1d: the example stays in the prompt
+
+EXAMPLE_PASTED_BACK = CHART_EXEMPLAR_ANSWER + "\n```json\n" + json.dumps(CHART_EXEMPLAR) + "\n```"
+
+
+async def test_the_format_example_pasted_back_with_no_query_is_refused():
+    convo = Conversation(turns=[_answer(EXAMPLE_PASTED_BACK)])
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+    assert "exemplar_echo" in str(exc.value)
+
+
+async def test_the_format_example_pasted_back_after_a_real_query_is_still_refused():
+    """THE ONE EXCEPTION to "if any query succeeded the answer passes": the example's
+    labels cannot be shop data, so this is developer text reaching the user
+    whatever ran before it."""
+    convo = Conversation(turns=[_asks_for_sql(), _answer(EXAMPLE_PASTED_BACK)], tool_results=[SQL_OK])
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+    assert "exemplar_echo" in str(exc.value)
+
+
+async def test_a_real_chart_after_a_real_query_survives_the_guard():
+    real = {**CHART_EXEMPLAR, "data": [
+        {"vendor": "Acme Steel", "spend": 12400},
+        {"vendor": "Helix Alloys", "spend": 9800},
+        {"vendor": "Northern Bar Stock", "spend": 4100},
+    ]}
+    text = "Acme Steel leads at $12,400.\n```json\n" + json.dumps(real) + "\n```"
+    # The query's own rows: the figure in the sentence is one the tool returned.
+    spend = {"columns": ["vendor", "spend"], "rows": real["data"], "row_count": 3, "description": "spend"}
+    convo = Conversation(turns=[_asks_for_sql(), _answer(text)], tool_results=[spend])
+    result = await run(convo)
+    assert result["answer"] == "Acme Steel leads at $12,400."
+    assert result["chart_config"] is not None
+    assert result["chart_config"]["data"][0]["vendor"] == "Acme Steel"
+
+
+async def test_the_off_topic_template_is_an_answer_and_is_flagged():
+    """No query, no figure, and not a non-answer: the shop asked for a poem and
+    was told what this assistant is for. Flagged so the rate is countable."""
+    convo = Conversation(turns=[_answer(OFF_TOPIC_REPLY)])
+    result = await run(convo)
+    assert result["answer"] == OFF_TOPIC_REPLY
+    assert result["off_topic"] is True
+
+
+async def test_an_ordinary_answer_is_not_flagged_off_topic():
+    convo = Conversation(turns=[_asks_for_sql(), _answer("You have 4 late jobs.")], tool_results=[SQL_OK])
+    result = await run(convo)
+    assert result["off_topic"] is False
+
+
 # --------------------------------------------------------- 1c: the answer gate
 
 
@@ -258,7 +312,7 @@ async def test_the_failure_quotes_the_rejected_text_without_pasting_all_of_it():
 
 @pytest.mark.parametrize("text", [
     pytest.param("Three jobs came back with an error code this week.", id="error-as-shop-data"),
-    pytest.param("Your scrap rate has an error margin of about 2%.", id="error-margin"),
+    pytest.param("Your scrap rate has an error margin of about two percent.", id="error-margin"),
     pytest.param("Jigged has no table for payroll, so that data does not exist here.",
                  id="a-plain-decline"),
     pytest.param("Nothing is late right now.", id="a-flat-answer"),
@@ -368,7 +422,7 @@ async def test_the_callers_date_reaches_the_tool_as_a_date():
     with the screen next to it, which is the exact failure this change removes.
     """
     convo = Conversation(
-        turns=[_asks_for_sql(), _answer("7 jobs are late.")],
+        turns=[_asks_for_sql(), _answer("4 jobs are late.")],  # the figure SQL_OK returned
         tool_results=[SQL_OK],
     )
 

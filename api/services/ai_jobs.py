@@ -7,9 +7,9 @@ polling design rests on -- a poll may DISCOVER work and may never create it --
 so the creation path lives in one place where it can be read whole.
 
 TWO EXECUTORS, ONE LIFECYCLE. A feature whose chain resolves to a local model is
-routed to the desktop worker; one still on Anthropic is worked inline by the
-enqueueing request. Both produce the same status vocabulary, so the frontend has
-one state machine rather than two.
+routed to the desktop worker; one whose chain head is a hosted provider is worked
+inline by the enqueueing request. Both produce the same status vocabulary, so the
+frontend has one state machine rather than two.
 """
 from __future__ import annotations
 
@@ -111,11 +111,19 @@ def enqueue(
     requested_by: str | None = None,
     page_count: int = 1,
     request_id: str | None = None,
+    thread_id: str | None = None,
+    kind: str = "chat",
 ) -> list[dict[str, Any]]:
     """Create the job row(s) for one user action. Returns the created rows.
 
     Raises AiUnavailable when the feature routes to a worker and none is alive --
     before creating anything, so an offline box leaves no job to poll.
+
+    `thread_id` and `kind` are REAL COLUMNS, not payload keys, for the reason the
+    `model` column's comment gives: the materialising trigger keys on thread_id,
+    the Reports list filters on kind, and jsonb type-checks nothing. A unique
+    index allows one in-flight job per thread; the caller turns that violation
+    into a 409.
     """
     if page_count < 1:
         raise ValueError("page_count must be at least 1")
@@ -168,6 +176,8 @@ def enqueue(
             # call with its own ai_calls rows, and batch_key is what groups them.
             "request_id": request_id if page_count == 1 else str(uuid.uuid4()),
             "expires_at": expires_at,
+            "thread_id": thread_id,
+            "kind": kind,
         }
         for page in range(1, page_count + 1)
     ]

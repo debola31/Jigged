@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
-from models.insights_models import ChatEnqueued, ChatRequest
+from models.insights_models import ChatEnqueued, ChatRequest, ReportRequest
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
 from services.llm.errors import (
@@ -107,10 +107,18 @@ def _seconds_until_window_frees(oldest_created_at, now: datetime) -> int:
 
 def _check_chat_rate_limit(company_id: str, limit: int) -> None:
     """
-    Enforce the company's chat rate limit (queries in the last hour).
+    Enforce the company's chat rate limit (AI jobs enqueued in the last hour).
+
+    COUNTS ai_jobs, NOT ai_chat_queries. The cap guards the one door that creates
+    AI work, and ai_jobs is the one table both executors write at that door. The
+    transcript table is written only by the inline backend path (_run_inline), so
+    once insights routed to the desktop worker it recorded nothing and the cap
+    silently counted zero -- a worker-served shop had no hourly limit at all.
+    Every enqueued row counts, including attempts that later failed or were
+    refused as non-answers: each one spent model time on the box.
 
     On breach, raises 429 with a message reflecting the company's actual limit
-    and a Retry-After header set to the seconds until the oldest in-window query
+    and a Retry-After header set to the seconds until the oldest in-window job
     ages out. A read error is non-fatal (allow the request through).
     """
     supabase = _get_supabase_service_role()
@@ -119,9 +127,12 @@ def _check_chat_rate_limit(company_id: str, limit: int) -> None:
 
     try:
         response = (
-            supabase.table("ai_chat_queries")
+            supabase.table("ai_jobs")
             .select("created_at")
             .eq("company_id", company_id)
+            # insights and insights_dev alike: the cap is per surface, whichever
+            # chain served it. Reports are insights jobs too and count.
+            .like("feature", "insights%")
             .gte("created_at", one_hour_ago.isoformat())
             .order("created_at", desc=False)
             .execute()
@@ -157,7 +168,10 @@ def _map_llm_error(exc: Exception) -> HTTPException:
     `throw new Error(errorData.detail || ...)` and renders the message straight
     into an Alert, so a {"code","message"} dict shows the user "[object Object]".
     The repo's rule is structured detail only when the browser must BRANCH on the
-    failure, and here it must not -- it only has to say the sentence.
+    failure. Here it branches on the HTTP STATUS alone -- utils/insightsAccess.ts
+    raises a ChatEnqueueError carrying it, and the ask bar renders a 503 as the
+    same quiet offline notice a mid-job outage gets -- so the sentence stays a
+    sentence.
 
     Status choices are deliberate against Sentry's 5xx-only capture:
       503 offline   -- a desktop that is asleep is expected downtime, not an
@@ -176,6 +190,13 @@ def _map_llm_error(exc: Exception) -> HTTPException:
             return HTTPException(
                 status_code=503,
                 detail="The AI box is offline right now. Everything else still works.",
+            )
+        if exc.is_context_overflow:
+            # 400, not 5xx: the box is up and nothing broke -- the conversation
+            # outgrew the window, and only the user can start a new one.
+            return HTTPException(
+                status_code=400,
+                detail="That conversation has grown past what the assistant can hold. Start a new one.",
             )
         return HTTPException(
             status_code=502,
@@ -196,7 +217,11 @@ def _map_llm_error(exc: Exception) -> HTTPException:
 
 def _error_kind(exc: Exception) -> str:
     if isinstance(exc, LLMChainExhausted):
-        return "ai_offline" if exc.is_offline else "provider"
+        if exc.is_offline:
+            return "ai_offline"
+        if exc.is_context_overflow:
+            return "context_overflow"
+        return "provider"
     if isinstance(exc, LLMToolLoopExhausted):
         return "provider"
     # Its own kind rather than 'provider' or 'internal'. The provider answered
@@ -207,6 +232,66 @@ def _error_kind(exc: Exception) -> str:
     if isinstance(exc, LLMNotConfigured):
         return "ai_offline"
     return "internal"
+
+
+def _is_one_in_flight_violation(exc: Exception) -> bool:
+    """The unique index ai_jobs_one_in_flight_per_thread, as PostgREST reports it."""
+    code = getattr(exc, "code", None)
+    return str(code) == "23505" and "ai_jobs_one_in_flight_per_thread" in str(
+        getattr(exc, "message", None) or exc
+    )
+
+
+def _thread_replay(db, company_id: str, thread_id: str) -> dict:
+    """The replay set for a conversation: the latest summary, and every turn after it.
+
+    FAILS VISIBLE, unlike the rate limiter's deliberate fail-open. A question
+    answered without its history is a silently wrong answer -- the model would
+    read "and by month?" with no idea what "and" continues -- so a read error here
+    propagates to the generic 500 rather than degrading to a one-off question.
+
+    The thread must be this company's and not archived. The route trusts
+    thread_id from the body (it has no auth of its own -- ai-insights.md, Known
+    gaps), so the company check is the one integrity it CAN enforce; per-user
+    integrity lives in the RLS the browser created the thread under.
+    """
+    thread = (
+        db.table("ai_chat_threads")
+        .select("id, company_id, deleted_at")
+        .eq("id", thread_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not thread or thread[0].get("company_id") != company_id or thread[0].get("deleted_at"):
+        raise HTTPException(
+            status_code=404, detail="That conversation isn't available any more. Start a new one."
+        )
+
+    rows = (
+        db.table("ai_chat_messages")
+        .select("seq, role, content, covers_through_seq")
+        .eq("thread_id", thread_id)
+        .order("seq", desc=False)
+        .execute()
+    ).data or []
+
+    # The LATEST summary wins -- the highest seq -- and its covers_through_seq is
+    # where replay starts. Rows at or before it are folded in already.
+    summary = None
+    for row in rows:
+        if row["role"] == "summary":
+            summary = row
+    covers = int(summary["covers_through_seq"]) if summary else 0
+    history = [
+        {"seq": row["seq"], "role": row["role"], "content": row["content"]}
+        for row in rows
+        if row["role"] in ("user", "assistant") and row["seq"] > covers
+    ]
+    return {
+        "thread_id": thread_id,
+        "summary": {"content": summary["content"], "covers_through_seq": covers} if summary else None,
+        "history": history,
+    }
 
 
 # How far the browser's date may sit from the server's before we stop believing it.
@@ -257,22 +342,40 @@ async def chat(company_id: str, request: ChatRequest):
     # definition not enqueueing anything.
     ai_jobs.sweep(db)
 
+    payload: dict = {
+        "question": request.question,
+        # In the PAYLOAD, not a handler argument: the desktop worker gets the job
+        # row and nothing else, so this is the one place that makes both execution
+        # paths see the same date without wiring it twice.
+        "today": _client_today(request.today).isoformat(),
+    }
+    thread_id = str(request.thread_id) if request.thread_id else None
+
     try:
+        if thread_id:
+            # The replay set rides in the payload for the same reason `today` does.
+            payload.update(_thread_replay(db, company_id, thread_id))
         rows = ai_jobs.enqueue(
             db,
             company_id=company_id,
             feature="insights",
-            payload={
-                "question": request.question,
-                # In the PAYLOAD, not a handler argument: the desktop worker gets
-                # the job row and nothing else, so this is the one place that makes
-                # both execution paths see the same date without wiring it twice.
-                "today": _client_today(request.today).isoformat(),
-            },
+            payload=payload,
+            thread_id=thread_id,
+            kind="chat",
         )
+    except HTTPException:
+        raise
     except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
         raise _map_llm_error(exc) from exc
     except Exception as exc:
+        if _is_one_in_flight_violation(exc):
+            # One question at a time per conversation. A second tab, or a double
+            # click: not an incident, and the row the first one made is the one to
+            # wait for.
+            raise HTTPException(
+                status_code=409,
+                detail="Still working on the previous question in this conversation. Give it a moment.",
+            ) from exc
         logger.error("insights enqueue failed: %s", exc, exc_info=True)
         sentry_sdk.capture_exception(exc)
         raise HTTPException(status_code=500, detail="Internal server error") from exc
@@ -283,6 +386,50 @@ async def chat(company_id: str, request: ChatRequest):
         return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
 
     await _run_inline(db, job, question=request.question, company_id=company_id)
+    return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
+
+
+@router.post("/{company_id}/report", response_model=ChatEnqueued, status_code=202)
+async def report(company_id: str, request: ReportRequest):
+    """Enqueue a one-page executive summary. The spec arrives on the job row.
+
+    The SAME door as a question: flag, cap, sweep, heartbeat. A report is one job
+    that makes several model calls, so it counts once against the cap and holds
+    the single slot for a few minutes; the browser renders the resulting spec to
+    PDF itself (utils/reportPdf.ts). No storage object, no backend rendering.
+    """
+    ai_enabled, chat_limit = _get_company_ai_settings(company_id)
+    if not ai_enabled:
+        raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
+    _check_chat_rate_limit(company_id, chat_limit)
+
+    db = _get_supabase_service_role()
+    ai_jobs.sweep(db)
+
+    try:
+        rows = ai_jobs.enqueue(
+            db,
+            company_id=company_id,
+            feature="insights",
+            payload={
+                "kind": "report",
+                "request": request.request,
+                "today": _client_today(request.today).isoformat(),
+            },
+            kind="report",
+        )
+    except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
+        raise _map_llm_error(exc) from exc
+    except Exception as exc:
+        logger.error("insights report enqueue failed: %s", exc, exc_info=True)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    job = rows[0]
+    if job["executor"] == "worker":
+        return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
+
+    await _run_inline(db, job, question=request.request, company_id=company_id)
     return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
 
 
@@ -324,10 +471,18 @@ async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
 
 
 def _log_chat_query(db, company_id: str, question: str, result: dict, duration_ms: int) -> None:
-    """Keep ai_chat_queries current: it backs saved insights, the /admin view AND
-    the rate limiter, so dropping it would quietly disable the cap.
+    """Transcript row for a BACKEND-executed job, and only those.
 
-    provider and model now carry whoever ACTUALLY answered rather than a hardcoded
+    The worker path never reaches this function, so ai_chat_queries holds inline
+    turns alone; a worker turn's transcript is ai_jobs.payload->>'question' and
+    result->>'answer'. This docstring used to claim the table backed saved
+    insights, the /admin view and the rate limiter. None of that holds: pins live
+    in saved_insights via the browser, nothing in the UI reads this table, and the
+    cap counts ai_jobs (see _check_chat_rate_limit) precisely because this table
+    went quiet when insights moved to the worker. It stays for the eval's question
+    seed (evals/insights_ab.py) and for debugging the hosted path.
+
+    provider and model carry whoever ACTUALLY answered rather than a hardcoded
     "anthropic" -- the point of a chain is that the answer's origin varies.
     """
     try:

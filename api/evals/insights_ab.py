@@ -145,6 +145,13 @@ DEFAULT_QUESTIONS = [
     # Deliberately unanswerable from the allowlisted tables. A good arm says so;
     # a bad one invents a number, and inventing is worse than declining.
     "What is our net profit margin after payroll?",
+    # Two controls for the prompt-level topical scope (ai-insights.md, "Chart
+    # decisioning" and the guardrails assessment in the plan). The first must come
+    # back as OFF_TOPIC_REPLY with no tool call; the second is a legitimate shop
+    # question phrased casually and must be answered with at least one executed
+    # query -- the negative case any future input gate would have to pass.
+    "Write a short poem about steel.",
+    "How's the shop doing this week?",
 ]
 
 # The SQL specialist the pipeline arms exist to test, and the small narrator that
@@ -210,9 +217,7 @@ def greedy_ollama(spec: str):
     reason: it keeps the blast radius at zero. Adding temperature to the registry
     would silently change insights_dev and drawings_dev too.
     """
-    from decimal import Decimal as _Decimal
-
-    from services.llm.openai_compat import OpenAICompatProvider
+    from services.llm.ollama_provider import OllamaProvider
 
     # partition, not split: an Ollama tag contains a colon and a naive split
     # truncates `qwen3:8b` to `qwen3`, which is a different model that answers.
@@ -223,15 +228,18 @@ def greedy_ollama(spec: str):
             f"measure a SQL specialist on our own hardware, and pointing one at a "
             f"hosted model would answer a different question."
         )
-    return OpenAICompatProvider(
+    # THE SAME ADAPTER PRODUCTION USES, or the eval measures a path nobody ships.
+    # It used to build an OpenAICompatProvider here after the registry and the
+    # worker had both moved to the native adapter -- which would have scored the
+    # /v1 wire format while every real shop ran /api/chat. Decoding is pinned
+    # through `options`; num_ctx and num_predict are applied over it.
+    return OllamaProvider(
         base_url=os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434/v1",
-        api_key=None,
         model=model or "qwen3:8b",
-        price_in_per_mtok=_Decimal("0"),
-        price_out_per_mtok=_Decimal("0"),
-        name="ollama",
-        timeout_s=120.0,
-        extra_body={"reasoning_effort": "none", "temperature": 0, "seed": 0},
+        # The worker's own per-call timeout (worker/config.py), for the same
+        # measured reason: a cold 32B's first call ran past 120 s.
+        timeout_s=240.0,
+        options={"temperature": 0, "seed": 0},
     )
 
 

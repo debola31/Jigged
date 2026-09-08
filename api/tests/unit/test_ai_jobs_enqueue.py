@@ -72,6 +72,30 @@ def backend_chain():
         yield
 
 
+class TestTheThreadColumns:
+    """thread_id and kind are real columns: the trigger keys on one, the Reports
+    list filters on the other, and jsonb would type-check neither."""
+
+    def test_a_conversation_job_carries_its_thread_and_kind(self, worker_chain):
+        db = FakeDb()
+        ai_jobs.enqueue(db, company_id="co", feature="insights", payload={"question": "q"},
+                        thread_id="thread-1", kind="chat")
+        row = db.inserted["ai_jobs"][0]
+        assert (row["thread_id"], row["kind"]) == ("thread-1", "chat")
+
+    def test_a_one_off_question_has_no_thread_and_is_a_chat_by_default(self, worker_chain):
+        db = FakeDb()
+        ai_jobs.enqueue(db, company_id="co", feature="insights", payload={"question": "q"})
+        row = db.inserted["ai_jobs"][0]
+        assert (row["thread_id"], row["kind"]) == (None, "chat")
+
+    def test_a_report_is_its_own_kind(self, worker_chain):
+        db = FakeDb()
+        ai_jobs.enqueue(db, company_id="co", feature="insights",
+                        payload={"kind": "report", "request": "operations summary"}, kind="report")
+        assert db.inserted["ai_jobs"][0]["kind"] == "report"
+
+
 class TestFanOut:
     @pytest.mark.parametrize("pages", [1, 2, 12, 60])
     def test_one_job_is_created_per_page(self, pages, worker_chain):

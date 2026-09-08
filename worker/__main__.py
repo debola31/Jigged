@@ -12,16 +12,23 @@ WHAT MAKES IT SAFE TO KILL. Ctrl-C releases unstarted claims back to `queued`,
 fails whatever was mid-flight as `ai_offline`, and backdates the heartbeat -- so
 the UI reaches its offline state within one poll instead of after a two-minute
 silence.
+
+WHAT MAKES IT SAFE TO SLEEP. macOS freezes this process rather than killing it,
+and the pooler drops the socket while it is frozen. The first statement on wake
+therefore raises, and for a while that raise escaped run() and ended the process
+-- one nap killed the worker until someone noticed. A batch that fails is now
+logged and the loop carries on; WorkerDb reconnects on the next statement and the
+lease sweep collects whatever the batch still held.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
 import sys
 import time
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -66,21 +73,18 @@ class Worker:
         correctness rather than convenience: the claim batches by model, so honouring
         anything other than the model on the row would break the batching it just
         paid for.
+
+        The NATIVE adapter: it pins the 32K context window per request and turns an
+        over-long prompt into a visible failure, where the /v1 path silently cut the
+        schema off the front. OLLAMA_CONTEXT_LENGTH on the box is now belt-and-braces.
         """
-        from services.llm.openai_compat import OpenAICompatProvider
+        from services.llm.ollama_provider import OllamaProvider
 
         return [
-            OpenAICompatProvider(
+            OllamaProvider(
                 base_url=self.cfg.ollama_base_url,
-                api_key=None,
                 model=model,
-                price_in_per_mtok=Decimal("0"),
-                price_out_per_mtok=Decimal("0"),
-                name="ollama",
                 timeout_s=self.cfg.request_timeout_s,
-                # `think: false` is the NATIVE /api/chat knob and does nothing here.
-                # The unconditional <think> strip is the actual guarantee either way.
-                extra_body={"reasoning_effort": "none"},
             )
         ]
 
@@ -118,6 +122,22 @@ class Worker:
         except Exception as exc:  # noqa: BLE001
             logger.warning("lease renewal failed: %s", exc)
 
+    async def _keepalive(self) -> None:
+        """Heartbeat and lease renewal on their own task, so they happen DURING a job.
+
+        Both used to tick only between jobs. A 116 s question then made the box
+        read as offline to every new question -- the heartbeat went stale at 60 s
+        and the route answered 503 "the AI box is offline" -- until the answer
+        landed; and with 480 s calls a single job could outlive its own 300 s
+        lease and be swept mid-run. The model call is an awaited HTTP request, so
+        the loop is free to beat while it runs. Measured 2026-09-07 on the
+        eight-turn re-test: two 503s in the middle of a healthy run.
+        """
+        while not self._stopping:
+            await asyncio.sleep(self.cfg.heartbeat_seconds)
+            self._tick_heartbeat(force=True)
+            self._tick_leases()
+
     # ----------------------------------------------------------------- work
 
     async def _run_one(self, job: dict[str, Any]) -> None:
@@ -150,8 +170,15 @@ class Worker:
             )
         except LLMChainExhausted as exc:
             # A local chain that failed is this box, and this box is the thing that
-            # is meant to fail visibly. 'ai_offline' is what the UI reads to say so.
-            kind = "ai_offline" if exc.is_offline else "provider"
+            # is meant to fail visibly. 'ai_offline' is what the UI reads to say so;
+            # 'context_overflow' is the prompt no longer fitting the window, which
+            # the user fixes by starting a new conversation.
+            if exc.is_offline:
+                kind = "ai_offline"
+            elif exc.is_context_overflow:
+                kind = "context_overflow"
+            else:
+                kind = "provider"
             await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), kind)
             logger.warning("job %s failed (%s): %s", job_id, kind, exc)
             return
@@ -198,6 +225,7 @@ class Worker:
     async def run(self) -> None:
         self.db.connect()
         self._tick_heartbeat(force=True)
+        keepalive = asyncio.create_task(self._keepalive())
         # The sandbox target is in the banner because "which database answered"
         # is not something anyone should have to infer from a wrong number later.
         from tools.sql_executor import describe_dsn
@@ -232,8 +260,18 @@ class Worker:
                 continue
 
             logger.info("claimed %s job(s) of %s", len(batch), batch[0]["model"])
-            await self._drain(batch)
+            try:
+                await self._drain(batch)
+            except Exception:  # noqa: BLE001 - a batch failing must not end the worker
+                # A report over a dead connection -- the box slept, or the pooler
+                # recycled the socket. Nothing is lost: the lease sweep times out
+                # whatever this batch still held, and the next statement
+                # reconnects. Same shape as the `claim failed` branch above.
+                logger.exception("batch failed; the lease sweep collects what was held")
 
+        keepalive.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await keepalive
         await self._shutdown()
 
     async def _shutdown(self) -> None:

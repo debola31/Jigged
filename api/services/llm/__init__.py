@@ -27,6 +27,7 @@ from services.llm.call import complete
 from services.llm.errors import (
     LLMAuthError,
     LLMChainExhausted,
+    LLMContextOverflow,
     LLMEmptyResponse,
     LLMError,
     LLMErrorEcho,
@@ -47,6 +48,7 @@ __all__ = [
     "ImagePart",
     "LLMAuthError",
     "LLMChainExhausted",
+    "LLMContextOverflow",
     "LLMEmptyResponse",
     "LLMError",
     "LLMNotConfigured",

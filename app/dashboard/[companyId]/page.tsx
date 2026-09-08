@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 
-import { InsightsSection, DashboardMetrics, RecentActivity } from '@/components/dashboard';
+import { InsightsSection, DashboardMetrics, RecentActivity, ReportsSection } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
 import UnfinishedWorkCard from '@/components/dashboard/UnfinishedWorkCard';
@@ -92,6 +92,9 @@ export default function DashboardPage() {
               onInsightSaved={handleInsightSaved}
             />
           </Box>
+
+          {/* One-page summaries the AI composes on request */}
+          <ReportsSection companyId={companyId} />
 
           {/* Saved Charts */}
           <InsightsSection

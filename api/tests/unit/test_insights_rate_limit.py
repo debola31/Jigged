@@ -30,7 +30,7 @@ def _fluent_client(execute_data):
     """A Supabase-style fluent mock whose terminal .execute() returns an object
     with `.data = execute_data`. Every builder method returns the same mock."""
     client = MagicMock()
-    for method in ("table", "select", "eq", "gte", "order", "single"):
+    for method in ("table", "select", "eq", "like", "gte", "order", "single"):
         getattr(client, method).return_value = client
     result = MagicMock()
     result.data = execute_data
@@ -105,6 +105,27 @@ class TestCheckChatRateLimit:
         _check_chat_rate_limit("c1", 20)
 
     @patch.object(insights_routes, "_get_supabase_service_role")
+    def test_counts_ai_jobs_rows_because_worker_jobs_never_write_ai_chat_queries(
+        self, mock_sr
+    ):
+        """THE FLIP'S SILENT FAILURE. ai_chat_queries is written only by the inline
+        backend path, so a shop served by the desktop worker wrote nothing there
+        and a cap counting it counted zero. ai_jobs is written at enqueue for both
+        executors, which is the door the cap guards."""
+        client = _fluent_client([])
+        mock_sr.return_value = client
+
+        _check_chat_rate_limit("c1", 20)
+
+        client.table.assert_called_once_with("ai_jobs")
+        client.like.assert_called_once_with("feature", "insights%")
+        client.eq.assert_called_once_with("company_id", "c1")
+        # No status filter, deliberately: a failed or refused attempt spent model
+        # time too, and excluding it would let a stuck shop retry for free.
+        assert not client.neq.called
+        assert not client.in_.called
+
+    @patch.object(insights_routes, "_get_supabase_service_role")
     def test_at_limit_raises_429_with_retry_after(self, mock_sr):
         now = datetime.now(timezone.utc)
         rows = [
@@ -123,7 +144,7 @@ class TestCheckChatRateLimit:
     @patch.object(insights_routes, "_get_supabase_service_role")
     def test_query_error_allows_through(self, mock_sr):
         client = MagicMock()
-        for method in ("table", "select", "eq", "gte", "order"):
+        for method in ("table", "select", "eq", "like", "gte", "order"):
             getattr(client, method).return_value = client
         client.execute.side_effect = RuntimeError("query blew up")
         mock_sr.return_value = client

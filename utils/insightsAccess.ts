@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '@/lib/api';
-import type { Database } from '@/types/database';
+import type { Database, Json } from '@/types/database';
 import { getSupabase } from '@/lib/supabase';
 import { todayLocalISODate } from '@/lib/localDate';
 
@@ -40,6 +40,10 @@ export interface ChatResponse {
   provider: string;
   model?: string | null;
   tokens_used: number | null;
+  /** The templated "I can only answer questions about this shop" refusal. */
+  off_topic?: boolean;
+  /** The model stated figures its queries did not produce and was sent back to the tool once. */
+  grounding_corrected?: boolean;
 }
 
 export interface SavedInsight {
@@ -89,6 +93,11 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 export async function submitChatQuery(
   companyId: string,
   question: string,
+  /**
+   * The conversation this question continues (utils/aiChatAccess.ts creates it
+   * under RLS). Omitted for a one-off question; the route then ships no history.
+   */
+  threadId?: string | null,
 ): Promise<ChatEnqueued> {
   const headers = await getAuthHeaders();
 
@@ -100,7 +109,11 @@ export async function submitChatQuery(
     // a US shop calls a job late from about 8pm the evening before — the jobs list
     // has always sent the same value as p_today, and the chat disagreeing with the
     // screen beside it is the whole reason this parameter exists.
-    body: JSON.stringify({ question, today: todayLocalISODate() }),
+    body: JSON.stringify({
+      question,
+      today: todayLocalISODate(),
+      ...(threadId ? { thread_id: threadId } : {}),
+    }),
   });
 
   if (!response.ok) {
@@ -110,9 +123,34 @@ export async function submitChatQuery(
     // _map_llm_error keeps it one, because this line renders it into an Alert and
     // an object would show the user "[object Object]".
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Failed to submit chat query (${response.status})`);
+    throw new ChatEnqueueError(
+      errorData.detail || `Failed to submit chat query (${response.status})`,
+      response.status,
+    );
   }
 
+  return (await response.json()) as ChatEnqueued;
+}
+
+/**
+ * Ask for a one-page executive summary. Same door as a question -- flag, cap,
+ * heartbeat -- and the same 202 with a job id; the ReportSpec lands on the job's
+ * result and the browser renders it to PDF itself (utils/reportPdf.ts).
+ */
+export async function submitReportRequest(companyId: string, request: string): Promise<ChatEnqueued> {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/report`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ request, today: todayLocalISODate() }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new ChatEnqueueError(
+      errorData.detail || `Failed to request a report (${response.status})`,
+      response.status,
+    );
+  }
   return (await response.json()) as ChatEnqueued;
 }
 
@@ -124,6 +162,23 @@ export interface ChatEnqueued {
   job_id: string;
   status: string;
   executor: 'worker' | 'backend';
+}
+
+/**
+ * An enqueue failure that carries the HTTP status, so the ask bar can BRANCH on
+ * the status and never on the sentence. 503 is the AI box being offline: expected
+ * downtime, rendered as the same quiet notice a mid-job outage gets. 429 and 403
+ * are the shop's own cap and kill-switch. `message` is the backend's `detail`
+ * verbatim -- which is why _map_llm_error keeps that a plain string.
+ */
+export class ChatEnqueueError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ChatEnqueueError';
+  }
 }
 
 /**
@@ -191,6 +246,8 @@ export function chatResultOf(job: AiJob | null): ChatResponse | null {
     provider: typeof candidate.provider === 'string' ? candidate.provider : 'unknown',
     model: typeof candidate.model === 'string' ? candidate.model : null,
     tokens_used: typeof candidate.tokens_used === 'number' ? candidate.tokens_used : null,
+    off_topic: candidate.off_topic === true,
+    grounding_corrected: candidate.grounding_corrected === true,
   };
 }
 
@@ -211,6 +268,60 @@ export async function getAiJob(jobId: string): Promise<AiJob | null> {
 
   if (error) throw error;
   return data;
+}
+
+/** A finished report: the spec the model filled, ready for utils/reportPdf.ts. */
+export interface ReportSummary {
+  id: string;
+  created_at: string;
+  report: unknown;
+  /** Chart blocks the handler dropped at the gate; the page footer names them. */
+  dropped: string[];
+  /** Queries the model ran to compose it: how long a report held the box's single slot. */
+  tool_call_count: number;
+}
+
+function reportOf(raw: Json | null): { report: unknown; dropped: string[]; tool_call_count: number } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (!candidate.report || typeof candidate.report !== 'object') return null;
+  const dropped = Array.isArray(candidate.dropped)
+    ? candidate.dropped.filter((d): d is string => typeof d === 'string')
+    : [];
+  const tool_call_count = Array.isArray(candidate.tool_calls) ? candidate.tool_calls.length : 0;
+  return { report: candidate.report, dropped, tool_call_count };
+}
+
+/** The report on a settled job row, or null when the row carries none. */
+export function reportResultOf(job: AiJob | null): ReportSummary | null {
+  if (!job) return null;
+  const parsed = reportOf(job.result);
+  return parsed ? { id: job.id, created_at: job.created_at, ...parsed } : null;
+}
+
+/**
+ * The shop's recent reports, newest first. `kind` is a real column, so this reads
+ * exactly the rows the Reports card should list -- and RLS scopes it to the shop.
+ */
+export async function listReports(companyId: string, limit = 10): Promise<ReportSummary[]> {
+  const { data, error } = await getSupabase()
+    .from('ai_jobs')
+    .select('id, created_at, result')
+    .eq('company_id', companyId)
+    .eq('kind', 'report')
+    .eq('status', 'succeeded')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  const out: ReportSummary[] = [];
+  for (const row of data ?? []) {
+    const parsed = reportOf(row.result);
+    // A row an older handler wrote, or a shape the renderer no longer knows, is
+    // left out rather than listed as a report that cannot open.
+    if (parsed) out.push({ id: row.id, created_at: row.created_at, ...parsed });
+  }
+  return out;
 }
 
 /**

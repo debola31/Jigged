@@ -71,6 +71,30 @@ def test_the_three_pipeline_arms_are_the_three_retrieval_conditions():
     assert set(insights_ab.PIPELINE_ARMS.values()) == {"full", "loo", "none"}
 
 
+def test_the_greedy_local_arm_is_the_adapter_production_ships():
+    """The eval must measure the path real shops run. The registry and the worker
+    moved to the native adapter; an eval still on /v1 would have scored a wire
+    format nobody serves -- and passed."""
+    from evals import insights_ab
+    from services.llm.base import Message
+    from services.llm.ollama_provider import OLLAMA_NUM_CTX, OllamaProvider
+
+    provider = insights_ab.greedy_ollama("ollama:qwen3:32b")
+
+    assert isinstance(provider, OllamaProvider)
+    assert provider.model == "qwen3:32b"
+    options = provider._body([Message(role="user", content="q")], None, 10, None)["options"]
+    # Greedy, seeded, and STILL on the full window.
+    assert (options["temperature"], options["seed"], options["num_ctx"]) == (0, 0, OLLAMA_NUM_CTX)
+
+
+def test_a_hosted_spec_is_refused_by_the_greedy_builder():
+    from evals import insights_ab
+
+    with pytest.raises(ValueError):
+        insights_ab.greedy_ollama("deepinfra:Qwen/Qwen3-32B")
+
+
 def test_the_narrator_is_resolved_through_the_same_mechanism_as_an_arm():
     """One way to point the harness at a model, not two."""
     import os
@@ -97,17 +121,17 @@ def test_a_request_id_is_stable_across_processes():
 
 
 def test_the_greedy_provider_asks_for_deterministic_decoding():
-    """No Ollama call in this repo has ever been greedy: OpenAICompatProvider._body
-    sends model, messages, max_tokens and stream, and the registry's ollama branch
-    adds only reasoning_effort. A non-deterministic generator makes a pinned
-    expectation meaningless and two runs incomparable."""
+    """No production Ollama call is greedy -- the registry pins nothing -- and a
+    non-deterministic generator makes a pinned expectation meaningless and two
+    runs incomparable. The eval pins decoding through the native adapter's
+    `options`, which the request body carries under Ollama's own key."""
     from evals.insights_ab import greedy_ollama
 
     provider = greedy_ollama("ollama:qwen3:8b")
 
     assert provider.model == "qwen3:8b"
-    assert provider._extra_body["temperature"] == 0
-    assert provider._extra_body["seed"] == 0
+    assert provider._options["temperature"] == 0
+    assert provider._options["seed"] == 0
 
 
 def test_the_greedy_provider_keeps_the_whole_ollama_tag():

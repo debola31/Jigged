@@ -8,33 +8,11 @@ import { PieChart } from '@mui/x-charts/PieChart';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { ChartConfig } from '@/utils/insightsAccess';
+import { formatCompact, formatLabel, temporalKey } from '@/utils/chartFormat';
 
 interface InsightChartProps {
   chartConfig: ChartConfig;
   height?: number;
-}
-
-/** Format ISO timestamps and date strings into clean short labels. */
-function formatLabel(value: string): string {
-  if (/^\d{4}-\d{2}/.test(value)) {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) {
-      if (date.getDate() === 1 || value.includes('T00:00:00')) {
-        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      }
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-  }
-  return value.length > 12 ? value.slice(0, 12) + '...' : value;
-}
-
-/** Abbreviate large numbers for axis ticks: 7749 -> "7.7K", 1.2e6 -> "1.2M". */
-function formatCompact(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (abs >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (abs >= 1_000) return (value / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
-  return String(value);
 }
 
 /**
@@ -86,12 +64,19 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
     theme.palette.info.main,
   ];
 
-  // Sort nominal bars by value (descending) for readability; preserve the
-  // original order for time series (area) and pie.
-  const sortForBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
-  const rows = sortForBars
-    ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
-    : data;
+  // A time axis (ISO dates, month names, quarters) is put in calendar order
+  // whatever order the rows arrived in; nominal bars are value-sorted for
+  // readability; pie keeps its order. A time series usually arrives as `area`,
+  // but "a bar chart of monthly bookings" arrives as bars over months, and
+  // ranking those prints Mar, Feb, Jan, Dec: a scrambled calendar. The PDF
+  // renderer (utils/pdfCharts.ts) applies the same rule through the same key.
+  const keys = data.map((d) => temporalKey(String(d[x_key] ?? '')));
+  const isBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
+  const rows = keys.every((k) => k !== null)
+    ? data.map((d, i) => ({ d, k: keys[i] as number })).sort((a, b) => a.k - b.k).map((x) => x.d)
+    : isBars
+      ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
+      : data;
 
   // Extract x-axis labels and y-axis values
   const xLabels = rows.map((d) => formatLabel(String(d[x_key] ?? '')));

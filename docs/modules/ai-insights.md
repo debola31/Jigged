@@ -351,6 +351,37 @@ compaction timing and its failure modes, the budget floor against the real promp
 `api/tests/integration/test_ai_chat_threads.py` (RLS, the trigger under the real worker role, the
 guards).
 
+### What the first live thread showed
+
+The 25-turn conversation through the real route, queue, worker and trigger (2026-09-07, seeded shop,
+`qwen3:32b`): every turn materialised (48 rows), the replay grew to 46 messages, prompts stayed between
+12.2K and 14.2K tokens, and **six of twenty-four answers stated figures without running a query**. "And
+in July?" was answered with $21,564.12 against a real $23,518.67, August with $23,789.45 against
+$75,668.71; a quarter average, a work-centre ranking and a top-three share came from nowhere. In the
+single-turn eval every question ran a query. With history in front of it, the model answers from memory.
+
+- **The grounding guard.** `figures_in_text` and `unsupported_figures` in
+  [`insights_presentation.py`](../../api/services/insights_presentation.py), applied by the loop in
+  [`insights.py`](../../api/services/ai_features/insights.py): every figure in an answer (money,
+  percentages, decimals and every integer, a zero included; not dates, job numbers, uuids or years)
+  must appear in **this turn's** query results, within rounding. The first offence earns one corrective
+  turn that names the figures and sends the model back to the tool; a second fails the job as
+  `error_echo` `[ungrounded_figures]`. An echoed example or a narrated tool call is refused instead,
+  never corrected. `result.grounding_corrected`, and the `ai job settled` property of the same name,
+  count how often a thread tempted the model. On the eight-turn re-test the two answers the guard could
+  see were corrected and re-queried; the quarter average then matched the report run's figure and the
+  vendor question got an honest "no cost data" instead of "Example Vendor". **Withdrawn, twice:**
+  relying on the prompt alone (the guideline is there too, and the model still answered "And in
+  July?" from memory), and letting an earlier turn vouch for a figure (a July zero it had queried
+  licensed an August zero it had not, and counts under ten were exempt, so the zero slipped through).
+  A figure worth repeating is worth one query.
+- **The history estimate is calibrated.** Compaction never fired in 25 turns because there was nothing
+  to compact (≈1,700 real tokens of history; a real thread needs roughly 70 such turns). A synthetic
+  30-turn history the chars/4 estimate put at 5.7K tokens the model counted at 9.5K: conversation text
+  tokenises at 2.4–3.3 chars/token against the prose prompt's 4.0, so the window thought it had room
+  and the undercount was eating the tool-result headroom. Turns and summaries are estimated at 3
+  chars/token now (`HISTORY_CHARS_PER_TOKEN`), the prompt still at 4.
+
 ## Chart decisioning
 
 **Text-first, constrained renderer** — the model *proposes* a chart; deterministic code decides
@@ -732,6 +763,10 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** a chart or a sentence carrying the prompt's format-example labels, **then** the chart is dropped and the turn is refused as `error_echo` whether or not a query succeeded — *verified by `api/tests/unit/test_chart_exemplar.py` and `api/tests/unit/test_insights_loop_integrity.py`*.
 - [ ] **Given** the format example itself, **then** it extracts from the assembled prompt, passes `_validate_chart_config`, and its question appears in neither `DEFAULT_QUESTIONS` nor `EXAMPLE_PROMPTS` — *verified by `api/tests/unit/test_chart_exemplar.py`*.
 - [ ] **Given** a question that is not about the shop, **then** the answer is the exact `OFF_TOPIC_REPLY`, it passes the answer gate, and the job flags `off_topic` — *verified by `api/tests/unit/test_insights_loop_integrity.py`; the model's compliance is measured by the two control questions in `evals/insights_ab.py`, not asserted in CI*.
+- [ ] **Given** an answer that states a figure no query of this turn produced and no earlier turn of the
+  conversation held, **then** the model gets one corrective turn naming the figures, and a second such
+  answer fails the job as `error_echo` `[ungrounded_figures]` — *verified by
+  `api/tests/unit/test_grounding_guard.py`; found on the 25-turn live thread of 2026-09-07*.
 
 **Gating, limits and access**
 
@@ -777,7 +812,9 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   still push a long conversation past the window; with `truncate: false` that is now a visible
   `context_overflow` rather than a schema-less answer.
 - **A summary is instructed, not verified.** The compaction prompt demands every figure and period;
-  nothing checks the summary kept them. A multi-turn scenario in `evals/insights_ab.py` is the follow-up.
+  nothing checks the summary kept them. Compaction has fired live only against a synthetic history; the
+  25-turn thread never reached the threshold. A multi-turn scenario in `evals/insights_ab.py` is the
+  follow-up.
 - **The real render is looked at by a person.** `reportRender.test.ts` draws the seven checklist PDFs
   only when `RENDER_REPORT_PDFS` is set, and nothing but a reviewer's eye judges the PNGs; CI runs the
   mocked suite, which proves ordering, arguments and font state and passed all four defects the first

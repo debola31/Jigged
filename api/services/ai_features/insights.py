@@ -45,6 +45,8 @@ from services.insights_presentation import (
     _validate_chart_config,
     classify_non_answer,
     echoes_exemplar,
+    numbers_in,
+    unsupported_figures,
 )
 from services.llm.base import Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
@@ -78,6 +80,13 @@ TOOLS_PREFIX_TOKENS = 500
 TOOL_RESULT_HEADROOM_TOKENS = 8_000
 SUMMARY_MAX_TOKENS = 600
 CHARS_PER_TOKEN = 4
+# Conversation text is denser than the prose prompt: measured against Ollama's own
+# prompt_eval_count on 2026-09-07, the ~50 KB system prompt tokenises at ~4.0
+# chars/token, the 25-turn live thread at 3.3, and a digit-heavy synthetic history
+# at 2.4 -- one the chars/4 estimate placed at 5.7K tokens was 9.5K, so the
+# window thought it had room, never compacted, and ate into the tool-result
+# headroom. History and summaries are estimated at 3.
+HISTORY_CHARS_PER_TOKEN = 3
 # MemGPT's numbers, and every compaction since: fold when past 70 % of the budget,
 # down to 50 %, so a thread near the edge is not summarised on every turn.
 COMPACT_AT_FRACTION = 0.7
@@ -146,8 +155,15 @@ async def _run_tool(company_id: str, call: ToolCall, today: date | None) -> dict
 
 
 def _estimate_tokens(text: str) -> int:
-    """ceil(chars / 4). The same rule the trigger stores in token_estimate."""
+    """ceil(chars / 4), for the prose prompt and the question."""
     return -(-len(text or "") // CHARS_PER_TOKEN)
+
+
+def _estimate_history_tokens(text: str) -> int:
+    """ceil(chars / 3): conversation turns and summaries are denser than prose
+    (HISTORY_CHARS_PER_TOKEN). The trigger's token_estimate column keeps chars/4
+    and is informational; this is what the window is sized by."""
+    return -(-len(text or "") // HISTORY_CHARS_PER_TOKEN)
 
 
 def _history_budget(system_prompt: str, question: str) -> int:
@@ -169,7 +185,7 @@ def _history_budget(system_prompt: str, question: str) -> int:
 
 
 def _turn_tokens(turn: dict[str, Any]) -> int:
-    return _estimate_tokens(str(turn.get("content") or ""))
+    return _estimate_history_tokens(str(turn.get("content") or ""))
 
 
 def _window(history: list[dict[str, Any]], budget: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -283,6 +299,23 @@ def _correction_turns(text: str) -> list[Message]:
     return turns + [Message(role="user", content=CORRECTION)]
 
 
+GROUNDING_CORRECTION = (
+    "Your answer states figures that come from no query run in this turn: {figures}. "
+    "Earlier turns of this conversation only tell you what the user means; they are not a "
+    "source of numbers, even when they held the same figure. Run the query that produces "
+    "each figure now and answer again, or say the figure is unavailable."
+)
+
+
+def _grounding_turns(text: str, figures: list[float]) -> list[Message]:
+    """The corrective exchange for an answer that invented its numbers -- the 25-turn
+    live conversation did so on six turns of twenty-four once it had history. Same
+    shape as _correction_turns, same conditional assistant turn."""
+    turns = [Message(role="assistant", content=text)] if text.strip() else []
+    listed = ", ".join(f"{x:g}" for x in figures[:8])
+    return turns + [Message(role="user", content=GROUNDING_CORRECTION.format(figures=listed))]
+
+
 async def run(ctx: JobContext) -> dict[str, Any]:
     """Answer one question. Returns the shape ai_jobs.result stores.
 
@@ -336,6 +369,12 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         + [Message(role="user", content=question)]
     )
 
+    # Every figure in the answer has to come from a query result of THIS turn.
+    # Earlier turns tell the model what the user means, never what the number is:
+    # a July zero it had queried licensed an August zero it had not.
+    known_figures: set[float] = set()
+    grounding_corrected = False
+
     tool_names: list[str] = []
     # What ran, for the thread's audit column. Never replayed into a prompt.
     tool_trace: list[dict[str, Any]] = []
@@ -375,6 +414,21 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                     "insights %s: correcting a failed-query answer", ctx.request_id
                 )
                 continue
+            # ONE corrective turn for an answer that states figures this turn's
+            # queries did not produce and the conversation never held. Once a
+            # thread carries history the model answers "And in July?" from
+            # memory; the correction sends it back to the tool.
+            prose = _strip_inline_markdown(_flatten_markdown_tables(_strip_code_blocks(result.text)))
+            refusable = echoes_exemplar(prose) or classify_non_answer(prose) is not None
+            invented = [] if refusable else unsupported_figures(prose, known_figures)
+            if invented and not grounding_corrected:
+                grounding_corrected = True
+                messages = messages + _grounding_turns(result.text, invented)
+                logger.info(
+                    "insights %s: correcting an ungrounded answer (%d figure(s))",
+                    ctx.request_id, len(invented),
+                )
+                continue
             break
 
         # Run the tools first, then wire the messages: the count of refused
@@ -398,6 +452,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 # Zero rows is a SUCCESS: the query ran, and "none" is an answer.
                 sql_ok += 1
                 trace["row_count"] = r.get("row_count")
+                numbers_in(r, known_figures)
             else:
                 trace["error_kind"] = r.get("error_kind")
                 if r.get("error_kind") == SQL_ERROR_KIND:
@@ -461,6 +516,23 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             tokens_out=tokens_used,
         )
 
+    # THE GROUNDING GUARD, on the text the user would read: every figure comes
+    # from a query result of this turn. The loop offered one corrective turn; a
+    # second invented answer fails visibly rather than reaching the person as a
+    # fact.
+    ungrounded = unsupported_figures(answer, known_figures)
+    if ungrounded:
+        raise LLMErrorEcho(
+            f"[ungrounded_figures] {len(ungrounded)} figure(s) in the answer come from no "
+            f"query result of this turn: "
+            f"{', '.join(f'{x:g}' for x in ungrounded[:6])}; {answer[:_REJECTED_ECHO_CHARS]!r}",
+            feature=ctx.feature,
+            request_id=ctx.request_id,
+            provider=result.provider,
+            model=result.model,
+            tokens_out=tokens_used,
+        )
+
     chart_config = _select_chart_type(
         _drop_exemplar_echo(_validate_chart_config(_extract_chart_config(raw))), question
     )
@@ -472,8 +544,8 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     summary: str | None = None
     covers: int | None = None
     summary_error: str | None = None
-    carried = sum(_turn_tokens(t) for t in kept) + _estimate_tokens(prior_summary or "")
-    this_turn = _estimate_tokens(question) + _estimate_tokens(answer)
+    carried = sum(_turn_tokens(t) for t in kept) + _estimate_history_tokens(prior_summary or "")
+    this_turn = _estimate_history_tokens(question) + _estimate_history_tokens(answer)
     if evicted or carried + this_turn > COMPACT_AT_FRACTION * budget:
         folded = list(evicted)
         remaining = list(kept)
@@ -509,6 +581,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # so PostHog can count the rate without reading a question. Exact match:
         # the template is prose with no markdown, so the scrub leaves it intact.
         "off_topic": answer.strip() == OFF_TOPIC_REPLY,
+        # The model stated figures its queries did not produce and was sent back
+        # to the tool once. Its rate says how often a thread tempts the model to
+        # answer from memory.
+        "grounding_corrected": grounding_corrected,
         # Read by the ai_jobs trigger, never by the browser: a summary row is
         # written only when these are set.
         "summary": summary,

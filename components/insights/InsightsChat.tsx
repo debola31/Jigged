@@ -183,6 +183,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       // rate is the trigger for building an input gate; the question itself never
       // leaves its row.
       off_topic: !!job.result?.off_topic,
+      grounding_corrected: !!job.result?.grounding_corrected,
     });
   }, [job.phase, job.job, job.result]);
 

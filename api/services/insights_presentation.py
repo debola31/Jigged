@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from decimal import Decimal
 
 def _extract_chart_config(content: str) -> dict | None:
     """
@@ -226,6 +227,102 @@ _FENCED = re.compile(r"```[ \t]*(\w+)?[ \t]*\n?(.*?)```", re.S)
 # Above this, the fence IS the message and the prose is a label on it. An answer
 # that explains itself and quotes the filter it used sits well below.
 _FENCE_DOMINATES = 0.6
+
+
+# ---------------------------------------------------------------------------
+# Grounding: figures in an answer must come from somewhere the reader can trust
+# ---------------------------------------------------------------------------
+# The 25-turn live conversation (2026-09-07, qwen3:32b): once a thread carried
+# history, six of twenty-four answers stated figures without running a query --
+# "And in July?" produced $21,564.12 against a real $23,518.67, August $23,789.45
+# against $75,668.71. In the single-turn eval every question queried. Earlier
+# turns tell the model what the user means; they must never become its source of
+# numbers, so a figure in an answer has to appear in this turn's query results
+# or be quoted from an earlier turn of the same conversation.
+
+_GROUND_ABS_TOLERANCE = 0.5
+_GROUND_REL_TOLERANCE = 0.005
+_FIGURE_RE = re.compile(
+    r"\$\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?\b"     # $12,330.83  $23.5K
+    r"|\d+(?:\.\d+)?\s?%"                        # 62.3%
+    r"|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b"          # 1,234
+    r"|\b\d+\.\d+\b"                             # 4.5
+    r"|\b\d+\b"                                   # 19
+)
+_NOT_A_FIGURE_RE = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"  # a uuid
+    r"|\b\d{4}-\d{2}(?:-\d{2})?\b"                # 2026-09-03, 2026-09
+    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b"          # 9/3/2026
+    r"|\b[A-Z]{1,3}-?\d{2,}\b|#\d+"               # J-0020, PO-77, #12
+)
+_SCALE = {"k": 1_000.0, "m": 1_000_000.0}
+
+
+def figures_in_text(text: str) -> set[float]:
+    """The numbers a reader would take as figures: money, percentages, decimals
+    and every integer, a zero included -- "0 jobs in August" was invented on the
+    live re-test, and a zero hides work. Dates, job and quote numbers, uuids and
+    years are not figures."""
+    out: set[float] = set()
+    for m in _FIGURE_RE.finditer(_NOT_A_FIGURE_RE.sub(" ", text)):
+        raw = m.group(0)
+        token = raw.replace("$", "").replace("%", "").replace(",", "").strip()
+        scale = 1.0
+        if token and token[-1].lower() in _SCALE:
+            scale = _SCALE[token[-1].lower()]
+            token = token[:-1].strip()
+        try:
+            value = float(token) * scale
+        except ValueError:
+            continue
+        if raw.isdigit() and 1990 <= value <= 2100:
+            continue
+        out.add(value)
+    return out
+
+
+def numbers_in(value, out: set[float]) -> None:
+    """Every numeric value reachable in a tool result, as floats (strings that
+    parse as money or numbers included; booleans excluded)."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float, Decimal)):
+        f = float(value)
+        if math.isfinite(f):
+            out.add(f)
+        return
+    if isinstance(value, str):
+        try:
+            f = float(value.replace(",", "").replace("$", "").strip())
+        except ValueError:
+            return
+        if math.isfinite(f):
+            out.add(f)
+        return
+    if isinstance(value, dict):
+        for v in value.values():
+            numbers_in(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            numbers_in(v, out)
+
+
+def _supported(x: float, sources: set[float]) -> bool:
+    for candidate in (x, x / 100.0, x * 100.0):  # a ratio the model wrote as a percentage, or back
+        if candidate in sources:
+            return True
+        if any(abs(candidate - v) <= max(_GROUND_ABS_TOLERANCE, abs(v) * _GROUND_REL_TOLERANCE) for v in sources):
+            return True
+    return False
+
+
+def unsupported_figures(answer: str, sources: set[float]) -> list[float]:
+    """Figures in `answer` that appear in none of `sources` -- this turn's query
+    results, within rounding tolerance. Earlier turns are deliberately NOT a
+    source: on the live re-test, "0 jobs in July" (queried) licensed "0 jobs in
+    August" (never queried, and wrong). A figure worth repeating is worth one
+    query."""
+    return sorted(x for x in figures_in_text(answer) if not _supported(x, sources))
 
 
 def _sql_fence_share(text: str) -> float:

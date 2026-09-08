@@ -32,6 +32,14 @@ from tools.sql_executor import SQL_ERROR_KIND
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _chars_per_token_of_four(monkeypatch):
+    """The arithmetic in this file was written at chars/4 for every string. The
+    calibrated history divisor (3, measured against the model's own count) has
+    its own test in test_grounding_guard.py; here it would only obscure the sums."""
+    monkeypatch.setattr(insights, "HISTORY_CHARS_PER_TOKEN", 4)
+
+
 class Recording(Conversation):
     """The scripted model, also recording the kwargs of every call and able to fail."""
 

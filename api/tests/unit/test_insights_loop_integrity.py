@@ -260,7 +260,9 @@ async def test_a_real_chart_after_a_real_query_survives_the_guard():
         {"vendor": "Northern Bar Stock", "spend": 4100},
     ]}
     text = "Acme Steel leads at $12,400.\n```json\n" + json.dumps(real) + "\n```"
-    convo = Conversation(turns=[_asks_for_sql(), _answer(text)], tool_results=[SQL_OK])
+    # The query's own rows: the figure in the sentence is one the tool returned.
+    spend = {"columns": ["vendor", "spend"], "rows": real["data"], "row_count": 3, "description": "spend"}
+    convo = Conversation(turns=[_asks_for_sql(), _answer(text)], tool_results=[spend])
     result = await run(convo)
     assert result["answer"] == "Acme Steel leads at $12,400."
     assert result["chart_config"] is not None
@@ -310,7 +312,7 @@ async def test_the_failure_quotes_the_rejected_text_without_pasting_all_of_it():
 
 @pytest.mark.parametrize("text", [
     pytest.param("Three jobs came back with an error code this week.", id="error-as-shop-data"),
-    pytest.param("Your scrap rate has an error margin of about 2%.", id="error-margin"),
+    pytest.param("Your scrap rate has an error margin of about two percent.", id="error-margin"),
     pytest.param("Jigged has no table for payroll, so that data does not exist here.",
                  id="a-plain-decline"),
     pytest.param("Nothing is late right now.", id="a-flat-answer"),
@@ -420,7 +422,7 @@ async def test_the_callers_date_reaches_the_tool_as_a_date():
     with the screen next to it, which is the exact failure this change removes.
     """
     convo = Conversation(
-        turns=[_asks_for_sql(), _answer("7 jobs are late.")],
+        turns=[_asks_for_sql(), _answer("4 jobs are late.")],  # the figure SQL_OK returned
         tool_results=[SQL_OK],
     )
 

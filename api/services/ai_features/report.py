@@ -41,6 +41,7 @@ from services import llm
 from services.ai_features import insights
 from services.ai_features.base import JobContext
 from services.insights_presentation import (
+    numbers_in,
     _drop_exemplar_echo,
     _select_chart_type,
     _validate_chart_config,
@@ -105,28 +106,9 @@ COMPOSE_REQUEST = (
 
 
 def _numbers_in(value: Any, out: set[float]) -> None:
-    """Every numeric value reachable in a tool result, as floats."""
-    if isinstance(value, bool):
-        return
-    if isinstance(value, (int, float, Decimal)):
-        f = float(value)
-        if math.isfinite(f):
-            out.add(f)
-        return
-    if isinstance(value, str):
-        try:
-            f = float(value.replace(",", "").replace("$", "").strip())
-        except ValueError:
-            return
-        if math.isfinite(f):
-            out.add(f)
-        return
-    if isinstance(value, dict):
-        for v in value.values():
-            _numbers_in(v, out)
-    elif isinstance(value, (list, tuple)):
-        for v in value:
-            _numbers_in(v, out)
+    """Every numeric value reachable in a tool result, as floats. The walker lives
+    in insights_presentation (chat's grounding guard uses it too)."""
+    numbers_in(value, out)
 
 
 def _traceable(x: float, seen: set[float]) -> bool:

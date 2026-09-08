@@ -42,6 +42,8 @@ export interface ChatResponse {
   tokens_used: number | null;
   /** The templated "I can only answer questions about this shop" refusal. */
   off_topic?: boolean;
+  /** The model stated figures its queries did not produce and was sent back to the tool once. */
+  grounding_corrected?: boolean;
 }
 
 export interface SavedInsight {
@@ -245,6 +247,7 @@ export function chatResultOf(job: AiJob | null): ChatResponse | null {
     model: typeof candidate.model === 'string' ? candidate.model : null,
     tokens_used: typeof candidate.tokens_used === 'number' ? candidate.tokens_used : null,
     off_topic: candidate.off_topic === true,
+    grounding_corrected: candidate.grounding_corrected === true,
   };
 }
 

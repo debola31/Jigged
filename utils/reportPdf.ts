@@ -112,10 +112,13 @@ export function periodLine(spec: Pick<ReportSpec, 'period_start' | 'period_end' 
   const label = spec.period_label.trim();
   if (!start || !end) return label;
   const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // A snapshot ("as of today") has one date, not a range of one day.
   const range =
-    start.getFullYear() === end.getFullYear()
-      ? `${day(start)} – ${day(end)}, ${end.getFullYear()}`
-      : `${day(start)}, ${start.getFullYear()} – ${day(end)}, ${end.getFullYear()}`;
+    start.getTime() === end.getTime()
+      ? `${day(end)}, ${end.getFullYear()}`
+      : start.getFullYear() === end.getFullYear()
+        ? `${day(start)} – ${day(end)}, ${end.getFullYear()}`
+        : `${day(start)}, ${start.getFullYear()} – ${day(end)}, ${end.getFullYear()}`;
   const carriesYear = /\b(19|20)\d{2}\b/.test(label);
   return carriesYear ? label : `${label} · ${range}`;
 }

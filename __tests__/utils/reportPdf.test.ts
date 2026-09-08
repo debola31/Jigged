@@ -273,6 +273,11 @@ describe('periodLine', () => {
       'Last 12 months · Oct 1, 2025 – Sep 30, 2026',
     );
   });
+  it('prints a snapshot as one date, not a range of one day', () => {
+    // The third live report: "Backlog and late jobs right now".
+    expect(periodLine({ period_start: '2026-09-07', period_end: '2026-09-07', period_label: 'As of Today' })).toBe('As of Today · Sep 7, 2026');
+  });
+
   it('lets a label that carries a year stand alone, and dates one that does not', () => {
     expect(periodLine({ period_start: '2026-06-01', period_end: '2026-09-03', period_label: 'Jun 1 – Sep 3, 2026' })).toBe('Jun 1 – Sep 3, 2026');
     // The second live report wrote "June to September" and dated it 2023.

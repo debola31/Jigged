@@ -91,7 +91,9 @@ REPORT_BRIEF = (
     f"({CHART_POINTS_MIN} to {CHART_POINTS_MAX} points; label points on a time axis with ISO "
     "dates YYYY-MM-DD, never month names, so the axis keeps calendar order; each chart shows "
     "something no other block already shows), or one text block of at most two "
-    f"sentences ({TEXT_BODY_MAX} characters). Numbers over words. Every number in the report "
+    f"sentences ({TEXT_BODY_MAX} characters). Numbers over words; when the request is about "
+    "particular jobs, customers, parts or quotes, a table that names them beats a count of them. "
+    "Every number in the report "
     "must be a value that appeared in a query result. Values are raw numbers: never format "
     "them, declare a format (currency, integer, percent, plain) and the renderer will."
 )

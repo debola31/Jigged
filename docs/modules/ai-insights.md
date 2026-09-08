@@ -373,6 +373,22 @@ three runs; `forbidden` is every question that must not.
 | `phase-3-before` | anthropic | 33 | 30 | 28 | 5 | 3/6 | 0/18 | 7 s |
 | `phase-3-after` (ships) | ollama | 39 | 38 | 33 | 4 | 3/6 | 0/24 | 9 s |
 | `phase-3-after` | anthropic | 39 | 38 | 32 | 11 | 6/6 | 0/24 | 7 s |
+| semantics pass (`606fb749`) | ollama | 39 | 36 | 30 | 3 | 3/6 | 0/24 | 9 s |
+| semantics pass | anthropic | 39 | 37 | 31 | 9 | 6/6 | 0/24 | 8 s |
+| final (`b7d8659d`, ships) | ollama | 39 | **39** | 33 | 3 | 3/6 | 0/24 | 10 s |
+| final | anthropic | 39 | 17 † | 15 | 5 | 4/6 | 0/24 | — |
+
+† The API balance ran out during the final measurement's second run; every Claude answer from there on is
+"every provider failed", so the final Claude column is void and its blind sheet pairs the final local
+answers with Claude's answers from the semantics pass, the same prompt one guard tweak earlier.
+
+**The semantics pass** (relative periods as an executable block, the file compacted, two guideline lines) fixed
+what it targeted: the month comparison the local arm got wrong twice in the blind read is now July 8 and
+August 21, the seed's true counts. Its first three runs also showed the grounding guard refusing four
+answers it should not have — the 2 in "CNC Mill (Haas VF-2)" and the difference 13 between two stated,
+grounded figures — which is what the final guard accepts; the local arm then answered 39 of 39 with no
+false refusal. The work-centre chart gap is unchanged, and the snapshot guideline produced a several-figure
+answer in one run of three.
 
 **Adapter parity (plan 2.7): met.** The native adapter answers and runs SQL exactly as often as the `/v1`
 path it replaced (32 and 29 of 33), and at least as often as Claude in the same phase (31 and 28). One

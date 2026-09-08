@@ -187,7 +187,7 @@ describe('listReports / reportResultOf', () => {
 
   it('reads only succeeded report jobs for the shop, newest first', async () => {
     const q = queryStub([
-      { id: 'j1', created_at: 'c1', result: { report: { title: 'A' }, dropped: ['Flat'] } },
+      { id: 'j1', created_at: 'c1', result: { report: { title: 'A' }, dropped: ['Flat'], tool_calls: ['execute_sql', 'execute_sql'] } },
       { id: 'j2', created_at: 'c2', result: { answer: 'not a report' } },
     ]);
     mockFrom.mockReturnValue(q);
@@ -200,7 +200,7 @@ describe('listReports / reportResultOf', () => {
     expect(q.eq).toHaveBeenCalledWith('status', 'succeeded');
     expect(q.order).toHaveBeenCalledWith('created_at', { ascending: false });
     // A row with no report on it is left out rather than listed as one that cannot open.
-    expect(reports).toEqual([{ id: 'j1', created_at: 'c1', report: { title: 'A' }, dropped: ['Flat'] }]);
+    expect(reports).toEqual([{ id: 'j1', created_at: 'c1', report: { title: 'A' }, dropped: ['Flat'], tool_call_count: 2 }]);
   });
 
   it('narrows a settled job to its report, or null', () => {

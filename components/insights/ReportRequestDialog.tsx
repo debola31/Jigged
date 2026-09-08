@@ -75,6 +75,7 @@ export default function ReportRequestDialog({ open, onClose, companyId, onGenera
       table_count: spec?.blocks.filter((b) => b.type === 'table').length ?? 0,
       has_text_block: !!spec?.blocks.some((b) => b.type === 'text'),
       dropped_count: summary?.dropped.length ?? 0,
+      tool_call_count: summary?.tool_call_count ?? 0,
     });
     if (summary && spec) onGenerated(summary);
   }, [job.phase, job.job, onGenerated]);

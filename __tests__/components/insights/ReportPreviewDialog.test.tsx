@@ -24,7 +24,7 @@ vi.mock('posthog-js', () => ({ default: { identify: vi.fn(), capture: vi.fn() } 
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 const report = JSON.parse(readFileSync(join(__dirname, '..', '..', 'fixtures', 'reportSpecExample.json'), 'utf8'));
-const summary = { id: 'job-1', created_at: '2026-09-07T15:00:00Z', report, dropped: [] };
+const summary = { id: 'job-1', created_at: '2026-09-07T15:00:00Z', report, dropped: [], tool_call_count: 3 };
 
 describe('ReportPreviewDialog', () => {
   beforeEach(() => {

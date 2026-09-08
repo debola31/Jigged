@@ -8,7 +8,7 @@ import { PieChart } from '@mui/x-charts/PieChart';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { ChartConfig } from '@/utils/insightsAccess';
-import { formatCompact, formatLabel } from '@/utils/chartFormat';
+import { formatCompact, formatLabel, isDateLabel } from '@/utils/chartFormat';
 
 interface InsightChartProps {
   chartConfig: ChartConfig;
@@ -65,9 +65,14 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
   ];
 
   // Sort nominal bars by value (descending) for readability; preserve the
-  // original order for time series (area) and pie.
-  const sortForBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
-  const rows = sortForBars
+  // original order for time series and pie. A time series usually arrives as
+  // `area`, but a user who asks for "a bar chart of monthly bookings" gets bars
+  // over dates, and ranking those prints Mar, Feb, Jan, Dec: a scrambled
+  // calendar, not a ranking. The PDF renderer (utils/pdfCharts.ts) applies the
+  // same rule through the same predicate.
+  const isBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
+  const temporal = data.every((d) => isDateLabel(String(d[x_key] ?? '')));
+  const rows = isBars && !temporal
     ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
     : data;
 

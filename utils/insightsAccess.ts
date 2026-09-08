@@ -274,16 +274,19 @@ export interface ReportSummary {
   report: unknown;
   /** Chart blocks the handler dropped at the gate; the page footer names them. */
   dropped: string[];
+  /** Queries the model ran to compose it: how long a report held the box's single slot. */
+  tool_call_count: number;
 }
 
-function reportOf(raw: Json | null): { report: unknown; dropped: string[] } | null {
+function reportOf(raw: Json | null): { report: unknown; dropped: string[]; tool_call_count: number } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const candidate = raw as Record<string, unknown>;
   if (!candidate.report || typeof candidate.report !== 'object') return null;
   const dropped = Array.isArray(candidate.dropped)
     ? candidate.dropped.filter((d): d is string => typeof d === 'string')
     : [];
-  return { report: candidate.report, dropped };
+  const tool_call_count = Array.isArray(candidate.tool_calls) ? candidate.tool_calls.length : 0;
+  return { report: candidate.report, dropped, tool_call_count };
 }
 
 /** The report on a settled job row, or null when the row carries none. */

@@ -23,7 +23,7 @@ describe('ReportsSection', () => {
 
   it('lists recent reports by their own title and period', async () => {
     mockListReports.mockResolvedValue([
-      { id: 'job-1', created_at: '2026-09-07T15:00:00Z', report, dropped: [] },
+      { id: 'job-1', created_at: '2026-09-07T15:00:00Z', report, dropped: [], tool_call_count: 3 },
     ]);
     render(<ReportsSection companyId="co-1" />);
 

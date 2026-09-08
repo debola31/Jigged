@@ -10,7 +10,9 @@
  *
  * Cases: the reference layout with no logo, with a logo, and with a logo that
  * carries the name; every chart type with long labels; a spec too tall for the
- * page (the "Not shown" footer); a shop with no shipments (null cells).
+ * page (the "Not shown" footer); a shop with no shipments (null cells). Point
+ * RENDER_REPORT_SPEC at a handler result JSON (the `result` column of a
+ * succeeded report job) to draw what a real model composed as an eighth case.
  */
 import { describe, expect, it } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -159,6 +161,12 @@ const cases: { file: string; spec: ReportSpec; company: Company; supabase: Supab
     supabase: null,
   },
 ];
+
+const LIVE = process.env.RENDER_REPORT_SPEC;
+if (OUT && LIVE) {
+  const live = reportSpecOf(JSON.parse(readFileSync(LIVE, 'utf8')).report);
+  if (live) cases.push({ file: '08-live-model-output.pdf', spec: live, company: contour, supabase: null });
+}
 
 describe.skipIf(!OUT)('render the report checklist to PDF files', () => {
   it.each(cases)('$file', async ({ file, spec, company, supabase }) => {

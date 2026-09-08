@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, routerMocks, resetRouterMocks } from '../../test-utils';
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  routerMocks,
+  resetRouterMocks,
+} from '../../test-utils';
 import userEvent from '@testing-library/user-event';
 import CompanySelector from '@/components/auth/CompanySelector';
 
@@ -22,6 +29,15 @@ vi.mock('@/utils/companyAccess', () => ({
 
 vi.mock('@sentry/nextjs', () => ({
   captureException: vi.fn(),
+}));
+
+const getSignedUrls = vi.fn(async (paths: string[]) =>
+  new Map(paths.map((path) => [path, `https://signed.test/${path}`])),
+);
+
+vi.mock('@/utils/storageHelpers', () => ({
+  getSignedUrls: (...args: [string[], number?, string?]) => getSignedUrls(...args),
+  LOGOS_BUCKET: 'logos',
 }));
 
 describe('CompanySelector', () => {
@@ -124,5 +140,84 @@ describe('CompanySelector', () => {
     // auth resolves.
     await new Promise((r) => setTimeout(r, 50));
     expect(getUserCompanies).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The login picker follows the same rule as the sidebar switcher: a logo that carries the shop's
+ * name replaces that name, and anything else keeps the row it has always had. This is the first
+ * screen a multi-shop user sees, and every row here used to be the same generic building icon.
+ */
+describe('CompanySelector logos', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRouterMocks();
+    useAuthMock.mockReturnValue({ user: { id: 'user-1', email: 'a@b.co' } });
+    setLastCompany.mockResolvedValue(undefined);
+  });
+
+  it('shows the wordmark INSTEAD of the name when the logo carries it', async () => {
+    getUserCompanies.mockResolvedValue([
+      {
+        user_id: 'user-1',
+        company_id: 'co-a',
+        role: 'admin',
+        companies: {
+          id: 'co-a',
+          name: 'Acme Corp',
+          logo_url: 'co-a/company/logo_ab12_acme.png',
+          settings: { logo_includes_name: true },
+        },
+      },
+    ]);
+    render(<CompanySelector />);
+
+    const logo = await screen.findByRole('img', { name: 'Acme Corp' });
+    expect(logo).toHaveAttribute('src', 'https://signed.test/co-a/company/logo_ab12_acme.png');
+    expect(screen.queryByText('Acme Corp')).toBeNull();
+    // The role line survives — it is the one thing the wordmark cannot say.
+    expect(screen.getByText('Role: admin')).toBeInTheDocument();
+  });
+
+  it('keeps the name for a logo that does not contain it', async () => {
+    getUserCompanies.mockResolvedValue([
+      {
+        user_id: 'user-1',
+        company_id: 'co-a',
+        role: 'admin',
+        companies: {
+          id: 'co-a',
+          name: 'Acme Corp',
+          logo_url: 'co-a/company/logo_ab12_emblem.png',
+          settings: { logo_includes_name: false },
+        },
+      },
+    ]);
+    render(<CompanySelector />);
+
+    expect(await screen.findByText('Acme Corp')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Acme Corp' })).toBeNull();
+    expect(getSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the name when the logo fails to load', async () => {
+    getUserCompanies.mockResolvedValue([
+      {
+        user_id: 'user-1',
+        company_id: 'co-a',
+        role: 'admin',
+        companies: {
+          id: 'co-a',
+          name: 'Acme Corp',
+          logo_url: 'co-a/company/logo_ab12_acme.png',
+          settings: { logo_includes_name: true },
+        },
+      },
+    ]);
+    render(<CompanySelector />);
+
+    fireEvent.error(await screen.findByRole('img', { name: 'Acme Corp' }));
+
+    expect(await screen.findByText('Acme Corp')).toBeInTheDocument();
   });
 });

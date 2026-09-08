@@ -60,7 +60,15 @@ export interface PaymentTermsPickerProps {
   value: string;
   /** Called with the chosen term, or '' when cleared. */
   onChange: (next: string) => void;
-  label?: string;
+  /**
+   * The visible field label. Pass `null` where the surrounding row already
+   * names the field — the settings screen puts the heading and its explanation
+   * in the left column — and the control still takes its accessible name from
+   * `ariaLabel`, so it is never an unnamed combobox.
+   */
+  label?: string | null;
+  /** Accessible name when `label` is null. Ignored when a label is rendered. */
+  ariaLabel?: string;
   helperText?: string;
   required?: boolean;
   size?: 'small' | 'medium';
@@ -72,6 +80,7 @@ export default function PaymentTermsPicker({
   value,
   onChange,
   label = 'Payment terms',
+  ariaLabel = 'Payment terms',
   helperText,
   required = false,
   size = 'small',
@@ -245,9 +254,14 @@ export default function PaymentTermsPicker({
         renderInput={(params) => (
           <TextField
             {...params}
-            label={label}
+            label={label ?? undefined}
             required={required}
             helperText={helperText}
+            inputProps={
+              label === null
+                ? { ...params.inputProps, 'aria-label': ariaLabel }
+                : params.inputProps
+            }
             InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
           />
         )}
@@ -256,10 +270,13 @@ export default function PaymentTermsPicker({
       {addingTerm && (
         // Revealed below the picker rather than inside it: a dropdown closes on
         // selection, so a field living in the menu can't reliably be typed into.
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: 1 }}>
           <TextField
             size="small"
-            fullWidth
+            // Grows to fill a wide form row, but keeps a floor narrow enough
+            // that the two buttons wrap under it in a narrow column (the
+            // settings row) rather than crushing the field to nothing.
+            sx={{ flex: '1 1 180px' }}
             autoFocus
             label="New payment term"
             placeholder="e.g. Net 30, 1% late charge"

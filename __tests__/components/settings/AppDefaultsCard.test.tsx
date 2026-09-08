@@ -14,13 +14,22 @@ import userEvent from '@testing-library/user-event';
 
 const getCompany = vi.hoisted(() => vi.fn());
 const getCustomPaymentTerms = vi.hoisted(() => vi.fn());
+const addCustomPaymentTerm = vi.hoisted(() => vi.fn());
+const removeCustomPaymentTerm = vi.hoisted(() => vi.fn());
 const updateCompanyDefaults = vi.hoisted(() => vi.fn());
 const setCompanyDefaultPaymentTerms = vi.hoisted(() => vi.fn());
 const setCompanyPricingDefaults = vi.hoisted(() => vi.fn());
+const listQuickBooksTerms = vi.hoisted(() => vi.fn());
+
+// The terms field is the shared PaymentTermsPicker, so this card now depends on
+// the picker's own reads: the saved list and QuickBooks' terms.
+vi.mock('@/utils/quickbooksAccess', () => ({ listQuickBooksTerms }));
 
 vi.mock('@/utils/companyAccess', () => ({
   getCompany,
   getCustomPaymentTerms,
+  addCustomPaymentTerm,
+  removeCustomPaymentTerm,
   updateCompanyDefaults,
   setCompanyDefaultPaymentTerms,
   setCompanyPricingDefaults,
@@ -44,6 +53,9 @@ beforeEach(() => {
     settings: { defaults: {}, default_payment_terms: 'Net 30' },
   });
   getCustomPaymentTerms.mockResolvedValue(['2% Net 30']);
+  addCustomPaymentTerm.mockResolvedValue(['2% Net 30']);
+  removeCustomPaymentTerm.mockResolvedValue([]);
+  listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
   updateCompanyDefaults.mockResolvedValue(undefined);
   setCompanyDefaultPaymentTerms.mockImplementation(async (_id: string, v: string) => v.trim() || null);
 });
@@ -69,6 +81,42 @@ describe('AppDefaultsCard', () => {
   });
 
   /**
+   * **Why this card stopped rendering its own combobox.**
+   *
+   * The settings screen is where a shop curates its house terms — and it was the one screen with
+   * neither "Add New" nor the remove control, because it had hand-rolled a plain freeSolo box
+   * beside the shared picker. A term typed into it set the default without ever joining
+   * `custom_payment_terms`, so it then showed up on quotes as an unrecognised value.
+   */
+  it('offers "Add New" here, and saves the term to the shop’s list', async () => {
+    addCustomPaymentTerm.mockResolvedValue(['2% Net 30 EOM', '2% Net 30']);
+    render(<AppDefaultsCard companyId={CO} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByLabelText(/^payment terms$/i));
+    await user.click(await screen.findByRole('option', { name: /add new/i }));
+    await user.type(await screen.findByLabelText('New payment term'), '2% Net 30 EOM');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+
+    expect(addCustomPaymentTerm).toHaveBeenCalledWith(CO, '2% Net 30 EOM');
+    // …and it is the value the card will save as the shop default.
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() =>
+      expect(setCompanyDefaultPaymentTerms).toHaveBeenCalledWith(CO, '2% Net 30 EOM'),
+    );
+  });
+
+  it('can remove one of the shop’s saved terms from here', async () => {
+    render(<AppDefaultsCard companyId={CO} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByLabelText(/^payment terms$/i));
+    await user.click(await screen.findByRole('button', { name: 'Remove 2% Net 30' }));
+
+    expect(removeCustomPaymentTerm).toHaveBeenCalledWith(CO, '2% Net 30');
+  });
+
+  /**
    * **The reason this file exists.**
    *
    * `updateCompanyDefaults` and `setCompanyDefaultPaymentTerms` both read the whole
@@ -80,15 +128,15 @@ describe('AppDefaultsCard', () => {
    */
   it('writes both halves in sequence, never concurrently', async () => {
     render(<AppDefaultsCard companyId={CO} />);
-    const input = await screen.findByLabelText(/^payment terms$/i);
-
-    await userEvent.clear(input);
-    await userEvent.type(input, 'Net 45');
-    await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    const user = userEvent.setup();
+    // Pick-only: the term is chosen from the menu, not typed into the field.
+    await user.click(await screen.findByLabelText(/^payment terms$/i));
+    await user.click(await screen.findByRole('option', { name: 'Net 15', exact: true }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
 
     await waitFor(() => expect(setCompanyDefaultPaymentTerms).toHaveBeenCalled());
     expect(updateCompanyDefaults).toHaveBeenCalledTimes(1);
-    expect(setCompanyDefaultPaymentTerms).toHaveBeenCalledWith(CO, 'Net 45');
+    expect(setCompanyDefaultPaymentTerms).toHaveBeenCalledWith(CO, 'Net 15');
     expect(updateCompanyDefaults.mock.invocationCallOrder[0]).toBeLessThan(
       setCompanyDefaultPaymentTerms.mock.invocationCallOrder[0],
     );

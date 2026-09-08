@@ -10,14 +10,12 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import InputAdornment from '@mui/material/InputAdornment';
 import SaveIcon from '@mui/icons-material/Save';
-import Autocomplete from '@mui/material/Autocomplete';
 import posthog from 'posthog-js';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import type { ChargeBasis } from '@/types/bom';
 import {
   getCompany,
-  getCustomPaymentTerms,
   readCompanyPricingDefaults,
   setCompanyPricingDefaults,
   setCompanyDefaultPaymentTerms,
@@ -29,8 +27,8 @@ import {
   readCompanyDefaults,
   type CompanyDefaultKey,
 } from '@/lib/companyDefaults';
-import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import SettingsSection from '@/components/settings/SettingsSection';
+import PaymentTermsPicker from '@/components/common/PaymentTermsPicker';
 
 interface AppDefaultsCardProps {
   companyId: string;
@@ -64,9 +62,19 @@ function fieldError(key: CompanyDefaultKey, raw: string): string | null {
  * registry is; they know quote validity and payment terms are both "what a new quote starts with"
  * and were in two boxes. The card is one; the registry stays numeric.
  *
- * Terms are free text on purpose. Shops phrase them in their own words — one told us "2% Net 30"
- * where our preset list says "2/10 Net 30" — and a quote prints whatever is stored, so forcing
- * their wording onto our vocabulary would change what the customer reads.
+ * Shops phrase terms in their own words — one told us "2% Net 30" where our preset list says
+ * "2/10 Net 30" — and a quote prints whatever is stored, so their wording must survive. It reaches
+ * the field through the SHARED `PaymentTermsPicker`, not a free-text box of this card's own:
+ * "Add New" takes the same arbitrary string, and the difference is that it also joins
+ * `custom_payment_terms`, so the phrase the shop just made its house term is offered on every
+ * quote instead of arriving there as an unrecognised value. The hand-rolled combobox this replaced
+ * had neither that nor the remove control, so the one screen a shop would go to to curate its list
+ * was the one screen that could not.
+ *
+ * **The two halves of this row commit at different times, and that is inherent rather than an
+ * oversight.** Adding or removing a saved term writes `custom_payment_terms` immediately (it is a
+ * list edit, and the picker owns it everywhere it appears); the chosen default only lands on Save.
+ * Each writer re-reads the settings object, so the later Save carries the earlier list edit.
  *
  * Values persist to `companies.settings.defaults` and `companies.settings.default_payment_terms`;
  * both writers read-modify-write the whole settings object, which is why Save runs them in
@@ -87,7 +95,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
     bought: '0',
     basis: 'cost' as ChargeBasis,
   });
-  const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -97,10 +104,7 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       try {
         setLoading(true);
         setError(null);
-        const [company, customTerms] = await Promise.all([
-          getCompany(companyId),
-          getCustomPaymentTerms(companyId),
-        ]);
+        const company = await getCompany(companyId);
         if (cancelled) return;
         setForm(toFormState(readCompanyDefaults(company)));
         setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
@@ -113,7 +117,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
           bought: String(defaults.bought),
           basis: defaults.materialChargeBasis,
         });
-        setSavedTerms(customTerms);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
       } finally {
@@ -124,14 +127,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       cancelled = true;
     };
   }, [companyId]);
-
-  // The shop's own saved terms first, then the built-in presets — same ordering the quote form's
-  // picker uses, minus the add/remove affordances (this screen sets one value; it isn't where the
-  // reusable list is curated).
-  const termOptions = [
-    ...savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t)),
-    ...PAYMENT_TERM_PRESETS,
-  ];
 
   const handleChange = (key: CompanyDefaultKey) => (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -284,27 +279,19 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
                 individually.
               </Typography>
             </Box>
-            <Autocomplete
-              freeSolo
-              size="small"
-              options={termOptions}
-              value={terms}
-              onChange={(_, next) => {
-                setTerms(next ?? '');
-                setSuccess(false);
-              }}
-              onInputChange={(_, next) => {
-                setTerms(next);
-                setSuccess(false);
-              }}
-              sx={{ width: 280 }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  inputProps={{ ...params.inputProps, 'aria-label': 'Payment terms' }}
-                />
-              )}
-            />
+            {/* Wide enough that the "Add New" row's field, Add and Cancel sit
+                on one line; the picker itself only needs ~280. */}
+            <Box sx={{ width: 380, maxWidth: '100%' }}>
+              <PaymentTermsPicker
+                companyId={companyId}
+                value={terms}
+                onChange={(next) => {
+                  setTerms(next);
+                  setSuccess(false);
+                }}
+                label={null}
+              />
+            </Box>
           </Box>
 
           <Divider sx={{ my: 2 }} />

@@ -77,9 +77,10 @@ export default function CompanySwitcher() {
 
   return (
     <>
-      {/* pb is tighter than px: the switcher and the nav below it read as one block, and the
-          default 12px here stacked with the nav's own 16px into a 40px trough. */}
-      <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5 }}>
+      {/* No bottom padding: the switcher and the nav below it read as one block, and the button's
+          own 12px already separates them. This used to stack 12px here onto the nav's 16px for a
+          40px trough that left the company mark stranded at the top of the sidebar. */}
+      <Box sx={{ px: 1.5, pt: 1.5, pb: 0 }}>
         <ButtonBase
           onClick={handleOpen}
           disabled={!hasMultipleCompanies}

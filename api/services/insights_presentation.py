@@ -245,6 +245,7 @@ _GROUND_REL_TOLERANCE = 0.005
 _FIGURE_RE = re.compile(
     r"\$\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?\b"     # $12,330.83  $23.5K
     r"|\d+(?:\.\d+)?\s?%"                        # 62.3%
+    r"|\b\d+(?:\.\d+)?\s?[xX]\b"                 # 3x, 2.5x -- a ratio the reader cannot check
     r"|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b"          # 1,234
     r"|\b\d+\.\d+\b"                             # 4.5
     r"|\b\d+\b"                                   # 19
@@ -267,6 +268,8 @@ def figures_in_text(text: str) -> set[float]:
     for m in _FIGURE_RE.finditer(_NOT_A_FIGURE_RE.sub(" ", text)):
         raw = m.group(0)
         token = raw.replace("$", "").replace("%", "").replace(",", "").strip()
+        if token and token[-1] in "xX" and not token[:-1].strip()[-1:].lower() in ("k", "m"):
+            token = token[:-1].strip()
         scale = 1.0
         if token and token[-1].lower() in _SCALE:
             scale = _SCALE[token[-1].lower()]
@@ -295,6 +298,11 @@ def numbers_in(value, out: set[float]) -> None:
         try:
             f = float(value.replace(",", "").replace("$", "").strip())
         except ValueError:
+            # A name with a number in it -- "CNC Mill (Haas VF-2)", "Q-1042" -- is a
+            # returned value too, and an answer that repeats the name repeats the
+            # number. Every numeric token in a returned string counts as returned.
+            for token in re.findall(r"\d+(?:\.\d+)?", value):
+                out.add(float(token))
             return
         if math.isfinite(f):
             out.add(f)
@@ -321,8 +329,22 @@ def unsupported_figures(answer: str, sources: set[float]) -> list[float]:
     results, within rounding tolerance. Earlier turns are deliberately NOT a
     source: on the live re-test, "0 jobs in July" (queried) licensed "0 jobs in
     August" (never queried, and wrong). A figure worth repeating is worth one
-    query."""
-    return sorted(x for x in figures_in_text(answer) if not _supported(x, sources))
+    query.
+
+    One kind of arithmetic is accepted: the sum or difference of two figures the
+    answer ITSELF states and that are grounded -- "8 in July and 21 in August, up
+    13". The reader can check it from the sentence. Ratios and percentages are
+    not: "3x more" and "a 133 % drop" are where the model went wrong live, and
+    the semantics ask for those in SQL."""
+    figures = figures_in_text(answer)
+    grounded = [x for x in figures if _supported(x, sources)]
+    def derived(x: float) -> bool:
+        for i, a in enumerate(grounded):
+            for b in grounded[i + 1:]:
+                if any(abs(x - c) <= max(_GROUND_ABS_TOLERANCE, abs(c) * _GROUND_REL_TOLERANCE) for c in (a + b, abs(a - b))):
+                    return True
+        return False
+    return sorted(x for x in figures if not _supported(x, sources) and not derived(x))
 
 
 def _sql_fence_share(text: str) -> float:

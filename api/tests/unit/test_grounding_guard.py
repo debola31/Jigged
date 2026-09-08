@@ -47,6 +47,25 @@ def test_numbers_in_walks_rows_and_money_strings():
     assert 23518.67 in seen and 1.0 in seen  # the value, and row_count
 
 
+def test_a_number_inside_a_returned_name_counts_as_returned():
+    """The eval refused "CNC Mill (Haas VF-2) (3 operations)" for the 2 in the
+    machine's name, twice in three runs. A returned string's digits are returned."""
+    seen: set[float] = set()
+    numbers_in({"rows": [{"work_centre": "CNC Mill (Haas VF-2)", "queued": 3}], "row_count": 1}, seen)
+    assert {2.0, 3.0, 1.0} <= seen
+    assert unsupported_figures("Final Inspection leads with 9, then CNC Mill (Haas VF-2) with 3.", seen | {9.0}) == []
+
+
+def test_a_sum_or_difference_of_two_stated_grounded_figures_is_accepted():
+    """"8 in July and 21 in August, an increase of 13" was refused for the 13 on
+    the eval. The reader can check that from the sentence; a ratio they cannot."""
+    assert unsupported_figures("We quoted 8 times in July and 21 in August, an increase of 13.", {8.0, 21.0}) == []
+    assert unsupported_figures("We quoted 8 times in July and 21 in August, 3x more.", {8.0, 21.0}) == [3.0]
+    # The operands must be in the sentence: 13 alone, with 8 and 21 only in the
+    # results, is still a figure the answer did not earn.
+    assert unsupported_figures("Quotes rose by 13.", {8.0, 21.0}) == [13.0]
+
+
 # ------------------------------------------------------------- the handler
 
 

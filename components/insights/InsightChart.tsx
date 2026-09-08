@@ -8,7 +8,7 @@ import { PieChart } from '@mui/x-charts/PieChart';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { SparkLineChart } from '@mui/x-charts/SparkLineChart';
 import type { ChartConfig } from '@/utils/insightsAccess';
-import { formatCompact, formatLabel, isDateLabel } from '@/utils/chartFormat';
+import { formatCompact, formatLabel, temporalKey } from '@/utils/chartFormat';
 
 interface InsightChartProps {
   chartConfig: ChartConfig;
@@ -64,17 +64,19 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
     theme.palette.info.main,
   ];
 
-  // Sort nominal bars by value (descending) for readability; preserve the
-  // original order for time series and pie. A time series usually arrives as
-  // `area`, but a user who asks for "a bar chart of monthly bookings" gets bars
-  // over dates, and ranking those prints Mar, Feb, Jan, Dec: a scrambled
-  // calendar, not a ranking. The PDF renderer (utils/pdfCharts.ts) applies the
-  // same rule through the same predicate.
+  // A time axis (ISO dates, month names, quarters) is put in calendar order
+  // whatever order the rows arrived in; nominal bars are value-sorted for
+  // readability; pie keeps its order. A time series usually arrives as `area`,
+  // but "a bar chart of monthly bookings" arrives as bars over months, and
+  // ranking those prints Mar, Feb, Jan, Dec: a scrambled calendar. The PDF
+  // renderer (utils/pdfCharts.ts) applies the same rule through the same key.
+  const keys = data.map((d) => temporalKey(String(d[x_key] ?? '')));
   const isBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
-  const temporal = data.every((d) => isDateLabel(String(d[x_key] ?? '')));
-  const rows = isBars && !temporal
-    ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
-    : data;
+  const rows = keys.every((k) => k !== null)
+    ? data.map((d, i) => ({ d, k: keys[i] as number })).sort((a, b) => a.k - b.k).map((x) => x.d)
+    : isBars
+      ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
+      : data;
 
   // Extract x-axis labels and y-axis values
   const xLabels = rows.map((d) => formatLabel(String(d[x_key] ?? '')));

@@ -11,6 +11,42 @@ export function isDateLabel(value: string): boolean {
   return /^\d{4}-\d{2}/.test(value);
 }
 
+const MONTH_WORDS: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5,
+  jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+
+/**
+ * A sortable key for a label on a time axis, or null when the label is not one.
+ *
+ * Recognises ISO dates and timestamps, month names with or without a year
+ * ("Jul 2026", "August"), and quarters ("Q3", "Q3 2026"). A model asked for a
+ * month-by-month figure often relabels the months by name -- the first live
+ * report did -- and a renderer that ranks those by value prints a scrambled
+ * calendar. Both renderers order by this key instead. Bare month names carry no
+ * year, so they sort within one; a series that crosses a year boundary needs
+ * the year in the label. Whole words only: "Marlin" and "Decatur" are customers.
+ */
+export function temporalKey(value: string): number | null {
+  const v = value.trim();
+  const iso = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(v);
+  if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3] ?? 1);
+  const monthYear = /^([A-Za-z]+)\.?,?\s+(\d{4})$/.exec(v);
+  if (monthYear) {
+    const m = MONTH_WORDS[monthYear[1].toLowerCase()];
+    return m ? Number(monthYear[2]) * 10000 + m * 100 + 1 : null;
+  }
+  const month = /^([A-Za-z]+)\.?$/.exec(v);
+  if (month) {
+    const m = MONTH_WORDS[month[1].toLowerCase()];
+    return m ? m * 100 + 1 : null;
+  }
+  const quarter = /^Q([1-4])(?:\s+(\d{4}))?$/i.exec(v);
+  if (quarter) return Number(quarter[2] ?? 0) * 10000 + (Number(quarter[1]) * 3 - 2) * 100 + 1;
+  return null;
+}
+
 /**
  * Format ISO timestamps and date strings into clean short labels.
  *

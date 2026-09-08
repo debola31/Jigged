@@ -1,6 +1,6 @@
 import type { jsPDF } from 'jspdf';
 import type { ChartConfig } from '@/utils/insightsAccess';
-import { formatCompact, formatLabel, isDateLabel } from '@/utils/chartFormat';
+import { formatCompact, formatLabel, temporalKey } from '@/utils/chartFormat';
 
 /**
  * Charts drawn into a PDF as vectors, from the same `chart_config` the dashboard
@@ -101,7 +101,7 @@ function ink(doc: ChartDoc, rgb: Rgb, size: number, style: 'normal' | 'bold' = '
 }
 
 /** Shorten a label until it fits `maxWidth` at the current font, with an ellipsis. */
-function fitLabel(doc: ChartDoc, label: string, maxWidth: number): string {
+export function fitLabel(doc: ChartDoc, label: string, maxWidth: number): string {
   if (doc.getTextWidth(label) <= maxWidth) return label;
   let text = label;
   while (text.length > 1 && doc.getTextWidth(`${text}…`) > maxWidth) text = text.slice(0, -1);
@@ -115,19 +115,21 @@ interface Point {
 
 /**
  * The rows as label/value pairs. Labels are formatted but never cut here -- each
- * drawer fits them to the room it actually has. Bars are value-sorted only when
- * the axis is nominal: a month axis that a user asked to see "as a bar chart"
- * keeps its order, because "Mar, Feb, Jan, Dec" is a scrambled calendar, not a
- * ranking.
+ * drawer fits them to the room it actually has. A time axis (ISO dates, month
+ * names, quarters) is put in calendar order whatever order the rows arrived in;
+ * a nominal axis is value-sorted when the drawer asks for it. "Mar, Feb, Jan,
+ * Dec" is a scrambled calendar, not a ranking.
  */
 function pointsOf(config: ChartConfig, sortDesc: boolean): Point[] {
   const raw = config.data.map((row) => String(row[config.x_key] ?? ''));
+  const keys = raw.map(temporalKey);
   const points = raw.map((label, i) => ({
     label: formatLabel(label, Number.POSITIVE_INFINITY),
     value: Number(config.data[i][config.y_key] ?? 0),
+    key: keys[i] ?? 0,
   }));
-  const temporal = raw.every(isDateLabel);
-  return sortDesc && !temporal ? points.sort((a, b) => b.value - a.value) : points;
+  if (keys.every((k) => k !== null)) return points.sort((a, b) => a.key - b.key);
+  return sortDesc ? points.sort((a, b) => b.value - a.value) : points;
 }
 
 interface Plot {

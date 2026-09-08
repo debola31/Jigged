@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompact, formatKpi, formatLabel, formatValue } from '@/utils/chartFormat';
+import { formatCompact, formatKpi, formatLabel, formatValue, temporalKey } from '@/utils/chartFormat';
 
 describe('formatLabel', () => {
   it('reads a first-of-month ISO date as a month', () => {
@@ -17,6 +17,24 @@ describe('formatLabel', () => {
   it('keeps the whole label when the caller lifts the cap', () => {
     // The PDF renderer measures real widths and fits labels itself.
     expect(formatLabel('Hastings Machine Company', Number.POSITIVE_INFINITY)).toBe('Hastings Machine Company');
+  });
+});
+
+describe('temporalKey', () => {
+  it('orders ISO dates, month names with and without a year, and quarters', () => {
+    const keys = ['2026-01-15', '2026-03-01', 'Jul 2026', 'September 2026'].map(temporalKey) as number[];
+    expect(keys.every((k) => k !== null)).toBe(true);
+    expect([...keys].sort((a, b) => a - b)).toEqual(keys);
+    expect(temporalKey('July')! < temporalKey('August')!).toBe(true);
+    expect(temporalKey('Sept')! > temporalKey('Aug')!).toBe(true);
+    expect(temporalKey('Q1 2026')! < temporalKey('Q3 2026')!).toBe(true);
+    expect(temporalKey('Q3')! > temporalKey('Q2')!).toBe(true);
+  });
+  it('is null for a name that merely starts like a month', () => {
+    // "Marlin", "Decatur" and "Junction" are customers, not March, December and June.
+    for (const label of ['Marlin', 'Decatur', 'Junction Tool', 'Hastings Machine Company', 'A']) {
+      expect(temporalKey(label)).toBeNull();
+    }
   });
 });
 

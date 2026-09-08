@@ -100,6 +100,22 @@ describe('InsightChart', () => {
     expect(screen.getByTestId('bar-chart').getAttribute('data-bands')).toBe(JSON.stringify(['Jan 2026', 'Feb 2026', 'Mar 2026']));
   });
 
+  it('puts month names in calendar order too, however the rows arrived', () => {
+    render(
+      <InsightChart
+        chartConfig={makeConfig({
+          x_key: 'month',
+          data: [
+            { month: 'August', revenue: 19606 },
+            { month: 'September', revenue: 16282 },
+            { month: 'July', revenue: 14617 },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId('bar-chart').getAttribute('data-bands')).toBe(JSON.stringify(['July', 'August', 'September']));
+  });
+
   it('renders an area chart for a temporal config', () => {
     render(
       <InsightChart

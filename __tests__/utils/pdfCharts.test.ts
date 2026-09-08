@@ -106,6 +106,17 @@ describe('drawChartConfig', () => {
     expect(texts(calls).filter((t) => t.endsWith('2026'))).toEqual(['Jan 2026', 'Feb 2026', 'Mar 2026']);
   });
 
+  it('bars over month names are put in calendar order whatever order they arrived in', () => {
+    // The first live report labelled its months by name and listed them by value.
+    const { doc, calls } = fakeDoc();
+    drawChartConfig(doc, cfg('bar', [['August', 19606], ['September', 16282], ['July', 14617]]), FRAME);
+
+    expect(texts(calls).filter((t) => /^(July|August|September)$/.test(t))).toEqual(['July', 'August', 'September']);
+    const heights = calls.rect.map((a) => a[3] as number);
+    expect(heights[1]).toBeGreaterThan(heights[0]);
+    expect(heights[1]).toBeGreaterThan(heights[2]);
+  });
+
   it('bars: every one of twelve long labels is drawn, staggered over two rows', () => {
     // Twelve bands of 40pt cannot each hold a name in one row, and dropping every
     // other label leaves half the bars anonymous. Two rows, each label fitted to

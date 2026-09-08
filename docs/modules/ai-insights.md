@@ -570,11 +570,12 @@ the guardrails moved from the model into a schema and a renderer.
 
 | Guardrail | Enforced by |
 |---|---|
-| One page | The renderer measures each block and stops at the footer, naming what it left out ("Not shown (one page): …"); `addPage` is never called and a test asserts it. The schema's caps — ≤4 KPIs, ≤4 blocks, tables ≤8×5, charts 3–12 points — make cuts rare |
+| One page | Renderer: blocks are packed down the page in order and `addPage` is never called. Two narrow tables share a row; a chart that does not fit at full height is drawn shorter, down to 100pt, before it is dropped; a block that still does not fit is named in a "Not shown (one page): …" line above the footer, and the blocks after it are still tried. Schema caps make cuts rare: ≤ 4 KPIs, ≤ 4 blocks, tables ≤ 8 rows × ≤ 5 columns, charts ≤ 12 points |
 | Company name/logo top-left, AI-inferred title top-right | `drawShopHeaderBlock`, the block every document uses, sized against the right column — except that this right column is a title and two lines, which on the first real render left the logo 4pt tall; so when a logo exists the header is given `LOGO_HEADER_DEPTH` (96pt, what a five-row quote reaches) out of the page instead. `title ≤ 40` from the schema, drawn uppercase at 22pt with `Period:` and `Generated:` beneath, the reference's arrangement |
 | Minimal prose | Schema: `headline ≤ 200`, at most one text block ≤ 240 chars, notes ≤ 120 |
 | Every figure comes from a query | `untraceable_figures()` in [`api/services/ai_features/report.py`](../../api/services/ai_features/report.py): every number in a KPI, a table cell or a chart point must equal (to half a unit or half a percent) a value in a tool result of *this* job. Derived figures are computed in SQL. One repair turn names the offenders; a second failure is an `error_echo` job (`[ungrounded_figures]`). No successful query → no report (`[report_no_data]`) |
 | The model never formats | Values are raw; each declares `currency \| integer \| percent \| plain` and the renderer formats (`$13,367`, `$99.3k` on a tile) |
+| Nothing the model wrote is drawn unmeasured | Renderer: every free string is fitted to the slot it lands in — the title steps its font down from 22pt to 15pt before a character is cut and never enters the 200pt that belong to the shop block; the headline is two lines with an ellipsis; section titles, notes, KPI captions and the "Not shown" line are cut to their width (a caption that does not fit beside its label wraps under it first); table cells ellipsize instead of wrapping, which also keeps row heights equal to what the page was packed against; a time axis (ISO dates, month names, quarters) is put in calendar order rather than ranked. The first live report captioned a tile with a sentence that ran through the next tile and off the page, and listed its months by value |
 | Charts valid | Each chart block becomes a `chart_config` and goes through the chat gate (`_validate_chart_config` → `_drop_exemplar_echo` → `_select_chart_type`); a refused block is dropped and named in `result.dropped` and on the page |
 | Same safety boundary as chat | Same `execute_sql`, validator, sandbox, cap and heartbeat; one job that makes several model calls and holds the box's single slot for a few minutes |
 
@@ -612,6 +613,8 @@ cut, applied before any width was measured — the PDF now fits full labels to t
 only every other label on a twelve-bar chart (now two staggered rows, every bar named); and a
 month axis in value order under a user-requested bar chart (time axes now keep calendar order).
 Each has a test in `pdfCharts.test.ts` or `reportPdf.test.ts` named for it.
+
+**The first live report (2026-09-07, seeded shop, `qwen3:32b` through the native adapter, "Operations summary for June to September")** composed in 459 s: five queries, eight model calls, no block dropped by the gate; prompts of 12.3–14.3K tokens per call, well inside the 32K window; the two compose calls (≈770 output tokens each, under the schema-constrained `format`) took ≈150 s each and were two thirds of the wall time. Its page found what no authored spec would: sentence-length KPI captions, months labelled by name and ranked by value, a period label of just "Q3", two near-identical charts, and a text block dropped beside a half-empty page. The renderer rules above came from that page; the brief now asks for count-style captions ("84 jobs"), ISO date labels on a time axis, the period the request names, and charts that do not repeat each other. Reproduce it with `RENDER_REPORT_SPEC=<result json>` on the render script.
 
 ## Withdrawn — the predefined metric functions
 
@@ -779,8 +782,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   only when `RENDER_REPORT_PDFS` is set, and nothing but a reviewer's eye judges the PNGs; CI runs the
   mocked suite, which proves ordering, arguments and font state and passed all four defects the first
   real render found. Pie arcs are cubic approximations (≤ 90° per segment).
-- **A report holds the box's single slot for minutes.** Other shops' questions queue behind it. If that
-  bites, `kind = 'report'` can enqueue at `PRIORITY_BATCH` so questions preempt at claim boundaries.
+- **A report holds the box's single slot for about eight minutes** (459 s measured on the 48 GB M4 Max, two thirds of it the schema-constrained compose calls at ≈5 tokens/s). Other shops' questions queue behind it. If that bites, `kind = 'report'` can enqueue at `PRIORITY_BATCH` so questions preempt at claim boundaries.
 - **The traceability guard checks numbers, not labels or dates.** A figure attached to the wrong label
   is what the eval's human column exists for.
 - **An enqueue-time offline fires no PostHog event.** A 503 from the route leaves no job row, so the

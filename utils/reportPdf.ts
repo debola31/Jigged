@@ -26,18 +26,35 @@ import {
   loadLogoAsDataUrl,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
-import { PDF_PALETTE, chartFrameHeight, drawChartConfig } from '@/utils/pdfCharts';
+import { PDF_PALETTE, chartFrameHeight, drawChartConfig, fitLabel } from '@/utils/pdfCharts';
 import type { ReportBlock, ReportCell, ReportSpec, ReportTableBlock } from '@/utils/reportSpec';
 
 const MARGIN = 40;
 const FOOTER_RESERVE = 30;
+/**
+ * THE RULE: NOTHING THE MODEL WROTE IS DRAWN UNMEASURED. Every free string in the
+ * spec -- title, headline, labels, captions, section titles, notes, cells -- is
+ * fitted to the slot it lands in: an ellipsis, a wrap with a line cap, or a font
+ * that steps down before a character is cut. The first live report captioned a
+ * KPI tile with a sentence and the line ran through the next tile and off the
+ * page; a mocked test cannot see that, so the renderer never trusts a length.
+ */
+const TITLE_SIZE = 22;
+const TITLE_MIN_SIZE = 15;
+/** Header points that belong to the logo, name and address whatever the title's length. */
+const HEADER_LEFT_RESERVE = 200;
 /** Header depth handed to the shop block when a logo exists: a ~38pt mark above name and address. */
 const LOGO_HEADER_DEPTH = 96;
 const KPI_BAND_HEIGHT = 52;
+/** The band grows by one caption line when a tile needs its label and caption on two lines. */
+const KPI_CAPTION_LINE_H = 9;
 const BLOCK_GAP = 16;
+/** A chart is drawn this short before it is dropped: a shorter chart still says what it says. */
+const MIN_CHART_HEIGHT = 100;
 const SECTION_TITLE_H = 14;
-const TABLE_ROW_H = 14;
-const TABLE_HEAD_H = 20;
+/** A 9pt single-line autoTable row: 9 × 1.15 line height plus 3pt padding above and below. */
+const TABLE_ROW_H = 17;
+const TABLE_HEAD_H = 17;
 const TEXT_LINE_H = 12;
 const NOTE_H = 12;
 /** Two consecutive tables this narrow share a row, like the reference's Backlog + Quoting. */
@@ -72,6 +89,38 @@ function formatGenerated(generatedAt: Date): string {
   });
 }
 
+/** A date-only ISO string parsed from its parts (the UTC-midnight trap `formatLabel` documents). */
+function localDate(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * "Jun 1 – Sep 3, 2026", the reference's period line, from the spec's dates.
+ *
+ * The dates are the truth and the label is the model's name for them. A label
+ * that already names months or dates ("Jun 1 – Sep 3, 2026", "June to
+ * September") stands alone; a short one ("Q3", "Last 90 days") -- what the first
+ * live report wrote -- is printed with the dates after it, so the reader never
+ * has to guess which quarter of which year.
+ */
+export function periodLine(spec: Pick<ReportSpec, 'period_start' | 'period_end' | 'period_label'>): string {
+  const start = localDate(spec.period_start);
+  const end = localDate(spec.period_end);
+  const label = spec.period_label.trim();
+  if (!start || !end) return label;
+  const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const range =
+    start.getFullYear() === end.getFullYear()
+      ? `${day(start)} – ${day(end)}, ${end.getFullYear()}`
+      : `${day(start)}, ${start.getFullYear()} – ${day(end)}, ${end.getFullYear()}`;
+  const namesDates =
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(label) || /\d{4}-\d{2}|\d{1,2}\/\d{1,2}/.test(label);
+  return namesDates ? label : `${label} · ${range}`;
+}
+
 function cellText(cell: ReportCell, format: ValueFormat): string {
   if (cell === null || cell === undefined) return '—';
   if (typeof cell === 'string') return cell;
@@ -96,22 +145,21 @@ function estimateHeight(doc: jsPDF, block: ReportBlock, width: number): number {
   return (doc.splitTextToSize(block.body, width) as string[]).length * TEXT_LINE_H;
 }
 
-function drawSectionTitle(doc: jsPDF, title: string, x: number, y: number): number {
+function drawSectionTitle(doc: jsPDF, title: string, x: number, y: number, width: number): number {
   setInk(doc, PDF_PALETTE.muted, 7.5, 'bold');
-  doc.text(title.toUpperCase(), x, y + 8);
+  doc.text(fitLabel(doc, title.toUpperCase(), width), x, y + 8);
   return y + SECTION_TITLE_H;
 }
 
 function drawNote(doc: jsPDF, note: string | null, x: number, y: number, width: number): number {
   if (!note) return y;
   setInk(doc, PDF_PALETTE.muted, 7.5);
-  const lines = doc.splitTextToSize(note, width) as string[];
-  doc.text(lines[0] ?? '', x, y + 8);
+  doc.text(fitLabel(doc, note, width), x, y + 8);
   return y + NOTE_H;
 }
 
 function drawTable(doc: jsPDF, block: ReportTableBlock, x: number, y: number, width: number): number {
-  let cursor = drawSectionTitle(doc, block.title, x, y);
+  let cursor = drawSectionTitle(doc, block.title, x, y, width);
   const body: RowInput[] = block.rows.map((row) =>
     row.map((cell, i) => cellText(cell, block.columns[i].format)),
   );
@@ -133,6 +181,9 @@ function drawTable(doc: jsPDF, block: ReportTableBlock, x: number, y: number, wi
     styles: {
       font: 'helvetica',
       fontSize: 9,
+      // Single-line cells: a wrapped cell grows its row past the height the
+      // page was packed against, and autoTable would add a page to hold it.
+      overflow: 'ellipsize',
       cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
       textColor: [...PDF_PALETTE.ink],
       lineColor: [...PDF_PALETTE.grid],
@@ -146,11 +197,22 @@ function drawTable(doc: jsPDF, block: ReportTableBlock, x: number, y: number, wi
   return drawNote(doc, block.note, x, cursor + 2, width);
 }
 
-function drawChart(doc: jsPDF, block: Extract<ReportBlock, { type: 'chart' }>, x: number, y: number, width: number): number {
-  const cursor = drawSectionTitle(doc, block.title, x, y);
-  const height = chartFrameHeight(block.chart_config.chart_type);
+function drawChart(
+  doc: jsPDF,
+  block: Extract<ReportBlock, { type: 'chart' }>,
+  x: number,
+  y: number,
+  width: number,
+  height = chartFrameHeight(block.chart_config.chart_type),
+): number {
+  const cursor = drawSectionTitle(doc, block.title, x, y, width);
   drawChartConfig(doc, block.chart_config, { x, y: cursor, width, height });
   return drawNote(doc, block.note, x, cursor + height + 2, width);
+}
+
+/** What a chart block costs beyond its frame: the section title, the gap, the note. */
+function chartOverhead(block: Extract<ReportBlock, { type: 'chart' }>): number {
+  return SECTION_TITLE_H + 2 + (block.note ? NOTE_H : 0);
 }
 
 function drawText(doc: jsPDF, body: string, x: number, y: number, width: number): number {
@@ -185,11 +247,18 @@ export async function generateReportPdf(
 
   // ---------- Header: the right column first, then the shop block sized into it ----------
   const headerTop = MARGIN;
-  setInk(doc, PDF_PALETTE.ink, 22, 'bold');
-  doc.text(spec.title.toUpperCase(), pageWidth - MARGIN, headerTop + 20, { align: 'right' });
+  const titleRoom = usableWidth - HEADER_LEFT_RESERVE;
+  const title = spec.title.toUpperCase();
+  let titleSize = TITLE_SIZE;
+  setInk(doc, PDF_PALETTE.ink, titleSize, 'bold');
+  while (doc.getTextWidth(title) > titleRoom && titleSize > TITLE_MIN_SIZE) {
+    titleSize -= 1;
+    setInk(doc, PDF_PALETTE.ink, titleSize, 'bold');
+  }
+  doc.text(fitLabel(doc, title, titleRoom), pageWidth - MARGIN, headerTop + 20, { align: 'right' });
   setInk(doc, PDF_PALETTE.secondary, 8.5);
-  const meta = [`Period: ${spec.period_label}`, `Generated: ${formatGenerated(generatedAt)}`];
-  meta.forEach((row, i) => doc.text(row, pageWidth - MARGIN, headerTop + 38 + i * 12, { align: 'right' }));
+  const meta = [`Period: ${periodLine(spec)}`, `Generated: ${formatGenerated(generatedAt)}`];
+  meta.forEach((row, i) => doc.text(fitLabel(doc, row, titleRoom), pageWidth - MARGIN, headerTop + 38 + i * 12, { align: 'right' }));
   const metaBottom = headerTop + 38 + meta.length * 12;
 
   // A quote's right column runs four or five rows deep, so `drawShopHeaderBlock`
@@ -219,42 +288,60 @@ export async function generateReportPdf(
   // ---------- Headline: the one line of prose ----------
   setInk(doc, PDF_PALETTE.ink, 10);
   const headline = doc.splitTextToSize(spec.headline, usableWidth) as string[];
-  headline.slice(0, 2).forEach((line, i) => doc.text(line, MARGIN, cursorY + i * 13));
-  cursorY += Math.min(headline.length, 2) * 13 + 8;
+  const shown = headline.slice(0, 2);
+  if (headline.length > 2) shown[1] = fitLabel(doc, `${shown[1]} ${headline.slice(2).join(' ')}`, usableWidth);
+  shown.forEach((line, i) => doc.text(line, MARGIN, cursorY + i * 13));
+  cursorY += shown.length * 13 + 8;
 
   // ---------- KPI band ----------
   if (spec.kpis.length > 0) {
+    const tileWidth = usableWidth / spec.kpis.length;
+    const inner = tileWidth - 24;
+    // The caption line is fitted to its tile, never trusted to be short. The
+    // first live report captioned a tile "Total jobs in progress or active" and
+    // the line ran through the next tile and off the page. `LABEL · CAPTION` on
+    // one line when it fits; otherwise the label above the caption, each cut with
+    // an ellipsis to the tile, and the band one line taller.
+    setInk(doc, PDF_PALETTE.secondary, 7.5, 'bold');
+    const captionLines = spec.kpis.map((kpi) => {
+      const label = kpi.label.toUpperCase();
+      if (!kpi.caption) return [fitLabel(doc, label, inner)];
+      const joined = `${label} · ${kpi.caption.toUpperCase()}`;
+      if (doc.getTextWidth(joined) <= inner) return [joined];
+      return [fitLabel(doc, label, inner), fitLabel(doc, kpi.caption.toUpperCase(), inner)];
+    });
+    const bandHeight = KPI_BAND_HEIGHT + (captionLines.some((l) => l.length > 1) ? KPI_CAPTION_LINE_H : 0);
     doc.setFillColor(PDF_PALETTE.tileFill[0], PDF_PALETTE.tileFill[1], PDF_PALETTE.tileFill[2]);
     doc.setDrawColor(PDF_PALETTE.tileStroke[0], PDF_PALETTE.tileStroke[1], PDF_PALETTE.tileStroke[2]);
     doc.setLineWidth(0.9);
-    doc.rect(MARGIN, cursorY, usableWidth, KPI_BAND_HEIGHT, 'FD');
-    const tileWidth = usableWidth / spec.kpis.length;
+    doc.rect(MARGIN, cursorY, usableWidth, bandHeight, 'FD');
     spec.kpis.forEach((kpi, i) => {
       const x = MARGIN + i * tileWidth + 12;
       setInk(doc, PDF_PALETTE.ink, 21, 'bold');
       doc.text(formatKpi(kpi.value, kpi.format), x, cursorY + 30);
       setInk(doc, PDF_PALETTE.secondary, 7.5, 'bold');
-      const caption = kpi.caption ? `${kpi.label} · ${kpi.caption}` : kpi.label;
-      doc.text(caption.toUpperCase(), x, cursorY + 44);
+      captionLines[i].forEach((line, row) => doc.text(line, x, cursorY + 44 + row * KPI_CAPTION_LINE_H));
     });
-    cursorY += KPI_BAND_HEIGHT + BLOCK_GAP;
+    cursorY += bandHeight + BLOCK_GAP;
   }
 
   // ---------- Blocks: pack down the page, never onto a second one ----------
+  // Each block gets its chance in order: two narrow tables share a row, a chart
+  // that does not fit at full height is drawn shorter (down to MIN_CHART_HEIGHT),
+  // and a block that still does not fit is named below -- but the blocks after
+  // it are still tried, because a one-line note after a chart that did not fit
+  // is worth printing. The first live render dropped a 12pt note beside 140pt
+  // of empty page because the chart before it had overflowed.
   const notShown: string[] = [];
   const blocks = [...spec.blocks];
   let i = 0;
-  let overflowed = false;
   while (i < blocks.length) {
     const block = blocks[i];
     const next = blocks[i + 1];
-    const pair = !overflowed && next && isNarrowTable(block) && isNarrowTable(next);
-    if (pair) {
+    if (next && isNarrowTable(block) && isNarrowTable(next)) {
       const half = (usableWidth - BLOCK_GAP) / 2;
       const height = Math.max(estimateHeight(doc, block, half), estimateHeight(doc, next, half));
-      if (cursorY + height > footerTop) {
-        overflowed = true;
-      } else {
+      if (cursorY + height <= footerTop) {
         const leftBottom = drawBlock(doc, block, MARGIN, cursorY, half);
         const rightBottom = drawBlock(doc, next, MARGIN + half + BLOCK_GAP, cursorY, half);
         cursorY = Math.max(leftBottom, rightBottom) + BLOCK_GAP;
@@ -262,10 +349,12 @@ export async function generateReportPdf(
         continue;
       }
     }
-    if (!overflowed && cursorY + estimateHeight(doc, block, usableWidth) <= footerTop) {
+    const room = footerTop - cursorY;
+    if (estimateHeight(doc, block, usableWidth) <= room) {
       cursorY = drawBlock(doc, block, MARGIN, cursorY, usableWidth) + BLOCK_GAP;
+    } else if (block.type === 'chart' && room - chartOverhead(block) - 4 >= MIN_CHART_HEIGHT) {
+      cursorY = drawChart(doc, block, MARGIN, cursorY, usableWidth, room - chartOverhead(block) - 4) + BLOCK_GAP;
     } else {
-      overflowed = true;
       notShown.push(block.type === 'text' ? 'a note' : block.title);
     }
     i += 1;
@@ -274,8 +363,7 @@ export async function generateReportPdf(
   // ---------- What did not fit, said out loud ----------
   if (notShown.length > 0) {
     setInk(doc, PDF_PALETTE.muted, 7.5);
-    const line = doc.splitTextToSize(`Not shown (one page): ${notShown.join(', ')}`, usableWidth) as string[];
-    doc.text(line[0] ?? '', MARGIN, footerTop + 6);
+    doc.text(fitLabel(doc, `Not shown (one page): ${notShown.join(', ')}`, usableWidth), MARGIN, footerTop + 9);
   }
 
   // ---------- Footer ----------
@@ -283,9 +371,10 @@ export async function generateReportPdf(
   doc.setDrawColor(PDF_PALETTE.grid[0], PDF_PALETTE.grid[1], PDF_PALETTE.grid[2]);
   doc.setLineWidth(0.5);
   doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
+  // No page number: a document that is one page by construction has nothing to
+  // count, and "Page 1 of 1" only invited the reader to look for a second.
   setInk(doc, PDF_PALETTE.muted, 7.5);
   doc.text(ATTRIBUTION_MARK, MARGIN, footerY);
-  doc.text('Page 1 of 1', pageWidth - MARGIN, footerY, { align: 'right' });
 
   return doc;
 }

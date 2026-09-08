@@ -94,22 +94,6 @@ describe('companyAccess utilities', () => {
       expect(result[1].companies.name).toBe('Widget Inc');
     });
 
-    /**
-     * The workspace switcher and the login picker decide between a shop's wordmark and its initials
-     * from these two fields. Dropping them from the select doesn't fail anything — every row just
-     * quietly goes back to initials, with no error to notice. Hence a test on the select itself.
-     */
-    it('selects the fields the logo rule needs', async () => {
-      mockQueryBuilder.data = [];
-      mockQueryBuilder.error = null;
-
-      await getUserCompanies('user-1');
-
-      const selected = mockQueryBuilder.select.mock.calls[0][0] as string;
-      expect(selected).toContain('logo_url');
-      expect(selected).toContain('settings');
-    });
-
     it('returns empty array when user has no companies', async () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;

@@ -118,35 +118,33 @@ export default function CompanyIdentity({
    * A white plate, for the same reason the settings preview forces one: shops upload the file they
    * hand their printer — dark ink on a transparent ground — which is invisible on the indigo chrome.
    *
-   * **The plate hugs the artwork; the artwork does not rattle around inside the plate.** A fixed
-   * box has to be tall enough for the tallest logo and wide enough for the widest, which leaves
-   * every other logo stranded in white and looking smaller than it is. Sizing to content instead
-   * means the padding is the only white, so each shop's mark draws as large as its own proportions
-   * allow.
+   * **The plate fills the row and takes its HEIGHT from the artwork.** Every logo therefore gets
+   * the same white band, whatever its proportions: a wide lockup runs the full width, and a
+   * squarer mark sits centred with the white simply carrying on to either side. What the plate
+   * never does is stand taller than the logo it holds — a fixed height has to clear the tallest
+   * mark, which leaves every shorter one stranded in white and looking smaller than it is.
    */
   const plateSx = {
     bgcolor: 'common.white',
     borderRadius: 1.5,
-    display: 'inline-flex',
+    display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 'fit-content',
-    maxWidth: '100%',
+    width: '100%',
     p: 0.75,
   } as const;
 
   if (variant === 'trigger') {
     if (showLogo) {
-      // The wrapper takes the row's free space so the caret keeps its own width — the sidebar is
-      // only 240px and a plate that grabbed all of it would push the caret off the edge. The plate
-      // is centred in that space rather than pinned left: a shop's mark reads as its own thing,
-      // not as a swap for the avatar that used to sit on the rail.
+      // The wrapper takes the row's free space and the plate fills it. The caret keeps its own
+      // width — the sidebar is only 240px, and a plate that grabbed all of it would push the
+      // caret off the edge.
       return (
         <>
-          <Box sx={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{ flex: 1, minWidth: 0, display: 'flex' }}>
             <Box sx={plateSx}>{logo}</Box>
           </Box>
-          {trailing}
+          <Box sx={{ flexShrink: 0, display: 'flex' }}>{trailing}</Box>
         </>
       );
     }
@@ -190,9 +188,7 @@ export default function CompanyIdentity({
     // no baseline for a check mark to sit against.
     return (
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-          <Box sx={plateSx}>{logo}</Box>
-        </Box>
+        <Box sx={plateSx}>{logo}</Box>
         {(role || trailing) && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.875 }}>
             {role && <Typography sx={{ ...ROLE_SX, flex: 1, minWidth: 0 }}>{role}</Typography>}

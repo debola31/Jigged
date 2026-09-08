@@ -77,7 +77,9 @@ export default function CompanySwitcher() {
 
   return (
     <>
-      <Box sx={{ p: 1.5 }}>
+      {/* pb is tighter than px: the switcher and the nav below it read as one block, and the
+          default 12px here stacked with the nav's own 16px into a 40px trough. */}
+      <Box sx={{ px: 1.5, pt: 1.5, pb: 0.5 }}>
         <ButtonBase
           onClick={handleOpen}
           disabled={!hasMultipleCompanies}

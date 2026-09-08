@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The Jigged desktop AI worker as a macOS LaunchAgent: starts at login, restarts if it exits,
+       and holds a no-sleep assertion (caffeinate -s, mains power) for as long as it runs.
+       Instantiate with the sed line in docs/runbooks/ai-worker.md, then:
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jigged.worker.plist
+       Stop: launchctl bootout gui/$(id -u)/com.jigged.worker -->
+  <key>Label</key><string>com.jigged.worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-s</string>
+    <string>__PYTHON__</string>
+    <string>-m</string>
+    <string>worker</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__PYTHON_DIR__:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/jigged/worker.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/jigged/worker.log</string>
+</dict>
+</plist>

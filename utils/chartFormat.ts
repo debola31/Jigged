@@ -75,7 +75,17 @@ export function formatLabel(value: string, maxChars = 12): string {
   if (isDateLabel(value)) {
     const date = new Date(value);
     if (!isNaN(date.getTime())) {
-      if (date.getDate() === 1 || value.includes('T00:00:00')) {
+      // A midnight timestamp is a DATE that came through a timestamptz column
+      // (DATE_TRUNC('month', ship_date) without ::date). Read it in UTC: in local
+      // time it is the evening before for every viewer west of Greenwich, and the
+      // first live dashboard labelled June's revenue "May 2026".
+      if (/T00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?$/.test(value)) {
+        const opts = date.getUTCDate() === 1
+          ? ({ month: 'short', year: 'numeric', timeZone: 'UTC' } as const)
+          : ({ month: 'short', day: 'numeric', timeZone: 'UTC' } as const);
+        return date.toLocaleDateString('en-US', opts);
+      }
+      if (date.getDate() === 1) {
         return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       }
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

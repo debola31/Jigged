@@ -69,15 +69,20 @@ export default function ConversationTurnCard({
         </Typography>
       </Box>
 
+      {/* The answer first, then the chart it introduces: the model narrates and then
+          says "here is the chart", and a chart above that sentence read as a caption
+          in the wrong place. `pre-line` keeps the model's line breaks -- a
+          month-by-month answer arrives as one line per month and collapsed into a
+          run-on paragraph before. */}
+      <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+        {answer}
+      </Typography>
+
       {chartConfig && (
-        <Box sx={{ mb: 1.5 }}>
+        <Box sx={{ mt: 1.5 }}>
           <InsightChart chartConfig={chartConfig} height={chartHeight} />
         </Box>
       )}
-
-      <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
-        {answer}
-      </Typography>
 
       {chartConfig && !saved && (
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>

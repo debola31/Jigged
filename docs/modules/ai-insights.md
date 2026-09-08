@@ -409,6 +409,14 @@ nine wins are the honest declines (payroll) and the dormant-customer list, terse
 asks for is not adapter work: relative periods spelled out in `semantics.md`, and two guideline lines
 (name the runners-up when ranking; a snapshot, not one count, for an open-ended question).
 
+**Re-read on the final code (2026-09-08): met.** The same 37-pair blind read, local answers from the final
+code against Claude's from the semantics pass: local better 8, same 22, local worse 7 — **19 % worse** against
+the 20 % bar, all 37 marked. None of the seven losses is a wrong figure: the pipeline total stated without
+the count of quotes behind it (twice), a clumsier "no parts without routing" (twice), a thinner weekly
+snapshot (twice), and identical top-customer figures in a less fluent sentence. The month comparison that
+lost both of its pairs the night before won its pair. With the adapter legs already met, plan 2.7's gate
+is met in full; the chart gate stays half met on the work-centre question.
+
 **Chart emission (plan 3): half met.** The exemplar took the local arm from zero charts to the revenue
 trend in every run, with nothing on the forbidden set in any phase or arm, and both scope controls behave
 (the poem is refused with no query in two runs of three and timed out in the third; the casual question

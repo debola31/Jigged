@@ -372,8 +372,21 @@ three runs; `forbidden` is every question that must not.
 **Adapter parity (plan 2.7): met.** The native adapter answers and runs SQL exactly as often as the `/v1`
 path it replaced (32 and 29 of 33), and at least as often as Claude in the same phase (31 and 28). One
 caveat the numbers hide: the `/v1` runs happened while the box already held a 32K runner from earlier
-native calls, so they never met the truncation the adapter exists to prevent. The blind side-by-side
-human verdict is still owed.
+native calls, so they never met the truncation the adapter exists to prevent.
+
+**The blind side-by-side (plan 2.7's human leg): not met.** The shop owner read the 37 `phase-3-after` pairs
+with the arms shuffled and unlabelled: local better 9, same 17, local worse 10, one unmarked — **28 % worse**
+against the 20 % bar. (The three "quotes turned into jobs in the last 90 days" pairs are scored *same*: 22
+is the file's definition, quotes created in the window that converted, and 23 is conversions that happened
+in it; Claude followed the file and stated the denominator, the local arm took the other reading without
+saying so.) The ten losses have a shape: seven are a single correct fact where Claude adds the context a
+shop owner wants (the runners-up behind the top customer and the top work centre, what "pipeline" counted,
+a several-figure snapshot for "how's the shop doing this week" where the local arm reports one count), two
+are wrong on "what did we quote last month versus the month before" (a 133 % drop; 21 and 2 quotes against
+Claude's 24 and 3 — the month arithmetic against `$2` again), one is prose where Claude gave figures. The
+nine wins are the honest declines (payroll) and the dormant-customer list, terser and preferred. What this
+asks for is not adapter work: relative periods spelled out in `semantics.md`, and two guideline lines
+(name the runners-up when ranking; a snapshot, not one count, for an open-ended question).
 
 **Chart emission (plan 3): half met.** The exemplar took the local arm from zero charts to the revenue
 trend in every run, with nothing on the forbidden set in any phase or arm, and both scope controls behave

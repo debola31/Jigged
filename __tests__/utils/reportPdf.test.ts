@@ -273,9 +273,12 @@ describe('periodLine', () => {
       'Last 12 months · Oct 1, 2025 – Sep 30, 2026',
     );
   });
-  it('lets a label that already names the dates stand alone', () => {
+  it('lets a label that carries a year stand alone, and dates one that does not', () => {
     expect(periodLine({ period_start: '2026-06-01', period_end: '2026-09-03', period_label: 'Jun 1 – Sep 3, 2026' })).toBe('Jun 1 – Sep 3, 2026');
-    expect(periodLine({ period_start: '2026-06-01', period_end: '2026-09-30', period_label: 'June to September' })).toBe('June to September');
+    // The second live report wrote "June to September" and dated it 2023.
+    expect(periodLine({ period_start: '2023-06-01', period_end: '2023-09-30', period_label: 'June to September' })).toBe(
+      'June to September · Jun 1 – Sep 30, 2023',
+    );
   });
 });
 

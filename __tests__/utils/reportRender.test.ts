@@ -11,8 +11,9 @@
  * Cases: the reference layout with no logo, with a logo, and with a logo that
  * carries the name; every chart type with long labels; a spec too tall for the
  * page (the "Not shown" footer); a shop with no shipments (null cells). Point
- * RENDER_REPORT_SPEC at a handler result JSON (the `result` column of a
- * succeeded report job) to draw what a real model composed as an eighth case.
+ * RENDER_REPORT_SPEC at one or more handler result JSONs (comma-separated; the
+ * `result` column of a succeeded report job) to draw what a real model composed
+ * as further cases, numbered from 08.
  */
 import { describe, expect, it } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -124,7 +125,7 @@ const cases: { file: string; spec: ReportSpec; company: Company; supabase: Supab
     file: '06-too-tall-not-shown.pdf',
     spec: {
       ...fixture,
-      title: 'Operations summary',
+      title: 'Monthly bookings',
       blocks: [1, 2, 3, 4].map((i) => chart(`Chart ${i}`, 'bar', MONTHS.slice(0, 6).map((m, j) => [m, 1000 * (j + i)]))),
     },
     company: contour,
@@ -134,7 +135,7 @@ const cases: { file: string; spec: ReportSpec; company: Company; supabase: Supab
     file: '07-no-shipments-null-cells.pdf',
     spec: {
       ...fixture,
-      title: 'Operations summary',
+      title: 'Shipping status',
       headline: 'Nothing has shipped yet this period; two quotes are open.',
       kpis: [
         { label: 'Quotes issued', value: 2, format: 'integer', caption: null },
@@ -164,8 +165,10 @@ const cases: { file: string; spec: ReportSpec; company: Company; supabase: Supab
 
 const LIVE = process.env.RENDER_REPORT_SPEC;
 if (OUT && LIVE) {
-  const live = reportSpecOf(JSON.parse(readFileSync(LIVE, 'utf8')).report);
-  if (live) cases.push({ file: '08-live-model-output.pdf', spec: live, company: contour, supabase: null });
+  LIVE.split(',').forEach((path, i) => {
+    const live = reportSpecOf(JSON.parse(readFileSync(path.trim(), 'utf8')).report);
+    if (live) cases.push({ file: `${String(8 + i).padStart(2, '0')}-live-model-output-${i + 1}.pdf`, spec: live, company: contour, supabase: null });
+  });
 }
 
 describe.skipIf(!OUT)('render the report checklist to PDF files', () => {

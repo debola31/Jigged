@@ -82,6 +82,19 @@ async def test_a_report_payload_is_dispatched_by_kind_and_shares_the_system_turn
     assert "operations summary for June to August" in convo.seen[0][1].text()
 
 
+async def test_the_request_turn_states_todays_date_in_words():
+    """$2 is a bind parameter whose value the model never sees, and a report has to
+    write period_start and period_end as literal dates. The second live run, asked
+    for "June to September", dated them 2023 and summarised a quarter with no data."""
+    convo = Recording(turns=[_asks_for_sql(), _answer("READY"), _composed(_report())], tool_results=[ROWS])
+    await run_report(convo)
+
+    first = convo.seen[0][1].text()
+    assert "Today is 2026-09-07." in first
+    assert first.index("Today is 2026-09-07.") < first.index("The request:")
+    assert "most recent such months on or before today" in report.REPORT_BRIEF
+
+
 async def test_the_compose_call_is_schema_constrained_and_carries_no_tools():
     convo = Recording(turns=[_asks_for_sql(), _answer("READY"), _composed(_report())], tool_results=[ROWS])
     await run_report(convo)

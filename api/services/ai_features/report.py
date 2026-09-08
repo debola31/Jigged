@@ -75,10 +75,11 @@ REPORT_BRIEF = (
     "You are preparing a ONE-PAGE executive summary for the shop owner, in two stages.\n"
     "Stage 1, now: gather the figures with execute_sql. Decide which sections the request "
     "needs, run the queries, and compute EVERY derived figure in SQL -- totals, averages, "
-    "rates, shares, month-by-month splits -- never in your head. Use $2 for today's date. "
-    "The period is exactly the one the request names; if it names none, choose one and "
-    "say which in the period label. When the data is gathered, reply with the single "
-    "word READY and nothing else; do not write the report yet.\n"
+    "rates, shares, month-by-month splits -- never in your head. Use $2 for today's date "
+    "in SQL. The period is exactly the one the request names; months named without a year "
+    "are the most recent such months on or before today; if the request names no period, "
+    "choose one and say which in the period label. When the data is gathered, reply with "
+    "the single word READY and nothing else; do not write the report yet.\n"
     "Stage 2, when asked: the report as JSON matching the schema you will be given. "
     f"A title of at most {TITLE_MAX} characters naming the subject; the period as start and "
     f"end dates plus a short label; a headline of at most {HEADLINE_MAX} characters; up to "
@@ -199,10 +200,15 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # The SAME system turn as chat, so the KV prefix is shared. The brief is the
     # first user turn, never part of the system prompt, for the same reason the
     # conversation summary is not.
+    # TODAY IS STATED IN WORDS. $2 is a bind parameter whose value the model never
+    # sees, and a report has to write period_start and period_end as literal dates:
+    # the second live run, asked for "June to September", dated them 2023 and
+    # summarised a quarter with no data in it.
     system_prompt = _build_chat_system_prompt()
+    dated = f"Today is {today.isoformat()}. " if today else ""
     messages = [
         Message(role="system", content=system_prompt),
-        Message(role="user", content=f"{REPORT_BRIEF}\n\nThe request: {request}"),
+        Message(role="user", content=f"{REPORT_BRIEF}\n\n{dated}The request: {request}"),
     ]
 
     tool_names: list[str] = []

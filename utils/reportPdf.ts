@@ -101,10 +101,10 @@ function localDate(iso: string): Date | null {
  * "Jun 1 – Sep 3, 2026", the reference's period line, from the spec's dates.
  *
  * The dates are the truth and the label is the model's name for them. A label
- * that already names months or dates ("Jun 1 – Sep 3, 2026", "June to
- * September") stands alone; a short one ("Q3", "Last 90 days") -- what the first
- * live report wrote -- is printed with the dates after it, so the reader never
- * has to guess which quarter of which year.
+ * that already carries a year ("Jun 1 – Sep 3, 2026") stands alone; any other
+ * ("Q3", "Last 90 days", "June to September") is printed with the dates after
+ * it. The second live report labelled its period "June to September" and dated
+ * it 2023; a label without a year would have hidden that from the page.
  */
 export function periodLine(spec: Pick<ReportSpec, 'period_start' | 'period_end' | 'period_label'>): string {
   const start = localDate(spec.period_start);
@@ -116,9 +116,8 @@ export function periodLine(spec: Pick<ReportSpec, 'period_start' | 'period_end' 
     start.getFullYear() === end.getFullYear()
       ? `${day(start)} – ${day(end)}, ${end.getFullYear()}`
       : `${day(start)}, ${start.getFullYear()} – ${day(end)}, ${end.getFullYear()}`;
-  const namesDates =
-    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(label) || /\d{4}-\d{2}|\d{1,2}\/\d{1,2}/.test(label);
-  return namesDates ? label : `${label} · ${range}`;
+  const carriesYear = /\b(19|20)\d{2}\b/.test(label);
+  return carriesYear ? label : `${label} · ${range}`;
 }
 
 function cellText(cell: ReportCell, format: ValueFormat): string {

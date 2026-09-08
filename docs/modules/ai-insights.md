@@ -209,9 +209,14 @@ imitate.)*
 ### Business terms live in `api/services/ai/semantics.md`, and it is runtime
 
 [`api/services/ai/semantics.md`](../../api/services/ai/semantics.md) defines late, revenue, job
-value, this quarter, dormant, pipeline and conversion — **and `_build_chat_system_prompt()` renders
-it straight into the system prompt.** It is documentation and source in one, so editing it changes
-what the product answers.
+value, this quarter and every other relative period, dormant, pipeline and conversion — **and
+`_build_chat_system_prompt()` renders it straight into the system prompt.** It is documentation and
+source in one, so editing it changes what the product answers. Since 2026-09-08 the relative periods
+(today, yesterday, this and last week, month, quarter and year, last N days, and a month named without
+a year, which is the most recent one on or before today) are one executable block of expressions on
+`$2::date` that CI runs like the others, because the model's own month arithmetic against today's date
+was the commonest wrong answer in the live runs; and the file says everything it said before in 15 %
+fewer characters, that block included.
 There is no second copy in Python, deliberately: the Gate 1 eval had three arms answer *"how many
 jobs are late right now"* with 5, 4 and 0, each defensibly, because the term was undefined and the
 prose that gestured at it lived somewhere the runtime never read.
@@ -318,7 +323,7 @@ alone is ~13K of it. A conversation therefore has a budget, and the budget is ar
 | Item | Tokens |
 |---|---|
 | Window (`OLLAMA_NUM_CTX`, one definition in `services/llm/ollama_provider.py`) | 32,768 |
-| Stable prefix: system prompt (~50 KB ÷ 4, measured from the real string) + tool schema | −13,000 |
+| Stable prefix: system prompt (~44 KB ÷ 4, measured from the real string; Ollama counts the rendered prompt at ~11.7K tokens) + tool schema | −13,000 |
 | Answer reserve (`MAX_TOKENS`) | −4,000 |
 | Tool results appended during this turn (a reserve, not a cap) | −8,000 |
 | Summary reserve + the question | −725 |

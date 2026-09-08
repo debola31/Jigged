@@ -87,6 +87,8 @@ CHARS_PER_TOKEN = 4
 # window thought it had room, never compacted, and ate into the tool-result
 # headroom. History and summaries are estimated at 3.
 HISTORY_CHARS_PER_TOKEN = 3
+# The most history a question carries, whatever the window would allow (_history_budget).
+HISTORY_MAX_TOKENS = 5_000
 # MemGPT's numbers, and every compaction since: fold when past 70 % of the budget,
 # down to 50 %, so a thread near the edge is not summarised on every turn.
 COMPACT_AT_FRACTION = 0.7
@@ -173,7 +175,7 @@ def _history_budget(system_prompt: str, question: str) -> int:
     shrinks by itself when semantics.md grows -- and a test asserts the floor.
     """
     prefix = _estimate_tokens(system_prompt) + TOOLS_PREFIX_TOKENS
-    return max(
+    fits = max(
         0,
         OLLAMA_NUM_CTX
         - prefix
@@ -182,6 +184,11 @@ def _history_budget(system_prompt: str, question: str) -> int:
         - SUMMARY_MAX_TOKENS
         - _estimate_tokens(question),
     )
+    # The window would allow ~7K; the cap keeps a cold turn -- the prefix cache
+    # evicted because the box served something else -- to ~18K tokens of prefill,
+    # about three minutes at the ~100 tokens/s this box manages uncached. A 21.7K
+    # prompt ran past the 240 s timeout on 2026-09-07.
+    return min(fits, HISTORY_MAX_TOKENS)
 
 
 def _turn_tokens(turn: dict[str, Any]) -> int:

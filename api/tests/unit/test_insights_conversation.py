@@ -238,7 +238,11 @@ def test_the_budget_floor_against_the_real_prompt():
     leave at least 4,000 tokens for a conversation."""
     from services.insights_service import _build_chat_system_prompt
 
-    assert insights._history_budget(_build_chat_system_prompt(), "x" * 500) >= 4_000
+    budget = insights._history_budget(_build_chat_system_prompt(), "x" * 500)
+    assert 4_000 <= budget <= insights.HISTORY_MAX_TOKENS
+    # The cap is what holds a cold turn to ~3 minutes of prefill; the floor is what
+    # says the prompt has not grown past the point where a thread is worth having.
+    assert insights.HISTORY_MAX_TOKENS == 5_000
 
 
 def test_the_estimate_rounds_up():

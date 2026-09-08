@@ -47,7 +47,7 @@ _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
 # first after the prompt changed, which re-pays the ~13K-token prefill -- ran past
 # 120 s; the warm median was 25 s. The eval's tool-loop arm resolves through here,
 # so a shorter value would score a timeout the worker would not have.
-_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 240.0}
+_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 480.0}
 
 
 def _env(name: str, default: str | None = None) -> str | None:

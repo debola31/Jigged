@@ -322,7 +322,7 @@ alone is ~13K of it. A conversation therefore has a budget, and the budget is ar
 | Answer reserve (`MAX_TOKENS`) | −4,000 |
 | Tool results appended during this turn (a reserve, not a cap) | −8,000 |
 | Summary reserve + the question | −725 |
-| **History budget** | **≈7,000** — about twenty turns |
+| **History budget** | **5,000, capped** (`HISTORY_MAX_TOKENS`; the window would allow ≈7,000) — about fifteen turns at 3 chars/token. The cap is about time, not room: this box prefills an uncached prompt at ~100 tokens/s, so a turn whose prefix the cache no longer holds costs the whole prompt, and 5K of history keeps that near three minutes |
 
 **What is replayed, in what order.** `[system] → [summary as a user turn] → [kept turns] →
 [question]`. The system turn is **byte-identical** with and without history and the summary is a

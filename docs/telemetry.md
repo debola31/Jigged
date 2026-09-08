@@ -35,10 +35,15 @@ error tracking has no advanced grouping. Two trackers means double ingest and tw
 look during an incident. Turning it on would also make PostHog source-map upload a hard CI
 requirement; leaving it off deletes that work item.
 
-**Named gap:** the option is never *written*. `capture_exceptions` appears in that file only
-inside a comment, so no test and no grep fails if someone turns it on. Verified behaviourally
-instead — the PostHog project has never ingested an `$exception` event; the name is absent
-from its taxonomy entirely (checked 2026-08-03).
+**Closed 2026-09-08: the option is now written and guarded.** It used to appear in that file only
+inside a comment, and the gap was verified behaviourally — the PostHog project had never ingested
+an `$exception` event (checked 2026-08-03). That check stopped holding: with the option unset, the
+posthog-js 1.427.2 upgrade let the project's server-side exception-autocapture setting govern, and
+the SDK filed a stackless cross-origin `Script error.` — the browser-extension noise `ignoreErrors`
+already drops on the Sentry side. `capture_exceptions: false` is now set in
+[`instrumentation-client.ts`](../instrumentation-client.ts), and
+[`__tests__/standards/captureExceptions.test.ts`](../__tests__/standards/captureExceptions.test.ts)
+fails CI if the literal is removed or flipped to `true`.
 
 **Vercel has no JavaScript error tracking at all**, so it substitutes for neither. A
 client-side crash is invisible in Vercel logs.

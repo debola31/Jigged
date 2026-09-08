@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, model_validator
 Format = Literal["currency", "integer", "percent", "plain"]
 Cell = str | float | None
 
-TITLE_MAX = 40
+TITLE_MAX = 60
 HEADLINE_MAX = 200
 KPI_MAX = 4
 BLOCK_MAX = 4
@@ -48,14 +48,14 @@ NOTE_MAX = 120
 
 
 class Kpi(BaseModel):
-    label: str = Field(min_length=1, max_length=24)
+    label: str = Field(min_length=1, max_length=32)
     value: float
     format: Format
-    caption: str | None = Field(default=None, max_length=32)
+    caption: str | None = Field(default=None, max_length=48)
 
 
 class Column(BaseModel):
-    label: str = Field(min_length=1, max_length=20)
+    label: str = Field(min_length=1, max_length=28)
     format: Format
 
 
@@ -130,7 +130,7 @@ class ReportSpec(BaseModel):
     title: str = Field(min_length=1, max_length=TITLE_MAX)
     period_start: date
     period_end: date
-    period_label: str = Field(min_length=1, max_length=40)
+    period_label: str = Field(min_length=1, max_length=60)
     headline: str = Field(min_length=1, max_length=HEADLINE_MAX)
     kpis: list[Kpi] = Field(max_length=KPI_MAX)
     blocks: list[Block] = Field(min_length=1, max_length=BLOCK_MAX)

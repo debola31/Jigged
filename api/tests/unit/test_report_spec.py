@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from models.report_spec import (
+from models.report_spec import (TITLE_MAX, 
     BLOCK_MAX, CHART_POINTS_MAX, CHART_POINTS_MIN, KPI_MAX, TABLE_ROWS_MAX,
     ReportSpec, inline_refs,
 )
@@ -97,7 +97,7 @@ class TestTheCaps:
     @pytest.mark.parametrize("over, fragment", [
         ({"kpis": [{"label": f"K{i}", "value": 1, "format": "plain", "caption": None} for i in range(KPI_MAX + 1)]}, "kpis"),
         ({"blocks": [{"type": "text", "body": "x"}] + [_spec()["blocks"][1]] * BLOCK_MAX}, "blocks"),
-        ({"title": "T" * 41}, "title"),
+        ({"title": "T" * (TITLE_MAX + 1)}, "title"),
         ({"headline": "H" * 201}, "headline"),
         ({"period_start": "2026-09-30", "period_end": "2026-09-01"}, "period_start"),
     ])

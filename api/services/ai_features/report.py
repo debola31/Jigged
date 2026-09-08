@@ -81,11 +81,12 @@ REPORT_BRIEF = (
     "choose one and say which in the period label. When the data is gathered, reply with "
     "the single word READY and nothing else; do not write the report yet.\n"
     "Stage 2, when asked: the report as JSON matching the schema you will be given. "
-    f"A title of at most {TITLE_MAX} characters naming the subject; the period as start and "
-    f"end dates plus a short label; a headline of at most {HEADLINE_MAX} characters; up to "
+    "A title of at most six words naming the subject -- never the period, which has its own "
+    "line; the period as start and end dates plus a short label; a headline of at most "
+    f"{HEADLINE_MAX} characters; up to "
     f"{KPI_MAX} KPI tiles, each a label of one to three words, a raw value, a format, and a "
-    "caption that is a count with its unit such as '84 jobs' (three words at most), or null "
-    "when the value is itself a count; up to "
+    "caption of at most three words that ADDS to the value -- '84 jobs' under a booked total "
+    "-- or null when there is nothing to add; a caption never repeats the value; up to "
     f"{BLOCK_MAX} blocks, each a table (at most {TABLE_ROWS_MAX} rows "
     f"and {TABLE_COLUMNS_MAX} columns, cells aligned with the columns), a chart "
     f"({CHART_POINTS_MIN} to {CHART_POINTS_MAX} points; label points on a time axis with ISO "
@@ -293,6 +294,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     compose = compose + [Message(role="user", content=COMPOSE_REQUEST)]
 
     spec: ReportSpec | None = None
+    figures_repaired = False
     for attempt in (1, 2):
         composed = await llm.complete(
             ctx.feature, compose, json_schema=ReportSpec, max_tokens=REPORT_MAX_TOKENS,
@@ -311,6 +313,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 feature=ctx.feature, request_id=ctx.request_id,
                 provider=composed.provider, model=composed.model, tokens_out=tokens_used,
             )
+        figures_repaired = True
         problems = "; ".join(f"{where} = {x:g}" for where, x in bad[:12])
         compose = compose + [
             Message(role="assistant", content=composed.text),
@@ -344,6 +347,9 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     return {
         "report": report,
         "dropped": dropped,
+        # A compose call is the expensive one (≈150 s on the M4 Max); this says whether
+        # the job paid for two because a figure appeared in no query result.
+        "figures_repaired": figures_repaired,
         "tool_calls": tool_names,
         "tool_trace": tool_trace,
         "provider": composed.provider,

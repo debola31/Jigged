@@ -8,14 +8,13 @@ import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
-import ListItemText from '@mui/material/ListItemText';
-import ListItemIcon from '@mui/material/ListItemIcon';
 import Divider from '@mui/material/Divider';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
-import BusinessIcon from '@mui/icons-material/Business';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useCompanyLogos } from '@/hooks/useCompanyLogos';
+import CompanyIdentity from '@/components/common/CompanyIdentity';
 import {
   getUserCompanies,
   setLastCompany,
@@ -29,6 +28,7 @@ export default function CompanySelector() {
   const [companies, setCompanies] = useState<UserCompanyAccess[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { logoUrls } = useCompanyLogos(companies);
 
   useEffect(() => {
     async function fetchCompanies() {
@@ -114,13 +114,10 @@ export default function CompanySelector() {
                 onClick={() => handleCompanySelect(company)}
                 sx={{ py: 2 }}
               >
-                <ListItemIcon>
-                  <BusinessIcon color="primary" />
-                </ListItemIcon>
-                <ListItemText
-                  primary={company.companies.name}
-                  secondary={`Role: ${company.role}`}
-                  primaryTypographyProps={{ fontWeight: 500 }}
+                <CompanyIdentity
+                  name={company.companies.name}
+                  role={`Role: ${company.role}`}
+                  logoUrl={logoUrls.get(company.company_id) ?? null}
                 />
               </ListItemButton>
             </Box>

@@ -139,10 +139,11 @@ export default function CompanyIdentity({
     if (showLogo) {
       // The wrapper takes the row's free space so the caret keeps its own width — the sidebar is
       // only 240px and a plate that grabbed all of it would push the caret off the edge. The plate
-      // sits at the start of that space, on the same left rail as the avatar it replaces.
+      // is centred in that space rather than pinned left: a shop's mark reads as its own thing,
+      // not as a swap for the avatar that used to sit on the rail.
       return (
         <>
-          <Box sx={{ flex: 1, minWidth: 0, display: 'flex' }}>
+          <Box sx={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
             <Box sx={plateSx}>{logo}</Box>
           </Box>
           {trailing}
@@ -189,7 +190,7 @@ export default function CompanyIdentity({
     // no baseline for a check mark to sit against.
     return (
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
           <Box sx={plateSx}>{logo}</Box>
         </Box>
         {(role || trailing) && (

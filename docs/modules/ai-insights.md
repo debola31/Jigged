@@ -303,6 +303,48 @@ entire point: there is no longer a way to ship a tenant table nobody thought abo
 
 ---
 
+## Long conversations on a 32K context
+
+The serving model is a local 32B behind Ollama with a **32,768-token window**, and the system prompt
+alone is ~13K of it. A conversation therefore has a budget, and the budget is arithmetic in
+`services/ai_features/insights.py` — module constants, never env:
+
+| Item | Tokens |
+|---|---|
+| Window (`OLLAMA_NUM_CTX`, one definition in `services/llm/ollama_provider.py`) | 32,768 |
+| Stable prefix: system prompt (~50 KB ÷ 4, measured from the real string) + tool schema | −13,000 |
+| Answer reserve (`MAX_TOKENS`) | −4,000 |
+| Tool results appended during this turn (a reserve, not a cap) | −8,000 |
+| Summary reserve + the question | −725 |
+| **History budget** | **≈7,000** — about twenty turns |
+
+**What is replayed, in what order.** `[system] → [summary as a user turn] → [kept turns] →
+[question]`. The system turn is **byte-identical** with and without history and the summary is a
+*user* turn, never part of the system prompt: Ollama's cache is llama.cpp's longest-common-prefix
+cache, so the ~13K prefix is reused only while nothing in front of the history changes. Old tool
+results are never replayed (they live in `tool_trace`); the answer is what carries forward.
+
+**When it is folded.** After the answer, never before it. When something was evicted this turn, or
+the replayed history sits past 70 % of the budget, one more call folds the oldest turns into a new
+summary down to 50 % (MemGPT's numbers) — starting with the **same system turn and the same tools**,
+because Qwen's template renders both into the prefix. The summary is stored as its own row with
+`covers_through_seq`; the next question replays it plus what came after. A summary that is a tool
+call or machine payload is refused, and **a failed summary never costs the answer**: it lands in
+`result.summary_error`, the `ai_calls` row already names the failure, and the next turn tries again.
+
+**Overflow is visible.** The native adapter sends `truncate: false`, so a prompt past the window is a
+400 → `LLMContextOverflow` → `error_kind = 'context_overflow'` → "That conversation has grown past
+what the assistant can hold. Start a new one." On the OpenAI-compatible `/v1` path the same prompt
+came back 200 with the schema silently cut from the front. **Withdrawn:** serving Ollama over `/v1` —
+wrong because `/v1` cannot set `num_ctx`, so the window was whatever the box's environment said,
+4,096 by default.
+
+Tests: `api/tests/unit/test_insights_conversation.py` (replay order, prefix identity, window,
+compaction timing and its failure modes, the budget floor against the real prompt),
+`api/tests/unit/test_ollama_provider.py` (the request shape, the overflow), and
+`api/tests/integration/test_ai_chat_threads.py` (RLS, the trigger under the real worker role, the
+guards).
+
 ## Chart decisioning
 
 **Text-first, constrained renderer** — the model *proposes* a chart; deterministic code decides
@@ -364,6 +406,8 @@ the failure mode of failing closed here is a silently dead product surface.
 |---|---|
 | Chat queries per company per hour | `chat_per_hour`, default 20 |
 | Max tokens per chat response | 4,000 |
+| Context window the conversation budget assumes | 32,768 — `OLLAMA_NUM_CTX`, pinned per request by the native adapter |
+| Turns per conversation | uncapped; the replay set is bounded by tokens, never by turn count |
 | SQL statement timeout | 5,000 ms |
 | SQL row limit | 200 |
 
@@ -387,6 +431,17 @@ It is **written, never read back as chat history.**
 `user_id = auth.uid()`, so each user sees only their own pins. **There is no saved-insight cap**
 in the database, the access layer or the UI.
 
+**`ai_chat_threads`** — one conversation, per user (`created_by = auth.uid()`), `title` = the first
+question truncated, archived by `deleted_at`. **`ai_chat_messages`** — its append-only turns:
+`seq`, `role ∈ {user, assistant, summary}`, `content`, `chart_config`, `tool_trace` (the queries
+behind an assistant turn, audit only, never replayed), `covers_through_seq` (summary rows only),
+`token_estimate`, `job_id`. **Nothing writes a message by hand**: `ai_jobs_materialize_chat_turn()`,
+a `SECURITY DEFINER` trigger on `ai_jobs`, appends the user turn (from `payload.question`), the
+assistant turn (from `result.answer`) and any summary when a chat job reads `succeeded` — so
+`jigged_ai_worker` keeps touching one table. No role holds `UPDATE` or `DELETE` on messages.
+`ai_jobs` gained `thread_id`, `kind ∈ {chat, report}` and the `context_overflow` error kind
+([`20260907234149`](../../supabase/migrations/20260907234149_ai_chat_threads_and_messages.sql)).
+
 **Removed: `ai_insight_cache`** — dropped when the 5-card panel went; nothing read or wrote it.
 
 *(This doc used to cite `20260305000000_create_ai_insights_tables.sql`,
@@ -407,9 +462,14 @@ paragraph used to claim the route *"Requires a Supabase JWT and an `owner` / `ad
 role"*, and it does not: nothing at the FastAPI layer reads the bearer token the frontend
 attaches, and `company_id` comes from the URL.
 
-**Chat is stateless.** Each request is an independent Q&A; there is no `chat/history` endpoint and
-no frontend caller for one. If multi-turn history is added it should be scoped per user within a
-company, mirroring the `saved_insights` RLS model.
+**Conversations.** `ChatRequest` takes an optional `thread_id`. The browser creates the thread
+(`utils/aiChatAccess.ts` → `ai_chat_threads`, `created_by = auth.uid()` under RLS, per user like
+`saved_insights`) and sends its id with each question; the route loads the **replay set** — the latest
+`summary` row plus every `user`/`assistant` row after its `covers_through_seq` — and ships it in the
+payload, because the desktop worker gets the job row and nothing else. A thread that is not this
+company's, or is archived, is a plain-string 404; a second question while one is in flight is a 409
+(`ai_jobs_one_in_flight_per_thread`). **The route never writes a message.** *(This paragraph used to
+say chat was stateless, and it was.)*
 
 **Saved-insights CRUD is not a backend route** — it runs client-side against the RLS-scoped table
 via [`utils/savedInsightsAccess.ts`](../../utils/savedInsightsAccess.ts), per the Supabase-first
@@ -598,7 +658,14 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   reads the bearer token the frontend attaches, so a direct HTTP call reaches any company's data
   and spends credits against its cap. Operators cannot reach the surface, but that is routing, not
   enforcement.
-- **Multi-turn chat is not built**; `ai_chat_queries` is write-only today.
+- **Threads trust `thread_id` from the request body.** The route has no auth of its own, so it can
+  check the thread belongs to the URL's company and nothing more; per-user integrity rests on the RLS
+  the browser created the thread under. Closing the FastAPI auth gap above closes this too.
+- **Tool results appended during a turn are a reserve, not a count.** Two wide 200-row results can
+  still push a long conversation past the window; with `truncate: false` that is now a visible
+  `context_overflow` rather than a schema-less answer.
+- **A summary is instructed, not verified.** The compaction prompt demands every figure and period;
+  nothing checks the summary kept them. A multi-turn scenario in `evals/insights_ab.py` is the follow-up.
 - **An enqueue-time offline fires no PostHog event.** A 503 from the route leaves no job row, so the
   ask bar's `ai job settled` never fires and the offline-to-done ratio undercounts a box that was off
   when someone asked. The 503 renders as the same quiet notice a mid-job outage gets; it is not counted.

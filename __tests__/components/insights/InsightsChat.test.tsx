@@ -41,13 +41,28 @@ vi.mock('@/hooks/useAiJob', () => ({
   }),
 }));
 vi.mock('@/utils/savedInsightsAccess', () => ({ saveInsight: vi.fn() }));
+
+const mockCreateThread = vi.fn();
+const mockListThreadMessages = vi.fn();
+const mockListThreads = vi.fn();
+vi.mock('@/utils/aiChatAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/aiChatAccess')>();
+  return {
+    ...actual,
+    createThread: (...a: unknown[]) => mockCreateThread(...a),
+    listThreadMessages: (...a: unknown[]) => mockListThreadMessages(...a),
+    listThreads: (...a: unknown[]) => mockListThreads(...a),
+    archiveThread: vi.fn(),
+  };
+});
 vi.mock('@/components/insights/InsightChart', () => ({ default: () => null }));
 vi.mock('posthog-js', () => ({ default: { identify: vi.fn(), capture: vi.fn() } }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 async function ask(question: string) {
   const user = userEvent.setup();
-  await user.type(screen.getByPlaceholderText('Ask about your shop data...'), question);
+  // The placeholder changes once a conversation exists ('Ask a follow-up...').
+  await user.type(screen.getByPlaceholderText(/^Ask /), question);
   await user.click(screen.getByRole('button', { name: 'Send question' }));
 }
 
@@ -55,6 +70,10 @@ describe('InsightsChat — what an enqueue refusal looks like', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetRouterMocks();
+    window.sessionStorage.clear();
+    mockCreateThread.mockResolvedValue({ id: 'thread-1', title: 't', created_at: 'c', updated_at: 'u' });
+    mockListThreadMessages.mockResolvedValue([]);
+    mockListThreads.mockResolvedValue([]);
   });
 
   it('renders a 503 as the quiet offline notice, not as an error, and does not page', async () => {
@@ -111,5 +130,75 @@ describe('InsightsChat — what an enqueue refusal looks like', () => {
 
     expect(await screen.findByRole('alert')).toHaveClass('MuiAlert-standardError');
     expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 409 (one question at a time) is a plain refusal, not an incident', async () => {
+    mockSubmitChatQuery.mockRejectedValue(
+      new ChatEnqueueError('Still working on the previous question in this conversation.', 409),
+    );
+    render(<InsightsChat companyId="co-1" />);
+
+    await ask('and by month?');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Still working/);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+});
+
+describe('InsightsChat — the conversation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRouterMocks();
+    window.sessionStorage.clear();
+    mockCreateThread.mockResolvedValue({ id: 'thread-1', title: 't', created_at: 'c', updated_at: 'u' });
+    mockListThreadMessages.mockResolvedValue([]);
+    mockListThreads.mockResolvedValue([]);
+    mockSubmitChatQuery.mockResolvedValue({ job_id: 'job-1', status: 'queued', executor: 'worker' });
+  });
+
+  it('the first question opens a thread titled by the question, and the post carries it', async () => {
+    render(<InsightsChat companyId="co-1" />);
+
+    await ask('How many jobs are late?');
+
+    expect(mockCreateThread).toHaveBeenCalledWith('co-1', 'How many jobs are late?');
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'How many jobs are late?', 'thread-1');
+    expect(window.sessionStorage.getItem('jigged.aiThread.co-1')).toBe('thread-1');
+  });
+
+  it('a remembered thread is reused rather than reopened, and the turn count is the shape reported', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
+    mockListThreadMessages.mockResolvedValue([
+      { id: 'm1', seq: 1, role: 'user', content: 'How many jobs are late?', chart_config: null, created_at: 'c' },
+      { id: 'm2', seq: 2, role: 'assistant', content: 'Four jobs are late.', chart_config: null, created_at: 'c' },
+    ]);
+    render(<InsightsChat companyId="co-1" />);
+
+    // The earlier exchange renders from the thread, not from any job row.
+    expect(await screen.findByText('Four jobs are late.')).toBeInTheDocument();
+
+    await ask('and by month?');
+
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'and by month?', 'thread-9');
+    const posthog = (await import('posthog-js')).default;
+    expect(posthog.capture).toHaveBeenCalledWith(
+      'ai job enqueued',
+      expect.objectContaining({ feature: 'insights', turn_index: 1, from_example: false }),
+    );
+  });
+
+  it('a thread the route no longer knows is forgotten, so the next question starts fresh', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-gone');
+    mockSubmitChatQuery.mockRejectedValueOnce(
+      new ChatEnqueueError("That conversation isn't available any more. Start a new one.", 404),
+    );
+    render(<InsightsChat companyId="co-1" />);
+
+    await ask('and by month?');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Start a new one/);
+    expect(window.sessionStorage.getItem('jigged.aiThread.co-1')).toBeNull();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 });

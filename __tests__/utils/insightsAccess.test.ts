@@ -53,6 +53,18 @@ describe('submitChatQuery', () => {
     const body = JSON.parse(init.body as string);
     expect(body.question).toBe('How many jobs are late?');
     expect(body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect('thread_id' in body).toBe(false);
+  });
+
+  it('carries the conversation id when the question continues one', async () => {
+    fetchMock.mockResolvedValue(
+      response(202, { job_id: 'job-2', status: 'queued', executor: 'worker' }),
+    );
+
+    await submitChatQuery('co-1', 'and by month?', 'thread-1');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).thread_id).toBe('thread-1');
   });
 
   it('a 503 carries its status, so the ask bar can show downtime as downtime', async () => {

@@ -89,6 +89,11 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 export async function submitChatQuery(
   companyId: string,
   question: string,
+  /**
+   * The conversation this question continues (utils/aiChatAccess.ts creates it
+   * under RLS). Omitted for a one-off question; the route then ships no history.
+   */
+  threadId?: string | null,
 ): Promise<ChatEnqueued> {
   const headers = await getAuthHeaders();
 
@@ -100,7 +105,11 @@ export async function submitChatQuery(
     // a US shop calls a job late from about 8pm the evening before — the jobs list
     // has always sent the same value as p_today, and the chat disagreeing with the
     // screen beside it is the whole reason this parameter exists.
-    body: JSON.stringify({ question, today: todayLocalISODate() }),
+    body: JSON.stringify({
+      question,
+      today: todayLocalISODate(),
+      ...(threadId ? { thread_id: threadId } : {}),
+    }),
   });
 
   if (!response.ok) {

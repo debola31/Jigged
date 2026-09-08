@@ -20,7 +20,7 @@ server-side settings matter, set differently per platform:
 |---|---|---|---|
 | `OLLAMA_KEEP_ALIVE=-1` | keep the model resident; an eviction turns every job into a 43–63 s reload | system environment variable, then restart Ollama | `launchctl setenv OLLAMA_KEEP_ALIVE -1`, then quit and relaunch Ollama.app |
 | `OLLAMA_NUM_PARALLEL=1` | one generation at a time; one slot also keeps the ~13K-token insights prefix in the KV cache between jobs | same | `launchctl setenv OLLAMA_NUM_PARALLEL 1` |
-| `OLLAMA_CONTEXT_LENGTH=32768` | the insights system prompt alone is ~13K tokens and Ollama's default window is 4,096. **A prompt past the window is truncated silently from the front** — the schema goes first, the server log says `truncating input prompt` once, and the answer comes back 200 with no schema behind it. The OpenAI-compatible path the worker uses cannot set this per request | same | `launchctl setenv OLLAMA_CONTEXT_LENGTH 32768` |
+| `OLLAMA_CONTEXT_LENGTH=32768` | belt-and-braces since September 2026: the worker's native adapter (`api/services/llm/ollama_provider.py`) pins `num_ctx=32768` on every request and refuses truncation, so an over-long prompt is a visible failure instead of a schema silently cut from the front. Set it anyway for anything else that talks to the box (the eval's embedding step, a manual `ollama run`) | same | `launchctl setenv OLLAMA_CONTEXT_LENGTH 32768` |
 
 `launchctl setenv` does **not** survive a reboot: persist it in a LaunchAgent plist, or run the
 server from a shell instead of the app —

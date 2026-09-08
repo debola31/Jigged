@@ -68,6 +68,17 @@ describe('verdictFor', () => {
     ).toBe('failed');
   });
 
+  it('a conversation that outgrew the window says so, and says what to do', () => {
+    // The one failure the USER fixes. "You can ask again" would send them
+    // straight back into the same wall.
+    const v = verdictFor(
+      job({ status: 'failed', error_kind: 'context_overflow', error: 'ollama returned 400' }),
+      opts(),
+    );
+    expect(v.phase).toBe('failed');
+    expect(v.message).toMatch(/start a new one/i);
+  });
+
   describe('a queued job that is simply waiting', () => {
     it('stays pending however long the queue is, while a worker is alive', () => {
       // Twenty minutes behind a busy batch. This is the client-side half of the

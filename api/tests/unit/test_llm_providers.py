@@ -130,11 +130,28 @@ def _anthropic(response=None, error=None, **over):
 
 # ------------------------------------------------------------- conformance
 
-PROVIDERS = ["anthropic", "deepinfra"]
+PROVIDERS = ["anthropic", "deepinfra", "ollama"]
+
+
+def _ollama():
+    from services.llm.ollama_provider import OllamaProvider
+
+    def default(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "model": "qwen3:32b", "message": {"role": "assistant", "content": "Answer"},
+            "done": True, "done_reason": "stop", "prompt_eval_count": 700, "eval_count": 120,
+        })
+
+    return OllamaProvider(base_url="http://localhost:11434", model="qwen3:32b",
+                          transport=httpx.MockTransport(default))
 
 
 def _instance(kind):
-    return _anthropic()[0] if kind == "anthropic" else _compat()[0]
+    if kind == "anthropic":
+        return _anthropic()[0]
+    if kind == "ollama":
+        return _ollama()
+    return _compat()[0]
 
 
 @pytest.mark.parametrize("kind", PROVIDERS)
@@ -164,7 +181,7 @@ def test_complete_has_an_identical_signature_on_every_provider():
         sigs[kind] = [
             (p.name, p.default) for p in inspect.signature(fn).parameters.values() if p.name != "self"
         ]
-    assert sigs["anthropic"] == sigs["deepinfra"], sigs
+    assert sigs["anthropic"] == sigs["deepinfra"] == sigs["ollama"], sigs
     assert [n for n, _ in sigs["anthropic"]] == ["messages", "json_schema", "max_tokens", "tools"]
 
 

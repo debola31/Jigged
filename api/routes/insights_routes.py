@@ -191,6 +191,13 @@ def _map_llm_error(exc: Exception) -> HTTPException:
                 status_code=503,
                 detail="The AI box is offline right now. Everything else still works.",
             )
+        if exc.is_context_overflow:
+            # 400, not 5xx: the box is up and nothing broke -- the conversation
+            # outgrew the window, and only the user can start a new one.
+            return HTTPException(
+                status_code=400,
+                detail="That conversation has grown past what the assistant can hold. Start a new one.",
+            )
         return HTTPException(
             status_code=502,
             detail="The AI service is unavailable right now. Please try again in a moment.",
@@ -210,7 +217,11 @@ def _map_llm_error(exc: Exception) -> HTTPException:
 
 def _error_kind(exc: Exception) -> str:
     if isinstance(exc, LLMChainExhausted):
-        return "ai_offline" if exc.is_offline else "provider"
+        if exc.is_offline:
+            return "ai_offline"
+        if exc.is_context_overflow:
+            return "context_overflow"
+        return "provider"
     if isinstance(exc, LLMToolLoopExhausted):
         return "provider"
     # Its own kind rather than 'provider' or 'internal'. The provider answered
@@ -221,6 +232,66 @@ def _error_kind(exc: Exception) -> str:
     if isinstance(exc, LLMNotConfigured):
         return "ai_offline"
     return "internal"
+
+
+def _is_one_in_flight_violation(exc: Exception) -> bool:
+    """The unique index ai_jobs_one_in_flight_per_thread, as PostgREST reports it."""
+    code = getattr(exc, "code", None)
+    return str(code) == "23505" and "ai_jobs_one_in_flight_per_thread" in str(
+        getattr(exc, "message", None) or exc
+    )
+
+
+def _thread_replay(db, company_id: str, thread_id: str) -> dict:
+    """The replay set for a conversation: the latest summary, and every turn after it.
+
+    FAILS VISIBLE, unlike the rate limiter's deliberate fail-open. A question
+    answered without its history is a silently wrong answer -- the model would
+    read "and by month?" with no idea what "and" continues -- so a read error here
+    propagates to the generic 500 rather than degrading to a one-off question.
+
+    The thread must be this company's and not archived. The route trusts
+    thread_id from the body (it has no auth of its own -- ai-insights.md, Known
+    gaps), so the company check is the one integrity it CAN enforce; per-user
+    integrity lives in the RLS the browser created the thread under.
+    """
+    thread = (
+        db.table("ai_chat_threads")
+        .select("id, company_id, deleted_at")
+        .eq("id", thread_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not thread or thread[0].get("company_id") != company_id or thread[0].get("deleted_at"):
+        raise HTTPException(
+            status_code=404, detail="That conversation isn't available any more. Start a new one."
+        )
+
+    rows = (
+        db.table("ai_chat_messages")
+        .select("seq, role, content, covers_through_seq")
+        .eq("thread_id", thread_id)
+        .order("seq", desc=False)
+        .execute()
+    ).data or []
+
+    # The LATEST summary wins -- the highest seq -- and its covers_through_seq is
+    # where replay starts. Rows at or before it are folded in already.
+    summary = None
+    for row in rows:
+        if row["role"] == "summary":
+            summary = row
+    covers = int(summary["covers_through_seq"]) if summary else 0
+    history = [
+        {"seq": row["seq"], "role": row["role"], "content": row["content"]}
+        for row in rows
+        if row["role"] in ("user", "assistant") and row["seq"] > covers
+    ]
+    return {
+        "thread_id": thread_id,
+        "summary": {"content": summary["content"], "covers_through_seq": covers} if summary else None,
+        "history": history,
+    }
 
 
 # How far the browser's date may sit from the server's before we stop believing it.
@@ -271,22 +342,40 @@ async def chat(company_id: str, request: ChatRequest):
     # definition not enqueueing anything.
     ai_jobs.sweep(db)
 
+    payload: dict = {
+        "question": request.question,
+        # In the PAYLOAD, not a handler argument: the desktop worker gets the job
+        # row and nothing else, so this is the one place that makes both execution
+        # paths see the same date without wiring it twice.
+        "today": _client_today(request.today).isoformat(),
+    }
+    thread_id = str(request.thread_id) if request.thread_id else None
+
     try:
+        if thread_id:
+            # The replay set rides in the payload for the same reason `today` does.
+            payload.update(_thread_replay(db, company_id, thread_id))
         rows = ai_jobs.enqueue(
             db,
             company_id=company_id,
             feature="insights",
-            payload={
-                "question": request.question,
-                # In the PAYLOAD, not a handler argument: the desktop worker gets
-                # the job row and nothing else, so this is the one place that makes
-                # both execution paths see the same date without wiring it twice.
-                "today": _client_today(request.today).isoformat(),
-            },
+            payload=payload,
+            thread_id=thread_id,
+            kind="chat",
         )
+    except HTTPException:
+        raise
     except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
         raise _map_llm_error(exc) from exc
     except Exception as exc:
+        if _is_one_in_flight_violation(exc):
+            # One question at a time per conversation. A second tab, or a double
+            # click: not an incident, and the row the first one made is the one to
+            # wait for.
+            raise HTTPException(
+                status_code=409,
+                detail="Still working on the previous question in this conversation. Give it a moment.",
+            ) from exc
         logger.error("insights enqueue failed: %s", exc, exc_info=True)
         sentry_sdk.capture_exception(exc)
         raise HTTPException(status_code=500, detail="Internal server error") from exc

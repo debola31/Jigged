@@ -28,7 +28,6 @@ import os
 import signal
 import sys
 import time
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -73,21 +72,18 @@ class Worker:
         correctness rather than convenience: the claim batches by model, so honouring
         anything other than the model on the row would break the batching it just
         paid for.
+
+        The NATIVE adapter: it pins the 32K context window per request and turns an
+        over-long prompt into a visible failure, where the /v1 path silently cut the
+        schema off the front. OLLAMA_CONTEXT_LENGTH on the box is now belt-and-braces.
         """
-        from services.llm.openai_compat import OpenAICompatProvider
+        from services.llm.ollama_provider import OllamaProvider
 
         return [
-            OpenAICompatProvider(
+            OllamaProvider(
                 base_url=self.cfg.ollama_base_url,
-                api_key=None,
                 model=model,
-                price_in_per_mtok=Decimal("0"),
-                price_out_per_mtok=Decimal("0"),
-                name="ollama",
                 timeout_s=self.cfg.request_timeout_s,
-                # `think: false` is the NATIVE /api/chat knob and does nothing here.
-                # The unconditional <think> strip is the actual guarantee either way.
-                extra_body={"reasoning_effort": "none"},
             )
         ]
 
@@ -157,8 +153,15 @@ class Worker:
             )
         except LLMChainExhausted as exc:
             # A local chain that failed is this box, and this box is the thing that
-            # is meant to fail visibly. 'ai_offline' is what the UI reads to say so.
-            kind = "ai_offline" if exc.is_offline else "provider"
+            # is meant to fail visibly. 'ai_offline' is what the UI reads to say so;
+            # 'context_overflow' is the prompt no longer fitting the window, which
+            # the user fixes by starting a new conversation.
+            if exc.is_offline:
+                kind = "ai_offline"
+            elif exc.is_context_overflow:
+                kind = "context_overflow"
+            else:
+                kind = "provider"
             await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), kind)
             logger.warning("job %s failed (%s): %s", job_id, kind, exc)
             return

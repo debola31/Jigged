@@ -65,6 +65,10 @@ const OFFLINE_COPY =
   'The AI box is offline right now — everything else on this page still works.';
 const FAILED_COPY = "That didn't finish. You can ask again.";
 const WALL_COPY = "That's taken longer than it should. You can ask again.";
+// The prompt no longer fits the model's window. Not downtime and not an
+// incident: the one failure the USER fixes, so the copy says how.
+const OVERFLOW_COPY =
+  'That conversation has grown past what the assistant can hold. Start a new one.';
 
 interface Verdict {
   phase: AiJobPhase;
@@ -87,10 +91,9 @@ export function verdictFor(
   // 1. Already terminal.
   if (job.status === 'succeeded') return { phase: 'done', message: null };
   if (job.status === 'failed' || job.status === 'timed_out') {
-    return {
-      phase: job.error_kind === 'ai_offline' ? 'offline' : 'failed',
-      message: job.error_kind === 'ai_offline' ? OFFLINE_COPY : FAILED_COPY,
-    };
+    if (job.error_kind === 'ai_offline') return { phase: 'offline', message: OFFLINE_COPY };
+    if (job.error_kind === 'context_overflow') return { phase: 'failed', message: OVERFLOW_COPY };
+    return { phase: 'failed', message: FAILED_COPY };
   }
 
   const past = (iso: string | null) => !!iso && Date.parse(iso) < opts.nowMs;

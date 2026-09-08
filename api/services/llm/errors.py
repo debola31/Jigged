@@ -111,6 +111,22 @@ class LLMProtocolError(LLMProviderError):
     """
 
 
+class LLMContextOverflow(LLMProviderError):
+    """The PROMPT did not fit the model's context window -> the job fails visibly.
+
+    Only the native Ollama adapter raises it, because only that path can ask for
+    it: with `truncate: false` a prompt past num_ctx is an HTTP 400 naming the
+    token counts. The alternative -- the default on the OpenAI-compatible path --
+    is a 200 whose prompt was silently cut from the FRONT, which is where the
+    schema and the business definitions sit. A schema-less answer looks exactly
+    like an answer; this class exists so it never gets to look like one.
+
+    Not offline (the box is up and said no) and not an incident (nothing broke):
+    its own error_kind, 'context_overflow', with copy telling the user to start a
+    new conversation.
+    """
+
+
 class LLMTruncated(LLMProviderError):
     """Output hit max_tokens. Checked BEFORE validation, so a cut-off object fails
     with an accurate cause instead of a misleading schema violation -- and does not
@@ -193,10 +209,24 @@ class LLMChainExhausted(LLMError):
             for f in self.failures
         )
 
+    @property
+    def is_context_overflow(self) -> bool:
+        """True when every provider refused the prompt as too long for its window.
+
+        Checked AFTER is_offline by both hosts. A chain is local-only or hosted-only
+        by policy, so in practice this is one Ollama provider saying the
+        conversation no longer fits -- and the user, not an engineer, is the one
+        who can fix that, by starting a new one.
+        """
+        return bool(self.failures) and all(
+            isinstance(f, LLMContextOverflow) for f in self.failures
+        )
+
 
 __all__ = [
     "LLMAuthError",
     "LLMChainExhausted",
+    "LLMContextOverflow",
     "LLMEmptyResponse",
     "LLMError",
     "LLMErrorEcho",

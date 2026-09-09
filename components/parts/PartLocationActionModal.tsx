@@ -35,6 +35,9 @@ import LocationPicker, {
 } from '@/components/inventory/locations/LocationPicker';
 import type { JobWithRelations } from '@/types/job';
 import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
+import MillCertField from '@/components/inventory/MillCertField';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
+import { certificateUploadProperties } from '@/components/inventory/certificateTelemetry';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
@@ -108,7 +111,20 @@ export default function PartLocationActionModal({
   const [unit, setUnit] = useState(primaryUnit);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  /** The lot an Add landed on. Holds the dialog open to offer the mill certificate. */
+  /**
+   * The cert chosen alongside the heat, uploaded once the write returns a lot.
+   *
+   * Staged rather than uploaded on pick: a certificate needs a `lot_id`, and the lot does not
+   * exist until `add_stock_at_location` creates it.
+   */
+  const [certFile, setCertFile] = useState<File | null>(null);
+  /**
+   * Set ONLY when the receipt landed and its certificate did not.
+   *
+   * The happy path closes; there is nothing to say once the stock is recorded and the document is
+   * filed. This holds the dialog open for the one case that needs a person: the material is on the
+   * shelf, the cert is not, and nothing else on screen would ever mention it again.
+   */
   const [landedLotId, setLandedLotId] = useState<string | null>(null);
   // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell a
   // billing block from an ordinary failure. Validation still sets plain strings, which it renders.
@@ -279,6 +295,8 @@ export default function PartLocationActionModal({
     setError(null);
     try {
       let addedLotId: string | null = null;
+      /** Only meaningful when a cert was staged; `true` when there was nothing to do. */
+      let certLanded = true;
       if (action === 'add') {
         // The result was previously discarded. It carries `lot_id` — the lot this receipt landed
         // on, and the only reading of "is this part lot-tracked?" available here: `tracked` is set
@@ -289,6 +307,35 @@ export default function PartLocationActionModal({
           heatNumber: heatNumber.trim() || undefined,
         });
         addedLotId = result?.lot_id ?? null;
+
+        /*
+         * The certificate, AFTER the stock write and outside its failure path.
+         *
+         * A cert that fails must never un-land a receipt, so this cannot throw into the same catch
+         * that reports a failed movement — it would tell someone their stock was not recorded when
+         * it was, and send them to enter it twice.
+         */
+        if (addedLotId && certFile) {
+          try {
+            await uploadLotCertificate(companyId, addedLotId, certFile);
+            const fileProps = certificateUploadProperties(certFile);
+            posthog.capture('lot certificate uploaded', {
+              surface: 'office_receipt',
+              at_receipt: true,
+              file_kind: fileProps.file_kind,
+              size_bucket: fileProps.size_bucket,
+              is_replacement: false,
+            });
+            certLanded = true;
+          } catch {
+            posthog.capture('lot certificate upload failed', {
+              surface: 'office_receipt',
+              reason: 'failed',
+              attempt: 1,
+            });
+            certLanded = false;
+          }
+        }
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
         // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
@@ -324,9 +371,9 @@ export default function PartLocationActionModal({
         heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
-      // A receipt against a lot-tracked part stays open to offer the certificate; everything else
-      // closes as before. The cert is a second write, so a failed one cannot un-land the stock.
-      if (addedLotId) {
+      // Held open ONLY when the cert failed — the material is on the shelf and its document is
+      // not, which is the one outcome nothing else on screen would mention again.
+      if (addedLotId && !certLanded) {
         setLandedLotId(addedLotId);
         return;
       }
@@ -463,7 +510,21 @@ export default function PartLocationActionModal({
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           )}
           {showHeatField && (
-            <HeatNumberField value={heatNumber} onChange={setHeatNumber} disabled={saving} />
+            <HeatNumberField
+              value={heatNumber}
+              onChange={(next) => {
+                setHeatNumber(next);
+                // Clearing the heat clears the cert with it: a staged file would otherwise upload
+                // against a lot minted for material nobody identified.
+                if (!next.trim()) setCertFile(null);
+              }}
+              disabled={saving}
+            />
+          )}
+          {/* Only once a heat has been entered — the cert is the paper stapled to the bar whose
+              number you are typing, so the two belong together. */}
+          {showHeatField && heatNumber.trim().length > 0 && (
+            <MillCertField value={certFile} onChange={setCertFile} disabled={saving} />
           )}
           {showLotPicker && (tracked || lots.length > 0) && (
             <LotPicker

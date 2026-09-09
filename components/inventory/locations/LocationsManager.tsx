@@ -16,9 +16,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
-import SearchIcon from '@mui/icons-material/Search';
+import StorageFilterField from '@/components/inventory/StorageFilterField';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -526,22 +524,7 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          <TextField
-            size="small"
-            label="Filter locations"
-            value={unitQuery}
-            onChange={(e) => setUnitQuery(e.target.value)}
-            sx={{ width: { xs: '100%', sm: 320 } }}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
+          <StorageFilterField label="Filter places" value={unitQuery} onChange={setUnitQuery} />
 
           <Box sx={{ flex: 1 }} />
 

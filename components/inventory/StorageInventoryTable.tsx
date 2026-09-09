@@ -17,7 +17,6 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 
 import { useLoad } from '@/hooks/useLoad';
@@ -27,7 +26,9 @@ import { getLocations } from '@/utils/inventoryLocationsAccess';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { gapSentence, summariseOnHand } from '@/lib/inventoryOnHand';
 import { computePathNames } from '@/lib/locationTree';
+import { formatDateOnly } from '@/lib/localDate';
 import PartPlacesDrawer from '@/components/inventory/locations/place/PartPlacesDrawer';
+import StorageFilterField from '@/components/inventory/StorageFilterField';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -197,20 +198,23 @@ export default function StorageInventoryTable({
         valueGetter: (p) => (p.data ? (pathById.get(p.data.locationId) ?? p.data.locationName) : ''),
       },
       {
-        field: 'heatNumber',
-        headerName: 'Heat',
-        flex: 1,
-        minWidth: 110,
         /*
-         * ONLY a real mill heat, never the lot code.
+         * "Updated", where the heat used to be.
          *
-         * A lot-tracked part whose material arrived with no readable heat gets a MINTED code
-         * (`LOT-260909-01`), and stock that predates tracking gets `PRE-TRACKING` — both from
-         * `resolve_lot`, so that untagged bar is still storable rather than refused. Printing those
-         * under a column headed "Heat" states as a mill heat something no mill ever issued, which
-         * is the one thing traceability may not do. Absent is the honest answer.
+         * A heat could only ever be ONE of a part's heats, so a part on three shelves read as three
+         * unrelated things — and the side rail already breaks a part down by heat, which is where
+         * that question is actually answered. What a list wants of a row it is unsure about is when
+         * the stock last changed.
+         *
+         * Sorts on the raw timestamp and only formats for display, so "Sep 9" and "Sep 10" order by
+         * date rather than alphabetically.
          */
-        valueFormatter: (p: ValueFormatterParams<OnHandRow>) => p.value ?? '—',
+        field: 'lastMovedAt',
+        headerName: 'Updated',
+        flex: 1,
+        minWidth: 130,
+        valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
+          p.value ? formatDateOnly(String(p.value)) : '—',
       },
       {
         field: 'quantity',
@@ -296,15 +300,13 @@ export default function StorageInventoryTable({
         one finds what is on the shelves, and the Places tab's finds places.
       */}
       <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
-        <TextField
-          size="small"
-          label="Search parts, places or heats"
+        <StorageFilterField
+          label="Filter parts"
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            onFilter('search', e.target.value.trim().length > 0);
+          onChange={(next) => {
+            setSearch(next);
+            onFilter('search', next.trim().length > 0);
           }}
-          sx={{ minWidth: 300 }}
         />
         {onlyUncosted && (
           <Chip

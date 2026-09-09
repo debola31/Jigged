@@ -28,6 +28,9 @@ import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPic
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
 import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
+import MillCertField from '@/components/inventory/MillCertField';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
+import { certificateUploadProperties } from '@/components/inventory/certificateTelemetry';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -143,6 +146,8 @@ export default function OperatorLocationActionModal({
    * "is this part lot-tracked?" at this moment. Holds the dialog open to offer the certificate.
    */
   const [landedLotId, setLandedLotId] = useState<string | null>(null);
+  /** The cert chosen beside the heat. Staged: the lot does not exist until the RPC runs. */
+  const [certFile, setCertFile] = useState<File | null>(null);
 
   const handleEnter = async () => {
     setQuantity('');
@@ -214,6 +219,8 @@ export default function OperatorLocationActionModal({
       }
 
       let addedLotId: string | null = null;
+      /** Only meaningful when a cert was staged; `true` when there was nothing to do. */
+      let certLanded = true;
       if (action === 'add') {
         // operatorId on every write, not just depletion: bin history has to be able to name
         // who put something away, and `created_by` (an auth user) is unreadable from the browser.
@@ -224,6 +231,29 @@ export default function OperatorLocationActionModal({
           heatNumber: heatNumber.trim() || undefined,
         });
         addedLotId = result?.lot_id ?? null;
+
+        // AFTER the write and outside its failure path: a failed cert must never report a receipt
+        // that landed as one that did not.
+        if (addedLotId && certFile) {
+          try {
+            await uploadLotCertificate(companyId, addedLotId, certFile);
+            const fileProps = certificateUploadProperties(certFile);
+            posthog.capture('lot certificate uploaded', {
+              surface: 'operator',
+              at_receipt: true,
+              file_kind: fileProps.file_kind,
+              size_bucket: fileProps.size_bucket,
+              is_replacement: false,
+            });
+          } catch {
+            posthog.capture('lot certificate upload failed', {
+              surface: 'operator',
+              reason: 'failed',
+              attempt: 1,
+            });
+            certLanded = false;
+          }
+        }
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
           graceful: true,
@@ -265,7 +295,8 @@ export default function OperatorLocationActionModal({
        * The panel configures itself from what the lot already holds, so a routine top-up of a bin
        * whose cert is already filed reads as a confirmation rather than as a nag.
        */
-      if (addedLotId) {
+      // Held open ONLY when the cert failed. The happy path has nothing left to say.
+      if (addedLotId && !certLanded) {
         setLandedLotId(addedLotId);
         return;
       }
@@ -359,7 +390,20 @@ export default function OperatorLocationActionModal({
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           )}
           {showHeatField && (
-            <HeatNumberField value={heatNumber} onChange={setHeatNumber} disabled={saving} />
+            <HeatNumberField
+              value={heatNumber}
+              onChange={(next) => {
+                setHeatNumber(next);
+                // Clearing the heat clears the cert with it: a staged file would otherwise upload
+                // against a lot minted for material nobody identified.
+                if (!next.trim()) setCertFile(null);
+              }}
+              disabled={saving}
+            />
+          )}
+          {/* Only once a heat is entered — the cert belongs with the number it certifies. */}
+          {showHeatField && heatNumber.trim().length > 0 && (
+            <MillCertField value={certFile} onChange={setCertFile} disabled={saving} />
           )}
           {/* Shown once the shelf actually holds lots, or whenever the part is tracked — in which
               case an empty picker is the answer ("none of this is recorded here"), not a gap. */}

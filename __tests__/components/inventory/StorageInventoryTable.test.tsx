@@ -72,6 +72,7 @@ function row(over: Partial<OnHandRow> = {}): OnHandRow {
     costBelowMin: false,
     onHandCost: 300,
     gap: null,
+    lastMovedAt: '2026-09-09T12:00:00Z',
     ...over,
   };
 }
@@ -112,7 +113,14 @@ describe('money is gated, and the rest is not', () => {
   it('shows cost columns and the total when cost is enabled', async () => {
     renderTable(true);
     await screen.findByTestId('grid');
-    expect(columnHeaders()).toEqual(['Part', 'Place', 'Heat', 'On hand', 'Cost / unit', 'Value']);
+    expect(columnHeaders()).toEqual([
+      'Part',
+      'Place',
+      'Updated',
+      'On hand',
+      'Cost / unit',
+      'Value',
+    ]);
     expect(screen.getByText('Total at our cost')).toBeInTheDocument();
     expect(screen.getByText('$300')).toBeInTheDocument();
   });
@@ -120,7 +128,7 @@ describe('money is gated, and the rest is not', () => {
   it('drops every cost column and the total when it is not', async () => {
     renderTable(false);
     await screen.findByTestId('grid');
-    expect(columnHeaders()).toEqual(['Part', 'Place', 'Heat', 'On hand']);
+    expect(columnHeaders()).toEqual(['Part', 'Place', 'Updated', 'On hand']);
     expect(screen.queryByText('Total at our cost')).not.toBeInTheDocument();
     // No dollar figure anywhere on the surface.
     expect(document.body.textContent).not.toMatch(/\$/);
@@ -182,7 +190,7 @@ describe('filters move the total', () => {
     await screen.findByTestId('grid');
     expect(screen.getByText('$350')).toBeInTheDocument();
 
-    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), '4140');
+    await user.type(screen.getByRole('textbox', { name: /Filter parts/ }), '4140');
 
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
     expect(screen.getByText('1 part')).toBeInTheDocument();
@@ -199,7 +207,7 @@ describe('filters move the total', () => {
     // Stock only ever sits at a LEAF, so matching only the leaf name would answer "Raw stock rack"
     // with nothing — indistinguishable from an empty rack. The search matches the full path, which
     // is how one box does what a separate Where control used to.
-    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'Raw stock rack');
+    await user.type(screen.getByRole('textbox', { name: /Filter parts/ }), 'Raw stock rack');
 
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
     expect(screen.getByText('1 part')).toBeInTheDocument();
@@ -213,38 +221,48 @@ describe('filters move the total', () => {
     ]);
     await screen.findByTestId('grid');
 
-    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'H-4471');
+    await user.type(screen.getByRole('textbox', { name: /Filter parts/ }), 'H-4471');
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
   });
 });
 
-describe('the Heat column states only what a mill issued', () => {
-  const heatValue = (r: OnHandRow) => {
+describe('the Updated column', () => {
+  const updatedValue = (r: OnHandRow) => {
     const cols = (capturedGridProps.current?.columnDefs ?? []) as Array<{
       field?: string;
       valueFormatter?: (p: { value: unknown; data: OnHandRow }) => string;
     }>;
-    const col = cols.find((c) => c.field === 'heatNumber');
-    return col?.valueFormatter?.({ value: r.heatNumber, data: r });
+    const col = cols.find((c) => c.field === 'lastMovedAt');
+    return col?.valueFormatter?.({ value: r.lastMovedAt, data: r });
   };
 
-  it('shows a real heat', async () => {
-    renderTable(true, [row({ heatNumber: 'H-4471' })]);
+  it('renders the day the stock last moved', async () => {
+    renderTable(true, [row()]);
     await screen.findByTestId('grid');
-    expect(heatValue(row({ heatNumber: 'H-4471' }))).toBe('H-4471');
+    // Formatted through `formatDateOnly`, whose regex is anchored — a timestamptz falls through to
+    // the plain parse and renders the day the SHOP saw, not its UTC calendar day.
+    expect(updatedValue(row())).toBe(new Date('2026-09-09T12:00:00Z').toLocaleDateString());
   });
 
-  it.each(['LOT-260909-01', 'PRE-TRACKING'])(
-    'shows an em dash, not the minted code %s',
-    async (lotCode) => {
-      renderTable(true, [row({ heatNumber: null, lotCode })]);
-      await screen.findByTestId('grid');
-      // A minted code and PRE-TRACKING are what `resolve_lot` invents so untagged bar is still
-      // storable. Printing either under a column headed "Heat" would state as a mill heat a number
-      // no mill ever issued — the one thing traceability may not do.
-      expect(heatValue(row({ heatNumber: null, lotCode }))).toBe('—');
-    },
-  );
+  it('sorts on the timestamp, not the formatted string', async () => {
+    renderTable(true, [row()]);
+    await screen.findByTestId('grid');
+    const cols = (capturedGridProps.current?.columnDefs ?? []) as Array<{ field?: string }>;
+    // The field is the raw value; only the formatter is cosmetic. Sorting the rendered string
+    // would order "Sep 9" after "Sep 10" alphabetically.
+    expect(cols.find((c) => c.field === 'lastMovedAt')).toBeTruthy();
+  });
+
+  /**
+   * The heat is gone from this table on purpose. A row could only ever carry ONE of a part's
+   * heats, so a part on three shelves read as three unrelated things; the side rail breaks a part
+   * down by heat, which is where that question is answered.
+   */
+  it('has no Heat column', async () => {
+    renderTable(true, [row()]);
+    await screen.findByTestId('grid');
+    expect(columnHeaders()).not.toContain('Heat');
+  });
 });
 
 describe('a row opens the part', () => {

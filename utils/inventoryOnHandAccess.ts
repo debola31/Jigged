@@ -45,6 +45,14 @@ export interface OnHandRow {
    * not filling in a field that does not exist for that part.
    */
   gap: 'no_cost_tier' | 'made' | null;
+  /**
+   * When this stock last moved.
+   *
+   * The newest ledger entry for this (part, place, lot), falling back to when the balance row
+   * itself appeared — both real facts about the row. Never null in practice; typed nullable
+   * because the view's columns generate that way.
+   */
+  lastMovedAt: string | null;
 }
 
 export interface StorageOnHand {
@@ -90,6 +98,7 @@ interface OnHandViewRow {
   cost_below_min: boolean | null;
   on_hand_cost: number | null;
   gap_reason: string | null;
+  last_moved_at: string | null;
 }
 
 /** `Number(x)` for a real value, `null` for a gap. NEVER `|| 0` — that turns a gap into a zero. */
@@ -147,6 +156,7 @@ export async function getStorageOnHand(companyId: string): Promise<StorageOnHand
         onHandCost: num(row.on_hand_cost),
         gap:
           row.gap_reason === 'made' || row.gap_reason === 'no_cost_tier' ? row.gap_reason : null,
+        lastMovedAt: row.last_moved_at,
       });
     }
 

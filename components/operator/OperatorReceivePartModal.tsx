@@ -19,6 +19,9 @@ import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
 import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
+import MillCertField from '@/components/inventory/MillCertField';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
+import { certificateUploadProperties } from '@/components/inventory/certificateTelemetry';
 
 interface OperatorReceivePartModalProps {
   open: boolean;
@@ -74,6 +77,8 @@ export default function OperatorReceivePartModal({
    * field, so a part gained one only on its second visit.
    */
   const [photo, setPhoto] = useState<File | null>(null);
+  /** The cert chosen beside the heat. Staged, because the lot does not exist until the RPC runs. */
+  const [certFile, setCertFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -106,6 +111,7 @@ export default function OperatorReceivePartModal({
     setNotes('');
     setHeatNumber('');
     setPhoto(null);
+    setCertFile(null);
     setError(null);
     setLanded(null);
   };
@@ -175,10 +181,40 @@ export default function OperatorReceivePartModal({
        * would be asking about a write that has already happened.
        */
       const heat = heatNumber.trim();
-      if (result?.started_tracking || result?.lot_id) {
+
+      /*
+       * The certificate, AFTER the stock write and outside its failure path — a failed cert must
+       * never report a receipt that landed as one that did not.
+       */
+      let certLanded = true;
+      if (result?.lot_id && certFile) {
+        try {
+          await uploadLotCertificate(companyId, result.lot_id, certFile);
+          const fileProps = certificateUploadProperties(certFile);
+          posthog.capture('lot certificate uploaded', {
+            surface: 'operator_receive',
+            at_receipt: true,
+            file_kind: fileProps.file_kind,
+            size_bucket: fileProps.size_bucket,
+            is_replacement: false,
+          });
+        } catch {
+          posthog.capture('lot certificate upload failed', {
+            surface: 'operator_receive',
+            reason: 'failed',
+            attempt: 1,
+          });
+          certLanded = false;
+        }
+      }
+
+      // Held open when tracking just started (that is a change to how the part works, and the
+      // person who caused it is standing here) or when the cert did not land.
+      if (result?.started_tracking || (result?.lot_id && !certLanded)) {
         setLanded({
           partName: part.part_name,
-          lotId: result?.lot_id ?? null,
+          // Only offered again when it failed; a cert that landed needs nothing said about it.
+          lotId: certLanded ? null : (result?.lot_id ?? null),
           startedTracking: Boolean(result?.started_tracking),
           heatLabel: heat ? `Heat ${heat}` : null,
         });
@@ -290,11 +326,19 @@ export default function OperatorReceivePartModal({
           <TextField
             label="Heat number (optional)"
             value={heatNumber}
-            onChange={(e) => setHeatNumber(e.target.value)}
+            onChange={(e) => {
+              setHeatNumber(e.target.value);
+              // Clearing the heat clears the cert with it.
+              if (!e.target.value.trim()) setCertFile(null);
+            }}
             fullWidth
             disabled={!part}
             slotProps={{ htmlInput: { autoCapitalize: 'characters', maxLength: 64 } }}
           />
+          {/* Only once a heat is entered: the cert is the paper on the bar whose number you typed. */}
+          {heatNumber.trim().length > 0 && (
+            <MillCertField value={certFile} onChange={setCertFile} disabled={saving} />
+          )}
           <TextField
             label="Notes (optional)"
             value={notes}

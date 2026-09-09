@@ -4456,6 +4456,7 @@ export type Database = {
           cost_per_unit: number | null
           gap_reason: string | null
           heat_number: string | null
+          last_moved_at: string | null
           location_id: string | null
           location_name: string | null
           lot_code: string | null

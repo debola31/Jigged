@@ -14,6 +14,9 @@ import { test, expect, type Page } from '@playwright/test';
  * is what starts tracing a part — so the tests read as one story: a receipt that skips the cert,
  * then one that attaches it. `fullyParallel` is on and CI pins workers=1; `describe.serial` makes
  * the local run agree with CI rather than racing on the shared fixture.
+ *
+ * The cert is STAGED in the form beside the heat and uploads after the write, so the happy path
+ * closes the dialog with nothing offered afterwards. That is the behaviour these pin.
  */
 
 const PART = 'E2E-CERT';
@@ -44,8 +47,8 @@ async function openPartStorage(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
 }
 
-/** Fill the Add form with a heat, and submit. */
-async function receiveWithHeat(page: Page, quantity: string): Promise<void> {
+/** Open Add and fill it in, optionally staging a certificate. Does not submit. */
+async function fillAddForm(page: Page, quantity: string, cert = false): Promise<void> {
   await page.getByRole('button', { name: 'Add', exact: true }).click();
 
   const location = page.getByRole('combobox', { name: 'Location' });
@@ -55,72 +58,74 @@ async function receiveWithHeat(page: Page, quantity: string): Promise<void> {
 
   await page.getByRole('spinbutton', { name: 'Quantity' }).fill(quantity);
   await page.getByRole('textbox', { name: /Heat number/i }).fill(HEAT);
-  await page.getByRole('button', { name: 'Confirm' }).click();
+
+  if (cert) {
+    // Scoped to the dialog and by its `accept`: the part page behind it has file inputs of its
+    // own, and "the last file input on the page" is a different control entirely.
+    await page
+      .getByRole('dialog')
+      .locator('input[accept*=".pdf"]')
+      .setInputFiles({
+        name: 'MTR-4471.pdf',
+        mimeType: 'application/pdf',
+        buffer: CERT_PDF,
+      });
+    await expect(page.getByText('MTR-4471.pdf')).toBeVisible();
+  }
 }
 
 test.describe.serial('Mill certificates', () => {
-  test('a receipt records the stock and offers the cert without demanding it', async ({ page }) => {
+  test('the cert appears with the heat, and leaves when it is cleared', async ({ page }) => {
     await openPartStorage(page);
-    await receiveWithHeat(page, '10');
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
 
-    // The panel names the heat it is asking about, rather than a lot id nobody typed.
-    await expect(page.getByText(`Heat ${HEAT} —`, { exact: false })).toBeVisible();
-    // And recording it started tracing the part — the banner behind the dialog says so.
-    await expect(page.getByText(/Heat-tracked/i)).toBeVisible();
+    const heat = page.getByRole('textbox', { name: /Heat number/i });
+    // The cert is the paper stapled to the bar whose number you are typing, so it belongs with the
+    // heat rather than arriving after Confirm has already been pressed.
+    await expect(page.getByRole('button', { name: /Attach the mill cert/i })).toBeHidden();
+    await heat.fill(HEAT);
+    await expect(page.getByRole('button', { name: /Attach the mill cert/i })).toBeVisible();
 
-    // The cert is offered, and Done is available WITHOUT attaching one. That is the whole promise:
-    // nothing about a certificate may stand between someone and finishing a receipt.
-    await expect(page.getByRole('button', { name: /Add the mill cert/i })).toBeVisible();
-    const done = page.getByRole('button', { name: 'Done' });
-    await expect(done).toBeEnabled();
-    await done.click();
+    // Clearing the heat takes it back: a staged file with no heat would upload against a lot
+    // minted for material nobody identified.
+    await heat.clear();
+    await expect(page.getByRole('button', { name: /Attach the mill cert/i })).toBeHidden();
+  });
 
-    // Skipped, and the material is on the shelf regardless.
+  test('a receipt records the stock without demanding a cert', async ({ page }) => {
+    await openPartStorage(page);
+    await fillAddForm(page, '10');
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    // Nothing is offered after the fact: the receipt is done, and the cert was optional.
     await expect(page.getByRole('dialog')).toBeHidden();
     await expect(page.getByText(`Heat ${HEAT}`).first()).toBeVisible();
-
-    // EXACTLY ONE place to attach it. The balance row shows the heat as identity and stops there;
-    // one lot is one document, so two controls on one screen would be two buttons doing one thing.
+    // EXACTLY ONE place to attach it later. One lot is one document.
     await expect(page.getByRole('button', { name: 'Add cert', exact: true })).toHaveCount(1);
   });
 
-  test('the certificate uploads onto the lot the receipt created', async ({ page }) => {
+  test('a staged certificate lands on the lot the receipt created', async ({ page }) => {
     await openPartStorage(page);
-    await receiveWithHeat(page, '5');
-
-    // Same heat, so this lands on the lot the first receipt created rather than minting another.
-    const addCert = page.getByRole('button', { name: /Add the mill cert/i });
-    await expect(addCert).toBeVisible();
+    await fillAddForm(page, '5', true);
+    await page.getByRole('button', { name: 'Confirm' }).click();
 
     // A REAL upload: through the browser, into the `attachments` bucket, under
     // {companyId}/lots/{lotId}/... — the path the bucket's RLS gates on.
-    await page.locator('input[type="file"]').last().setInputFiles({
-      name: 'MTR-4471.pdf',
-      mimeType: 'application/pdf',
-      buffer: CERT_PDF,
-    });
-
-    // On success the panel finishes the receipt itself, and the lot now shows its cert rather than
-    // an invitation to add one.
     await expect(page.getByRole('dialog')).toBeHidden({ timeout: 30_000 });
-    // Found BY ROLE, which is the point: the control has to be a real button, reachable by
-    // keyboard and announced to a screen reader. Its accessible name is the file, so what it opens
-    // is stated rather than left to a generic "Cert".
     await expect(page.getByRole('button', { name: /Open MTR-4471\.pdf/i })).toBeVisible();
-    // And the invitation to add one is gone — the lot has its document now.
     await expect(page.getByRole('button', { name: 'Add cert', exact: true })).toHaveCount(0);
   });
 
   test('the cert is reachable from the part, opened by name', async ({ page }) => {
     await openPartStorage(page);
 
-    // The heats section is the office path — it lists every heat ever held, not only what is still
-    // on a shelf, which is the one that answers "the customer wants the cert for heat 4471".
+    // The heats section is the office path — every heat ever held, not only what is still on a
+    // shelf, which is the one that answers "the customer wants the cert for heat 4471".
     await expect(page.getByText('Heats and certificates')).toBeVisible();
     await page.getByRole('button', { name: /Open MTR-4471\.pdf/i }).first().click();
 
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByText('MTR-4471.pdf')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Download/i })).toBeEnabled();
+    await expect(page.getByText('MTR-4471.pdf').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Download/i }).first()).toBeEnabled();
   });
 });

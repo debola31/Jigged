@@ -688,9 +688,9 @@ rather than a promise not to.
 
 | Decision | Why |
 |---|---|
-| The cert uploads **after** the stock RPC | The lot does not exist until the RPC creates it, so upload-first is impossible — and because the cert is a second, independent write, a failed one cannot un-land the stock. The exact inverse of [`MovementPhotoField`](../../components/operator/MovementPhotoField.tsx), which *must* upload first because `photo_path` is written at INSERT and immutable after. Both orderings are asserted in one file, `__tests__/components/operator/OperatorReceivePartModal.test.tsx` |
+| The cert is **staged with the heat** and uploads **after** the stock RPC | Both files in the form are staged; only the timing of their upload differs, and neither had a choice. [`MovementPhotoField`](../../components/operator/MovementPhotoField.tsx) *must* upload before the RPC, because `photo_path` is written at INSERT and immutable after. A cert *cannot*: it needs a `lot_id`, and the lot does not exist until the RPC creates it — which is also what makes a failed cert unable to un-land the stock. Both orderings are asserted in one file, `__tests__/components/operator/OperatorReceivePartModal.test.tsx`. **Withdrawn 2026-09-09:** offering the cert in a panel AFTER submit — right about the ordering, wrong about the moment. The cert is the paper stapled to the bar whose heat you are typing, and a prompt arriving once Confirm has been pressed reads as an interruption. The field appears with the heat and leaves when it is cleared; the panel now shows **only** when the receipt landed and its cert did not, which is the one outcome nothing else on screen would mention again |
 | Gate on the returned `lot_id`, never on `parts.lot_tracked` | `add_stock_at_location` returns a lot exactly when the part is tracked, **including when this receipt turned tracking on**. None of the four add surfaces can read the flag beforehand anyway: `PartSelectOption` omits it, and `PartLocationActionModal.tracked` is set inside a loader that early-returns on the add path, so it is always false there |
-| `Done` is always enabled and takes focus | The never-blocks guarantee made structural. Nothing is red, nothing warns that no cert was attached, and no state of the panel can stop material being put away |
+| Nothing about a cert can stop a receipt | The field is optional and silent about it, a rejected file warns without blocking, and the recovery panel's `Done` is always enabled and takes focus. No state of either can prevent material being put away |
 | One control per lot, and only in **Heats and certificates** | A lot on two shelves is two rows and one document. The first build put the control on the balance rows *and* in the heats list, so a lot that was both on a shelf and in that list carried two buttons doing the same thing — caught by the e2e. The balance row shows the heat as identity and stops; certs live in the one section that also covers lots with nothing left on the shelf |
 | Absence is a plain control, never a warning | *"a lot with no rows is the normal state on the day material lands, and chasing it is an office task, not a dock task"* — the table's own comment |
 | Several per lot; newest is current; no `is_current` | A lot legitimately carries a mill cert plus a plating cert plus a re-test. A flag would need maintaining on delete and would still be wrong for that case. Replace = upload then delete, in that order, so a failed upload never leaves the lot with nothing |
@@ -1007,6 +1007,14 @@ obvious fix for "the footer scrolls off" and is wrong twice over: it puts a figu
 it sums, and it re-creates the scorecard strip this design deliberately dropped. The grid is capped
 at the viewport instead and scrolls internally, so the total is always on screen and still describes
 what is above it.
+
+**The list shows `Updated`, not the heat.** A row could only ever carry ONE of a part's heats, so a
+part on three shelves read as three unrelated things — and the side rail already breaks a part down
+by heat, which is where that question is answered. What a list wants of a row it is unsure about is
+when the stock last changed, which
+[`20260909185255`](../../supabase/migrations/20260909185255_inventory_on_hand_last_moved.sql) reads
+off the ledger rather than storing: `part_location_stock` has no `updated_at`, and adding one would
+mean a trigger every stock RPC then has to keep honest.
 
 **A row opens the part.** A row is a part somewhere, so clicking one opens
 [`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — everywhere

@@ -205,10 +205,11 @@ Then sign in with the seed account (`dev@jigged.test` / `jigged-dev-1234`) — t
 `supabase/seed.sql`, so it has the full Vanguard Precision Works data graph. Get `$PREVIEW_URL` from
 the PR's Vercel comment or `gh pr view <n> --json comments`.
 
-**AI Insights on a preview needs a worker of its own.** The preview talks to the PR's Supabase branch,
-where nothing heartbeats, so the ask bar says the box is offline until you run
-`scripts/preview-worker.sh <pr>` on the serving Mac — see
-[ai-worker.md](ai-worker.md#for-a-prs-vercel-preview-a-second-worker-on-demand).
+**AI Insights works on a preview with nothing to run.** The preview talks to the PR's Supabase
+branch, and the worker on the serving Mac discovers that branch and serves it beside production
+within a couple of minutes of it going healthy — see
+[ai-worker.md](ai-worker.md#what-it-serves-and-how-a-preview-branch-joins). If the ask bar there says
+the box is offline, check that the worker is running and that `SUPABASE_ACCESS_TOKEN` is set.
 
 **Use a fresh `--session` per preview domain.** The bypass cookie is set for one host; carrying a
 session over from a previous PR's preview makes the new domain bounce to Vercel's SSO login even

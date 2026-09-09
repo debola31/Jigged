@@ -122,7 +122,9 @@ CORRECTION = (
 _REJECTED_ECHO_CHARS = 300
 
 
-async def _run_tool(company_id: str, call: ToolCall, today: date | None) -> dict[str, Any]:
+async def _run_tool(
+    company_id: str, call: ToolCall, today: date | None, dsn: str | None = None
+) -> dict[str, Any]:
     """Execute one tool call. A tool FAILING is data for the model, not an error.
 
     The executor returns shaped errors -- SQL_ERROR for anything a rewrite can
@@ -153,6 +155,7 @@ async def _run_tool(company_id: str, call: ToolCall, today: date | None) -> dict
             sql=call.arguments.get("sql", ""),
             description=call.arguments.get("description", ""),
             today=today,
+            dsn=dsn,
         )
     except Exception as exc:  # noqa: BLE001 - hand the failure back to the model
         logger.warning("insights tool %s failed: %s", call.name, type(exc).__name__)
@@ -464,7 +467,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # objects is what the eval asserts to zero, and it is invisible once the
         # dict has been through json.dumps.
         tool_results = [
-            (call, await _run_tool(ctx.company_id, call, today))
+            (call, await _run_tool(ctx.company_id, call, today, ctx.readonly_dsn))
             for call in result.tool_calls
         ]
         refused += sum(

@@ -19,6 +19,11 @@ psycopg2-binary>=2.9.0
 # already pulls this in; declared here because this package imports it directly.
 python-dotenv>=1.0.0
 
+# branches.py asks Supabase which preview branches exist, so the worker can serve
+# them beside production. api/requirements.txt already pulls this in for the LLM
+# providers; declared here because this package imports it directly.
+httpx>=0.27.0
+
 # PDF -> PNG for the vision path. LICENCE CONSTRAINT, NOT A PREFERENCE:
 # no AGPL anywhere in this product. That rules out the three obvious choices --
 # PyMuPDF/fitz (AGPL-3.0), Ghostscript (AGPL-3.0) and pdf2image/poppler (GPL-2.0).

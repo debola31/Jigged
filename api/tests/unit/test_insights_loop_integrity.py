@@ -90,6 +90,10 @@ class Conversation:
         self.turns = list(turns)
         self.tool_results = list(tool_results or [])
         self.tool_dates: list[object] = []
+        # Which database each tool call was told to query. None is the backend and
+        # the evals, where one process serves one database and the executor reads
+        # AI_READONLY_DATABASE_URL; the worker names it per job.
+        self.tool_dsns: list[object] = []
         self.seen: list[list[Message]] = []
 
     async def complete(self, feature, messages, **kwargs):
@@ -101,8 +105,9 @@ class Conversation:
             )
         return self.turns.pop(0)
 
-    async def run_tool(self, company_id, call, today):
+    async def run_tool(self, company_id, call, today, dsn=None):
         assert self.tool_results, "the loop ran a tool the script has no result for"
+        self.tool_dsns.append(dsn)
         # The caller's local date, on its way to the executor to be bound as $2.
         # Captured rather than ignored: if the loop forwarded None the sandbox
         # would silently fall back to the UTC database clock, and every other
@@ -456,3 +461,49 @@ async def test_a_job_row_without_a_date_forwards_none_rather_than_inventing_one(
         ))
 
     assert convo.tool_dates == [None]
+
+
+async def test_the_jobs_database_reaches_the_tool_and_nothing_ambient_decides():
+    """Which database this job's SQL runs against travels WITH the job.
+
+    The worker serves production and every live preview branch from one process,
+    so the sandbox DSN is named per job on JobContext rather than read from
+    AI_READONLY_DATABASE_URL. If this stopped being forwarded, a preview's question
+    would be answered from whatever the environment happened to hold -- and the
+    answer would look perfectly correct.
+    """
+    branch = "postgresql://jigged_ai_readonly.branchref:pw@pooler:5432/postgres"
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("4 jobs are late.")],
+        tool_results=[SQL_OK],
+    )
+
+    with patch.object(insights.llm, "complete", convo.complete), \
+         patch.object(insights, "_run_tool", convo.run_tool), \
+         patch("services.insights_service._build_chat_system_prompt", return_value="SYSTEM"):
+        await insights.run(JobContext(
+            feature="insights", company_id="c0", request_id="rid",
+            payload={"question": "how many jobs are late?", "today": "2026-09-09"},
+            readonly_dsn=branch,
+        ))
+
+    assert convo.tool_dsns == [branch]
+
+
+async def test_a_job_that_names_no_database_leaves_the_executor_on_the_environment():
+    """The backend and the evals: one process, one database, the env is the
+    configuration. Passing None keeps tools/sql_executor's fallback in play."""
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("4 jobs are late.")],
+        tool_results=[SQL_OK],
+    )
+
+    with patch.object(insights.llm, "complete", convo.complete), \
+         patch.object(insights, "_run_tool", convo.run_tool), \
+         patch("services.insights_service._build_chat_system_prompt", return_value="SYSTEM"):
+        await insights.run(JobContext(
+            feature="insights", company_id="c0", request_id="rid",
+            payload={"question": "how many jobs are late?", "today": "2026-09-09"},
+        ))
+
+    assert convo.tool_dsns == [None]

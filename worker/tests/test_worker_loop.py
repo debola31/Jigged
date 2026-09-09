@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 
 import psycopg2
+from unittest.mock import patch
 
+from worker import branches as worker_branches
 from worker import config as worker_config
 from worker.__main__ import Worker
 
@@ -69,6 +71,21 @@ class _DbThatDiesOnReport:
         raise AssertionError("mark_running raised, so nothing should be reported")
 
 
+def _serve(worker: Worker, db, ref: str = "production") -> None:
+    """Hand the worker a database without a network round trip.
+
+    The worker keeps its queues in dicts keyed by project ref since it began
+    serving production and every live preview branch from one process; run()
+    adopts production only when it is not already there, which is this seam. A
+    non-pooler DSN discovers as the single ref "production", so the key matches.
+    """
+    worker.dbs[ref] = db
+    worker.served[ref] = worker_branches.Served(
+        ref=ref, label=ref, is_default=True,
+        queue_dsn="postgresql://queue", sandbox_dsn="postgresql://sandbox",
+    )
+
+
 def _config() -> worker_config.Config:
     return worker_config.Config(
         worker_id="desktop-1",
@@ -84,7 +101,7 @@ def test_a_write_over_a_dead_connection_does_not_end_the_loop():
     worker = Worker(_config())
     db = _DbThatDiesOnReport()
     db.worker = worker
-    worker.db = db  # type: ignore[assignment]
+    _serve(worker, db)
 
     asyncio.run(worker.run())  # escaped as OperationalError before the guard existed
 
@@ -133,10 +150,10 @@ def test_the_heartbeat_and_the_lease_renewal_keep_going_during_a_job(monkeypatch
     )
     w = Worker(cfg)
     db.worker = w
-    w.db = db  # type: ignore[assignment]
+    _serve(w, db)
     monkeypatch.setattr(worker_main, "LEASE_RENEW_SECONDS", 0.0)
 
-    async def slow_job(job):
+    async def slow_job(job, served):
         await asyncio.sleep(0.12)
 
     monkeypatch.setattr(w, "_run_one", slow_job)
@@ -146,3 +163,88 @@ def test_the_heartbeat_and_the_lease_renewal_keep_going_during_a_job(monkeypatch
     # 0.01 s cadence there are several more, and the held lease is renewed.
     assert db.beats >= 5, db.beats
     assert db.renewals >= 1, db.renewals
+
+
+class _QuietDb(_DbThatDiesOnReport):
+    """Never has work. Stands in for a database that is being served and is idle."""
+
+    def claim(self, *args, **kwargs) -> list[dict]:
+        return []
+
+
+class _DbNamingItsJob(_DbThatDiesOnReport):
+    """Hands out one job, reports it fine, then stops the worker."""
+
+    def mark_running(self, job_id: str, lease_seconds: int) -> None:
+        pass
+
+    def mark_succeeded(self, *args, **kwargs) -> None:
+        pass
+
+
+def test_a_job_carries_the_sandbox_of_the_database_it_was_claimed_from():
+    """THE ONE THAT MATTERS. The worker serves production and every live preview
+    branch from one process, so the database a job's SQL runs against is named on
+    its JobContext -- never left to AI_READONLY_DATABASE_URL, which holds
+    production. Answering a preview's question from the shop's real data would
+    look exactly like a correct run, which is why it is asserted rather than
+    trusted."""
+    w = Worker(_config())
+    branch_db = _DbNamingItsJob()
+    branch_db.worker = w
+    branch = worker_branches.Served(
+        ref="branchref", label="feature/x", is_default=False,
+        queue_dsn="postgresql://jigged_ai_worker.branchref:pw@pooler:5432/postgres",
+        sandbox_dsn="postgresql://jigged_ai_readonly.branchref:pw@pooler:5432/postgres",
+    )
+    w.dbs["branchref"] = branch_db
+    w.served["branchref"] = branch
+    # Production is idle, and already in hand so run() adopts nothing over the network.
+    _serve(w, _QuietDb())
+    # Discovery agrees both are live, so neither is retired mid-test.
+    discovered = [w.served["production"], branch]
+
+    seen: list[object] = []
+
+    async def capture(ctx):
+        seen.append(ctx.readonly_dsn)
+        return {"answer": "x"}
+
+    with patch.object(worker_branches, "discover", return_value=discovered), \
+         patch("services.ai_features.handler_for", lambda _f: capture):
+        asyncio.run(w.run())
+
+    assert seen == [branch.sandbox_dsn], "the job did not carry its own database"
+
+
+def test_beating_one_database_does_not_silence_the_others():
+    """`ai_workers` lives in each database and each route reads its own, so a
+    preview only stops saying "the AI box is offline" once the beat lands THERE.
+    One clock for all of them would let production's beat satisfy the gate and
+    leave every branch looking dead."""
+    w = Worker(_config())
+    first, second = _QuietDb(), _QuietDb()
+    beats: dict[str, int] = {"a": 0, "b": 0}
+    first.heartbeat = lambda *a, **k: beats.__setitem__("a", beats["a"] + 1)  # type: ignore[method-assign]
+    second.heartbeat = lambda *a, **k: beats.__setitem__("b", beats["b"] + 1)  # type: ignore[method-assign]
+    _serve(w, first, ref="production")
+    _serve(w, second, ref="branchref")
+
+    w._tick_heartbeat(force=True)
+
+    assert beats == {"a": 1, "b": 1}
+
+
+def test_one_databases_heartbeat_failing_does_not_stop_the_rest():
+    """A branch being torn down must not cost the shop its own heartbeat."""
+    w = Worker(_config())
+    broken, healthy = _QuietDb(), _QuietDb()
+    beat = []
+    broken.heartbeat = lambda *a, **k: (_ for _ in ()).throw(psycopg2.OperationalError("gone"))  # type: ignore[method-assign]
+    healthy.heartbeat = lambda *a, **k: beat.append(1)  # type: ignore[method-assign]
+    _serve(w, broken, ref="branchref")
+    _serve(w, healthy, ref="production")
+
+    w._tick_heartbeat(force=True)
+
+    assert beat == [1]

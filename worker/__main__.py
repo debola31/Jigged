@@ -42,6 +42,7 @@ _API_DIR = _ROOT / "api"
 if str(_API_DIR) not in sys.path:
     sys.path.insert(0, str(_API_DIR))
 
+from worker import branches as worker_branches  # noqa: E402
 from worker import config as worker_config  # noqa: E402
 from worker.db import WorkerDb  # noqa: E402
 
@@ -55,14 +56,32 @@ LEASE_RENEW_SECONDS = 60
 
 
 class Worker:
+    """One process, every database the shop's AI answers for.
+
+    Production always, and since 2026-09-09 every live Supabase preview branch
+    beside it (worker/branches.py), because a preview deployment enqueues into its
+    own branch and a worker that polls production alone leaves every preview
+    reading "the AI box is offline".
+
+    The databases are kept in dicts keyed by project ref rather than one `self.db`,
+    and each carries its OWN heartbeat clock: `ai_workers` is per database, so
+    beating production must not silence a branch. What stays single is what the
+    box itself is: one resident model, one Ollama slot, one job at a time.
+    """
+
     def __init__(self, cfg: worker_config.Config) -> None:
         self.cfg = cfg
-        self.db = WorkerDb(cfg.database_url)
+        self.dbs: dict[str, WorkerDb] = {}
+        self.served: dict[str, worker_branches.Served] = {}
         self.resident_model: str | None = None
         self.held: list[dict[str, Any]] = []
+        # Which database the held batch came from. Execution is serial, so one ref
+        # is never ambiguous -- and lease renewal has to reach the right database.
+        self.held_ref: str | None = None
         self._stopping = False
-        self._last_heartbeat = 0.0
+        self._last_heartbeat: dict[str, float] = {}
         self._last_renew = 0.0
+        self._last_discovery = 0.0
 
     # ------------------------------------------------------------- provider
 
@@ -89,8 +108,16 @@ class Worker:
         ]
 
     async def _audit(self, row: dict[str, Any]) -> None:
-        """Ledger writer for this process: libpq as jigged_ai_worker, not PostgREST."""
-        await asyncio.to_thread(self.db.insert_ai_call, row)
+        """Ledger writer for this process: libpq as jigged_ai_worker, not PostgREST.
+
+        Into the database the job came from, so a branch's attempts are that
+        branch's ledger and production's stay production's.
+        """
+        db = self.dbs.get(self.held_ref or "")
+        if db is None:
+            logger.warning("no database in hand for the ai_calls row; dropped")
+            return
+        await asyncio.to_thread(db.insert_ai_call, row)
 
     # ------------------------------------------------------------ lifecycle
 
@@ -100,27 +127,43 @@ class Worker:
         self._stopping = True
 
     def _tick_heartbeat(self, force: bool = False) -> None:
+        """Beat into EVERY database served, each on its own clock.
+
+        `ai_workers` lives in each database and each route reads its own, so a
+        preview only stops saying "offline" once the beat lands there. One clock
+        for all of them would let a single beat satisfy the gate and starve the
+        rest; one failure must not skip the others, hence the per-database try.
+        """
         now = time.monotonic()
-        if not force and now - self._last_heartbeat < self.cfg.heartbeat_seconds:
-            return
-        try:
-            self.db.heartbeat(
-                self.cfg.worker_id, list(self.cfg.models), self.resident_model, self.cfg.version
-            )
-            self._last_heartbeat = now
-        except Exception as exc:  # noqa: BLE001 - a missed beat is not fatal
-            logger.warning("heartbeat failed: %s", exc)
+        for ref, db in list(self.dbs.items()):
+            if not force and now - self._last_heartbeat.get(ref, 0.0) < self.cfg.heartbeat_seconds:
+                continue
+            try:
+                db.heartbeat(
+                    self.cfg.worker_id, list(self.cfg.models), self.resident_model, self.cfg.version
+                )
+                self._last_heartbeat[ref] = now
+            except Exception as exc:  # noqa: BLE001 - a missed beat is not fatal
+                logger.warning("heartbeat failed on %s: %s", self._label(ref), exc)
 
     def _tick_leases(self) -> None:
         now = time.monotonic()
         if not self.held or now - self._last_renew < LEASE_RENEW_SECONDS:
             return
+        db = self.dbs.get(self.held_ref or "")
+        if db is None:
+            return
         try:
-            n = self.db.renew_leases(self.cfg.worker_id, self.cfg.lease_seconds)
+            n = db.renew_leases(self.cfg.worker_id, self.cfg.lease_seconds)
             self._last_renew = now
             logger.debug("renewed %s lease(s)", n)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("lease renewal failed: %s", exc)
+            logger.warning("lease renewal failed on %s: %s", self._label(self.held_ref), exc)
+
+    def _label(self, ref: str | None) -> str:
+        """What to call a database in a log line. A wrong-database run has to LOOK wrong."""
+        served = self.served.get(ref or "")
+        return f"{served.label} ({ref})" if served else str(ref)
 
     async def _keepalive(self) -> None:
         """Heartbeat and lease renewal on their own task, so they happen DURING a job.
@@ -140,7 +183,7 @@ class Worker:
 
     # ----------------------------------------------------------------- work
 
-    async def _run_one(self, job: dict[str, Any]) -> None:
+    async def _run_one(self, job: dict[str, Any], served: worker_branches.Served) -> None:
         from services.ai_features import JobContext, handler_for
         from services.ai_features.base import result_kind
         from services.llm.errors import LLMChainExhausted, LLMError, LLMErrorEcho
@@ -148,13 +191,14 @@ class Worker:
         job_id = str(job["job_id"])
         feature, model = job["feature"], job["model"]
         started = time.perf_counter()
-        logger.info("running %s (%s / %s)", job_id, feature, model)
+        logger.info("running %s (%s / %s) on %s", job_id, feature, model, self._label(served.ref))
 
-        await asyncio.to_thread(self.db.mark_running, job_id, self.cfg.lease_seconds)
+        db = self.dbs[served.ref]
+        await asyncio.to_thread(db.mark_running, job_id, self.cfg.lease_seconds)
         try:
             handler = handler_for(feature)
         except LookupError as exc:
-            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "internal")
+            await asyncio.to_thread(db.mark_failed, job_id, str(exc), "internal")
             logger.error("no handler for %s: %s", feature, exc)
             return
 
@@ -167,6 +211,12 @@ class Worker:
                     payload=job.get("payload") or {},
                     chain=self._chain(model),
                     audit_writer=self._audit,
+                    # WHICH DATABASE THIS JOB'S SQL RUNS AGAINST. Named per job
+                    # rather than left to the environment, because this process
+                    # serves several: the sandbox DSN was built from the same ref
+                    # as the queue this job was claimed from, so a preview's
+                    # question cannot reach production's data.
+                    readonly_dsn=served.sandbox_dsn,
                 )
             )
         except LLMChainExhausted as exc:
@@ -180,97 +230,192 @@ class Worker:
                 kind = "context_overflow"
             else:
                 kind = "provider"
-            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), kind)
+            await asyncio.to_thread(db.mark_failed, job_id, str(exc), kind)
             logger.warning("job %s failed (%s): %s", job_id, kind, exc)
             return
         except LLMErrorEcho as exc:
             # Ahead of the generic LLMError branch: the provider answered fine,
             # so filing this as 'provider' would hide the failure the gate exists
             # to make countable.
-            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "error_echo")
+            await asyncio.to_thread(db.mark_failed, job_id, str(exc), "error_echo")
             logger.warning("job %s produced no answer: %s", job_id, exc)
             return
         except LLMError as exc:
-            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "provider")
+            await asyncio.to_thread(db.mark_failed, job_id, str(exc), "provider")
             logger.warning("job %s failed: %s", job_id, exc)
             return
         except Exception as exc:  # noqa: BLE001 - every failure becomes a terminal row
-            await asyncio.to_thread(self.db.mark_failed, job_id, str(exc), "internal")
+            await asyncio.to_thread(db.mark_failed, job_id, str(exc), "internal")
             logger.exception("job %s raised", job_id)
             return
 
         # A question the model answered with a report settles as one: result_kind
         # reads the handler's verdict and the UPDATE flips the row's kind with it.
-        await asyncio.to_thread(self.db.mark_succeeded, job_id, result, result_kind(result))
+        await asyncio.to_thread(db.mark_succeeded, job_id, result, result_kind(result))
         logger.info("finished %s in %.1fs", job_id, time.perf_counter() - started)
 
-    async def _drain(self, batch: list[dict[str, Any]]) -> None:
+    async def _drain(self, batch: list[dict[str, Any]], served: worker_branches.Served) -> None:
         """Run a claimed batch, one job at a time.
 
         Serial on purpose: NUM_PARALLEL=1 on the box, one resident model, and two
         concurrent generations on one GPU are slower than two sequential ones plus
         a memory risk. The batch exists to amortise the model LOAD, not to overlap
-        inference.
+        inference. That is a property of the BOX, not of a database, so serving
+        several changes nothing here: one batch, from one database, at a time.
         """
         self.held = list(batch)
+        self.held_ref = served.ref
         self._last_renew = time.monotonic()
         try:
             for job in batch:
                 if self._stopping:
                     break
                 self.resident_model = job["model"]
-                await self._run_one(job)
+                await self._run_one(job, served)
                 self._tick_heartbeat()
                 self._tick_leases()
         finally:
             self.held = []
+            self.held_ref = None
+
+    async def _adopt(self, served: worker_branches.Served) -> bool:
+        """Start serving one database. False means not this pass, and that is fine.
+
+        Production is connected eagerly by run() and a failure there is fatal, the
+        way a missing DSN is: a shop box that cannot reach its own queue should say
+        so loudly. A BRANCH is best effort -- it may be healthy per the API and
+        still refuse the seed's login for a moment -- so it is logged and retried
+        at the next discovery rather than taking the process down with it.
+        """
+        db = WorkerDb(served.queue_dsn)
+        try:
+            await asyncio.to_thread(db.connect)
+        except Exception as exc:  # noqa: BLE001 - see the docstring
+            logger.warning("cannot serve %s yet: %s", self._label(served.ref), exc)
+            db.close()
+            return False
+        self.dbs[served.ref] = db
+        self.served[served.ref] = served
+        return True
+
+    async def _retire(self, ref: str) -> None:
+        """Stop serving one database, closing the sandbox pool it opened.
+
+        A branch goes when its PR closes and Supabase deletes it. Standing down
+        first keeps `ai_workers` honest there for whatever remains of its life.
+        """
+        from tools.sql_executor import close_pool
+
+        served = self.served.pop(ref, None)
+        db = self.dbs.pop(ref, None)
+        self._last_heartbeat.pop(ref, None)
+        if db is not None:
+            with contextlib.suppress(Exception):
+                db.stand_down(self.cfg.worker_id)
+            db.close()
+        if served is not None:
+            await close_pool(served.sandbox_dsn)
+        logger.info("no longer serving %s", self._label(ref))
+
+    async def _discover(self, force: bool = False) -> None:
+        """Ask Supabase which databases exist, and reconcile what is being served.
+
+        Never lets a discovery failure shrink the list: branches.discover always
+        returns production, and an unreachable API returns no branches rather than
+        an empty world, so the worst case is that a new preview joins late.
+        """
+        now = time.monotonic()
+        if not force and now - self._last_discovery < self.cfg.discover_seconds:
+            return
+        self._last_discovery = now
+
+        wanted = {s.ref: s for s in await asyncio.to_thread(worker_branches.discover, self.cfg)}
+        for ref in [r for r in self.dbs if r not in wanted]:
+            await self._retire(ref)
+        for ref, served in wanted.items():
+            if ref in self.dbs:
+                continue
+            if await self._adopt(served):
+                logger.info("now serving %s", self._label(ref))
+                self._tick_heartbeat(force=True)
+
+    def _rotation(self) -> list[worker_branches.Served]:
+        """Production first, every pass. A preview never delays the shop's own question."""
+        return sorted(self.served.values(), key=lambda s: (not s.is_default, s.label))
 
     async def run(self) -> None:
-        self.db.connect()
-        self._tick_heartbeat(force=True)
-        keepalive = asyncio.create_task(self._keepalive())
-        # The sandbox target is in the banner because "which database answered"
-        # is not something anyone should have to infer from a wrong number later.
         from tools.sql_executor import describe_dsn
 
+        # discover() always returns production first, from the environment.
+        production = worker_branches.discover(self.cfg)[0]
+        if production.ref not in self.dbs and not await self._adopt(production):
+            # Eager and fatal for production alone: the LaunchAgent restarts the
+            # process, which is the right response to a box that cannot reach its
+            # own queue.
+            raise RuntimeError(f"cannot connect to the production queue at {describe_dsn(production.queue_dsn)}")
+        await self._discover(force=True)
+        self._tick_heartbeat(force=True)
+        keepalive = asyncio.create_task(self._keepalive())
+        # EVERY database is in the banner because "which database answered" is not
+        # something anyone should have to infer from a wrong number later.
         logger.info(
-            "worker %s ready; models=%s ollama=%s sandbox=%s",
+            "worker %s ready; models=%s ollama=%s serving %s",
             self.cfg.worker_id, ", ".join(self.cfg.models), self.cfg.ollama_base_url,
-            describe_dsn(self.cfg.readonly_database_url),
+            "; ".join(
+                f"{s.label} -> {describe_dsn(s.sandbox_dsn)}" for s in self._rotation()
+            ),
         )
 
         while not self._stopping:
-            try:
-                self.db.sweep()
-                batch = self.db.claim(
-                    self.cfg.worker_id,
-                    list(self.cfg.models),
-                    self.resident_model,
-                    self.cfg.claim_limit,
-                    self.cfg.lease_seconds,
+            await self._discover()
+            worked = False
+            failed = 0
+
+            for served in self._rotation():
+                if self._stopping:
+                    break
+                db = self.dbs.get(served.ref)
+                if db is None:
+                    continue
+                try:
+                    db.sweep()
+                    batch = db.claim(
+                        self.cfg.worker_id,
+                        list(self.cfg.models),
+                        self.resident_model,
+                        self.cfg.claim_limit,
+                        self.cfg.lease_seconds,
+                    )
+                except Exception as exc:  # noqa: BLE001 - a queue may be briefly unreachable
+                    # One database being unreachable must not stop the others: the
+                    # box slept, a pooler recycled a socket, or a branch is being
+                    # torn down. The next statement reconnects.
+                    logger.warning("claim failed on %s: %s", self._label(served.ref), exc)
+                    failed += 1
+                    continue
+
+                if not batch:
+                    # Nothing to do, and therefore nothing done. No model is called,
+                    # no ai_calls row is written, no cost is incurred.
+                    continue
+
+                worked = True
+                logger.info(
+                    "claimed %s job(s) of %s on %s",
+                    len(batch), batch[0]["model"], self._label(served.ref),
                 )
-            except Exception as exc:  # noqa: BLE001 - the queue may be briefly unreachable
-                logger.warning("claim failed: %s", exc)
-                await asyncio.sleep(self.cfg.poll_seconds * 2)
-                self._tick_heartbeat()
-                continue
+                try:
+                    await self._drain(batch, served)
+                except Exception:  # noqa: BLE001 - a batch failing must not end the worker
+                    # A report over a dead connection -- the box slept, or the pooler
+                    # recycled the socket. Nothing is lost: the lease sweep times out
+                    # whatever this batch still held, and the next statement
+                    # reconnects. Same shape as the `claim failed` branch above.
+                    logger.exception("batch failed; the lease sweep collects what was held")
 
-            if not batch:
-                # Nothing to do, and therefore nothing done. No model is called, no
-                # ai_calls row is written, no cost is incurred.
-                self._tick_heartbeat()
-                await asyncio.sleep(self.cfg.poll_seconds)
-                continue
-
-            logger.info("claimed %s job(s) of %s", len(batch), batch[0]["model"])
-            try:
-                await self._drain(batch)
-            except Exception:  # noqa: BLE001 - a batch failing must not end the worker
-                # A report over a dead connection -- the box slept, or the pooler
-                # recycled the socket. Nothing is lost: the lease sweep times out
-                # whatever this batch still held, and the next statement
-                # reconnects. Same shape as the `claim failed` branch above.
-                logger.exception("batch failed; the lease sweep collects what was held")
+            self._tick_heartbeat()
+            if not worked:
+                await asyncio.sleep(self.cfg.poll_seconds * (2 if failed else 1))
 
         keepalive.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -278,15 +423,22 @@ class Worker:
         await self._shutdown()
 
     async def _shutdown(self) -> None:
-        try:
-            released = self.db.release_unstarted(self.cfg.worker_id)
-            if released:
-                logger.info("released %s unstarted job(s) back to the queue", released)
-            self.db.stand_down(self.cfg.worker_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("shutdown housekeeping failed: %s", exc)
-        finally:
-            self.db.close()
+        from tools.sql_executor import close_pool
+
+        for ref, db in list(self.dbs.items()):
+            try:
+                released = db.release_unstarted(self.cfg.worker_id)
+                if released:
+                    logger.info(
+                        "released %s unstarted job(s) back to the queue on %s",
+                        released, self._label(ref),
+                    )
+                db.stand_down(self.cfg.worker_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("shutdown housekeeping failed on %s: %s", self._label(ref), exc)
+            finally:
+                db.close()
+        await close_pool()
         logger.info("worker %s stopped", self.cfg.worker_id)
 
 

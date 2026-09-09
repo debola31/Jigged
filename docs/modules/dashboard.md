@@ -232,7 +232,7 @@ tooltip. Empty: "No recent activity." on the card, "No activity yet." on the pag
 Below Recent Activity: the chat (`InsightsChat`), gated on the `ai_insights` flag, which is **opt-out** (on
 unless a system admin turns it off for the tenant) and stays hidden while the flag loads so it never flashes in
 then out. Since 2026-09-08 it is the whole AI area: a centred question until a conversation exists, then a
-composer docked under the exchanges; its **Report** verb asks for a one-page summary that comes back as a turn,
+composer docked under the exchanges; asked in words for a one-page report, it answers with one as a turn,
 and its **History** button opens a rail with past conversations, reports and charts. Full spec — text-to-SQL
 flow, persistence, prompts, and the "AI only on explicit user action" contract — is in
 [AI Insights & Charts](ai-insights.md); the surfaces are in its *Dashboard surfaces* section. *(A saved-charts

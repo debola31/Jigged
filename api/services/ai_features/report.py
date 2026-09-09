@@ -25,8 +25,11 @@ THE GUARDRAILS, AND WHO ENFORCES EACH.
   * Same safety boundary as chat -- same execute_sql tool, validator, sandbox, and
     the SAME system turn, so the KV prefix is shared with every chat job.
 
-Dispatched from insights.run on payload.kind == "report", so the two hosts, the
-chain, the ledger and the error kinds are all the ones chat already has.
+Dispatched from insights.run on payload.kind == "report" (the report door) and,
+since 2026-09-08, when the chat loop sees the model call compose_report: the brief
+it wrote becomes the request, and the result's kind = 'report' flips the job row
+when it settles. Either way the two hosts, the chain, the ledger and the error
+kinds are all the ones chat already has.
 """
 from __future__ import annotations
 
@@ -171,13 +174,21 @@ def render_blocks(spec: ReportSpec, request: str) -> tuple[list[dict[str, Any]],
     return blocks, dropped
 
 
-async def run(ctx: JobContext) -> dict[str, Any]:
-    """Gather, compose, check. Returns the shape ai_jobs.result stores."""
+async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
+    """Gather, compose, check. Returns the shape ai_jobs.result stores.
+
+    Two ways in. The report door enqueues `kind = 'report'` with the request in
+    the payload. Since 2026-09-08 the chat loop also lands here, when the model
+    answers a question by calling compose_report: `request` is then the brief the
+    model wrote with the conversation in view, so "put that in a PDF" arrives as a
+    request that stands alone, and the result says `kind = 'report'` so the
+    executor flips the job row's column when it records the success.
+    """
     from services.insights_service import _build_chat_system_prompt
-    from tools.chat_tools import CHAT_TOOLS
+    from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
-    request = (ctx.payload.get("request") or "").strip()
+    request = (request or ctx.payload.get("request") or "").strip()
     if not request:
         raise ValueError("report job payload has no request")
     raw_today = ctx.payload.get("today")
@@ -206,6 +217,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     sql_failed = 0
     corrected = False
     result = None
+    # Set when the loop's last assistant turn was appended inside it (the model
+    # called compose_report beside its queries), so the compose step does not
+    # append that text a second time.
+    final_turn_recorded = False
 
     for _ in range(MAX_REPORT_TOOL_ITERATIONS):
         result = await llm.complete(
@@ -221,7 +236,15 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 continue
             break
 
-        tool_results = [(call, await insights._run_tool(ctx.company_id, call, today)) for call in result.tool_calls]
+        # compose_report is offered here too -- the tools block is part of the
+        # prefix the KV cache reuses, so it has to match chat's -- and in this loop
+        # it means "I have what I need", the same signal as answering in prose. Any
+        # queries beside it run first; then composing begins. It is never handed on.
+        composing = any(call.name == COMPOSE_REPORT_TOOL for call in result.tool_calls)
+        calls = [call for call in result.tool_calls if call.name != COMPOSE_REPORT_TOOL]
+        if composing and not calls and not result.text.strip():
+            break
+        tool_results = [(call, await insights._run_tool(ctx.company_id, call, today)) for call in calls]
         refused += sum(1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND)
         for call, r in tool_results:
             if call.name != "execute_sql":
@@ -244,12 +267,15 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             tool_trace.append(trace)
 
         messages = messages + [
-            Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
+            Message(role="assistant", content=result.text, tool_calls=calls)
         ] + [
             Message(role="tool", tool_call_id=call.id, content=dumps_tool_result(r))
             for call, r in tool_results
         ]
-        tool_names.extend(call.name for call in result.tool_calls)
+        tool_names.extend(call.name for call in calls)
+        if composing:
+            final_turn_recorded = True
+            break
     else:
         raise LLMToolLoopExhausted(
             f"the report loop reached {MAX_REPORT_TOOL_ITERATIONS} iterations without gathering "
@@ -271,7 +297,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # Compose: one schema-constrained call over the gathered results. No tools,
     # so the grammar applies cleanly; the same system turn, so the prefix holds.
     compose = messages
-    if result.text.strip():
+    if result.text.strip() and not final_turn_recorded:
         compose = compose + [Message(role="assistant", content=result.text)]
     compose = compose + [Message(role="user", content=COMPOSE_REQUEST)]
 
@@ -327,6 +353,12 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         "blocks": blocks,
     }
     return {
+        # The executors write this into ai_jobs.kind on success (result_kind): a
+        # question the model answered with a report settles as one.
+        "kind": "report",
+        # What the page was composed from: the door's request, or the brief the
+        # model wrote when it chose compose_report in a conversation.
+        "brief": request,
         "report": report,
         "dropped": dropped,
         # A compose call is the expensive one (≈150 s on the M4 Max); this says whether

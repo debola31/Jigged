@@ -201,11 +201,24 @@ def mark_running(db, job_id: str, *, lease_seconds: int = BACKEND_LEASE_SECONDS)
 
 
 def mark_succeeded(db, job_id: str, result: dict[str, Any]) -> None:
-    db.table("ai_jobs").update({
+    """Terminal success. The result may re-kind the row.
+
+    A chat job whose model answered by calling compose_report returns a report
+    result (`kind = 'report'`), and the row settles as a report so the thread
+    trigger, the Reports list and the settle event all read one column. The
+    worker's mark_succeeded does the same in SQL; result_kind is the shared rule.
+    """
+    from services.ai_features.base import result_kind
+
+    update: dict[str, Any] = {
         "status": "succeeded",
         "result": result,
         "finished_at": _now().isoformat(),
-    }).eq("id", job_id).execute()
+    }
+    kind = result_kind(result)
+    if kind:
+        update["kind"] = kind
+    db.table("ai_jobs").update(update).eq("id", job_id).execute()
 
 
 def mark_failed(db, job_id: str, *, error: str, error_kind: str) -> None:

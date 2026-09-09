@@ -1,6 +1,6 @@
 /**
  * The chat-first dashboard area: what it shows empty and in a conversation, how
- * the two composer verbs (Ask, Report) reach the two routes, what an enqueue
+ * one composer reaches one route whatever form the answer takes, what an enqueue
  * refusal looks like, and the History rail behind its one button.
  *
  * Three refusals come back from the routes and only one of them is bad news
@@ -18,29 +18,23 @@ import InsightsChat from '@/components/insights/InsightsChat';
 import { ChatEnqueueError } from '@/utils/insightsAccess';
 
 const mockSubmitChatQuery = vi.fn();
-const mockSubmitReportRequest = vi.fn();
 const mockListReports = vi.fn();
 vi.mock('@/utils/insightsAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/insightsAccess')>();
   return {
     ...actual,
     submitChatQuery: (...a: unknown[]) => mockSubmitChatQuery(...a),
-    submitReportRequest: (...a: unknown[]) => mockSubmitReportRequest(...a),
     listReports: (...a: unknown[]) => mockListReports(...a),
   };
 });
 
-// Idle throughout: these tests never get a job row, so the hook's own behaviour
-// (covered in __tests__/hooks/useAiJob.test.ts) is out of the picture.
+// Idle unless a test says otherwise: the hook's own behaviour is covered in
+// __tests__/hooks/useAiJob.test.ts; here a test hands it a settled row to see
+// what the composer makes of one.
+const IDLE_JOB = { phase: 'idle', job: null, result: null, message: null, watch: vi.fn(), reset: vi.fn() };
+const mockUseAiJob = vi.fn(() => IDLE_JOB);
 vi.mock('@/hooks/useAiJob', () => ({
-  useAiJob: () => ({
-    phase: 'idle',
-    job: null,
-    result: null,
-    message: null,
-    watch: vi.fn(),
-    reset: vi.fn(),
-  }),
+  useAiJob: (...a: unknown[]) => mockUseAiJob(...a),
 }));
 
 const mockCreateThread = vi.fn();
@@ -90,7 +84,7 @@ beforeEach(() => {
   mockListReports.mockResolvedValue([]);
   mockListChartTurns.mockResolvedValue([]);
   mockSubmitChatQuery.mockResolvedValue({ job_id: 'job-1', status: 'queued', executor: 'worker' });
-  mockSubmitReportRequest.mockResolvedValue({ job_id: 'job-r', status: 'queued', executor: 'worker' });
+  mockUseAiJob.mockReturnValue(IDLE_JOB);
 });
 
 describe('InsightsChat — what an enqueue refusal looks like', () => {
@@ -161,7 +155,10 @@ describe('InsightsChat — the conversation', () => {
 
     expect(screen.getByRole('heading', { name: 'What do you want to know about the shop?' })).toBeInTheDocument();
     expect(screen.getByText('What is my revenue trend over time?')).toBeInTheDocument();
-    expect(screen.getByText('One-page summary of this quarter')).toBeInTheDocument();
+    expect(screen.getByText('One-page report on this quarter')).toBeInTheDocument();
+    // One box, no picker: the words decide whether the answer is a page.
+    expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull();
     // Nothing is read for the dashboard's sake: history loads when History opens.
     expect(mockListThreads).not.toHaveBeenCalled();
     expect(mockListReports).not.toHaveBeenCalled();
@@ -198,10 +195,14 @@ describe('InsightsChat — the conversation', () => {
     expect(mockCreateThread).not.toHaveBeenCalled();
     expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'and by month?', 'thread-9');
     const posthog = (await import('posthog-js')).default;
-    expect(posthog.capture).toHaveBeenCalledWith(
-      'ai job enqueued',
-      expect.objectContaining({ feature: 'insights', turn_index: 2, from_example: false, kind: 'ask' }),
-    );
+    // Exact: nothing about the answer's eventual form leaves at enqueue, because
+    // nothing is known about it yet.
+    expect(posthog.capture).toHaveBeenCalledWith('ai job enqueued', {
+      feature: 'insights',
+      executor: 'worker',
+      from_example: false,
+      turn_index: 2,
+    });
   });
 
   it('a thread the route no longer knows is forgotten, so the next question starts fresh', async () => {
@@ -219,32 +220,44 @@ describe('InsightsChat — the conversation', () => {
   });
 });
 
-describe('InsightsChat — Report is the composer’s second verb', () => {
-  it('in Report mode the request goes to the report route, in the same thread, and the event says so', async () => {
+describe('InsightsChat — a report is an answer, not a mode', () => {
+  it('a report chip goes through the one door like a question; the model decides the form', async () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'Report' }));
-    expect(screen.getByRole('heading', { name: 'What should the one-page summary cover?' })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText('Describe the one-page summary you want…'), 'Summary of the quarter');
-    await user.click(screen.getByRole('button', { name: 'Request report' }));
+    await user.click(screen.getByText('PDF of the backlog and late jobs'));
 
-    expect(mockCreateThread).toHaveBeenCalledWith('co-1', 'Summary of the quarter');
-    expect(mockSubmitReportRequest).toHaveBeenCalledWith('co-1', 'Summary of the quarter', 'thread-1');
-    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(mockCreateThread).toHaveBeenCalledWith('co-1', 'PDF of the backlog and late jobs');
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'PDF of the backlog and late jobs', 'thread-1');
     const posthog = (await import('posthog-js')).default;
-    expect(posthog.capture).toHaveBeenCalledWith('ai job enqueued', expect.objectContaining({ kind: 'report', from_example: false }));
+    expect(posthog.capture).toHaveBeenCalledWith('ai job enqueued', {
+      feature: 'insights',
+      executor: 'worker',
+      from_example: true,
+      turn_index: 0,
+    });
   });
 
-  it('a report chip switches the verb and sends', async () => {
-    const user = userEvent.setup();
+  it('a settled job the model turned into a report fires `report generated`, not `ai job settled`', async () => {
+    const spec = {
+      title: 'Backlog and late jobs', period_start: '2026-09-08', period_end: '2026-09-08', period_label: 'As of today',
+      headline: '7 late jobs.', kpis: [{ label: 'Late', value: 7, format: 'integer', caption: null }],
+      blocks: [{ type: 'text', body: 'Steady.' }],
+    };
+    const job = {
+      id: 'job-9', status: 'succeeded', executor: 'worker', model: 'qwen3:32b', kind: 'report',
+      result: { kind: 'report', report: spec, dropped: [], tool_calls: ['execute_sql', 'execute_sql'] },
+      error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+    };
+    mockUseAiJob.mockReturnValue({ phase: 'done', job, result: null, message: null, watch: vi.fn(), reset: vi.fn() });
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByText('Backlog and late jobs right now'));
-
-    expect(mockSubmitReportRequest).toHaveBeenCalledWith('co-1', 'Backlog and late jobs right now', 'thread-1');
     const posthog = (await import('posthog-js')).default;
-    expect(posthog.capture).toHaveBeenCalledWith('ai job enqueued', expect.objectContaining({ kind: 'report', from_example: true }));
+    expect(posthog.capture).toHaveBeenCalledWith(
+      'report generated',
+      expect.objectContaining({ phase: 'done', kpi_count: 1, block_count: 1, table_count: 0, has_text_block: true, tool_call_count: 2 }),
+    );
+    expect(posthog.capture).not.toHaveBeenCalledWith('ai job settled', expect.anything());
   });
 
   it('a report turn shows the page it produced and opens the preview from the thread', async () => {
@@ -255,7 +268,7 @@ describe('InsightsChat — Report is the composer’s second verb', () => {
       blocks: [{ type: 'text', body: 'Steady.' }],
     };
     mockListThreadMessages.mockResolvedValue(
-      turn(1, 'Summary of the quarter', '26 jobs started, 16 shipped.', {
+      turn(1, 'Put that in a PDF', '26 jobs started, 16 shipped.', {
         report: { report: spec, dropped: ['Flat chart'], tool_call_count: 5 },
         job_id: 'job-r1',
       }),

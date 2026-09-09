@@ -73,10 +73,12 @@ MAX_TOKENS = 4000
 #   ~7,000  history budget -- about twenty turns; compaction at ~4,900, down to ~3,500
 #
 # The tool schema is rendered into the system block by the chat template, so it
-# is prefix too. Estimated rather than measured: no tokenizer ships with the
-# worker, chars/4 is a fair rate for prose, and ai_calls.tokens_in (the server's
-# own prompt_eval_count) is the calibration point if it drifts.
-TOOLS_PREFIX_TOKENS = 500
+# is prefix too: two tools since 2026-09-08 (execute_sql and compose_report, ~1.9 KB
+# of JSON at ~3 chars/token plus the template's framing). Estimated rather than
+# measured: no tokenizer ships with the worker, chars/4 is a fair rate for prose,
+# and ai_calls.tokens_in (the server's own prompt_eval_count) is the calibration
+# point if it drifts.
+TOOLS_PREFIX_TOKENS = 700
 TOOL_RESULT_HEADROOM_TOKENS = 8_000
 SUMMARY_MAX_TOKENS = 600
 CHARS_PER_TOKEN = 4
@@ -134,7 +136,8 @@ async def _run_tool(company_id: str, call: ToolCall, today: date | None) -> dict
     already shapes every failure the model could have caused, so anything left
     is ours and no retry reaches it.
 
-    CHAT_TOOLS offers exactly one tool, so a name other than execute_sql means the
+    CHAT_TOOLS offers two tools, and compose_report never reaches here (both loops
+    intercept it before any tool runs), so a name other than execute_sql means the
     model INVENTED one -- which an OpenAI-compat local model does, and
     openai_compat parses whatever name comes back. The raise below is caught two
     lines down and handed to the model as data, exactly as the deleted
@@ -335,12 +338,14 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     settled `succeeded` with "The column total_price does not exist..." in it.
     """
     from services.insights_service import _build_chat_system_prompt
-    from tools.chat_tools import CHAT_TOOLS
+    from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
     if ctx.payload.get("kind") == "report":
-        # A one-page executive summary: same chain, same tools, same system turn,
-        # a different shape of answer. services/ai_features/report.py.
+        # A one-page executive summary through the report door: same chain, same
+        # tools, same system turn, a different shape of answer. The other way in is
+        # further down, when the model answers a question by calling compose_report.
+        # services/ai_features/report.py.
         from services.ai_features import report
 
         return await report.run(ctx)
@@ -437,6 +442,23 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 )
                 continue
             break
+
+        # THE MODEL MAY ANSWER WITH A DOCUMENT. compose_report is how it says the
+        # person asked for one -- a report, a one-pager, a PDF -- the way a
+        # chart_config fence is how it says the answer wants a chart; there is no
+        # Ask/Report picker for the person to choose. The brief it wrote, with the
+        # conversation in view so "that" is resolved, becomes the report's request,
+        # and the job settles as kind = 'report' (the executors flip the column from
+        # the result). Nothing gathered so far is carried over: a page is gathered
+        # for differently from a sentence, and the brief tells the report path what
+        # to gather.
+        handoff = next((c for c in result.tool_calls if c.name == COMPOSE_REPORT_TOOL), None)
+        if handoff is not None:
+            from services.ai_features import report
+
+            brief = str(handoff.arguments.get("brief") or "").strip() or question
+            logger.info("insights %s: the model asked for a report; composing", ctx.request_id)
+            return await report.run(ctx, request=brief)
 
         # Run the tools first, then wire the messages: the count of refused
         # objects is what the eval asserts to zero, and it is invisible once the

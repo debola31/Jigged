@@ -132,34 +132,6 @@ export async function submitChatQuery(
   return (await response.json()) as ChatEnqueued;
 }
 
-/**
- * Ask for a one-page executive summary. Same door as a question -- flag, cap,
- * heartbeat -- and the same 202 with a job id; the ReportSpec lands on the job's
- * result and the browser renders it to PDF itself (utils/reportPdf.ts).
- */
-export async function submitReportRequest(
-  companyId: string,
-  request: string,
-  threadId?: string | null,
-): Promise<ChatEnqueued> {
-  const headers = await getAuthHeaders();
-  const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/report`, {
-    method: 'POST',
-    headers,
-    // A report asked in a conversation joins it (2026-09-08): the trigger writes
-    // the request and the headline into the thread with the spec beside them.
-    body: JSON.stringify({ request, today: todayLocalISODate(), ...(threadId ? { thread_id: threadId } : {}) }),
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new ChatEnqueueError(
-      errorData.detail || `Failed to request a report (${response.status})`,
-      response.status,
-    );
-  }
-  return (await response.json()) as ChatEnqueued;
-}
-
 // ============================================================
 // The job row, read straight from Supabase
 // ============================================================

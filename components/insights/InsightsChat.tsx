@@ -10,8 +10,6 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
@@ -29,13 +27,7 @@ import {
   type ReportTurn,
   type ThreadMessage,
 } from '@/utils/aiChatAccess';
-import {
-  ChatEnqueueError,
-  reportResultOf,
-  submitChatQuery,
-  submitReportRequest,
-  type ReportSummary,
-} from '@/utils/insightsAccess';
+import { ChatEnqueueError, reportResultOf, submitChatQuery, type ReportSummary } from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
 
 const EXAMPLE_PROMPTS = [
@@ -44,10 +36,14 @@ const EXAMPLE_PROMPTS = [
   'What is my quote pipeline worth?',
 ];
 
-/** Report requests offered as chips; each switches the composer to Report and sends. */
+/**
+ * Requests for a document, offered beside the questions. There is no Report
+ * verb: the words carry the intent, and the model calls compose_report when it
+ * reads one. The chips show what to say.
+ */
 const EXAMPLE_REPORTS = [
-  'One-page summary of this quarter',
-  'Backlog and late jobs right now',
+  'One-page report on this quarter',
+  'PDF of the backlog and late jobs',
 ];
 
 /**
@@ -56,22 +52,16 @@ const EXAMPLE_REPORTS = [
  * interaction-standards.md §5 puts anything over ten seconds in a tier that must
  * say WHERE the wait is, not just that there is one. A local model on shop
  * hardware routinely takes tens of seconds for a question and minutes for a
- * report, so the last line of each set says so plainly.
+ * report, and which of the two this is only shows on the job row when it settles
+ * (the model decides mid-job), so the last line states both.
  */
 const LOADING_MESSAGES = [
   'Reading your shop data…',
   'Working out the answer…',
-  'Still going — this can take up to a minute.',
-];
-const REPORT_LOADING_MESSAGES = [
-  'Gathering the figures on your AI box…',
-  'Composing the one-page summary…',
-  'Still going — a report takes a few minutes. You can keep asking in a new conversation meanwhile.',
+  'Still going — a question can take up to a minute, a one-page report a few minutes.',
 ];
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
-
-type Mode = 'ask' | 'report';
 
 interface InsightsChatProps {
   companyId: string;
@@ -123,8 +113,9 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
  * box or a chat app. Once a thread exists the composer docks to the bottom and
  * the conversation reads top to bottom above it. One History button opens the
  * rail with every conversation, report and chart asked for before. The composer
- * has two verbs: Ask (a question, answered in the thread) and Report (a one-page
- * summary, which comes back as a turn carrying the page).
+ * has one box and no picker: the form of the answer -- prose, a chart, or a
+ * one-page report when the words ask for a document -- is the model's call
+ * (compose_report), and a report comes back as a turn carrying the page.
  *
  * The thread is the record and the browser owns its identity: the first question
  * creates an ai_chat_threads row under RLS (created_by = auth.uid()) and every
@@ -134,14 +125,12 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
  */
 export default function InsightsChat({ companyId }: InsightsChatProps) {
   const [question, setQuestion] = useState('');
-  const [mode, setMode] = useState<Mode>('ask');
   const [asking, setAsking] = useState(false);
   // The status rides with the message so the render can tell downtime (503, the
   // quiet offline notice) from a refusal (429 / 403 / 409, an error) without
   // matching on the sentence.
   const [error, setError] = useState<{ message: string; status?: number } | null>(null);
   const [askedQuestion, setAskedQuestion] = useState('');
-  const [askedMode, setAskedMode] = useState<Mode>('ask');
   const [loadingTick, setLoadingTick] = useState(0);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -282,39 +271,36 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     setHistoryOpen(false);
   };
 
-  const handleSubmit = async (input?: string, forcedMode?: Mode) => {
+  const handleSubmit = async (input?: string) => {
     const q = (input || question).trim();
-    const m = forcedMode ?? mode;
     if (!q || pending) return;
 
     setAsking(true);
     setError(null);
     setLoadingTick(0);
     setAskedQuestion(q);
-    setAskedMode(m);
     setQuestion('');
 
     try {
-      // The first question (or report) opens the thread; its title is the text itself.
+      // The first message opens the thread; its title is the text itself.
       let tid = threadId;
       if (!tid) {
         tid = (await createThread(companyId, q)).id;
         rememberThread(tid);
       }
-      const enqueued =
-        m === 'report'
-          ? await submitReportRequest(companyId, q, tid)
-          : await submitChatQuery(companyId, q, tid);
+      // One door. Whether this comes back as prose, a chart or a one-page report
+      // is decided by the model from the words, and shows on the job row's `kind`
+      // when it settles (`report generated` fires for a report, below).
+      const enqueued = await submitChatQuery(companyId, q, tid);
       // Shape, never content: `executor` is the whole point of the rollout -- it
       // says whether the local box or a hosted model served this shop -- and
       // `turn_index` is how many answered turns this thread already had, which is
-      // the multi-turn adoption signal. `kind` separates a report from a question.
+      // the multi-turn adoption signal.
       posthog.capture('ai job enqueued', {
         feature: 'insights',
         executor: enqueued.executor,
         from_example: !!input,
         turn_index: turns.length,
-        kind: m,
       });
       job.watch(enqueued.job_id);
     } catch (err) {
@@ -338,10 +324,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     }
   };
 
-  const handleChipClick = (prompt: string, chipMode: Mode) => {
-    setMode(chipMode);
+  const handleChipClick = (prompt: string) => {
     setQuestion(prompt);
-    handleSubmit(prompt, chipMode);
+    handleSubmit(prompt);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -376,13 +361,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     });
   };
 
-  const placeholder =
-    mode === 'report'
-      ? 'Describe the one-page summary you want…'
-      : hasConversation
-        ? 'Ask a follow-up…'
-        : 'Ask about your shop data…';
-  const loadingCopy = askedMode === 'report' ? REPORT_LOADING_MESSAGES : LOADING_MESSAGES;
+  const placeholder = hasConversation ? 'Ask a follow-up…' : 'Ask a question, or ask for a one-page report…';
 
   const composer = (
     <Box sx={{ display: 'flex', gap: 1.5 }}>
@@ -399,7 +378,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         slotProps={{
           input: {
             sx: { minHeight: 48 },
-            'aria-label': mode === 'report' ? 'What the report should cover' : 'Your question',
+            'aria-label': 'Your question',
           },
         }}
       />
@@ -408,7 +387,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         onClick={() => handleSubmit()}
         disabled={!question.trim() || pending}
         sx={{ minWidth: 48, minHeight: 48, px: 2 }}
-        aria-label={mode === 'report' ? 'Request report' : 'Send question'}
+        aria-label="Send question"
         aria-busy={pending}
       >
         {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
@@ -424,7 +403,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           <CircularProgress size={16} />
           <Typography variant="body2" color="text.secondary">
             {askedQuestion ? `${askedQuestion} — ` : ''}
-            {loadingCopy[loadingTick % loadingCopy.length]}
+            {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
           </Typography>
         </Box>
       )}
@@ -451,7 +430,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                 New conversation
               </Button>
             ) : (
-              <Button color="inherit" size="small" onClick={() => handleSubmit(askedQuestion, askedMode)}>
+              <Button color="inherit" size="small" onClick={() => handleSubmit(askedQuestion)}>
                 Try again
               </Button>
             )
@@ -474,25 +453,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Top row: what to ask for, and the way back to everything asked before. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
-        <ToggleButtonGroup
-          exclusive
-          size="small"
-          value={mode}
-          onChange={(_, value: Mode | null) => {
-            if (value) setMode(value);
-          }}
-          aria-label="What to ask for"
-        >
-          <ToggleButton value="ask" sx={{ minHeight: 48, px: 2.5 }}>
-            Ask
-          </ToggleButton>
-          <ToggleButton value="report" sx={{ minHeight: 48, px: 2.5 }}>
-            <DescriptionOutlinedIcon fontSize="small" sx={{ mr: 0.75 }} />
-            Report
-          </ToggleButton>
-        </ToggleButtonGroup>
+      {/* Top row: the way back to everything asked before. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
         <Stack direction="row" spacing={1}>
           {hasConversation && (
             <Button
@@ -514,7 +476,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         // Empty: one centred question, the shape of a search box.
         <Box sx={{ py: { xs: 4, md: 8 }, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2.5 }}>
           <Typography variant="h5" component="h2" sx={{ fontWeight: 600, textAlign: 'center' }}>
-            {mode === 'report' ? 'What should the one-page summary cover?' : 'What do you want to know about the shop?'}
+            What do you want to know about the shop?
           </Typography>
           <Box sx={{ width: '100%', maxWidth: 760 }}>{composer}</Box>
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.75, justifyContent: 'center', maxWidth: 760 }}>
@@ -523,7 +485,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                 key={prompt}
                 label={prompt}
                 variant="outlined"
-                onClick={() => handleChipClick(prompt, 'ask')}
+                onClick={() => handleChipClick(prompt)}
                 disabled={pending}
                 sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
               />
@@ -535,7 +497,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                 variant="outlined"
                 color="primary"
                 icon={<DescriptionOutlinedIcon />}
-                onClick={() => handleChipClick(request, 'report')}
+                onClick={() => handleChipClick(request)}
                 disabled={pending}
                 sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
               />

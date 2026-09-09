@@ -154,7 +154,7 @@ class WorkerDb:
                 (lease_seconds, job_id),
             )
 
-    def mark_succeeded(self, job_id: str, result: dict[str, Any]) -> None:
+    def mark_succeeded(self, job_id: str, result: dict[str, Any], kind: str | None = None) -> None:
         """Report success -- for a row that is still ours to report on.
 
         `AND status IN ('claimed', 'running')`, because the sweep may have got
@@ -162,13 +162,19 @@ class WorkerDb:
         wake and usually completes it, minutes after its lease lapsed and the sweep
         marked the row timed_out; an unguarded UPDATE then flipped a terminal row
         back to succeeded, behind a UI that had already told the user it failed.
+
+        `kind = COALESCE(%s, kind)`: a question the model answered by composing a
+        report settles as kind = 'report', in the same statement, so the thread
+        trigger materialises a report turn and the Reports list finds it. The
+        caller passes services.ai_features.base.result_kind(result), the one rule
+        the backend executor also applies; None leaves the column as enqueued.
         """
         with self._cursor() as cur:
             cur.execute(
                 "UPDATE public.ai_jobs SET status = 'succeeded', result = %s,"
-                " finished_at = now()"
+                " kind = COALESCE(%s, kind), finished_at = now()"
                 " WHERE id = %s AND status IN ('claimed', 'running')",
-                (json.dumps(result), job_id),
+                (json.dumps(result), kind, job_id),
             )
             if cur.rowcount == 0:
                 logger.warning("job %s was already terminal; success report discarded", job_id)

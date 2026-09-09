@@ -393,6 +393,11 @@ async def chat(company_id: str, request: ChatRequest):
 async def report(company_id: str, request: ReportRequest):
     """Enqueue a one-page executive summary. The spec arrives on the job row.
 
+    The direct door. The composer has no Report verb since 2026-09-08: a report
+    asked in the chat reaches the same handler through the model's compose_report
+    tool, and the job's kind flips to 'report' when it settles. This route is for
+    a caller that already knows it wants a page.
+
     The SAME door as a question: flag, cap, sweep, heartbeat. A report is one job
     that makes several model calls, so it counts once against the cap and holds
     the single slot for a few minutes; the browser renders the resulting spec to

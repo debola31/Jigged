@@ -241,6 +241,52 @@ def test_the_workers_report_of_a_report_job_materialises_a_report_turn():
         assert rows[1][4] is None and str(rows[1][5]) == str(job)
 
 
+def test_a_question_the_model_answered_with_a_report_materialises_a_report_turn():
+    """The composer has one door (2026-09-08). A chat job whose model called
+    compose_report settles with kind = 'report' in the same UPDATE as its status;
+    the trigger then reads the person's words from payload.question -- there is
+    no payload.request -- and stores the spec beside the headline."""
+    with throwaway_company() as (conn, company_id):
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO public.ai_chat_threads (company_id, title) VALUES (%s, 'pdf') RETURNING id",
+                        (company_id,))
+            thread = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.ai_jobs (company_id, feature, executor, model, status, request_id,"
+                " thread_id, kind, payload, claimed_by, claimed_at, lease_expires_at)"
+                " VALUES (%s,'insights','worker','qwen3:32b','running', gen_random_uuid(), %s, 'chat', %s,"
+                "         'desktop-1', now(), now() + interval '5 minutes') RETURNING id",
+                (company_id, thread, json.dumps({"question": "Put that in a PDF", "today": "2026-09-08"})),
+            )
+            job = cur.fetchone()[0]
+
+        spec = {"title": "Booked by month", "period_start": "2026-06-01", "period_end": "2026-08-31",
+                "period_label": "Jun–Aug 2026", "headline": "Booked $96,782 across 81 jobs.", "kpis": [], "blocks": []}
+        result = {"kind": "report", "brief": "One-page report of booked revenue by month, June to August 2026",
+                  "report": spec, "dropped": [], "tool_calls": ["execute_sql"], "tool_trace": [],
+                  "provider": "ollama", "model": "qwen3:32b", "tokens_used": 1, "not_permitted": 0}
+        worker = _connect(WORKER_URL)
+        with worker.cursor() as wc:
+            # The worker's mark_succeeded, verbatim: the kind rides in the same statement.
+            wc.execute("UPDATE public.ai_jobs SET status = 'succeeded', result = %s, kind = COALESCE(%s, kind),"
+                       " finished_at = now() WHERE id = %s AND status IN ('claimed', 'running')",
+                       (json.dumps(result), "report", job))
+            assert wc.rowcount == 1
+        worker.close()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT kind FROM public.ai_jobs WHERE id = %s", (job,))
+            assert cur.fetchone()[0] == "report"
+            cur.execute("SELECT seq, role, content, report, chart_config FROM public.ai_chat_messages"
+                        " WHERE thread_id = %s ORDER BY seq", (thread,))
+            rows = cur.fetchall()
+        assert [(r[0], r[1]) for r in rows] == [(1, "user"), (2, "assistant")]
+        assert rows[0][2] == "Put that in a PDF"
+        assert rows[1][2] == "Booked $96,782 across 81 jobs."
+        assert rows[1][3] == {"report": spec, "dropped": [], "tool_call_count": 1}
+        assert rows[1][4] is None
+
+
 def test_a_report_may_only_ride_on_an_assistant_row():
     with throwaway_company() as (conn, company_id):
         with conn.cursor() as cur:

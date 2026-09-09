@@ -53,3 +53,21 @@ def handler_for(feature: str) -> Handler:
 
 
 __all__ = ["Handler", "JobContext", "handler_for"]
+
+
+# The two values ai_jobs.kind may hold; the CHECK constraint on the column is the
+# source of truth (20260907234149_ai_chat_threads_and_messages.sql).
+JOB_KINDS = frozenset({"chat", "report"})
+
+
+def result_kind(result: dict[str, Any] | None) -> str | None:
+    """The kind a settling job should carry, when its result says so.
+
+    A chat job whose model answered by calling compose_report returns a report
+    result with `kind = 'report'`; both executors write it into `ai_jobs.kind` on
+    success, so the Reports list, the thread trigger and the settle event read one
+    column. Anything unrecognised leaves the column as enqueued: the CHECK
+    constraint is the real guard, and a bad value would fail the settle itself.
+    """
+    kind = (result or {}).get("kind")
+    return kind if isinstance(kind, str) and kind in JOB_KINDS else None

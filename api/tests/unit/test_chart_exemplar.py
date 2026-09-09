@@ -127,3 +127,18 @@ class TestTheOffTopicReply:
     def test_the_template_carries_no_figure_and_no_markdown(self):
         assert not re.search(r"\d", OFF_TOPIC_REPLY)
         assert "*" not in OFF_TOPIC_REPLY and "`" not in OFF_TOPIC_REPLY
+
+
+def test_the_prompt_offers_both_tools_and_says_when_a_report_is_one():
+    """One composer, no picker (2026-09-08): the model chooses the form of the
+    answer. The opening lines name both tools -- where a 32B weights a long
+    prompt -- and a guideline fences compose_report to a request for a document."""
+    from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
+
+    prompt = _build_chat_system_prompt()
+    opening = prompt[:1200]
+    assert "execute_sql" in opening and "compose_report" in opening
+    assert "Call compose_report only when the person asks for a document" in prompt
+    assert "is never a report: answer it" in prompt
+    assert [t["name"] for t in CHAT_TOOLS] == ["execute_sql", COMPOSE_REPORT_TOOL]
+    assert CHAT_TOOLS[1]["input_schema"]["required"] == ["brief"]

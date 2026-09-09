@@ -215,6 +215,20 @@ PART_SCHEMA = {
         "required": False,
         "description": "Initial quantity on hand (defaults to 0, must be non-negative)",
     },
+    # WHERE that quantity is. Stock cannot exist without a location (migration
+    # 20260906182638), so a quantity whose location is missing, unknown or ambiguous is
+    # reported as skipped rather than filed somewhere nobody will look. Declared here so the
+    # AI can actually map it: the descriptions are what the column mapper matches source
+    # headers against, and a legacy export calls this "Bin", "Location" or "Shelf".
+    "location_name": {
+        "type": "string",
+        "required": False,
+        "description": (
+            "The shelf or bin this stock is on — required alongside a quantity, since stock "
+            "cannot be recorded without a place. Often exported as 'Bin', 'Bin Location', "
+            "'Location', 'Shelf' or 'Warehouse'."
+        ),
+    },
     "cost_per_unit": {
         "type": "number",
         "required": False,
@@ -229,11 +243,6 @@ PART_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Preferred vendor name. Resolved against existing vendors at import; fails as unknown_vendor if not found.",
-    },
-    "notes": {
-        "type": "string",
-        "required": False,
-        "description": "Internal notes about this part",
     },
 }
 

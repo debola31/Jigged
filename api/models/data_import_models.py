@@ -33,6 +33,7 @@ from models.bom_import_models import BOM_SCHEMA
 from models.import_models import CUSTOMER_SCHEMA
 from models.parts_import_models import PART_SCHEMA
 from models.routings_import_models import ROUTING_SCHEMA
+from models.vendor_services_import_models import VENDOR_SERVICE_SCHEMA
 from models.vendors_import_models import VENDOR_SCHEMA
 from models.work_centers_import_models import WORK_CENTER_SCHEMA
 
@@ -42,6 +43,10 @@ class EntityType(str, Enum):
 
     PARTS = "parts"
     VENDORS = "vendors"
+    # A vendor's PROCESS ("Anodize"), not the supplier. The frontend has offered this
+    # entity since the 2026-08-23 split; without a member here the classifier could never
+    # return it, so such a file arrived as vendors-or-unknown and had to be retyped by hand.
+    VENDOR_SERVICES = "vendor_services"
     WORK_CENTERS = "work_centers"
     ROUTINGS = "routings"
     BOM = "bom"
@@ -221,6 +226,7 @@ class SuggestFixesResponse(BaseModel):
 ENTITY_SCHEMAS: dict[EntityType, dict] = {
     EntityType.PARTS: PART_SCHEMA,
     EntityType.VENDORS: VENDOR_SCHEMA,
+    EntityType.VENDOR_SERVICES: VENDOR_SERVICE_SCHEMA,
     EntityType.WORK_CENTERS: WORK_CENTER_SCHEMA,
     EntityType.ROUTINGS: ROUTING_SCHEMA,
     EntityType.BOM: BOM_SCHEMA,

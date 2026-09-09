@@ -368,7 +368,7 @@ dismissals are separate handlers on purpose:** they were briefly one that called
 dismissing the phone-width overlay also wrote the docked column's remembered state to closed —
 collapsing the desktop rail on a screen the person had not yet opened.
 
-Three row kinds, merged by a pure module
+Five row kinds, merged by a pure module
 ([`jobActivityTimeline.ts`](../../components/jobs/activity/jobActivityTimeline.ts)):
 
 | Row | Source | On the row |
@@ -376,13 +376,33 @@ Three row kinds, merged by a pure module
 | **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
 | **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Undo** — not "void", which is document language for slips and invoices; the step card has always said `Undo completion`, and the column being `voided_at` is the schema's word rather than the user's. The note typed into the Complete dialog renders here, on the event it describes |
 | **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
+| **Shipment** | `shipments`, via `getShipmentsForJob` | The `PS-` packing slip number, opening the preview. View only — **voiding a slip stays in the Shipments menu** |
+| **Invoice** | `quickbooks_invoice_links`, via `getQuickBooksInvoiceLinksForJob` | The number and Jigged's line total, and **View in QuickBooks** when the push returned a URL |
 | **Job created** | `jobs.created_at`, derived | Nothing — it is the feed's oldest row and its beginning |
+
+**The two documents are job-level**, so the step filter drops them — a packing slip is not an answer
+to a question about one operation — and they share one dot colour rather than taking a hue each,
+the same call `sent` and `received` already make.
+
+**A slip sorts on `created_at`, not `ship_date`**, which is the opposite of the rule for a vendor
+send and for a reason the column forces: `ship_date` is a DATE, so it lands at midnight and an
+afternoon shipment would sort below that morning's notes. The ship date is not lost — the row
+prints it whenever the two disagree, which is how a backdated slip stays honest.
+
+**No payment state on the invoice row.** The paid / partial / open chip lives in the Invoices menu,
+where *opening it* is what refreshes the QuickBooks mirror. A chip here would show whatever the
+mirror last happened to say, with no user action behind it and no way to read how old it is; and
+there is no paid-at timestamp to hang a "Payment received" row on at all
+([invoicing.md](invoicing.md#payment-status-quickbooks-online-mirror)). What a feed can say
+honestly is that the invoice was raised, and when.
 
 One slip fans out to a `sent` row, one `received` row per receipt, and a `short_closed` row when
 something was retired — never one row that rewrites itself, the same call the operator feed makes
-for interval start/finish. Slips, receipts and completions that were taken back stay in the list struck
-through: this is an audit surface, so the rule is show-struck-through rather than the usual
-`filter-it-out`.
+for interval start/finish. Slips, receipts, completions, packing slips and invoices that were taken
+back stay in the list struck through: this is an audit surface, so the rule is show-struck-through
+rather than the usual `filter-it-out`. For an invoice that covers a QuickBooks-side void *or*
+delete, since `apply_qbo_invoice_mirror` stamps `voided_at` for both — the row says it no longer
+counts, not which of the two happened.
 
 **A region, not a box.** The rail is one screen tall, bleeds through `<main>`'s padding to the
 edges, carries a faint darkening wash, and is separated from the content by a single left rule —

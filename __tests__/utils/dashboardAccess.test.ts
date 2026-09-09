@@ -11,6 +11,7 @@ const DATA: Record<string, unknown[]> & { error?: unknown } = {
   notes: [],
   operations: [],
   inventory: [],
+  invoices: [],
 };
 
 function resolveData(state: { table: string; completedFilter: boolean }) {
@@ -26,6 +27,8 @@ function resolveData(state: { table: string; completedFilter: boolean }) {
       return { data: DATA.notes, error: null };
     case 'job_operations':
       return { data: DATA.operations, error: null };
+    case 'quickbooks_invoice_links':
+      return { data: DATA.invoices, error: null };
     case 'inventory_transactions':
       return { data: DATA.inventory, error: null };
     default:
@@ -69,6 +72,7 @@ beforeEach(() => {
   DATA.shipments = [];
   DATA.notes = [];
   DATA.operations = [];
+  DATA.invoices = [];
   delete DATA.error;
 });
 
@@ -263,5 +267,63 @@ describe('inventory activity', () => {
     DATA.inventory = [txn({})];
     const items = await getActivityStream('co1', { types: ['job'] });
     expect(items.every((i) => i.type !== 'inventory')).toBe(true);
+  });
+});
+
+describe('invoice activity', () => {
+  function link(over: Record<string, unknown> = {}) {
+    return {
+      id: 'inv-1',
+      created_at: '2026-09-05T16:00:00Z',
+      job_id: 'job-1',
+      qb_invoice_doc_number: '1043',
+      job: { job_number: 'J-0148', customer: { name: 'Classic Turning Inc.' } },
+      ...over,
+    };
+  }
+
+  it('reads a created invoice as a job-anchored feed row', async () => {
+    DATA.invoices = [link()];
+
+    const [item] = await getActivityStream('co1', { types: ['invoice'] });
+
+    expect(item).toMatchObject({
+      id: 'invoice-inv-1',
+      type: 'invoice',
+      action: 'created',
+      // The JOB number is the row's bold label, as it is for a shipment; the
+      // invoice number is a separate field the sentence uses.
+      entityNumber: 'J-0148',
+      invoiceNumber: '1043',
+      customerName: 'Classic Turning Inc.',
+      href: '/dashboard/co1/jobs/job-1',
+    });
+  });
+
+  it('survives an invoice QuickBooks has not numbered yet', async () => {
+    DATA.invoices = [link({ qb_invoice_doc_number: null })];
+    const [item] = await getActivityStream('co1', { types: ['invoice'] });
+    expect(item.invoiceNumber).toBeUndefined();
+  });
+
+  it('asks only for created invoices on live jobs', async () => {
+    // The mock returns whatever the fixture holds regardless of filters, so the
+    // assertion is on the QUERY: a pending push is not an event, and an
+    // archived job's paperwork should not outlive it in the feed.
+    DATA.invoices = [link()];
+    await getActivityStream('co1', { types: ['invoice'] });
+
+    const builder = mockSupabase.from.mock.results.at(-1)?.value as Record<
+      string,
+      ReturnType<typeof vi.fn>
+    >;
+    expect(builder.eq).toHaveBeenCalledWith('status', 'created');
+    expect(builder.is).toHaveBeenCalledWith('jobs.deleted_at', null);
+  });
+
+  it('is left out of the feed unless asked for', async () => {
+    DATA.invoices = [link()];
+    const items = await getActivityStream('co1', { types: ['job'] });
+    expect(items.every((i) => i.type !== 'invoice')).toBe(true);
   });
 });

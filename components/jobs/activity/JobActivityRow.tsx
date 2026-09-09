@@ -8,11 +8,25 @@ import Typography from '@mui/material/Typography';
 import { formatAbsoluteTime, formatRelativeTime } from '@/components/dashboard/activityFormat';
 
 /** What a row is about, which is all the dot encodes. */
-export type JobActivityRowTone = 'done' | 'vendor' | 'note' | 'muted';
+export type JobActivityRowTone = 'done' | 'vendor' | 'document' | 'note' | 'muted';
 
+/**
+ * ONE TONE FOR BOTH DOCUMENTS — a packing slip and an invoice share `document`
+ * rather than getting a hue each, the same call `sent` and `received` already
+ * make in sharing `vendor`. They are one class of thing (paperwork this job
+ * produced that leaves the building) and their titles, not their dots, say
+ * which one you are looking at.
+ *
+ * `info.main` because the rest of the palette is spoken for and this is the
+ * only free hue that means nothing else: `secondary.main` is a neutral grey a
+ * shade off the `note` dot, and amber is the andon's *needs attention* — an
+ * invoice is not a problem, and spending the attention colour on an ordinary
+ * document is exactly what lib/theme.ts warns against.
+ */
 const DOT_COLOUR: Record<JobActivityRowTone, string> = {
   done: 'success.main',
   vendor: 'primary.light',
+  document: 'info.main',
   note: 'text.secondary',
   muted: 'text.disabled',
 };

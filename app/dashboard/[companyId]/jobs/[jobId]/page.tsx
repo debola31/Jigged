@@ -322,8 +322,11 @@ export default function JobDetailPage() {
     // Force the history card to refetch + auto-open the preview on the new row.
     setPendingPreviewShipmentId(result.shipmentId);
     setHistoryRefreshKey((k) => k + 1);
-    // Re-pull job + per-part summary so status block + parts row reflect the new shipment.
-    await fetchJob();
+    // Re-pull job + per-part summary so status block + parts row reflect the new
+    // shipment. refreshAfterWrite rather than a bare fetchJob because the RAIL
+    // reads shipments too and does not watch historyRefreshKey — without it the
+    // slip shows in the toolbar menu and not in the feed until a page reload.
+    await refreshAfterWrite();
   };
 
   // Single edit surface: the "Edit" button flips the page into JobEditForm
@@ -838,7 +841,10 @@ export default function JobDetailPage() {
           setInvoicesRefreshKey((k) => k + 1);
           // Refresh job (invoicing_status) + per-part invoice summaries so the toolbar,
           // edit-form floor, and per-part breakdown reflect the new invoice.
-          fetchJob();
+          // refreshAfterWrite (not fetchJob) because the RAIL reads invoices too and
+          // does not watch invoicesRefreshKey: without it the new invoice appears in
+          // the toolbar menu and nowhere in the activity feed until a page reload.
+          void refreshAfterWrite();
         }}
       />
 
@@ -906,6 +912,10 @@ export default function JobDetailPage() {
         filter={railFilter}
         onClearFilter={() => setUserFilterOpId(null)}
         onViewSlip={setRailSlipId}
+        // Reuses the dialog the post-create auto-preview already mounts. That
+        // instance is deliberately given no `onVoided`, so the rail offers view
+        // without void — voiding a slip stays in the Shipments menu.
+        onViewPackingSlip={setPendingPreviewShipmentId}
       />
     </Box>
   );

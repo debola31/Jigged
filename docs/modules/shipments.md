@@ -167,6 +167,11 @@ dead routes until 2026-09-07; they are gone too.
   on screen.
 - **`components/shipments/CreateShipmentModal.tsx`** — thin `Dialog` around `ShipmentForm`, which it hands
   a `jobId`; the job page auto-opens the preview for the new slip.
+- **The job's activity rail** — every slip is also a row in the feed
+  ([jobs.md](jobs.md)), derived from the same `getShipmentsForJob` read rather than
+  written as an event. The row opens the same `PackingSlipPreviewDialog`, but the instance the rail
+  reuses is mounted **without `onVoided`**, so the feed offers view without void and the destructive
+  action stays where the bullet above puts it. A voided slip stays in the feed, struck through.
 - **`components/shipments/ShipmentForm.tsx`** — per-part table (Ordered / Already Shipped / Remaining / Ship
   Now) pre-filled with the full remaining qty and captioned by `lineShipConsequence`. Over-shipping **warns,
   never blocks**; submit is blocked only when every qty is zero. No notes field.

@@ -9,6 +9,8 @@ import {
 import type { JobNote } from '@/types/operator';
 import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import type { ShipmentWithRelations } from '@/types/shipment';
+import type { QuickBooksInvoiceView } from '@/utils/quickbooksAccess';
 
 function note(over: Partial<JobNote> & Pick<JobNote, 'id' | 'created_at'>): JobNote {
   return {
@@ -91,6 +93,59 @@ function receipt(over: { id: string; received_at: string; quantity_good?: number
     updated_at: over.received_at,
     ...over,
   };
+}
+
+function packingSlip(
+  over: Partial<ShipmentWithRelations> &
+    Pick<ShipmentWithRelations, 'id' | 'packing_slip_number' | 'created_at'>,
+): ShipmentWithRelations {
+  return {
+    company_id: 'co-1',
+    customer_id: 'cust-1',
+    job_id: 'job-1',
+    shipping_address_id: null,
+    one_time_address: null,
+    ship_date: '2026-09-05',
+    carrier: null,
+    shipping_method: null,
+    created_by: 'user-1',
+    voided_at: null,
+    voided_by: null,
+    customer_name: 'Classic Turning Inc.',
+    bill_to_address: null,
+    ship_to_address: null,
+    freight_terms: null,
+    customer_carrier_account_id: null,
+    freight_account_snapshot: null,
+    heat_numbers_snapshot: [],
+    created_by_member: { user_id: 'user-1', name: 'Devin', email: null },
+    shipment_line_items: [
+      { id: 'sli-1', shipment_id: over.id, job_part_id: 'jp-1', quantity: 20, created_at: over.created_at },
+    ],
+    ...over,
+  } as ShipmentWithRelations;
+}
+
+function invoice(
+  over: Partial<QuickBooksInvoiceView> & Pick<QuickBooksInvoiceView, 'id' | 'createdAt'>,
+): QuickBooksInvoiceView {
+  return {
+    invoiceId: 'qb-1',
+    docNumber: '1043',
+    url: 'https://qbo.intuit.com/app/invoice?txnId=1043',
+    lines: [],
+    total: 4200,
+    provider: 'qbo',
+    realmId: 'realm-1',
+    voidedAt: null,
+    qbTxnDate: null,
+    qbStatus: null,
+    qbTotalAmt: null,
+    qbBalance: null,
+    qbDueDate: null,
+    qbStatusCheckedAt: null,
+    ...over,
+  } as QuickBooksInvoiceView;
 }
 
 describe('movementsFromShipments', () => {
@@ -191,6 +246,8 @@ describe('buildJobActivity', () => {
   it('merges all three kinds newest-first', () => {
     const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [note({ id: 'n-1', created_at: '2026-09-05T13:40:00Z', job_operation_id: 'op-20' })],
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
       shipments: [
@@ -215,12 +272,16 @@ describe('buildJobActivity', () => {
     const at = '2026-09-05T14:31:00Z';
     const forward = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [],
       completions: [completion({ id: 'b', completed_at: at }), completion({ id: 'a', completed_at: at })],
       shipments: [],
     });
     const reversed = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [],
       completions: [completion({ id: 'a', completed_at: at }), completion({ id: 'b', completed_at: at })],
       shipments: [],
@@ -235,6 +296,8 @@ describe('buildJobActivity', () => {
     // behaviour most likely to be reported as a sort bug.
     const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [note({ id: 'n-1', created_at: '2026-09-05T09:00:00Z' })],
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:00:00Z' })],
       shipments: [slip({ id: 's-old', slip_number: 'VPS-1042-9', shipped_at: '2026-09-05T11:00:00Z' })],
@@ -246,6 +309,8 @@ describe('buildJobActivity', () => {
   it('carries a voided completion into the list rather than filtering it out', () => {
     const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [],
       completions: [
         completion({ id: 'c-1', completed_at: '2026-09-05T14:00:00Z', voided_at: '2026-09-05T15:00:00Z' }),
@@ -269,6 +334,8 @@ describe("the job's own beginning", () => {
       completions: [],
       shipments: [],
       createdAt: '2026-09-01T08:00:00Z',
+      customerShipments: [],
+      invoices: [],
     });
 
     expect(items).toHaveLength(1);
@@ -281,6 +348,8 @@ describe("the job's own beginning", () => {
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
       shipments: [],
       createdAt: '2026-09-01T08:00:00Z',
+      customerShipments: [],
+      invoices: [],
     });
 
     expect(items.map((i) => i.key)).toEqual(['completion-c-1', 'note-n-1', 'job-created']);
@@ -293,6 +362,8 @@ describe("the job's own beginning", () => {
       completions: [],
       shipments: [],
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
     });
 
     expect(items).toEqual([]);
@@ -304,6 +375,127 @@ describe("the job's own beginning", () => {
       completions: [completion({ id: 'c-1', completed_at: '2026-09-05T14:31:00Z' })],
       shipments: [],
       createdAt: '2026-09-01T08:00:00Z',
+      customerShipments: [],
+      invoices: [],
+    });
+
+    expect(filterToOperation(items, 'op-20').map((i) => i.key)).toEqual(['completion-c-1']);
+  });
+});
+
+describe('the documents a job produces', () => {
+  const BASE = {
+    createdAt: null,
+    notes: [],
+    completions: [],
+    shipments: [],
+    customerShipments: [],
+    invoices: [],
+  };
+
+  it('merges packing slips and invoices into the same chronology as everything else', () => {
+    const items = buildJobActivity({
+      ...BASE,
+      notes: [note({ id: 'n-1', created_at: '2026-09-05T13:40:00Z' })],
+      completions: [completion({ id: 'c-1', completed_at: '2026-09-05T09:00:00Z' })],
+      customerShipments: [
+        packingSlip({ id: 'ship-1', packing_slip_number: 'PS-0148-1', created_at: '2026-09-05T15:00:00Z' }),
+      ],
+      invoices: [invoice({ id: 'inv-1', createdAt: '2026-09-05T16:00:00Z' })],
+    });
+
+    expect(items.map((i) => i.key)).toEqual([
+      'invoice-inv-1', // 16:00
+      'shipment-ship-1', // 15:00
+      'note-n-1', // 13:40
+      'completion-c-1', // 09:00
+    ]);
+  });
+
+  it('sums the line items on a slip into one piece count', () => {
+    const items = buildJobActivity({
+      ...BASE,
+      customerShipments: [
+        packingSlip({
+          id: 'ship-1',
+          packing_slip_number: 'PS-0148-1',
+          created_at: '2026-09-05T15:00:00Z',
+          shipment_line_items: [
+            { id: 'a', shipment_id: 'ship-1', job_part_id: 'jp-1', quantity: 12, created_at: '2026-09-05T15:00:00Z' },
+            { id: 'b', shipment_id: 'ship-1', job_part_id: 'jp-2', quantity: 8, created_at: '2026-09-05T15:00:00Z' },
+          ],
+        }),
+      ],
+    });
+
+    expect(items[0]).toMatchObject({ kind: 'shipment', quantity: 20 });
+  });
+
+  it('sorts a slip on created_at, NOT on a backdated ship_date', () => {
+    // ship_date is a DATE, so using it would drop an afternoon shipment below
+    // every note written that morning. This is the assertion that pins it.
+    const items = buildJobActivity({
+      ...BASE,
+      notes: [note({ id: 'n-1', created_at: '2026-09-05T09:00:00Z' })],
+      customerShipments: [
+        packingSlip({
+          id: 'ship-1',
+          packing_slip_number: 'PS-0148-1',
+          created_at: '2026-09-05T15:00:00Z',
+          ship_date: '2026-09-01',
+        }),
+      ],
+    });
+
+    expect(items.map((i) => i.key)).toEqual(['shipment-ship-1', 'note-n-1']);
+    expect(items[0]).toMatchObject({ shipDate: '2026-09-01' });
+  });
+
+  it('keeps a voided slip and a voided invoice, marked rather than dropped', () => {
+    // This is an audit surface: the paperwork existed, the customer may hold a
+    // copy, and hiding it would make the job's quantities unexplainable.
+    const items = buildJobActivity({
+      ...BASE,
+      customerShipments: [
+        packingSlip({
+          id: 'ship-1',
+          packing_slip_number: 'PS-0148-1',
+          created_at: '2026-09-05T15:00:00Z',
+          voided_at: '2026-09-06T09:00:00Z',
+        }),
+      ],
+      invoices: [invoice({ id: 'inv-1', createdAt: '2026-09-05T16:00:00Z', voidedAt: '2026-09-06T10:00:00Z' })],
+    });
+
+    expect(items).toHaveLength(2);
+    expect(items.find((i) => i.key === 'shipment-ship-1')).toMatchObject({ voided: true });
+    expect(items.find((i) => i.key === 'invoice-inv-1')).toMatchObject({ voided: true });
+  });
+
+  it('carries Jigged line total and the QuickBooks deep link onto the invoice row', () => {
+    const items = buildJobActivity({
+      ...BASE,
+      invoices: [
+        invoice({ id: 'inv-1', createdAt: '2026-09-05T16:00:00Z', docNumber: '1043', total: 4200, url: 'https://qbo/x' }),
+      ],
+    });
+
+    expect(items[0]).toMatchObject({
+      kind: 'invoice',
+      docNumber: '1043',
+      total: 4200,
+      url: 'https://qbo/x',
+    });
+  });
+
+  it('leaves both out of a step filter — they belong to the job, not an operation', () => {
+    const items = buildJobActivity({
+      ...BASE,
+      completions: [completion({ id: 'c-1', completed_at: '2026-09-05T09:00:00Z', job_operation_id: 'op-20' })],
+      customerShipments: [
+        packingSlip({ id: 'ship-1', packing_slip_number: 'PS-0148-1', created_at: '2026-09-05T15:00:00Z' }),
+      ],
+      invoices: [invoice({ id: 'inv-1', createdAt: '2026-09-05T16:00:00Z' })],
     });
 
     expect(filterToOperation(items, 'op-20').map((i) => i.key)).toEqual(['completion-c-1']);
@@ -313,6 +505,8 @@ describe("the job's own beginning", () => {
 describe('filterToOperation', () => {
   const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
     notes: [
       note({ id: 'n-step', created_at: '2026-09-05T13:40:00Z', job_operation_id: 'op-20' }),
       note({ id: 'n-job', created_at: '2026-09-05T13:30:00Z', job_operation_id: null }),

@@ -5,7 +5,15 @@ import { applyOverdueJobsFilter } from '@/utils/jobsAccess';
 
 // ============== Types ==============
 
-export type ActivityType = 'quote' | 'job' | 'shipment' | 'note' | 'photo' | 'operation' | 'inventory';
+export type ActivityType =
+  | 'quote'
+  | 'job'
+  | 'shipment'
+  | 'invoice'
+  | 'note'
+  | 'photo'
+  | 'operation'
+  | 'inventory';
 
 export type ActivityAction =
   | 'created'
@@ -44,6 +52,10 @@ export interface ActivityItem {
   quantityLabel?: string;
   /** Inventory events: the mill heat the movement carried, when one was recorded. */
   heatNumber?: string;
+  /** Invoice events: the QuickBooks document number, which is what a shop owner
+   *  and their bookkeeper both call the invoice. Absent until QuickBooks has
+   *  given us one. */
+  invoiceNumber?: string;
 }
 
 // ============== Dashboard metrics ==============
@@ -693,6 +705,63 @@ async function fetchShipmentActivity(
   return items;
 }
 
+/**
+ * Invoices this shop raised, newest first.
+ *
+ * ONLY `status = 'created'`. A link row is inserted as `pending` to claim an
+ * idempotency key before QuickBooks is called, and may end as `error` or
+ * `needs_verification` — a push that never landed is not an event, and the flip
+ * to `created` is the moment the invoice became real.
+ *
+ * VOIDED INVOICES STAY. The raising of it happened, and this is a log; it also
+ * matches fetchShipmentActivity, which likewise does not filter voided_at. Note
+ * the mirror sets `voided_at` for a QuickBooks-side void OR delete, so filtering
+ * here would silently retract history on a bookkeeper's action.
+ *
+ * `jobs!inner` + the deleted_at filter is a FILTER, not data: an invoice carries
+ * no deleted_at of its own, and an archived job's paperwork should not surface
+ * in a feed the job itself has left.
+ */
+async function fetchInvoiceActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  let q = supabase
+    .from('quickbooks_invoice_links')
+    .select(
+      'id, created_at, job_id, qb_invoice_doc_number, job:jobs!inner(job_number, deleted_at, customer:customers(name))',
+    )
+    .eq('company_id', companyId)
+    .eq('status', 'created')
+    .is('jobs.deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  // NO `as unknown as` HERE, unlike its neighbours in this file: the generated
+  // types describe this select exactly, and laundering the row would erase the
+  // one thing that would catch a renamed column (CLAUDE.md, typed client).
+  for (const r of data ?? []) {
+    if (!r.created_at) continue;
+    const job = firstRel(r.job);
+    items.push({
+      id: `invoice-${r.id}`,
+      type: 'invoice',
+      action: 'created',
+      entityNumber: job?.job_number ?? '',
+      timestamp: r.created_at,
+      customerName: firstRel(job?.customer)?.name ?? undefined,
+      invoiceNumber: r.qb_invoice_doc_number ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+    });
+  }
+  return items;
+}
+
 type NoteActivityRow = {
   id: string;
   created_at: string;
@@ -951,6 +1020,7 @@ async function collectActivity(
   if (want('job')) tasks.push(fetchJobActivity(companyId, before, perSource));
   if (want('quote')) tasks.push(fetchQuoteActivity(companyId, before, perSource));
   if (want('shipment')) tasks.push(fetchShipmentActivity(companyId, before, perSource));
+  if (want('invoice')) tasks.push(fetchInvoiceActivity(companyId, before, perSource));
   // 'note' and 'photo' both come from notes (one query yields both kinds).
   if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
   if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));

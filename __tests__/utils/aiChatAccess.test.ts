@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 function buildQueryStub(initial?: { data?: unknown; error?: unknown }) {
   const builder: Record<string, unknown> = {};
-  ['select', 'insert', 'update', 'delete', 'eq', 'in', 'is', 'order', 'limit', 'single'].forEach((m) => {
+  ['select', 'insert', 'update', 'delete', 'eq', 'in', 'is', 'not', 'order', 'limit', 'single'].forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
   builder.data = initial?.data ?? null;
@@ -37,6 +37,7 @@ vi.mock('@/lib/supabase', () => ({ getSupabase: () => mockSupabase }));
 import {
   archiveThread,
   createThread,
+  listChartTurns,
   listThreadMessages,
   listThreads,
   THREAD_TITLE_MAX,
@@ -129,6 +130,26 @@ describe('listThreadMessages', () => {
     expect(messages[1].chart_config).toEqual(chart);
   });
 
+  it('carries a report turn and the job that made it, and nothing for a plain answer', async () => {
+    const spec = { title: 'Operations summary', period_label: 'Q3' };
+    queueBuilders([
+      buildQueryStub({
+        data: [
+          { id: 'm1', seq: 1, role: 'user', content: 'Summary of the quarter', chart_config: null, report: null, job_id: 'j-1', created_at: 'c' },
+          { id: 'm2', seq: 2, role: 'assistant', content: 'h', chart_config: null,
+            report: { report: spec, dropped: ['Flat'], tool_call_count: 5 }, job_id: 'j-1', created_at: 'c' },
+          { id: 'm3', seq: 3, role: 'assistant', content: 'a', chart_config: null, report: { dropped: [] }, job_id: null, created_at: 'c' },
+        ],
+      }),
+    ]);
+    const [user, report, plain] = await listThreadMessages('t-1');
+    expect(user.report).toBeNull();
+    expect(report.report).toEqual({ report: spec, dropped: ['Flat'], tool_call_count: 5 });
+    expect(report.job_id).toBe('j-1');
+    // A `report` object with no spec inside is not a report turn.
+    expect(plain.report).toBeNull();
+  });
+
   it('drops a chart that no longer has the shape the renderer needs', async () => {
     queueBuilders([
       buildQueryStub({
@@ -152,5 +173,32 @@ describe('listThreadMessages', () => {
     ]);
     const messages = await listThreadMessages('t-1');
     expect(messages).toHaveLength(1);
+  });
+});
+
+
+describe('listChartTurns', () => {
+  const chart = { chart_type: 'area', data: [{ m: '2026-06-01', v: 1 }], x_key: 'm', y_key: 'v' };
+
+  it('reads answered turns that carry a chart across the shop, newest first, with their thread title', async () => {
+    const q = buildQueryStub({
+      data: [
+        { id: 'm4', thread_id: 't-2', content: 'Booked rose.', chart_config: chart, created_at: 'c2', ai_chat_threads: { title: 'Booked by month', deleted_at: null } },
+        { id: 'm9', thread_id: 't-3', content: 'gone', chart_config: chart, created_at: 'c1', ai_chat_threads: { title: 'Archived one', deleted_at: '2026-09-01' } },
+        { id: 'm5', thread_id: 't-4', content: 'no shape', chart_config: { chart_type: 'bar' }, created_at: 'c0', ai_chat_threads: { title: 'Odd', deleted_at: null } },
+      ],
+    });
+    queueBuilders([q]);
+
+    const turns = await listChartTurns('co-1');
+
+    expect(q.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    expect(q.eq).toHaveBeenCalledWith('role', 'assistant');
+    expect(q.not).toHaveBeenCalledWith('chart_config', 'is', null);
+    expect(q.order).toHaveBeenCalledWith('created_at', { ascending: false });
+    expect(q.limit).toHaveBeenCalledWith(30);
+    // An archived conversation takes its charts with it; a chart without a shape is not a chart.
+    expect(turns.map((t) => t.thread_title)).toEqual(['Booked by month']);
+    expect(turns[0]).toMatchObject({ id: 'm4', thread_id: 't-2', answer: 'Booked rose.', chart_config: chart });
   });
 });

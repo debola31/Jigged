@@ -88,6 +88,7 @@ export type Database = {
           created_at: string
           id: string
           job_id: string | null
+          report: Json | null
           role: string
           seq: number
           thread_id: string
@@ -102,6 +103,7 @@ export type Database = {
           created_at?: string
           id?: string
           job_id?: string | null
+          report?: Json | null
           role: string
           seq: number
           thread_id: string
@@ -116,6 +118,7 @@ export type Database = {
           created_at?: string
           id?: string
           job_id?: string | null
+          report?: Json | null
           role?: string
           seq?: number
           thread_id?: string

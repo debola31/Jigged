@@ -142,6 +142,7 @@ class Worker:
 
     async def _run_one(self, job: dict[str, Any]) -> None:
         from services.ai_features import JobContext, handler_for
+        from services.ai_features.base import result_kind
         from services.llm.errors import LLMChainExhausted, LLMError, LLMErrorEcho
 
         job_id = str(job["job_id"])
@@ -198,7 +199,9 @@ class Worker:
             logger.exception("job %s raised", job_id)
             return
 
-        await asyncio.to_thread(self.db.mark_succeeded, job_id, result)
+        # A question the model answered with a report settles as one: result_kind
+        # reads the handler's verdict and the UPDATE flips the row's kind with it.
+        await asyncio.to_thread(self.db.mark_succeeded, job_id, result, result_kind(result))
         logger.info("finished %s in %.1fs", job_id, time.perf_counter() - started)
 
     async def _drain(self, batch: list[dict[str, Any]]) -> None:

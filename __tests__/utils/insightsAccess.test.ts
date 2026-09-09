@@ -32,7 +32,6 @@ import {
   listReports,
   reportResultOf,
   submitChatQuery,
-  submitReportRequest,
   type AiJob,
 } from '@/utils/insightsAccess';
 
@@ -47,7 +46,7 @@ function response(status: number, body: unknown): Response {
 describe('chatResultOf', () => {
   const job = (result: unknown): AiJob => ({
     id: 'j', status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
-    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null, kind: 'chat',
   });
 
   it('narrows the off-topic flag to a boolean and defaults it off', () => {
@@ -147,42 +146,10 @@ describe('submitChatQuery', () => {
   });
 });
 
-describe('submitReportRequest', () => {
-  const fetchMock = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockGetSession.mockResolvedValue({ data: { session: { access_token: 'tok' } } });
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
-  afterEach(() => vi.unstubAllGlobals());
-
-  it('posts the request through the report door with the local date', async () => {
-    fetchMock.mockResolvedValue(response(202, { job_id: 'job-r', status: 'queued', executor: 'worker' }));
-
-    const enqueued = await submitReportRequest('co-1', 'operations summary for this quarter');
-
-    expect(enqueued.job_id).toBe('job-r');
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://api.test/api/insights/co-1/report');
-    const body = JSON.parse(init.body as string);
-    expect(body.request).toBe('operations summary for this quarter');
-    expect(body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  });
-
-  it('carries the status like a question does', async () => {
-    fetchMock.mockResolvedValue(response(503, { detail: 'The AI box is offline right now, so this can\'t run.' }));
-    const err = await submitReportRequest('co-1', 'x').catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ChatEnqueueError);
-    expect((err as ChatEnqueueError).status).toBe(503);
-  });
-});
-
 describe('listReports / reportResultOf', () => {
   const job = (result: unknown, id = 'j'): AiJob => ({
     id, status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
-    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null, kind: 'chat',
   });
 
   it('reads only succeeded report jobs for the shop, newest first', async () => {

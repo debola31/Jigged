@@ -579,7 +579,9 @@ It is **written, never read back as chat history.**
 in the database, the access layer or the UI.
 
 **`ai_chat_threads`** — one conversation, per user (`created_by = auth.uid()`), `title` = the first
-question truncated, archived by `deleted_at`. **`ai_chat_messages`** — its append-only turns:
+question truncated, archived by `deleted_at`. **`ai_chat_messages`** — its append-only turns (since
+2026-09-08 an assistant row may carry `report`, the spec a report turn is drawn from, with the titles the
+chart gate dropped and the query count; a CHECK keeps it off user rows):
 `seq`, `role ∈ {user, assistant, summary}`, `content`, `chart_config`, `tool_trace` (the queries
 behind an assistant turn, audit only, never replayed), `covers_through_seq` (summary rows only),
 `token_estimate`, `job_id`. **Nothing writes a message by hand**: `ai_jobs_materialize_chat_turn()`,
@@ -588,6 +590,12 @@ assistant turn (from `result.answer`) and any summary when a chat job reads `suc
 `jigged_ai_worker` keeps touching one table. No role holds `UPDATE` or `DELETE` on messages.
 `ai_jobs` gained `thread_id`, `kind ∈ {chat, report}` and the `context_overflow` error kind
 ([`20260907234149`](../../supabase/migrations/20260907234149_ai_chat_threads_and_messages.sql)).
+`kind` is what the door enqueued, until the job settles: since 2026-09-08 a chat job whose model
+answered by calling `compose_report` returns a result saying `kind = 'report'`, and both executors
+write that into the row in the statement that records the success (`result_kind` in
+`api/services/ai_features/base.py`; the worker's `mark_succeeded` says `kind = COALESCE(%s, kind)`).
+The trigger reads the person's words from `payload.question` or `payload.request`, whichever the row
+has ([`20260909005528`](../../supabase/migrations/20260909005528_report_turn_from_a_question.sql)).
 
 **Removed: `ai_insight_cache`** — dropped when the 5-card panel went; nothing read or wrote it.
 
@@ -618,9 +626,12 @@ company's, or is archived, is a plain-string 404; a second question while one is
 (`ai_jobs_one_in_flight_per_thread`). **The route never writes a message.** *(This paragraph used to
 say chat was stateless, and it was.)*
 
-**Saved-insights CRUD is not a backend route** — it runs client-side against the RLS-scoped table
-via [`utils/savedInsightsAccess.ts`](../../utils/savedInsightsAccess.ts), per the Supabase-first
-architecture rule.
+**Withdrawn 2026-09-08 — saved insights.** "Save to dashboard", the "Your Charts" grid and
+the saved-insights access module are gone. A chart is kept by having been answered: the History rail's
+Charts tab is a filter over `ai_chat_messages` rows that carry a `chart_config`, so nothing needs a save
+gesture to be found again. The `saved_insights` table remains with no reader until a later migration
+drops it; if pinned charts turn out to matter (watch `insights history opened` and the `charts` tab
+share), the way back is a Build mode that adds widgets from prompts, not the grid.
 
 **Backend** (`api/`): `routes/insights_routes.py` (the endpoint, chart validation and selection) ·
 `services/insights_service.py` (the chat system prompt and `execute_sql_tool`, and nothing else) ·
@@ -632,8 +643,8 @@ architecture rule.
 second, pre-gateway tool loop; that is deleted, and `base_provider` never carried the method the
 old wording attributed to it.
 
-**Frontend:** `components/insights/` (`InsightsChat`, `InsightCard`, `InsightChart`) and
-`components/dashboard/InsightsSection`.
+**Frontend:** `components/insights/` — `InsightsChat` (the chat-first area and its composer),
+`HistoryDrawer` (the rail), `ConversationTurnCard`, `InsightChart`, `ReportPreviewDialog`.
 
 **Env:** `LLM_CHAIN_INSIGHTS` selects the chain. Unset, it is `anthropic` (needs `ANTHROPIC_API_KEY`)
 and the route works the job inline; `ollama:<tag>` routes every question to the desktop worker, whose
@@ -656,25 +667,39 @@ Supabase vars.
 > `MetricPickerModal` do not exist**, and `20260812211807_prune_dashboard_metric_preferences.sql`
 > removed the preference keys. The metric row is not user-configurable.
 
-**Ask bar** — input plus example prompt chips, rotating loading messages, and a **Save button shown
-only when a chart survived validation**. Since September 2026 it is a conversation: the answered
-exchanges render newest-first under the input, and a recent-conversations menu switches or archives
-threads (see *Long conversations on a 32K context*).
+**The chat, first (2026-09-08).** Below the scorecards the AI area is one thing. Empty, it is a
+centred question with example chips — the shape of a search box — and one composer with no picker:
+whether an answer is prose, a chart or a one-page report is the model's call from the words
+(`compose_report`, below). Once a conversation exists the composer docks to the bottom and the
+exchanges read top to bottom above it, newest beside the box (`components/insights/InsightsChat.tsx`).
+A report — asked for in so many words, "one-page report on this quarter", "put that in a PDF" — comes
+back as a turn carrying the page: the request, the headline, and an **Open report** card that draws the
+PDF from the spec stored on the message (`ai_chat_messages.report`). One
+**History** button opens the rail (`HistoryDrawer.tsx`) with three tabs: **Chats** (the caller's
+conversations, switch or archive), **Reports** (from the job rows, `ai_jobs.kind = 'report'`, each
+re-drawn on open) and **Charts** (every answer that carried a chart, opening its conversation). The
+lists load when their tab shows, never on dashboard load.
 
-**Your Charts** — the current user's saved cards in a responsive grid, each with question, chart,
-summary and a remove button; a dashed empty state inviting the first question.
-
-**Reports** — a card between the ask bar and the saved charts: **New report** opens a dialog that
-asks what the page should cover, and the shop's recent one-page summaries are listed from their own
-job rows (`ai_jobs.kind = 'report'`), each re-drawn from its stored spec on open. See *Reports:
-one-page executive summaries*.
+> **Withdrawn 2026-09-08.** The ask bar's newest-first thread with a recent-conversations menu, the
+> **Your Charts** grid with its Save button, and the **Reports** card with its request dialog. The
+> shop owner chose a chat-first page over three stacked sections, two of them usually empty, and
+> accepted losing pinned charts until use says otherwise. Every chart and report is still one click
+> away in History.
+>
+> **Withdrawn the same day.** The composer's **Ask / Report** toggle, which the first cut of the
+> chat-first page carried. The owner wanted one chat, with the assistant choosing whether the answer is
+> text, a chart or a one-page PDF, and reports and charts in History as pointers back into the
+> conversations that made them. The verb lasted one review; the report door stays for a caller that
+> already knows it wants a page.
 
 ## Reports: one-page executive summaries
 
-**What the owner asks for → what ships.** They type what the page should cover — "operations summary
-for June to September", "how is Hastings Machine doing this year", "backlog and late jobs". One
-insights job with `kind = 'report'` runs the **same tool loop** as chat (same system turn, so the
-prefix is shared), then one schema-constrained compose call fills a `ReportSpec`
+**What the owner asks for → what ships.** They ask, in the one composer, for a document — "one-page
+report on this quarter", "PDF of the backlog and late jobs", "put that in a PDF" — or a caller posts
+the request to the report door. One insights job — enqueued as `kind = 'report'` through the door, or a
+chat job whose model called `compose_report` and whose row flips to `report` when it settles — runs the
+**same tool loop** as chat (same system turn, so the prefix is shared), then one schema-constrained
+compose call fills a `ReportSpec`
 ([`api/models/report_spec.py`](../../api/models/report_spec.py)): an AI-inferred title, the period as
 dates, a headline, up to four KPI tiles and four blocks. The browser renders it to PDF
 ([`utils/reportPdf.ts`](../../utils/reportPdf.ts)) with the shop's header block top-left, the title
@@ -692,6 +717,30 @@ the guardrails moved from the model into a schema and a renderer.
 | Nothing the model wrote is drawn unmeasured | Renderer: every free string is fitted to the slot it lands in — the title steps its font down from 22pt to 15pt before a character is cut and never enters the 200pt that belong to the shop block; the headline is two lines with an ellipsis; section titles, notes, KPI captions and the "Not shown" line are cut to their width (a caption that does not fit beside its label wraps under it first); table cells ellipsize instead of wrapping, which also keeps row heights equal to what the page was packed against; a time axis (ISO dates, month names, quarters) is put in calendar order rather than ranked. The first live report captioned a tile with a sentence that ran through the next tile and off the page, and listed its months by value |
 | Charts valid | Each chart block becomes a `chart_config` and goes through the chat gate (`_validate_chart_config` → `_drop_exemplar_echo` → `_select_chart_type`); a refused block is dropped and named in `result.dropped` and on the page |
 | Same safety boundary as chat | Same `execute_sql`, validator, sandbox, cap and heartbeat; one job that makes several model calls and holds the box's single slot for a few minutes |
+
+**One composer, so the model decides the form (2026-09-08).** `compose_report` sits beside
+`execute_sql` in `CHAT_TOOLS` ([`api/tools/chat_tools.py`](../../api/tools/chat_tools.py)). It computes
+nothing: it is how the model says "this person asked for a document", the way a `chart_config` fence is
+how it says the answer wants a chart. Its description and one guideline fence it to a request for a
+report, a one-pager, a PDF, a printout or an executive summary, and say that a question a few sentences
+or one chart can answer is never a report. The brief it writes must stand alone — the subject, the
+period, the names the conversation established — because the chat loop hands that brief to the report
+path as the request and carries nothing else over: a page is gathered for differently from a sentence.
+The report loop is offered the same tool (the tools block is part of the cached prefix and must match
+chat's); there it means "I have what I need" and ends gathering, with any queries beside it run first.
+Both executors flip the row's `kind` from the result, so the trigger, the Reports tab and
+`report generated` need no second path. What this trades: the form of an answer is the model's
+judgement, not a gate — over-triggering costs the person minutes on the box's single slot,
+under-triggering a rephrase ("…as a PDF") — and only a live run measures it. **Measured 2026-09-08** with
+[`api/evals/route_probe.py`](../../api/evals/route_probe.py) (the real handler on the serving Mac,
+`qwen3:32b`, the local seed, `report.run` stubbed so a report costs one call): 24 cases, 24 routed as
+intended. The eval's thirteen questions and the near-misses — "give me an overview of late jobs", "what
+did the last report say?", "and July?" mid-thread — stayed prose; all six document asks became reports;
+"put that in a PDF" after a top-customer answer produced the brief "Top customers by revenue for the
+year". The decision itself is cheap: a report call returned in 1.9–2.7 s on the warm prefix, against
+1–22 s for a prose answer (the first call after the prompt changed paid a 121 s cold prefill). Twenty-four
+cases is a smoke test, not a distribution; `report generated` against `ai job enqueued` in production is
+the number that matters.
 
 **Strict-output shape, on purpose.** Ollama's `format` and Anthropic's structured output want closed
 objects with every property required and no `$defs`, so a table row is a list of cells aligned with
@@ -826,6 +875,24 @@ reworded line moves what the linker can see.
 
 ## Acceptance Criteria
 
+- [ ] **Given** a report asked through the report door in a conversation, **then** the job carries the
+  thread, a thread the company does not own is a 404 and an in-flight job on it a 409, and on success the
+  trigger appends the request and the headline with the spec in `ai_chat_messages.report` — *verified by
+  `api/tests/unit/test_insights_enqueue.py::TestTheReportDoor` and
+  `api/tests/integration/test_ai_chat_threads.py`*.
+- [ ] **Given** a question the model answers by calling `compose_report`, **then** its brief becomes the
+  report's request (the question when the brief is empty), the result says `kind = 'report'`, both
+  executors write that into the row as they record the success, and the trigger appends the question and
+  the headline with the spec; **given** the same call inside the report loop, **then** it ends gathering
+  and is never dispatched — *verified by `api/tests/unit/test_report_handler.py`,
+  `api/tests/unit/test_ai_jobs_enqueue.py::TestMarkSucceeded`, `worker/tests/test_db_reporting.py` and
+  `api/tests/integration/test_ai_chat_threads.py`*.
+- [ ] **Given** the dashboard with no conversation, **then** one centred question with example chips and no
+  list is read; **given** a conversation, **then** it reads oldest first with the composer docked under
+  it; **given** the History button, **then** conversations, reports and charts load only then and a
+  chart opens its conversation — *verified by `__tests__/components/insights/InsightsChat.test.tsx` and
+  `__tests__/utils/aiChatAccess.test.ts`*.
+
 Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
 `automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).
 
@@ -873,21 +940,31 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 
 ## Known gaps
 
+- **No pinned charts on the dashboard.** Withdrawn with the chat-first page (2026-09-08), deliberately, to
+  be re-evaluated on use: the Charts tab of History is the substitute, and a Build mode (widgets from
+  prompts) is the way back if owners want charts on the landing page.
 - **A preview deployment has no worker unless someone runs one.** The preview's backend enqueues into
   the PR's Supabase branch, where nothing heartbeats, so every preview's ask bar reads offline out of
   the box. `scripts/preview-worker.sh <pr>` runs a second worker against that branch from the serving
   Mac for as long as you are testing ([ai-worker.md](../runbooks/ai-worker.md)).
+
 - **Nothing enforces that this doc's two table lists match the code.** Both had drifted — the
   count in four places, and one missing denylist entry. A test asserting the doc's lists against
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.
 - **No E2E covers the chat path** — validation and chart selection are unit-tested, the browser
   round-trip is not.
-- **`CHAT_TOOLS` is single-tool, and adding a second one has a precondition.** Predefined Python
+- **`CHAT_TOOLS` has one data tool, and adding another has a precondition.** Predefined Python
   tools alongside `execute_sql` are a reasonable answer for questions too error-prone for generated
   SQL. Seven of them already existed and were deleted (see *Withdrawn* above) because each was a
   second definition of a business term, and the second definition is what drifts. The precondition:
   a new tool computes from a definition the UI also reads — a SQL object both call — rather than
-  restating one in Python.
+  restating one in Python. `compose_report` is not one of these: it computes nothing and restates no
+  term; it is a signal the handler intercepts.
+- **Which form an answer takes is the model's judgement.** `compose_report` is fenced by its
+  description and a guideline, not a gate. A false call costs the person a multi-minute report job on
+  the single slot for a question they wanted in a sentence; a missed one costs a rephrase. Nothing in
+  CI can measure either; `api/evals/route_probe.py` does, live (24 of 24 routed as intended on the seed,
+  2026-09-08), and `report generated` against `ai job enqueued` is the one to keep watching.
 - **The chat route has no auth at the FastAPI layer.** `company_id` comes from the URL and nothing
   reads the bearer token the frontend attaches, so a direct HTTP call reaches any company's data
   and spends credits against its cap. Operators cannot reach the surface, but that is routing, not

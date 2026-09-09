@@ -365,9 +365,9 @@ class TestTheReportDoor:
     """A report is the same door as a question: flag, cap, sweep, heartbeat -- and one
     job row with kind='report' whose payload says so too."""
 
-    async def _post(self, request="operations summary for June to September"):
+    async def _post(self, request="operations summary for June to September", thread_id=None):
         return await routes.report(
-            "co-1", ReportRequest(request=request, today=datetime.now(timezone.utc).date()),
+            "co-1", ReportRequest(request=request, today=datetime.now(timezone.utc).date(), thread_id=thread_id),
         )
 
     async def test_a_disabled_company_cannot_enqueue_a_report(self):
@@ -402,7 +402,54 @@ class TestTheReportDoor:
         assert kwargs["kind"] == "report" and kwargs["feature"] == "insights"
         assert kwargs["payload"]["kind"] == "report"
         assert kwargs["payload"]["request"] == "operations summary for June to September"
+        assert kwargs["thread_id"] is None
         assert "today" in kwargs["payload"]
+
+    async def test_a_report_asked_in_a_conversation_joins_its_thread(self):
+        """Since 2026-09-08 a report is a turn: the job carries the thread so the
+        trigger materialises the request and the headline into it. The replay set
+        is NOT in the payload -- the report gathers its own figures."""
+        row = {"id": "job-r", "status": "queued", "executor": "worker", "company_id": "co-1",
+               "feature": "insights", "request_id": "r", "payload": {}}
+        tid = "11111111-2222-3333-4444-555555555555"
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep"), \
+             patch.object(routes, "_thread_replay", return_value={"thread_id": tid, "summary": None, "history": []}) as replay, \
+             patch.object(routes.ai_jobs, "enqueue", return_value=[row]) as enqueue:
+            await self._post(thread_id=tid)
+        replay.assert_called_once()
+        kwargs = enqueue.call_args.kwargs
+        assert kwargs["thread_id"] == tid and kwargs["kind"] == "report"
+        assert "history" not in kwargs["payload"] and "summary" not in kwargs["payload"]
+
+    async def test_a_report_in_a_thread_the_company_does_not_own_is_a_404(self):
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep"), \
+             patch.object(routes, "_thread_replay", side_effect=HTTPException(status_code=404, detail="gone")), \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._post(thread_id="11111111-2222-3333-4444-555555555555")
+        assert exc.value.status_code == 404
+        enqueue.assert_not_called()
+
+    async def test_a_report_behind_an_in_flight_question_is_told_to_wait(self):
+        """A report holds the thread for minutes; the one-in-flight index refuses the
+        second job and the door says so with the same 409 a question gets."""
+        tid = "11111111-2222-3333-4444-555555555555"
+        with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \
+             patch.object(routes, "_check_chat_rate_limit"), \
+             patch.object(routes, "_get_supabase_service_role"), \
+             patch.object(routes.ai_jobs, "sweep"), \
+             patch.object(routes, "_thread_replay", return_value={"thread_id": tid, "summary": None, "history": []}), \
+             patch.object(routes, "_is_one_in_flight_violation", return_value=True), \
+             patch.object(routes.ai_jobs, "enqueue", side_effect=Exception("duplicate key value violates unique constraint")):
+            with pytest.raises(HTTPException) as exc:
+                await self._post(thread_id=tid)
+        assert exc.value.status_code == 409
 
     async def test_an_offline_box_refuses_a_report_the_same_way(self):
         with patch.object(routes, "_get_company_ai_settings", return_value=(True, 20)), \

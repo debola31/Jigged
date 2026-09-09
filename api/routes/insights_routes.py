@@ -393,6 +393,11 @@ async def chat(company_id: str, request: ChatRequest):
 async def report(company_id: str, request: ReportRequest):
     """Enqueue a one-page executive summary. The spec arrives on the job row.
 
+    The direct door. The composer has no Report verb since 2026-09-08: a report
+    asked in the chat reaches the same handler through the model's compose_report
+    tool, and the job's kind flips to 'report' when it settles. This route is for
+    a caller that already knows it wants a page.
+
     The SAME door as a question: flag, cap, sweep, heartbeat. A report is one job
     that makes several model calls, so it counts once against the cap and holds
     the single slot for a few minutes; the browser renders the resulting spec to
@@ -406,6 +411,16 @@ async def report(company_id: str, request: ReportRequest):
     db = _get_supabase_service_role()
     ai_jobs.sweep(db)
 
+    # A report asked in a conversation joins it: the thread must be this
+    # company's and live (the same 404 a question gets), and the one-in-flight
+    # rule applies -- a report holds the thread for minutes, so a question asked
+    # meanwhile is told to wait rather than queued behind it. The replay set is
+    # not sent: the report gathers its own figures with SQL and the request is
+    # the whole brief.
+    thread_id = str(request.thread_id) if request.thread_id else None
+    if thread_id:
+        _thread_replay(db, company_id, thread_id)
+
     try:
         rows = ai_jobs.enqueue(
             db,
@@ -416,11 +431,17 @@ async def report(company_id: str, request: ReportRequest):
                 "request": request.request,
                 "today": _client_today(request.today).isoformat(),
             },
+            thread_id=thread_id,
             kind="report",
         )
     except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
         raise _map_llm_error(exc) from exc
     except Exception as exc:
+        if _is_one_in_flight_violation(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="Still working on the previous question in this conversation. Give it a moment.",
+            ) from exc
         logger.error("insights report enqueue failed: %s", exc, exc_info=True)
         sentry_sdk.capture_exception(exc)
         raise HTTPException(status_code=500, detail="Internal server error") from exc

@@ -1,5 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
-import type { ChartConfig } from '@/utils/insightsAccess';
+import type { ChartConfig, ReportSummary } from '@/utils/insightsAccess';
 
 // ============================================================
 // Insights conversations — direct Supabase queries under RLS
@@ -19,6 +19,14 @@ export interface ChatThread {
   updated_at: string;
 }
 
+/**
+ * What a report turn carries beside its headline: the spec the PDF is drawn from,
+ * the chart titles the gate dropped, and how many queries it took. The same
+ * shape `listReports` returns from the job rows, so the preview dialog opens
+ * either without caring where it came from.
+ */
+export type ReportTurn = Pick<ReportSummary, 'report' | 'dropped' | 'tool_call_count'>;
+
 /** A displayed turn. Summary rows are the model's own notes and are never shown. */
 export interface ThreadMessage {
   id: string;
@@ -26,6 +34,20 @@ export interface ThreadMessage {
   role: 'user' | 'assistant';
   content: string;
   chart_config: ChartConfig | null;
+  /** Set on the assistant row of a report turn (2026-09-08). */
+  report: ReportTurn | null;
+  /** The job that produced this turn, when the queue row still exists. */
+  job_id: string | null;
+  created_at: string;
+}
+
+/** An answer that carried a chart, from any of the caller's conversations. */
+export interface ChartTurn {
+  id: string;
+  thread_id: string;
+  thread_title: string;
+  answer: string;
+  chart_config: ChartConfig;
   created_at: string;
 }
 
@@ -99,7 +121,7 @@ function chartConfigOf(raw: unknown): ChartConfig | null {
 export async function listThreadMessages(threadId: string): Promise<ThreadMessage[]> {
   const { data, error } = await getSupabase()
     .from('ai_chat_messages')
-    .select('id, seq, role, content, chart_config, created_at')
+    .select('id, seq, role, content, chart_config, report, job_id, created_at')
     .eq('thread_id', threadId)
     .in('role', ['user', 'assistant'])
     .order('seq', { ascending: true });
@@ -117,6 +139,56 @@ export async function listThreadMessages(threadId: string): Promise<ThreadMessag
       role: row.role,
       content: row.content,
       chart_config: chartConfigOf(row.chart_config),
+      report: reportTurnOf(row.report),
+      job_id: row.job_id,
+      created_at: row.created_at,
+    });
+  }
+  return out;
+}
+
+/** Narrow the `report` column: a spec object with the dropped titles and the query count, or nothing. */
+function reportTurnOf(raw: unknown): ReportTurn | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  if (!candidate.report || typeof candidate.report !== 'object') return null;
+  return {
+    report: candidate.report,
+    dropped: Array.isArray(candidate.dropped) ? candidate.dropped.filter((d): d is string => typeof d === 'string') : [],
+    tool_call_count: typeof candidate.tool_call_count === 'number' ? candidate.tool_call_count : 0,
+  };
+}
+
+/**
+ * Every answer that carried a chart, across the caller's conversations in this
+ * shop, newest first. The History rail's Charts tab is this list: a chart is
+ * kept by having been answered, not by a save gesture. RLS scopes the rows to
+ * threads the caller owns; the thread title rides along for the label.
+ */
+export async function listChartTurns(companyId: string, limit = 30): Promise<ChartTurn[]> {
+  const { data, error } = await getSupabase()
+    .from('ai_chat_messages')
+    .select('id, thread_id, content, chart_config, created_at, ai_chat_threads(title, deleted_at)')
+    .eq('company_id', companyId)
+    .eq('role', 'assistant')
+    .not('chart_config', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`Failed to load your charts: ${error.message}`);
+
+  const out: ChartTurn[] = [];
+  for (const row of data ?? []) {
+    const chart = chartConfigOf(row.chart_config);
+    const thread = row.ai_chat_threads;
+    // An archived conversation takes its charts with it.
+    if (!chart || !thread || thread.deleted_at) continue;
+    out.push({
+      id: row.id,
+      thread_id: row.thread_id,
+      thread_title: thread.title,
+      answer: row.content,
+      chart_config: chart,
       created_at: row.created_at,
     });
   }

@@ -200,6 +200,104 @@ def test_the_workers_report_materialises_the_turn():
         assert summary_row[3] == 2 and summary_row[2].startswith("Earlier:")
 
 
+def test_the_workers_report_of_a_report_job_materialises_a_report_turn():
+    """Since 2026-09-08 a report is a turn. The request becomes the user row, the
+    headline the assistant row, and the spec rides in `report` so the browser can
+    open the page from the thread without the job row. No summary row: a report
+    does not fold history."""
+    with throwaway_company() as (conn, company_id):
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO public.ai_chat_threads (company_id, title) VALUES (%s, 'quarter') RETURNING id",
+                        (company_id,))
+            thread = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.ai_jobs (company_id, feature, executor, model, status, request_id,"
+                " thread_id, kind, payload, claimed_by, claimed_at, lease_expires_at)"
+                " VALUES (%s,'insights','worker','qwen3:32b','running', gen_random_uuid(), %s, 'report', %s,"
+                "         'desktop-1', now(), now() + interval '5 minutes') RETURNING id",
+                (company_id, thread, json.dumps({"kind": "report", "request": "Summary of the quarter", "today": "2026-09-08"})),
+            )
+            job = cur.fetchone()[0]
+
+        spec = {"title": "Operations summary", "period_start": "2026-07-01", "period_end": "2026-09-30",
+                "period_label": "Q3", "headline": "26 jobs started, 16 shipped.", "kpis": [], "blocks": []}
+        result = {"report": spec, "dropped": ["Flat chart"], "tool_calls": ["execute_sql", "execute_sql"],
+                  "tool_trace": [], "provider": "ollama", "model": "qwen3:32b", "tokens_used": 1, "not_permitted": 0}
+        worker = _connect(WORKER_URL)
+        with worker.cursor() as wc:
+            wc.execute("UPDATE public.ai_jobs SET status = 'succeeded', result = %s, finished_at = now()"
+                       " WHERE id = %s AND status IN ('claimed', 'running')", (json.dumps(result), job))
+            assert wc.rowcount == 1
+        worker.close()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT seq, role, content, report, chart_config, job_id FROM public.ai_chat_messages"
+                        " WHERE thread_id = %s ORDER BY seq", (thread,))
+            rows = cur.fetchall()
+        assert [(r[0], r[1]) for r in rows] == [(1, "user"), (2, "assistant")]
+        assert rows[0][2] == "Summary of the quarter" and rows[0][3] is None
+        assert rows[1][2] == "26 jobs started, 16 shipped."
+        assert rows[1][3] == {"report": spec, "dropped": ["Flat chart"], "tool_call_count": 2}
+        assert rows[1][4] is None and str(rows[1][5]) == str(job)
+
+
+def test_a_question_the_model_answered_with_a_report_materialises_a_report_turn():
+    """The composer has one door (2026-09-08). A chat job whose model called
+    compose_report settles with kind = 'report' in the same UPDATE as its status;
+    the trigger then reads the person's words from payload.question -- there is
+    no payload.request -- and stores the spec beside the headline."""
+    with throwaway_company() as (conn, company_id):
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO public.ai_chat_threads (company_id, title) VALUES (%s, 'pdf') RETURNING id",
+                        (company_id,))
+            thread = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO public.ai_jobs (company_id, feature, executor, model, status, request_id,"
+                " thread_id, kind, payload, claimed_by, claimed_at, lease_expires_at)"
+                " VALUES (%s,'insights','worker','qwen3:32b','running', gen_random_uuid(), %s, 'chat', %s,"
+                "         'desktop-1', now(), now() + interval '5 minutes') RETURNING id",
+                (company_id, thread, json.dumps({"question": "Put that in a PDF", "today": "2026-09-08"})),
+            )
+            job = cur.fetchone()[0]
+
+        spec = {"title": "Booked by month", "period_start": "2026-06-01", "period_end": "2026-08-31",
+                "period_label": "Jun–Aug 2026", "headline": "Booked $96,782 across 81 jobs.", "kpis": [], "blocks": []}
+        result = {"kind": "report", "brief": "One-page report of booked revenue by month, June to August 2026",
+                  "report": spec, "dropped": [], "tool_calls": ["execute_sql"], "tool_trace": [],
+                  "provider": "ollama", "model": "qwen3:32b", "tokens_used": 1, "not_permitted": 0}
+        worker = _connect(WORKER_URL)
+        with worker.cursor() as wc:
+            # The worker's mark_succeeded, verbatim: the kind rides in the same statement.
+            wc.execute("UPDATE public.ai_jobs SET status = 'succeeded', result = %s, kind = COALESCE(%s, kind),"
+                       " finished_at = now() WHERE id = %s AND status IN ('claimed', 'running')",
+                       (json.dumps(result), "report", job))
+            assert wc.rowcount == 1
+        worker.close()
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT kind FROM public.ai_jobs WHERE id = %s", (job,))
+            assert cur.fetchone()[0] == "report"
+            cur.execute("SELECT seq, role, content, report, chart_config FROM public.ai_chat_messages"
+                        " WHERE thread_id = %s ORDER BY seq", (thread,))
+            rows = cur.fetchall()
+        assert [(r[0], r[1]) for r in rows] == [(1, "user"), (2, "assistant")]
+        assert rows[0][2] == "Put that in a PDF"
+        assert rows[1][2] == "Booked $96,782 across 81 jobs."
+        assert rows[1][3] == {"report": spec, "dropped": [], "tool_call_count": 1}
+        assert rows[1][4] is None
+
+
+def test_a_report_may_only_ride_on_an_assistant_row():
+    with throwaway_company() as (conn, company_id):
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO public.ai_chat_threads (company_id, title) VALUES (%s, 't') RETURNING id", (company_id,))
+            thread = cur.fetchone()[0]
+            with pytest.raises(psycopg2.errors.CheckViolation):
+                cur.execute("INSERT INTO public.ai_chat_messages (thread_id, company_id, seq, role, content, report)"
+                            " VALUES (%s,%s,1,'user','q','{}'::jsonb)", (thread, company_id))
+        conn.rollback()
+
+
 def test_a_job_without_a_thread_materialises_nothing():
     with throwaway_company() as (conn, company_id):
         with conn.cursor() as cur:

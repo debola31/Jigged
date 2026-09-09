@@ -9,6 +9,7 @@ the log when they find nothing to touch.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from worker.db import WorkerDb
@@ -77,3 +78,17 @@ def test_a_report_that_finds_no_in_flight_row_warns_instead_of_writing(caplog):
         db.mark_failed("job-1", "boom", "internal")
 
     assert caplog.text.count("already terminal") == 2
+
+
+def test_mark_succeeded_re_kinds_the_row_only_when_told_to():
+    """A question the model answered by composing a report settles as one (the
+    caller passes result_kind(result)); None leaves the column as enqueued."""
+    db, cur = _db(rowcount=1)
+
+    db.mark_succeeded("job-1", {"kind": "report", "report": {}}, "report")
+    db.mark_succeeded("job-2", {"answer": "x"})
+
+    sql, params = cur.executed[0]
+    assert "kind = COALESCE(%s, kind)" in sql
+    assert params == (json.dumps({"kind": "report", "report": {}}), "report", "job-1")
+    assert cur.executed[1][1] == (json.dumps({"answer": "x"}), None, "job-2")

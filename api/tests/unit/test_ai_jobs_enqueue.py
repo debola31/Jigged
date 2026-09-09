@@ -33,6 +33,10 @@ class FakeTable:
     def select(self, *_a, **_k):
         return self
 
+    def update(self, values):
+        self._db.updated.setdefault(self._name, []).append(values)
+        return self
+
     def eq(self, *_a):
         return self
 
@@ -50,6 +54,7 @@ class FakeDb:
     def __init__(self, rows=None):
         self.rows = rows or {}
         self.inserted: dict[str, list] = {}
+        self.updated: dict[str, list] = {}
 
     def table(self, name):
         return FakeTable(self, name)
@@ -222,3 +227,26 @@ class TestOfflineAndPriority:
              patch.object(ai_jobs, "worker_can_serve", return_value=True):
             ai_jobs.enqueue(db2, company_id="co", feature="drawings", payload={})
         assert db2.inserted["ai_jobs"][0]["expires_at"] is None
+
+
+class TestMarkSucceeded:
+    """The result may re-kind the row: a question the model answered by calling
+    compose_report settles as kind = 'report', so the Reports list, the thread
+    trigger and the settle event read one column. Anything else leaves it."""
+
+    def test_a_report_result_re_kinds_the_row(self):
+        db = FakeDb()
+        ai_jobs.mark_succeeded(db, "job-1", {"kind": "report", "report": {"title": "t"}})
+        written = db.updated["ai_jobs"][0]
+        assert written["status"] == "succeeded" and written["kind"] == "report"
+
+    def test_a_chat_result_leaves_the_kind_as_enqueued(self):
+        db = FakeDb()
+        ai_jobs.mark_succeeded(db, "job-1", {"answer": "x"})
+        assert "kind" not in db.updated["ai_jobs"][0]
+
+    def test_an_unrecognised_kind_is_not_written(self):
+        """The CHECK constraint would fail the settle itself; the rule filters first."""
+        db = FakeDb()
+        ai_jobs.mark_succeeded(db, "job-1", {"kind": "poem", "answer": "x"})
+        assert "kind" not in db.updated["ai_jobs"][0]

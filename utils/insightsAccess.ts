@@ -132,28 +132,6 @@ export async function submitChatQuery(
   return (await response.json()) as ChatEnqueued;
 }
 
-/**
- * Ask for a one-page executive summary. Same door as a question -- flag, cap,
- * heartbeat -- and the same 202 with a job id; the ReportSpec lands on the job's
- * result and the browser renders it to PDF itself (utils/reportPdf.ts).
- */
-export async function submitReportRequest(companyId: string, request: string): Promise<ChatEnqueued> {
-  const headers = await getAuthHeaders();
-  const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/report`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ request, today: todayLocalISODate() }),
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new ChatEnqueueError(
-      errorData.detail || `Failed to request a report (${response.status})`,
-      response.status,
-    );
-  }
-  return (await response.json()) as ChatEnqueued;
-}
-
 // ============================================================
 // The job row, read straight from Supabase
 // ============================================================
@@ -204,6 +182,7 @@ export type AiJob = Pick<
   | 'expires_at'
   | 'lease_expires_at'
   | 'batch_key'
+  | 'kind'
 >;
 
 const TERMINAL: readonly string[] = ['succeeded', 'failed', 'timed_out'];
@@ -224,7 +203,7 @@ export function isInFlight(job: AiJob | null): boolean {
  * erasure CLAUDE.md forbids. Duplicating twelve column names is the cheaper price.
  */
 const AI_JOB_SELECT =
-  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key' as const;
+  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key, kind' as const;
 
 /**
  * Narrow `ai_jobs.result` to the answer shape.

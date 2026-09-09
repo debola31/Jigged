@@ -16,10 +16,12 @@ from models.report_spec import ReportSpec
 from services.ai_features import insights, report
 from services.ai_features.base import JobContext
 from services.insights_presentation import CHART_EXEMPLAR
-from services.llm.base import LLMResult
+from services.ai_features.base import result_kind
+from services.llm.base import LLMResult, ToolCall
 from services.llm.errors import LLMErrorEcho
 from tests.unit.test_insights_conversation import Recording
-from tests.unit.test_insights_loop_integrity import SQL_FAILED, _answer, _asks_for_sql
+from tests.unit.test_insights_loop_integrity import SQL_FAILED, SQL_OK, _answer, _asks_for_sql
+from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
 
 pytestmark = pytest.mark.unit
 
@@ -228,3 +230,112 @@ async def test_the_trace_and_the_counts_ride_on_the_result():
     assert result["tool_trace"][0]["sql"] == "SELECT 1" and result["tool_trace"][0]["row_count"] == 4
     assert result["tool_calls"] == ["execute_sql"]
     assert result["tokens_used"] == 15 + 15 + 150
+
+
+# ------------------------------------------ a question answered with a page
+
+BRIEF = "One-page report of booked revenue by month, June to August 2026"
+
+
+def _asks_to_compose(brief: str | None = BRIEF) -> LLMResult:
+    args = {} if brief is None else {"brief": brief}
+    return LLMResult(
+        text="", tool_calls=[ToolCall(id="call_compose", name=COMPOSE_REPORT_TOOL, arguments=args)],
+        model="m", provider="p", tokens_in=10, tokens_out=5,
+    )
+
+
+async def run_question(convo: Recording, question: str = "Put that in a PDF") -> dict:
+    """A CHAT payload -- the composer has one door -- with a conversation behind it."""
+    with patch.object(report.llm, "complete", convo.complete), \
+         patch.object(insights, "_run_tool", convo.run_tool), \
+         patch("services.insights_service._build_chat_system_prompt", return_value="SYSTEM"):
+        return await insights.run(JobContext(
+            feature="insights", company_id="c0", request_id="rid",
+            payload={"question": question, "today": "2026-09-07",
+                     "history": [{"seq": 1, "role": "user", "content": "Booked revenue by month?"},
+                                 {"seq": 2, "role": "assistant",
+                                  "content": "June $13,367, July $34,444, August $48,971."}]},
+        ))
+
+
+async def test_a_question_the_model_answers_by_composing_becomes_a_report():
+    """One composer, no picker (2026-09-08): the model reads "put that in a PDF",
+    resolves "that" from the conversation and calls compose_report with a brief
+    that stands alone. The handler hands the brief to the report path, and the
+    result says kind = 'report' so the executors flip the row."""
+    convo = Recording(turns=[_asks_to_compose(), _asks_for_sql(), _answer("READY"), _composed(_report())],
+                      tool_results=[ROWS])
+    result = await run_question(convo)
+
+    assert result["kind"] == "report" and result_kind(result) == "report"
+    assert result["report"]["title"] == "OPERATIONS SUMMARY"
+    assert result["brief"] == BRIEF
+    # The chat call saw the conversation and the question, with both tools offered;
+    # the report path saw the brief, never the question.
+    chat_call, gather = convo.seen[0], convo.seen[1]
+    assert chat_call[-1].text() == "Put that in a PDF"
+    assert convo.kwargs[0]["tools"] is CHAT_TOOLS
+    assert report.REPORT_BRIEF in gather[1].text()
+    assert f"The request: {BRIEF}" in gather[1].text()
+    assert "Put that in a PDF" not in gather[1].text()
+    # Same system turn throughout: the prefix chat cached is the one the report reuses.
+    assert {seen[0].text() for seen in convo.seen} == {"SYSTEM"}
+
+
+async def test_a_compose_call_with_no_brief_falls_back_to_the_question():
+    convo = Recording(turns=[_asks_to_compose(brief=None), _asks_for_sql(), _answer("READY"), _composed(_report())],
+                      tool_results=[ROWS])
+    result = await run_question(convo, question="One-page report on this quarter")
+
+    assert result["kind"] == "report"
+    assert result["brief"] == "One-page report on this quarter"
+    assert "The request: One-page report on this quarter" in convo.seen[1][1].text()
+
+
+async def test_a_plain_answer_carries_no_kind_so_the_row_stays_as_enqueued():
+    convo = Recording(turns=[_asks_for_sql(), _answer("4 jobs are late.")], tool_results=[SQL_OK])
+    result = await run_question(convo, question="How many jobs are late?")
+
+    assert result["answer"] == "4 jobs are late." and "kind" not in result
+    assert result_kind(result) is None
+    assert result_kind({"kind": "report"}) == "report"
+    assert result_kind({"kind": "poem"}) is None and result_kind(None) is None
+
+
+async def test_in_the_report_loop_compose_report_means_done_gathering():
+    """The tools block must match chat's for the prefix to hold, so the report
+    loop is offered compose_report too. There it ends gathering -- the queries
+    beside it run first -- and it is never dispatched again."""
+    both = LLMResult(
+        text="", model="m", provider="p", tokens_in=10, tokens_out=5,
+        tool_calls=[
+            ToolCall(id="c1", name="execute_sql",
+                     arguments={"sql": "SELECT 1 FROM jobs WHERE company_id = $1", "description": "d"}),
+            ToolCall(id="c2", name=COMPOSE_REPORT_TOOL, arguments={"brief": "ignored here"}),
+        ],
+    )
+    convo = Recording(turns=[both, _composed(_report())], tool_results=[ROWS])
+    result = await run_report(convo)
+
+    assert result["kind"] == "report" and result["report"]["title"] == "OPERATIONS SUMMARY"
+    # Two calls: the gather that asked to compose, then the compose. No third.
+    assert len(convo.seen) == 2
+    compose = convo.seen[1]
+    assert compose[-1].text() == report.COMPOSE_REQUEST
+    assert any(m.role == "tool" for m in compose)
+    # The query is recorded as a tool call; the compose_report call is not.
+    recorded = [c.name for m in compose if m.role == "assistant" for c in m.tool_calls]
+    assert recorded == ["execute_sql"]
+    assert result["tool_calls"] == ["execute_sql"]
+
+
+async def test_a_bare_compose_call_in_the_report_loop_composes_over_what_was_gathered():
+    convo = Recording(turns=[_asks_for_sql(), _asks_to_compose(), _composed(_report())], tool_results=[ROWS])
+    result = await run_report(convo)
+
+    assert result["report"]["title"] == "OPERATIONS SUMMARY"
+    assert len(convo.seen) == 3
+    compose = convo.seen[2]
+    # Nothing was appended for the bare call: the tool result, then the request.
+    assert compose[-1].text() == report.COMPOSE_REQUEST and compose[-2].role == "tool"

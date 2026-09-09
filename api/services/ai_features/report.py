@@ -244,7 +244,10 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
         calls = [call for call in result.tool_calls if call.name != COMPOSE_REPORT_TOOL]
         if composing and not calls and not result.text.strip():
             break
-        tool_results = [(call, await insights._run_tool(ctx.company_id, call, today)) for call in calls]
+        tool_results = [
+            (call, await insights._run_tool(ctx.company_id, call, today, ctx.readonly_dsn))
+            for call in calls
+        ]
         refused += sum(1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND)
         for call, r in tool_results:
             if call.name != "execute_sql":

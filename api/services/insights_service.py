@@ -172,6 +172,7 @@ async def execute_sql_tool(
     sql: str,
     description: str = "",
     today: date | None = None,
+    dsn: str | None = None,
 ) -> dict:
     """
     Execute an AI-generated SQL query via the SQL executor.
@@ -184,6 +185,9 @@ async def execute_sql_tool(
         today: The caller's LOCAL date, bound as $2. The database is UTC, so the
             model must never read the clock itself -- the validator refuses
             CURRENT_DATE and now() for exactly this reason.
+        dsn: Which database to ask. The worker names it per job because it serves
+            production and every live preview branch from one process; None means
+            AI_READONLY_DATABASE_URL, which is the backend's single database.
 
     Returns:
         Dict with columns, rows, row_count (or error message)
@@ -195,4 +199,5 @@ async def execute_sql_tool(
         sql=sql,
         description=description,
         today=today,
+        dsn=dsn,
     )

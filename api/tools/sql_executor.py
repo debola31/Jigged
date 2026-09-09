@@ -19,8 +19,15 @@ from .tool_json import to_json_safe
 
 logger = logging.getLogger(__name__)
 
-# Connection pool (lazily initialized)
-_pool: Optional[asyncpg.Pool] = None
+# One pool per read-only DSN, created lazily and kept for the life of the process.
+#
+# A DICT, NOT A SINGLE POOL, since 2026-09-09. The worker serves production and
+# every live Supabase preview branch from one process, and each job's SQL has to
+# run against the database that job was claimed from. A single latched pool meant
+# one shop's question could be answered with another's data -- the same failure the
+# two DSN incidents in worker/config.py describe, and the reason the DSN now
+# travels with the job (JobContext.readonly_dsn) instead of being ambient.
+_pools: dict[str, asyncpg.Pool] = {}
 
 # Maximum rows to return
 MAX_ROWS = 200
@@ -166,39 +173,55 @@ def describe_dsn(dsn: str) -> str:
     return f"{user}{parts.hostname or '?'}:{parts.port or 5432}{parts.path}"
 
 
-async def init_pool() -> Optional[asyncpg.Pool]:
-    """Initialize the asyncpg connection pool."""
-    global _pool
-    if _pool is not None:
-        return _pool
+async def init_pool(dsn: str | None = None) -> Optional[asyncpg.Pool]:
+    """The pool for one read-only DSN, created on first use and reused after.
 
-    dsn = os.getenv("AI_READONLY_DATABASE_URL")
-    if not dsn:
+    THE ENVIRONMENT IS CONSULTED ONLY WHEN NO DSN IS GIVEN. A caller that names a
+    database gets that database or nothing -- falling back to
+    AI_READONLY_DATABASE_URL here would be the `setdefault` bug of
+    worker/__main__.export_sandbox_dsn one level up, quietly answering a preview
+    branch's question from production because the env happened to hold it. The
+    no-argument form is the backend's and the evals', where the env IS the
+    configuration and one process serves one database.
+    """
+    resolved = dsn or os.getenv("AI_READONLY_DATABASE_URL")
+    if not resolved:
         logger.warning(
             "AI_READONLY_DATABASE_URL not set. SQL tool will not be available."
         )
         return None
 
+    existing = _pools.get(resolved)
+    if existing is not None:
+        return existing
+
     try:
-        _pool = await asyncpg.create_pool(
-            dsn=dsn,
+        pool = await asyncpg.create_pool(
+            dsn=resolved,
             min_size=0,
             max_size=1,
             command_timeout=STATEMENT_TIMEOUT_MS / 1000,
         )
-        logger.info("AI SQL executor pool initialized.")
-        return _pool
     except Exception as e:
-        logger.error(f"Failed to initialize AI SQL pool: {e}")
+        logger.error(f"Failed to initialize AI SQL pool for {describe_dsn(resolved)}: {e}")
         return None
 
+    _pools[resolved] = pool
+    logger.info("AI SQL executor pool initialized for %s.", describe_dsn(resolved))
+    return pool
 
-async def close_pool() -> None:
-    """Close the connection pool."""
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+
+async def close_pool(dsn: str | None = None) -> None:
+    """Close one database's pool, or every pool when none is named.
+
+    Closing everything is what the test fixtures mean by close_pool(), and it is
+    also what a worker wants when a preview branch disappears -- there, the DSN is
+    named, because the other databases are still being served.
+    """
+    for key in ([dsn] if dsn else list(_pools)):
+        pool = _pools.pop(key, None)
+        if pool is not None:
+            await pool.close()
 
 
 async def execute_sql_query(
@@ -206,6 +229,7 @@ async def execute_sql_query(
     sql: str,
     description: str = "",
     today: date | None = None,
+    dsn: str | None = None,
 ) -> dict:
     """
     Validate and execute an AI-generated SQL query.
@@ -261,8 +285,8 @@ async def execute_sql_query(
             f"table, or a statement that is not a SELECT"
         )
 
-    # 2. Ensure pool is ready
-    pool = await init_pool()
+    # 2. Ensure pool is ready, for THIS job's database (see init_pool)
+    pool = await init_pool(dsn)
     if pool is None:
         return {
             "error": "Database connection not available. AI_READONLY_DATABASE_URL may not be configured.",

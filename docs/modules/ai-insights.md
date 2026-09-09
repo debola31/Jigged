@@ -653,7 +653,10 @@ and the route works the job inline; `ollama:<tag>` routes every question to the 
 `qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production flipped to
 `ollama:qwen3:32b` in September 2026; the revert is unsetting the variable. `AI_READONLY_DATABASE_URL`
 is the sandbox connection for the backend; the worker carries its own
-(`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)). All on top of the standard
+(`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)) — one per database, since
+it serves production and every live Supabase preview branch from one process and each job names the
+database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insights works on a PR's
+Vercel preview with nothing run per PR. All on top of the standard
 Supabase vars.
 
 ## Dashboard surfaces
@@ -943,11 +946,6 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - **No pinned charts on the dashboard.** Withdrawn with the chat-first page (2026-09-08), deliberately, to
   be re-evaluated on use: the Charts tab of History is the substitute, and a Build mode (widgets from
   prompts) is the way back if owners want charts on the landing page.
-- **A preview deployment has no worker unless someone runs one.** The preview's backend enqueues into
-  the PR's Supabase branch, where nothing heartbeats, so every preview's ask bar reads offline out of
-  the box. `scripts/preview-worker.sh <pr>` runs a second worker against that branch from the serving
-  Mac for as long as you are testing ([ai-worker.md](../runbooks/ai-worker.md)).
-
 - **Nothing enforces that this doc's two table lists match the code.** Both had drifted — the
   count in four places, and one missing denylist entry. A test asserting the doc's lists against
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.

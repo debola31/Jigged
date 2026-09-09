@@ -17,10 +17,17 @@ from services.llm.base import LLMProvider
 class JobContext:
     """One job's inputs, plus the seams the two hosts need to differ on.
 
-    `chain` and `audit_writer` are injectable because the worker resolves its own
-    chain and writes the ledger over libpq as jigged_ai_worker, while the backend
-    resolves from env and writes through PostgREST as service_role. Everything
+    `chain`, `audit_writer` and `readonly_dsn` are injectable because the worker
+    resolves its own chain, writes the ledger over libpq as jigged_ai_worker, and
+    since 2026-09-09 serves several databases at once, while the backend resolves
+    all three from env and writes through PostgREST as service_role. Everything
     else about running the job is identical, which is the point.
+
+    `readonly_dsn` is WHICH DATABASE THIS JOB'S SQL RUNS AGAINST. The worker sets
+    it from the database the job was claimed from -- production or one live
+    preview branch -- so nothing ambient decides. Left None by the backend and the
+    evals, where tools/sql_executor falls back to AI_READONLY_DATABASE_URL because
+    one process there serves exactly one database.
     """
 
     feature: str
@@ -29,6 +36,7 @@ class JobContext:
     payload: dict[str, Any] = field(default_factory=dict)
     chain: list[LLMProvider] | None = None
     audit_writer: AuditWriter | None = None
+    readonly_dsn: str | None = None
 
 
 Handler = Callable[[JobContext], Awaitable[dict[str, Any]]]

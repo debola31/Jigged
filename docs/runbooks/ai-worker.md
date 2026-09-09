@@ -53,6 +53,7 @@ Two DSNs, two roles, one process. That split is the whole least-privilege story:
 |---|---|---|
 | `WORKER_DATABASE_URL` | `jigged_ai_worker` | claim/report `ai_jobs`, insert `ai_calls`, keep its heartbeat |
 | `WORKER_READONLY_DATABASE_URL` | `jigged_ai_readonly` | the insights `execute_sql` sandbox, per-company scoped by RLS |
+| `SUPABASE_ACCESS_TOKEN` | — | **optional.** Lets the worker discover live preview branches and serve them beside production (§3). Read-only scope is enough; it is only ever used for `GET /v1/projects/{ref}/branches`. Absent, the worker serves production alone |
 
 **Where they go.** [`worker/__main__.py`](../../worker/__main__.py) loads the repo-root
 `.env.local`, and the shell wins over it. That is the entire precedence rule.
@@ -134,25 +135,37 @@ A heartbeat inside 60 seconds is what makes the feature "available". Staler than
 that and every queued job for its models sweeps to `timed_out` / `ai_offline`,
 and the UI says the box is off.
 
-### For a PR's Vercel preview (a second worker, on demand)
+### What it serves, and how a preview branch joins
 
-A preview deployment talks to the PR's **Supabase branch**, not production, and nothing heartbeats
-there: every preview's ask bar reads "the AI box is offline". One worker serves one database, so a
-preview gets its own for as long as you are testing it:
+**One worker, every database this project answers for.** Production always, from
+`WORKER_DATABASE_URL`; and, when `SUPABASE_ACCESS_TOKEN` is set, every live preview branch beside it.
+A Vercel preview enqueues into the PR's **own Supabase branch** — a separate project with its own
+`ai_jobs` and `ai_workers` — so without this every preview's ask bar reads "the AI box is offline",
+refused at enqueue because nothing heartbeats there.
 
-```bash
-scripts/preview-worker.sh 840      # the PR number; Ctrl-C stops it
-```
+Nothing is run per PR and nothing is configured per branch. Every two minutes the worker asks
+Supabase which branches exist (`GET /v1/projects/{ref}/branches`), serves each one whose
+`preview_project_status` is `ACTIVE_HEALTHY`, and drops it when the PR closes and the branch goes.
+Branch DSNs are derived from production's own pooler DSN — same host, the branch's project ref in
+the pooler username — with the login `supabase/seed.sql` grants both roles on non-production
+databases. The banner names every database served, and every job log line names the one it ran
+against, because *which database answered* must never be something to infer from a wrong number
+later.
 
-The script reads the branch's project ref from the PR's **Supabase Preview** check (`gh pr checks`),
-reuses the region pooler host from `WORKER_DATABASE_URL` in `.env.local`, and connects as
-`jigged_ai_worker` / `jigged_ai_readonly` with the password `supabase/seed.sql` gives those roles on
-local and preview databases — no credential to set up, and it refuses the production ref. The Vercel
-preview's own env already routes insights to the local chain (`LLM_CHAIN_INSIGHTS`), so the preview's
-ask bar comes alive the moment the heartbeat lands. Both workers share the one Ollama
-(`OLLAMA_NUM_PARALLEL=1`), so a production question asked during a preview job waits behind it.
-Measured 2026-09-08 on PR #840: heartbeat within 5 s; a question posted to the preview backend was
-enqueued to the worker executor and settled in 15 s.
+`ACTIVE_HEALTHY` is the project's status, not a promise the connection will work: a branch created
+minutes ago can report it while its pooler tenant or its seed is still catching up, so the connect is
+the real gate. Observed on 2026-09-09 with two PRs open at once — one branch was serving inside a
+second, the other refused the login and was picked up on a later pass. A branch that never becomes
+connectable costs one warning every two minutes and nothing else.
+
+Degradations are all in the safe direction: no token, a non-pooler `WORKER_DATABASE_URL`, an
+unreachable API or a revoked token all mean **production alone**, which is what every shop box does.
+Discovery can never shrink the list below it.
+
+> **Withdrawn 2026-09-09.** A preview-worker shell script under `scripts/`, taking a PR number and
+> starting a second worker by hand against that one PR's branch. It died when the PR merged, the next
+> PR needed the command run again with a different number, and it made serving a preview something a
+> person had to remember. Deleted, not replaced: the worker does it.
 
 ## 4. What the loop does, and the two things that are easy to get wrong
 

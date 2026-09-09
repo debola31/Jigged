@@ -40,6 +40,15 @@ class Config:
     # waits for: its offline verdict comes from the heartbeat, not from this.
     request_timeout_s: float = 480.0
     version: str = "1"
+    # A Supabase personal access token, READ-ONLY scope being enough. Present, the
+    # worker asks which preview branches exist and serves them beside production
+    # (worker/branches.py); absent, it serves production alone, which is what every
+    # shop box does. Optional on purpose: this is a developer convenience, and a
+    # worker must never depend on an external API to do its actual job.
+    supabase_access_token: str | None = None
+    # How often to ask which branches exist. Two minutes: a branch appearing is not
+    # something anyone is watching a spinner for, and every pass is an API call.
+    discover_seconds: float = 120.0
     extra: dict = field(default_factory=dict)
 
 
@@ -50,6 +59,29 @@ def _require(name: str, purpose: str) -> str:
     return value
 
 
+def refuse_superuser_sandbox(dsn: str, source: str) -> None:
+    """Refuse a sandbox DSN that names the `postgres` superuser on a remote host.
+
+    AI_READONLY_DATABASE_URL is the local postgres SUPERUSER, which is BYPASSRLS --
+    every tenant-scoping guarantee in the SQL sandbox off, queries silently
+    returning other companies' rows. Fine on a local stack, catastrophic for a
+    worker serving real shops. While the backend and the worker read one name, the
+    only thing standing between them was load order; the separate name deleted
+    that, and this is the backstop for a hand-pasted DSN.
+
+    A FUNCTION, not an inline check, since 2026-09-09: the worker now builds a
+    sandbox DSN per database it serves, so every one of them is vetted, not just
+    the one in the environment. `source` names where the DSN came from, because a
+    refusal that does not say which database it is about is a puzzle.
+    """
+    if "://postgres:" in dsn and "127.0.0.1" not in dsn and "localhost" not in dsn:
+        raise WorkerMisconfigured(
+            f"{source} points at the `postgres` superuser on a non-local host. That "
+            f"role is BYPASSRLS, so the SQL sandbox's per-company scoping would "
+            f"silently do nothing. Use the jigged_ai_readonly role."
+        )
+
+
 def load() -> Config:
     readonly = _require(
         "WORKER_READONLY_DATABASE_URL",
@@ -57,19 +89,7 @@ def load() -> Config:
         "jigged_ai_readonly. Named apart from AI_READONLY_DATABASE_URL deliberately: "
         "one .env.local holds both, and that one is the LOCAL stack",
     )
-    # The separate NAME is the actual fix here. AI_READONLY_DATABASE_URL is the local
-    # postgres SUPERUSER, which is BYPASSRLS -- every tenant-scoping guarantee in the
-    # SQL sandbox off, queries silently returning other companies' rows. Fine on a
-    # local stack, catastrophic for a worker serving real shops. While both processes
-    # read one name, the only thing standing between them was load order. Now nothing
-    # the backend sets can reach this value, and the check below is a backstop for a
-    # hand-pasted DSN rather than the guarantee itself.
-    if "://postgres:" in readonly and "127.0.0.1" not in readonly and "localhost" not in readonly:
-        raise WorkerMisconfigured(
-            "WORKER_READONLY_DATABASE_URL points at the `postgres` superuser on a "
-            "non-local host. That role is BYPASSRLS, so the SQL sandbox's per-company "
-            "scoping would silently do nothing. Use the jigged_ai_readonly role."
-        )
+    refuse_superuser_sandbox(readonly, "WORKER_READONLY_DATABASE_URL")
 
     return Config(
         worker_id=_require("WORKER_ID", "how this box identifies itself in ai_workers"),
@@ -85,7 +105,8 @@ def load() -> Config:
         ),
         lease_seconds=int(os.getenv("WORKER_LEASE_SECONDS", "300")),
         version=os.getenv("WORKER_VERSION", "1"),
+        supabase_access_token=os.getenv("SUPABASE_ACCESS_TOKEN") or None,
     )
 
 
-__all__ = ["Config", "WorkerMisconfigured", "load"]
+__all__ = ["Config", "WorkerMisconfigured", "load", "refuse_superuser_sandbox"]

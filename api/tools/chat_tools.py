@@ -20,13 +20,38 @@ tool itself computes nothing, and it is never dispatched to anything.
 
 COMPOSE_REPORT_TOOL = "compose_report"
 
+# THE CLOCK RULE IS STATED HERE TOO, AND THAT IS NOT DRIFT. It is a mechanical
+# contract of this tool -- which values are bound -- not a business definition;
+# semantics.md still owns those and this file defines none. It is repeated here
+# because of WHERE this text lands. Measured on the assembled prompt: Ollama's
+# qwen3 template renders the tools block AFTER the entire system prompt, so the
+# `sql` parameter description sits at ~98% depth while "TODAY IS $2, NEVER THE
+# CLOCK" in SCHEMA_CONTEXT sits at ~46%. Until 2026-09-09 this block carried
+# three `$1`, zero `$2`, and called $1 "THE placeholder for company_id" -- a
+# false arity claim about fifty tokens before the model writes SQL -- with a
+# single worked example that had no date in it at all.
+#
+# Production 2026-09-08..09: 3 of 27 questions paid a wasted round trip to a
+# CURRENT_DATE refusal, and 3 of 3 clock reaches were refused. On a box decoding
+# at ~7 tokens/s that is ten to twenty seconds of someone waiting, for a rule the
+# prompt already stated twice.
+#
+# Only two clock functions are named, deliberately: _FORBIDDEN_CLOCK holds eight
+# and that list is the validator's to grow. Naming two keeps this sentence true
+# when it does. The examples are pinned to validate_query by
+# api/tests/unit/test_chat_tools_contract.py -- an example the validator would
+# refuse teaches the model the failure, because the example is what it copies.
+
 CHAT_TOOLS: list[dict] = [
     {
         "name": "execute_sql",
         "description": (
             "Execute a read-only SQL SELECT query against the company's PostgreSQL database. "
             "The query MUST be a single SELECT statement (or WITH/CTE). "
-            "Use $1 as the placeholder for company_id — it will be injected automatically. "
+            "Two values are bound for you and they are the only two: $1 is the company_id, "
+            "and $2 is TODAY — the caller's own local calendar date. Build every date bound "
+            "from $2. Asking the database for the date instead — CURRENT_DATE, now() — is "
+            "rejected before execution and the query never runs. "
             "Results are limited to 200 rows. Use this for any analytical question about "
             "jobs, quotes, customers, parts, inventory, operations, or other business data."
         ),
@@ -36,9 +61,14 @@ CHAT_TOOLS: list[dict] = [
                 "sql": {
                     "type": "string",
                     "description": (
-                        "A single SELECT statement. Use $1 as the company_id placeholder. "
-                        "Example: SELECT production_status, COUNT(*) as count FROM jobs "
-                        "WHERE company_id = $1 GROUP BY production_status"
+                        "A single SELECT statement. $1 is the company_id; $2 is today's "
+                        "date. Write $2::date wherever the expression does not already fix "
+                        "the type — DATE_TRUNC, EXTRACT, AGE and interval arithmetic all "
+                        "need the cast; a comparison against a typed column does not.\n"
+                        "Example, no date needed: SELECT production_status, COUNT(*) AS count "
+                        "FROM jobs WHERE company_id = $1 GROUP BY production_status\n"
+                        "Example, bounded by today: SELECT COUNT(*) AS jobs FROM jobs "
+                        "WHERE company_id = $1 AND due_date BETWEEN $2::date AND $2::date + 7"
                     ),
                 },
                 "description": {

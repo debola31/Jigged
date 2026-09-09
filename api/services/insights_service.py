@@ -96,6 +96,15 @@ def _build_chat_system_prompt(semantics: str | None = None) -> str:
     carries them, even after a successful query. It sits at the TAIL so the bytes
     before it -- the prefix the KV cache reuses -- are unchanged.
 
+    BOTH PLACEHOLDERS ARE NAMED IN THE FIRST LINES, for the same measured reason.
+    This sentence named $1 alone while the clock rule sat thousands of tokens later
+    in SCHEMA_CONTEXT, and the tool schema -- which Ollama's qwen3 template renders
+    LAST, nearest the point of use -- named $1 alone as well and called it "the"
+    placeholder. Over 2026-09-08..09, 3 of 27 production questions paid a round trip
+    to a CURRENT_DATE refusal and every clock reach was refused. Fixing the tool
+    schema while the opening still enumerates the bound values and names one of them
+    would be half a fix.
+
     TWO TOOLS, NO PICKER (2026-09-08). The composer has one box, so whether an
     answer is prose, a chart or a one-page PDF is the model's call: compose_report
     is offered beside execute_sql and a guideline says when. The opening lines
@@ -125,7 +134,8 @@ def _stable_prefix() -> str:
         "about this shop's data -- do not attempt it. Reply with exactly this sentence and nothing "
         f"more: {OFF_TOPIC_REPLY}\n"
         "You have two tools. execute_sql queries the company's PostgreSQL database: answer questions "
-        "by writing SELECT queries, always with $1 as the company_id placeholder. compose_report "
+        "by writing SELECT queries, always with $1 as the company_id placeholder and $2 as today's "
+        "date -- never the clock. compose_report "
         "produces a one-page PDF report, and is only for when the person asks for a document.\n\n"
         f"{SCHEMA_CONTEXT}\n\n"
         "Guidelines:\n"

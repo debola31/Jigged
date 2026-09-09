@@ -495,6 +495,11 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 numbers_in(r, known_figures)
             else:
                 trace["error_kind"] = r.get("error_kind")
+                # The validator's branch slug, when it was the validator that
+                # refused. This is what makes "how often does the model reach for
+                # the clock" a GROUP BY rather than a regex over jsonb.
+                if r.get("error_reason"):
+                    trace["error_reason"] = r["error_reason"]
                 if r.get("error_kind") == SQL_ERROR_KIND:
                     sql_failed += 1
             tool_trace.append(trace)

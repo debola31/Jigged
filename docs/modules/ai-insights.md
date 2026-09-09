@@ -295,6 +295,60 @@ earlier?" was answered by re-running the metric and re-emitting the previous sen
 word, three times**. A guideline now names that failure: a question about the conversation is
 answered from the replayed turns with no tool call.
 
+**Every SQL failure on record was the model reaching for the clock — 2026-09-09.** Across the whole
+recorded history of the feature (`ai_jobs.result -> tool_trace`, 2026-09-08..09): **30 `execute_sql`
+calls over 27 questions, 3 failures, and 100 % of those failures were `CURRENT_DATE`.** Every one was
+the same shape — `expiration_date >= CURRENT_DATE` — refused by the validator, rewritten with `$2`,
+and then correct. **3 of 27 questions (11.1 %) paid an extra round trip**, ten to twenty seconds each
+on a box decoding at ~7 tokens/s. Three of three clock reaches were refused: when the model reaches
+for the clock, it is always wrong.
+
+The rule was already stated **twice**, in `SCHEMA_CONTEXT` and in `semantics.md`. What was missing
+was where. Measured on the assembled prompt: Ollama's qwen3 template renders the tools block **after
+the entire system prompt**, so the `sql` parameter description the model reads while filling in the
+argument sits at **~98 % depth** and the clock rule at **~46 %**. And that block named `$1` three
+times, `$2` **zero** times, called `$1` *"the placeholder for company_id"* — a false claim about how
+many values are bound, fifty tokens before generation — and carried one worked example with no date
+in it at all.
+
+So the fix is locality, not repetition: the tool description and its `sql` parameter now name both
+bound values, state the refusal as a consequence (*"rejected before execution and the query never
+runs"*), and carry two examples — one dateless, one bounded by `$2::date`. The opening sentence names
+both placeholders too, the position this file's own docstring records as decisive for a 32B.
+[`test_chat_tools_contract.py`](../../api/tests/unit/test_chat_tools_contract.py) pins every worked
+example **through `validate_query`**: the example is what the model copies, so an example the
+validator would refuse teaches it the failure.
+
+**The dated example bounds `due_date`, a `DATE`, and that is deliberate.** `$2::date` against a
+`TIMESTAMPTZ` column — `created_at >= DATE_TRUNC('month', $2::date)` — validates cleanly and compares
+a UTC instant to a local midnight: the same day-boundary error as `CURRENT_DATE`, wearing the fix's
+clothes.
+
+**And the rate is now a `GROUP BY`, not a regex.** Establishing the 11.1 % above meant matching a
+pattern against the model's SQL inside jsonb by hand, which is not a measurement anyone repeats.
+`validate_query_detailed` returns a branch slug that rides onto `tool_trace.error_reason`, set only
+for a refusal *before* execution — a database error carries `error_kind` with no reason, which is how
+the two are told apart:
+
+```sql
+SELECT call ->> 'error_reason' AS reason, count(*)
+FROM ai_chat_messages m, jsonb_array_elements(m.tool_trace) AS call
+WHERE call ? 'error_reason'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+**The decision this leaves open, pre-registered so it is not re-argued later.** A deterministic
+rewrite of `CURRENT_DATE` → `$2::date` in the validator would remove the round trip outright, and it
+was designed and costed. It is **not shipped**, for two reasons a review panel raised and neither is
+cosmetic: it spends the repo's own anti-substitution principle — *refuse loudly, never quietly
+substitute* — and it degrades `tool_trace.sql` from "the SQL that ran" to "the SQL the model wrote",
+which is the exact column the 16-vs-6 investigation depended on. Shipping it beside the prompt fix
+would also make the prompt fix permanently unmeasurable: a reach that costs nothing stops being
+reported as a failure. **If the query above still shows `clock` after a fortnight of real use, the
+rewrite is the answer and the argument for it is made** — one construct wide, `CURRENT_DATE` only
+(the type note above `_FORBIDDEN_CLOCK` says why the other seven are not candidates), storing both
+the written and the executed SQL.
+
 **And the day boundary underneath it.** Postgres runs in UTC, so `CURRENT_DATE` is already tomorrow
 for the last hours of a working day in the Americas — enough to call a job late the evening before
 it is. The jobs list had always avoided this by threading the browser's date in as `p_today`; the

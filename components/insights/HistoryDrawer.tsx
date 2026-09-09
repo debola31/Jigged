@@ -228,7 +228,7 @@ export default function HistoryDrawer({
             })}
             {(reports.data ?? NO_REPORTS).length === 0 && (
               <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 2 }}>
-                No reports yet. Switch the composer to Report and describe the one-pager you want.
+                No reports yet. Ask for a report — a one-pager, a PDF, a printout — and it will appear here.
               </Typography>
             )}
           </List>

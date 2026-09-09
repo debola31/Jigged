@@ -28,7 +28,7 @@ is prefixed `/dashboard/{companyId}`.
 | `overdue_jobs` | Overdue Jobs | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "not yet shipped" | `/jobs?overdue=true` |
 | `open_jobs` | Open Jobs | not `fully_shipped` AND not `cancelled` | ordered **minus already shipped** — "not yet shipped" | `/jobs?status=not_started` |
 | `completed_jobs` | Completed Jobs | distinct jobs **shipped from** in the period | value shipped in the period — "shipped this week" / "shipped today", with a period-over-period delta | `/jobs?status=completed` |
-| `open_quotes` | Open Quotes | `quotes.status = 'active'` | none — see below | `/quotes?status=active` |
+| `open_quotes` | Open Quotes | the shared `public.is_quote_open` predicate — active, not converted, not lapsed; the same rule the quotes list and the insights AI use | none — see below | `/quotes?status=open` |
 
 Never `jobs.status`; that column was removed (the May 2026 prod regression).
 

@@ -14,7 +14,7 @@ from typing import Optional
 
 import asyncpg
 
-from .sql_validator import validate_query
+from .sql_validator import validate_query_detailed
 from .tool_json import to_json_safe
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ _REWRITE_INSTRUCTION = (
 )
 
 
-def retryable_sql_error(message: str) -> dict:
+def retryable_sql_error(message: str, reason: str = "") -> dict:
     """A model-fixable failure, phrased as an instruction rather than a report.
 
     THE OTHER HALF OF classify_not_permitted. That one says a failure is final;
@@ -67,13 +67,24 @@ def retryable_sql_error(message: str) -> dict:
     Carrying SQL_ERROR_KIND is what lets the tool loop count "failed, and
     fixable" without reading message text: infrastructure failures and refused
     objects deliberately do not get it, because no rewrite reaches either.
+
+    `reason` is the validator's branch slug, set only for a pre-execution refusal.
+    It is for counting, never for the model -- which is why it is a separate key
+    and not folded into the sentence. Measuring the CURRENT_DATE rate before this
+    existed meant running a regex over the model's SQL in jsonb by hand.
     """
     one_line = " ".join(str(message).split())[:_MESSAGE_CHARS].rstrip(". ")
-    return {
+    out = {
         "error": f"SQL_ERROR: {one_line}. {_REWRITE_INSTRUCTION}",
         "error_kind": SQL_ERROR_KIND,
         "rows": [],
     }
+    # Only the validator supplies one; a database error has no branch to name.
+    # Absent rather than empty so a GROUP BY over the column separates "refused
+    # for a known reason" from "Postgres said no".
+    if reason:
+        out["error_reason"] = reason
+    return out
 
 # Errors no rewrite of the query can fix. Privilege and existence are properties
 # of the database, not of the phrasing.
@@ -274,15 +285,20 @@ async def execute_sql_query(
         return {"error": "Invalid company_id format.", "rows": []}
 
     # 1. Validate
-    is_valid, error_msg = validate_query(sql)
+    is_valid, error_msg, reason = validate_query_detailed(sql)
     if not is_valid:
         # Refused before the round trip, but the same KIND of failure as a syntax
         # error: the model wrote the wrong query and can write a better one. The
         # advice used to sit in a second `suggestion` key that nothing rendered
         # and no prompt mentioned, so it is folded into the instruction here.
+        #
+        # `reason` rides along for counting only -- it never reaches the model.
+        # The message is what the model reads and will be reworded; the slug is
+        # what a GROUP BY reads and must not be.
         return retryable_sql_error(
             f"{error_msg} Common causes: no $1 for company_id, a restricted "
-            f"table, or a statement that is not a SELECT"
+            f"table, or a statement that is not a SELECT",
+            reason=reason,
         )
 
     # 2. Ensure pool is ready, for THIS job's database (see init_pool)

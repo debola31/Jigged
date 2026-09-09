@@ -68,6 +68,22 @@ _SELECT_INTO = re.compile(r"\bSELECT\b.*\bINTO\b", re.IGNORECASE | re.DOTALL)
 # now() is matched with its parens so a column or alias merely CALLED now is not
 # refused; the bare words CURRENT_DATE / CURRENT_TIMESTAMP / LOCALTIMESTAMP are
 # reserved and cannot be identifiers, so \b is enough for them.
+# THE EIGHT ARE NOT ONE KIND OF THING, and only one of them could ever be
+# rewritten rather than refused. Written down here because this is where the next
+# reader will be standing when they propose generalising it:
+#   CURRENT_DATE is `date`, and so is $2::date ($2 binds a Python date). In a
+#     comparison, DATE_TRUNC, EXTRACT, AGE or interval arithmetic the two resolve
+#     identically; only the VALUE moves, from UTC's day to the caller's, which is
+#     the entire point of the rule.
+#   CURRENT_TIMESTAMP / now() / transaction_timestamp() / statement_timestamp()
+#     are timestamptz, LOCALTIMESTAMP is timestamp. $2::date in their place
+#     collapses an instant to midnight, COMPILES CLEAN, and returns a plausible
+#     wrong number: `completed_at <= now()` would drop everything that happened
+#     today, and `now() - INTERVAL '7 days'` widens the window by up to 24h.
+#   LOCALTIME is `time`; $2::date there is a type error -- today's clean
+#     pre-execution refusal traded for a useless round trip.
+#   clock_timestamp() is VOLATILE by design; freezing it is a different query.
+# A rewrite that loops over this alternation is the mistake this list prevents.
 _FORBIDDEN_CLOCK = re.compile(
     r"\b(CURRENT_DATE|CURRENT_TIMESTAMP|LOCALTIMESTAMP|LOCALTIME|now\s*\(\s*\)|"
     r"statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|"
@@ -120,6 +136,29 @@ _SENSITIVE_TABLE_PATTERN = re.compile(
 )
 
 
+# A stable label per refusal branch, carried onto the tool result and into
+# ai_chat_messages.tool_trace.
+#
+# WHY A SLUG AND NOT THE MESSAGE. Counting a failure mode meant matching a regex
+# against the model's SQL by hand -- which is how the CURRENT_DATE rate was
+# measured at all (3 of 27 questions, 2026-09-08..09), and it is not a thing
+# anyone will do twice. The message is written for the model and will be reworded;
+# a slug is written for a GROUP BY and must not be. Adding a branch without a slug
+# is caught by test_every_refusal_branch_carries_a_reason.
+REASON_EMPTY = "empty"
+REASON_MULTIPLE_STATEMENTS = "multiple_statements"
+REASON_NOT_SELECT = "not_select"
+REASON_FORBIDDEN_STATEMENT = "forbidden_statement"
+REASON_SELECT_INTO = "select_into"
+REASON_FORBIDDEN_PATTERN = "forbidden_pattern"
+REASON_CLOCK = "clock"
+REASON_UNTYPED_TODAY = "untyped_today"
+REASON_NO_COMPANY_SCOPE = "no_company_scope"
+REASON_SENSITIVE_TABLE = "sensitive_table"
+REASON_OFF_SCHEMA = "off_schema"
+REASON_NESTING = "nesting"
+
+
 def validate_query(sql: str) -> tuple[bool, str]:
     """
     Validate an AI-generated SQL query before execution.
@@ -130,9 +169,22 @@ def validate_query(sql: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message).
         If valid, error_message is empty string.
+
+    The two-value form is what every caller wanted until the clock rate needed
+    counting; validate_query_detailed adds the reason slug and this stays the
+    shorthand, so the ~40 existing assertions on (ok, msg) keep reading plainly.
+    """
+    ok, message, _ = validate_query_detailed(sql)
+    return ok, message
+
+
+def validate_query_detailed(sql: str) -> tuple[bool, str, str]:
+    """As validate_query, plus the slug naming the branch that refused.
+
+    The slug is the empty string when the query is valid.
     """
     if not sql or not sql.strip():
-        return False, "Query is empty."
+        return False, "Query is empty.", REASON_EMPTY
 
     cleaned = sql.strip().rstrip(";").strip()
 
@@ -143,26 +195,26 @@ def validate_query(sql: str) -> tuple[bool, str]:
         if ch == "'" and (i == 0 or cleaned[i - 1] != "\\"):
             in_single_quote = not in_single_quote
         elif ch == ";" and not in_single_quote:
-            return False, "Multiple statements are not allowed. Send one SELECT at a time."
+            return False, "Multiple statements are not allowed. Send one SELECT at a time.", REASON_MULTIPLE_STATEMENTS
 
     # 2. Must start with SELECT or WITH (for CTEs)
     first_keyword = cleaned.split()[0].upper() if cleaned.split() else ""
     if first_keyword not in ("SELECT", "WITH"):
-        return False, f"Query must start with SELECT or WITH. Got: {first_keyword}"
+        return False, f"Query must start with SELECT or WITH. Got: {first_keyword}", REASON_NOT_SELECT
 
     # 3. Check for forbidden statement types
     match = _FORBIDDEN_STATEMENT_TYPES.search(cleaned)
     if match:
-        return False, f"Forbidden keyword: {match.group(1).upper()}. Only SELECT queries are allowed."
+        return False, f"Forbidden keyword: {match.group(1).upper()}. Only SELECT queries are allowed.", REASON_FORBIDDEN_STATEMENT
 
     # 4. Check for SELECT INTO
     if _SELECT_INTO.search(cleaned):
-        return False, "SELECT INTO is not allowed. Use a plain SELECT."
+        return False, "SELECT INTO is not allowed. Use a plain SELECT.", REASON_SELECT_INTO
 
     # 5. Check for dangerous patterns
     match = _FORBIDDEN_PATTERNS.search(cleaned)
     if match:
-        return False, f"Forbidden pattern: {match.group(1)}. System catalog access is not allowed."
+        return False, f"Forbidden pattern: {match.group(1)}. System catalog access is not allowed.", REASON_FORBIDDEN_PATTERN
 
     # 5b. The clock. Refused so today has exactly one source: the bound $2.
     clock = _FORBIDDEN_CLOCK.search(cleaned)
@@ -171,7 +223,7 @@ def validate_query(sql: str) -> tuple[bool, str]:
             f"{clock.group(1)} is not available. Use $2 for today's date -- it is "
             f"bound to the date where the user actually is. The database runs in "
             f"UTC and would call a job late hours before the shop's day ends."
-        )
+        ), REASON_CLOCK
 
     # 5c. The bound date, used where nothing can type it.
     if _UNTYPED_TODAY.search(cleaned):
@@ -181,11 +233,11 @@ def validate_query(sql: str) -> tuple[bool, str]:
             "fine, and so is passing it to a function that declares its parameter "
             "type; handing it to DATE_TRUNC, EXTRACT, AGE or interval arithmetic "
             "is not."
-        )
+        ), REASON_UNTYPED_TODAY
 
     # 6. Check for $1 placeholder (company_id scoping)
     if "$1" not in cleaned:
-        return False, "Query must include $1 placeholder for company_id filtering."
+        return False, "Query must include $1 placeholder for company_id filtering.", REASON_NO_COMPANY_SCOPE
 
     # 7. Guaranteed-catch denylist: sensitive/auth tables are never allowed,
     # even if the table extraction below misses an unusual reference form.
@@ -194,7 +246,7 @@ def validate_query(sql: str) -> tuple[bool, str]:
         return False, (
             f"Query references restricted table(s): {deny.group(1).lower()}. "
             f"Only business tables are allowed."
-        )
+        ), REASON_SENSITIVE_TABLE
 
     # 7b. Anything outside the public schema.
     off_schema = _FORBIDDEN_SCHEMA_PATTERN.search(cleaned)
@@ -202,7 +254,7 @@ def validate_query(sql: str) -> tuple[bool, str]:
         return False, (
             f"Query references the {off_schema.group(1).lower()} schema. "
             f"Only the public schema is available."
-        )
+        ), REASON_OFF_SCHEMA
 
     # 8. The table allowlist used to live here, and deleting it is the point of
     # 20260826010319. It duplicated a decision the database already owns, and the
@@ -222,6 +274,6 @@ def validate_query(sql: str) -> tuple[bool, str]:
         elif ch == ")":
             depth -= 1
     if max_depth > 3:
-        return False, f"Query has {max_depth} levels of nesting. Maximum is 3."
+        return False, f"Query has {max_depth} levels of nesting. Maximum is 3.", REASON_NESTING
 
-    return True, ""
+    return True, "", ""

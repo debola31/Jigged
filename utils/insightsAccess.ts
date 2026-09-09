@@ -44,6 +44,8 @@ export interface ChatResponse {
   off_topic?: boolean;
   /** The model stated figures its queries did not produce and was sent back to the tool once. */
   grounding_corrected?: boolean;
+  /** Up to three questions the model offered to answer next. Absent is normal. */
+  follow_ups?: string[];
 }
 
 export interface SavedInsight {
@@ -144,7 +146,7 @@ export interface ChatEnqueued {
 
 /**
  * An enqueue failure that carries the HTTP status, so the ask bar can BRANCH on
- * the status and never on the sentence. 503 is the AI box being offline: expected
+ * the status and never on the sentence. 503 is the AI being unavailable: expected
  * downtime, rendered as the same quiet notice a mid-job outage gets. 429 and 403
  * are the shop's own cap and kill-switch. `message` is the backend's `detail`
  * verbatim -- which is why _map_llm_error keeps that a plain string.

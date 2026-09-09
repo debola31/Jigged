@@ -265,6 +265,134 @@ due. Resolved in favour of delivery and moved into
 [`public.is_job_late()`](../../supabase/migrations/20260827114506_shared_late_job_predicate.sql),
 which the jobs list and the AI now both call. See [jobs.md](jobs.md#overdue-derived-never-stored).
 
+**Sixteen open quotes, then six, then eleven — 2026-09-09.** The same bug, one shared predicate
+later. Asked "how many open quotes do we have?" the assistant answered **16**, then **6** on the
+follow-up, then **11** in another thread. None of it was invented: `ai_chat_messages.tool_trace`
+holds all three queries, and each ran successfully.
+
+| Answer | What it counted |
+|---|---|
+| **16** | `status = 'active'` alone — and winning a quote sets `converted_at`, leaving `status` untouched forever, so every quote already won was counted as still to win |
+| **11** | the right filters, but `COUNT(*)` over a `JOIN` to `quote_line_items` — line-item rows, not quotes |
+| **6** | `status='active' AND expiration_date >= $2 AND NOT EXISTS (job)` |
+
+The dashboard tile also read **6**, by a *third* route — `status='active' AND converted_at IS NULL`,
+with no expiry test at all. **They agreed by coincidence**, on data where the two readings happen to
+coincide; the first quote to lapse would have separated them. Two numbers agreeing for different
+reasons is not agreement.
+
+`semantics.md` had no "open quote" entry — only *Quote pipeline worth*, a money metric with filters
+of its own — so the model reached for a different reading each turn and every one of them was
+defensible. Resolved into
+[`public.is_quote_open()`](../../supabase/migrations/20260909115308_shared_open_quote_predicate.sql):
+active, not won, not lapsed. The quotes list, the dashboard tile and `semantics.md` all call it, the
+TypeScript mirror `isQuoteOpen()` is pinned to it by
+[`openQuoteCases.json`](../../__tests__/fixtures/openQuoteCases.json) through two suites, and the
+tile's number changed as a result — an expired quote is no longer pipeline.
+
+**The same thread also showed the model cannot be asked about itself.** "Why did you say 16
+earlier?" was answered by re-running the metric and re-emitting the previous sentence **word for
+word, three times**. A guideline now names that failure: a question about the conversation is
+answered from the replayed turns with no tool call.
+
+**Every SQL failure on record was the model reaching for the clock — 2026-09-09.** Across the whole
+recorded history of the feature (`ai_jobs.result -> tool_trace`, 2026-09-08..09): **30 `execute_sql`
+calls over 27 questions, 3 failures, and 100 % of those failures were `CURRENT_DATE`.** Every one was
+the same shape — `expiration_date >= CURRENT_DATE` — refused by the validator, rewritten with `$2`,
+and then correct. **3 of 27 questions (11.1 %) paid an extra round trip**, ten to twenty seconds each
+on a box decoding at ~7 tokens/s. Three of three clock reaches were refused: when the model reaches
+for the clock, it is always wrong.
+
+The rule was already stated **twice**, in `SCHEMA_CONTEXT` and in `semantics.md`. What was missing
+was where. Measured on the assembled prompt: Ollama's qwen3 template renders the tools block **after
+the entire system prompt**, so the `sql` parameter description the model reads while filling in the
+argument sits at **~98 % depth** and the clock rule at **~46 %**. And that block named `$1` three
+times, `$2` **zero** times, called `$1` *"the placeholder for company_id"* — a false claim about how
+many values are bound, fifty tokens before generation — and carried one worked example with no date
+in it at all.
+
+So the fix is locality, not repetition: the tool description and its `sql` parameter now name both
+bound values, state the refusal as a consequence (*"rejected before execution and the query never
+runs"*), and carry two examples — one dateless, one bounded by `$2::date`. The opening sentence names
+both placeholders too, the position this file's own docstring records as decisive for a 32B.
+[`test_chat_tools_contract.py`](../../api/tests/unit/test_chat_tools_contract.py) pins every worked
+example **through `validate_query`**: the example is what the model copies, so an example the
+validator would refuse teaches it the failure.
+
+**The dated example bounds `due_date`, a `DATE`, and that is deliberate.** `$2::date` against a
+`TIMESTAMPTZ` column — `created_at >= DATE_TRUNC('month', $2::date)` — validates cleanly and compares
+a UTC instant to a local midnight: the same day-boundary error as `CURRENT_DATE`, wearing the fix's
+clothes.
+
+**And the rate is now a `GROUP BY`, not a regex.** Establishing the 11.1 % above meant matching a
+pattern against the model's SQL inside jsonb by hand, which is not a measurement anyone repeats.
+`validate_query_detailed` returns a branch slug that rides onto `tool_trace.error_reason`, set only
+for a refusal *before* execution — a database error carries `error_kind` with no reason, which is how
+the two are told apart:
+
+```sql
+SELECT call ->> 'error_reason' AS reason, count(*)
+FROM ai_chat_messages m, jsonb_array_elements(m.tool_trace) AS call
+WHERE call ? 'error_reason'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+**The decision this leaves open, pre-registered so it is not re-argued later.** A deterministic
+rewrite of `CURRENT_DATE` → `$2::date` in the validator would remove the round trip outright, and it
+was designed and costed. It is **not shipped**, for two reasons a review panel raised and neither is
+cosmetic: it spends the repo's own anti-substitution principle — *refuse loudly, never quietly
+substitute* — and it degrades `tool_trace.sql` from "the SQL that ran" to "the SQL the model wrote",
+which is the exact column the 16-vs-6 investigation depended on. Shipping it beside the prompt fix
+would also make the prompt fix permanently unmeasurable: a reach that costs nothing stops being
+reported as a failure. **If the query above still shows `clock` after a fortnight of real use, the
+rewrite is the answer and the argument for it is made** — one construct wide, `CURRENT_DATE` only
+(the type note above `_FORBIDDEN_CLOCK` says why the other seven are not candidates), storing both
+the written and the executed SQL.
+
+**"I apologize for the error" — 2026-09-09, and the tool schema caused it.** Hours after the fix
+above shipped to the worker, prod and preview both started answering *"I apologize for the error. Let
+me attempt to retrieve the information for you once more."* `tool_trace` again had the receipts — the
+model was returning **the tool's JSON schema fused with the value**:
+
+```json
+"sql": { "sql": "SELECT j.customer_name …", "type": "string" }
+```
+
+That dict went straight into `validate_query`, where `sql.strip()` raised `AttributeError`. `_run_tool`
+caught it and returned `{"error": str(exc)}` **with no `error_kind`** — which the loop reads, by
+design, as *"ours, not the model's, no retry reaches it."* So the model was handed
+`'dict' object has no attribute 'strip'` with none of the `SQL_ERROR: … Rewrite the query` framing
+that makes a failure recoverable, and did the only thing left: apologised.
+
+**Two faults, and only one of them was new.** The over-stuffed `sql` parameter description was new —
+four lines with two labelled examples and a sentence about which expressions need a cast. Sampled
+against `qwen3:32b` on the box with the real system prompt:
+
+| `sql` parameter description | schema-shaped |
+|---|---|
+| Old (`$1` only) | 1 / 14 |
+| Four lines, two examples | **5 / 14** |
+| One line, one example (shipped) | 1 / 16 |
+
+A property's description is read **while that property is being generated**, so structure inside it
+invites the model to reproduce structure. The `$2` teaching moved to the tool description above,
+where the same sampling showed no such effect — and **0 of 16 calls reached for the clock**, so the
+CURRENT_DATE fix survives the retreat intact.
+
+**The second fault was older and worse: nothing defended the boundary.** The old description produces
+this shape too, just rarely, so a malformed argument could always turn into an unshaped exception.
+`sql_argument()` / `description_argument()` in
+[`chat_tools.py`](../../api/tools/chat_tools.py) now sit at all three unpack sites. They unwrap the
+known shape — the intended value is present verbatim under its own key, so this is a shape, not a
+guess — and yield `""` for anything else, which the validator refuses as an empty query: shaped,
+retryable, and carrying the rewrite instruction. **A model returning nonsense should cost a turn, not
+the conversation.**
+
+**And the operational lesson, which is the one to keep.** Nothing was deployed. The worker serves
+production from the local checkout ([ai-worker.md](../runbooks/ai-worker.md)), so an un-merged branch
+was answering real production questions, and the fault reached shop owners through a code path no
+deploy gate had ever seen. Anything the worker loads is in production the moment it restarts.
+
 **And the day boundary underneath it.** Postgres runs in UTC, so `CURRENT_DATE` is already tomorrow
 for the last hours of a working day in the Americas — enough to call a job late the evening before
 it is. The jobs list had always avoided this by threading the browser's date in as `p_today`; the
@@ -276,6 +404,57 @@ cacheable prefix, and a date inside it would change that prefix daily for every 
 sanity-checks the claimed date against the server's own (±1 day, which covers UTC-12 through UTC+14)
 and **refuses rather than substituting** — a quietly substituted date would be this same class of
 bug in a new place.
+
+### Where a business definition lives — the three tiers
+
+**The question this answers:** `is_job_late()` and `is_quote_open()` both exist because a term
+drifted. Does every term now need a SQL predicate, and can `semantics.md` grow a section for each
+one? **No to both**, and the reasons are different.
+
+**The arithmetic first.** Measured 2026-09-09: `SCHEMA_CONTEXT` ≈ **6,200 tokens**, `semantics.md` ≈
+**3,600** across twelve sections. That is ~9,800 tokens resident on *every* question, against a
+32,768-token window that also carries the tool schema, a 5,000-token history budget and the 4,000
+answer reserve. `context_overflow` is an error kind here because that ceiling is real, and it is
+reached by conversations, not by prompts — so every resident token is taken from someone's history.
+A file that grows a section per term therefore **cannot stay fully resident**: the tenth definition
+is paid for by every question that has nothing to do with it.
+
+| Tier | Use when | How it grows | What it costs |
+|---|---|---|---|
+| **1 · SQL predicate** | A Jigged **screen** computes the same term. This is a two-consumer drift problem, and a predicate is the only thing that fixes it | Bounded by the UI — `is_job_late`, `is_quote_open`; perhaps six to ten ever | A migration, both consumers repointed, and a golden-case fixture pinning the TypeScript mirror |
+| **2 · `semantics.md` section** | The term is genuinely ambiguous, only the AI computes it, and a wrong reading is silently plausible | **Capped by a token budget, not by taste** | ~300 resident tokens, or ~300 retrieved ones |
+| **3 · Verified query** (`pairs.json`) | Everything else | Unbounded — it is retrieved, not resident | ~0 resident tokens |
+
+**Tier 3 is the default.** A term earns Tier 2 by being ambiguous; it earns Tier 1 only by having a
+second consumer in the app. "Open quote" is Tier 1 because the dashboard tile computes it too —
+that, and not the model's confusion, is what a predicate solves.
+
+**And the tail is retrieved, not pasted.** `semantics.md` is the last block of the system prompt
+(see `_build_chat_system_prompt`) precisely so it can vary per question without disturbing a byte
+the KV cache is holding. With `INSIGHTS_SEMANTICS_RETRIEVAL=on`,
+[`semantics_retrieval.py`](../../api/services/insights_pipeline/semantics_retrieval.py) embeds the
+question against each section's heading-plus-definition and sends the top three **plus the never-
+dropped core** ("How to use these definitions", which carries `$1`, `$2`, the refusal of
+`CURRENT_DATE` and the archived-rows rule — preconditions for writing any query, not facts about one
+term). Sections render in **file order**, because they cross-refer. Measured on the quotes question:
+3,036 characters against 14,868, a **79.6 %** reduction.
+
+**It fails to the whole file, never to nothing** — no question, switch off, embedder unreachable,
+empty selection, any exception at all. Being wrong in that direction costs a longer prompt; being
+wrong in the other invents a business rule.
+
+**It is off by default and stays off until `api/evals/insights_ab.py` says otherwise.** Retrieval
+that misses the one section a question needed is strictly worse than pasting all twelve, and nothing
+but the eval can tell you which you have. This is the same experiment the pipeline arm's docstring
+frames — "a 7B model attends better to two exemplars than to ten" — run against the arm that
+actually serves production.
+
+This is where the field landed too: [dbt's 2026 benchmark](https://docs.getdbt.com/blog/semantic-layer-vs-text-to-sql-2026)
+measures semantic grounding as the largest single accuracy lever (Claude Sonnet 4.6 90.0 % → 98.2 %,
+GPT-5.3-Codex 84.1 % → 100 %), while [Snowflake Cortex Analyst](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst/verified-query-repository)
+caps a semantic model at 2 MB, advises ~10 tables per view, and tells teams to invest in a
+**retrieved verified-query repository** rather than resident prose. Define the terms; do not carry
+all of them at once.
 
 ### Adding a table to AI scope
 
@@ -891,10 +1070,18 @@ reworded line moves what the linker can see.
   `api/tests/unit/test_ai_jobs_enqueue.py::TestMarkSucceeded`, `worker/tests/test_db_reporting.py` and
   `api/tests/integration/test_ai_chat_threads.py`*.
 - [ ] **Given** the dashboard with no conversation, **then** one centred question with example chips and no
-  list is read; **given** a conversation, **then** it reads oldest first with the composer docked under
-  it; **given** the History button, **then** conversations, reports and charts load only then and a
-  chart opens its conversation — *verified by `__tests__/components/insights/InsightsChat.test.tsx` and
+  list is read; **given** a conversation, **then** it reads oldest first as a transcript — the question a
+  right-aligned bubble, the answer unboxed beneath it — inside a fixed-height pane that scrolls on its
+  own, with the composer under it and the scorecards above it unmoved; **given** the History button,
+  **then** conversations, reports and charts load only then and a chart opens its conversation —
+  *verified by `__tests__/components/insights/InsightsChat.test.tsx` and
   `__tests__/utils/aiChatAccess.test.ts`*.
+- [ ] **Given** any state of the chat, **then** a BETA chip and "Jigged AI can make mistakes. Please
+  double-check responses." are read, and no copy anywhere in the path names the hardware inference runs
+  on; **given** an answer the model offered follow-ups for, **then** up to three appear as chips under
+  the NEWEST turn only and asking one reports `from_suggestion` — *verified by
+  `__tests__/components/insights/InsightsChat.test.tsx` and
+  `api/tests/unit/test_follow_ups_and_semantics_tail.py`*.
 
 Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
 `automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).

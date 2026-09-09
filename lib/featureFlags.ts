@@ -72,7 +72,7 @@ export const KNOWN_FEATURES = [
     key: 'ai_insights',
     label: 'AI Insights',
     description:
-      'Dashboard ask-bar (natural-language questions about shop data) and the saved-charts section. On by default; turning it off hides the AI area and blocks the chat endpoint for this tenant.',
+      'Dashboard chat (natural-language questions about shop data, answered with prose, a chart or a one-page report). On by default; turning it off hides the AI area and blocks the chat endpoint for this tenant.',
     // GA feature with a kill-switch: enabled unless explicitly turned off.
     defaultEnabled: true,
   },

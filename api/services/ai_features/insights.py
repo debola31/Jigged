@@ -38,6 +38,7 @@ from services.insights_presentation import (
     OFF_TOPIC_REPLY,
     _drop_exemplar_echo,
     _extract_chart_config,
+    _extract_follow_ups,
     _flatten_markdown_tables,
     _select_chart_type,
     _strip_code_blocks,
@@ -51,6 +52,7 @@ from services.insights_presentation import (
 from services.llm.base import Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
 from services.llm.ollama_provider import OLLAMA_NUM_CTX
+from tools.chat_tools import description_argument, sql_argument
 from tools.tool_json import dumps_tool_result
 
 logger = logging.getLogger(__name__)
@@ -152,8 +154,13 @@ async def _run_tool(
             raise ValueError(f"Unknown tool: {call.name}")
         return await execute_sql_tool(
             company_id=company_id,
-            sql=call.arguments.get("sql", ""),
-            description=call.arguments.get("description", ""),
+            # Not arguments["sql"] directly: a local model sometimes returns the
+            # property's SCHEMA fused with its value. sql_argument unwraps that and
+            # yields "" for anything else, so the validator refuses it as an empty
+            # query -- shaped and retryable -- instead of AttributeError reaching
+            # the except below, which strips the error_kind the model needs.
+            sql=sql_argument(call.arguments),
+            description=description_argument(call.arguments),
             today=today,
             dsn=dsn,
         )
@@ -340,7 +347,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     of the insights A/B failed at the second and third of those, and the job
     settled `succeeded` with "The column total_price does not exist..." in it.
     """
-    from services.insights_service import _build_chat_system_prompt
+    from services.insights_service import _build_chat_system_prompt, semantics_for
     from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
@@ -371,7 +378,14 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     prior = ctx.payload.get("summary") or None
     prior_summary: str | None = (prior or {}).get("content") if isinstance(prior, dict) else None
 
-    system_prompt = _build_chat_system_prompt()
+    # The semantics tail may be retrieved rather than pasted whole
+    # (INSIGHTS_SEMANTICS_RETRIEVAL). Awaited HERE rather than fetched inside the
+    # builder: the backend path runs this handler on FastAPI's request loop, so the
+    # embedding round trip has to be an await and not a blocking call. Everything
+    # ahead of the tail is byte-identical either way, which is what the KV cache
+    # needs; with the switch off this is the same string as before.
+    semantics = await semantics_for(question)
+    system_prompt = _build_chat_system_prompt(semantics=semantics)
     budget = _history_budget(system_prompt, question)
     evicted, kept = _window(history, budget)
 
@@ -477,8 +491,8 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             if call.name != "execute_sql":
                 continue
             trace: dict[str, Any] = {
-                "sql": call.arguments.get("sql", ""),
-                "description": call.arguments.get("description", ""),
+                "sql": sql_argument(call.arguments),
+                "description": description_argument(call.arguments),
             }
             if "error" not in r:
                 # Zero rows is a SUCCESS: the query ran, and "none" is an answer.
@@ -487,6 +501,11 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 numbers_in(r, known_figures)
             else:
                 trace["error_kind"] = r.get("error_kind")
+                # The validator's branch slug, when it was the validator that
+                # refused. This is what makes "how often does the model reach for
+                # the clock" a GROUP BY rather than a regex over jsonb.
+                if r.get("error_reason"):
+                    trace["error_reason"] = r["error_reason"]
                 if r.get("error_kind") == SQL_ERROR_KIND:
                     sql_failed += 1
             tool_trace.append(trace)
@@ -569,6 +588,13 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         _drop_exemplar_echo(_validate_chart_config(_extract_chart_config(raw))), question
     )
 
+    # WHAT TO ASK NEXT, from the same raw text and by the same mechanism as the
+    # chart. Read AFTER both gates above, so a turn that failed to answer offers
+    # nothing -- suggesting a next question under a refusal is the surface acting
+    # pleased with itself. [] is a normal outcome and the trigger stores NULL for
+    # it; nothing here can fail the turn.
+    follow_ups = _extract_follow_ups(raw, question)
+
     # COMPACTION, AFTER THE ANSWER. The answer is the deliverable and is already
     # in hand; the summary is what makes the NEXT question cheap. Fold whenever
     # something was evicted this turn (it must reach the summary or it is lost to
@@ -617,6 +643,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # to the tool once. Its rate says how often a thread tempts the model to
         # answer from memory.
         "grounding_corrected": grounding_corrected,
+        # Up to three questions the model offered to answer next. An empty list is
+        # normal -- a refusal, an off-topic reply or a model that saw nothing worth
+        # following offers none -- and the ai_jobs trigger stores NULL for it.
+        "follow_ups": follow_ups,
         # Read by the ai_jobs trigger, never by the browser: a summary row is
         # written only when these are set.
         "summary": summary,

@@ -53,6 +53,7 @@ from services.insights_presentation import (
 )
 from services.llm.base import Message
 from services.llm.errors import LLMErrorEcho, LLMToolLoopExhausted
+from tools.chat_tools import sql_argument
 from models.report_spec import (
     BLOCK_MAX, CHART_POINTS_MAX, CHART_POINTS_MIN, HEADLINE_MAX, KPI_MAX,
     TABLE_COLUMNS_MAX, TABLE_ROWS_MAX, TEXT_BODY_MAX, TITLE_MAX,
@@ -253,7 +254,7 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
             if call.name != "execute_sql":
                 continue
             trace: dict[str, Any] = {
-                "sql": call.arguments.get("sql", ""),
+                "sql": sql_argument(call.arguments),
                 "description": call.arguments.get("description", ""),
             }
             if "error" not in r:

@@ -28,7 +28,11 @@ from services.insights_presentation import (
     classify_non_answer,
     echoes_exemplar,
 )
-from services.insights_service import _build_chat_system_prompt, load_semantics
+from services.insights_service import (
+    _build_chat_system_prompt,
+    _stable_prefix,
+    load_semantics,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -46,12 +50,44 @@ def _example_prompts() -> list[str]:
 
 
 class TestTheExampleInThePrompt:
-    def test_the_prompt_carries_the_example_verbatim_at_the_tail(self):
+    def test_the_prompt_carries_the_example_verbatim_at_the_end_of_the_stable_prefix(self):
+        """The example is last in the part that never varies, and semantics follows it.
+
+        THE ORDER CHANGED 2026-09-09 and this assertion inverted with it. The example
+        used to sit after semantics.md, because both were static and putting the
+        example last meant adding it disturbed no earlier byte. Semantics is now the
+        one block that may vary per question (INSIGHTS_SEMANTICS_RETRIEVAL selects
+        sections), so it is the block that has to be last: anything after a varying
+        block re-prefills on every question, and at ~7 tokens/s that is the expensive
+        mistake. The example's placement was always a cache decision -- see
+        _build_chat_system_prompt's docstring -- and this serves the same goal.
+        """
         prompt = _build_chat_system_prompt()
         assert json.dumps(CHART_EXEMPLAR, indent=2) in prompt
         assert CHART_EXEMPLAR_QUESTION in prompt and CHART_EXEMPLAR_ANSWER in prompt
-        # AFTER semantics.md: the bytes before it are the prefix the KV cache reuses.
-        assert prompt.index(load_semantics()) < prompt.index(CHART_EXEMPLAR_QUESTION)
+        # The example is the tail of the stable prefix...
+        assert CHART_EXEMPLAR_QUESTION in _stable_prefix()
+        assert _stable_prefix().index(CHART_EXEMPLAR_QUESTION) > _stable_prefix().index("Guidelines:")
+        # ...and semantics is the only thing after it.
+        assert prompt.index(CHART_EXEMPLAR_QUESTION) < prompt.index(load_semantics())
+        assert prompt.endswith(load_semantics())
+
+    def test_the_stable_prefix_is_byte_identical_whatever_the_tail(self):
+        """The whole point of moving semantics to the tail.
+
+        If a future edit puts anything question-dependent ahead of it, the KV cache
+        stops matching after that point and every question re-prefills the ~6,200
+        tokens of SCHEMA_CONTEXT behind it. Varying the tail is the strongest form
+        of this assertion: two prompts that share nothing after the prefix must
+        still share the prefix exactly.
+        """
+        a = _build_chat_system_prompt(semantics="## Open quote\nsomething")
+        b = _build_chat_system_prompt(semantics="## Revenue\nsomething else")
+        assert a.startswith(_stable_prefix())
+        assert b.startswith(_stable_prefix())
+        assert a != b
+        # And the divergence starts exactly at the end of the prefix.
+        assert a[len(_stable_prefix()):] != b[len(_stable_prefix()):]
 
     def test_the_example_is_labelled_a_placeholder(self):
         prompt = _build_chat_system_prompt()

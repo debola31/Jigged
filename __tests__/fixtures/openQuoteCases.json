@@ -1,0 +1,81 @@
+{
+  "$comment": [
+    "ONE FILE, TWO RUNNERS. __tests__/types/quote.test.ts feeds these to isQuoteOpen();",
+    "api/tests/integration/test_open_quote_parity.py feeds the same rows to",
+    "public.is_quote_open(). If the TypeScript mirror and the SQL definition ever",
+    "disagree, one of the two suites fails on the case that separates them.",
+    "",
+    "Modelled on lateJobCases.json, which exists because 'late' drifted three ways.",
+    "'Open quote' had drifted FOUR ways by 2026-09-09 -- the assistant answered 16, 11",
+    "and 6 in one afternoon (ai_chat_messages.tool_trace holds all three queries) and",
+    "the dashboard tile had a fourth reading again -- so it gets the same treatment",
+    "rather than a comment asking people to keep two files in step.",
+    "",
+    "`today` IS A FIXED ANCHOR, NOT A REAL DATE. isQuoteOpen() reads the machine",
+    "clock, so the TypeScript suite re-anchors each expiration_date to the same OFFSET",
+    "from the real today; the Python suite passes `today` to the SQL function directly.",
+    "That keeps the boundary cases meaningful on any machine, on any day.",
+    "",
+    "EVERY CASE NAMES THE CONDITION IT ISOLATES. A case that would still pass with one",
+    "of the three conditions deleted is not pulling its weight."
+  ],
+  "today": "2026-09-09",
+  "cases": [
+    {
+      "name": "active, unwon, dated in the future — the baseline open quote",
+      "status": "active",
+      "converted_at": null,
+      "expiration_date": "2026-10-01",
+      "open": true
+    },
+    {
+      "name": "expires today — the boundary is inclusive, a quote is live on its last day",
+      "status": "active",
+      "converted_at": null,
+      "expiration_date": "2026-09-09",
+      "open": true
+    },
+    {
+      "name": "expired yesterday — lapsed work must be re-quoted, so it is not in play",
+      "status": "active",
+      "converted_at": null,
+      "expiration_date": "2026-09-08",
+      "open": false
+    },
+    {
+      "name": "no expiration date — an undated quote never lapses",
+      "status": "active",
+      "converted_at": null,
+      "expiration_date": null,
+      "open": true
+    },
+    {
+      "name": "won — converted_at is stamped while status stays 'active'; this is the 16-vs-6 case",
+      "status": "active",
+      "converted_at": "2026-09-01T12:00:00+00:00",
+      "expiration_date": "2026-10-01",
+      "open": false
+    },
+    {
+      "name": "status 'expired' — the other half of the enum is never open",
+      "status": "expired",
+      "converted_at": null,
+      "expiration_date": "2026-10-01",
+      "open": false
+    },
+    {
+      "name": "won AND lapsed — no condition rescues it",
+      "status": "active",
+      "converted_at": "2026-08-01T12:00:00+00:00",
+      "expiration_date": "2026-08-02",
+      "open": false
+    },
+    {
+      "name": "won, undated — converted_at alone closes it",
+      "status": "active",
+      "converted_at": "2026-09-05T09:30:00+00:00",
+      "expiration_date": null,
+      "open": false
+    }
+  ]
+}

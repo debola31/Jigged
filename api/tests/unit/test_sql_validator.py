@@ -7,7 +7,7 @@ from reaching the database.
 
 import pytest
 
-from tools.sql_validator import validate_query
+from tools.sql_validator import validate_query, REASON_CLOCK, validate_query_detailed
 
 
 class TestBasicValidation:
@@ -359,6 +359,16 @@ class TestTheClockIsRefused:
         # CURRENT_TIMESTAMP next, then now(), burning an iteration each time.
         assert "UTC" in msg
 
+    def test_the_refusal_is_labelled_so_the_rate_can_be_counted(self):
+        """Measuring how often the model reaches for the clock used to mean running
+        a regex over its SQL in jsonb by hand -- which is how 3-of-27 was found, and
+        not a thing anyone does twice. The slug makes it a GROUP BY."""
+        ok, _, reason = validate_query_detailed(
+            "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < CURRENT_DATE"
+        )
+        assert ok is False
+        assert reason == REASON_CLOCK
+
     def test_a_query_using_the_bound_date_passes(self):
         ok, _ = validate_query(
             "SELECT count(*) FROM jobs WHERE company_id = $1 AND due_date < $2::date"
@@ -497,3 +507,64 @@ class TestTheBoundDateMustCarryItsType:
             if not is_valid:
                 refused[pair.id] = error
         assert not refused, f"the cast rule refused known-good reference SQL: {refused}"
+
+
+class TestEveryRefusalIsCountable:
+    """A slug per branch, so a failure mode can be counted without reading prose.
+
+    THE MESSAGE AND THE SLUG HAVE DIFFERENT AUDIENCES, and that is why there are
+    two. The message is written for the model and will be reworded whenever it
+    stops working; the slug is written for a GROUP BY over
+    ai_chat_messages.tool_trace and must survive that rewording.
+    """
+
+    def test_a_valid_query_has_no_reason(self):
+        ok, msg, reason = validate_query_detailed(
+            "SELECT 1 FROM jobs WHERE company_id = $1"
+        )
+        assert (ok, msg, reason) == (True, "", "")
+
+    @pytest.mark.parametrize(
+        "sql,expected",
+        [
+            ("", "empty"),
+            ("SELECT 1 FROM jobs WHERE company_id = $1; SELECT 2", "multiple_statements"),
+            ("DELETE FROM jobs", "not_select"),
+            ("SELECT 1 FROM jobs WHERE company_id = $1 AND due_date < CURRENT_DATE", "clock"),
+            ("SELECT 1 FROM jobs WHERE company_id = $1 AND x > DATE_TRUNC('month', $2)", "untyped_today"),
+            ("SELECT 1 FROM jobs", "no_company_scope"),
+            ("SELECT 1 FROM auth_audit_log WHERE company_id = $1", "sensitive_table"),
+            ("SELECT 1 FROM auth.users WHERE company_id = $1", "off_schema"),
+        ],
+    )
+    def test_each_branch_names_itself(self, sql, expected):
+        ok, _, reason = validate_query_detailed(sql)
+        assert ok is False
+        assert reason == expected
+
+    def test_every_refusal_branch_carries_a_reason(self):
+        """The guard against adding a branch and forgetting the slug.
+
+        A `return False, "..."` with no third value is a TypeError at unpack time
+        in the executor, which is a loud failure -- but only on a query that
+        reaches it. This reads the source instead, so the omission is caught by
+        the suite rather than by production.
+        """
+        import inspect
+        import re as _re
+
+        from tools import sql_validator
+
+        src = inspect.getsource(sql_validator.validate_query_detailed)
+        # Every `return False, <message>` must end in a third value.
+        returns = _re.findall(r"return False,.*?(?=\n    (?:#|[a-zA-Z]|$))", src, _re.S)
+        assert returns, "no refusal branches found -- did the function move?"
+        for r in returns:
+            assert _re.search(r"REASON_[A-Z_]+", r), (
+                f"a refusal branch returns no reason slug:\n{r.strip()[:200]}"
+            )
+
+    def test_the_two_value_form_still_works_for_every_caller_that_wants_it(self):
+        assert validate_query("SELECT 1 FROM jobs WHERE company_id = $1") == (True, "")
+        ok, msg = validate_query("DELETE FROM jobs")
+        assert ok is False and msg

@@ -47,6 +47,71 @@ def _extract_chart_config(content: str) -> dict | None:
     return None
 
 
+# ---- follow-ups ----------------------------------------------------------------
+# The most a turn may offer, and the longest one may be. Three because a fourth
+# is scrolling on a phone, and 72 characters because a suggestion is a question
+# someone reads at a glance -- past that it is a paragraph wearing a chip.
+MAX_FOLLOW_UPS = 3
+FOLLOW_UP_MAX_CHARS = 72
+
+
+def _extract_follow_ups(content: str, question: str = "") -> list[str]:
+    """What the model offered to look at next, from a fenced block in its answer.
+
+    SAME MECHANISM AS chart_config, and for the same reason: there is no
+    json_schema on this path (it is a tool-calling loop that ends in free text),
+    so a fence is how the model says something structured. _strip_code_blocks
+    removes every fence from the answer the user reads, so this costs the reader
+    nothing whether it parses or not.
+
+    RETURNS [] ON ANYTHING UNEXPECTED, never raises and never partially trusts a
+    malformed block. A model that returned a string, an object, nested arrays or
+    forty suggestions gets none: the chips are a garnish, and the one thing they
+    must never do is cost or delay an answer that is already correct.
+
+    Drops a suggestion that merely restates the question -- "how many open quotes
+    do we have?" offering "how many open quotes?" is a loop, not a next step.
+    """
+    if "```" not in content:
+        return []
+    asked = _normalise_for_echo(question)
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, block in enumerate(content.split("```")):
+        if i % 2 == 0:  # outside a fence
+            continue
+        lines = block.strip().split("\n")
+        body = "\n".join(lines[1:]) if lines[0].strip().lower() in ("json", "follow_ups") else block.strip()
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        raw = data.get("follow_ups")
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            text = " ".join(item.split())
+            if not text or len(text) > FOLLOW_UP_MAX_CHARS:
+                continue
+            key = _normalise_for_echo(text)
+            if not key or key == asked or key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+            if len(out) == MAX_FOLLOW_UPS:
+                return out
+    return out
+
+
+def _normalise_for_echo(text: str) -> str:
+    """Lowercase alphanumerics only, for comparing two questions by their words."""
+    return "".join(c for c in text.lower() if c.isalnum())
+
+
 def _strip_code_blocks(content: str) -> str:
     """Remove all fenced code blocks (```...```) from AI response text."""
     if "```" not in content:

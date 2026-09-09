@@ -219,6 +219,29 @@ out of a "customers we have lost" answer.
 
 ---
 
+## Open quote
+
+**Definition.** A quote still genuinely winnable: active, not already won, and not lapsed. Use
+`public.is_quote_open(...)` rather than writing the conditions out — it is the same function the
+quotes list and the dashboard's Open Quotes tile are held to, so your count and the number on the
+owner's screen cannot disagree.
+
+```sql
+SELECT COUNT(*) AS open_quotes
+FROM quotes q
+WHERE q.company_id = $1
+  AND public.is_quote_open(q.status, q.converted_at, q.expiration_date, $2)
+```
+
+**Notes.** `quotes.status` only ever holds `active` or `expired`, and **winning a quote sets
+`converted_at` and leaves the status alone** — so `WHERE status = 'active'` counts work already won
+as work still to win. On 2026-09-09 that mistake answered 16 where 6 were live. Count the quotes,
+never the rows of a join: `COUNT(*)` over a join to `quote_line_items` counts line items, which is
+how the same question also produced 11. For the value of those quotes rather than their number, see
+*Quote pipeline worth* below — it selects the same set.
+
+---
+
 ## Quote pipeline worth
 
 **Definition.** The value of quotes still genuinely in play: active, unexpired, not yet converted.
@@ -228,15 +251,14 @@ SELECT COALESCE(SUM(qli.total_price), 0) AS pipeline_worth
 FROM quotes q
 JOIN quote_line_items qli ON qli.quote_id = q.id
 WHERE q.company_id = $1
-  AND q.status = 'active'
-  AND q.expiration_date >= $2::date
-  AND NOT EXISTS (
-    SELECT 1 FROM jobs j WHERE j.quote_id = q.id
-  )
+  AND public.is_quote_open(q.status, q.converted_at, q.expiration_date, $2)
 ```
 
-**Notes.** An expired quote is not pipeline. A converted quote's value is now a job, and counting both
-double-counts the same work. Say what "pipeline" counted when you answer.
+**Notes.** The same set as *Open quote* above, by the same function — the count and the value must
+describe the same quotes, and until 2026-09-09 they did not: this query used `NOT EXISTS (job)` where
+the tile used `converted_at`, so the two could differ. An expired quote is not pipeline, and a
+converted quote's value is now a job — counting both double-counts the same work. Say what
+"pipeline" counted when you answer.
 
 ---
 

@@ -61,7 +61,7 @@ class Worker:
     Production always, and since 2026-09-09 every live Supabase preview branch
     beside it (worker/branches.py), because a preview deployment enqueues into its
     own branch and a worker that polls production alone leaves every preview
-    reading "the AI box is offline".
+    reading "insights are temporarily unavailable".
 
     The databases are kept in dicts keyed by project ref rather than one `self.db`,
     and each carries its OWN heartbeat clock: `ai_workers` is per database, so
@@ -170,7 +170,7 @@ class Worker:
 
         Both used to tick only between jobs. A 116 s question then made the box
         read as offline to every new question -- the heartbeat went stale at 60 s
-        and the route answered 503 "the AI box is offline" -- until the answer
+        and the route answered 503 "insights are unavailable" -- until the answer
         landed; and with 480 s calls a single job could outlive its own 300 s
         lease and be swept mid-run. The model call is an awaited HTTP request, so
         the loop is free to beat while it runs. Measured 2026-09-07 on the

@@ -219,7 +219,7 @@ def test_a_job_carries_the_sandbox_of_the_database_it_was_claimed_from():
 
 def test_beating_one_database_does_not_silence_the_others():
     """`ai_workers` lives in each database and each route reads its own, so a
-    preview only stops saying "the AI box is offline" once the beat lands THERE.
+    preview only stops saying insights are unavailable once the beat lands THERE.
     One clock for all of them would let production's beat satisfy the gate and
     leave every branch looking dead."""
     w = Worker(_config())

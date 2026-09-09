@@ -865,6 +865,16 @@ export const E2E_RAW_SHELF = 'E2E Raw Shelf';
 export const E2E_SUB_SHELF = 'E2E Sub Shelf';
 
 /**
+ * A part on a shelf with NO cost on file, and the shelf it sits on.
+ *
+ * Its own shelf so no other spec's fixture sees it: `storage-inventory.spec.ts` needs one costed
+ * row and one uncosted row in the same run — the costed one to prove the total, the uncosted one
+ * to prove it is excluded and said so in words rather than counted as zero.
+ */
+export const E2E_COST_SHELF = 'E2E Cost Shelf';
+export const E2E_UNCOSTED_PART = 'E2E-NO-COST';
+
+/**
  * Put an exact quantity of one part at one named place.
  *
  * ABSOLUTE, like `ensureSplitStock` below and for the same reason: CI starts clean and a dev
@@ -908,7 +918,10 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
     primary_unit: 'each',
-    cost_per_unit: null,
+    // Priced since 2026-09-09 so the Storage Inventory table has a costed row to total. 52 held
+    // (40 + 12) at $2.50 is $130 — a figure `storage-inventory.spec.ts` asserts exactly, and the
+    // only fixture in the suite that already proves a part split across two shelves.
+    cost_per_unit: 2.5,
   });
 
   const shelfA = await ensureLocation(supabase, companyId, E2E_SHELF_A);
@@ -927,4 +940,31 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     { onConflict: 'part_id,location_id,lot_key' },
   );
   if (error) throw new Error(`split stock upsert failed: ${error.message}`);
+
+  await ensureUncostedStock(supabase, companyId);
+}
+
+/**
+ * One part on a shelf with no cost on file.
+ *
+ * The other half of what the Inventory table has to get right: a row that is real stock and has no
+ * price, which must render an em dash, stay out of the total, and be named in words underneath —
+ * never silently counted as zero.
+ */
+async function ensureUncostedStock(supabase: SupabaseClient, companyId: string): Promise<void> {
+  const partId = await ensurePart(supabase, companyId, {
+    part_name: E2E_UNCOSTED_PART,
+    description: 'On a shelf, with no cost recorded',
+    source: 'bought',
+    primary_unit: 'each',
+    cost_per_unit: null,
+  });
+
+  const shelf = await ensureLocation(supabase, companyId, E2E_COST_SHELF);
+
+  const { error } = await supabase.from('part_location_stock').upsert(
+    [{ company_id: companyId, part_id: partId, location_id: shelf, quantity: 7 }],
+    { onConflict: 'part_id,location_id,lot_key' },
+  );
+  if (error) throw new Error(`uncosted stock upsert failed: ${error.message}`);
 }

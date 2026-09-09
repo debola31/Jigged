@@ -124,6 +124,61 @@ def test_founder_override_no_trial_charges_immediately(stripe_sdk, supabase_admi
     assert row["trial_end"] is None
 
 
+def test_backpay_checkout_session_shows_both_lines(
+    stripe_sdk, supabase_admin, sandbox_customer, monkeypatch
+):
+    """The real Checkout Session carries the backpay AND the recurring price, and
+    its total is their sum — the customer approves one number.
+
+    This is the only test that exercises `Price.retrieve` and `InvoiceItem.list`
+    against Stripe, so it is also what catches a STRIPE_RESTRICTED_KEY missing the
+    Prices / Invoice items read scopes (a 502 rather than an assertion failure).
+    The session is created but never completed, so nothing is charged.
+    """
+    from models.stripe_models import CheckoutRequest
+
+    company_id = sandbox_customer["company_id"]
+    supabase_admin.table("company_billing").upsert(
+        {
+            "company_id": company_id,
+            "stripe_customer_id": sandbox_customer["customer_id"],
+            "override_price_id": _FOUNDER_PRICE,
+            "override_trial_days": 0,
+            "backpay_amount_cents": 75000,
+            "backpay_description": "Sandbox backpay line",
+        },
+        on_conflict="company_id",
+    ).execute()
+
+    async def _noop_admin(request, cid):
+        return "test-user"
+
+    monkeypatch.setattr(sr, "_verify_company_admin", _noop_admin)
+    monkeypatch.setattr(sr, "_service_client", lambda: supabase_admin)
+    monkeypatch.setattr(sr, "_stripe", lambda: stripe_sdk)
+
+    import asyncio
+
+    class _Req:
+        headers: dict = {}
+
+    resp = asyncio.run(sr.create_checkout(CheckoutRequest(company_id=company_id), _Req()))
+    assert resp.url.startswith("https://")
+
+    session_id = resp.url.rsplit("/", 1)[-1].split("#")[0]
+    session = stripe_sdk.checkout.Session.retrieve(
+        session_id, expand=["line_items"]
+    )
+    lines = sr._g(sr._g(session, "line_items"), "data")
+    assert len(lines) == 2, f"expected recurring + backpay, got {lines}"
+
+    founder = stripe_sdk.Price.retrieve(_FOUNDER_PRICE)
+    assert sr._g(session, "amount_total") == sr._g(founder, "unit_amount") + 75000
+
+    amounts = sorted(sr._g(line, "amount_total") for line in lines)
+    assert 75000 in amounts
+
+
 def test_cancel_at_period_end_is_reflected(stripe_sdk, supabase_admin, sandbox_customer):
     """Canceling at period end keeps the sub live with cancel_at set (the 'Canceling'
     UI state)."""

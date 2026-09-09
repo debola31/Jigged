@@ -124,7 +124,7 @@ def test_founder_override_no_trial_charges_immediately(stripe_sdk, supabase_admi
     assert row["trial_end"] is None
 
 
-def test_backpay_checkout_session_shows_both_lines(
+def test_backpay_checkout_session_itemises_each_month(
     stripe_sdk, supabase_admin, sandbox_customer, monkeypatch
 ):
     """The real Checkout Session carries the backpay AND the recurring price, and
@@ -144,8 +144,9 @@ def test_backpay_checkout_session_shows_both_lines(
             "stripe_customer_id": sandbox_customer["customer_id"],
             "override_price_id": _FOUNDER_PRICE,
             "override_trial_days": 0,
-            "backpay_amount_cents": 75000,
-            "backpay_description": "Sandbox backpay line",
+            "backpay_monthly_cents": 25000,
+            "backpay_months": 3,
+            "backpay_first_month": "2026-06-01",
         },
         on_conflict="company_id",
     ).execute()
@@ -170,13 +171,24 @@ def test_backpay_checkout_session_shows_both_lines(
         session_id, expand=["line_items"]
     )
     lines = sr._g(sr._g(session, "line_items"), "data")
-    assert len(lines) == 2, f"expected recurring + backpay, got {lines}"
+    assert len(lines) == 4, f"expected recurring + one line per month, got {lines}"
 
     founder = stripe_sdk.Price.retrieve(_FOUNDER_PRICE)
     assert sr._g(session, "amount_total") == sr._g(founder, "unit_amount") + 75000
 
-    amounts = sorted(sr._g(line, "amount_total") for line in lines)
-    assert 75000 in amounts
+    # Three $250 month lines, each labelled with the month it covers.
+    descriptions = {sr._g(line, "description") for line in lines}
+    for month in ("June 2026", "July 2026", "August 2026"):
+        assert any(month in d for d in descriptions if d), (
+            f"no line covering {month} in {descriptions}"
+        )
+    # NB: filter on the label, not the amount — the recurring founder line is also
+    # $250, so an amount filter would match all four.
+    month_lines = [
+        line for line in lines if "previously unbilled" in (sr._g(line, "description") or "")
+    ]
+    assert len(month_lines) == 3
+    assert all(sr._g(line, "amount_total") == 25000 for line in month_lines)
 
 
 def test_cancel_at_period_end_is_reflected(stripe_sdk, supabase_admin, sandbox_customer):

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  backpaySummary,
   blockedMessageForAdmin,
   blockedMessageForNonAdmin,
   blockedNoticeForAdmin,
@@ -91,5 +92,52 @@ describe('blocked copy', () => {
       expect(blockedMessageForNonAdmin(state)).toContain('An admin at your shop');
       expect(blockedNoticeForNonAdmin(state, 'parts')).toContain('An admin at your shop');
     }
+  });
+});
+
+describe('backpaySummary', () => {
+  const backpay = (over: Partial<Parameters<typeof backpaySummary>[0]> = {}) => ({
+    backpay_monthly_cents: 25000,
+    backpay_months: 3,
+    backpay_first_month: '2026-06-01',
+    backpay_charged_at: null,
+    ...over,
+  });
+
+  it('states the total and the months it covers', () => {
+    expect(backpaySummary(backpay())).toBe(
+      '$750.00 for 3 previously unbilled months (June 2026 – August 2026)',
+    );
+  });
+
+  it('does not render a month range or a plural for a single month', () => {
+    expect(backpaySummary(backpay({ backpay_months: 1 }))).toBe(
+      '$250.00 for 1 previously unbilled month (June 2026)',
+    );
+  });
+
+  it('labels the first month correctly in a negative-offset timezone', () => {
+    // `new Date('2026-06-01')` is UTC midnight, which is May 31 in US timezones —
+    // the whole reason the date is parsed by parts rather than by Date.parse.
+    expect(backpaySummary(backpay())).toContain('June 2026');
+    expect(backpaySummary(backpay())).not.toContain('May');
+  });
+
+  it('rolls the year over rather than producing a month 13', () => {
+    expect(
+      backpaySummary(backpay({ backpay_first_month: '2026-11-01', backpay_months: 4 })),
+    ).toBe('$1,000.00 for 4 previously unbilled months (November 2026 – February 2027)');
+  });
+
+  it('says nothing once the backpay has been paid', () => {
+    // Advertising a charge the customer has already settled would be a lie.
+    expect(backpaySummary(backpay({ backpay_charged_at: '2026-09-09T00:00:00Z' }))).toBeNull();
+  });
+
+  it('says nothing when no backpay is configured, or it is half-configured', () => {
+    expect(backpaySummary(null)).toBeNull();
+    expect(backpaySummary(backpay({ backpay_monthly_cents: null }))).toBeNull();
+    expect(backpaySummary(backpay({ backpay_months: null }))).toBeNull();
+    expect(backpaySummary(backpay({ backpay_first_month: null }))).toBeNull();
   });
 });

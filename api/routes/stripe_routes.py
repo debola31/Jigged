@@ -22,7 +22,7 @@ import os
 import secrets
 import string
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import sentry_sdk
 import stripe
@@ -305,10 +305,33 @@ def _resolve_company_for_event(s, client: Client, obj, customer_id: str | None) 
     return None
 
 
-def _backpay_line_item(
+def _backpay_month_labels(first_month: str, months: int) -> list[str]:
+    """One label per covered month: ['June 2026', 'July 2026', 'August 2026'].
+
+    Derived from the stored dates rather than a free-text description, so a label
+    can never disagree with the window it is billing for.
+    """
+    start = date.fromisoformat(first_month[:10])
+    labels = []
+    for i in range(months):
+        month_index = start.month - 1 + i
+        labels.append(
+            date(start.year + month_index // 12, month_index % 12 + 1, 1).strftime(
+                "%B %Y"
+            )
+        )
+    return labels
+
+
+def _backpay_line_items(
     s, customer_id: str, price_id: str, billing: dict, trial_days: int
-) -> dict:
-    """Build the one-time Checkout line item for previously-unbilled service.
+) -> list[dict]:
+    """Build the one-time Checkout line items for previously-unbilled service.
+
+    One line per whole month at the monthly rate — "Jigged service — June 2026",
+    "… July 2026", and so on — rather than a single lump. Same money, but the
+    customer (and their bookkeeper, a year later) can reconcile the charge against
+    the months they actually used the product.
 
     Stripe puts one-time line items on the INITIAL invoice only, so a backpay charge
     can never leak onto a renewal. What that does NOT protect against is the first
@@ -358,19 +381,23 @@ def _backpay_line_item(
             ),
         )
 
-    return {
-        "quantity": 1,
-        "price_data": {
-            "currency": currency,
-            "unit_amount": int(billing["backpay_amount_cents"]),
-            # Inline product: the amount and the service window it covers are
-            # per-company, so there is no reusable Price to point at.
-            "product_data": {
-                "name": billing.get("backpay_description")
-                or "Previously unbilled service",
+    unit_amount = int(billing["backpay_monthly_cents"])
+    labels = _backpay_month_labels(
+        billing["backpay_first_month"], int(billing["backpay_months"])
+    )
+    return [
+        {
+            "quantity": 1,
+            "price_data": {
+                "currency": currency,
+                "unit_amount": unit_amount,
+                # Inline product: the rate and the month it covers are per-company,
+                # so there is no reusable Price to point at.
+                "product_data": {"name": f"Jigged service — {label} (previously unbilled)"},
             },
-        },
-    }
+        }
+        for label in labels
+    ]
 
 
 # ───────────────────────── endpoints ─────────────────────────
@@ -444,12 +471,14 @@ async def create_checkout(body: CheckoutRequest, request: Request):
     # alongside the recurring price, so the customer approves a single total on a
     # single hosted page. Service-role-set, like the price/trial overrides above.
     line_items = [{"price": price_id, "quantity": 1}]
-    backpay_cents = billing.get("backpay_amount_cents") if billing else None
-    if backpay_cents and not billing.get("backpay_charged_at"):
-        line_items.append(
-            _backpay_line_item(s, customer_id, price_id, billing, trial_days)
+    monthly_cents = billing.get("backpay_monthly_cents") if billing else None
+    if monthly_cents and not billing.get("backpay_charged_at"):
+        backpay = _backpay_line_items(s, customer_id, price_id, billing, trial_days)
+        line_items.extend(backpay)
+        subscription_data["metadata"]["backpay_months"] = str(len(backpay))
+        subscription_data["metadata"]["backpay_amount_cents"] = str(
+            int(monthly_cents) * len(backpay)
         )
-        subscription_data["metadata"]["backpay_amount_cents"] = str(backpay_cents)
 
     base = _app_base_url()
     try:

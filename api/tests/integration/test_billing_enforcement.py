@@ -396,7 +396,13 @@ def test_apply_stripe_subscription_stamps_backpay_charged_at(supabase_admin, bil
             "company_id", company_id
         ).single().execute().data
 
-    _set_billing(supabase_admin, company_id, backpay_amount_cents=75000)
+    _set_billing(
+        supabase_admin,
+        company_id,
+        backpay_monthly_cents=25000,
+        backpay_months=3,
+        backpay_first_month="2026-06-01",
+    )
 
     # A trial has not paid the backpay.
     apply("trialing", "2026-03-01T00:00:00+00:00")

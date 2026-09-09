@@ -171,7 +171,15 @@ def test_checkout_blocks_second_subscription_via_stripe(monkeypatch):
     assert exc.value.status_code == 409
 
 
-# ───────────────────────── checkout: backpay line item ─────────────────────────
+# ───────────────────────── checkout: backpay line items ─────────────────────────
+# Three whole months at the founder rate — Contour's real shape.
+_BACKPAY = {
+    "backpay_monthly_cents": 25000,
+    "backpay_months": 3,
+    "backpay_first_month": "2026-06-01",
+}
+
+
 def _backpay_stripe(created, *, pending_items=None, balance=0):
     """A Stripe double for the backpay path: no existing subscription, a clean
     customer, and a Session.create that records the kwargs it was handed."""
@@ -243,38 +251,55 @@ def _run_backpay_checkout(monkeypatch, fake_stripe, client):
     )
 
 
-def test_checkout_appends_backpay_line_item(monkeypatch):
-    """The backpay rides on the SAME session as the recurring price, so the hosted
-    page shows one total. It must be a one-time price (no `recurring` key), which is
-    what makes Stripe put it on the initial invoice only."""
+def test_checkout_appends_one_backpay_line_per_month(monkeypatch):
+    """The backpay rides on the SAME session as the recurring price, one line per
+    covered month at the monthly rate. Each must be a one-time price (no `recurring`
+    key), which is what makes Stripe put them on the initial invoice only."""
     created: dict = {}
     _run_backpay_checkout(
         monkeypatch,
         _backpay_stripe(created),
         _backpay_client(
-            backpay_amount_cents=75000,
-            backpay_description="Jigged service June 5 - September 9, 2026",
+            backpay_monthly_cents=25000,
+            backpay_months=3,
+            backpay_first_month="2026-06-01",
         ),
     )
 
     items = created["line_items"]
-    assert len(items) == 2
+    assert len(items) == 4  # the recurring price + one line per month
     assert items[0] == {"price": "price_founder", "quantity": 1}
 
-    backpay = items[1]["price_data"]
-    assert backpay["unit_amount"] == 75000
-    assert backpay["currency"] == "usd"  # taken from the recurring price, not assumed
-    assert "recurring" not in backpay  # one-time => initial invoice only
-    assert backpay["product_data"]["name"] == "Jigged service June 5 - September 9, 2026"
+    for item in items[1:]:
+        assert item["price_data"]["unit_amount"] == 25000
+        assert item["price_data"]["currency"] == "usd"  # from the price, not assumed
+        assert "recurring" not in item["price_data"]  # one-time => initial invoice only
+
+    assert [item["price_data"]["product_data"]["name"] for item in items[1:]] == [
+        "Jigged service — June 2026 (previously unbilled)",
+        "Jigged service — July 2026 (previously unbilled)",
+        "Jigged service — August 2026 (previously unbilled)",
+    ]
     # The subscription records why its first invoice was larger than $250.
+    assert created["subscription_data"]["metadata"]["backpay_months"] == "3"
     assert created["subscription_data"]["metadata"]["backpay_amount_cents"] == "75000"
+
+
+def test_backpay_month_labels_roll_over_the_year(monkeypatch):
+    """A window that crosses December must not produce a month 13."""
+    assert sr._backpay_month_labels("2026-11-01", 4) == [
+        "November 2026",
+        "December 2026",
+        "January 2027",
+        "February 2027",
+    ]
 
 
 def test_checkout_without_backpay_is_a_single_line_item(monkeypatch):
     created: dict = {}
     _run_backpay_checkout(monkeypatch, _backpay_stripe(created), _backpay_client())
     assert created["line_items"] == [{"price": "price_founder", "quantity": 1}]
-    assert "backpay_amount_cents" not in created["subscription_data"]["metadata"]
+    assert "backpay_months" not in created["subscription_data"]["metadata"]
 
 
 def test_checkout_does_not_rebill_an_already_charged_backpay(monkeypatch):
@@ -283,23 +308,9 @@ def test_checkout_does_not_rebill_an_already_charged_backpay(monkeypatch):
     _run_backpay_checkout(
         monkeypatch,
         _backpay_stripe(created),
-        _backpay_client(
-            backpay_amount_cents=75000,
-            backpay_charged_at="2026-09-09T00:00:00+00:00",
-        ),
+        _backpay_client(**_BACKPAY, backpay_charged_at="2026-09-09T00:00:00+00:00"),
     )
     assert created["line_items"] == [{"price": "price_founder", "quantity": 1}]
-
-
-def test_checkout_backpay_falls_back_to_a_generic_description(monkeypatch):
-    created: dict = {}
-    _run_backpay_checkout(
-        monkeypatch,
-        _backpay_stripe(created),
-        _backpay_client(backpay_amount_cents=75000, backpay_description=None),
-    )
-    name = created["line_items"][1]["price_data"]["product_data"]["name"]
-    assert name == "Previously unbilled service"
 
 
 def test_checkout_backpay_refuses_a_trial(monkeypatch):
@@ -310,7 +321,7 @@ def test_checkout_backpay_refuses_a_trial(monkeypatch):
         _run_backpay_checkout(
             monkeypatch,
             _backpay_stripe(created),
-            _backpay_client(backpay_amount_cents=75000, override_trial_days=30),
+            _backpay_client(**_BACKPAY, override_trial_days=30),
         )
     assert exc.value.status_code == 500
     assert "trial" in exc.value.detail.lower()
@@ -325,7 +336,7 @@ def test_checkout_backpay_refuses_pending_invoice_items(monkeypatch):
         _run_backpay_checkout(
             monkeypatch,
             _backpay_stripe(created, pending_items=[{"id": "ii_1"}]),
-            _backpay_client(backpay_amount_cents=75000),
+            _backpay_client(**_BACKPAY),
         )
     assert exc.value.status_code == 409
     assert "pending invoice items" in exc.value.detail
@@ -340,7 +351,7 @@ def test_checkout_backpay_refuses_a_nonzero_customer_balance(monkeypatch):
         _run_backpay_checkout(
             monkeypatch,
             _backpay_stripe(created, balance=5000),
-            _backpay_client(backpay_amount_cents=75000),
+            _backpay_client(**_BACKPAY),
         )
     assert exc.value.status_code == 409
     assert "balance" in exc.value.detail

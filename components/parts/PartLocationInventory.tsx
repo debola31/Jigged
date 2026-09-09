@@ -22,6 +22,7 @@ import type { Part } from '@/types/part';
 import type { PartUnitConversion } from '@/types/part';
 import type {
   InventoryLocation,
+  LotCertificate,
   PartLocationBalanceWithLocation,
 } from '@/types/inventoryLocations';
 import {
@@ -30,6 +31,8 @@ import {
   getLocations,
   setPartLotTracking,
 } from '@/utils/inventoryLocationsAccess';
+import { listLotCertificatesForLots } from '@/utils/lotCertificatesAccess';
+import LotCertificateControl from '@/components/inventory/LotCertificateControl';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import { compareLocationNames } from '@/lib/locationTree';
@@ -42,6 +45,7 @@ import PartLocationActionModal, {
 // Stable empty fallbacks so derived memos don't churn while the first load runs.
 const EMPTY_BALANCES: PartLocationBalanceWithLocation[] = [];
 const EMPTY_LOCATIONS: InventoryLocation[] = [];
+const EMPTY_CERTS = new Map<string, LotCertificate[]>();
 
 // The private `pathLabel` that used to live here is gone: it was the fourth copy of the same
 // ancestry walk, and `stockDestinationOptions` now builds the labelled list.
@@ -85,6 +89,46 @@ export default function PartLocationInventory({
   );
   const balances = inventoryData?.[0] ?? EMPTY_BALANCES;
   const locations = inventoryData?.[1] ?? EMPTY_LOCATIONS;
+
+  /*
+   * Certificates, but only for a heat-tracked part.
+   *
+   * Gated on the flag rather than on "does any balance have a lot", so a shop that never records a
+   * heat issues ZERO extra requests here — the cert journey is invisible to it, which is what keeps
+   * the 2026-08-01 "we do not want traceability" answer honoured with no setting to configure.
+   */
+  const certLotIds = useMemo(
+    () =>
+      part.lot_tracked
+        ? [...new Set(balances.map((b) => b.lot_id).filter((id): id is string => Boolean(id)))]
+        : [],
+    [part.lot_tracked, balances],
+  );
+  // A join, so the dep is a value rather than a fresh array identity every render.
+  const certLotKey = certLotIds.join(',');
+  const { data: certsData, reload: reloadCerts } = useLoad(
+    () => listLotCertificatesForLots(certLotIds),
+    [certLotKey],
+  );
+  const certsByLot = certsData ?? EMPTY_CERTS;
+
+  /*
+   * WHICH ROW CARRIES THE CERT CONTROL.
+   *
+   * One lot on two shelves is two balance rows and ONE document. Rendering the control per row
+   * would offer two upload buttons for one cert, and show "Add cert" twice for a lot that has one.
+   * So it renders on the FIRST row of each distinct lot only.
+   */
+  const certAnchorKeys = useMemo(() => {
+    const seenLots = new Set<string>();
+    const anchors = new Set<string>();
+    for (const b of balances) {
+      if (!b.lot_id || seenLots.has(b.lot_id)) continue;
+      seenLots.add(b.lot_id);
+      anchors.add(`${b.location_id}:${b.lot_id}`);
+    }
+    return anchors;
+  }, [balances]);
 
   /*
    * No-storage mode: the shop has never built a place.
@@ -319,6 +363,19 @@ export default function PartLocationInventory({
               <Typography sx={{ fontWeight: 600 }}>
                 {b.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })} {primaryUnit}
               </Typography>
+              {b.lot_id && certAnchorKeys.has(`${b.location_id}:${b.lot_id}`) && (
+                <Box sx={{ ml: 2 }}>
+                  <LotCertificateControl
+                    companyId={companyId}
+                    lotId={b.lot_id}
+                    heatLabel={b.heat_number ? `Heat ${b.heat_number}` : b.lot_code}
+                    certificates={certsByLot.get(b.lot_id) ?? []}
+                    surface="office_lot"
+                    onChanged={reloadCerts}
+                    onError={setError}
+                  />
+                </Box>
+              )}
               {/*
                 The door counting never had from a part.
 

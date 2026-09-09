@@ -10,6 +10,7 @@ import type { Part, PartUnitConversion } from '@/types/part';
 import PartTransactionHistoryTable from '@/components/parts/PartTransactionHistoryTable';
 import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEditor';
 import PartLocationInventory from '@/components/parts/PartLocationInventory';
+import PartLotCertificates from '@/components/parts/PartLotCertificates';
 
 interface InventoryTabProps {
   part: Part;
@@ -88,6 +89,23 @@ export default function InventoryTab({
             onStockChanged={onStockChanged}
           />
         </Box>
+
+        {/*
+          Heats and their certificates.
+
+          Below the balances rather than inside them, because it answers a different question: the
+          balances say what is on the shelf now, this says what we have ever held and whether we
+          can prove what it was. A heat consumed last month has no balance row and is exactly the
+          one a customer asks about.
+        */}
+        {part.lot_tracked && (
+          <Box sx={{ mt: 4, textAlign: 'left' }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Heats and certificates
+            </Typography>
+            <PartLotCertificates partId={partId} companyId={companyId} />
+          </Box>
+        )}
 
         {/* Unit conversions — inline-editable list. */}
         {part.primary_unit && (

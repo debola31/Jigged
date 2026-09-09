@@ -32,6 +32,12 @@ import type { LotCertificate, LotCertificatePreview } from '@/types/inventoryLoc
  */
 export const CERT_MAX_BYTES = 25 * 1024 * 1024;
 
+/**
+ * `UploadTimeoutError.name`, so a caller can tell a stalled transfer from a server refusal without
+ * importing the error class and without matching on message text.
+ */
+export const UPLOAD_TIMEOUT_REASON = 'UploadTimeoutError';
+
 /** Long enough that a 40-page MTR scanned at 300 dpi doesn't 403 halfway through being read. */
 const CERT_URL_EXPIRY_SECONDS = 4 * 60 * 60;
 

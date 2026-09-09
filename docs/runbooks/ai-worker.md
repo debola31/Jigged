@@ -134,6 +134,26 @@ A heartbeat inside 60 seconds is what makes the feature "available". Staler than
 that and every queued job for its models sweeps to `timed_out` / `ai_offline`,
 and the UI says the box is off.
 
+### For a PR's Vercel preview (a second worker, on demand)
+
+A preview deployment talks to the PR's **Supabase branch**, not production, and nothing heartbeats
+there: every preview's ask bar reads "the AI box is offline". One worker serves one database, so a
+preview gets its own for as long as you are testing it:
+
+```bash
+scripts/preview-worker.sh 840      # the PR number; Ctrl-C stops it
+```
+
+The script reads the branch's project ref from the PR's **Supabase Preview** check (`gh pr checks`),
+reuses the region pooler host from `WORKER_DATABASE_URL` in `.env.local`, and connects as
+`jigged_ai_worker` / `jigged_ai_readonly` with the password `supabase/seed.sql` gives those roles on
+local and preview databases — no credential to set up, and it refuses the production ref. The Vercel
+preview's own env already routes insights to the local chain (`LLM_CHAIN_INSIGHTS`), so the preview's
+ask bar comes alive the moment the heartbeat lands. Both workers share the one Ollama
+(`OLLAMA_NUM_PARALLEL=1`), so a production question asked during a preview job waits behind it.
+Measured 2026-09-08 on PR #840: heartbeat within 5 s; a question posted to the preview backend was
+enqueued to the worker executor and settled in 15 s.
+
 ## 4. What the loop does, and the two things that are easy to get wrong
 
 Each tick: sweep → claim (up to 8, single model) → run them one at a time →

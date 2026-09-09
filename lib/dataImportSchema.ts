@@ -1,23 +1,42 @@
 /**
  * The canonical fields the owner can confirm/correct in the **Map** stage, per entity.
  *
- * This is the review-relevant slice — identity, required, referential, cost, and **stock**
- * fields. Most are ones the deterministic analyzer (dataImportAnalyzer.ts) keys its checks on,
- * so a correction here visibly changes the review. Keys MUST match the analyzer's roles
- * (e.g. parts cost is `cost_per_unit`); keep the two in step when the check set changes.
+ * This is the FULL set of fields `/execute` writes for each entity, not a slice. It used to be a
+ * "review-relevant" subset (customers got 2 of 11, vendors 1 of 11), which was survivable only
+ * while the per-entity wizards still exposed the rest for hand-correction. #776 retired those, so
+ * a field missing from here had no correction surface anywhere: the AI maps it, it rides through
+ * `mappingsFor()` to execute, and a mis-map could not be fixed by anyone (#777).
  *
- * `quantity` / `reorder_point` are a deliberate widening beyond "what the analyzer checks":
- * the backend has always accepted them (PART_SCHEMA in api/models/parts_import_models.py),
- * but with no entry here they were invisible at Map, so an owner could neither see nor correct
- * a mis-detected on-hand column. Opening balances are journey J1 in docs/modules/inventory.md.
+ * TWO INVARIANTS, both machine-enforced by scripts/dataImportFieldParityCheck.ts:
+ *
+ *  1. Every key here exists in the entity's Python import schema (PART_SCHEMA, CUSTOMER_SCHEMA, …)
+ *     with the same `required` flag, and every key there exists here. Those schemas are the AI's
+ *     mapping vocabulary, so a field in one and not the other is either unmappable (the AI has
+ *     never heard of it) or uncorrectable (the owner can't see it) — both silent.
+ *  2. Every role the deterministic analyzer keys a check on (dataImportAnalyzer.ts) has an entry
+ *     here — parts cost is `cost_per_unit`, and `routings.sequence` is the column the
+ *     `sequence_inferred` notice explicitly tells the owner to map at this step.
+ *
+ * Labels are for a non-technical owner, never the DB column name ('primary_unit' → "unit of
+ * measure"). Array order is display order in the details panel, and `group`ed fields sort last —
+ * see ColumnMappingStep, which partitions on exactly that.
  */
 
 import type { EntityType } from '@/types/data-import';
+
+/**
+ * Subheadings inside the Map details panel. Undefined is the common case: the fields an owner
+ * came to check, rendered first and ungrouped, exactly as every entity rendered before the
+ * catalog was widened. A group exists only where a block would otherwise bury them — the ten
+ * contact/address columns on a customer, the four numbers on a routing step.
+ */
+export type FieldGroup = 'Contact & address' | 'Times & rates';
 
 export interface CanonicalField {
   key: string; // canonical role the analyzer + importer use
   label: string; // plain-language label for a non-technical owner
   required: boolean; // needed to import this entity at all
+  group?: FieldGroup; // rendered under a subheading, after the ungrouped fields
 }
 
 /**
@@ -66,10 +85,23 @@ export const KNOWN_ENTITIES: EntityType[] = [
   'customers',
 ];
 
+/** The six postal columns, character-for-character the same on customers and vendors — both
+ *  land in their entity's `*_addresses` table. Shared so the two can't drift apart. */
+const ADDRESS_FIELDS: CanonicalField[] = [
+  { key: 'address_line1', label: 'Street address', required: false, group: 'Contact & address' },
+  { key: 'address_line2', label: 'Suite / unit', required: false, group: 'Contact & address' },
+  { key: 'city', label: 'City', required: false, group: 'Contact & address' },
+  { key: 'state', label: 'State', required: false, group: 'Contact & address' },
+  { key: 'postal_code', label: 'ZIP code', required: false, group: 'Contact & address' },
+  { key: 'country', label: 'Country', required: false, group: 'Contact & address' },
+];
+
 export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
   parts: [
     { key: 'part_name', label: 'Part number / name', required: true },
+    { key: 'description', label: 'Description', required: false },
     { key: 'primary_unit', label: 'Unit of measure', required: true }, // parts can't import without one
+    { key: 'source', label: 'Made in-house or bought', required: false },
     { key: 'preferred_vendor_name', label: 'Preferred vendor', required: false },
     { key: 'cost_per_unit', label: 'Cost / price', required: false },
     { key: 'quantity', label: 'Quantity on hand', required: false },
@@ -79,11 +111,25 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     { key: 'location_name', label: 'Location (needed with a quantity)', required: false },
     { key: 'reorder_point', label: 'Reorder point', required: false },
   ],
-  vendors: [{ key: 'name', label: 'Vendor name', required: true }],
+  vendors: [
+    { key: 'name', label: 'Vendor name', required: true },
+    { key: 'primary_contact_name', label: 'Contact name', required: false, group: 'Contact & address' },
+    { key: 'primary_contact_email', label: 'Contact email', required: false, group: 'Contact & address' },
+    { key: 'primary_contact_phone', label: 'Contact phone', required: false, group: 'Contact & address' },
+    // One of VENDOR_CONTACT_ROLE_VALUES, defaulting to 'sales'. 'other' is in that enum but fails
+    // the DB CHECK on this path, which has nowhere to carry the role_label 'other' requires — so
+    // the label deliberately doesn't invite it.
+    { key: 'primary_contact_role', label: "Contact's role", required: false, group: 'Contact & address' },
+    ...ADDRESS_FIELDS,
+  ],
   // In-house only. The `vendor_name` column is GONE: a work centre has no
   // vendor, and leaving the field here is what let the wizard keep minting the
   // concept the split removed.
-  work_centers: [{ key: 'name', label: 'Work center name', required: true }],
+  work_centers: [
+    { key: 'name', label: 'Work center name', required: true },
+    { key: 'labor_rate', label: 'Hourly rate', required: false },
+    { key: 'description', label: 'Notes', required: false },
+  ],
   vendor_services: [
     { key: 'vendor_name', label: 'Vendor', required: true },
     { key: 'service_name', label: 'Service (e.g. Anodize)', required: true },
@@ -98,6 +144,17 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     // disambiguates it. Absent, the importer resolves an in-house station first
     // and only falls back to a service when exactly one matches.
     { key: 'vendor_name', label: 'Vendor (for an outside step)', required: false },
+    // The column the `sequence_inferred` notice tells the owner to map. Left unmapped, the ingest
+    // driver numbers each part's ops by their order across the WHOLE file
+    // (numberRoutingOpsInFileOrder) — right for essentially every export, but a guess.
+    { key: 'sequence', label: 'Step number', required: false },
+    { key: 'instructions', label: 'Instructions for the operator', required: false },
+    // Cost-bearing, every one of them: a mis-mapped column here is silently wrong money rather
+    // than a visibly wrong record, which is why they are shown rather than left to the AI alone.
+    { key: 'setup_minutes', label: 'Setup time (minutes)', required: false, group: 'Times & rates' },
+    { key: 'cycle_minutes_per_unit', label: 'Run time per piece (minutes)', required: false, group: 'Times & rates' },
+    { key: 'labor_rate_override', label: 'Hourly rate for this step', required: false, group: 'Times & rates' },
+    { key: 'external_unit_price', label: 'Outside price per piece', required: false, group: 'Times & rates' },
   ],
   bom: [
     { key: 'parent_part_name', label: 'Assembly (parent part)', required: true },
@@ -111,5 +168,9 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     // commercial field every job-shop ERP ships — so mapping it on import is the
     // difference between arriving populated and being typed in per customer later.
     { key: 'default_payment_terms', label: 'Payment terms', required: false },
+    { key: 'contact_name', label: 'Contact name', required: false, group: 'Contact & address' },
+    { key: 'contact_email', label: 'Contact email', required: false, group: 'Contact & address' },
+    { key: 'contact_phone', label: 'Contact phone', required: false, group: 'Contact & address' },
+    ...ADDRESS_FIELDS,
   ],
 };

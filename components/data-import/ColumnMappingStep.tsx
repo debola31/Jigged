@@ -16,6 +16,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import { ENTITY_FIELDS, ENTITY_LABELS, KNOWN_ENTITIES } from '@/lib/dataImportSchema';
+import type { CanonicalField, FieldGroup } from '@/lib/dataImportSchema';
 import type { WorkingFile } from '@/lib/dataImportEditing';
 import type { EntityType } from '@/types/data-import';
 
@@ -40,6 +41,24 @@ function sampleValues(file: WorkingFile, header: string, n = 3): string[] {
     }
   }
   return out;
+}
+
+/**
+ * The details panel's sections: the fields an owner came to check first and unlabelled, then each
+ * group under a subheading. An entity with no grouped fields yields exactly one section, so it
+ * renders as the flat list it always did.
+ *
+ * Grouping, rather than a second "+9 more fields" disclosure, is what keeps the widened panel
+ * readable (#777). The panel is already behind one click; making the owner click again to reach
+ * the very field they opened it to fix would rebuild a milder version of the dead end being closed.
+ */
+function fieldSections(fields: CanonicalField[]): { heading?: FieldGroup; fields: CanonicalField[] }[] {
+  const ungrouped = fields.filter((f) => !f.group);
+  const headings = [...new Set(fields.flatMap((f) => (f.group ? [f.group] : [])))];
+  return [
+    ...(ungrouped.length > 0 ? [{ fields: ungrouped }] : []),
+    ...headings.map((heading) => ({ heading, fields: fields.filter((f) => f.group === heading) })),
+  ];
 }
 
 /**
@@ -211,29 +230,42 @@ function FileReviewCard({
             </Button>
             <Collapse in={showDetails}>
               <Stack spacing={1} sx={{ mt: 1 }}>
-                {fields.map((field) => (
-                  <Box key={field.key} sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <Typography variant="body2" sx={{ minWidth: 180 }}>
-                      {field.label}
-                      {field.required && ' *'}
-                    </Typography>
-                    <FormControl size="small" sx={{ minWidth: 220 }} error={field.required && !file.columnRoles[field.key]}>
-                      <Select
-                        value={file.columnRoles[field.key] ?? ''}
-                        displayEmpty
-                        onChange={(e) => onRoleChange(index, field.key, e.target.value as string)}
+                {fieldSections(fields).map((section) => (
+                  <Stack key={section.heading ?? '_'} spacing={1}>
+                    {section.heading && (
+                      <Typography
+                        variant="overline"
+                        color="text.secondary"
+                        sx={{ display: 'block', mt: 1 }}
                       >
-                        <MenuItem value="">
-                          <em>— not in this file —</em>
-                        </MenuItem>
-                        {file.headers.map((h) => (
-                          <MenuItem key={h} value={h}>
-                            {h}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Box>
+                        {section.heading}
+                      </Typography>
+                    )}
+                    {section.fields.map((field) => (
+                      <Box key={field.key} sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Typography variant="body2" sx={{ minWidth: 180 }}>
+                          {field.label}
+                          {field.required && ' *'}
+                        </Typography>
+                        <FormControl size="small" sx={{ minWidth: 220 }} error={field.required && !file.columnRoles[field.key]}>
+                          <Select
+                            value={file.columnRoles[field.key] ?? ''}
+                            displayEmpty
+                            onChange={(e) => onRoleChange(index, field.key, e.target.value as string)}
+                          >
+                            <MenuItem value="">
+                              <em>— not in this file —</em>
+                            </MenuItem>
+                            {file.headers.map((h) => (
+                              <MenuItem key={h} value={h}>
+                                {h}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                    ))}
+                  </Stack>
                 ))}
               </Stack>
             </Collapse>

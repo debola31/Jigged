@@ -578,7 +578,7 @@ class TestExplicitEdgeCases:
 
 @pytest.mark.integration
 class TestCancellationFulfillmentIndependence:
-    """PRD §7.1: cancellation does NOT remove a part from fulfillment math."""
+    """Cancellation does NOT remove a part from fulfillment math."""
 
     def test_partial_ship_then_cancel_keeps_partially_shipped(self, admin: Client):
         env = _new_env(admin)

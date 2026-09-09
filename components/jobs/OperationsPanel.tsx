@@ -171,7 +171,7 @@ export default function OperationsPanel({
   const completedCount = operations.filter((op) => op.status === 'completed').length;
   const progressPercent = operations.length > 0 ? (completedCount / operations.length) * 100 : 0;
 
-  // Production and fulfillment are independent lifecycles (PRD §0/§7) —
+  // Production and fulfillment are independent lifecycles —
   // a fully-shipped job can still have outstanding work that operators
   // need to record (rework, last operation completed after the box went
   // out the door, etc.). Only the production-side terminal state stops

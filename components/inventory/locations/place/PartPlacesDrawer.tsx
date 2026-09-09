@@ -71,6 +71,11 @@ import LocationPicker, { type LocationPickerOption } from '@/components/inventor
 import PlaceViewHeader from './PlaceViewHeader';
 import PlaceStockActionForm, { type PlaceStockAction } from './PlaceStockActionForm';
 import PartHeatsSection from '@/components/inventory/PartHeatsSection';
+import LotCertificateControl from '@/components/inventory/LotCertificateControl';
+import { listLotCertificatesForLots } from '@/utils/lotCertificatesAccess';
+import type { LotCertificate } from '@/types/inventoryLocations';
+
+const EMPTY_CERTS = new Map<string, LotCertificate[]>();
 import PlaceAdjustForm from './PlaceAdjustForm';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -119,6 +124,21 @@ function PartPlacesBody({
   };
 
   const balances = data ?? [];
+
+  /*
+   * Certificates for the heats that are ON A SHELF, so each one can sit inside the heat it belongs
+   * to rather than in a list of its own below. The rows are already broken down by heat; a second
+   * list of the same heats was the same information twice, taking space every time.
+   */
+  const shelvedLotIds = [
+    ...new Set(balances.map((b) => b.lot_id).filter((id): id is string => Boolean(id))),
+  ];
+  const shelvedLotKey = shelvedLotIds.join(',');
+  const { data: certsData, reload: reloadCerts } = useLoad(
+    () => listLotCertificatesForLots(shelvedLotIds),
+    [shelvedLotKey, stamp],
+  );
+  const certsByLot: Map<string, LotCertificate[]> = certsData ?? EMPTY_CERTS;
   // Safe to add: balances are stored in the part's primary unit, so these are the same unit by
   // construction. It is the one number on this screen that is a sum rather than an observation.
   const total = balances.reduce((sum, r) => sum + Number(r.quantity), 0);
@@ -330,6 +350,27 @@ function PartPlacesBody({
                         />
                       )}
 
+                      {/*
+                        The certificate, inside the heat it belongs to.
+                        The rows are already broken down by heat, so this is where someone looking
+                        for a cert opens — a separate list below repeated every heat to reach the
+                        few that have documents, and took the space whether or not any did.
+                      */}
+                      {r.lot_id && (
+                        <Box sx={{ mb: 1 }}>
+                          <LotCertificateControl
+                            companyId={companyId}
+                            lotId={r.lot_id}
+                            heatLabel={r.heat_number ? `Heat ${r.heat_number}` : r.lot_code}
+                            certificates={certsByLot.get(r.lot_id) ?? []}
+                            surface="office_lot"
+                            atReceipt={false}
+                            onChanged={reloadCerts}
+                            onError={() => {}}
+                          />
+                        </Box>
+                      )}
+
                       {/* Inside the section, not a second target on the row — the bin stays one
                           click away without competing with the thing you came here to do. */}
                       <Button size="small" variant="text" onClick={() => onOpenPlace(r.location_id)}>
@@ -361,17 +402,14 @@ function PartPlacesBody({
         )}
 
         {/*
-          Heats and their certificates — the DOCUMENT axis, which the rows above are not.
-          A row is (place, lot): it says where material is, and names its heat so two lots on one
-          shelf are tellable apart. A certificate belongs to the LOT, so one heat on two shelves is
-          two rows and ONE document — a control per row would offer two buttons for it. And a heat
-          that has been fully consumed has no row at all, which is exactly the one a customer asks
-          about. Both reasons point at a list keyed by heat rather than by place.
+          Only what the rows above CANNOT show: heats with nothing left on a shelf, and the way out
+          of heat tracking. A heat still in stock carries its certificate inside its own row now.
         */}
         <PartHeatsSection
           partId={part.id}
           companyId={companyId}
           refreshKey={stamp}
+          shelvedLotIds={shelvedLotIds}
           onChanged={afterWrite}
         />
       </Box>

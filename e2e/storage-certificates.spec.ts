@@ -97,8 +97,12 @@ test.describe.serial('Mill certificates', () => {
   test('a receipt records the stock without demanding a cert', async ({ page }) => {
     await receive(page, false);
 
-    // Nothing is offered after the fact — the receipt is done and the cert was optional. The rail
-    // is still where one can be attached later.
+    // Nothing is offered after the fact — the receipt is done and the cert was optional.
+    // The way to attach one later is INSIDE the heat's own row, so open that heat.
+    const row = page.getByRole('button', { name: new RegExp(`Heat ${HEAT}`, 'i') }).first();
+    await expect(row).toBeVisible();
+    await page.waitForTimeout(300);
+    await row.click();
     await expect(page.getByRole('button', { name: 'Add cert', exact: true }).first()).toBeVisible();
   });
 
@@ -107,17 +111,28 @@ test.describe.serial('Mill certificates', () => {
 
     // A REAL upload: through the browser, into the `attachments` bucket, under
     // {companyId}/lots/{lotId}/... — the path the bucket's RLS gates on.
+    // The cert lives inside the heat it landed on, so open that heat to see it. Waited for
+    // first: the drawer re-reads its places after the write, and clicking into that reload
+    // collapses the row again.
+    const heatRow = page.getByRole('button', { name: new RegExp(`Heat ${HEAT}`, 'i') }).first();
+    await expect(heatRow).toBeVisible();
+    await page.waitForTimeout(300);
+    await heatRow.click();
     await expect(page.getByRole('button', { name: /Open MTR-4471\.pdf/i })).toBeVisible({
       timeout: 30_000,
     });
   });
 
-  test('the cert opens by name, and downloads in one click', async ({ page }) => {
+  test('the cert lives inside its heat, not in a list of its own', async ({ page }) => {
     await openSideRail(page);
 
-    // Heats and certificates live in the rail: every heat ever held, not only what is still on a
-    // shelf, which is the one that answers "the customer wants the cert for heat 4471".
-    await expect(page.getByText('Heats and certificates')).toBeVisible();
+    // Nothing outside the rows: the rows are already broken down by heat, so a second list of the
+    // same heats was the same information twice, taking space whether or not any had a document.
+    await expect(page.getByText('Heats and certificates')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Open MTR-4471\.pdf/i })).toHaveCount(0);
+
+    // It is there once the heat it belongs to is opened.
+    await page.getByRole('button', { name: new RegExp(SHELF, 'i') }).first().click();
     await expect(page.getByRole('button', { name: /Download MTR-4471\.pdf/i })).toBeVisible();
 
     await page.getByRole('button', { name: /Open MTR-4471\.pdf/i }).first().click();

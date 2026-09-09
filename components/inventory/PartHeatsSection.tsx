@@ -4,7 +4,6 @@ import { useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -22,28 +21,32 @@ interface PartHeatsSectionProps {
   companyId: string;
   /** Bumped by the drawer after any write, so a new heat or a new cert shows without a reload. */
   refreshKey: number;
+  /** Heats that still have stock. Those carry their certificate inside their own row above. */
+  shelvedLotIds: string[];
   /** A write landed — the drawer re-reads, and the part's tracking flag with it. */
   onChanged: () => void | Promise<void>;
 }
 
 /**
- * Every heat this part has ever carried, its certificate, and the way out of heat tracking.
+ * What the rows above cannot show: heats with nothing left on a shelf, and the way out of tracking.
  *
- * **Lives in the side rail on Storage → Inventory**, which is the only per-part storage surface
- * there is now. It was on the part detail page's own Storage tab until 2026-09-09; that tab is
- * gone, because most parts are never stocked and a tab that is empty for most of a catalogue is a
- * tab people learn to ignore — and the one place someone looks for a part's heats is the drawer
- * they opened by clicking that part in the stock list.
+ * **It used to list every heat.** That was the same information twice — the rail's rows are already
+ * broken down by heat — and it took the space whether or not any heat had a document. A heat still
+ * in stock now carries its certificate inside its own expanded row, where someone looking for it
+ * opens anyway.
  *
- * **Balances cannot drive this.** `getLotsForPart` returns every lot ever recorded against the
- * part, not only what is still on a shelf, and that is the whole point: the question people are
- * actually asked is *"the customer wants the cert for heat 4471"* about material consumed last
- * month, which has no balance row at all.
+ * What has no row is a heat that has been **fully consumed**, and that is exactly the one people
+ * are asked about: *"the customer wants the cert for heat 4471"* about material used last month.
+ * `getLotsForPart` returns every lot ever recorded against the part rather than only what is on a
+ * shelf, so those stay reachable — and only they are listed here.
+ *
+ * Most parts, most of the time, render nothing but the tracking control.
  */
 export default function PartHeatsSection({
   partId,
   companyId,
   refreshKey,
+  shelvedLotIds,
   onChanged,
 }: PartHeatsSectionProps) {
   const [error, setError] = useState<string | null>(null);
@@ -82,35 +85,34 @@ export default function PartHeatsSection({
     }
   };
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-        <CircularProgress size={20} />
-      </Box>
-    );
-  }
+  if (loading) return null;
 
-  // No heats, no section. An untracked part is most parts, and a header over nothing is clutter.
+  // No heats at all means an untracked part — most parts — and there is nothing to say.
   if (!lots || lots.length === 0) return null;
+
+  const shelved = new Set(shelvedLotIds);
+  const consumed = lots.filter((l) => !shelved.has(l.lotId));
 
   return (
     <Box sx={{ mt: 3 }}>
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: '0.7rem', mb: 1 }}
-      >
-        Heats and certificates
-      </Typography>
-
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
+      {consumed.length > 0 && (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: '0.7rem', mb: 1 }}
+        >
+          Heats no longer in stock
+        </Typography>
+      )}
+
       <Stack spacing={1}>
-        {lots.map((lot) => (
+        {consumed.map((lot) => (
           <Paper
             key={lot.lotId}
             variant="outlined"

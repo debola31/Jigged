@@ -1018,11 +1018,16 @@ hold*; the side rail is where a part comes apart by place and heat. `Places` is 
 the one honest thing a column can say about three shelves — **distinct places, not balance rows**,
 so two heats on one shelf is one place and the rail's "across 1 location" and the column agree.
 
-**The heats and certificates live in the side rail**, keyed by heat rather than by place. A
-certificate belongs to the LOT, so one heat on two shelves is two rows and ONE document — a control
-per row would offer two buttons for it — and a heat that has been fully consumed has no row at all,
-which is exactly the one a customer asks about. The way out of heat tracking sits beside them, where
-someone would come looking.
+**A certificate lives inside the heat it belongs to**, in the side rail's expanded row.
+**Withdrawn 2026-09-09:** a `Heats and certificates` list below the rows — wrong because the rows
+are *already* broken down by heat, so it listed every heat a second time to reach the few with
+documents, and took the space whether or not any did. The cost of putting it on the row is that one
+heat at two places shows the control twice; several certs per lot is legal anyway, so the worst case
+is two ways to reach one document rather than two documents.
+
+What has no row is a heat **fully consumed** — no balance, nothing to expand — and that is exactly
+the one a customer asks about. Those, and only those, are listed under `Heats no longer in stock`,
+beside the way out of heat tracking. Most parts render neither.
 
 **The list shows `Updated`, not the heat.** A row could only ever carry ONE of a part's heats, so a
 part on three shelves read as three unrelated things — and the side rail already breaks a part down

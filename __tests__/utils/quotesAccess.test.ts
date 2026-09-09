@@ -140,9 +140,7 @@ vi.mock('@/utils/jobsAccess', () => ({
 
 // Import functions after mock setup
 import {
-  getQuotes,
   getAllQuotes,
-  getQuotesCount,
   getQuote,
   getQuoteWithRelations,
   createQuote,
@@ -212,74 +210,6 @@ describe('quotesAccess utilities', () => {
 
   // ============== CRUD Operations Tests ==============
 
-  describe('getQuotes', () => {
-    it('returns paginated quotes with relations', async () => {
-      const mockQuotesWithRelations = [
-        {
-          ...mockQuote,
-          customers: { id: 'customer-1', name: 'Test Customer' },
-          parts: { id: 'part-1', part_name: 'PART001', description: 'Test Part', pricing: [] },
-          jobs: null,
-        },
-      ];
-      mockQueryBuilder.data = mockQuotesWithRelations;
-      mockQueryBuilder.count = 1;
-      mockQueryBuilder.error = null;
-
-      const result = await getQuotes('company-1');
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('quotes');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(result.data).toHaveLength(1);
-      expect(result.total).toBe(1);
-    });
-
-    it('applies status filter correctly', async () => {
-      mockQueryBuilder.data = [];
-      mockQueryBuilder.count = 0;
-      mockQueryBuilder.error = null;
-
-      await getQuotes('company-1', { status: 'approved' });
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'approved');
-    });
-
-    it('applies customer filter correctly', async () => {
-      mockQueryBuilder.data = [];
-      mockQueryBuilder.count = 0;
-      mockQueryBuilder.error = null;
-
-      await getQuotes('company-1', { customerId: 'customer-1' });
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
-    });
-
-    it('applies search filter with SQL escaping', async () => {
-      mockQueryBuilder.data = [];
-      mockQueryBuilder.count = 0;
-      mockQueryBuilder.error = null;
-
-      await getQuotes('company-1', { search: 'test%query' });
-
-      // After the description column was removed, search targets only quote_number
-      // via .ilike (not .or). The % wildcard in the input must still be escaped.
-      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith(
-        'quote_number',
-        expect.stringContaining('\\%')
-      );
-    });
-
-    it('throws error when Supabase query fails', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { message: 'Database error', code: '500' };
-
-      await expect(getQuotes('company-1')).rejects.toEqual({
-        message: 'Database error',
-        code: '500',
-      });
-    });
-  });
-
   describe('getAllQuotes', () => {
     it('fetches all quotes in batches', async () => {
       mockQueryBuilder.data = [mockQuote];
@@ -302,27 +232,40 @@ describe('quotesAccess utilities', () => {
       // Should stop because we got fewer than BATCH_SIZE (1000)
       expect(result).toHaveLength(1);
     });
-  });
 
-  describe('getQuotesCount', () => {
-    it('returns count of quotes', async () => {
-      mockQueryBuilder.count = 42;
+    it('applies status, customer and creator filters to the query', async () => {
+      mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      const result = await getQuotesCount('company-1');
-
-      expect(result).toBe(42);
-    });
-
-    it('applies filters to count query', async () => {
-      mockQueryBuilder.count = 10;
-      mockQueryBuilder.error = null;
-
-      await getQuotesCount('company-1', { status: 'pending_approval', customerId: 'cust-1' });
+      await getAllQuotes('company-1', {
+        status: 'approved',
+        customerId: 'customer-1',
+        createdBy: 'user-1',
+      });
 
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'pending_approval');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'cust-1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'approved');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('created_by', 'user-1');
+    });
+
+    it('excludes archived quotes', async () => {
+      mockQueryBuilder.data = [];
+      mockQueryBuilder.error = null;
+
+      await getAllQuotes('company-1');
+
+      expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
+    });
+
+    it('throws error when Supabase query fails', async () => {
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = { message: 'Database error', code: '500' };
+
+      await expect(getAllQuotes('company-1')).rejects.toEqual({
+        message: 'Database error',
+        code: '500',
+      });
     });
   });
 

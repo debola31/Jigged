@@ -524,10 +524,6 @@ export type Database = {
       }
       company_billing: {
         Row: {
-          backpay_charged_at: string | null
-          backpay_first_month: string | null
-          backpay_monthly_cents: number | null
-          backpay_months: number | null
           billing_exempt: boolean
           cancel_at: string | null
           canceled_at: string | null
@@ -547,10 +543,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          backpay_charged_at?: string | null
-          backpay_first_month?: string | null
-          backpay_monthly_cents?: number | null
-          backpay_months?: number | null
           billing_exempt?: boolean
           cancel_at?: string | null
           canceled_at?: string | null
@@ -570,10 +562,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          backpay_charged_at?: string | null
-          backpay_first_month?: string | null
-          backpay_monthly_cents?: number | null
-          backpay_months?: number | null
           billing_exempt?: boolean
           cancel_at?: string | null
           canceled_at?: string | null

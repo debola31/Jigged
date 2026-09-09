@@ -367,61 +367,6 @@ def test_apply_stripe_subscription_monotonic_and_exempt_clear(supabase_admin, bi
     assert row()["billing_exempt"] is False
 
 
-def test_apply_stripe_subscription_stamps_backpay_charged_at(supabase_admin, billing_user):
-    """The backpay one-way latch.
-
-    /checkout adds the catch-up line only while backpay_charged_at IS NULL, so this
-    stamp is the whole cancel-then-resubscribe guard. It fires on the same condition
-    as the billing_exempt auto-clear — a real paying relationship — and deliberately
-    NOT on trialing: an abandoned trial has paid for nothing, so the backpay must
-    still be owed on the next attempt.
-    """
-    company_id = billing_user["company_id"]
-    _clear_billing(supabase_admin, company_id)
-
-    def apply(status, event_at):
-        supabase_admin.rpc(
-            "apply_stripe_subscription",
-            {
-                "p_company_id": company_id, "p_stripe_customer_id": "cus_test",
-                "p_stripe_subscription_id": "sub_test", "p_status": status,
-                "p_price_id": "price_test", "p_current_period_end": None,
-                "p_cancel_at": None, "p_canceled_at": None, "p_ended_at": None,
-                "p_trial_end": None, "p_event_at": event_at,
-            },
-        ).execute()
-
-    def row():
-        return supabase_admin.table("company_billing").select("*").eq(
-            "company_id", company_id
-        ).single().execute().data
-
-    _set_billing(
-        supabase_admin,
-        company_id,
-        backpay_monthly_cents=25000,
-        backpay_months=3,
-        backpay_first_month="2026-06-01",
-    )
-
-    # A trial has not paid the backpay.
-    apply("trialing", "2026-03-01T00:00:00+00:00")
-    assert row()["backpay_charged_at"] is None
-
-    apply("active", "2026-03-02T00:00:00+00:00")
-    first_stamp = row()["backpay_charged_at"]
-    assert first_stamp is not None
-
-    # Latched: a later sync must not move it, or a resubscribe could re-bill.
-    apply("past_due", "2026-03-03T00:00:00+00:00")
-    assert row()["backpay_charged_at"] == first_stamp
-
-    # A company with no backpay configured is never stamped.
-    _clear_billing(supabase_admin, company_id)
-    apply("active", "2026-04-01T00:00:00+00:00")
-    assert row()["backpay_charged_at"] is None
-
-
 def test_no_tenant_table_left_ungated(supabase_admin):
     """The tech-debt guard: every browser-writable tenant table is gated or
     explicitly exempt. A new tenant table left un-gated fails this test."""

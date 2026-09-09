@@ -10,7 +10,6 @@ import SettingsSection from '@/components/settings/SettingsSection';
 import StatusChip from '@/components/common/StatusChip';
 import { useSubscription } from '@/components/providers/SubscriptionProvider';
 import { GRACE_DAYS } from '@/lib/entitlement';
-import { backpaySummary } from '@/lib/billingCopy';
 import { startCheckout, openBillingPortal, reconcileBilling } from '@/lib/billingApi';
 
 type ChipColor = 'success' | 'warning' | 'error' | 'default' | 'info';
@@ -140,9 +139,6 @@ export default function BillingCard() {
 
   const useCheckout = !MANAGEABLE.includes(status ?? '');
   const actionLabel = useCheckout ? 'Subscribe' : 'Manage billing';
-  // Only worth saying on the path that will actually charge it — the Subscribe
-  // flow. On a live subscription the catch-up is already settled or irrelevant.
-  const backpay = useCheckout ? backpaySummary(billing) : null;
 
   const handleAction = async () => {
     setBusy(true);
@@ -182,11 +178,6 @@ export default function BillingCard() {
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
-            </Alert>
-          )}
-          {backpay && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              {backpay} will be added to your first payment.
             </Alert>
           )}
           <Button

@@ -22,7 +22,7 @@ import os
 import secrets
 import string
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import sentry_sdk
 import stripe
@@ -305,101 +305,6 @@ def _resolve_company_for_event(s, client: Client, obj, customer_id: str | None) 
     return None
 
 
-def _backpay_month_labels(first_month: str, months: int) -> list[str]:
-    """One label per covered month: ['June 2026', 'July 2026', 'August 2026'].
-
-    Derived from the stored dates rather than a free-text description, so a label
-    can never disagree with the window it is billing for.
-    """
-    start = date.fromisoformat(first_month[:10])
-    labels = []
-    for i in range(months):
-        month_index = start.month - 1 + i
-        labels.append(
-            date(start.year + month_index // 12, month_index % 12 + 1, 1).strftime(
-                "%B %Y"
-            )
-        )
-    return labels
-
-
-def _backpay_line_items(
-    s, customer_id: str, price_id: str, billing: dict, trial_days: int
-) -> list[dict]:
-    """Build the one-time Checkout line items for previously-unbilled service.
-
-    One line per whole month at the monthly rate — "Jigged service — June 2026",
-    "… July 2026", and so on — rather than a single lump. Same money, but the
-    customer (and their bookkeeper, a year later) can reconcile the charge against
-    the months they actually used the product.
-
-    Stripe puts one-time line items on the INITIAL invoice only, so a backpay charge
-    can never leak onto a renewal. What that does NOT protect against is the first
-    invoice quietly exceeding the total the customer approved on the hosted page:
-    Checkout renders the session's line items, but the invoice it generates also
-    sweeps in any pending invoice item and applies any customer balance debit,
-    neither of which the page shows. Both are refused here rather than reconciled —
-    a customer who approves $1,000 must be charged $1,000.
-    """
-    # A trial zeroes the recurring line but not the one-time one, and the resulting
-    # "free trial that charges today" is undocumented territory. Reserved-price
-    # customers run trial_days = 0, so this is a misconfiguration, not a flow.
-    if trial_days > 0:
-        sentry_sdk.capture_message(
-            f"Backpay configured with a {trial_days}-day trial for company "
-            f"{billing.get('company_id')} — refusing to build the session"
-        )
-        raise HTTPException(
-            status_code=500, detail="Backpay cannot be combined with a trial"
-        )
-
-    try:
-        pending = s.InvoiceItem.list(customer=customer_id, pending=True, limit=1)
-        customer = s.Customer.retrieve(customer_id)
-        # Every line item in a session must share one currency; take it from the
-        # recurring price rather than assuming USD. This runs only on the backpay
-        # path, so an ordinary checkout adds no Stripe round-trip.
-        currency = _g(s.Price.retrieve(price_id), "currency")
-    except stripe.error.StripeError as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=502, detail="Stripe error preparing backpay")
-
-    if _g(pending, "data"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This customer has pending invoice items; resolve them before "
-                "billing backpay."
-            ),
-        )
-    if _g(customer, "balance"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This customer has a non-zero account balance; resolve it before "
-                "billing backpay."
-            ),
-        )
-
-    unit_amount = int(billing["backpay_monthly_cents"])
-    labels = _backpay_month_labels(
-        billing["backpay_first_month"], int(billing["backpay_months"])
-    )
-    return [
-        {
-            "quantity": 1,
-            "price_data": {
-                "currency": currency,
-                "unit_amount": unit_amount,
-                # Inline product: the rate and the month it covers are per-company,
-                # so there is no reusable Price to point at.
-                "product_data": {"name": f"Jigged service — {label} (previously unbilled)"},
-            },
-        }
-        for label in labels
-    ]
-
-
 # ───────────────────────── endpoints ─────────────────────────
 @router.post("/checkout", response_model=UrlResponse)
 async def create_checkout(body: CheckoutRequest, request: Request):
@@ -467,25 +372,12 @@ async def create_checkout(body: CheckoutRequest, request: Request):
             "end_behavior": {"missing_payment_method": "cancel"}
         }
 
-    # Backpay: previously-unbilled service, billed ONCE on the first invoice
-    # alongside the recurring price, so the customer approves a single total on a
-    # single hosted page. Service-role-set, like the price/trial overrides above.
-    line_items = [{"price": price_id, "quantity": 1}]
-    monthly_cents = billing.get("backpay_monthly_cents") if billing else None
-    if monthly_cents and not billing.get("backpay_charged_at"):
-        backpay = _backpay_line_items(s, customer_id, price_id, billing, trial_days)
-        line_items.extend(backpay)
-        subscription_data["metadata"]["backpay_months"] = str(len(backpay))
-        subscription_data["metadata"]["backpay_amount_cents"] = str(
-            int(monthly_cents) * len(backpay)
-        )
-
     base = _app_base_url()
     try:
         session = s.checkout.Session.create(
             mode="subscription",
             customer=customer_id,
-            line_items=line_items,
+            line_items=[{"price": price_id, "quantity": 1}],
             subscription_data=subscription_data,
             client_reference_id=body.company_id,
             success_url=f"{_billing_url(base, body.company_id)}?session_id={{CHECKOUT_SESSION_ID}}",

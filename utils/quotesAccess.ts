@@ -3,6 +3,7 @@
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import * as Sentry from '@sentry/nextjs';
+import { todayLocalISODate } from '@/lib/localDate';
 import { getSupabase } from '@/lib/supabase';
 import {
   friendlyErrorMessage,
@@ -160,6 +161,7 @@ function applyQuoteStatusFilter<
   Q extends {
     eq(column: string, value: unknown): Q;
     is(column: string, value: unknown): Q;
+    or(filters: string): Q;
     not(column: string, operator: string, value: unknown): Q;
   },
 >(query: Q, status: QuoteListStatus | undefined): Q {
@@ -168,7 +170,15 @@ function applyQuoteStatusFilter<
     case 'all':
       return query;
     case 'open':
-      return query.eq('status', 'active').is('converted_at', null);
+      // The three conditions of public.is_quote_open(), as a PostgREST chain --
+      // isQuoteOpen() in utils/quoteStatus.ts is the readable mirror and both are
+      // pinned to the SQL by __tests__/fixtures/openQuoteCases.json. An undated
+      // quote never lapses, hence the `or`: PostgREST has no way to say
+      // "null OR >= today" in a chained filter.
+      return query
+        .eq('status', 'active')
+        .is('converted_at', null)
+        .or(`expiration_date.is.null,expiration_date.gte.${todayLocalISODate()}`);
     case 'converted':
       return query.not('converted_at', 'is', null);
     default:

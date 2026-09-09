@@ -17,6 +17,8 @@ first one is the drift, not a hedge against it.
 """
 
 import json
+import logging
+import os
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +29,9 @@ from services.insights_presentation import (
     CHART_EXEMPLAR_QUESTION,
     OFF_TOPIC_REPLY,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # INSIDE api/, NOT docs/, AND THAT IS LOAD-BEARING. vercel.json's excludeFiles
@@ -54,12 +59,19 @@ def load_semantics() -> str:
     return SEMANTICS_PATH.read_text(encoding="utf-8").strip()
 
 
-def _build_chat_system_prompt() -> str:
+def _build_chat_system_prompt(question: str | None = None) -> str:
     """Build the full system prompt for chat interactions with schema context.
 
-    Order is load-bearing: preamble, structure, semantics, guidelines. Everything
-    here is static per deploy, so the whole thing is one cacheable prefix and the
-    user's question is the only varying part -- and it arrives as a separate turn.
+    ORDER IS LOAD-BEARING, AND CHANGED 2026-09-09: preamble, structure, guidelines,
+    chart example, THEN semantics. Semantics used to sit third, in the middle. It
+    moved to the tail so that it can become the only part that varies per question
+    without disturbing a byte before it -- see _semantics_block(). Everything ahead
+    of it is static per deploy, which is what prompt caching and Ollama KV reuse
+    need; a varying block in the middle would re-prefill roughly 10K tokens on every
+    question, and at the box's ~7 tokens/s that is not a rounding error.
+
+    The reorder is behaviour-neutral on its own: the same bytes, in a different
+    order, and the model is told the definitions after the schema either way.
 
     THE SCOPE IS STATED IN THE FIRST LINES, not only in the guidelines. Measured on
     qwen3:32b: with the scope sentence sitting ~13K tokens deep, after the schema
@@ -86,6 +98,17 @@ def _build_chat_system_prompt() -> str:
     name both tools for the reason they carry the scope -- a 32B weights the start
     of a long prompt -- and the rule is repeated in the guidelines.
     """
+    return f"{_stable_prefix()}\n\n{_semantics_block(question)}"
+
+
+@lru_cache(maxsize=1)
+def _stable_prefix() -> str:
+    """Everything ahead of the semantics tail: byte-identical on every request.
+
+    Cached because it is assembled from module constants and a file read, and
+    because being the SAME OBJECT every time is the point -- this is the prefix the
+    KV cache reuses across a whole conversation.
+    """
     from tools.schema_context import SCHEMA_CONTEXT
 
     return (
@@ -99,7 +122,6 @@ def _build_chat_system_prompt() -> str:
         "by writing SELECT queries, always with $1 as the company_id placeholder. compose_report "
         "produces a one-page PDF report, and is only for when the person asks for a document.\n\n"
         f"{SCHEMA_CONTEXT}\n\n"
-        f"{load_semantics()}\n\n"
         "Guidelines:\n"
         "- You answer questions about this shop's data in Jigged: jobs, quotes, customers, vendors, "
         "parts, inventory, work centres, shipments and the operations behind them. For anything else, "
@@ -114,6 +136,13 @@ def _build_chat_system_prompt() -> str:
         "- In a conversation, earlier turns tell you what the user means (which customer, which "
         "month); they are never a source of figures. A new question needs a new query in this "
         "turn, even when an earlier answer looked similar.\n"
+        "- A question ABOUT THE CONVERSATION is different, and is the one case where you must not "
+        "re-run the metric. \"Why did you say 16 earlier?\", \"how did you work that out?\", "
+        "\"you didn't answer my question\", \"which of those two is right?\" are asking about what "
+        "you already said. Answer them from the turns above: say what the earlier answer counted "
+        "and how this one differs, name which is right and why, and call no tool. Repeating the "
+        "previous answer word for word is never a reply to one of these -- it is the failure this "
+        "rule exists to stop.\n"
         "- Only query the tables documented in the schema above. Never reference user, auth, "
         "access-control, or system tables — they are off-limits.\n"
         "- Rows are ALREADY scoped to one company by the executor. Never join an access-control "
@@ -163,8 +192,94 @@ def _build_chat_system_prompt() -> str:
         "```\n\n"
         "Every key inside the data row objects MUST be exactly the x_key and y_key strings "
         "(here 'vendor' and 'spend'). Data rows are the rows your query returned. Emit valid JSON "
-        "only — no comments or trailing commas."
+        "only — no comments or trailing commas.\n\n"
+        "What to look at next. After the answer, you may add ONE more fenced json block holding "
+        "up to three short follow-up questions, like this:\n"
+        '```json\n{"follow_ups": ["What are those worth?", "Which expire this month?"]}\n```\n'
+        "Rules for them: each must be a question you could answer with the tables you just "
+        "queried, under 72 characters, and a genuine NEXT step -- never a restatement of what was "
+        "just asked. Offer none at all rather than a weak one, and none when you refused the "
+        "question or could not get the figure. They are shown as buttons under your answer, so "
+        "write them as the person would say them."
     )
+
+
+# ---- the semantics tail ---------------------------------------------------------
+# THE ONLY PART OF THE SYSTEM PROMPT THAT MAY VARY PER QUESTION, and it sits last
+# so that varying it disturbs no byte the KV cache is holding.
+#
+# WHY THIS EXISTS. semantics.md is ~3,600 tokens across twelve sections, and every
+# one of them shipped on every question -- against a 32,768-token window already
+# carrying ~6,200 tokens of SCHEMA_CONTEXT, the tool schema, a 5,000-token history
+# budget and the answer reserve. `context_overflow` is an error kind here because
+# that ceiling is real. A file that grows a section per business term therefore
+# cannot stay fully resident: the tenth definition costs every question that has
+# nothing to do with it, and eventually costs the conversation its history.
+#
+# WHAT THE FIELD DOES INSTEAD, and what this follows: keep a small always-on core,
+# retrieve the rest. Snowflake caps a Cortex Analyst semantic model at 2 MB, advises
+# roughly ten tables per view, and tells teams to invest in a retrieved verified-query
+# repository rather than resident prose; dbt's 2026 benchmark measures semantic
+# grounding as the largest single accuracy lever (Claude Sonnet 4.6 90.0% -> 98.2%).
+# Retrieval is how you keep the second without paying the first every time.
+#
+# HOW THE CORE IS CHOSEN. "How to use these definitions" is never dropped: it carries
+# $1, $2, the refusal of CURRENT_DATE and the archived-rows rule, which are
+# preconditions for writing ANY query rather than facts about one business term.
+# Dropping it would not cost a definition, it would cost every query.
+#
+# OFF BY DEFAULT, and it stays off until api/evals/insights_ab.py says otherwise.
+# Retrieval that misses the one section a question needed is strictly worse than
+# pasting all twelve, and nothing but the eval can tell you which you have. The
+# switch is an env var so it can be turned off in production without a deploy.
+SEMANTICS_RETRIEVAL_ENV = "INSIGHTS_SEMANTICS_RETRIEVAL"
+SEMANTICS_CORE_HEADING = "How to use these definitions"
+SEMANTICS_TOP_K = 3
+
+
+def semantics_retrieval_enabled() -> bool:
+    """Read at call time, never cached: an operator turning this off must not have
+    to restart the worker to be believed."""
+    return os.environ.get(SEMANTICS_RETRIEVAL_ENV, "").strip().lower() in ("1", "on", "true", "yes")
+
+
+def _semantics_block(question: str | None) -> str:
+    """The definitions this question needs, or all of them.
+
+    FAILS TO THE WHOLE FILE, never to nothing. Every path out of the retrieval
+    branch that is not a confident hit returns load_semantics(): no question, the
+    switch off, the embedder unreachable, an empty selection, any exception at all.
+    The cost of being wrong in that direction is a longer prompt; the cost of being
+    wrong in the other is an answer that invents a business rule.
+    """
+    if not question or not semantics_retrieval_enabled():
+        return load_semantics()
+    try:
+        from services.insights_pipeline.semantics_retrieval import select_sections
+
+        selected = await_sync(select_sections(question, top_k=SEMANTICS_TOP_K))
+        return selected or load_semantics()
+    except Exception:  # noqa: BLE001 -- deliberately total; see the docstring
+        logger.warning(
+            "insights: semantics retrieval failed, sending the whole file", exc_info=True
+        )
+        return load_semantics()
+
+
+def await_sync(coro):
+    """Run one coroutine from this synchronous prompt builder.
+
+    _build_chat_system_prompt() is called from async handlers but is itself sync,
+    and making it async would ripple through report.py, four tests and the eval for
+    one optional lookup. asyncio.run() is wrong inside a running loop, so the work
+    goes to a private loop on its own thread -- the embedder is a local HTTP call
+    that returns in tens of milliseconds.
+    """
+    import asyncio
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 async def execute_sql_tool(

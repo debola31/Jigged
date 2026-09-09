@@ -2,7 +2,7 @@
 
 A Vercel preview deployment enqueues into the PR's OWN Supabase branch -- a
 separate project with its own `ai_jobs` and `ai_workers` tables -- so a worker that
-polls production alone leaves every preview's ask bar reading "the AI box is
+polls production alone leaves every preview's ask bar reading "insights are
 offline", refused at enqueue because nothing heartbeats there.
 
 Supabase is asked directly rather than GitHub: `GET /v1/projects/{ref}/branches` is

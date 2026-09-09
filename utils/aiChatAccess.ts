@@ -38,6 +38,8 @@ export interface ThreadMessage {
   report: ReportTurn | null;
   /** The job that produced this turn, when the queue row still exists. */
   job_id: string | null;
+  /** What the model offered to ask next. Empty when it offered nothing. */
+  follow_ups: string[];
   created_at: string;
 }
 
@@ -121,7 +123,7 @@ function chartConfigOf(raw: unknown): ChartConfig | null {
 export async function listThreadMessages(threadId: string): Promise<ThreadMessage[]> {
   const { data, error } = await getSupabase()
     .from('ai_chat_messages')
-    .select('id, seq, role, content, chart_config, report, job_id, created_at')
+    .select('id, seq, role, content, chart_config, report, follow_ups, job_id, created_at')
     .eq('thread_id', threadId)
     .in('role', ['user', 'assistant'])
     .order('seq', { ascending: true });
@@ -140,11 +142,27 @@ export async function listThreadMessages(threadId: string): Promise<ThreadMessag
       content: row.content,
       chart_config: chartConfigOf(row.chart_config),
       report: reportTurnOf(row.report),
+      follow_ups: followUpsOf(row.follow_ups),
       job_id: row.job_id,
       created_at: row.created_at,
     });
   }
   return out;
+}
+
+/**
+ * Narrow the `follow_ups` column to at most three non-blank strings.
+ *
+ * Same posture as chartConfigOf: narrow, never assert. A model that returned the
+ * wrong shape costs the chips, not the answer -- which is the whole reason the
+ * handler treats them as optional in the first place.
+ */
+function followUpsOf(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
+    .map((f) => f.trim())
+    .slice(0, 3);
 }
 
 /** Narrow the `report` column: a spec object with the dropped titles and the query count, or nothing. */

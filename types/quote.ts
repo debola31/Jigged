@@ -489,15 +489,26 @@ export function calculateTotalPrice(quantity: number, unitPrice: number | null):
 
 /**
  * True when an expiration date is strictly before today (local midnight).
- * A null date is never past. Shared by isQuoteExpired (read path) and
- * updateQuote (save path) so the displayed status and the persisted status
+ * A null date is never past. Shared by isQuoteExpired (read path), isQuoteOpen
+ * and updateQuote (save path) so the displayed status and the persisted status
  * use identical date math and can't drift.
+ *
+ * PARSES THE YMD PARTS INTO A LOCAL DATE, as isJobOverdue() in types/job.ts does
+ * and for the reason written out there: `new Date('YYYY-MM-DD')` parses as UTC
+ * midnight, which is the PREVIOUS calendar day everywhere west of Greenwich. Until
+ * 2026-09-09 this read `new Date(expirationDate) < today`, so a quote expiring
+ * TODAY was already "past" for every shop in the Americas -- it lost its last day.
+ * Caught by the boundary case in __tests__/fixtures/openQuoteCases.json, which
+ * exists because the same date is now also judged in SQL.
  */
 export function isExpirationDatePast(expirationDate: string | null): boolean {
   if (!expirationDate) return false;
+  const [y, m, d] = expirationDate.split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return false;
+  const expLocal = new Date(y, m - 1, d);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return new Date(expirationDate) < today;
+  return expLocal < today;
 }
 
 /**
@@ -507,6 +518,39 @@ export function isExpirationDatePast(expirationDate: string | null): boolean {
  */
 export function isQuoteExpired(quote: Pick<Quote, 'status' | 'expiration_date'>): boolean {
   return quote.status === 'expired' || isExpirationDatePast(quote.expiration_date);
+}
+
+/**
+ * True when a quote is still genuinely winnable: active, not already won, and
+ * not lapsed. An undated quote never lapses.
+ *
+ * THE MIRROR, NOT THE DEFINITION. `public.is_quote_open(status, converted_at,
+ * expiration_date, today)` is the definition; this exists because the quotes list
+ * and the dashboard tile filter through PostgREST, where the rule has to be a
+ * query-builder chain rather than a function call. The two are pinned together by
+ * __tests__/fixtures/openQuoteCases.json, fed to this function by
+ * __tests__/types/quote.test.ts and to the SQL one by
+ * api/tests/integration/test_open_quote_parity.py -- so a change to either that
+ * the other does not follow fails a suite on the case that separates them. Exactly
+ * the arrangement is_job_late() has with isJobOverdue(), and it is here because
+ * "open quote" had drifted four ways by 2026-09-09: the assistant answered 16, 11
+ * and 6 in one afternoon, and the dashboard tile had a fourth reading again.
+ *
+ * `converted_at`, not a lookup into `jobs`: winning a quote stamps this column and
+ * leaves `status` alone, which is the whole reason a converted quote used to be
+ * counted as pipeline still to win.
+ *
+ * Archived is NOT part of this. `deleted_at` is whether the row is on the books at
+ * all, applied separately by every list and count.
+ */
+export function isQuoteOpen(
+  quote: Pick<Quote, 'status' | 'converted_at' | 'expiration_date'>,
+): boolean {
+  return (
+    quote.status === 'active' &&
+    quote.converted_at === null &&
+    !isExpirationDatePast(quote.expiration_date)
+  );
 }
 
 /**

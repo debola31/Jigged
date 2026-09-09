@@ -38,6 +38,7 @@ from services.insights_presentation import (
     OFF_TOPIC_REPLY,
     _drop_exemplar_echo,
     _extract_chart_config,
+    _extract_follow_ups,
     _flatten_markdown_tables,
     _select_chart_type,
     _strip_code_blocks,
@@ -371,7 +372,11 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     prior = ctx.payload.get("summary") or None
     prior_summary: str | None = (prior or {}).get("content") if isinstance(prior, dict) else None
 
-    system_prompt = _build_chat_system_prompt()
+    # The question reaches the prompt builder for ONE reason: the semantics tail
+    # may be retrieved rather than pasted whole (INSIGHTS_SEMANTICS_RETRIEVAL).
+    # Everything ahead of that tail is byte-identical either way, which is what the
+    # KV cache needs; with the switch off this is the same string as before.
+    system_prompt = _build_chat_system_prompt(question)
     budget = _history_budget(system_prompt, question)
     evicted, kept = _window(history, budget)
 
@@ -569,6 +574,13 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         _drop_exemplar_echo(_validate_chart_config(_extract_chart_config(raw))), question
     )
 
+    # WHAT TO ASK NEXT, from the same raw text and by the same mechanism as the
+    # chart. Read AFTER both gates above, so a turn that failed to answer offers
+    # nothing -- suggesting a next question under a refusal is the surface acting
+    # pleased with itself. [] is a normal outcome and the trigger stores NULL for
+    # it; nothing here can fail the turn.
+    follow_ups = _extract_follow_ups(raw, question)
+
     # COMPACTION, AFTER THE ANSWER. The answer is the deliverable and is already
     # in hand; the summary is what makes the NEXT question cheap. Fold whenever
     # something was evicted this turn (it must reach the summary or it is lost to
@@ -617,6 +629,10 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # to the tool once. Its rate says how often a thread tempts the model to
         # answer from memory.
         "grounding_corrected": grounding_corrected,
+        # Up to three questions the model offered to answer next. An empty list is
+        # normal -- a refusal, an off-topic reply or a model that saw nothing worth
+        # following offers none -- and the ai_jobs trigger stores NULL for it.
+        "follow_ups": follow_ups,
         # Read by the ai_jobs trigger, never by the browser: a summary row is
         # written only when these are set.
         "summary": summary,

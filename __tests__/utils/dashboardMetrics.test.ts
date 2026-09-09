@@ -82,6 +82,10 @@ function makeBuilder(table: string) {
     if (table === 'shipments') STATE.shipmentFilters.push(`${col} is ${String(val)}`);
     return builder;
   });
+  builder.or = vi.fn((filters: string) => {
+    if (table === 'quotes') STATE.quoteFilters.push(`or:${filters}`);
+    return builder;
+  });
   builder.lt = vi.fn((col: string) => {
     if (table === 'shipments') STATE.shipmentFilters.push(`lt:${col}`);
     return builder;
@@ -335,11 +339,16 @@ describe('dashboard metrics', () => {
     expect(m.open_jobs?.money).toBe(0);
   });
 
-  it('counts only quotes that are still live, not ones already won', async () => {
+  it('counts only quotes that are still live — not ones already won, and not ones that lapsed', async () => {
     // quotes.status holds active|expired and NOTHING else — winning a quote sets
     // converted_at and leaves the status alone, so a quote that became a job
     // stays "active" forever. Counting status alone read 25 on the pilot shop
     // when 11 were live, and 9 against 1 on demo companies.
+    //
+    // The expiry half was added 2026-09-09, when the insights chat answered "how
+    // many open quotes" three different ways and this tile had a fourth reading
+    // again. All three conditions are now public.is_quote_open(), mirrored by
+    // isQuoteOpen() in types/quote.ts and pinned by openQuoteCases.json.
     STATE.quoteCount = 11;
 
     const m = await getDashboardMetrics('c1', 'this_week');
@@ -347,6 +356,10 @@ describe('dashboard metrics', () => {
     expect(m.open_quotes?.count).toBe(11);
     expect(STATE.quoteFilters).toContain('status=active');
     expect(STATE.quoteFilters).toContain('converted_at is null');
+    // "no expiry date OR not yet lapsed" — an undated quote never expires, so this
+    // cannot be a plain gte.
+    expect(STATE.quoteFilters.some((f) => f.startsWith('or:expiration_date.is.null,'))).toBe(true);
+    expect(STATE.quoteFilters.some((f) => f.includes('expiration_date.gte.'))).toBe(true);
   });
 
   it('gives Open Quotes a count and no money at all', async () => {

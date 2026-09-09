@@ -16,9 +16,10 @@ import CloudOffIcon from '@mui/icons-material/CloudOff';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import HistoryIcon from '@mui/icons-material/History';
 import SendIcon from '@mui/icons-material/Send';
-import ConversationTurnCard from './ConversationTurnCard';
+import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
+import StatusChip from '@/components/common/StatusChip';
 import { useAiJob } from '@/hooks/useAiJob';
 import { useLoad } from '@/hooks/useLoad';
 import {
@@ -50,10 +51,14 @@ const EXAMPLE_REPORTS = [
  * Rotating status while the answer is being worked out.
  *
  * interaction-standards.md §5 puts anything over ten seconds in a tier that must
- * say WHERE the wait is, not just that there is one. A local model on shop
- * hardware routinely takes tens of seconds for a question and minutes for a
- * report, and which of the two this is only shows on the job row when it settles
- * (the model decides mid-job), so the last line states both.
+ * say WHERE the wait is, not just that there is one. A question routinely takes
+ * tens of seconds and a report minutes, and which of the two this is only shows
+ * on the job row when it settles (the model decides mid-job), so the last line
+ * states both.
+ *
+ * NAMES NO HARDWARE, deliberately. Where inference runs is our deployment
+ * detail; a shop owner has no use for it and no action to take on it. The
+ * offline copy in useAiJob.ts is held to the same rule.
  */
 const LOADING_MESSAGES = [
   'Reading your shop data…',
@@ -62,6 +67,25 @@ const LOADING_MESSAGES = [
 ];
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
+
+/**
+ * How the person got to the question they asked. Reported as two booleans rather
+ * than one enum because analyticsEventsCheck reads literal property keys, and
+ * because `from_example` already exists and its history stays comparable.
+ */
+type QuestionSource = 'typed' | 'example' | 'suggestion';
+
+/**
+ * How tall the transcript is allowed to be.
+ *
+ * A HEIGHT, NOT A max-height (the same trap JobActivityRail documents): with a
+ * max, the pane is only as tall as its content, so it grows turn by turn and
+ * pushes the composer down the page -- which is the behaviour this replaced. A
+ * fixed height means the dashboard above never moves and the transcript scrolls
+ * inside itself. dvh, not vh, so a phone's collapsing address bar does not
+ * change it mid-conversation.
+ */
+const TRANSCRIPT_HEIGHT = { xs: 'clamp(280px, 52dvh, 460px)', md: 'clamp(340px, 58dvh, 620px)' };
 
 interface InsightsChatProps {
   companyId: string;
@@ -74,6 +98,7 @@ interface Turn {
   answer: string;
   chartConfig: ThreadMessage['chart_config'];
   report: ReportTurn | null;
+  followUps: string[];
   jobId: string | null;
   createdAt: string;
 }
@@ -98,6 +123,7 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
       answer: next.content,
       chartConfig: next.chart_config,
       report: next.report,
+      followUps: next.follow_ups,
       jobId: next.job_id,
       createdAt: next.created_at,
     });
@@ -137,7 +163,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const [historyTab, setHistoryTab] = useState<HistoryTab>('chats');
   const [preview, setPreview] = useState<ReportSummary | null>(null);
   const loadingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const paneRef = useRef<HTMLDivElement | null>(null);
 
   // The answer arrives on a job row, not on the POST. Keyed by company so two tabs
   // on different shops do not re-attach to each other's question after a reload.
@@ -231,6 +257,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // leaves its row.
       off_topic: !!job.result?.off_topic,
       grounding_corrected: !!job.result?.grounding_corrected,
+      follow_up_count: job.result?.follow_ups?.length ?? 0,
     });
   }, [job.phase, job.job, job.result]);
 
@@ -252,15 +279,27 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     };
   }, [pending]);
 
-  // Keep the newest thing in view: a new turn, or the wait for one. The composer
-  // is sticky at the bottom, so this brings the conversation to it.
+  // Keep the newest thing in view: a new turn, or the wait for one.
+  //
+  // SCROLLS THE PANE, NOT THE DOCUMENT. scrollIntoView() moves the nearest
+  // scrolling ancestor, which used to be the window -- so every answer dragged
+  // the scorecards and Recent Activity off the top of the page. The transcript
+  // owns a real scrollport now, so this sets its scrollTop and the dashboard
+  // above it never moves.
   useEffect(() => {
     if (!hasConversation && !pending) return;
+    const pane = paneRef.current;
+    if (!pane) return;
     const reduce =
       typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    bottomRef.current?.scrollIntoView?.({ block: 'end', behavior: reduce ? 'auto' : 'smooth' });
+    // scrollTo may be absent in jsdom; scrollTop is the fallback that always works.
+    if (typeof pane.scrollTo === 'function') {
+      pane.scrollTo({ top: pane.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
+    } else {
+      pane.scrollTop = pane.scrollHeight;
+    }
   }, [turns.length, pending, hasConversation]);
 
   const startNewConversation = () => {
@@ -271,7 +310,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     setHistoryOpen(false);
   };
 
-  const handleSubmit = async (input?: string) => {
+  const handleSubmit = async (input?: string, source: QuestionSource = 'typed') => {
     const q = (input || question).trim();
     if (!q || pending) return;
 
@@ -299,7 +338,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       posthog.capture('ai job enqueued', {
         feature: 'insights',
         executor: enqueued.executor,
-        from_example: !!input,
+        from_example: source === 'example',
+        from_suggestion: source === 'suggestion',
         turn_index: turns.length,
       });
       job.watch(enqueued.job_id);
@@ -326,7 +366,12 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
   const handleChipClick = (prompt: string) => {
     setQuestion(prompt);
-    handleSubmit(prompt);
+    handleSubmit(prompt, 'example');
+  };
+
+  const handleFollowUp = (prompt: string) => {
+    setQuestion(prompt);
+    handleSubmit(prompt, 'suggestion');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -397,21 +442,27 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
   const status = (
     <>
-      {/* Working. aria-live so a screen reader is told the wait started and ended. */}
+      {/* Working. aria-live so a screen reader is told the wait started and ended.
+          AMBER, because grey text.secondary read as inert -- people could not tell
+          the difference between "thinking" and "finished with nothing to say" on a
+          wait that routinely runs tens of seconds. warning.LIGHT for the text and
+          warning.MAIN for the spinner: design-system.md measures #fbbf24 at 6.28:1
+          on this ground against #f59e0b's 4.89:1, and states the split as a rule --
+          light for text, main for the mark. */}
       {pending && (
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <CircularProgress size={16} />
-          <Typography variant="body2" color="text.secondary">
+          <CircularProgress size={16} color="warning" />
+          <Typography variant="body2" sx={{ color: 'warning.light' }}>
             {askedQuestion ? `${askedQuestion} — ` : ''}
             {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
           </Typography>
         </Box>
       )}
 
-      {/* Offline. severity="info", not error, and it names what still works. The
-          shop's AI box being asleep is not the user's mistake and not a fault of
+      {/* Offline. severity="info", not error, and it names what still works.
+          Insights being unavailable is not the user's mistake and not a fault of
           the page they are on. Distinct from the flag being off, which renders
-          nothing at all. */}
+          nothing at all. The copy names no hardware -- see useAiJob.ts. */}
       {!pending && job.phase === 'offline' && (
         <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />}>
           {job.message}
@@ -440,8 +491,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         </Alert>
       )}
 
-      {/* An enqueue-time 503 is the SAME state as a mid-job outage -- the box is
-          off -- and gets the same quiet notice. */}
+      {/* An enqueue-time 503 is the SAME state as a mid-job outage -- insights
+          are unavailable -- and gets the same quiet notice. */}
       {error && error.status === 503 && (
         <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />}>
           {error.message}
@@ -451,10 +502,31 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     </>
   );
 
+  // Said under the composer in both states. The assistant writes SQL against the
+  // shop's own data and can pick the wrong reading of a business term -- which it
+  // has, live -- so the surface says so rather than letting a confident sentence
+  // imply otherwise.
+  const disclaimer = (
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      sx={{ display: 'block', textAlign: 'center', mt: 1 }}
+    >
+      Jigged AI can make mistakes. Please double-check responses.
+    </Typography>
+  );
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Top row: the way back to everything asked before. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+      {/* Top row: what this is, and the way back to everything asked before. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Typography variant="h6" component="h2" sx={{ fontWeight: 600 }}>
+          Ask the shop
+        </Typography>
+        {/* Same badge the demo banner uses, for the same reason: a standing
+            statement about the surface, not a status that changes. */}
+        <StatusChip label="BETA" color="warning" sx={{ fontWeight: 600, letterSpacing: 0.5 }} />
+        <Box sx={{ flex: 1 }} />
         <Stack direction="row" spacing={1}>
           {hasConversation && (
             <Button
@@ -504,28 +576,43 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             ))}
           </Stack>
           <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 2 }}>{status}</Box>
+          <Box sx={{ width: '100%', maxWidth: 760 }}>{disclaimer}</Box>
         </Box>
       ) : (
-        <>
-          <Stack spacing={2}>
-            {turns.map((turn) => (
-              <ConversationTurnCard
-                key={turn.key}
-                question={turn.question}
-                answer={turn.answer}
-                chartConfig={turn.chartConfig}
-                report={turn.report}
-                onOpenReport={() => openReportTurn(turn)}
-              />
-            ))}
-            {status}
-            <div ref={bottomRef} aria-hidden="true" />
-          </Stack>
-          {/* Docked: the composer stays in view while the conversation scrolls above it. */}
-          <Box sx={{ position: 'sticky', bottom: 0, zIndex: 1, bgcolor: 'background.default', pt: 1.5, pb: 1 }}>
-            {composer}
+        // A conversation owns a fixed-height column: the transcript scrolls
+        // INSIDE it and the composer is a flex sibling below, so the scorecards
+        // and Recent Activity above stay where the owner left them. `position:
+        // sticky` is gone from the composer -- inside a real scrollport there is
+        // nothing for it to stick to, which is why it never docked before.
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: TRANSCRIPT_HEIGHT }}>
+          <Box
+            ref={paneRef}
+            // minHeight: 0 is load-bearing. A flex child's default min-height is
+            // its content, so without this the column grows instead of scrolling.
+            sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}
+          >
+            <Stack spacing={2.5}>
+              {turns.map((turn, i) => (
+                <ConversationTurn
+                  key={turn.key}
+                  question={turn.question}
+                  answer={turn.answer}
+                  chartConfig={turn.chartConfig}
+                  report={turn.report}
+                  onOpenReport={() => openReportTurn(turn)}
+                  followUps={i === turns.length - 1 ? turn.followUps : []}
+                  onFollowUp={handleFollowUp}
+                  followUpsDisabled={pending}
+                />
+              ))}
+              {status}
+            </Stack>
           </Box>
-        </>
+          <Box sx={{ pt: 1.5, bgcolor: 'background.default' }}>
+            {composer}
+            {disclaimer}
+          </Box>
+        </Box>
       )}
 
       <HistoryDrawer

@@ -147,8 +147,11 @@ def enqueue(
         )
 
     if executor == "worker" and not worker_can_serve(db, model):
+        # Names no hardware, deliberately -- see the note on OFFLINE_COPY in
+        # hooks/useAiJob.ts. This sentence reaches the browser verbatim as a 503.
         raise AiUnavailable(
-            "The AI box is offline right now, so this can't run. Everything else still works."
+            "Insights are temporarily unavailable right now, so this can't run. "
+            "Everything else still works."
         )
 
     request_id = request_id or str(uuid.uuid4())

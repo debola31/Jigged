@@ -61,8 +61,13 @@ function intervalFor(elapsedMs: number): number {
  */
 export const INTERACTIVE_WALL_MS = 15 * 60_000;
 
+// NAMES NO HARDWARE. Where inference runs is our deployment detail: a shop owner
+// has no use for it and no action to take on it, and "the AI box is offline" reads
+// as an instruction to go and find a box. Said the same way in three places -- here,
+// ai_jobs.py's AiUnavailable and insights_routes.py's 503 -- because a person can
+// meet any of the three and they are the same event.
 const OFFLINE_COPY =
-  'The AI box is offline right now — everything else on this page still works.';
+  'Insights are temporarily unavailable right now — everything else on this page still works.';
 const FAILED_COPY = "That didn't finish. You can ask again.";
 const WALL_COPY = "That's taken longer than it should. You can ask again.";
 // The prompt no longer fits the model's window. Not downtime and not an

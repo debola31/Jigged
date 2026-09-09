@@ -10,7 +10,7 @@ assignments; the HTTP client is per-call anyway.
 TWO RULES THAT ARE POLICY, NOT PLUMBING:
 
   * A PRODUCTION CHAIN IS ollama-ONLY OR anthropic-ONLY. Never mixed. A migrated
-    surface fails VISIBLE when the desktop is down -- the user is told the AI box
+    surface fails VISIBLE when the desktop is down -- the user is told insights are
     is offline -- rather than silently falling back to a hosted model at 40x the
     cost. "It still worked" is the failure mode, not the happy path.
   * DEEPINFRA NEVER ENTERS A PRODUCTION CHAIN. It exists for the eval harness and

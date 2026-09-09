@@ -86,6 +86,7 @@ export type Database = {
           content: string
           covers_through_seq: number | null
           created_at: string
+          follow_ups: Json | null
           id: string
           job_id: string | null
           report: Json | null
@@ -101,6 +102,7 @@ export type Database = {
           content: string
           covers_through_seq?: number | null
           created_at?: string
+          follow_ups?: Json | null
           id?: string
           job_id?: string | null
           report?: Json | null
@@ -116,6 +118,7 @@ export type Database = {
           content?: string
           covers_through_seq?: number | null
           created_at?: string
+          follow_ups?: Json | null
           id?: string
           job_id?: string | null
           report?: Json | null
@@ -4893,6 +4896,15 @@ export type Database = {
           p_due_date: string
           p_fulfillment_status: string
           p_production_status: string
+          p_today: string
+        }
+        Returns: boolean
+      }
+      is_quote_open: {
+        Args: {
+          p_converted_at: string
+          p_expiration_date: string
+          p_status: string
           p_today: string
         }
         Returns: boolean

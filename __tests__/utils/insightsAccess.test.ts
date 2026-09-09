@@ -106,7 +106,7 @@ describe('submitChatQuery', () => {
     // branches on -- before this class existed it matched /offline/ in the prose.
     fetchMock.mockResolvedValue(
       response(503, {
-        detail: "The AI box is offline right now, so this can't run. Everything else still works.",
+        detail: "Insights are temporarily unavailable right now, so this can't run. Everything else still works.",
       }),
     );
 

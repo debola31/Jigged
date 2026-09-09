@@ -2,9 +2,11 @@ import {
   calculateUnitPriceFromMarkup,
   calculateMarkupFromUnitPrice,
   calculateTotalPrice,
+  isQuoteOpen,
   quoteToFormData,
 } from '@/types/quote';
-import type { QuoteWithRelations } from '@/types/quote';
+import type { Quote, QuoteWithRelations } from '@/types/quote';
+import openQuoteCases from '../fixtures/openQuoteCases.json';
 
 describe('calculateUnitPriceFromMarkup', () => {
   it('calculates 0% markup correctly', () => {
@@ -268,5 +270,69 @@ describe('quoteToFormData', () => {
     const form = quoteToFormData(quote);
 
     expect(form.parts[0].lead_time_text).toBeNull();
+  });
+});
+
+
+describe('isQuoteOpen', () => {
+  // THE CASES LIVE IN A FILE THAT SQL ALSO READS.
+  // __tests__/fixtures/openQuoteCases.json is fed to isQuoteOpen() here and to
+  // public.is_quote_open() by api/tests/integration/test_open_quote_parity.py, so
+  // the TypeScript mirror cannot drift from the definition the database and the
+  // insights AI use. Add a case there, not here.
+  //
+  // The fixture pins `today`; isQuoteOpen reads the machine clock, so each case is
+  // re-anchored to the same OFFSET from the real today. That keeps the boundary
+  // cases (expires today / yesterday) meaningful on any machine, on any day.
+  const fixtureToday = Date.parse(`${openQuoteCases.today}T00:00:00Z`);
+
+  function reanchor(date: string | null): string | null {
+    if (date === null) return null;
+    const offsetDays = Math.round((Date.parse(`${date}T00:00:00Z`) - fixtureToday) / 86_400_000);
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + offsetDays);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  it.each(openQuoteCases.cases.map((c) => [c.name, c] as const))(
+    'golden case: %s',
+    (_name, c) => {
+      expect(
+        isQuoteOpen({
+          status: c.status as Quote['status'],
+          converted_at: c.converted_at,
+          expiration_date: reanchor(c.expiration_date),
+        }),
+      ).toBe(c.open);
+    },
+  );
+
+  it('covers both sides of the day boundary, so a strict < is actually pinned', () => {
+    // Guards the fixture itself: a case list that never exercises "expires today"
+    // and "expired yesterday" would let < and <= both pass, and that one character
+    // is a whole day of quotes -- the last day a shop can still win the work.
+    const dates = openQuoteCases.cases.map((c) => c.expiration_date);
+    expect(dates).toContain(openQuoteCases.today);
+    expect(dates).toContain('2026-09-08');
+    expect(openQuoteCases.cases.find((c) => c.expiration_date === openQuoteCases.today)?.open).toBe(
+      true,
+    );
+    expect(openQuoteCases.cases.find((c) => c.expiration_date === '2026-09-08')?.open).toBe(false);
+  });
+
+  it('separates "won" from "expired", which is the bug that produced 16 and 6', () => {
+    // A converted quote keeps status 'active' forever. If this ever passes with
+    // the converted_at condition deleted, the fixture has stopped isolating it.
+    expect(
+      isQuoteOpen({
+        status: 'active',
+        converted_at: '2026-09-01T12:00:00+00:00',
+        expiration_date: reanchor('2026-10-01'),
+      }),
+    ).toBe(false);
   });
 });

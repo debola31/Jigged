@@ -32,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 ALL_FAILURES = [
-    ai_jobs.AiUnavailable("The AI box is offline right now."),
+    ai_jobs.AiUnavailable("Insights are temporarily unavailable right now."),
     LLMRequestError("bad call"),
     LLMNotConfigured("no chain"),
     LLMChainExhausted("insights", "rid", [LLMTimeout("slow", provider="ollama")]),
@@ -151,11 +151,15 @@ class TestTheOnlyDoor:
              patch.object(routes, "_get_supabase_service_role"), \
              patch.object(routes.ai_jobs, "sweep", return_value=0), \
              patch.object(routes.ai_jobs, "enqueue",
-                          side_effect=ai_jobs.AiUnavailable("The AI box is offline right now.")):
+                          side_effect=ai_jobs.AiUnavailable("Insights are temporarily unavailable right now.")):
             with pytest.raises(HTTPException) as exc:
                 await self._post()
         assert exc.value.status_code == 503
-        assert "offline" in exc.value.detail
+        # Names no hardware: "the AI box is offline" told a shop owner about a
+        # machine they do not have and cannot act on. See OFFLINE_COPY in
+        # hooks/useAiJob.ts -- this sentence reaches the browser verbatim.
+        assert "temporarily unavailable" in exc.value.detail
+        assert "box" not in exc.value.detail.lower()
 
     async def test_a_worker_routed_job_returns_immediately_without_running_anything(self):
         job = {"id": "job-1", "status": "queued", "executor": "worker",
@@ -457,7 +461,7 @@ class TestTheReportDoor:
              patch.object(routes, "_get_supabase_service_role"), \
              patch.object(routes.ai_jobs, "sweep", return_value=0), \
              patch.object(routes.ai_jobs, "enqueue",
-                          side_effect=ai_jobs.AiUnavailable("The AI box is offline right now.")):
+                          side_effect=ai_jobs.AiUnavailable("Insights are temporarily unavailable right now.")):
             with pytest.raises(HTTPException) as exc:
                 await self._post()
         assert exc.value.status_code == 503

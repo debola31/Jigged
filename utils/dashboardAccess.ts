@@ -1,5 +1,6 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 8 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { todayLocalISODate } from '@/lib/localDate';
 import { getSupabase } from '@/lib/supabase';
 import { applyOverdueJobsFilter } from '@/utils/jobsAccess';
 
@@ -379,18 +380,24 @@ async function getCompletedInRange(
 }
 
 /**
- * Quotes still live — active AND never converted. Count only, see
+ * Quotes still live — active, never converted, and not lapsed. Count only, see
  * `MetricValue.money`.
  *
- * `converted_at IS NULL` is the whole fix. `quotes.status` only ever holds
- * `active | expired`; winning a quote sets `converted_at` and leaves the status
- * alone, so a quote that became a job stays "active" forever and this tile
+ * `converted_at IS NULL` was the first half of the fix. `quotes.status` only ever
+ * holds `active | expired`; winning a quote sets `converted_at` and leaves the
+ * status alone, so a quote that became a job stays "active" forever and this tile
  * counted work already won as pipeline still to win. On the pilot shop it read
- * 25 when 11 were live; on demo companies it read 9 against 1, because nearly
- * every demo quote is converted.
+ * 25 when 11 were live; on demo companies it read 9 against 1.
+ *
+ * THE EXPIRY TEST IS THE SECOND HALF, added 2026-09-09, and it changes this
+ * number. A lapsed quote is not work you can still win, and leaving it in meant
+ * this tile disagreed with semantics.md's "Quote pipeline worth" — so the count
+ * and the value of the pipeline described different sets of quotes. The full rule
+ * now lives in `public.is_quote_open()`; this chain is its PostgREST form, pinned
+ * to it through isQuoteOpen() by __tests__/fixtures/openQuoteCases.json.
  *
  * The drill-down goes to `?status=open`, which the quotes list resolves through
- * the same two conditions — the tile and the list it opens must never disagree.
+ * the same three conditions — the tile and the list it opens must never disagree.
  */
 async function getOpenQuotes(companyId: string): Promise<MetricValue> {
   const supabase = getSupabase();
@@ -400,7 +407,9 @@ async function getOpenQuotes(companyId: string): Promise<MetricValue> {
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .eq('status', 'active')
-    .is('converted_at', null);
+    .is('converted_at', null)
+    // "no expiry date OR not yet lapsed" — see isQuoteOpen().
+    .or(`expiration_date.is.null,expiration_date.gte.${todayLocalISODate()}`);
 
   if (error) throw error;
   return { count: count || 0, money: null };

@@ -189,10 +189,13 @@ def _map_llm_error(exc: Exception) -> HTTPException:
         if exc.is_offline:
             return HTTPException(
                 status_code=503,
-                detail="The AI box is offline right now. Everything else still works.",
+                detail=(
+                    "Insights are temporarily unavailable right now. "
+                    "Everything else still works."
+                ),
             )
         if exc.is_context_overflow:
-            # 400, not 5xx: the box is up and nothing broke -- the conversation
+            # 400, not 5xx: nothing is down and nothing broke -- the conversation
             # outgrew the window, and only the user can start a new one.
             return HTTPException(
                 status_code=400,

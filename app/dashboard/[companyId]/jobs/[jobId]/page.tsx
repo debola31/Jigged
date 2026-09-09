@@ -451,7 +451,7 @@ export default function JobDetailPage() {
               refreshKey={historyRefreshKey}
               canShip={canShip}
               onCreate={() => setShipModalOpen(true)}
-              onVoided={fetchJob}
+              onPreview={setPendingPreviewShipmentId}
               disabled={actionLoading}
             />
           )}
@@ -813,11 +813,24 @@ export default function JobDetailPage() {
         onCreated={handleCreated}
       />
 
-      {/* Auto-preview the packing slip right after a shipment is created. */}
+      {/* THE job's packing-slip preview — one mount, three ways in: the
+          Shipments menu, a row in the activity rail, and the auto-open right
+          after a slip is created. It used to be two mounts (this one and one
+          inside ShipmentsMenu), and only the menu's passed `onVoided`, so the
+          same slip offered Void from the toolbar and not from the feed.
+          `canVoid` in the dialog is `!!onVoided && !voidedAt`, so the prop IS
+          the behaviour — a second mount that omits it is a second behaviour. */}
       <PackingSlipPreviewDialog
         open={!!pendingPreviewShipmentId}
         shipmentId={pendingPreviewShipmentId}
         onClose={() => setPendingPreviewShipmentId(null)}
+        onVoided={() => {
+          // The menu reads its own list off historyRefreshKey; the rail and the
+          // job's fulfillment status come from refreshAfterWrite. A void changes
+          // all three, so all three are told.
+          setHistoryRefreshKey((k) => k + 1);
+          void refreshAfterWrite();
+        }}
       />
 
       <JobTravelerPreviewDialog
@@ -912,9 +925,9 @@ export default function JobDetailPage() {
         filter={railFilter}
         onClearFilter={() => setUserFilterOpId(null)}
         onViewSlip={setRailSlipId}
-        // Reuses the dialog the post-create auto-preview already mounts. That
-        // instance is deliberately given no `onVoided`, so the rail offers view
-        // without void — voiding a slip stays in the Shipments menu.
+        // The same dialog the Shipments menu opens, with the same actions. A
+        // slip does not become a different document because you reached it from
+        // the feed.
         onViewPackingSlip={setPendingPreviewShipmentId}
       />
     </Box>

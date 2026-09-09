@@ -47,9 +47,15 @@ function meta(item: ShipmentItem): string {
  * One packing slip sent to the customer.
  *
  * The slip number is the affordance, exactly as it is on a vendor movement:
- * pressing it opens the packing-slip preview. Voiding is NOT offered here —
- * that lives in the Shipments menu, where the dialog is mounted with its
- * `onVoided` handler. A feed is for reading what happened.
+ * pressing it opens the packing-slip preview — the SAME dialog the Shipments
+ * menu opens, mounted once by the job page, so Void is offered here exactly as
+ * it is there.
+ *
+ * This row briefly reached a second mount that omitted `onVoided`, which made
+ * the slip un-voidable from the feed alone. "A feed is only for reading" was the
+ * excuse, and it does not survive contact with this rail: notes carry edit and
+ * delete, and a completion carries Undo. A document that behaves differently
+ * depending on which control you used to reach it is a bug, not a policy.
  */
 export default function JobActivityShipmentRow({
   item,

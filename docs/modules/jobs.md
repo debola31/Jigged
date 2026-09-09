@@ -376,7 +376,7 @@ Five row kinds, merged by a pure module
 | **Note** (± photos/video) | `notes`, via `getJobNotes` — job-subject *and* durable part-subject notes captured on this job | Edit / delete, gated exactly as RLS is: author edits, author or admin deletes, `note_type = 'user'` only |
 | **Completion** | `job_operation_completions`, via `getJobCompletionsForOffice` | **Undo** — not "void", which is document language for slips and invoices; the step card has always said `Undo completion`, and the column being `voided_at` is the schema's word rather than the user's. The note typed into the Complete dialog renders here, on the event it describes |
 | **Outside movement** | `outside_shipments` + receipts | The `VPS-` slip number, opening the same preview the step card used to offer |
-| **Shipment** | `shipments`, via `getShipmentsForJob` | The `PS-` packing slip number, opening the preview. View only — **voiding a slip stays in the Shipments menu** |
+| **Shipment** | `shipments`, via `getShipmentsForJob` | The `PS-` packing slip number, opening **the same preview the Shipments menu opens** — Void included. *(This row briefly reached a second, read-only mount; "a feed is only for reading" does not survive a rail that offers Undo on a completion and delete on a note. [shipments.md](shipments.md) has the guard.)* |
 | **Invoice** | `quickbooks_invoice_links`, via `getQuickBooksInvoiceLinksForJob` | The number and Jigged's line total, and **View in QuickBooks** when the push returned a URL |
 | **Job created** | `jobs.created_at`, derived | Nothing — it is the feed's oldest row and its beginning |
 

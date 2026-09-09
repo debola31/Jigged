@@ -682,8 +682,15 @@ async function fetchShipmentActivity(
   const supabase = getSupabase();
   let q = supabase
     .from('shipments')
-    .select('id, created_at, job_id, job:jobs(job_number), customer:customers(name)')
+    .select('id, created_at, job_id, job:jobs!inner(job_number, deleted_at), customer:customers(name)')
     .eq('company_id', companyId)
+    // A shipment carries no deleted_at of its own — it is voided, not archived —
+    // so the archived-job case has to come through the join, exactly as
+    // SHIPMENT_VALUE_SELECT above already does it for the revenue tile. Without
+    // it an archived job's paperwork outlives the job in the feed.
+    // `jobs.` and not `job.`: PostgREST honours both the table name and the
+    // alias for an embedded filter (verified against the local stack).
+    .is('jobs.deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(perSource);
   if (before) q = q.lt('created_at', before);
@@ -769,11 +776,14 @@ type NoteActivityRow = {
   // captured_job_id, and a work-center-subject note has neither.
   job_id: string | null;
   captured_job_id: string | null;
-  job: { job_number: string } | { job_number: string }[] | null;
-  captured_job: { job_number: string } | { job_number: string }[] | null;
+  job: JobRefRel;
+  captured_job: JobRefRel;
   author: { name: string | null } | { name: string | null }[] | null;
   media: { id: string }[] | null;
 };
+
+type JobRef = { job_number: string; deleted_at: string | null };
+type JobRefRel = JobRef | JobRef[] | null;
 
 async function fetchNoteActivity(
   companyId: string,
@@ -787,12 +797,18 @@ async function fetchNoteActivity(
   // PostgREST cannot COALESCE in a select, and keying only on job_id would silently
   // drop every new operator capture from the activity feed.
   // Two FKs point at `jobs`, so each embed must name its constraint to disambiguate.
+  //
+  // `deleted_at` COMES BACK BUT IS NOT FILTERED IN THE QUERY, unlike every other
+  // source here. Neither embed can be `!inner`: both FKs are nullable, and an
+  // inner join on either would drop the work-center-subject note that has no job
+  // at all — a whole row kind, silently. So the archived-job case is settled
+  // below, on the job the row actually resolves to.
   let q = supabase
     .from('notes')
     .select(
       'id, created_at, job_id, captured_job_id, ' +
-        'job:jobs!notes_job_fk(job_number), ' +
-        'captured_job:jobs!notes_captured_job_fk(job_number), ' +
+        'job:jobs!notes_job_fk(job_number, deleted_at), ' +
+        'captured_job:jobs!notes_captured_job_fk(job_number, deleted_at), ' +
         'author:user_company_access(name), media:note_media(id)',
     )
     .eq('company_id', companyId)
@@ -806,8 +822,13 @@ async function fetchNoteActivity(
     if (!r.created_at) continue;
     const hasMedia = (r.media ?? []).length > 0;
     const jobId = r.job_id ?? r.captured_job_id;
-    const jobNumber =
-      firstRel(r.job)?.job_number ?? firstRel(r.captured_job)?.job_number ?? '';
+    // The job this row RESOLVES to, matching the coalesce below: job_id wins,
+    // captured_job_id is the fallback, and a work-center note has neither.
+    const job = r.job_id ? firstRel(r.job) : firstRel(r.captured_job);
+    // Archived job → the note goes with it. A job-less note is unaffected,
+    // which is the reason this is here rather than in the query.
+    if (job?.deleted_at) continue;
+    const jobNumber = job?.job_number ?? '';
     items.push({
       id: `note-${r.id}`,
       // A note carrying photos surfaces as a 'photo' event so the /activity
@@ -950,8 +971,13 @@ async function fetchOperationActivity(
 
   let completedQ = supabase
     .from('job_operations')
-    .select(`id, completed_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), ${VS_SELECT}`)
+    .select(
+      `id, completed_at, job_id, vendor_service_id, jobs!inner(job_number, company_id, deleted_at), ${VS_SELECT}`,
+    )
     .eq('jobs.company_id', companyId)
+    // Same join that already scopes the company scopes the archive: an
+    // operation has no deleted_at, so its job's is the only one there is.
+    .is('jobs.deleted_at', null)
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(perSource);
@@ -962,8 +988,11 @@ async function fetchOperationActivity(
   // separate .eq('kind','external') this used to need is gone.
   let sentQ = supabase
     .from('job_operations')
-    .select(`id, sent_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), vendor_service:vendor_services!inner(vendor:vendors(name))`)
+    .select(
+      `id, sent_at, job_id, vendor_service_id, jobs!inner(job_number, company_id, deleted_at), vendor_service:vendor_services!inner(vendor:vendors(name))`,
+    )
     .eq('jobs.company_id', companyId)
+    .is('jobs.deleted_at', null)
     .not('sent_at', 'is', null)
     .order('sent_at', { ascending: false })
     .limit(perSource);

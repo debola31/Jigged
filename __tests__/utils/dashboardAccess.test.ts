@@ -270,6 +270,108 @@ describe('inventory activity', () => {
   });
 });
 
+describe('an archived job takes its paperwork with it', () => {
+  // CLAUDE.md's most-violated rule: every list query filters deleted_at. None of
+  // these tables carries one — a shipment is voided, an operation and a note
+  // belong to a job — so the job's archive flag is the only one there is.
+  function buildersFor(table: string) {
+    return mockSupabase.from.mock.calls
+      .map((call, i) => ({ table: call[0], builder: mockSupabase.from.mock.results[i]?.value }))
+      .filter((c) => c.table === table)
+      .map((c) => c.builder as Record<string, ReturnType<typeof vi.fn>>);
+  }
+
+  it('excludes shipments on an archived job', async () => {
+    DATA.shipments = [
+      { id: 's1', created_at: '2026-06-23T07:00:00Z', job_id: 'j1', job: { job_number: 'J-1' }, customer: null },
+    ];
+    await getActivityStream('c1', { types: ['shipment'] });
+
+    const [builder] = buildersFor('shipments');
+    expect(builder.is).toHaveBeenCalledWith('jobs.deleted_at', null);
+  });
+
+  it('excludes operations on an archived job — both the completed and the sent query', async () => {
+    DATA.operations = [
+      { id: 'o1', completed_at: '2026-06-23T08:00:00Z', job_id: 'j1', jobs: { job_number: 'J-1' } },
+    ];
+    await getActivityStream('c1', { types: ['operation'] });
+
+    const builders = buildersFor('job_operations');
+    expect(builders).toHaveLength(2);
+    for (const b of builders) {
+      expect(b.is).toHaveBeenCalledWith('jobs.deleted_at', null);
+    }
+  });
+
+  it('drops a note whose job is archived', async () => {
+    DATA.notes = [
+      {
+        id: 'n-live',
+        created_at: '2026-06-23T09:00:00Z',
+        job_id: 'j1',
+        job: { job_number: 'J-1', deleted_at: null },
+        author: { name: 'Sam' },
+        media: [],
+      },
+      {
+        id: 'n-archived',
+        created_at: '2026-06-23T08:00:00Z',
+        job_id: 'j2',
+        job: { job_number: 'J-2', deleted_at: '2026-06-24T00:00:00Z' },
+        author: { name: 'Sam' },
+        media: [],
+      },
+    ];
+
+    const items = await getActivityStream('c1', { types: ['note'] });
+
+    expect(items.map((i) => i.id)).toEqual(['note-n-live']);
+  });
+
+  it('drops a note captured on an archived job, keyed on the job it resolves to', async () => {
+    // A durable part-subject note has no job_id — captured_job_id is what says
+    // which job it was written on, and it is that job's archive that counts.
+    DATA.notes = [
+      {
+        id: 'n-captured',
+        created_at: '2026-06-23T08:00:00Z',
+        job_id: null,
+        captured_job_id: 'j2',
+        job: null,
+        captured_job: { job_number: 'J-2', deleted_at: '2026-06-24T00:00:00Z' },
+        author: { name: 'Sam' },
+        media: [],
+      },
+    ];
+
+    expect(await getActivityStream('c1', { types: ['note'] })).toEqual([]);
+  });
+
+  it('keeps a work-center note, which has no job to be archived', async () => {
+    // The reason the note filter is in JS and not the query: `!inner` on either
+    // nullable FK would drop this whole row kind silently.
+    DATA.notes = [
+      {
+        id: 'n-wc',
+        created_at: '2026-06-23T08:00:00Z',
+        job_id: null,
+        captured_job_id: null,
+        job: null,
+        captured_job: null,
+        author: { name: 'Sam' },
+        media: [],
+      },
+    ];
+
+    const items = await getActivityStream('c1', { types: ['note'] });
+
+    expect(items.map((i) => i.id)).toEqual(['note-n-wc']);
+    expect(items[0].entityNumber).toBe('');
+    expect(items[0].href).toBe('/dashboard/c1/activity');
+  });
+});
+
 describe('invoice activity', () => {
   function link(over: Record<string, unknown> = {}) {
     return {

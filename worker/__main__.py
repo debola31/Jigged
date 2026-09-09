@@ -193,7 +193,21 @@ class Worker:
         _keepalive tick (which runs DURING a job, which is why busy/held/
         resident_model stay true through a 480 s generation), and the end of
         _shutdown.
+
+        IT CANNOT RAISE, AND THAT IS THE POINT OF THE CATCH. One of those call
+        sites is inside _keepalive, whose body is unguarded: an exception there
+        kills the task, and with it the heartbeat and lease renewal, so the box
+        would read offline within 60 seconds and jobs would be swept mid-run.
+        Letting a convenience file take production down that way would invert every
+        priority this process has. status.write() already swallows OSError; this
+        covers everything else, loudly enough to be found in the log.
         """
+        try:
+            self._publish_unguarded(stopped=stopped)
+        except Exception as exc:  # noqa: BLE001 - never worth the heartbeat
+            logger.warning("status file not written: %s", exc)
+
+    def _publish_unguarded(self, *, stopped: bool = False) -> None:
         databases = [
             {
                 "ref": s.ref, "label": s.label, "is_default": s.is_default,

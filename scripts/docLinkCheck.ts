@@ -110,6 +110,12 @@ export const ALLOWLIST = new Map<string, string>([
     'docs/architecture.md::api/services/email.py',
     'Same deletion, restated beside the env-var list that no longer carries RESEND_API_KEY for the backend.',
   ],
+  [
+    'docs/runbooks/ai-worker.md::worker/.env',
+    "Names the two-file env layout withdrawn in September 2026 — worker/.env first and .env.local " +
+      'second — where load order was the only thing between a shop and a BYPASSRLS connection. ' +
+      'The absence is the point, and this surfaced the moment worker/ joined CODE_PATH_PREFIXES.',
+  ],
 ]);
 
 // ============== Fences ==============
@@ -213,6 +219,10 @@ const CODE_PATH_PREFIXES = [
   '__tests__/',
   'e2e/',
   'api/',
+  // Added 2026-09-09 with the worker's status file and menu bar indicator. Until
+  // then every backticked worker/ path in the runbooks was silently UNCHECKED --
+  // ai-worker.md cites worker/config.py and nothing verified it resolved.
+  'worker/',
   'utils/',
   'components/',
   'app/',

@@ -150,3 +150,50 @@ class TestTheSuiteCannotEscape:
 
     def test_no_test_can_reach_the_real_location(self) -> None:
         assert "Application Support" not in str(worker_status.path())
+
+
+class TestPublishCannotTakeTheWorkerDown:
+    """_publish() runs inside _keepalive, whose body is unguarded.
+
+    An exception escaping there kills the task that carries BOTH the heartbeat and
+    lease renewal: the box reads offline within 60 seconds and in-flight jobs get
+    swept mid-run. A status file is a convenience and must never be able to cause
+    that, so the call site catches everything, not just the OSError write() eats.
+    """
+
+    def _worker(self):
+        import types
+        from worker import branches as wb
+        from worker.__main__ import Worker
+
+        w = Worker.__new__(Worker)
+        w.cfg = types.SimpleNamespace(
+            worker_id="w", version="1", models=["m"],
+            ollama_base_url="u", heartbeat_seconds=15,
+        )
+        w.served = {"r": wb.Served(ref="r", label="production", is_default=True,
+                                   queue_dsn="q", sandbox_dsn="s")}
+        w.dbs, w.resident_model, w.held, w.held_ref = {}, None, [], None
+        w._db_health, w._started_at, w._commit, w._last_job = {}, "t", None, None
+        return w
+
+    def test_a_raising_snapshot_is_contained(self, monkeypatch, caplog) -> None:
+        monkeypatch.setattr(
+            worker_status, "snapshot",
+            lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        self._worker()._publish()  # must not raise
+        assert "status file not written" in caplog.text
+
+    def test_a_raising_write_is_contained(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            worker_status, "write",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        self._worker()._publish()  # must not raise
+
+    def test_the_happy_path_still_writes(self, tmp_path: Path, monkeypatch) -> None:
+        """The guard must not be hiding a permanently broken publish."""
+        monkeypatch.setenv("JIGGED_STATUS_FILE", str(tmp_path / "s.json"))
+        self._worker()._publish()
+        assert json.loads((tmp_path / "s.json").read_text())["worker_id"] == "w"

@@ -317,19 +317,23 @@ class Worker:
             await close_pool(served.sandbox_dsn)
         logger.info("no longer serving %s", self._label(ref))
 
-    async def _discover(self, force: bool = False) -> None:
+    async def _discover(self, force: bool = False) -> list[worker_branches.Served]:
         """Ask Supabase which databases exist, and reconcile what is being served.
 
         Never lets a discovery failure shrink the list: branches.discover always
         returns production, and an unreachable API returns no branches rather than
         an empty world, so the worst case is that a new preview joins late.
+
+        Returns what was discovered -- production first -- so startup can insist on
+        production without asking twice.
         """
         now = time.monotonic()
         if not force and now - self._last_discovery < self.cfg.discover_seconds:
-            return
+            return list(self.served.values())
         self._last_discovery = now
 
-        wanted = {s.ref: s for s in await asyncio.to_thread(worker_branches.discover, self.cfg)}
+        discovered = await asyncio.to_thread(worker_branches.discover, self.cfg)
+        wanted = {s.ref: s for s in discovered}
         for ref in [r for r in self.dbs if r not in wanted]:
             await self._retire(ref)
         for ref, served in wanted.items():
@@ -338,6 +342,7 @@ class Worker:
             if await self._adopt(served):
                 logger.info("now serving %s", self._label(ref))
                 self._tick_heartbeat(force=True)
+        return discovered
 
     def _rotation(self) -> list[worker_branches.Served]:
         """Production first, every pass. A preview never delays the shop's own question."""
@@ -346,14 +351,16 @@ class Worker:
     async def run(self) -> None:
         from tools.sql_executor import describe_dsn
 
-        # discover() always returns production first, from the environment.
-        production = worker_branches.discover(self.cfg)[0]
-        if production.ref not in self.dbs and not await self._adopt(production):
-            # Eager and fatal for production alone: the LaunchAgent restarts the
-            # process, which is the right response to a box that cannot reach its
-            # own queue.
-            raise RuntimeError(f"cannot connect to the production queue at {describe_dsn(production.queue_dsn)}")
-        await self._discover(force=True)
+        # One pass adopts everything reachable; discover() always returns
+        # production first, from the environment.
+        production = (await self._discover(force=True))[0]
+        if production.ref not in self.dbs:
+            # Best effort for a branch, fatal for production: the LaunchAgent
+            # restarts the process, which is the right response to a box that
+            # cannot reach its own queue.
+            raise RuntimeError(
+                f"cannot connect to the production queue at {describe_dsn(production.queue_dsn)}"
+            )
         self._tick_heartbeat(force=True)
         keepalive = asyncio.create_task(self._keepalive())
         # EVERY database is in the banner because "which database answered" is not

@@ -152,6 +152,12 @@ databases. The banner names every database served, and every job log line names 
 against, because *which database answered* must never be something to infer from a wrong number
 later.
 
+`ACTIVE_HEALTHY` is the project's status, not a promise the connection will work: a branch created
+minutes ago can report it while its pooler tenant or its seed is still catching up, so the connect is
+the real gate. Observed on 2026-09-09 with two PRs open at once — one branch was serving inside a
+second, the other refused the login and was picked up on a later pass. A branch that never becomes
+connectable costs one warning every two minutes and nothing else.
+
 Degradations are all in the safe direction: no token, a non-pooler `WORKER_DATABASE_URL`, an
 unreachable API or a revoked token all mean **production alone**, which is what every shop box does.
 Discovery can never shrink the list below it.

@@ -1,0 +1,16 @@
+# The menu bar indicator. macOS ONLY, and the marker is load-bearing rather than
+# decorative: pyobjc ships no Linux wheel and its sdist needs an Objective-C
+# compiler, so an unmarked line here would fail the ubuntu-latest Backend Tests job
+# outright.
+#
+# THIS FILE IS DELIBERATELY NOT INSTALLED BY CI. Everything under worker/menubar/
+# except ui.py is pure and stdlib-only, `pytest worker/menubar/tests` needs none of
+# this, and tests/test_no_ui_import.py is what keeps that true. Installing it on
+# the runner would buy nothing and could only break the job.
+#
+# Licence: pyobjc is MIT, which clears worker/tests/test_dependency_licences.py
+# (it scans every installed distribution for AGPL/SSPL).
+#
+# Install on the serving Mac:
+#   /opt/miniconda3/envs/jigged/bin/pip install -r worker/menubar/requirements.txt
+pyobjc-framework-Cocoa>=12.0 ; sys_platform == "darwin"

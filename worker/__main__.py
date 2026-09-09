@@ -44,6 +44,7 @@ if str(_API_DIR) not in sys.path:
 
 from worker import branches as worker_branches  # noqa: E402
 from worker import config as worker_config  # noqa: E402
+from worker import status as worker_status  # noqa: E402
 from worker.db import WorkerDb  # noqa: E402
 
 logging.basicConfig(
@@ -82,6 +83,14 @@ class Worker:
         self._last_heartbeat: dict[str, float] = {}
         self._last_renew = 0.0
         self._last_discovery = 0.0
+        # Per-database reachability AS THIS PROCESS SEES IT -- not staleness.
+        # The Wi-Fi-drop shape is a live process whose beats are all failing,
+        # and only the except branch in _tick_heartbeat can tell that apart
+        # from health. Published by _publish; nothing else reads it.
+        self._db_health: dict[str, dict[str, Any]] = {}
+        self._started_at = worker_status.now_iso()
+        self._commit: str | None = None
+        self._last_job: dict[str, Any] | None = None
 
     # ------------------------------------------------------------- provider
 
@@ -143,7 +152,18 @@ class Worker:
                     self.cfg.worker_id, list(self.cfg.models), self.resident_model, self.cfg.version
                 )
                 self._last_heartbeat[ref] = now
+                self._db_health[ref] = {
+                    "reachable": True, "last_ok_at": worker_status.now_iso(), "error": None,
+                }
             except Exception as exc:  # noqa: BLE001 - a missed beat is not fatal
+                # last_ok_at is CARRIED FORWARD, never cleared: "unreachable since
+                # 11:49" is a diagnosis and "unreachable" on its own is not.
+                prev = self._db_health.get(ref) or {}
+                self._db_health[ref] = {
+                    "reachable": False,
+                    "last_ok_at": prev.get("last_ok_at"),
+                    "error": str(exc)[:200],
+                }
                 logger.warning("heartbeat failed on %s: %s", self._label(ref), exc)
 
     def _tick_leases(self) -> None:
@@ -165,6 +185,47 @@ class Worker:
         served = self.served.get(ref or "")
         return f"{served.label} ({ref})" if served else str(ref)
 
+    def _publish(self, *, stopped: bool = False) -> None:
+        """Say on disk what only this process knows.
+
+        NOT an IPC surface: nothing reads back in, and a reader that finds this
+        file missing or stale must cope. Three call sites -- the ready banner, every
+        _keepalive tick (which runs DURING a job, which is why busy/held/
+        resident_model stay true through a 480 s generation), and the end of
+        _shutdown.
+
+        IT CANNOT RAISE, AND THAT IS THE POINT OF THE CATCH. One of those call
+        sites is inside _keepalive, whose body is unguarded: an exception there
+        kills the task, and with it the heartbeat and lease renewal, so the box
+        would read offline within 60 seconds and jobs would be swept mid-run.
+        Letting a convenience file take production down that way would invert every
+        priority this process has. status.write() already swallows OSError; this
+        covers everything else, loudly enough to be found in the log.
+        """
+        try:
+            self._publish_unguarded(stopped=stopped)
+        except Exception as exc:  # noqa: BLE001 - never worth the heartbeat
+            logger.warning("status file not written: %s", exc)
+
+    def _publish_unguarded(self, *, stopped: bool = False) -> None:
+        databases = [
+            {
+                "ref": s.ref, "label": s.label, "is_default": s.is_default,
+                **(self._db_health.get(s.ref)
+                   or {"reachable": False, "last_ok_at": None, "error": "no beat yet"}),
+            }
+            for s in self._rotation()
+        ]
+        worker_status.write(worker_status.snapshot(
+            worker_id=self.cfg.worker_id, version=self.cfg.version,
+            models=self.cfg.models, resident_model=self.resident_model,
+            ollama_base_url=self.cfg.ollama_base_url,
+            heartbeat_seconds=self.cfg.heartbeat_seconds,
+            repo=_ROOT, commit=self._commit, started_at=self._started_at,
+            databases=databases, busy=bool(self.held), held=len(self.held),
+            last_job=self._last_job, stopped=stopped,
+        ))
+
     async def _keepalive(self) -> None:
         """Heartbeat and lease renewal on their own task, so they happen DURING a job.
 
@@ -180,6 +241,7 @@ class Worker:
             await asyncio.sleep(self.cfg.heartbeat_seconds)
             self._tick_heartbeat(force=True)
             self._tick_leases()
+            self._publish()
 
     # ----------------------------------------------------------------- work
 
@@ -252,7 +314,12 @@ class Worker:
         # A question the model answered with a report settles as one: result_kind
         # reads the handler's verdict and the UPDATE flips the row's kind with it.
         await asyncio.to_thread(db.mark_succeeded, job_id, result, result_kind(result))
-        logger.info("finished %s in %.1fs", job_id, time.perf_counter() - started)
+        elapsed = time.perf_counter() - started
+        self._last_job = {
+            "job_id": job_id, "feature": feature, "model": model,
+            "seconds": round(elapsed, 1), "finished_at": worker_status.now_iso(),
+        }
+        logger.info("finished %s in %.1fs", job_id, elapsed)
 
     async def _drain(self, batch: list[dict[str, Any]], served: worker_branches.Served) -> None:
         """Run a claimed batch, one job at a time.
@@ -309,6 +376,7 @@ class Worker:
         served = self.served.pop(ref, None)
         db = self.dbs.pop(ref, None)
         self._last_heartbeat.pop(ref, None)
+        self._db_health.pop(ref, None)
         if db is not None:
             with contextlib.suppress(Exception):
                 db.stand_down(self.cfg.worker_id)
@@ -362,16 +430,23 @@ class Worker:
                 f"cannot connect to the production queue at {describe_dsn(production.queue_dsn)}"
             )
         self._tick_heartbeat(force=True)
+        # ONCE. This names the code this process IMPORTED, which is what it will go
+        # on running until it restarts, however far the checkout moves underneath.
+        self._commit = worker_status.head_commit(_ROOT)
         keepalive = asyncio.create_task(self._keepalive())
         # EVERY database is in the banner because "which database answered" is not
         # something anyone should have to infer from a wrong number later.
         logger.info(
-            "worker %s ready; models=%s ollama=%s serving %s",
-            self.cfg.worker_id, ", ".join(self.cfg.models), self.cfg.ollama_base_url,
+            "worker %s ready; models=%s commit=%s ollama=%s serving %s",
+            self.cfg.worker_id, ", ".join(self.cfg.models),
+            (self._commit or "unknown")[:8], self.cfg.ollama_base_url,
             "; ".join(
                 f"{s.label} -> {describe_dsn(s.sandbox_dsn)}" for s in self._rotation()
             ),
         )
+        # Publish immediately rather than waiting for the first keepalive tick, so
+        # the file is truthful from the moment the banner says ready.
+        self._publish()
 
         while not self._stopping:
             await self._discover()
@@ -447,6 +522,7 @@ class Worker:
                 db.close()
         await close_pool()
         logger.info("worker %s stopped", self.cfg.worker_id)
+        self._publish(stopped=True)
 
 
 def load_env(root: Path = _ROOT) -> None:

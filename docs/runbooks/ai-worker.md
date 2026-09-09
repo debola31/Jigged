@@ -98,8 +98,17 @@ conda run -n jigged python -m worker
 A worker started from a shell dies with the terminal. On the serving Mac it runs as a LaunchAgent
 from [`worker/launchd/com.jigged.worker.plist.example`](../../worker/launchd/com.jigged.worker.plist.example):
 starts at login, restarts if it exits (`KeepAlive`), and runs under `caffeinate -s`, which holds a
-no-sleep assertion on mains power for as long as the worker lives (`pmset -g assertions` shows it).
-The worker handles `SIGTERM`, so `launchctl bootout` is the same graceful stop as Ctrl-C.
+no-sleep assertion on mains power for as long as the worker lives (`pmset -g assertions` shows it —
+the assertion is held by the *child* of the pid launchd reports, because `caffeinate` exec'd the
+interpreter over itself).
+
+> **Withdrawn 2026-09-09:** "The worker handles `SIGTERM`, so `launchctl bootout` is the same graceful
+> stop as Ctrl-C." True only when the worker is **idle**. `launchctl print` reports `exit timeout = 5`
+> for this job and a model call can run for 480 s, so a bootout mid-job is a SIGKILL five seconds in:
+> `_shutdown()` never runs, `stand_down()` never backdates the heartbeat, the UI reads the box as
+> available for up to 60 s after it died, and the in-flight job sits `running` until its 300 s lease
+> expires and `sweep_ai_jobs()` collects it. Raising `ExitTimeOut` was considered and rejected — it
+> would stall logout by minutes to save one job the sweep already recovers.
 
 ```bash
 mkdir -p ~/Library/LaunchAgents ~/Library/Logs/jigged
@@ -113,9 +122,76 @@ launchctl print gui/$(id -u)/com.jigged.worker | grep -E "state|pid"     # runni
 tail -f ~/Library/Logs/jigged/worker.log                                # "worker <id> ready; models=..."
 ```
 
-Stop or restart with `launchctl bootout gui/$(id -u)/com.jigged.worker` (and `bootstrap` again); after
-pulling new worker code, bootout and bootstrap so the process picks it up. The DSNs and `WORKER_MODELS`
-come from the repo's `.env.local` as before; nothing is duplicated into the plist.
+The DSNs and `WORKER_MODELS` come from the repo's `.env.local` as before; nothing is duplicated into
+the plist. The control verbs, and why the ordering in two of them is not optional:
+
+| Intent | Command | Why |
+|---|---|---|
+| Restart after pulling code | `launchctl kickstart -k gui/$(id -u)/com.jigged.worker` | Kills and respawns in one call, no unload window. **It does not re-read the plist** — launchd holds the job config from bootstrap time — so this is the right verb after a *code* change and does nothing after a *plist* change. |
+| Restart after editing the plist | `bootout` then `bootstrap` | The only thing that reloads the plist itself. |
+| Stop until next login | `launchctl bootout gui/$(id -u)/com.jigged.worker` | `~/Library/LaunchAgents` is bootstrapped at login, so this alone is **not** "off" — it comes back. |
+| Turn off across reboots | `launchctl disable …` **then** `bootout …` | `disable` writes a persistent override. Disable first: if `bootout` then fails you are still off at next login, whereas the reverse order leaves it running *and* re-enabled. |
+| Start it again | `launchctl enable …` **then** `bootstrap …` | `bootstrap` on a label carrying a disabled override fails with `Load failed: 5: Input/output error` — an errno, not an explanation. `enable` is the whole fix and is harmless otherwise. |
+
+**A plain `kill` is not a stop.** `KeepAlive` is unconditional and `ThrottleInterval` is 30, so the
+process returns within 30 seconds. Two kills inside five seconds is worse than one: the box is then
+offline for the full throttle window and the sweep fails whatever was queued.
+
+Which commit the running process is executing is in the ready banner (`commit=<sha>`) and in the
+status file below. **The worker imports its feature handlers from `api/` at startup**, so it goes on
+running the commit it started on however far the checkout moves underneath it — pulling without
+restarting changes nothing.
+
+### The status file
+
+The worker publishes [`worker/status.py`](../../worker/status.py)'s document to
+`~/Library/Application Support/Jigged/worker-status.json` on the ready banner, on every heartbeat tick
+and once on shutdown. It is a one-way publication and **not an IPC surface** — nothing reads back into
+the process, and a reader may find it missing, stale or from a previous run.
+
+It exists because nothing else on the box answers a person's questions: an idle worker logs nothing at
+INFO, launchd knows only whether a pid exists, and `ai_workers` — which stays the authority for the
+*product* — cannot say which databases are being served or which commit is running.
+
+`reachable` is **not** a staleness verdict, deliberately. It means "the last heartbeat this process
+attempted actually landed", which needs no clock, so this adds no fourth copy of the 60-second offline
+rule. It is also **production's** verdict alone: a torn-down preview branch failing its beats is a
+developer's problem, and over one measured 19-hour window 79 of 132 beat failures were exactly that.
+
+### The menu bar indicator
+
+[`worker/menubar/`](../../worker/menubar/) puts the Jigged J in the menu bar, reading the status file,
+launchd, local git refs and `ollama ps`. It opens no database connection, enqueues nothing and calls no
+model. Install it beside the worker:
+
+```bash
+PY=/opt/miniconda3/envs/jigged/bin/python
+$PY -m pip install -r worker/menubar/requirements.txt
+sed -e "s#__PYTHON__#$PY#g" -e "s#__PYTHON_DIR__#$(dirname "$PY")#g" \
+    -e "s#__REPO__#$PWD#g" -e "s#__HOME__#$HOME#g" \
+    worker/menubar/launchd/com.jigged.menubar.plist.example \
+    > ~/Library/LaunchAgents/com.jigged.menubar.plist
+plutil -lint ~/Library/LaunchAgents/com.jigged.menubar.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jigged.menubar.plist
+```
+
+`python -m worker.menubar --once` prints the same state as text and exits — the fallback if the status
+item ever stops appearing, and the way to debug a glyph you disagree with. It imports no UI framework.
+
+The J is tinted, never reshaped, so it stays recognisable:
+
+| Tint | State | Meaning |
+|---|---|---|
+| normal | running | Serving. A count appears beside it while jobs run. |
+| orange | unreachable | Process is up and **production's queue is not** — the state launchd alone reports as healthy. |
+| orange | wedged | Pid alive but it stopped publishing. `KeepAlive` cannot see this: it restarts a process that *exits*, not one stuck in its loop. |
+| red | restarting | Respawning repeatedly; no single sample of `runs` shows this, only the rate. |
+| dimmed | stopped / off | Booted out (returns at login) or disabled (does not). |
+
+Two differences from the worker's plist, both deliberate: **no `caffeinate`** (an indicator that held a
+no-sleep assertion would keep the Mac awake for a glyph, and go on holding it after the worker was
+switched off), and **`KeepAlive` as `SuccessfulExit=false` rather than `true`**, so its own Quit item
+is honoured while a crash is still recovered.
 
 **Ollama stays as Ollama.app.** Its own launch agent (`com.ollama.ollama`) serves `localhost:11434`
 with no environment set, and that is fine: the native adapter sends `num_ctx=32768` and
@@ -194,10 +270,17 @@ as `ai_offline`, and **backdates** its heartbeat rather than deleting the row �
 registry row would erase that from the historical record. The UI reaches its
 offline state within one poll instead of after a two-minute silence.
 
+`launchctl bootout` gets the same treatment **only when the worker is idle** — see the withdrawal in
+§3. And `bootout` alone lasts until next login; `launchctl disable` before it is what makes "off"
+survive a reboot. Check which you are in with `launchctl print-disabled gui/$(id -u)`, where a label
+that has never been disabled has no row at all.
+
 ## 6. When something is wrong
 
 | Symptom | Look at |
 |---|---|
+| `launchctl` says running, the UI says offline | The Wi-Fi-drop shape, and normal for a few seconds — a beat must miss four times over 60 s before the product calls it offline. The menu bar shows this as an orange J and names the database; the status file carries the same verdict per database, with `last_ok_at` carried forward so "unreachable since 11:49" is readable. An indicator driven by launchd alone shows green throughout. |
+| A merged fix is not in the answers | The worker imports `api/` at startup, so it runs the checkout **as it was when it started**. Compare `commit=` in the ready banner with `git rev-parse HEAD`; the menu bar does this for you and offers the restart. Pulling without restarting changes nothing. |
 | UI says offline, worker is running | `select last_seen_at, models from ai_workers` — is the job's model in `models`, spelled exactly as `LLM_CHAIN_INSIGHTS` names it? The sweep is model-aware, so a live worker that cannot serve `qwen3-vl:4b` does not keep a drawing job alive, and a tag that differs by a suffix is the same failure. |
 | The first question after an idle spell fails as offline; the next one works | Cold load plus the ~13K-token prefill exceeded `request_timeout_s` (`worker/config.py`), and a timeout classifies as `ai_offline`. Measured 2026-09-07 on the 48 GB M4 Max: the box prefills an **uncached** prompt at ~100 tokens/s and decodes at ~7, so the ~13K-token prefix costs ~2 minutes cold and a long thread whose prefix was evicted (the box served something else) costs ~3–4; a warm turn is 7–30 s because the prefix cache leaves only the new turn to prefill. The constant is 480 s (it bounds a hung generation; the heartbeat, not this, decides offline). Check `OLLAMA_KEEP_ALIVE=-1` and pre-warm after start; if a warm box still runs past ~5 minutes, raise the constant — not a new env knob. |
 | Answers ignore the schema, invent columns, or `error_echo` failures jump | The context window is too small and the prompt was truncated from the front. `ollama ps` must show CONTEXT 32768, and the server log (`~/.ollama/logs/server.log` on macOS) must not contain `truncating input prompt`. |

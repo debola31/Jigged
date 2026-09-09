@@ -8,6 +8,7 @@ import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartM
 import { addStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import { searchPartsForSelect } from '@/utils/partsAccess';
 import { uploadFileToStorage } from '@/utils/storageHelpers';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
 import type { PartSelectOption } from '@/utils/partsAccess';
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({ addStockAtLocation: vi.fn() }));
@@ -27,6 +28,17 @@ vi.mock('@/utils/imageCompression', () => ({
   compressPhoto: vi.fn(async (f: File) => ({ file: f })),
 }));
 vi.mock('posthog-js', () => ({ default: { capture: vi.fn() } }));
+// The cert access layer reaches lib/supabase the same way storageHelpers does, so it is mocked for
+// the same reason. The two constants are re-exported because the panel imports them directly.
+vi.mock('@/utils/lotCertificatesAccess', () => ({
+  CERT_ACCEPT_ATTR: '.pdf,.jpg',
+  UPLOAD_TIMEOUT_REASON: 'UploadTimeoutError',
+  listLotCertificates: vi.fn(async () => []),
+  uploadLotCertificate: vi.fn(async () => ({ id: 'cert-1' })),
+  validateLotCertificateFile: vi.fn(() => null),
+  getLotCertificateUrl: vi.fn(async () => 'https://signed'),
+  certificatePreviewKind: vi.fn(() => 'pdf'),
+}));
 // jsdom implements neither; the preview thumbnail needs both.
 if (!URL.createObjectURL) URL.createObjectURL = vi.fn(() => 'blob:preview');
 if (!URL.revokeObjectURL) URL.revokeObjectURL = vi.fn();
@@ -231,5 +243,88 @@ describe('OperatorReceivePartModal', () => {
       await waitFor(() => expect(onClose).toHaveBeenCalled());
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
+  });
+});
+
+/**
+ * THE TWO ORDERINGS, STATED SIDE BY SIDE.
+ *
+ * The photo test above asserts the upload runs BEFORE the RPC. These assert the certificate runs
+ * AFTER it. Both are correct, and the reason they differ is structural rather than a preference:
+ * `inventory_transactions.photo_path` is written at INSERT and immutable afterwards, so the RPC has
+ * to be handed a path and a failed photo must abort the movement; a certificate needs a `lot_id`,
+ * which does not exist until the RPC creates it, so uploading first is not merely unnecessary but
+ * impossible. That is what makes "a cert can never block a receipt" structural instead of a promise.
+ */
+describe('the mill certificate, after the write', () => {
+  const certFile = () => new File(['x'], 'MTR.pdf', { type: 'application/pdf' });
+
+  const pickAndAdd = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('combobox', { name: 'Part' }));
+    await user.keyboard('{ArrowDown}');
+    await user.click(await screen.findByRole('option', { name: 'Part A' }));
+    await user.type(screen.getByRole('spinbutton', { name: 'Quantity' }), '10');
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+  };
+
+  it('holds the dialog open and offers the cert when the receipt landed on a lot', async () => {
+    const user = userEvent.setup();
+    (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ lot_id: 'lot-9' });
+    const onClose = vi.fn();
+    renderModal({ onClose });
+
+    await pickAndAdd(user);
+
+    expect(await screen.findByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /add the mill cert/i })).toBeInTheDocument();
+    // Held open on purpose: closing would take the one moment the cert is in someone's hand.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes as before when the part is not lot-tracked', async () => {
+    const user = userEvent.setup();
+    (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ lot_id: null });
+    const onClose = vi.fn();
+    renderModal({ onClose });
+
+    await pickAndAdd(user);
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /add the mill cert/i })).not.toBeInTheDocument();
+  });
+
+  it('uploads the certificate AFTER the write — the inverse of the photo above', async () => {
+    const user = userEvent.setup();
+    (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ lot_id: 'lot-9' });
+    renderModal();
+
+    await pickAndAdd(user);
+    await screen.findByRole('button', { name: /add the mill cert/i });
+
+    const inputs = document.querySelectorAll('input[type="file"]');
+    // The last file input is the cert's; the first belongs to MovementPhotoField.
+    await user.upload(inputs[inputs.length - 1] as HTMLInputElement, certFile());
+
+    await waitFor(() => expect(uploadLotCertificate).toHaveBeenCalled());
+    expect(vi.mocked(uploadLotCertificate).mock.invocationCallOrder[0]).toBeGreaterThan(
+      vi.mocked(addStockAtLocation).mock.invocationCallOrder[0],
+    );
+    expect(uploadLotCertificate).toHaveBeenCalledWith('co1', 'lot-9', expect.any(File));
+  });
+
+  it('leaves the stock recorded when the certificate fails, and never re-writes it', async () => {
+    const user = userEvent.setup();
+    (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ lot_id: 'lot-9' });
+    vi.mocked(uploadLotCertificate).mockRejectedValueOnce(new Error('offline'));
+    renderModal();
+
+    await pickAndAdd(user);
+    await screen.findByRole('button', { name: /add the mill cert/i });
+    const inputs = document.querySelectorAll('input[type="file"]');
+    await user.upload(inputs[inputs.length - 1] as HTMLInputElement, certFile());
+
+    expect(await screen.findByText(/The stock is recorded/i)).toBeInTheDocument();
+    // One write, and it stays written.
+    expect(addStockAtLocation).toHaveBeenCalledTimes(1);
   });
 });

@@ -18,6 +18,7 @@ import PartAutocomplete from '@/components/parts/PartAutocomplete';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
+import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
 
 interface OperatorReceivePartModalProps {
   open: boolean;
@@ -75,8 +76,25 @@ export default function OperatorReceivePartModal({
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Set to the part's name when THIS receipt is what started tracing it. Holds the dialog open. */
-  const [startedTracking, setStartedTracking] = useState<string | null>(null);
+  /**
+   * What the receipt landed on, when there is something to say about it afterwards.
+   *
+   * ONE post-write state, not two. `started_tracking` already held this dialog open to explain
+   * itself; a cert needs the same hold for a different reason, and two independent "stay open"
+   * flags would have to agree about which body renders and which button closes.
+   *
+   * `lotId` non-null is ALSO the "is this part lot-tracked?" answer, and the only one available
+   * here: `PartSelectOption` carries no `lot_tracked`, so the flag cannot be read before the write.
+   * `add_stock_at_location` returns a lot exactly when the part is tracked — including when this
+   * very receipt turned tracking on — so gating the cert panel on it is correct by construction
+   * rather than by a second lookup that could disagree.
+   */
+  const [landed, setLanded] = useState<{
+    partName: string;
+    lotId: string | null;
+    startedTracking: boolean;
+    heatLabel: string | null;
+  } | null>(null);
 
   // Reset each time the dialog opens (house convention: Dialog onEnter, not a
   // setState-in-effect). Nothing is loaded here any more: the picker fetches its own options as
@@ -89,7 +107,7 @@ export default function OperatorReceivePartModal({
     setHeatNumber('');
     setPhoto(null);
     setError(null);
-    setStartedTracking(null);
+    setLanded(null);
   };
 
   const unitOptions = useMemo(() => {
@@ -156,8 +174,14 @@ export default function OperatorReceivePartModal({
        * deliberate act on the part page, which is where it says so and offers it. Asking now
        * would be asking about a write that has already happened.
        */
-      if (result?.started_tracking) {
-        setStartedTracking(part.part_name);
+      const heat = heatNumber.trim();
+      if (result?.started_tracking || result?.lot_id) {
+        setLanded({
+          partName: part.part_name,
+          lotId: result?.lot_id ?? null,
+          startedTracking: Boolean(result?.started_tracking),
+          heatLabel: heat ? `Heat ${heat}` : null,
+        });
         return;
       }
       onClose();
@@ -177,7 +201,11 @@ export default function OperatorReceivePartModal({
       TransitionProps={{ onEnter: handleEnter }}
     >
       <DialogTitle>
-        {startedTracking ? 'Stocked, and now tracked by heat' : `Stock a part — ${locationName}`}
+        {landed
+          ? landed.startedTracking
+            ? 'Stocked, and now tracked by heat'
+            : 'Stocked'
+          : `Stock a part — ${locationName}`}
       </DialogTitle>
       <DialogContent>
         {/*
@@ -186,12 +214,32 @@ export default function OperatorReceivePartModal({
           "here is your form, and also a note", and the obvious next tap would be Add again —
           against a bin that already has the bar in it. There is one thing to do now.
         */}
-        {startedTracking ? (
-          <Alert severity="info" sx={{ mt: 1 }}>
-            {startedTracking} is now tracked by heat, because you recorded one for it. Taking any of
-            it will ask which heat it came from. Stock that was already on the shelf is kept
-            separately, marked as having no known heat.
-          </Alert>
+        {landed ? (
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {landed.startedTracking && (
+              <Alert severity="info">
+                {landed.partName} is now tracked by heat, because you recorded one for it. Taking
+                any of it will ask which heat it came from. Stock that was already on the shelf is
+                kept separately, marked as having no known heat.
+              </Alert>
+            )}
+            {/*
+              The cert comes AFTER the stock write, and it cannot be otherwise: the lot does not
+              exist until the RPC creates it. The photo field above is the exact inverse — it
+              uploads BEFORE, because `photo_path` is written at INSERT and immutable after, so a
+              failed photo aborts the movement. Here a failed cert cannot: the material is already
+              on the shelf.
+            */}
+            {landed.lotId && (
+              <CertAfterReceiptPanel
+                companyId={companyId}
+                lotId={landed.lotId}
+                surface="operator_receive"
+                heatLabel={landed.heatLabel}
+                onDone={onClose}
+              />
+            )}
+          </Stack>
         ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           {/* No `onCreateNew`: creating parts is not an operator's job — same call as
@@ -258,10 +306,14 @@ export default function OperatorReceivePartModal({
         )}
       </DialogContent>
       <DialogActions>
-        {startedTracking ? (
-          <Button onClick={onClose} variant="contained" size="large">
-            Done
-          </Button>
+        {landed ? (
+          // The panel owns its own always-enabled Done when it is showing; a second one here would
+          // be two buttons doing the same thing.
+          landed.lotId ? null : (
+            <Button onClick={onClose} variant="contained" size="large">
+              Done
+            </Button>
+          )
         ) : (
           <>
             <Button onClick={onClose} disabled={saving} size="large">

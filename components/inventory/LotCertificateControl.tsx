@@ -27,6 +27,13 @@ interface LotCertificateControlProps {
   certificates: LotCertificate[];
   /** Where this control is rendered, for telemetry only. */
   surface: string;
+  /**
+   * Whether this attach is part of putting the material away, rather than chasing it later.
+   *
+   * The one boolean the whole feature is measured on: the objection this answered was that
+   * scanning at the receiving bench is friction, so the rate of true-vs-false is the answer.
+   */
+  atReceipt: boolean;
   /** Re-read the certs after an upload. */
   onChanged: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -51,6 +58,7 @@ export default function LotCertificateControl({
   heatLabel,
   certificates,
   surface,
+  atReceipt,
   onChanged,
   onError,
 }: LotCertificateControlProps) {
@@ -81,8 +89,7 @@ export default function LotCertificateControl({
       const fileProps = certificateUploadProperties(file);
       posthog.capture('lot certificate uploaded', {
         surface,
-        // Attached from a read surface, days after the truck — never at the receipt itself.
-        at_receipt: false,
+        at_receipt: atReceipt,
         file_kind: fileProps.file_kind,
         size_bucket: fileProps.size_bucket,
         is_replacement: certificates.length > 0,

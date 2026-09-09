@@ -10,6 +10,7 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
@@ -26,6 +27,7 @@ import type { LotOnHand } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
+import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -136,6 +138,12 @@ export default function OperatorLocationActionModal({
   const [photo, setPhoto] = useState<File | null>(null);
   const showPhoto = action === 'add' || action === 'move';
 
+  /**
+   * The lot a top-up landed on, when there was one — which is also the only available answer to
+   * "is this part lot-tracked?" at this moment. Holds the dialog open to offer the certificate.
+   */
+  const [landedLotId, setLandedLotId] = useState<string | null>(null);
+
   const handleEnter = async () => {
     setQuantity('');
     setUnit(primaryUnit);
@@ -205,15 +213,17 @@ export default function OperatorLocationActionModal({
         photoPath = await uploadMovementPhoto(companyId, locationId, photo);
       }
 
+      let addedLotId: string | null = null;
       if (action === 'add') {
         // operatorId on every write, not just depletion: bin history has to be able to name
         // who put something away, and `created_by` (an auth user) is unreadable from the browser.
-        await addStockAtLocation(partId, locationId, qty, unit, {
+        const result = await addStockAtLocation(partId, locationId, qty, unit, {
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           photoPath,
           heatNumber: heatNumber.trim() || undefined,
         });
+        addedLotId = result?.lot_id ?? null;
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
           graceful: true,
@@ -247,6 +257,18 @@ export default function OperatorLocationActionModal({
         heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
+      /*
+       * A top-up of a lot-tracked part holds the dialog open to offer the certificate — but only
+       * that. Every other verb closes as before, because a take, a move and a count do not create
+       * a lot and there is nothing new to document.
+       *
+       * The panel configures itself from what the lot already holds, so a routine top-up of a bin
+       * whose cert is already filed reads as a confirmation rather than as a nag.
+       */
+      if (addedLotId) {
+        setLandedLotId(addedLotId);
+        return;
+      }
       onClose();
     } catch (e) {
       // Supabase errors are plain objects, not Error instances — `instanceof` would drop the
@@ -265,8 +287,19 @@ export default function OperatorLocationActionModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>{TITLES[action]}</DialogTitle>
+      <DialogTitle>{landedLotId ? 'Stocked' : TITLES[action]}</DialogTitle>
       <DialogContent>
+        {landedLotId ? (
+          <Box sx={{ mt: 1 }}>
+            <CertAfterReceiptPanel
+              companyId={companyId}
+              lotId={landedLotId}
+              surface="operator"
+              heatLabel={heatNumber.trim() ? `Heat ${heatNumber.trim()}` : null}
+              onDone={onClose}
+            />
+          </Box>
+        ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Typography variant="body2" color="text.secondary">
             <strong>{partName}</strong> at <strong>{locationName}</strong> — {currentQuantity}{' '}
@@ -351,14 +384,21 @@ export default function OperatorLocationActionModal({
             <ErrorAlert error={error} entity="stock" fallback="Failed to update stock." />
           )}
         </Stack>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving} size="large">
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={saving} size="large">
-          {CONFIRM[action]}
-        </Button>
+        {/* The panel owns an always-enabled Done while it is showing; Cancel and Confirm would
+            both be lies at that point — the write has already landed. */}
+        {!landedLotId && (
+          <>
+            <Button onClick={onClose} disabled={saving} size="large">
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} variant="contained" disabled={saving} size="large">
+              {CONFIRM[action]}
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );

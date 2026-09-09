@@ -371,6 +371,8 @@ export default function PartLocationInventory({
                     heatLabel={b.heat_number ? `Heat ${b.heat_number}` : b.lot_code}
                     certificates={certsByLot.get(b.lot_id) ?? []}
                     surface="office_lot"
+                    // Chased later, from a read surface — never the receipt itself.
+                    atReceipt={false}
                     onChanged={reloadCerts}
                     onError={setError}
                   />

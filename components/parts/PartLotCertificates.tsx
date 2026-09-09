@@ -96,6 +96,8 @@ export default function PartLotCertificates({ partId, companyId }: PartLotCertif
               heatLabel={lot.heatNumber ? `Heat ${lot.heatNumber}` : lot.lotCode}
               certificates={certsByLot.get(lot.lotId) ?? []}
               surface="office_lot"
+              // Chased later, from a read surface — never the receipt itself.
+              atReceipt={false}
               onChanged={reloadCerts}
               onError={setError}
             />

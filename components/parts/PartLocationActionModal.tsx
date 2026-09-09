@@ -10,7 +10,9 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
+
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
@@ -32,6 +34,7 @@ import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
 import type { JobWithRelations } from '@/types/job';
+import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
@@ -105,6 +108,8 @@ export default function PartLocationActionModal({
   const [unit, setUnit] = useState(primaryUnit);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  /** The lot an Add landed on. Holds the dialog open to offer the mill certificate. */
+  const [landedLotId, setLandedLotId] = useState<string | null>(null);
   // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell a
   // billing block from an ordinary failure. Validation still sets plain strings, which it renders.
   const [error, setError] = useState<unknown>(null);
@@ -273,12 +278,17 @@ export default function PartLocationActionModal({
     setSaving(true);
     setError(null);
     try {
+      let addedLotId: string | null = null;
       if (action === 'add') {
-        await addStockAtLocation(partId, location!.id, qty, unit, {
+        // The result was previously discarded. It carries `lot_id` — the lot this receipt landed
+        // on, and the only reading of "is this part lot-tracked?" available here: `tracked` is set
+        // inside `loadLots`, which early-returns on the add path and so is always false for it.
+        const result = await addStockAtLocation(partId, location!.id, qty, unit, {
           notes: notes || undefined,
           operatorId,
           heatNumber: heatNumber.trim() || undefined,
         });
+        addedLotId = result?.lot_id ?? null;
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
         // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
@@ -314,6 +324,12 @@ export default function PartLocationActionModal({
         heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
+      // A receipt against a lot-tracked part stays open to offer the certificate; everything else
+      // closes as before. The cert is a second write, so a failed one cannot un-land the stock.
+      if (addedLotId) {
+        setLandedLotId(addedLotId);
+        return;
+      }
       onClose();
     } catch (e) {
       // Supabase errors are plain objects, not Error instances, so `instanceof` fell through
@@ -332,8 +348,19 @@ export default function PartLocationActionModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>{TITLES[action]}</DialogTitle>
+      <DialogTitle>{landedLotId ? 'Stocked' : TITLES[action]}</DialogTitle>
       <DialogContent>
+        {landedLotId ? (
+          <Box sx={{ mt: 1 }}>
+            <CertAfterReceiptPanel
+              companyId={companyId}
+              lotId={landedLotId}
+              surface="office_receipt"
+              heatLabel={heatNumber.trim() ? `Heat ${heatNumber.trim()}` : null}
+              onDone={onClose}
+            />
+          </Box>
+        ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           {isMove ? (
             <>
@@ -453,14 +480,21 @@ export default function PartLocationActionModal({
             <ErrorAlert error={error} entity="stock" fallback="Failed to update stock." />
           )}
         </Stack>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={saving}>
-          Confirm
-        </Button>
+        {/* The panel owns its own Done once the write has landed; Cancel and Confirm would both
+            misdescribe the state at that point. */}
+        {!landedLotId && (
+          <>
+            <Button onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} variant="contained" disabled={saving}>
+              Confirm
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );

@@ -122,6 +122,7 @@ import HeatNumberField from '@/components/inventory/HeatNumberField';
 import { useLoad } from '@/hooks/useLoad';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
+import CertAfterBatchPanel, { type LandedLot } from '@/components/inventory/CertAfterBatchPanel';
 
 /** The three verbs that act on stock at one place. `adjust` has its own form. */
 export type PlaceStockAction = 'add' | 'deplete' | 'move';
@@ -298,6 +299,8 @@ export default function PlaceStockActionForm({
   const [failures, setFailures] = useState<Array<{ partName: string; message: string }>>([]);
   /** How many lines landed in the last partial save — captured, not recomputed from live state. */
   const [saved, setSaved] = useState(0);
+  /** Lots a clean batch created, held so their certificates can be offered once, together. */
+  const [landedLots, setLandedLots] = useState<LandedLot[] | null>(null);
   /**
    * The caught error object, not a formatted string: `ErrorAlert` needs the object to tell a
    * billing block from an ordinary failure. Validation messages stay plain strings, which it
@@ -541,6 +544,14 @@ export default function PlaceStockActionForm({
     const failed: Array<{ partName: string; message: string }> = [];
     /** Row keys, not part ids: three lines of one bar succeed or fail independently. */
     const succeeded: string[] = [];
+    /**
+     * The lots the adds landed on, in line order.
+     *
+     * `result.lot_id` is the only reading of "is this part lot-tracked?" available here: an `add`
+     * row's own `lotId` is ALWAYS null (a receipt is where a lot comes into existence), so the row
+     * key cannot identify what the write produced.
+     */
+    const landed: LandedLot[] = [];
     for (let i = 0; i < lines.length; i += 1) {
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
@@ -551,11 +562,18 @@ export default function PlaceStockActionForm({
       const rowLot = row.lotId ?? undefined;
       try {
         if (action === 'add') {
-          await addStockAtLocation(row.partId, locationId, value, unit, {
+          const result = await addStockAtLocation(row.partId, locationId, value, unit, {
             notes: notes || undefined,
             operatorId: operatorId || undefined,
             heatNumber,
           });
+          if (result?.lot_id) {
+            landed.push({
+              lotId: result.lot_id,
+              partName: row.partName,
+              heatLabel: heatNumber ? `Heat ${heatNumber}` : null,
+            });
+          }
         } else if (action === 'deplete') {
           await depleteStockAtLocation(row.partId, locationId, value, unit, {
             graceful,
@@ -633,6 +651,21 @@ export default function PlaceStockActionForm({
       setFailures(failed);
       return;
     }
+    /*
+     * A clean batch that created lots stays open once, to offer their certificates.
+     *
+     * This is the receiving-bench case the cert journey was cut over: a delivery arrives under
+     * several heats and goes onto the shelf in one pass. Offering the certs together, after the
+     * stock is already recorded, is what makes the scan optional rather than a gate.
+     *
+     * Only on a CLEAN batch. A partial failure already owns this form with its own
+     * disarm-what-landed protocol, and a second post-write state stacked on that one would leave
+     * two things claiming to describe what just happened.
+     */
+    if (landed.length > 0) {
+      setLandedLots(landed);
+      return;
+    }
     onCancel();
   };
 
@@ -653,9 +686,18 @@ export default function PlaceStockActionForm({
       }}
     >
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-        {TITLES[action]}
+        {landedLots ? 'Stocked' : TITLES[action]}
       </Typography>
 
+      {/*
+        The form is REPLACED once a clean batch has landed, for the reason the operator receive
+        dialog gives: leaving the fields on screen beside a message reads as "here is your form,
+        and also a note", and the obvious next move is to submit it again — against a bin that
+        already holds the material.
+      */}
+      {landedLots ? (
+        <CertAfterBatchPanel companyId={companyId} lots={landedLots} onDone={onCancel} />
+      ) : (
       <Stack spacing={2}>
         {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
@@ -987,6 +1029,7 @@ export default function PlaceStockActionForm({
           </Button>
         </Stack>
       </Stack>
+      )}
     </Box>
   );
 }

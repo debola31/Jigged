@@ -92,6 +92,38 @@ conda run -n jigged pip install -r api/requirements.txt -r worker/requirements.t
 conda run -n jigged python -m worker
 ```
 
+### As a service (macOS launchd)
+
+A worker started from a shell dies with the terminal. On the serving Mac it runs as a LaunchAgent
+from [`worker/launchd/com.jigged.worker.plist.example`](../../worker/launchd/com.jigged.worker.plist.example):
+starts at login, restarts if it exits (`KeepAlive`), and runs under `caffeinate -s`, which holds a
+no-sleep assertion on mains power for as long as the worker lives (`pmset -g assertions` shows it).
+The worker handles `SIGTERM`, so `launchctl bootout` is the same graceful stop as Ctrl-C.
+
+```bash
+mkdir -p ~/Library/LaunchAgents ~/Library/Logs/jigged
+PY=$(conda run -n jigged python -c 'import sys; print(sys.executable)')
+sed -e "s#__PYTHON__#$PY#g" -e "s#__PYTHON_DIR__#$(dirname "$PY")#g" \
+    -e "s#__REPO__#$PWD#g" -e "s#__HOME__#$HOME#g" \
+    worker/launchd/com.jigged.worker.plist.example > ~/Library/LaunchAgents/com.jigged.worker.plist
+plutil -lint ~/Library/LaunchAgents/com.jigged.worker.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jigged.worker.plist
+launchctl print gui/$(id -u)/com.jigged.worker | grep -E "state|pid"     # running
+tail -f ~/Library/Logs/jigged/worker.log                                # "worker <id> ready; models=..."
+```
+
+Stop or restart with `launchctl bootout gui/$(id -u)/com.jigged.worker` (and `bootstrap` again); after
+pulling new worker code, bootout and bootstrap so the process picks it up. The DSNs and `WORKER_MODELS`
+come from the repo's `.env.local` as before; nothing is duplicated into the plist.
+
+**Ollama stays as Ollama.app.** Its own launch agent (`com.ollama.ollama`) serves `localhost:11434`
+with no environment set, and that is fine: the native adapter sends `num_ctx=32768` and
+`keep_alive=-1` on every request, `OLLAMA_NUM_PARALLEL` defaults to 1, and the serving Mac's server
+log shows `CONTEXT 32768`, `UNTIL Forever` and zero truncation lines under that arrangement. A second
+`ollama serve` under our own agent would fight the app's for the port, so §1's variables matter only for
+other clients of the box (a manual `ollama run`, the eval's embedding step). What the agent does **not**
+do is keep a closed-lid laptop awake; that is `sudo pmset -c disablesleep 1`, a system setting.
+
 Confirm it registered:
 
 ```sql

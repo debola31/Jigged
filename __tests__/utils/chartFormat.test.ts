@@ -8,6 +8,13 @@ describe('formatLabel', () => {
   it('reads a mid-month ISO date as a day', () => {
     expect(formatLabel('2026-03-14T12:00:00')).toBe('Mar 14');
   });
+  it('reads a UTC-midnight timestamp as the date it is, whatever the viewer\'s zone', () => {
+    // DATE_TRUNC('month', ship_date) on a timestamptz column arrives as midnight UTC;
+    // in local time that is the evening before, and June rendered as "May 2026".
+    expect(formatLabel('2026-06-01T00:00:00+00:00')).toBe('Jun 2026');
+    expect(formatLabel('2026-06-01T00:00:00Z')).toBe('Jun 2026');
+    expect(formatLabel('2026-06-15T00:00:00+00:00')).toBe('Jun 15');
+  });
   it('shortens a long nominal label', () => {
     expect(formatLabel('Hastings Machine Company')).toBe('Hastings Mac...');
   });

@@ -59,6 +59,17 @@ confidence and surface only the ambiguous (Flatfile / OneSchema / Dromo), confid
 selective confirmation plus assumption-and-undo for non-technical and older users, and the
 over-reliance guardrail — **surface uncertainty, don't force confirmation of the confident.**
 
+**Selective does not mean partial.** `ENTITY_FIELDS` lists every field the entity's `/execute`
+route writes — all 11 customer columns, all 11 vendor ones, every routing time and rate — because
+the panel is the only place a mis-map can be corrected since #776 retired the per-entity wizards.
+The two are not in tension: the default card still asks only about *missing required* fields, and
+every widened field is optional, so what an owner meets first is unchanged. The length is paid
+inside the disclosure they opted into.
+
+Grouping (`CanonicalField.group` → a subheading) is how the longer panel stays readable, rather
+than a second "+9 more fields" disclosure nested inside the first. A second click to reach the very
+field you opened the panel to fix rebuilds a milder version of the dead end #777 closed.
+
 ## Architecture
 
 **Where each stage runs — the load-bearing decision.** Rows are parsed in the browser and the
@@ -215,7 +226,9 @@ them?"*):
   count, using **the analyzer's own `norm()`** — so the review can't say "47 missing" while the fix
   creates 46. `REFERENTIAL_LINKS` lives in the same module and the analyzer imports it: **one
   registry**, so check and fix can't drift. Required fields are single-sourced the same way
-  (`lib/dataImportSchema.ts` `ENTITY_FIELDS`).
+  (`lib/dataImportSchema.ts` `ENTITY_FIELDS`), and `scripts/dataImportFieldParityCheck.ts` asserts
+  every role the analyzer keys on is offered at Map — a finding may never point at a control the
+  owner cannot reach.
 - **Only lookup-shaped parents** (`AUTO_CREATABLE_PARENTS` = work centers, vendors, customers) — a
   record that essentially *is* its name, so creating one from a reference invents nothing.
   **Parts are excluded on purpose:** a part needs a unit and a cost, so a missing part is answered
@@ -319,7 +332,8 @@ wrong row. `numberRoutingOpsInFileOrder` (inside `buildImportPlan`, and called *
 numbers each part's ops across the entire file and injects a synthetic `sequence`
 (`SYNTHETIC_SEQ_COLUMN = '__jigged_seq'`). A mapped step-order column always wins; the analyzer
 emits a `sequence_inferred` info notice (lands in "things we noticed") when none is mapped,
-pointing at the Map step.
+pointing at the **Step number** field on the Map step — which, until #777 widened the catalog, the
+Map step did not actually offer. The parity check below is what keeps that advice honourable.
 
 **Transactionality is an explicit non-goal for v1.** Cross-entity atomicity across separate
 endpoint calls is hard. Dependency order makes partial success *safe*: parents commit first and are
@@ -439,6 +453,8 @@ write plan out — never private helpers or DOM internals. Three seams:
 |---|---|---|
 | Analyzer + review + impact + actions (primary) | `__tests__/lib/dataImportAnalyzer.test.ts`, `dataImportReview.test.ts`, `dataImportImpact.test.ts`, `dataImportActions.test.ts`, `dataImportEditing.test.ts`, `dataImportLinks.test.ts`, `dataImportReconcile.test.ts`, `dataImportIngest.test.ts` | classification, within-file duplicates, cross-file orphans with asymmetric keys, normalized matching (**no phantom orphan**), **a referenced file absent → one `not_checked`, never a silent 0 and never a phantom N**, required/blank columns, cost + quantity coverage, name variants, inactive flags, edges; `rowsAtRisk` (one row lost is one row), `losses`/`lossPhrase`; task-vs-notice split, consequence line, outlook; `buildImportPlan`, `summarizeResults`, `runImportPlan — progress`; `reconcile`, `filterWorkingByMode`; `findMissingParents`, `guessKind`, `createMissingParents` |
 | AI endpoints | `api/tests/integration/test_data_import_api.py`, `api/tests/unit/test_data_import_provider.py` | caller auth (401/403), **that there is no feature gate** (`test_endpoints_are_not_feature_gated`), the 413 size cap, suggest-fixes proposals only, and the static no-write check |
+| Map step (the correction surface) | `__tests__/components/import/ColumnMappingStep.test.tsx` | the default card asks nothing when every required field is mapped and exactly once per one that isn't; the disclosure offers **every** catalog field so a mis-map is correctable; a correction reports the canonical role, not the label; grouped subheadings appear only for entities that have grouped fields |
+| Field-catalog parity (CI-named step) | `scripts/dataImportFieldParityCheck.ts` + `__tests__/standards/dataImportFieldParity.test.ts` | `ENTITY_FIELDS` ↔ the Python `*_SCHEMA` dicts agree on keys **and** `required` flags, both directions, and every role the analyzer keys on is offered at Map. Catches the four ways they drift silently: a field the AI maps that nobody can correct (#777), one the owner can pick that the AI has never heard of (`parts.location_name`), a phantom naming a column that doesn't exist (`PART_SCHEMA.notes`), and a finding pointing at a control that isn't there (`routings.sequence`). **It compares declarations, not writes** — a field can pass every rule and still be ignored by the route that receives it, which is exactly what `notes` did. Reading the `/execute` route is the only control for that |
 | The `/import` wizard journey end-to-end | **not built — `automation-pending (#367)`** | *(This doc previously cited "one Playwright E2E that drives `/import`"; the spec it meant drove the **per-entity** `/parts/import` wizard and was deleted along with it. So there is now **no** Playwright coverage of any CSV import, which raises #367 from a gap to the only end-to-end check there is. The live write was walked by hand on the PR #776 preview — two CSVs with a cross-file vendor reference, `Created 5`, links and opening balances resolved — but that is a one-off, not a check that reruns.)* |
 
 ## Not built / out of scope
@@ -448,12 +464,6 @@ write plan out — never private helpers or DOM internals. Three seams:
   `/…/import` wizards (plus `parts/bom/import`) are deleted. The empty-state
   `ImportAllDataLink` and the sidebar entry are the ways in. *(This doc previously listed the
   reroute as Not built, and before that described it as a Phase 2 behaviour.)*
-- **A Map step covering every importable field.** `ENTITY_FIELDS` is a review-relevant slice —
-  customers get `name` + `default_payment_terms`, vendors `name` alone. The AI maps the rest
-  against the full `ENTITY_SCHEMAS` and they ride through to `execute`, so richer columns do
-  import; but a mis-mapped one is not correctable, and since the per-entity wizards (which
-  exposed all 11 customer fields) are gone, there is no fallback surface.
-  [#777](https://github.com/debola31/Jigged/issues/777).
 - **"Unchanged" and "Conflict" reconciliation buckets**, and **fuzzy link-to-existing** matching
   (only exact-normalized bucketing ships).
 - **An explicit "leave blank — intentional" decision.** Spec'd so that confirming a gap *downgrades*

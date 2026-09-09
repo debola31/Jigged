@@ -181,7 +181,10 @@ Three-step handshake:
   `lib/dataImportIngest.ts` → `numberRoutingOpsInFileOrder` numbers each part's operations by
   their order across the **whole file**, on the client, *before* the 500-row batch split
   (`BATCH_SIZE = 500`), and sends an explicit `sequence`. The Review step shows a
-  `sequence_inferred` info notice (`lib/dataImportAnalyzer.ts`) pointing at the Map step.
+  `sequence_inferred` info notice (`lib/dataImportAnalyzer.ts`) pointing at the **Step number**
+  field on the Map step. Setup, run time and both rate overrides are mappable there too, under a
+  **Times & rates** subheading — they price the work, so a mis-mapped one is silently wrong money
+  rather than a visibly wrong record.
 - **Work-center resolution** — `work_center_name` matched against existing `work_centers`.
   Rows with no name fall back to a work center literally named `MISCELLANEOUS`
   (case-insensitive) if one exists, else fail as `unknown_work_center`. Work centers are

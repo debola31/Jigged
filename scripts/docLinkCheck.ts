@@ -111,6 +111,12 @@ export const ALLOWLIST = new Map<string, string>([
     'Same deletion, restated beside the env-var list that no longer carries RESEND_API_KEY for the backend.',
   ],
   [
+    'docs/runbooks/ai-worker.md::worker/.env',
+    "Names the two-file env layout withdrawn in September 2026 — worker/.env first and .env.local " +
+      'second — where load order was the only thing between a shop and a BYPASSRLS connection. ' +
+      'The absence is the point, and this surfaced the moment worker/ joined CODE_PATH_PREFIXES.',
+  ],
+  [
     'docs/modules/operator-view.md::api/routes/operators_routes.py',
     'Names the mounted, unauthenticated operators router deleted 2026-09-09 (#668). Cited twice on purpose: the module doc records both what the route did and that #550 closed without deleting it.',
   ],
@@ -221,6 +227,10 @@ const CODE_PATH_PREFIXES = [
   '__tests__/',
   'e2e/',
   'api/',
+  // Added 2026-09-09 with the worker's status file and menu bar indicator. Until
+  // then every backticked worker/ path in the runbooks was silently UNCHECKED --
+  // ai-worker.md cites worker/config.py and nothing verified it resolved.
+  'worker/',
   'utils/',
   'components/',
   'app/',

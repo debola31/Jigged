@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The menu bar indicator for the desktop AI worker. Reads only: a status file,
+       launchd, local git refs and Ollama on localhost. It opens no database
+       connection, enqueues nothing and calls no model.
+
+       Instantiate with the sed line in docs/runbooks/ai-worker.md, then:
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jigged.menubar.plist
+       Stop: launchctl bootout gui/$(id -u)/com.jigged.menubar -->
+  <key>Label</key><string>com.jigged.menubar</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>-m</string>
+    <string>worker.menubar</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__PYTHON_DIR__:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+
+  <!-- A DICT, NOT `true`, AND THAT IS THE DIFFERENCE FROM THE WORKER'S PLIST.
+       This agent has a Quit item. Under KeepAlive=true launchd would restart it
+       immediately and a person could not turn off their own indicator.
+       SuccessfulExit=false means "bring it back only if it crashed", so Quit is
+       honoured and a crash is still recovered. -->
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+
+  <!-- Stated rather than inherited: a job with no window-server session cannot
+       create an NSStatusItem, and this is the line that guarantees it has one. -->
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+
+  <!-- NO caffeinate, DELIBERATELY. The worker holds the no-sleep assertion because
+       the worker is the thing that must not sleep. An indicator holding one would
+       keep the Mac awake for the sake of a glyph, and would go on holding it after
+       the worker had been switched off -- the exact inverse of what turning the
+       worker off should mean.
+
+       A SEPARATE LOG, for the same reason: worker.log already interleaves six
+       logger names and is the file a person tails to answer "what is the worker
+       doing". A seventh source, from a different process, would take that away. -->
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/jigged/menubar.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/jigged/menubar.log</string>
+</dict>
+</plist>

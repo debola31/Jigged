@@ -211,7 +211,15 @@ jobs:
       # must not go unasserted.
       - name: Run desktop worker tests
         working-directory: ./
-        run: pytest worker/tests -v
+        # worker/menubar/tests runs here rather than in its own step because it
+        # needs nothing this job does not already have. Its modules are stdlib-only
+        # BY DESIGN: pyobjc ships no Linux wheel, so worker/menubar/requirements.txt
+        # is deliberately NOT installed above, and worker/menubar/ui.py -- the one
+        # module that imports AppKit -- is never imported by a test.
+        # test_no_ui_import.py enforces that boundary, and
+        # test_module_scope_names.py statically checks ui.py for import-time
+        # NameErrors precisely because this runner can never import it.
+        run: pytest worker/tests worker/menubar/tests -v
 
       - name: Upload backend coverage
         if: always()

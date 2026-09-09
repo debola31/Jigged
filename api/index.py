@@ -74,7 +74,7 @@ sentry_sdk.init(
 # Prefer SUPABASE_SECRET_KEY (recommended); fall back to SUPABASE_SERVICE_ROLE_KEY
 # — the name the Supabase<->Vercel branching integration injects — so preview
 # deployments against a branch DB don't silently disable database features.
-# Mirrors the fallback already used in operators_routes.py / admin_routes.py.
+# Mirrors the fallback already used in admin_routes.py.
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
@@ -111,7 +111,6 @@ from routes.vendor_services_import_routes import router as vendor_services_impor
 from routes.vendors_import_routes import router as vendors_import_router
 from routes.bom_import_routes import router as bom_import_router
 from routes.routings_import_routes import router as routings_import_router
-from routes.operators_routes import admin_router as operators_admin_router
 from routes.insights_routes import router as insights_router
 from routes.admin_routes import router as system_admin_router
 from routes.quickbooks_routes import router as quickbooks_router
@@ -127,7 +126,6 @@ app.include_router(vendor_services_import_router)
 app.include_router(vendors_import_router)
 app.include_router(bom_import_router)
 app.include_router(routings_import_router)
-app.include_router(operators_admin_router)
 app.include_router(insights_router)
 app.include_router(system_admin_router)
 app.include_router(quickbooks_router)

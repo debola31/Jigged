@@ -1442,11 +1442,18 @@ adoption, not the absence of a print button.**
 - **Operator management is not part of this module.** It is the generic team-member surface
   operating on `user_company_access` under RLS. *(This doc previously named `listOperators` /
   `updateOperator` / `deleteOperator` in `utils/operatorAccess.ts`; none of those functions exist.)*
-- **`api/routes/operators_routes.py` is worse than dead code — it is mounted.** `api/index.py`
-  registers it, so `POST /api/operators` is a **live route that would 500**, because it targets an
-  `operators` table that no longer exists. Nothing in the frontend calls it. Its deletion was
-  tracked in **#550, which is closed as completed while the file is still on disk** — read that
-  issue as superseded, not as done.
+- **`api/routes/operators_routes.py` was deleted 2026-09-09 ([#668](https://github.com/debola31/Jigged/issues/668)).**
+  It had been *mounted* rather than merely dead: `api/index.py` registered it, so `POST
+  /api/operators` was a live route that always 500'd on an `operators` table that no longer exists,
+  with no caller in the frontend. **Why it outranked ordinary dead code:** the router carried no
+  auth of any kind — no `verify_company_access`, and `index.py` adds only CORS, which stops nothing
+  that isn't a browser — and the create handler reached
+  `auth.admin.create_user` (with `email_confirm: True`) *before* the missing-table insert failed. So
+  an unauthenticated caller minted a confirmed `auth.users` row and got a 500, leaving it orphaned.
+  Bounded, because the `user_company_access` insert never ran and RLS grants such an account
+  nothing — but this was the only unauthenticated account-creation path in a product whose
+  `/signup` redirects to `/login`. Its deletion was first tracked in **#550, closed as completed
+  while the file sat on disk** — read that issue as superseded, not as done.
 
 ---
 
@@ -1582,9 +1589,12 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 exists; scrap-driven material consumption and yield costing; auto-logged completion entries in the
 activity feed; and any offline mode.
 
-**Code the docs surfaced, tracked nowhere:** `api/routes/operators_routes.py` is mounted and would
-500 (above). `#550`, which tracked its deletion, is **closed without the deletion having landed** —
-read it as superseded, the same way [inventory.md](inventory.md) records its own #550 residue.
+**Code the docs surfaced, tracked nowhere:** `api/routes/operators_routes.py` was mounted and would
+500 (above). `#550`, which tracked its deletion, was **closed without the deletion having landed** —
+read it as superseded, the same way [inventory.md](inventory.md) records its own #550 residue. The
+file was finally deleted on 2026-09-09 under
+[#668](https://github.com/debola31/Jigged/issues/668), the issue opened to catch exactly this
+pattern of a checklist item closed but never shipped.
 
 **`prd.md` was corrected in the same pass** (2026-08-02): §4.3's three false claims (single-tap
 capture, one QR per operation row, a blocking station guard), FR-6, FR-12's withdrawn gamification,

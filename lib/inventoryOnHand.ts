@@ -98,3 +98,122 @@ export function gapSentence(summary: OnHandSummary): string | null {
   const excluded = summary.noCostTierParts > 0 || summary.madeParts > 0;
   return `${parts.join(' · ')}${excluded ? ' — not in the total.' : '.'}`;
 }
+
+/** One line per PART, which is what the stock list shows. */
+export interface OnHandPartRow {
+  partId: string;
+  partName: string;
+  primaryUnit: string | null;
+  /** Summed across every place. Safe: balances are all in the part's own primary unit. */
+  quantity: number;
+  /**
+   * How many distinct PLACES hold it — not how many balance rows it has.
+   *
+   * Two heats on one shelf is two balances and one place. Counting rows would put "2" in a column
+   * headed Places while the side rail said "across 1 location", and the rail would be right.
+   */
+  placeCount: number;
+  costPerUnit: number | null;
+  costBelowMin: boolean;
+  /** Summed value, or null when the part has no cost on file. */
+  onHandCost: number | null;
+  gap: 'no_cost_tier' | 'made' | null;
+  /** The most recent movement across all of its places. */
+  lastMovedAt: string | null;
+  /** Every place path and heat this part sits under, lowercased — what the one search box matches. */
+  searchText: string;
+}
+
+/**
+ * Roll the balance rows into one line per part.
+ *
+ * **The list is one line per part; the side rail is where a part comes apart.** A bar on three
+ * shelves under two heats is one thing a shop owns, and three rows of it made a stock list read as
+ * three unrelated holdings — which is also why the Place column went: a column that can only show
+ * one of three places has to either pick one or repeat the part.
+ *
+ * `costPerUnit` is the same on every balance of a part by construction — the view picks the tier at
+ * the part's TOTAL on-hand, not per balance — so taking the first is not a choice between rivals.
+ *
+ * `searchText` carries every place path and heat, so typing a rack or a heat still finds the part
+ * even though neither is a column any more.
+ */
+export function rollUpByPart(
+  rows: OnHandRow[],
+  pathOf: (locationId: string) => string,
+): OnHandPartRow[] {
+  const byPart = new Map<string, OnHandPartRow>();
+  const placesSeen = new Map<string, Set<string>>();
+
+  for (const row of rows) {
+    const existing = byPart.get(row.partId);
+    const place = pathOf(row.locationId);
+    const bits = [place, row.heatNumber ?? '', row.lotCode ?? ''].filter(Boolean).join(' ');
+
+    const places = placesSeen.get(row.partId) ?? new Set<string>();
+    places.add(row.locationId);
+    placesSeen.set(row.partId, places);
+
+    if (!existing) {
+      byPart.set(row.partId, {
+        partId: row.partId,
+        partName: row.partName,
+        primaryUnit: row.primaryUnit,
+        quantity: row.quantity,
+        placeCount: places.size,
+        costPerUnit: row.costPerUnit,
+        costBelowMin: row.costBelowMin,
+        onHandCost: row.onHandCost,
+        gap: row.gap,
+        lastMovedAt: row.lastMovedAt,
+        searchText: `${row.partName} ${bits}`.toLowerCase(),
+      });
+      continue;
+    }
+
+    existing.quantity += row.quantity;
+    existing.placeCount = places.size;
+    existing.searchText += ` ${bits.toLowerCase()}`;
+    // NULL stays NULL: a part with no cost has no value, and adding zero for it would state a
+    // total that quietly excluded part of the holding.
+    if (row.onHandCost !== null) {
+      existing.onHandCost = (existing.onHandCost ?? 0) + row.onHandCost;
+    }
+    if (row.lastMovedAt && (!existing.lastMovedAt || row.lastMovedAt > existing.lastMovedAt)) {
+      existing.lastMovedAt = row.lastMovedAt;
+    }
+  }
+
+  for (const part of byPart.values()) {
+    if (part.onHandCost !== null) part.onHandCost = Math.round(part.onHandCost * 100) / 100;
+  }
+  return [...byPart.values()];
+}
+
+/** The footer, over the part rows the table is showing. */
+export function summariseParts(parts: OnHandPartRow[]): OnHandSummary {
+  let total = 0;
+  let anyCosted = false;
+  let noTier = 0;
+  let made = 0;
+  let belowMin = 0;
+
+  for (const part of parts) {
+    if (part.gap === 'no_cost_tier') noTier += 1;
+    if (part.gap === 'made') made += 1;
+    if (part.costBelowMin) belowMin += 1;
+    if (part.onHandCost !== null) {
+      total += part.onHandCost;
+      anyCosted = true;
+    }
+  }
+
+  return {
+    partCount: parts.length,
+    balanceCount: parts.reduce((n, p) => n + p.placeCount, 0),
+    costedTotal: anyCosted ? Math.round(total * 100) / 100 : null,
+    noCostTierParts: noTier,
+    madeParts: made,
+    belowMinParts: belowMin,
+  };
+}

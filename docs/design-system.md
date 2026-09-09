@@ -370,7 +370,7 @@ filled is decided by frequency per surface, and is *not* a property of the verb:
 | Surface | Primary | Why |
 |---|---|---|
 | Operator bin view ([`…/inventory/locations/[locationId]/page.tsx`](../app/operator/[companyId]/inventory/locations/[locationId]/page.tsx)) | **Remove** | Stock arrives in bulk once (really receiving's job, J6) and leaves in small amounts on every job, all shift |
-| Admin part page ([`PartLocationInventory`](../components/parts/PartLocationInventory.tsx)) | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it |
+| Storage → Inventory, a part's side rail ([`PartPlacesDrawer`](../components/inventory/locations/place/PartPlacesDrawer.tsx)) | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it. Was the part page's own Storage tab until 2026-09-09 |
 
 **Do not reorder to emphasise.** Consistency governs *recognition* — where a control is, what it's
 called, what it does — and that must not move. Emphasis governs *intent*, legitimately different for

@@ -14,6 +14,13 @@ vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   getBalancesForPart: vi.fn(async () => []),
+  // The heats section in the drawer reads these. An untracked part has no lots, which is the
+  // shape every case in this file uses.
+  getLotsForPart: vi.fn(async () => []),
+  setPartLotTracking: vi.fn(async () => 0),
+}));
+vi.mock('@/utils/lotCertificatesAccess', () => ({
+  listLotCertificatesForLots: vi.fn(async () => new Map()),
 }));
 
 import PartPlacesDrawer from '@/components/inventory/locations/place/PartPlacesDrawer';

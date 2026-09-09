@@ -44,8 +44,10 @@ the journey asked for.
 - **The one validated shop request regressed:** #59 (Shane, `client-feedback`, P0) *"link inventory
   removals to specific jobs"* shipped March on `/inventory/[itemId]`, killed by the May parts
   unification. **Since repaired** —
-  [`PartLocationActionModal.tsx`](../../components/parts/PartLocationActionModal.tsx) tags removals via
-  `JobTagPicker`; the doc's "zero references to jobs today" is withdrawn.
+  [`PlaceStockActionForm.tsx`](../../components/inventory/locations/place/PlaceStockActionForm.tsx) tags
+  removals via `JobTagPicker`; the doc's "zero references to jobs today" is withdrawn. (It was
+  `PartLocationActionModal` until 2026-09-09, when the part page's Storage tab went and the side
+  rail inherited the four verbs.)
 
 Fix: movement becomes **a by-product of work, not a chore** — checked, issued and confirmed against
 a job; stock a consequence. Locations stay (QR-on-location was asked for) but stop being the front
@@ -95,7 +97,7 @@ every tenant: the `inventory_locations` flag that used to gate Storage was retir
 | **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |
 | Put stray parts away | Place worksheet, at any bin | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. The tool is unchanged; the pile it was built to empty is gone (§5.14). |
 | **"Where is my o-ring?" — and take five off the shelf** | Storage → **Inventory**, search, click the row | The row opens [`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — every place the part is, with quantities and a total — and each row **expands into the four verbs scoped to that part at that place**, so the job finishes where the answer was. `Open bin` is inside the expanded section for when you want the whole shelf; the title links to the part's own page. **Withdrawn 2026-09-09:** a `StorageSearch` box on the board matching *"places and parts in one box, grouped"* — wrong once Inventory existed, because it put a parts answer on a tab that cannot show parts, and made two searches that both found them. The Places box filters the unit list; parts are found on Inventory. |
-| Count the whole shop | **Storage**, or a part's Storage tab → `/inventory/count` | One door, and now the worksheet's **only** browsing entry: Storage stopped navigating there entirely 2026-08-10. The page keeps its place-scoped mode for a part's own balance row (`?location=…&part=…` from [`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)). |
+| Count the whole shop | **Storage**, or a part's Storage tab → `/inventory/count` | One door, and now the worksheet's **only** browsing entry: Storage stopped navigating there entirely 2026-08-10. The page keeps its place-scoped mode for a part's own balance row (`?location=…&part=…`). |
 | **Add a part the bin read didn't return** | Place worksheet → `Found something not listed?` | The "system says zero, I'm holding twelve" case. |
 | Check a job has material | `/jobs/{id}` | `JobPartMaterialsCard`. Top-level BOM only; no on-order. |
 
@@ -248,7 +250,7 @@ Per part by `is_location_tracked`; unification is intent (§5.4).
 | How | Client read-modify-write of `parts.quantity`, then a **separate** ledger insert | Balance upsert + ledger insert in one transaction, `SELECT … FOR UPDATE` |
 | Atomicity | **None** — concurrent writes lose updates | Atomic, row-locked; `parts.quantity` is a `trg_recompute_part_quantity` rollup |
 
-`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to `PartLocationInventory`. `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrolled every new part at Unassigned unconditionally, hence no per-part opt-in UI. **Both the trigger and the bucket were removed 2026-09-06 (§5.14):** a part is created at 0 or the insert is refused, and stock enters only through `add_stock_at_location`. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
+`enforce_tracked_part_quantity` raises when a direct `parts.quantity` write disagrees with the balance sum, so the DB refuses Path A on tracked parts — hence the UI swap to the per-place balance surface (the part page's Storage tab then; the Storage → Inventory side rail since 2026-09-09). `trg_seed_new_part_balance` (was `trg_auto_track_stocked_part`) enrolled every new part at Unassigned unconditionally, hence no per-part opt-in UI. **Both the trigger and the bucket were removed 2026-09-06 (§5.14):** a part is created at 0 or the insert is refused, and stock enters only through `add_stock_at_location`. Its `features.inventory_locations = true` condition came out in 20260802015837, three weeks before the flag itself.
 
 **Nothing decrements automatically** — not on operation complete, job complete, shipment or invoice; zero stock calls in the jobs, operator, shipments or operation-completions access files. Deliberate, still true after Phase 1: consumption is recorded when an operator depletes at a bin and tags the job, which J4 reads back. The tag stays **optional** — accepted risk (J7).
 
@@ -257,7 +259,7 @@ Per part by `is_location_tracked`; unification is intent (§5.4).
 No item detail/create/edit/import page of its own; that is all Parts UI.
 
 - ~~`/inventory` list~~ **deleted 2026-07-30**, redirects to `/parts`: a second parts list with no unique capability. Parts then carried **On hand**, **Status** and a Stock filter seeded from `?status=` — the shortage lens J4 linked to. ⚠ **All three are gone as of the `is_stocked` removal**: Parts is the item master and holds no quantities, so J4's chip no longer links anywhere. Sidebar says **Storage** (§5.12).
-- **Part → Inventory tab** ([`InventoryTab.tsx`](../../components/parts/workspace/tabs/InventoryTab.tsx)), now on **every** part since every part is stockable: untracked → Add/Remove/Adjust (`PartLocationActionModal`), tracked → `PartLocationInventory` (+ move). **No longer a gap** — this said "no job selector … only an operator at a bin can tag a job", which was true when written and was repaired on 2026-07-28: `JobTagPicker` is on both engines (`PartLocationActionModal`). §1 already recorded the repair; §3 did not, and the two sat contradicting each other.
+- **Storage → Inventory, a part's side rail** ([`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx)): Add / Remove / Move / Adjust against each place, with `JobTagPicker` on the take. **Withdrawn 2026-09-09:** a Storage tab on the part page — wrong because a shop stocks a handful of ~9,000 parts, so it was blank most times it was opened and split every stock action across two surfaces. Storage → Inventory is the subset that IS stocked.
 - **`/inventory/locations`** — [`LocationsManager`](../../components/inventory/locations/LocationsManager.tsx), a **two-pane workspace since 2026-08-10**, plus a place drawer: [`StorageUnitList`](../../components/inventory/locations/StorageUnitList.tsx) on the left (searchable, `Add storage` lives with it) and [`LocationPanel`](../../components/inventory/locations/LocationPanel.tsx) on the right — the unit's actions, its drawn grid, and what is in the selected place. Picking a unit is a **selection, not a journey**: `router.replace` to `?unit={id}` with `scroll: false`, on the one page. It was a nested `/{unitId}` route for a day and Next treated every pick as a page transition — the whole screen blanked to change one pane, and clicking through six cabinets buried the page you arrived from under six history entries. Below `md` the same query param is what makes the two panes read as separate screens, with `All storage` going back to the list. **`LocationDetailSheet` is deleted**: it owned every action from the board era, and once the pane showed the selected location at any depth there was nothing left for a drawer to do. Page chrome is down to **Print all labels** alone (§5.11), and the instructional paragraph above the list went with the shape that needed explaining. The place's own actions are the four verbs — `Add` · `Remove` · `Move` · `Adjust` — which are the four ledger row types and nothing else; a unit with structure offers only `Adjust`, because stock lives in the places and not in the cabinet.
 - **Change layout** — one [`VisualLocationBuilder`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx) modal in `reshape` mode: seeded from the unit's real subtree via [`readSubtreeAsSpec`](../../utils/locationReshape.ts), diffed as you type by `planReshape`, written by `applyLocationLayout` → `apply_location_layout`. The same component still builds a new unit (`unit={null}` → `create_location_tree`); passing a unit is what makes it a reshape. **The diff is the whole feature**, and it turns on one thing: a `LocationSpecNode.key` may now carry a location id under `locationReshape`'s `id:` prefix, which is what tells "this is Row 3, renamed" from "this is a new location that happens to be called Row 3". Everything else falls out — a removal is an id the edited tree stops mentioning, a create is a key that never was one.
   - **`reconcileLevelsWithExisting` is where the append died.** The numbers editor applies the i-th planned name to the i-th existing child KEEPING ITS KEY, so 5 rows → 3 removes rows 4–5 and 3 → 5 creates two. It calls `planLevelNames(level, [])` — the empty sibling list — where the old path passed the unit's real names precisely so the run would continue past them.
@@ -634,7 +636,7 @@ still arrives against a tracked part and mints a code rather than quietly ending
 
 The one trap this creates is a heat typed by mistake, which would otherwise leave a part demanding
 heats forever with no visible reason. So the part page's inventory tab states the fact and carries
-the way back out ([`PartLocationInventory`](../../components/parts/PartLocationInventory.tsx)).
+the way back out ([`PartHeatsSection`](../../components/inventory/PartHeatsSection.tsx), in the side rail beside the heats themselves).
 
 **Turning it OFF leaves the balances split.** Merging them back would have to pick a survivor and
 silently add the others to it, destroying the record of what is physically on the shelf. The flag
@@ -1009,6 +1011,19 @@ it sums, and it re-creates the scorecard strip this design deliberately dropped.
 at the viewport instead and scrolls internally, so the total is always on screen and still describes
 what is above it.
 
+**One line per part, and no Place column.** A bar on three shelves under two heats is one thing the
+shop owns; three rows of it read as three unrelated holdings, and a single Place column can only
+show one of the three without either picking one or repeating the part. The list answers *what do we
+hold*; the side rail is where a part comes apart by place and heat. `Places` is a count, which is
+the one honest thing a column can say about three shelves — **distinct places, not balance rows**,
+so two heats on one shelf is one place and the rail's "across 1 location" and the column agree.
+
+**The heats and certificates live in the side rail**, keyed by heat rather than by place. A
+certificate belongs to the LOT, so one heat on two shelves is two rows and ONE document — a control
+per row would offer two buttons for it — and a heat that has been fully consumed has no row at all,
+which is exactly the one a customer asks about. The way out of heat tracking sits beside them, where
+someone would come looking.
+
 **The list shows `Updated`, not the heat.** A row could only ever carry ONE of a part's heats, so a
 part on three shelves read as three unrelated things — and the side rail already breaks a part down
 by heat, which is where that question is answered. What a list wants of a row it is unsure about is
@@ -1094,7 +1109,7 @@ Pinned by tests, not by prose.
 | Counting a container — subtree gathering, split parts staying per-bin, commit targeting the bin | `__tests__/components/inventory/InventoryCountPage.test.tsx` (`counting a container`) |
 | J9 count plan, commit routing, bin-scoped count, draft resume | `__tests__/lib/inventoryCountPlan.test.ts`, `__tests__/utils/inventoryCountAccess.test.ts`, `__tests__/components/inventory/InventoryCountPage.test.tsx` |
 | J4 material check | `__tests__/components/jobs/JobPartMaterialsCard.test.tsx`, `__tests__/utils/materialCheckAccess.test.ts` |
-| J7 bin remove/receive + job-tagged depletion; owner-side job tag (#59) | `__tests__/components/operator/{OperatorBinView,OperatorReceivePartModal,OperatorLocationActionModal}.test.tsx`, `__tests__/components/parts/PartTransactionJobTag.test.tsx` |
+| J7 bin remove/receive + job-tagged depletion; owner-side job tag (#59) | `__tests__/components/operator/{OperatorBinView,OperatorReceivePartModal,OperatorLocationActionModal}.test.tsx`, `__tests__/components/inventory/locations/place/PlaceStockActionForm.test.tsx` (`carries the tagged job through to the write`) |
 | Label → real `zxing-wasm` decode → location id; foreign-code rejection; camera errors | `__tests__/components/scanner/{scannerRoundTrip.test.ts,LocationScanner.test.tsx}` |
 | J1 opening balances via import | `api/tests/integration/test_parts_import_api.py` |
 | Mill certs — validation and caps, the `lots` storage prefix, `file_path` (not `storage_path`), insert rollback, row-first delete, and the batch read where absence means "no certs" while an error means an empty map | `__tests__/utils/lotCertificatesAccess.test.ts` (`validateLotCertificateFile`, `certificatePreviewKind`, `uploadLotCertificate`, `listLotCertificates`, `listLotCertificatesForLots`, `deleteLotCertificate`, `getLotCertificateUrl` — 32 its) |

@@ -95,8 +95,8 @@ const renderTable = (costEnabled = true, rows: OnHandRow[] = [row()]) => {
 };
 
 /** Fire AG Grid's row-click through the mock, which is all the table wires up. */
-const clickRow = (data: OnHandRow) =>
-  (capturedGridProps.current?.onRowClicked as (e: { data: OnHandRow }) => void)({ data });
+const clickRow = (data: { partId: string; partName: string; primaryUnit: string | null }) =>
+  (capturedGridProps.current?.onRowClicked as (e: { data: unknown }) => void)({ data });
 
 const columnHeaders = () =>
   ((capturedGridProps.current?.columnDefs ?? []) as Array<{ headerName: string }>).map(
@@ -115,7 +115,7 @@ describe('money is gated, and the rest is not', () => {
     await screen.findByTestId('grid');
     expect(columnHeaders()).toEqual([
       'Part',
-      'Place',
+      'Places',
       'Updated',
       'On hand',
       'Cost / unit',
@@ -128,7 +128,7 @@ describe('money is gated, and the rest is not', () => {
   it('drops every cost column and the total when it is not', async () => {
     renderTable(false);
     await screen.findByTestId('grid');
-    expect(columnHeaders()).toEqual(['Part', 'Place', 'Updated', 'On hand']);
+    expect(columnHeaders()).toEqual(['Part', 'Places', 'Updated', 'On hand']);
     expect(screen.queryByText('Total at our cost')).not.toBeInTheDocument();
     // No dollar figure anywhere on the surface.
     expect(document.body.textContent).not.toMatch(/\$/);
@@ -230,7 +230,7 @@ describe('the Updated column', () => {
   const updatedValue = (r: OnHandRow) => {
     const cols = (capturedGridProps.current?.columnDefs ?? []) as Array<{
       field?: string;
-      valueFormatter?: (p: { value: unknown; data: OnHandRow }) => string;
+      valueFormatter?: (p: { value: unknown; data: unknown }) => string;
     }>;
     const col = cols.find((c) => c.field === 'lastMovedAt');
     return col?.valueFormatter?.({ value: r.lastMovedAt, data: r });
@@ -262,6 +262,35 @@ describe('the Updated column', () => {
     renderTable(true, [row()]);
     await screen.findByTestId('grid');
     expect(columnHeaders()).not.toContain('Heat');
+  });
+});
+
+describe('one line per part', () => {
+  it('rolls a part on two shelves into a single row', async () => {
+    renderTable(true, [
+      row({ balanceId: 'b1', locationId: 'A-1', quantity: 40, onHandCost: 100 }),
+      row({ balanceId: 'b2', locationId: 'bin1', quantity: 12, onHandCost: 30 }),
+    ]);
+    await screen.findByTestId('grid');
+
+    const rows = (capturedGridProps.current?.rowData ?? []) as Array<{
+      quantity: number;
+      placeCount: number;
+      onHandCost: number;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].quantity).toBe(52);
+    // WHICH places is the side rail's job; the list says only how many.
+    expect(rows[0].placeCount).toBe(2);
+    expect(rows[0].onHandCost).toBe(130);
+    expect(screen.getByText('$130')).toBeInTheDocument();
+    expect(screen.getByText('1 part')).toBeInTheDocument();
+  });
+
+  it('has no Place column — one column cannot show three shelves', async () => {
+    renderTable(true, [row()]);
+    await screen.findByTestId('grid');
+    expect(columnHeaders()).not.toContain('Place');
   });
 });
 

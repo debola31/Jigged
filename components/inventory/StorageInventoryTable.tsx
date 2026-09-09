@@ -24,7 +24,13 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getStorageOnHand, type OnHandRow } from '@/utils/inventoryOnHandAccess';
 import { getLocations } from '@/utils/inventoryLocationsAccess';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
-import { gapSentence, summariseOnHand } from '@/lib/inventoryOnHand';
+import {
+  gapSentence,
+  rollUpByPart,
+  summariseParts,
+  summariseOnHand,
+  type OnHandPartRow,
+} from '@/lib/inventoryOnHand';
 import { computePathNames } from '@/lib/locationTree';
 import { formatDateOnly } from '@/lib/localDate';
 import PartPlacesDrawer from '@/components/inventory/locations/place/PartPlacesDrawer';
@@ -83,7 +89,7 @@ export default function StorageInventoryTable({
   costEnabled,
   onOpenPlace,
 }: StorageInventoryTableProps) {
-  const gridRef = useRef<AgGridReact<OnHandRow>>(null);
+  const gridRef = useRef<AgGridReact<OnHandPartRow>>(null);
   const [search, setSearch] = useState('');
   const [onlyUncosted, setOnlyUncosted] = useState(false);
   const [drawerPart, setDrawerPart] = useState<{
@@ -137,20 +143,31 @@ export default function StorageInventoryTable({
     };
   }, [locations]);
 
+  /**
+   * ONE LINE PER PART.
+   *
+   * The list answers "what do we hold"; the side rail answers "where, and under which heat". A bar
+   * on three shelves is one thing the shop owns, and three rows of it read as three holdings —
+   * which is also why there is no Place column: a single column cannot show three places without
+   * either picking one or repeating the part.
+   */
+  const partRows = useMemo(
+    () => rollUpByPart(rows, (id) => pathById.get(id) ?? ''),
+    [rows, pathById],
+  );
+
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return rows.filter((r) => {
+    return partRows.filter((r) => {
       if (onlyUncosted && r.gap === null) return false;
       if (!needle) return true;
-      return (
-        r.partName.toLowerCase().includes(needle) ||
-        (pathById.get(r.locationId) ?? r.locationName).toLowerCase().includes(needle) ||
-        (r.heatNumber ?? '').toLowerCase().includes(needle)
-      );
+      // `searchText` carries every place path and heat the part sits under, so a rack or a heat
+      // still finds it though neither is a column any more.
+      return r.searchText.includes(needle);
     });
-  }, [rows, onlyUncosted, search, pathById]);
+  }, [partRows, onlyUncosted, search]);
 
-  const summary = useMemo(() => summariseOnHand(filtered), [filtered]);
+  const summary = useMemo(() => summariseParts(filtered), [filtered]);
   const gap = gapSentence(summary);
 
   /*
@@ -183,19 +200,19 @@ export default function StorageInventoryTable({
     if (active) posthog.capture('storage inventory filtered', { filter, scope: 'inventory' });
   }, []);
 
-  const columnDefs = useMemo<ColDef<OnHandRow>[]>(() => {
-    const cols: ColDef<OnHandRow>[] = [
+  const columnDefs = useMemo<ColDef<OnHandPartRow>[]>(() => {
+    const cols: ColDef<OnHandPartRow>[] = [
       // Sorted by name by default: a part split across three shelves is three rows, and they are
       // only readable as one holding when they sit together. Value-first scattered them.
       { field: 'partName', headerName: 'Part', flex: 2.2, minWidth: 200, sort: 'asc' },
       {
-        field: 'locationName',
-        headerName: 'Place',
-        flex: 1.4,
-        minWidth: 160,
-        // The PATH, not the leaf. The search matches on the path, so showing only "A-1" would mean
-        // typing a rack's name filtered the table by something the table never displayed.
-        valueGetter: (p) => (p.data ? (pathById.get(p.data.locationId) ?? p.data.locationName) : ''),
+        // How many places hold it, not WHICH — the delineation is the side rail's job, and a
+        // count is the one honest thing a single column can say about three shelves.
+        field: 'placeCount',
+        headerName: 'Places',
+        flex: 0.6,
+        minWidth: 100,
+        type: 'rightAligned',
       },
       {
         /*
@@ -213,7 +230,7 @@ export default function StorageInventoryTable({
         headerName: 'Updated',
         flex: 1,
         minWidth: 130,
-        valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
+        valueFormatter: (p: ValueFormatterParams<OnHandPartRow>) =>
           p.value ? formatDateOnly(String(p.value)) : '—',
       },
       {
@@ -222,7 +239,7 @@ export default function StorageInventoryTable({
         flex: 1,
         minWidth: 120,
         type: 'rightAligned',
-        valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
+        valueFormatter: (p: ValueFormatterParams<OnHandPartRow>) =>
           `${Number(p.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${
             p.data?.primaryUnit ?? ''
           }`.trim(),
@@ -238,7 +255,7 @@ export default function StorageInventoryTable({
           minWidth: 130,
           type: 'rightAligned',
           // An em dash, never $0.00: no cost on file and a cost of nothing are different facts.
-          valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
+          valueFormatter: (p: ValueFormatterParams<OnHandPartRow>) =>
             p.value === null || p.value === undefined
               ? '—'
               : `$${Number(p.value).toLocaleString(undefined, {
@@ -252,17 +269,16 @@ export default function StorageInventoryTable({
           flex: 1,
           minWidth: 130,
           type: 'rightAligned',
-          valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
+          valueFormatter: (p: ValueFormatterParams<OnHandPartRow>) =>
             p.value === null || p.value === undefined ? '—' : money.format(Number(p.value)),
         },
       );
     }
 
     return cols;
-    // `pathById` is read inside the Place column's valueGetter, so it belongs here: the locations
-    // resolve after the first render, and without it the column would keep the empty map it closed
-    // over and show blank places forever.
-  }, [costEnabled, pathById]);
+    // `pathById` left with the Place column: the paths are folded into each part row's search text
+    // now, so no column reads the map.
+  }, [costEnabled]);
 
   /*
    * A VIEWPORT-BOUND height, so the footer is always on screen.
@@ -345,7 +361,7 @@ export default function StorageInventoryTable({
               <CircularProgress />
             </Box>
           ) : (
-            <AgGridReact<OnHandRow>
+            <AgGridReact<OnHandPartRow>
               ref={gridRef}
               rowData={filtered}
               columnDefs={columnDefs}
@@ -355,7 +371,7 @@ export default function StorageInventoryTable({
               paginationPageSize={25}
               paginationPageSizeSelector={[25, 50, 100]}
               domLayout="normal"
-              getRowId={(params) => params.data.balanceId}
+              getRowId={(params) => params.data.partId}
               enableCellTextSelection
               suppressCellFocus={false}
               // A row is a part somewhere, so clicking one opens that PART — everywhere it is,

@@ -21,7 +21,6 @@ import { test, expect, type Page } from '@playwright/test';
 
 const SPLIT_PART = 'E2E-VALUE';
 const UNCOSTED_PART = 'E2E-NO-COST';
-const SHELF_A = 'E2E Value Shelf A';
 
 async function openStorage(page: Page): Promise<string> {
   await page.goto('/');
@@ -68,14 +67,15 @@ test.describe('Storage — the Inventory tab', () => {
 
     await page.getByRole('textbox', { name: /Filter parts/ }).fill(SPLIT_PART);
 
-    // Split across two shelves: two rows, not one rolled-up line.
-    await expect(page.getByRole('gridcell', { name: SPLIT_PART })).toHaveCount(2);
-    await expect(page.getByRole('gridcell', { name: SHELF_A })).toBeVisible();
-    // 52 held at the one-break tier, so both rows carry the same unit cost.
-    await expect(page.getByRole('gridcell', { name: '$2.50' })).toHaveCount(2);
-    await expect(page.getByText('$130')).toBeVisible();
-    // ONE part, on two shelves. The footer counts parts, not rows — the row count is on the
-    // pagination bar, and "balances" was our word for a row rather than the shop's.
+    // Split across two shelves and shown as ONE line: the list says what the shop holds, and the
+    // side rail is where a part comes apart by place and heat.
+    await expect(page.getByRole('gridcell', { name: SPLIT_PART })).toHaveCount(1);
+    await expect(page.getByRole('gridcell', { name: '52 each' })).toBeVisible();
+    // How many places, never which — one column cannot show two shelves.
+    await expect(page.getByRole('gridcell', { name: '2', exact: true })).toBeVisible();
+    // Twice: the part's own Value cell and the footer total, which are the same number when one
+    // part is all that is showing.
+    await expect(page.getByText('$130')).toHaveCount(2);
     await expect(page.getByText('1 part', { exact: true })).toBeVisible();
   });
 
@@ -89,10 +89,8 @@ test.describe('Storage — the Inventory tab', () => {
     const row = page.getByRole('row').filter({ hasText: UNCOSTED_PART });
     await expect(row).toBeVisible();
 
-    // An em dash in BOTH money columns, and no dollar figure anywhere on the row. "No cost on
-    // file" and "a cost of nothing" are different facts, and $0.00 would assert the second.
-    // (Three dashes render in total — Heat is also empty for a lot-less part — so this asserts
-    // the money cells rather than counting dashes, which would pass for the wrong reason.)
+    // No dollar figure anywhere on the row. "No cost on file" and "a cost of nothing" are
+    // different facts, and $0.00 would assert the second.
     await expect(row).not.toContainText('$');
     await expect(page.getByText('No costs on file')).toBeVisible();
     // And the disclosure names it rather than leaving the reader to notice a gap.
@@ -105,7 +103,9 @@ test.describe('Storage — the Inventory tab', () => {
     const before = await page.getByText(/^\d+ parts?$/).first().textContent();
 
     await page.getByRole('textbox', { name: /Filter parts/ }).fill(SPLIT_PART);
-    await expect(page.getByText('$130')).toBeVisible();
+    // Twice: the part's own Value cell and the footer total, which are the same number when one
+    // part is all that is showing.
+    await expect(page.getByText('$130')).toHaveCount(2);
     await expect(page.getByText('1 part', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Clear filters' }).click();

@@ -70,6 +70,7 @@ import { SYSTEM_KIND } from '@/lib/locationKinds';
 import LocationPicker, { type LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
 import PlaceViewHeader from './PlaceViewHeader';
 import PlaceStockActionForm, { type PlaceStockAction } from './PlaceStockActionForm';
+import PartHeatsSection from '@/components/inventory/PartHeatsSection';
 import PlaceAdjustForm from './PlaceAdjustForm';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -358,6 +359,21 @@ function PartPlacesBody({
             Add at another location&hellip;
           </Button>
         )}
+
+        {/*
+          Heats and their certificates — the DOCUMENT axis, which the rows above are not.
+          A row is (place, lot): it says where material is, and names its heat so two lots on one
+          shelf are tellable apart. A certificate belongs to the LOT, so one heat on two shelves is
+          two rows and ONE document — a control per row would offer two buttons for it. And a heat
+          that has been fully consumed has no row at all, which is exactly the one a customer asks
+          about. Both reasons point at a list keyed by heat rather than by place.
+        */}
+        <PartHeatsSection
+          partId={part.id}
+          companyId={companyId}
+          refreshKey={stamp}
+          onChanged={afterWrite}
+        />
       </Box>
 
       {/*

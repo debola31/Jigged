@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '../../../../test-utils';
+import { render, screen, waitFor } from '../../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
@@ -54,9 +54,16 @@ vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: vi.fn(async () => ({ id: 'member-1' })),
 }));
 
+// A stub that can actually PICK, so the job-tag wiring is testable. It renders one button rather
+// than the real autocomplete; the picker has its own tests.
 vi.mock('@/components/inventory/JobTagPicker', () => ({
-  default: () => null,
+  default: ({ onChange }: { onChange: (j: unknown) => void }) => (
+    <button type="button" onClick={() => onChange({ id: 'job-7', job_number: 'J-7' })}>
+      Tag job J-7
+    </button>
+  ),
   loadTaggableJobs: vi.fn(async () => []),
+  loadJobsForPart: vi.fn(async () => []),
 }));
 
 import PlaceStockActionForm from '@/components/inventory/locations/place/PlaceStockActionForm';
@@ -709,6 +716,34 @@ describe('a bin holding two heats of one part', () => {
         screen.queryByRole('button', { name: /Attach the mill cert/i }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  /**
+   * The job tag on a removal — issue #59.
+   *
+   * Its regression pin used to live on `PartLocationActionModal`, the part page's own stock dialog.
+   * That page's Storage tab is gone (2026-09-09) and the modal with it, so the coverage moves to
+   * the form that inherited the job: the side rail's Remove. What matters is unchanged — a take
+   * that names a job has to reach the RPC carrying it, or the job's material cost silently misses
+   * the consumption.
+   */
+  it('carries the tagged job through to the write', async () => {
+    const user = userEvent.setup();
+    setup('deplete');
+    await screen.findAllByText('RAW-STEEL-BLANK');
+
+    await user.click(screen.getByRole('button', { name: /Use all 8 ea of RAW-STEEL-BLANK/i }));
+    await user.click(screen.getByRole('button', { name: 'Tag job J-7' }));
+    await user.click(screen.getByRole('button', { name: /Remove stock/i }));
+
+    await waitFor(() => expect(depleteStockAtLocation).toHaveBeenCalled());
+    expect(depleteStockAtLocation).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(Number),
+      expect.any(String),
+      expect.objectContaining({ jobId: 'job-7' }),
+    );
   });
 
   /** `All` fills the balance of the line it sits on, not the part's total across heats. */

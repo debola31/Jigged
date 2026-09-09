@@ -1012,8 +1012,6 @@ async function resetCertPart(supabase: SupabaseClient, companyId: string): Promi
     cost_per_unit: null,
   });
 
-  await ensureLocation(supabase, companyId, E2E_CERT_SHELF);
-
   const { error: balanceErr } = await supabase
     .from('part_location_stock')
     .delete()
@@ -1028,6 +1026,21 @@ async function resetCertPart(supabase: SupabaseClient, companyId: string): Promi
     .update({ lot_tracked: false, quantity: 0 })
     .eq('id', partId);
   if (partErr) throw new Error(`cert part tracking reset failed: ${partErr.message}`);
+
+  /*
+   * A LOT-LESS opening balance, so the part appears in the stock list.
+   *
+   * The cert journey runs entirely through Storage → Inventory now, and a part with no stock has
+   * no row there and therefore no side rail. Seeded without a lot, which is exactly what an
+   * untracked part looks like — so recording a heat still starts tracing it, which is the property
+   * the spec is named for.
+   */
+  const shelf = await ensureLocation(supabase, companyId, E2E_CERT_SHELF);
+  const { error: seedErr } = await supabase.from('part_location_stock').upsert(
+    [{ company_id: companyId, part_id: partId, location_id: shelf, quantity: 10 }],
+    { onConflict: 'part_id,location_id,lot_key' },
+  );
+  if (seedErr) throw new Error(`cert part seed failed: ${seedErr.message}`);
 }
 
 /**

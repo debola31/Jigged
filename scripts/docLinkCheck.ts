@@ -110,6 +110,14 @@ export const ALLOWLIST = new Map<string, string>([
     'docs/architecture.md::api/services/email.py',
     'Same deletion, restated beside the env-var list that no longer carries RESEND_API_KEY for the backend.',
   ],
+  [
+    'docs/modules/operator-view.md::api/routes/operators_routes.py',
+    'Names the mounted, unauthenticated operators router deleted 2026-09-09 (#668). Cited twice on purpose: the module doc records both what the route did and that #550 closed without deleting it.',
+  ],
+  [
+    'docs/modules/legal-acceptance.md::api/routes/operators_routes.py',
+    'Same deletion, restated where the consent table used to carry an operator-provisioning row that captured no acceptance.',
+  ],
 ]);
 
 // ============== Fences ==============

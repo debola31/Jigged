@@ -873,6 +873,10 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 
 ## Known gaps
 
+- **A preview deployment has no worker unless someone runs one.** The preview's backend enqueues into
+  the PR's Supabase branch, where nothing heartbeats, so every preview's ask bar reads offline out of
+  the box. `scripts/preview-worker.sh <pr>` runs a second worker against that branch from the serving
+  Mac for as long as you are testing ([ai-worker.md](../runbooks/ai-worker.md)).
 - **Nothing enforces that this doc's two table lists match the code.** Both had drifted — the
   count in four places, and one missing denylist entry. A test asserting the doc's lists against
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.

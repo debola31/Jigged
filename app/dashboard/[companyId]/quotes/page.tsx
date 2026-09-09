@@ -41,6 +41,7 @@ import {
   bulkDeleteQuotes,
   sweepExpiredQuotes,
 } from '@/utils/quotesAccess';
+import { filterQuotesBySearch } from '@/utils/quoteSearch';
 import { getAllCustomers } from '@/utils/customerAccess';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { resolveQuoteStatus } from '@/components/quotes/QuoteStatusChip';
@@ -168,19 +169,11 @@ export default function QuotesPage() {
   // (name or description). The list query already joins `customers` and
   // `line_items.parts`, so this needs no DB round-trip; matching in memory keeps
   // it instant and avoids an RPC (unlike jobs, quotes has no un-joined field).
-  const filteredQuotes = useMemo(() => {
-    const q = searchDebounced.trim().toLowerCase();
-    if (!q) return quotes;
-    return quotes.filter((quote) => {
-      if (quote.quote_number?.toLowerCase().includes(q)) return true;
-      if (quote.customers?.name?.toLowerCase().includes(q)) return true;
-      return (quote.line_items ?? []).some(
-        (li) =>
-          li.parts?.part_name?.toLowerCase().includes(q) ||
-          li.parts?.description?.toLowerCase().includes(q),
-      );
-    });
-  }, [quotes, searchDebounced]);
+  // The matcher itself lives in utils/quoteSearch so it can be tested directly.
+  const filteredQuotes = useMemo(
+    () => filterQuotesBySearch(quotes, searchDebounced),
+    [quotes, searchDebounced],
+  );
 
   // Clear selection when search or any filter changes — the rows on screen
   // change, so any ids selected before may no longer be visible. Called from

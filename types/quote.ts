@@ -350,7 +350,6 @@ export interface QuoteFilters {
   status?: QuoteListStatus;
   customerId?: string;
   createdBy?: string;
-  search?: string;
 }
 
 /**

@@ -40,7 +40,6 @@ import {
   deleteLineItem,
 } from '@/utils/quoteLineItemsAccess';
 import { isDrifted, isDriftedDegraded } from '@/utils/quotePricingResolver';
-import { escapeIlikePattern } from '@/utils/searchFilter';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
@@ -191,53 +190,6 @@ function applyQuoteStatusFilter<
 }
 
 /**
- * Get paginated list of quotes for a company
- */
-export async function getQuotes(
-  companyId: string,
-  filters: QuoteFilters = {},
-  page: number = 1,
-  limit: number = 25,
-  sortField: string = 'created_at',
-  sortDirection: 'asc' | 'desc' = 'desc',
-): Promise<{ data: QuoteWithRelations[]; total: number }> {
-  const supabase = getSupabase();
-  const offset = (page - 1) * limit;
-
-  let query = supabase
-    .from('quotes')
-    .select(QUOTE_LIST_SELECT, { count: 'exact' })
-    .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .order(sortField, { ascending: sortDirection === 'asc' })
-    .range(offset, offset + limit - 1);
-
-  query = applyQuoteStatusFilter(query, filters.status);
-  if (filters.customerId) query = query.eq('customer_id', filters.customerId);
-  if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
-  if (filters.search?.trim()) {
-    const sanitized = escapeIlikePattern(filters.search.trim());
-    query = query.ilike('quote_number', `%${sanitized}%`);
-  }
-
-  const [{ data, error, count }, members] = await Promise.all([
-    query,
-    getCompanyMembers(companyId).catch((err) => {
-      console.warn('getCompanyMembers failed; creator names will be blank:', err);
-      return [] as CompanyMember[];
-    }),
-  ]);
-
-  if (error) {
-    console.error('Error fetching quotes:', error);
-    throw error;
-  }
-
-  const rows = hydrateCreators((data || []) as QuoteWithRelations[], members);
-  return { data: rows, total: count || 0 };
-}
-
-/**
  * Get all quotes for a company (no pagination).
  * Fetches in batches of 1000 to bypass Supabase's default row limit.
  */
@@ -265,10 +217,6 @@ export async function getAllQuotes(
     query = applyQuoteStatusFilter(query, filters.status);
     if (filters.customerId) query = query.eq('customer_id', filters.customerId);
     if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
-    if (filters.search?.trim()) {
-      const sanitized = escapeIlikePattern(filters.search.trim());
-      query = query.ilike('quote_number', `%${sanitized}%`);
-    }
 
     const { data, error } = await query;
     if (error) {
@@ -286,36 +234,6 @@ export async function getAllQuotes(
     return [] as CompanyMember[];
   });
   return hydrateCreators(allData, members);
-}
-
-/**
- * Get total count of quotes for a company
- */
-export async function getQuotesCount(
-  companyId: string,
-  filters: QuoteFilters = {},
-): Promise<number> {
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from('quotes')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .is('deleted_at', null);
-
-  query = applyQuoteStatusFilter(query, filters.status);
-  if (filters.customerId) query = query.eq('customer_id', filters.customerId);
-  if (filters.search?.trim()) {
-    const sanitized = escapeIlikePattern(filters.search.trim());
-    query = query.ilike('quote_number', `%${sanitized}%`);
-  }
-
-  const { count, error } = await query;
-  if (error) {
-    console.error('Error fetching quotes count:', error);
-    throw error;
-  }
-  return count || 0;
 }
 
 /**

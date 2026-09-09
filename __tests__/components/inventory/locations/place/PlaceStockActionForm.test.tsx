@@ -663,7 +663,9 @@ describe('a bin holding two heats of one part', () => {
 
     expect(screen.getAllByText('RAW-STEEL-BLANK')).toHaveLength(1);
     // Summed across heats — what is already here is worth knowing while you put more down.
-    expect(screen.getByText(/12 ea here/)).toBeInTheDocument();
+    // Awaited: the on-hand line lands after the part name does, and a slow runner saw the gap
+    // (CI, 2026-09-09).
+    expect(await screen.findByText(/12 ea here/)).toBeInTheDocument();
     expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
   });
 

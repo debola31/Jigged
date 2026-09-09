@@ -74,7 +74,9 @@ test.describe('Storage — the Inventory tab', () => {
     // 52 held at the one-break tier, so both rows carry the same unit cost.
     await expect(page.getByRole('gridcell', { name: '$2.50' })).toHaveCount(2);
     await expect(page.getByText('$130')).toBeVisible();
-    await expect(page.getByText('2 balances')).toBeVisible();
+    // ONE part, on two shelves. The footer counts parts, not rows — the row count is on the
+    // pagination bar, and "balances" was our word for a row rather than the shop's.
+    await expect(page.getByText('1 part', { exact: true })).toBeVisible();
   });
 
   test('an uncosted part is shown, excluded from the total, and said so in words', async ({
@@ -100,14 +102,14 @@ test.describe('Storage — the Inventory tab', () => {
   test('the total follows the filter, and comes back when it is cleared', async ({ page }) => {
     await openStorage(page);
 
-    const before = await page.getByText(/balances?$/).first().textContent();
+    const before = await page.getByText(/^\d+ parts?$/).first().textContent();
 
     await page.getByRole('textbox', { name: /Search parts/ }).fill(SPLIT_PART);
     await expect(page.getByText('$130')).toBeVisible();
-    await expect(page.getByText('2 balances')).toBeVisible();
+    await expect(page.getByText('1 part', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Clear filters' }).click();
     // The footer describes the rows above it, so clearing restores the shop-wide figure.
-    await expect(page.getByText(/balances?$/).first()).not.toHaveText(String(before ?? ''));
+    await expect(page.getByText(/^\d+ parts?$/).first()).not.toHaveText(String(before ?? ''));
   });
 });

@@ -170,6 +170,9 @@ function PartPlacesBody({
     <>
       <PlaceViewHeader
         title={part.name}
+        // The part's own page, for everything this drawer is not about: its drawings, its
+        // routing, its heats and their certificates.
+        titleHref={`/dashboard/${companyId}/parts/${part.id}`}
         subtitle={
           loading
             ? 'Looking…'

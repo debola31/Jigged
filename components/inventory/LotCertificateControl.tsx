@@ -7,9 +7,12 @@ import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import DownloadIcon from '@mui/icons-material/Download';
+import IconButton from '@mui/material/IconButton';
 
 import {
   CERT_ACCEPT_ATTR,
+  getLotCertificateUrl,
   uploadLotCertificate,
   validateLotCertificateFile,
 } from '@/utils/lotCertificatesAccess';
@@ -66,6 +69,24 @@ export default function LotCertificateControl({
   const [viewing, setViewing] = useState<LotCertificate | null>(null);
 
   const newest = certificates[0] ?? null;
+
+  /**
+   * Download without opening the viewer first.
+   *
+   * The viewer has its own Download, but reaching it meant opening a preview to get at the file —
+   * two steps for the thing people mostly want, which is the PDF in their hands to send to a
+   * customer. The signed URL is fetched fresh here for the same reason the viewer fetches its own:
+   * a cached one can expire between renders.
+   */
+  const handleDownload = async () => {
+    if (!newest) return;
+    try {
+      const url = await getLotCertificateUrl(newest.file_path);
+      window.open(url, '_blank', 'noopener');
+    } catch {
+      onError('Could not open that certificate. Try again.');
+    }
+  };
 
   const handlePick = async (file: File | undefined) => {
     if (!file) return;
@@ -133,15 +154,26 @@ export default function LotCertificateControl({
           control by role. It also makes the two states look alike, which they should: "Cert" and
           "Add cert" are the same affordance in two conditions.
         */
-        <Tooltip title={`Open ${newest.file_name}`}>
-          <Button
-            size="small"
-            startIcon={<DescriptionOutlinedIcon />}
-            onClick={() => setViewing(newest)}
-          >
-            {certificates.length > 1 ? `Certs (${certificates.length})` : 'Cert'}
-          </Button>
-        </Tooltip>
+        <>
+          <Tooltip title={`Open ${newest.file_name}`}>
+            <Button
+              size="small"
+              startIcon={<DescriptionOutlinedIcon />}
+              onClick={() => setViewing(newest)}
+            >
+              {certificates.length > 1 ? `Certs (${certificates.length})` : 'Cert'}
+            </Button>
+          </Tooltip>
+          <Tooltip title={`Download ${newest.file_name}`}>
+            <IconButton
+              aria-label={`Download ${newest.file_name}`}
+              size="small"
+              onClick={handleDownload}
+            >
+              <DownloadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </>
       ) : (
         <Button size="small" onClick={() => inputRef.current?.click()}>
           Add cert

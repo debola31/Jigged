@@ -184,7 +184,9 @@ export default function StorageInventoryTable({
 
   const columnDefs = useMemo<ColDef<OnHandRow>[]>(() => {
     const cols: ColDef<OnHandRow>[] = [
-      { field: 'partName', headerName: 'Part', flex: 2.2, minWidth: 200 },
+      // Sorted by name by default: a part split across three shelves is three rows, and they are
+      // only readable as one holding when they sit together. Value-first scattered them.
+      { field: 'partName', headerName: 'Part', flex: 2.2, minWidth: 200, sort: 'asc' },
       {
         field: 'locationName',
         headerName: 'Place',
@@ -199,8 +201,16 @@ export default function StorageInventoryTable({
         headerName: 'Heat',
         flex: 1,
         minWidth: 110,
-        valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
-          p.value ?? (p.data?.lotCode ? p.data.lotCode : '—'),
+        /*
+         * ONLY a real mill heat, never the lot code.
+         *
+         * A lot-tracked part whose material arrived with no readable heat gets a MINTED code
+         * (`LOT-260909-01`), and stock that predates tracking gets `PRE-TRACKING` — both from
+         * `resolve_lot`, so that untagged bar is still storable rather than refused. Printing those
+         * under a column headed "Heat" states as a mill heat something no mill ever issued, which
+         * is the one thing traceability may not do. Absent is the honest answer.
+         */
+        valueFormatter: (p: ValueFormatterParams<OnHandRow>) => p.value ?? '—',
       },
       {
         field: 'quantity',
@@ -238,7 +248,6 @@ export default function StorageInventoryTable({
           flex: 1,
           minWidth: 130,
           type: 'rightAligned',
-          sort: 'desc',
           valueFormatter: (p: ValueFormatterParams<OnHandRow>) =>
             p.value === null || p.value === undefined ? '—' : money.format(Number(p.value)),
         },
@@ -382,10 +391,13 @@ export default function StorageInventoryTable({
             flexWrap: 'wrap',
           }}
         >
+          {/*
+            Just the parts. "15 balances" was our word for a row — (part, place, lot) — and nobody
+            in a shop says it; the row count is already on the pagination bar two lines up, so it
+            was inventing vocabulary to restate something visible.
+          */}
           <Typography sx={{ fontWeight: 600 }}>
-            {summary.partCount.toLocaleString()} {summary.partCount === 1 ? 'part' : 'parts'} ·{' '}
-            {summary.balanceCount.toLocaleString()}{' '}
-            {summary.balanceCount === 1 ? 'balance' : 'balances'}
+            {summary.partCount.toLocaleString()} {summary.partCount === 1 ? 'part' : 'parts'}
           </Typography>
           <Box sx={{ flex: 1 }} />
           {costEnabled && !truncated && (

@@ -92,14 +92,14 @@ export default function InventoryLocationsPage() {
         Rendered unconditionally, including for a shop with no storage at all, so the page does not
         change shape between shops.
       */}
-      <Tabs
-        value={view}
-        onChange={(_, next: 'inventory' | 'places') => switchTo(next)}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab label="Inventory" value="inventory" icon={<Inventory2Icon />} iconPosition="start" />
-        <Tab label="Places" value="places" icon={<GridViewIcon />} iconPosition="start" />
-      </Tabs>
+      {/* `mt: -2` and the border on the wrapper, matching Team — the layout leaves room above a
+          page's first element that a tab strip does not want. */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2, mt: -2 }}>
+        <Tabs value={view} onChange={(_, next: 'inventory' | 'places') => switchTo(next)}>
+          <Tab label="Inventory" value="inventory" icon={<Inventory2Icon />} iconPosition="start" />
+          <Tab label="Places" value="places" icon={<GridViewIcon />} iconPosition="start" />
+        </Tabs>
+      </Box>
 
       {view === 'inventory' ? (
         <StorageInventoryTable

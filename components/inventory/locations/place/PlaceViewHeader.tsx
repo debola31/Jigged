@@ -11,6 +11,7 @@
  * 48px, like every other target in this module.
  */
 
+import Link from 'next/link';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
@@ -18,6 +19,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 export interface PlaceViewHeaderProps {
   title: string;
+  /** When set, the title is a link here — the part drawer points at the part's own page. */
+  titleHref?: string;
   /** Where you are. Rendered small under the title; usually the place's name or path. */
   subtitle?: string;
   /** Omit on the drawer's root view, which has nothing behind it to go back to. */
@@ -28,6 +31,7 @@ export interface PlaceViewHeaderProps {
 
 export default function PlaceViewHeader({
   title,
+  titleHref,
   subtitle,
   onBack,
   action,
@@ -64,8 +68,29 @@ export default function PlaceViewHeader({
         </IconButton>
       )}
       <Box sx={{ flex: 1, minWidth: 0 }}>
+        {/*
+          The link goes INSIDE the heading, not instead of it. Rendering the Typography itself as
+          an anchor dropped the heading role — the drawer's title stopped being a title to a screen
+          reader, which is a worse trade than the navigation is worth.
+        */}
         <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }} noWrap>
-          {title}
+          {titleHref ? (
+            <Box
+              component={Link}
+              href={titleHref}
+              sx={{
+                // Looks like the heading it sits in; underlined only on hover, so it does not
+                // compete with the verbs below it.
+                color: 'inherit',
+                textDecoration: 'none',
+                '&:hover': { textDecoration: 'underline' },
+              }}
+            >
+              {title}
+            </Box>
+          ) : (
+            title
+          )}
         </Typography>
         {subtitle && (
           <Typography variant="body2" color="text.secondary" noWrap title={subtitle}>

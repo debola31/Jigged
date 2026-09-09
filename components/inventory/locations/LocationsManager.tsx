@@ -16,6 +16,9 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -36,7 +39,6 @@ import LocationFormModal, { type LocationFormValues } from './LocationFormModal'
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
-import StorageSearch, { type StorageHit } from './StorageSearch';
 import StorageActivity from './StorageActivity';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
@@ -179,8 +181,15 @@ export default function LocationsManager({
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [placeId, setPlaceId] = useState<string | null>(null);
-  /** Filters the unit list. Held here because the field lives in the page header. */
-
+  /**
+   * Filters the unit list. Held here because the field lives in the page header.
+   *
+   * It used to be an Autocomplete that PICKED a unit and selected it. A picker was the wrong shape
+   * for a list of ~22 things that is already on screen: you typed, read a dropdown, chose, and the
+   * list underneath never changed. Filtering the list narrows the thing you are looking at, which
+   * is what a search over a visible list should do.
+   */
+  const [unitQuery, setUnitQuery] = useState('');
 
 
   const [formState, setFormState] = useState<{
@@ -298,12 +307,6 @@ export default function LocationsManager({
    * the PART, and where it lives is the answer, which belongs on a surface that stays rather than
    * in a menu that closes.
    */
-  const onSearchPick = (hit: StorageHit) => {
-    setPlaceId(null);
-    setDrawerPlaceId(null);
-    showUnit(hit.id);
-  };
-
   /**
    * Walking from a movement in the activity feed to the place it happened.
    *
@@ -523,7 +526,22 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          <StorageSearch tree={tree} onPick={onSearchPick} />
+          <TextField
+            size="small"
+            label="Filter locations"
+            value={unitQuery}
+            onChange={(e) => setUnitQuery(e.target.value)}
+            sx={{ width: { xs: '100%', sm: 320 } }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
 
           <Box sx={{ flex: 1 }} />
 
@@ -681,6 +699,7 @@ export default function LocationsManager({
               </Box>
 
               <StorageUnitList
+                query={unitQuery}
                 tree={tree}
                 occupancy={occupancy}
                 selectedId={openUnit?.id ?? null}

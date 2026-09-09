@@ -130,7 +130,7 @@ describe('money is gated, and the rest is not', () => {
     renderTable(false);
     await screen.findByTestId('grid');
     // How complete a shop's cost data is, is not itself a dollar figure.
-    expect(screen.getByText(/1 part · 1 balance/)).toBeInTheDocument();
+    expect(screen.getByText('1 part')).toBeInTheDocument();
   });
 
   it('shows the uncosted disclosure even when the money is hidden', async () => {
@@ -185,7 +185,7 @@ describe('filters move the total', () => {
     await user.type(screen.getByRole('textbox', { name: /Search parts/ }), '4140');
 
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
-    expect(screen.getByText(/1 part · 1 balance/)).toBeInTheDocument();
+    expect(screen.getByText('1 part')).toBeInTheDocument();
   });
 
   it('typing a rack name narrows to the bins inside it', async () => {
@@ -202,7 +202,7 @@ describe('filters move the total', () => {
     await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'Raw stock rack');
 
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
-    expect(screen.getByText(/1 part · 1 balance/)).toBeInTheDocument();
+    expect(screen.getByText('1 part')).toBeInTheDocument();
   });
 
   it('finds a row by its heat', async () => {
@@ -216,6 +216,35 @@ describe('filters move the total', () => {
     await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'H-4471');
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
   });
+});
+
+describe('the Heat column states only what a mill issued', () => {
+  const heatValue = (r: OnHandRow) => {
+    const cols = (capturedGridProps.current?.columnDefs ?? []) as Array<{
+      field?: string;
+      valueFormatter?: (p: { value: unknown; data: OnHandRow }) => string;
+    }>;
+    const col = cols.find((c) => c.field === 'heatNumber');
+    return col?.valueFormatter?.({ value: r.heatNumber, data: r });
+  };
+
+  it('shows a real heat', async () => {
+    renderTable(true, [row({ heatNumber: 'H-4471' })]);
+    await screen.findByTestId('grid');
+    expect(heatValue(row({ heatNumber: 'H-4471' }))).toBe('H-4471');
+  });
+
+  it.each(['LOT-260909-01', 'PRE-TRACKING'])(
+    'shows an em dash, not the minted code %s',
+    async (lotCode) => {
+      renderTable(true, [row({ heatNumber: null, lotCode })]);
+      await screen.findByTestId('grid');
+      // A minted code and PRE-TRACKING are what `resolve_lot` invents so untagged bar is still
+      // storable. Printing either under a column headed "Heat" would state as a mill heat a number
+      // no mill ever issued — the one thing traceability may not do.
+      expect(heatValue(row({ heatNumber: null, lotCode }))).toBe('—');
+    },
+  );
 });
 
 describe('a row opens the part', () => {

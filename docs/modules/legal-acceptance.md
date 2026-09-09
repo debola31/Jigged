@@ -21,8 +21,14 @@ safety net.
 |---|---|---|
 | Admin invites a team member | [accept-invite](../../app/accept-invite/[invitationId]/page.tsx) | **Checkbox on the form.** The live signup in this product |
 | System admin creates a company + owner | [admin_routes.py](../../api/routes/admin_routes.py) | Lands on accept-invite |
-| Operator provisioned by an admin | [operators_routes.py](../../api/routes/operators_routes.py) | **No form exists** — an admin types their password. Gate only |
 | Self-serve signup | [SignUp.tsx](../../components/auth/SignUp.tsx) | Checkbox gates submit, **records nothing** — see below |
+
+**The "operator provisioned by an admin" row is gone as of 2026-09-09.** It pointed at
+`api/routes/operators_routes.py`, which captured no consent and has now been deleted
+([#668](https://github.com/debola31/Jigged/issues/668) — it was mounted, unauthenticated and always
+500'd; [operator-view.md](operator-view.md)). Operators reach the product through accept-invite like
+any other team member, so that row was a consent gap that no longer has a path to sit on. **Nothing
+provisions a user outside this table.**
 
 **`app/signup/page.tsx` redirects to `/login`.** `SignUp.tsx` is orphaned. Its
 checkbox is there so the screen is correct if revived, and it records nothing on

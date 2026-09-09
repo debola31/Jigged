@@ -36,7 +36,8 @@ router = APIRouter(prefix="/api/admin", tags=["system-admin"])
 def get_supabase_service_role() -> Client:
     """
     Get a Supabase client with service role key for admin operations.
-    Reuses the same pattern as operators_routes.py.
+    Same env-var fallback as index.py: SUPABASE_SECRET_KEY first, then the legacy
+    SUPABASE_SERVICE_ROLE_KEY the Supabase<->Vercel integration injects.
     """
     url = os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")

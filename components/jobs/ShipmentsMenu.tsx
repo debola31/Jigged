@@ -15,7 +15,6 @@ import AddIcon from '@mui/icons-material/Add';
 
 import { getShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { ShipmentWithRelations } from '@/types/shipment';
-import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 
 const EMPTY: ShipmentWithRelations[] = [];
 
@@ -24,30 +23,42 @@ const EMPTY: ShipmentWithRelations[] = [];
  * shipments, mirroring InvoicesMenu. Voiding lives inside the packing-slip
  * preview (opened from a row), next to Print/Download — so a destructive action
  * is only reachable once the slip is actually on screen.
+ *
+ * THE PREVIEW ITSELF IS NOT MOUNTED HERE. It used to be, and the job page
+ * mounted a second copy for the after-create auto-preview; when the activity
+ * rail grew a packing-slip row it reused the page's copy and inherited that
+ * copy's missing `onVoided`, so the same slip offered Void from the toolbar and
+ * not from the feed. One slip, two dialogs, two behaviours. The page owns the
+ * single mount now and this menu asks it to open — see `onPreview`.
  */
 export default function ShipmentsMenu({
   jobId,
   refreshKey = 0,
   canShip,
   onCreate,
-  onVoided,
+  onPreview,
   disabled,
 }: {
   jobId: string;
   refreshKey?: number;
   canShip: boolean;
   onCreate: () => void;
-  /** Fired after a shipment is voided so the page can re-pull job fulfillment status. */
-  onVoided?: () => void;
+  /** Open the job page's packing-slip preview. The page owns the dialog so every
+   *  route to a slip lands on the same one, with the same actions. */
+  onPreview: (shipmentId: string) => void;
   disabled?: boolean;
 }) {
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
 
-  const { data, reload } = useLoad(
+  const { data } = useLoad(
     async () => {
       const rows = await getShipmentsForJob(jobId);
-      // The inner-join read can yield one row per line item — roll up to one per slip.
+      // Belt and braces, not a live fix. This said the inner-join read "can
+      // yield one row per line item"; it does not — PostgREST nests children
+      // under one parent row, verified against a slip carrying two lines, which
+      // came back as ONE row with two nested items. Kept because it costs
+      // nothing, but the activity rail reads the same function without it and is
+      // right to: whoever removes this should remove the claim, not trust it.
       const byId = new Map<string, ShipmentWithRelations>();
       for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, r);
       return Array.from(byId.values());
@@ -78,7 +89,7 @@ export default function ShipmentsMenu({
             <MenuItem
               key={s.id}
               onClick={() => {
-                setPreviewId(s.id);
+                onPreview(s.id);
                 setAnchor(null);
               }}
             >
@@ -111,16 +122,6 @@ export default function ShipmentsMenu({
           </MenuItem>
         )}
       </Menu>
-
-      <PackingSlipPreviewDialog
-        open={!!previewId}
-        shipmentId={previewId}
-        onClose={() => setPreviewId(null)}
-        onVoided={() => {
-          reload();
-          onVoided?.();
-        }}
-      />
     </>
   );
 }

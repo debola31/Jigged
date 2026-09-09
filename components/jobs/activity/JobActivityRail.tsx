@@ -95,7 +95,7 @@ export interface JobActivityRailProps {
   items: JobActivityItem[];
   loading: boolean;
   error: unknown;
-  /** Re-read all three sources. Shared with the step cards so they cannot disagree. */
+  /** Re-read all five sources. Shared with the step cards so they cannot disagree. */
   reload: () => Promise<void>;
   memberId: string | null;
   isAdmin: boolean;
@@ -123,6 +123,9 @@ export interface JobActivityRailProps {
   filter: { operationId: string; stepName: string } | null;
   onClearFilter: () => void;
   onViewSlip?: (shipmentId: string) => void;
+  /** Opens the CUSTOMER packing slip preview — a different document and a
+   *  different dialog from the vendor slip above. */
+  onViewPackingSlip?: (shipmentId: string) => void;
 }
 
 /**
@@ -155,6 +158,7 @@ export default function JobActivityRail({
   filter,
   onClearFilter,
   onViewSlip,
+  onViewPackingSlip,
 }: JobActivityRailProps) {
   const [editing, setEditing] = useState<JobNote | null>(null);
   const [deleting, setDeleting] = useState<JobNote | null>(null);
@@ -337,6 +341,7 @@ export default function JobActivityRail({
         onUndoCompletion={handleUndoCompletion}
         undoingCompletionId={undoingId}
         onViewSlip={onViewSlip}
+        onViewPackingSlip={onViewPackingSlip}
         emptyMessage={
           filter
             ? `Nothing has been recorded on ${filter.stepName} yet.`

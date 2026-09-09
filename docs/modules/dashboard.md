@@ -217,9 +217,30 @@ rendered by `components/dashboard/RecentActivity.tsx`, a collapsible accordion w
 | Surface | Sources | Limit (per source before the merge) |
 |---|---|---|
 | Dashboard card | Quote created, job created, job completed, shipment (`shipments.created_at` → "shipped") | 6 (`max(limit × 3, 12)`) |
-| `/dashboard/{companyId}/activity` | the above **plus** notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
+| `/dashboard/{companyId}/activity` | the above **plus** **invoices** (`quickbooks_invoice_links`, `status = 'created'` only), notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
 
 Shipments come from the real `shipments` table — there is no `jobs.shipped_at` in the dual-status model.
+
+**Invoices are on the page but NOT on the card.** The card is the four business milestones and stays
+that way; adding a fifth is a deliberate decision, not a consequence of the source existing.
+
+### An archived job takes its paperwork with it
+
+**None of these tables carries a `deleted_at`** — a shipment is *voided*, an invoice is voided, and
+an operation and a note belong to a job — so the job's flag is the only archive signal there is, and
+every source has to reach it through the join. `fetchShipmentActivity` and `fetchOperationActivity`
+did not, which meant an archived job's shipments and completions went on appearing in the feed after
+the job had left every other surface (fixed 2026-09-09, alongside invoices arriving; CLAUDE.md calls
+this the most-violated rule in the repo, and it is silent when broken).
+
+PostgREST honours **both** the table name and the alias for an embedded filter, so
+`.is('jobs.deleted_at', null)` is correct against a `job:jobs!inner(…)` embed — verified against the
+local stack rather than assumed.
+
+**Notes are the exception, and filter in JS.** Both of their job FKs are nullable — `job_id` for a
+job-subject note, `captured_job_id` for a durable part-subject one, and *neither* for a
+work-center-subject note — so an `!inner` join on either would silently drop a whole row kind. The
+skip therefore happens after the read, on the job the row actually resolves to.
 **Floor chatter is deliberately excluded from the card** and lives only on the `/activity` page, reached by the
 card's **"View all activity"** link (`viewAllHref`, set by `page.tsx`; the link renders only when it is). Each
 row: type-coloured icon, entity number (Q-0089 / J-0042), action text, relative timestamp with an absolute-time
@@ -289,6 +310,8 @@ Also wanted: a wider period range for Completed (Month / Year / All Time).
 | The card returns only business milestones — never notes/photos/operations — newest-first, capped to the requested limit | `__tests__/utils/dashboardAccess.test.ts` — `describe('getDashboardActivity')`, 2 its |
 | `/activity` adds floor activity, separates text notes from photo notes, tags outside-op sent/received by vendor, merges sources newest-first, and **degrades best-effort when one source query errors** (returns the others, never throws) | same file — `describe('getActivityStream')`, 5 its |
 | Inventory events say what moved, how much and where; a transfer folds to the leg saying where stock ended up; a lone depletion leg survives; an adjustment reads as a count; the type is left out unless asked for | same file — `describe('inventory activity')`, 5 its |
+| An invoice reads as a job-anchored row carrying its doc number, survives one QuickBooks has not numbered, is asked for as `status = 'created'` on a live job, and stays out unless requested | same file — `describe('invoice activity')`, 4 its |
+| Shipments and operations ask for `jobs.deleted_at IS NULL`; a note on an archived job is dropped (by `job_id` **or** `captured_job_id`), and a work-center note with no job survives | same file — `describe('an archived job takes its paperwork with it')`, 5 its |
 
 **Gaps, automation-pending ([#367](https://github.com/debola31/Jigged/issues/367)):** period persistence across
 reload; the accordion's `localStorage` round-trip; tile → filtered-list navigation; the empty-tenant

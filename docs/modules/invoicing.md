@@ -75,6 +75,11 @@ to `partially_invoiced` via a trigger.
   memory). Shipping + invoicing live together under Fulfillment.
 - **Invoices card** lists every created invoice (doc #, date, parts × qty, amount, "View in
   QuickBooks"). Replaces the old single "View invoice" button.
+- **The job's activity rail** carries an `Invoice created` row per invoice — same
+  `getQuickBooksInvoiceLinksForJob` read, so it inherits the `status = 'created'` filter and a push
+  that never landed can never reach the feed. It shows the number, Jigged's line total and the
+  QuickBooks link — and deliberately **no payment chip**: see [§Payment status](#payment-status-quickbooks-online-mirror)
+  for why a mirror with no paid-at cannot honestly be a row in a chronological feed.
 - **Edit job**: quantity stays editable (upward) even after invoicing, down to
   `max(shipped, invoiced)`; a part's unit price is disabled once it has invoiced qty.
 

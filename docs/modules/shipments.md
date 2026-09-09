@@ -167,6 +167,21 @@ dead routes until 2026-09-07; they are gone too.
   on screen.
 - **`components/shipments/CreateShipmentModal.tsx`** — thin `Dialog` around `ShipmentForm`, which it hands
   a `jobId`; the job page auto-opens the preview for the new slip.
+- **The job's activity rail** — every slip is also a row in the feed
+  ([jobs.md](jobs.md)), derived from the same `getShipmentsForJob` read rather than written as an
+  event. The row opens the **same** `PackingSlipPreviewDialog`, with the same actions: a slip does
+  not become a different document because you reached it from the feed. A voided slip stays in the
+  feed, struck through.
+
+**One mount, three ways in.** The job page owns the single `PackingSlipPreviewDialog`; the Shipments
+menu (`onPreview`), the activity rail (`onViewPackingSlip`) and the auto-open after a slip is created
+all point at it. *It was briefly two mounts — one inside `ShipmentsMenu` with `onVoided`, one on the
+page without — and the rail reused the page's, so the same slip offered Void from the toolbar and
+not from the feed.* `canVoid` is `!!onVoided && !voidedAt`, so **the prop is the behaviour** and a
+second mount that omits it is a second behaviour, with nothing to fail:
+[`documentPreviewActions.test.ts`](../../__tests__/standards/documentPreviewActions.test.ts) now
+asserts every mount of either preview dialog passes `onVoided`. If a surface ever genuinely needs a
+read-only slip, give the dialog an explicit `readOnly` prop rather than dropping the handler.
 - **`components/shipments/ShipmentForm.tsx`** — per-part table (Ordered / Already Shipped / Remaining / Ship
   Now) pre-filled with the full remaining qty and captioned by `lineShipConsequence`. Over-shipping **warns,
   never blocks**; submit is blocked only when every qty is zero. No notes field.

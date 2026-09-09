@@ -21,6 +21,8 @@
 import type { JobNote } from '@/types/operator';
 import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import type { ShipmentWithRelations } from '@/types/shipment';
+import type { QuickBooksInvoiceView } from '@/utils/quickbooksAccess';
 import { roundQty } from '@/utils/outsideShipmentsAccess';
 
 /**
@@ -73,7 +75,18 @@ export type JobActivityMovement =
       vendorName: string;
     };
 
-/** A note, a completion, a movement or the job's own beginning. */
+/**
+ * A note, a completion, a movement, a document the job produced, or the job's
+ * own beginning.
+ *
+ * SHIPMENT AND INVOICE ARE JOB-LEVEL (`jobOperationId: null`), so the step
+ * filter drops them. That is correct rather than incidental: a packing slip is
+ * not an answer to a question about one operation.
+ *
+ * Each member carries only what its row renders — never the raw row — the same
+ * call `movement` makes in carrying a narrowed JobActivityMovement rather than
+ * the slip it came from.
+ */
 export type JobActivityItem =
   | { kind: 'created'; key: string; at: string; jobOperationId: null }
   | { kind: 'note'; key: string; at: string; jobOperationId: string | null; note: JobNote }
@@ -90,6 +103,38 @@ export type JobActivityItem =
       at: string;
       jobOperationId: string;
       movement: JobActivityMovement;
+    }
+  | {
+      kind: 'shipment';
+      key: string;
+      at: string;
+      jobOperationId: null;
+      shipmentId: string;
+      packingSlipNumber: string;
+      /** Pieces on this slip: the sum of its line items for this job. */
+      quantity: number;
+      /**
+       * The business ship date, which is a DATE and may be backdated — shown
+       * only when it disagrees with the day the row was recorded. See `at`
+       * below for why it is not the sort key.
+       */
+      shipDate: string;
+      shippedBy: string | null;
+      /** A voided slip still happened. It renders struck through, never hidden. */
+      voided: boolean;
+    }
+  | {
+      kind: 'invoice';
+      key: string;
+      at: string;
+      jobOperationId: null;
+      invoiceLinkId: string;
+      docNumber: string | null;
+      /** Jigged's line total, NOT the tax-inclusive QuickBooks figure. */
+      total: number;
+      /** The QuickBooks deep link, null until the push comes back with one. */
+      url: string | null;
+      voided: boolean;
     };
 
 /**
@@ -167,7 +212,21 @@ function movementKey(m: JobActivityMovement): string {
 export interface JobActivityInput {
   notes: JobNote[];
   completions: JobActivityCompletion[];
+  /**
+   * OUTSIDE / VENDOR slips, not the customer's. The two are different tables
+   * and different documents (`VPS-` vs `PS-`), and this field predates the
+   * other; `customerShipments` is the one that leaves the building.
+   */
   shipments: OutsideShipmentWithRelations[];
+  /** Packing slips sent to the customer — `shipments`, via getShipmentsForJob. */
+  customerShipments: ShipmentWithRelations[];
+  /**
+   * Invoices this job produced. Already narrowed to `status = 'created'` by
+   * getQuickBooksInvoiceLinksForJob, so a push that never landed cannot reach
+   * the feed and the "when does an invoice become real" question is answered
+   * upstream rather than here.
+   */
+  invoices: QuickBooksInvoiceView[];
   /**
    * `jobs.created_at`, which becomes the feed's oldest row.
    *
@@ -194,11 +253,20 @@ export interface JobActivityInput {
  * `shipped_at` is deliberately backdatable (20260903203741), so a send entered
  * after the fact sorts into the middle of the history rather than at the top.
  * That is correct, and it is the thing most likely to be reported as a sort bug.
+ *
+ * A CUSTOMER SLIP SORTS ON `created_at`, NOT `ship_date`, which is the opposite
+ * call to the one above and for a reason the column forces: `ship_date` is a
+ * DATE, so it resolves to midnight, and a slip cut this afternoon would sort
+ * below every note written this morning. `created_at` is when Jigged recorded
+ * it — the same thing the Invoices menu shows for an invoice. The ship date is
+ * not lost: the row prints it whenever the two disagree.
  */
 export function buildJobActivity({
   notes,
   completions,
   shipments,
+  customerShipments,
+  invoices,
   createdAt,
 }: JobActivityInput): JobActivityItem[] {
   const items: JobActivityItem[] = [];
@@ -234,6 +302,40 @@ export function buildJobActivity({
       at: movement.at,
       jobOperationId: movement.jobOperationId,
       movement,
+    });
+  }
+
+  for (const slip of customerShipments) {
+    items.push({
+      kind: 'shipment',
+      key: `shipment-${slip.id}`,
+      at: slip.created_at,
+      jobOperationId: null,
+      shipmentId: slip.id,
+      packingSlipNumber: slip.packing_slip_number,
+      quantity: roundQty(
+        (slip.shipment_line_items ?? []).reduce((n, li) => n + Number(li.quantity), 0),
+      ),
+      shipDate: slip.ship_date,
+      shippedBy: slip.created_by_member?.name ?? null,
+      voided: slip.voided_at != null,
+    });
+  }
+
+  for (const invoice of invoices) {
+    items.push({
+      kind: 'invoice',
+      key: `invoice-${invoice.id}`,
+      at: invoice.createdAt,
+      jobOperationId: null,
+      invoiceLinkId: invoice.id,
+      docNumber: invoice.docNumber,
+      total: invoice.total,
+      url: invoice.url,
+      // Set by the QBO mirror (voided or deleted in QuickBooks) as well as by a
+      // human void, and the row reads the same either way: it happened, and it
+      // no longer counts.
+      voided: invoice.voidedAt != null,
     });
   }
 

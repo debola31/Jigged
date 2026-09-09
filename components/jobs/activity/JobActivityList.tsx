@@ -4,9 +4,11 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 
 import JobActivityCompletionRow from './JobActivityCompletionRow';
+import JobActivityInvoiceRow from './JobActivityInvoiceRow';
 import JobActivityMovementRow from './JobActivityMovementRow';
 import JobActivityNoteRow from './JobActivityNoteRow';
 import JobActivityRow from './JobActivityRow';
+import JobActivityShipmentRow from './JobActivityShipmentRow';
 import type { JobActivityItem } from './jobActivityTimeline';
 import type { JobNote } from '@/types/operator';
 import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
@@ -21,7 +23,12 @@ export interface JobActivityListProps {
   onUndoCompletion: (completion: JobActivityCompletion) => void;
   /** Which completion is mid-undo, so only that row's button disables. */
   undoingCompletionId?: string | null;
+  /** Opens a VENDOR slip (`VPS-`). Not the customer's — see below. */
   onViewSlip?: (shipmentId: string) => void;
+  /** Opens a CUSTOMER packing slip (`PS-`). A separate handler on purpose: the
+   *  two are different documents in different dialogs, and one callback taking
+   *  both ids would be a coin toss over which preview opens. */
+  onViewPackingSlip?: (shipmentId: string) => void;
   /** Shown instead of the list when there is nothing — worded by the caller. */
   emptyMessage?: string;
 }
@@ -42,6 +49,7 @@ export default function JobActivityList({
   onUndoCompletion,
   undoingCompletionId,
   onViewSlip,
+  onViewPackingSlip,
   emptyMessage = 'Nothing has been recorded on this job yet.',
 }: JobActivityListProps) {
   if (items.length === 0) {
@@ -101,10 +109,29 @@ export default function JobActivityList({
           );
         }
 
-        /* THE JOB'S OWN BEGINNING, rendered inline rather than as a fourth row
-           component. The other three carry data, actions and conditional
+        if (item.kind === 'shipment') {
+          return (
+            <JobActivityShipmentRow
+              key={item.key}
+              item={item}
+              onViewPackingSlip={onViewPackingSlip}
+            />
+          );
+        }
+
+        if (item.kind === 'invoice') {
+          return <JobActivityInvoiceRow key={item.key} item={item} />;
+        }
+
+        /* THE JOB'S OWN BEGINNING, rendered inline rather than as a row
+           component of its own. The others carry data, actions and conditional
            content; this one is a timestamp and a sentence, and a file of its own
-           would be more ceremony than the row is worth. */
+           would be more ceremony than the row is worth.
+
+           EVERY OTHER KIND MUST BE HANDLED ABOVE. This is a bare fallthrough,
+           not a `kind === 'created'` branch, so a new union member that forgets
+           its `if` lands here and renders the words "Job created" — it compiles,
+           it does not throw, and it is wrong. */
         return (
           <JobActivityRow key={item.key} tone="muted" at={item.at} title="Job created" />
         );

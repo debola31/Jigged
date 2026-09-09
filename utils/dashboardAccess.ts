@@ -6,7 +6,15 @@ import { applyOverdueJobsFilter } from '@/utils/jobsAccess';
 
 // ============== Types ==============
 
-export type ActivityType = 'quote' | 'job' | 'shipment' | 'note' | 'photo' | 'operation' | 'inventory';
+export type ActivityType =
+  | 'quote'
+  | 'job'
+  | 'shipment'
+  | 'invoice'
+  | 'note'
+  | 'photo'
+  | 'operation'
+  | 'inventory';
 
 export type ActivityAction =
   | 'created'
@@ -45,6 +53,10 @@ export interface ActivityItem {
   quantityLabel?: string;
   /** Inventory events: the mill heat the movement carried, when one was recorded. */
   heatNumber?: string;
+  /** Invoice events: the QuickBooks document number, which is what a shop owner
+   *  and their bookkeeper both call the invoice. Absent until QuickBooks has
+   *  given us one. */
+  invoiceNumber?: string;
 }
 
 // ============== Dashboard metrics ==============
@@ -679,8 +691,15 @@ async function fetchShipmentActivity(
   const supabase = getSupabase();
   let q = supabase
     .from('shipments')
-    .select('id, created_at, job_id, job:jobs(job_number), customer:customers(name)')
+    .select('id, created_at, job_id, job:jobs!inner(job_number, deleted_at), customer:customers(name)')
     .eq('company_id', companyId)
+    // A shipment carries no deleted_at of its own — it is voided, not archived —
+    // so the archived-job case has to come through the join, exactly as
+    // SHIPMENT_VALUE_SELECT above already does it for the revenue tile. Without
+    // it an archived job's paperwork outlives the job in the feed.
+    // `jobs.` and not `job.`: PostgREST honours both the table name and the
+    // alias for an embedded filter (verified against the local stack).
+    .is('jobs.deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(perSource);
   if (before) q = q.lt('created_at', before);
@@ -702,6 +721,63 @@ async function fetchShipmentActivity(
   return items;
 }
 
+/**
+ * Invoices this shop raised, newest first.
+ *
+ * ONLY `status = 'created'`. A link row is inserted as `pending` to claim an
+ * idempotency key before QuickBooks is called, and may end as `error` or
+ * `needs_verification` — a push that never landed is not an event, and the flip
+ * to `created` is the moment the invoice became real.
+ *
+ * VOIDED INVOICES STAY. The raising of it happened, and this is a log; it also
+ * matches fetchShipmentActivity, which likewise does not filter voided_at. Note
+ * the mirror sets `voided_at` for a QuickBooks-side void OR delete, so filtering
+ * here would silently retract history on a bookkeeper's action.
+ *
+ * `jobs!inner` + the deleted_at filter is a FILTER, not data: an invoice carries
+ * no deleted_at of its own, and an archived job's paperwork should not surface
+ * in a feed the job itself has left.
+ */
+async function fetchInvoiceActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  let q = supabase
+    .from('quickbooks_invoice_links')
+    .select(
+      'id, created_at, job_id, qb_invoice_doc_number, job:jobs!inner(job_number, deleted_at, customer:customers(name))',
+    )
+    .eq('company_id', companyId)
+    .eq('status', 'created')
+    .is('jobs.deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  // NO `as unknown as` HERE, unlike its neighbours in this file: the generated
+  // types describe this select exactly, and laundering the row would erase the
+  // one thing that would catch a renamed column (CLAUDE.md, typed client).
+  for (const r of data ?? []) {
+    if (!r.created_at) continue;
+    const job = firstRel(r.job);
+    items.push({
+      id: `invoice-${r.id}`,
+      type: 'invoice',
+      action: 'created',
+      entityNumber: job?.job_number ?? '',
+      timestamp: r.created_at,
+      customerName: firstRel(job?.customer)?.name ?? undefined,
+      invoiceNumber: r.qb_invoice_doc_number ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+    });
+  }
+  return items;
+}
+
 type NoteActivityRow = {
   id: string;
   created_at: string;
@@ -709,11 +785,14 @@ type NoteActivityRow = {
   // captured_job_id, and a work-center-subject note has neither.
   job_id: string | null;
   captured_job_id: string | null;
-  job: { job_number: string } | { job_number: string }[] | null;
-  captured_job: { job_number: string } | { job_number: string }[] | null;
+  job: JobRefRel;
+  captured_job: JobRefRel;
   author: { name: string | null } | { name: string | null }[] | null;
   media: { id: string }[] | null;
 };
+
+type JobRef = { job_number: string; deleted_at: string | null };
+type JobRefRel = JobRef | JobRef[] | null;
 
 async function fetchNoteActivity(
   companyId: string,
@@ -727,12 +806,18 @@ async function fetchNoteActivity(
   // PostgREST cannot COALESCE in a select, and keying only on job_id would silently
   // drop every new operator capture from the activity feed.
   // Two FKs point at `jobs`, so each embed must name its constraint to disambiguate.
+  //
+  // `deleted_at` COMES BACK BUT IS NOT FILTERED IN THE QUERY, unlike every other
+  // source here. Neither embed can be `!inner`: both FKs are nullable, and an
+  // inner join on either would drop the work-center-subject note that has no job
+  // at all — a whole row kind, silently. So the archived-job case is settled
+  // below, on the job the row actually resolves to.
   let q = supabase
     .from('notes')
     .select(
       'id, created_at, job_id, captured_job_id, ' +
-        'job:jobs!notes_job_fk(job_number), ' +
-        'captured_job:jobs!notes_captured_job_fk(job_number), ' +
+        'job:jobs!notes_job_fk(job_number, deleted_at), ' +
+        'captured_job:jobs!notes_captured_job_fk(job_number, deleted_at), ' +
         'author:user_company_access(name), media:note_media(id)',
     )
     .eq('company_id', companyId)
@@ -746,8 +831,13 @@ async function fetchNoteActivity(
     if (!r.created_at) continue;
     const hasMedia = (r.media ?? []).length > 0;
     const jobId = r.job_id ?? r.captured_job_id;
-    const jobNumber =
-      firstRel(r.job)?.job_number ?? firstRel(r.captured_job)?.job_number ?? '';
+    // The job this row RESOLVES to, matching the coalesce below: job_id wins,
+    // captured_job_id is the fallback, and a work-center note has neither.
+    const job = r.job_id ? firstRel(r.job) : firstRel(r.captured_job);
+    // Archived job → the note goes with it. A job-less note is unaffected,
+    // which is the reason this is here rather than in the query.
+    if (job?.deleted_at) continue;
+    const jobNumber = job?.job_number ?? '';
     items.push({
       id: `note-${r.id}`,
       // A note carrying photos surfaces as a 'photo' event so the /activity
@@ -890,8 +980,13 @@ async function fetchOperationActivity(
 
   let completedQ = supabase
     .from('job_operations')
-    .select(`id, completed_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), ${VS_SELECT}`)
+    .select(
+      `id, completed_at, job_id, vendor_service_id, jobs!inner(job_number, company_id, deleted_at), ${VS_SELECT}`,
+    )
     .eq('jobs.company_id', companyId)
+    // Same join that already scopes the company scopes the archive: an
+    // operation has no deleted_at, so its job's is the only one there is.
+    .is('jobs.deleted_at', null)
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(perSource);
@@ -902,8 +997,11 @@ async function fetchOperationActivity(
   // separate .eq('kind','external') this used to need is gone.
   let sentQ = supabase
     .from('job_operations')
-    .select(`id, sent_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), vendor_service:vendor_services!inner(vendor:vendors(name))`)
+    .select(
+      `id, sent_at, job_id, vendor_service_id, jobs!inner(job_number, company_id, deleted_at), vendor_service:vendor_services!inner(vendor:vendors(name))`,
+    )
     .eq('jobs.company_id', companyId)
+    .is('jobs.deleted_at', null)
     .not('sent_at', 'is', null)
     .order('sent_at', { ascending: false })
     .limit(perSource);
@@ -960,6 +1058,7 @@ async function collectActivity(
   if (want('job')) tasks.push(fetchJobActivity(companyId, before, perSource));
   if (want('quote')) tasks.push(fetchQuoteActivity(companyId, before, perSource));
   if (want('shipment')) tasks.push(fetchShipmentActivity(companyId, before, perSource));
+  if (want('invoice')) tasks.push(fetchInvoiceActivity(companyId, before, perSource));
   // 'note' and 'photo' both come from notes (one query yields both kinds).
   if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
   if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));

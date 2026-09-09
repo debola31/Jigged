@@ -322,8 +322,11 @@ export default function JobDetailPage() {
     // Force the history card to refetch + auto-open the preview on the new row.
     setPendingPreviewShipmentId(result.shipmentId);
     setHistoryRefreshKey((k) => k + 1);
-    // Re-pull job + per-part summary so status block + parts row reflect the new shipment.
-    await fetchJob();
+    // Re-pull job + per-part summary so status block + parts row reflect the new
+    // shipment. refreshAfterWrite rather than a bare fetchJob because the RAIL
+    // reads shipments too and does not watch historyRefreshKey — without it the
+    // slip shows in the toolbar menu and not in the feed until a page reload.
+    await refreshAfterWrite();
   };
 
   // Single edit surface: the "Edit" button flips the page into JobEditForm
@@ -448,7 +451,7 @@ export default function JobDetailPage() {
               refreshKey={historyRefreshKey}
               canShip={canShip}
               onCreate={() => setShipModalOpen(true)}
-              onVoided={fetchJob}
+              onPreview={setPendingPreviewShipmentId}
               disabled={actionLoading}
             />
           )}
@@ -810,11 +813,24 @@ export default function JobDetailPage() {
         onCreated={handleCreated}
       />
 
-      {/* Auto-preview the packing slip right after a shipment is created. */}
+      {/* THE job's packing-slip preview — one mount, three ways in: the
+          Shipments menu, a row in the activity rail, and the auto-open right
+          after a slip is created. It used to be two mounts (this one and one
+          inside ShipmentsMenu), and only the menu's passed `onVoided`, so the
+          same slip offered Void from the toolbar and not from the feed.
+          `canVoid` in the dialog is `!!onVoided && !voidedAt`, so the prop IS
+          the behaviour — a second mount that omits it is a second behaviour. */}
       <PackingSlipPreviewDialog
         open={!!pendingPreviewShipmentId}
         shipmentId={pendingPreviewShipmentId}
         onClose={() => setPendingPreviewShipmentId(null)}
+        onVoided={() => {
+          // The menu reads its own list off historyRefreshKey; the rail and the
+          // job's fulfillment status come from refreshAfterWrite. A void changes
+          // all three, so all three are told.
+          setHistoryRefreshKey((k) => k + 1);
+          void refreshAfterWrite();
+        }}
       />
 
       <JobTravelerPreviewDialog
@@ -838,7 +854,10 @@ export default function JobDetailPage() {
           setInvoicesRefreshKey((k) => k + 1);
           // Refresh job (invoicing_status) + per-part invoice summaries so the toolbar,
           // edit-form floor, and per-part breakdown reflect the new invoice.
-          fetchJob();
+          // refreshAfterWrite (not fetchJob) because the RAIL reads invoices too and
+          // does not watch invoicesRefreshKey: without it the new invoice appears in
+          // the toolbar menu and nowhere in the activity feed until a page reload.
+          void refreshAfterWrite();
         }}
       />
 
@@ -906,6 +925,10 @@ export default function JobDetailPage() {
         filter={railFilter}
         onClearFilter={() => setUserFilterOpId(null)}
         onViewSlip={setRailSlipId}
+        // The same dialog the Shipments menu opens, with the same actions. A
+        // slip does not become a different document because you reached it from
+        // the feed.
+        onViewPackingSlip={setPendingPreviewShipmentId}
       />
     </Box>
   );

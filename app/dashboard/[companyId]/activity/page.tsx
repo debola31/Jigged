@@ -33,6 +33,7 @@ const FILTERS: { label: string; types?: ActivityType[] }[] = [
   { label: 'Jobs', types: ['job'] },
   { label: 'Quotes', types: ['quote'] },
   { label: 'Shipments', types: ['shipment'] },
+  { label: 'Invoices', types: ['invoice'] },
   { label: 'Notes', types: ['note'] },
   { label: 'Photos', types: ['photo'] },
   { label: 'Operations', types: ['operation'] },

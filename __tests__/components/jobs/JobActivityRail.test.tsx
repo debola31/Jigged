@@ -28,6 +28,8 @@ import { buildJobActivity } from '@/components/jobs/activity/jobActivityTimeline
 import type { JobNote } from '@/types/operator';
 import type { JobActivityCompletion } from '@/utils/operationCompletionsAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import type { ShipmentWithRelations } from '@/types/shipment';
+import type { QuickBooksInvoiceView } from '@/utils/quickbooksAccess';
 
 const NOTE = {
   id: 'n-1',
@@ -88,11 +90,49 @@ const SLIP = {
   receipts: [],
 } as unknown as OutsideShipmentWithRelations;
 
+const PACKING_SLIP = {
+  id: 'ship-1',
+  company_id: 'co-1',
+  customer_id: 'cust-1',
+  job_id: 'job-1',
+  packing_slip_number: 'PS-0148-1',
+  ship_date: '2026-09-05',
+  created_at: '2026-09-05T15:00:00Z',
+  voided_at: null,
+  created_by: 'member-1',
+  created_by_member: { user_id: 'member-1', name: 'Devin', email: null },
+  heat_numbers_snapshot: [],
+  shipment_line_items: [
+    { id: 'sli-1', shipment_id: 'ship-1', job_part_id: 'jp-1', quantity: 20, created_at: '2026-09-05T15:00:00Z' },
+  ],
+} as unknown as ShipmentWithRelations;
+
+const INVOICE = {
+  id: 'inv-1',
+  invoiceId: 'qb-1',
+  docNumber: '1043',
+  url: 'https://qbo.intuit.com/app/invoice?txnId=1043',
+  createdAt: '2026-09-05T16:00:00Z',
+  lines: [],
+  total: 4200,
+  provider: 'qbo',
+  realmId: 'realm-1',
+  voidedAt: null,
+  qbTxnDate: null,
+  qbStatus: null,
+  qbTotalAmt: null,
+  qbBalance: null,
+  qbDueDate: null,
+  qbStatusCheckedAt: null,
+} as unknown as QuickBooksInvoiceView;
+
 const ITEMS = buildJobActivity({
-      createdAt: null,
+  createdAt: null,
   notes: [NOTE],
   completions: [COMPLETION],
   shipments: [SLIP],
+  customerShipments: [],
+  invoices: [],
 });
 
 function renderRail(over: Partial<React.ComponentProps<typeof JobActivityRail>> = {}) {
@@ -158,6 +198,95 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', new MemoryStorage());
 });
 
+describe('JobActivityRail — the document rows', () => {
+  const documentItems = (
+    over: { slip?: Partial<ShipmentWithRelations>; invoice?: Partial<QuickBooksInvoiceView> } = {},
+  ) =>
+    buildJobActivity({
+      createdAt: null,
+      notes: [],
+      completions: [],
+      shipments: [],
+      customerShipments: [{ ...PACKING_SLIP, ...over.slip } as ShipmentWithRelations],
+      invoices: [{ ...INVOICE, ...over.invoice } as QuickBooksInvoiceView],
+    });
+
+  it('renders a packing slip and an invoice with their numbers and amounts', () => {
+    const { rail } = renderRail({ items: documentItems() });
+
+    expect(rail.getByText('Shipped 20 pcs')).toBeInTheDocument();
+    expect(rail.getByText(/PS-0148-1/)).toBeInTheDocument();
+    expect(rail.getByText('Invoice created')).toBeInTheDocument();
+    expect(rail.getByText(/#1043/)).toBeInTheDocument();
+    expect(rail.getByText(/\$4,200\.00/)).toBeInTheDocument();
+  });
+
+  it('opens the CUSTOMER packing slip through its own handler, not the vendor one', () => {
+    // Two different documents in two different dialogs. One shared callback
+    // would be a coin toss over which preview opens.
+    const onViewPackingSlip = vi.fn();
+    const onViewSlip = vi.fn();
+    const { rail } = renderRail({ items: documentItems(), onViewPackingSlip, onViewSlip });
+
+    rail.getByRole('button', { name: /Open packing slip PS-0148-1/i }).click();
+
+    expect(onViewPackingSlip).toHaveBeenCalledWith('ship-1');
+    expect(onViewSlip).not.toHaveBeenCalled();
+  });
+
+  it('links an invoice out to QuickBooks only when it has a URL', () => {
+    const withUrl = renderRail({ items: documentItems() });
+    expect(
+      withUrl.rail.getByRole('link', { name: /Open invoice 1043 in QuickBooks/i }),
+    ).toBeInTheDocument();
+
+    cleanup();
+
+    const withoutUrl = renderRail({ items: documentItems({ invoice: { url: null } }) });
+    expect(withoutUrl.rail.queryByRole('link', { name: /QuickBooks/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a backdated ship date, and stays quiet when it matches the day recorded', () => {
+    const backdated = renderRail({
+      items: documentItems({ slip: { ship_date: '2026-09-01' } }),
+    });
+    expect(backdated.rail.getByText(/shipped Sep 1, 2026/)).toBeInTheDocument();
+
+    cleanup();
+
+    // A ship_date on the same day as created_at is redundant and must not
+    // print. DERIVED, not hardcoded: nothing pins the suite's timezone, and
+    // 15:00Z is already the next day east of UTC+9 — a literal '2026-09-05'
+    // here would pass in CI and fail on a machine in Tokyo.
+    const recordedLocalDay = new Date(PACKING_SLIP.created_at).toLocaleDateString('en-CA');
+    const sameDay = renderRail({ items: documentItems({ slip: { ship_date: recordedLocalDay } }) });
+    expect(sameDay.rail.queryByText(/shipped /)).not.toBeInTheDocument();
+  });
+
+  it('keeps a voided slip and a voided invoice in the list, marked', () => {
+    const { rail } = renderRail({
+      items: documentItems({
+        slip: { voided_at: '2026-09-06T09:00:00Z' },
+        invoice: { voidedAt: '2026-09-06T10:00:00Z' },
+      }),
+    });
+
+    expect(rail.getByText('Shipped 20 pcs')).toBeInTheDocument();
+    expect(rail.getByText('Invoice created')).toBeInTheDocument();
+    expect(rail.getAllByText(/voided/)).toHaveLength(2);
+  });
+
+  it('offers no payment state — that is the Invoices menu, where the mirror refreshes', () => {
+    // A chip here would render whatever the QuickBooks mirror last happened to
+    // say, with no user action behind it and no way to tell how old it is.
+    const { rail } = renderRail({
+      items: documentItems({ invoice: { qbStatus: 'paid', qbBalance: 0 } }),
+    });
+
+    expect(rail.queryByText(/paid/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('JobActivityRail — the three row kinds', () => {
   it('renders a note, a completion and a vendor movement in one list', () => {
     const { rail } = renderRail();
@@ -183,6 +312,8 @@ describe('JobActivityRail — the three row kinds', () => {
   it('offers no Undo on a completion already taken back, but still shows the row', () => {
     const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [],
       completions: [{ ...COMPLETION, voided_at: '2026-09-05T15:00:00Z' }],
       shipments: [],
@@ -327,6 +458,8 @@ describe('JobActivityRail — note permissions mirror RLS', () => {
     // menu here would be a button guaranteed to 42501.
     const items = buildJobActivity({
       createdAt: null,
+      customerShipments: [],
+      invoices: [],
       notes: [{ ...NOTE, note_type: 'event' } as JobNote],
       completions: [],
       shipments: [],

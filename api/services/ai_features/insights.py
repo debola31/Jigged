@@ -341,7 +341,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     of the insights A/B failed at the second and third of those, and the job
     settled `succeeded` with "The column total_price does not exist..." in it.
     """
-    from services.insights_service import _build_chat_system_prompt
+    from services.insights_service import _build_chat_system_prompt, semantics_for
     from tools.chat_tools import CHAT_TOOLS, COMPOSE_REPORT_TOOL
     from tools.sql_executor import NOT_PERMITTED_KIND, SQL_ERROR_KIND
 
@@ -372,11 +372,14 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     prior = ctx.payload.get("summary") or None
     prior_summary: str | None = (prior or {}).get("content") if isinstance(prior, dict) else None
 
-    # The question reaches the prompt builder for ONE reason: the semantics tail
-    # may be retrieved rather than pasted whole (INSIGHTS_SEMANTICS_RETRIEVAL).
-    # Everything ahead of that tail is byte-identical either way, which is what the
-    # KV cache needs; with the switch off this is the same string as before.
-    system_prompt = _build_chat_system_prompt(question)
+    # The semantics tail may be retrieved rather than pasted whole
+    # (INSIGHTS_SEMANTICS_RETRIEVAL). Awaited HERE rather than fetched inside the
+    # builder: the backend path runs this handler on FastAPI's request loop, so the
+    # embedding round trip has to be an await and not a blocking call. Everything
+    # ahead of the tail is byte-identical either way, which is what the KV cache
+    # needs; with the switch off this is the same string as before.
+    semantics = await semantics_for(question)
+    system_prompt = _build_chat_system_prompt(semantics=semantics)
     budget = _history_budget(system_prompt, question)
     evicted, kept = _window(history, budget)
 

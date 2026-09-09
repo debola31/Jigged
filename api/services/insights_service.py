@@ -2,7 +2,7 @@
 Insights service: the chat system prompt, and the one tool behind it.
 
 Contains:
-1. `_build_chat_system_prompt()` -- preamble + SCHEMA_CONTEXT + semantics.md +
+1. `_build_chat_system_prompt()` -- preamble + SCHEMA_CONTEXT + guidelines + semantics.md +
    guidelines, assembled in that order because the whole thing is a cacheable
    prompt prefix
 2. `execute_sql_tool()` -- the handler for the only tool CHAT_TOOLS offers
@@ -59,19 +59,23 @@ def load_semantics() -> str:
     return SEMANTICS_PATH.read_text(encoding="utf-8").strip()
 
 
-def _build_chat_system_prompt(question: str | None = None) -> str:
+def _build_chat_system_prompt(semantics: str | None = None) -> str:
     """Build the full system prompt for chat interactions with schema context.
 
     ORDER IS LOAD-BEARING, AND CHANGED 2026-09-09: preamble, structure, guidelines,
     chart example, THEN semantics. Semantics used to sit third, in the middle. It
     moved to the tail so that it can become the only part that varies per question
-    without disturbing a byte before it -- see _semantics_block(). Everything ahead
+    without disturbing a byte before it -- see semantics_for(). Everything ahead
     of it is static per deploy, which is what prompt caching and Ollama KV reuse
     need; a varying block in the middle would re-prefill roughly 10K tokens on every
     question, and at the box's ~7 tokens/s that is not a rounding error.
 
     The reorder is behaviour-neutral on its own: the same bytes, in a different
     order, and the model is told the definitions after the schema either way.
+
+    TAKES THE TAIL, DOES NOT FETCH IT. `semantics` is whatever semantics_for()
+    returned; omitted, it is the whole file. Keeping the lookup in the async caller
+    is what stops an embedding round trip blocking FastAPI's request loop.
 
     THE SCOPE IS STATED IN THE FIRST LINES, not only in the guidelines. Measured on
     qwen3:32b: with the scope sentence sitting ~13K tokens deep, after the schema
@@ -98,7 +102,9 @@ def _build_chat_system_prompt(question: str | None = None) -> str:
     name both tools for the reason they carry the scope -- a 32B weights the start
     of a long prompt -- and the rule is repeated in the guidelines.
     """
-    return f"{_stable_prefix()}\n\n{_semantics_block(question)}"
+    if semantics is None:
+        semantics = load_semantics()
+    return f"{_stable_prefix()}\n\n{semantics}"
 
 
 @lru_cache(maxsize=1)
@@ -243,8 +249,17 @@ def semantics_retrieval_enabled() -> bool:
     return os.environ.get(SEMANTICS_RETRIEVAL_ENV, "").strip().lower() in ("1", "on", "true", "yes")
 
 
-def _semantics_block(question: str | None) -> str:
+async def semantics_for(question: str | None) -> str:
     """The definitions this question needs, or all of them.
+
+    ASYNC, AND AWAITED BY THE HANDLER -- not fetched from inside the prompt
+    builder. The first version of this ran the embedding call on a private loop in
+    a worker thread and blocked on the result, so that _build_chat_system_prompt()
+    could stay synchronous. That is fine in the desktop worker, which runs one job
+    at a time, and wrong in the backend: insights_routes._run_inline awaits the
+    handler ON THE REQUEST LOOP, so a blocking .result() there stalls every other
+    request FastAPI is serving for the length of an HTTP round trip. One await in
+    the caller costs a parameter and removes the hazard.
 
     FAILS TO THE WHOLE FILE, never to nothing. Every path out of the retrieval
     branch that is not a confident hit returns load_semantics(): no question, the
@@ -257,29 +272,13 @@ def _semantics_block(question: str | None) -> str:
     try:
         from services.insights_pipeline.semantics_retrieval import select_sections
 
-        selected = await_sync(select_sections(question, top_k=SEMANTICS_TOP_K))
+        selected = await select_sections(question, top_k=SEMANTICS_TOP_K)
         return selected or load_semantics()
     except Exception:  # noqa: BLE001 -- deliberately total; see the docstring
         logger.warning(
             "insights: semantics retrieval failed, sending the whole file", exc_info=True
         )
         return load_semantics()
-
-
-def await_sync(coro):
-    """Run one coroutine from this synchronous prompt builder.
-
-    _build_chat_system_prompt() is called from async handlers but is itself sync,
-    and making it async would ripple through report.py, four tests and the eval for
-    one optional lookup. asyncio.run() is wrong inside a running loop, so the work
-    goes to a private loop on its own thread -- the embedder is a local HTTP call
-    that returns in tens of milliseconds.
-    """
-    import asyncio
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 
 async def execute_sql_tool(

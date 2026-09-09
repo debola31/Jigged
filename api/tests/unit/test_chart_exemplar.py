@@ -72,17 +72,22 @@ class TestTheExampleInThePrompt:
         assert prompt.index(CHART_EXEMPLAR_QUESTION) < prompt.index(load_semantics())
         assert prompt.endswith(load_semantics())
 
-    def test_the_stable_prefix_is_byte_identical_whatever_the_question(self):
+    def test_the_stable_prefix_is_byte_identical_whatever_the_tail(self):
         """The whole point of moving semantics to the tail.
 
         If a future edit puts anything question-dependent ahead of it, the KV cache
         stops matching after that point and every question re-prefills the ~6,200
-        tokens of SCHEMA_CONTEXT behind it.
+        tokens of SCHEMA_CONTEXT behind it. Varying the tail is the strongest form
+        of this assertion: two prompts that share nothing after the prefix must
+        still share the prefix exactly.
         """
-        a = _build_chat_system_prompt("how many open quotes do we have?")
-        b = _build_chat_system_prompt("who is my top customer by revenue?")
+        a = _build_chat_system_prompt(semantics="## Open quote\nsomething")
+        b = _build_chat_system_prompt(semantics="## Revenue\nsomething else")
         assert a.startswith(_stable_prefix())
         assert b.startswith(_stable_prefix())
+        assert a != b
+        # And the divergence starts exactly at the end of the prefix.
+        assert a[len(_stable_prefix()):] != b[len(_stable_prefix()):]
 
     def test_the_example_is_labelled_a_placeholder(self):
         prompt = _build_chat_system_prompt()

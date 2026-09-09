@@ -25,8 +25,8 @@ from services.insights_pipeline.semantics_retrieval import (
 )
 from services.insights_service import (
     _build_chat_system_prompt,
-    _semantics_block,
     load_semantics,
+    semantics_for,
     semantics_retrieval_enabled,
 )
 
@@ -147,8 +147,8 @@ class TestTheTailIsOptional:
     def test_it_is_off_by_default_and_the_prompt_carries_everything(self, monkeypatch):
         monkeypatch.delenv("INSIGHTS_SEMANTICS_RETRIEVAL", raising=False)
         assert semantics_retrieval_enabled() is False
-        assert _semantics_block("how many open quotes?") == load_semantics()
-        assert _build_chat_system_prompt("how many open quotes?").endswith(load_semantics())
+        assert asyncio.run(semantics_for("how many open quotes?")) == load_semantics()
+        assert _build_chat_system_prompt().endswith(load_semantics())
 
     def test_a_failing_retrieval_falls_back_to_the_whole_file(self, monkeypatch):
         """The only direction it is safe to be wrong in: a longer prompt, never a
@@ -157,16 +157,31 @@ class TestTheTailIsOptional:
         assert semantics_retrieval_enabled() is True
         import services.insights_pipeline.semantics_retrieval as sr
 
-        def boom(*a, **k):
+        async def boom(*a, **k):
             raise RuntimeError("ollama is not running")
 
         monkeypatch.setattr(sr, "select_sections", boom)
-        assert _semantics_block("how many open quotes?") == load_semantics()
+        assert asyncio.run(semantics_for("how many open quotes?")) == load_semantics()
 
     def test_no_question_means_the_whole_file(self, monkeypatch):
         """report.py builds the prompt with no question and must keep every rule."""
         monkeypatch.setenv("INSIGHTS_SEMANTICS_RETRIEVAL", "on")
-        assert _semantics_block(None) == load_semantics()
+        assert asyncio.run(semantics_for(None)) == load_semantics()
+
+    def test_retrieval_is_awaited_not_blocked_on(self):
+        """The backend path runs the handler on FastAPI's request loop.
+
+        A blocking .result() there -- which is what the first version of this did,
+        so that the prompt builder could stay synchronous -- stalls every other
+        request for the length of an embedding round trip. Pinned as a shape: the
+        selector is a coroutine function, and the prompt builder takes the finished
+        text rather than going and getting it.
+        """
+        import inspect
+
+        assert inspect.iscoroutinefunction(semantics_for)
+        assert not inspect.iscoroutinefunction(_build_chat_system_prompt)
+        assert "semantics" in inspect.signature(_build_chat_system_prompt).parameters
 
 
 class TestThePromptSaysWhatChanged:

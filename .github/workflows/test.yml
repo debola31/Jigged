@@ -79,6 +79,16 @@ jobs:
           LEGAL_DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: pnpm exec vitest run __tests__/standards/legalDocuments.test.ts
 
+      - name: Import field parity — Map catalog, AI schemas and analyzer roles agree (issue #777)
+        # Named for the same reason as the three checks above. Three declarations in two
+        # languages describe the same columns — ENTITY_FIELDS (what the owner can correct at
+        # the Map step), the Python *_SCHEMA dicts (what the AI can map onto), and the roles
+        # the analyzer keys its checks on. Every way they can disagree is silent: a field the
+        # AI maps but nobody can correct (#777), a field the owner can pick but the AI has
+        # never heard of, a phantom naming a column that does not exist, or a finding telling
+        # the owner to map something the Map step does not offer.
+        run: pnpm exec vitest run __tests__/standards/dataImportFieldParity.test.ts
+
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage
 

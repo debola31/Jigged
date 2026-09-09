@@ -361,11 +361,13 @@ with the `/analyze` and `/validate` endpoints only it called.)*
 
 **Not mappable:** credit status or note (so an import can never set or lift a hold), and no carrier-account field.
 
-The guided flow (`lib/dataImportSchema.ts`) exposes only `name` and `default_payment_terms` at the
-Map step — a UI restriction, not a server limit: the AI maps the other nine and they ride through to
-execute. But since the retired wizard exposed all 11 for hand-correction, a mis-mapped
-`contact_email` or `postal_code` is currently **not** correctable in the UI. Widening
-`ENTITY_FIELDS` is [#777](https://github.com/debola31/Jigged/issues/777).
+All 11 are offered at the Map step (`ENTITY_FIELDS` in `lib/dataImportSchema.ts`), the nine
+contact and address columns under a **Contact & address** subheading inside "see how we matched
+each column". *(Until [#777](https://github.com/debola31/Jigged/issues/777) only `name` and
+`default_payment_terms` were listed. The AI mapped the other nine and they rode through to execute,
+so they did import — but a mis-mapped `contact_email` or `postal_code` was correctable nowhere once
+the per-entity wizard was retired. The catalog is now checked against `CUSTOMER_SCHEMA` in CI;
+see [data-import.md](data-import.md).)*
 
 The AI column mapper matches source headers against the schema *descriptions*, which deliberately carry legacy-ERP vocabulary: `default_payment_terms` notes *"Often exported as 'Terms', 'Terms Code' or 'Payment Terms'"*.
 

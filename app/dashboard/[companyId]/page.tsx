@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 
-import { InsightsSection, DashboardMetrics, RecentActivity, ReportsSection } from '@/components/dashboard';
+import { DashboardMetrics, RecentActivity } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
 import UnfinishedWorkCard from '@/components/dashboard/UnfinishedWorkCard';
@@ -15,14 +15,9 @@ export default function DashboardPage() {
   const params = useParams();
   const companyId = params.companyId as string;
   const { features, loading: featuresLoading } = useCompanyFeatures();
-  const [savedVersion, setSavedVersion] = useState(0);
   const [isEmpty, setIsEmpty] = useState(false);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
-
-  const handleInsightSaved = useCallback(() => {
-    setSavedVersion((v) => v + 1);
-  }, []);
 
   useEffect(() => {
     if (!companyId) return;
@@ -44,8 +39,8 @@ export default function DashboardPage() {
   }, [companyId]);
 
   // AI Insights is opt-out (on unless a system admin disabled it for this
-  // tenant). Gate the whole AI area — ask-bar + saved charts — on the flag;
-  // kept hidden while the flag is still loading so it never flashes in then out.
+  // tenant). Gate the whole AI area on the flag; kept hidden while the flag is
+  // still loading so it never flashes in then out.
   const aiInsightsEnabled = !featuresLoading && features.ai_insights;
 
   // Dashboard revenue is opt-OUT too: the money lines under each scorecard count are on unless a
@@ -82,26 +77,14 @@ export default function DashboardPage() {
         />
       </Box>
 
-      {/* AI Insights — ask-bar + saved charts, gated per-company */}
+      {/* AI Insights, chat first, gated per company: one centred question until a
+          conversation exists, then a docked composer under it. Past conversations,
+          reports and charts live behind its History button; the Reports card and
+          the saved-charts grid that used to sit here are withdrawn (2026-09-08). */}
       {aiInsightsEnabled && (
-        <>
-          {/* Ask Bar */}
-          <Box sx={{ mb: 4 }}>
-            <InsightsChat
-              companyId={companyId}
-              onInsightSaved={handleInsightSaved}
-            />
-          </Box>
-
-          {/* One-page summaries the AI composes on request */}
-          <ReportsSection companyId={companyId} />
-
-          {/* Saved Charts */}
-          <InsightsSection
-            companyId={companyId}
-            savedVersion={savedVersion}
-          />
-        </>
+        <Box sx={{ mb: 4 }}>
+          <InsightsChat companyId={companyId} />
+        </Box>
       )}
     </Box>
   );

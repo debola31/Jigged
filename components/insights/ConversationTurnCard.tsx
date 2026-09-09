@@ -1,64 +1,44 @@
 'use client';
 
-import { useState } from 'react';
-import * as Sentry from '@sentry/nextjs';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import InsightChart from './InsightChart';
+import type { ReportTurn } from '@/utils/aiChatAccess';
 import type { ChartConfig } from '@/utils/insightsAccess';
-import { saveInsight } from '@/utils/savedInsightsAccess';
+import { reportSpecOf } from '@/utils/reportSpec';
 
 interface ConversationTurnCardProps {
-  companyId: string;
   question: string;
   answer: string;
   chartConfig: ChartConfig | null;
+  /** Set when this turn is a one-page report: the answer is its headline. */
+  report?: ReportTurn | null;
   /** Chart height in pixels. */
   chartHeight?: number;
-  /** Called after a successful pin so the "Your Charts" grid can refresh. */
-  onSaved?: () => void;
-  onError?: (message: string) => void;
+  /** Opens the report's preview (the PDF, drawn from the stored spec). */
+  onOpenReport?: () => void;
 }
 
 /**
- * One answered turn of a conversation: the question, the chart if one survived
- * validation, the answer, and the pin button. Extracted from the ask bar's single
- * inline card so a thread renders it once per turn.
+ * One answered turn of a conversation: the question, the answer, then the chart
+ * it introduces, or the report card when the turn was a request for a one-pager.
  *
- * Save is offered only when a chart survived: "Your Charts" is a grid of charts,
- * and a card with no chart there would be a sentence in a chart slot.
+ * No pin button since 2026-09-08. A chart is kept by having been answered -- the
+ * History rail lists every turn that carried one -- so there is nothing to save.
  */
 export default function ConversationTurnCard({
-  companyId,
   question,
   answer,
   chartConfig,
+  report = null,
   chartHeight = 220,
-  onSaved,
-  onError,
+  onOpenReport,
 }: ConversationTurnCardProps) {
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const handleSave = async () => {
-    if (saving || saved) return;
-    setSaving(true);
-    try {
-      await saveInsight(companyId, question, answer, chartConfig);
-      setSaved(true);
-      onSaved?.();
-    } catch (err) {
-      Sentry.captureException(err);
-      onError?.(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const spec = report ? reportSpecOf(report.report) : null;
 
   return (
     <Card elevation={2} sx={{ p: 2 }}>
@@ -69,34 +49,47 @@ export default function ConversationTurnCard({
         </Typography>
       </Box>
 
+      {/* The answer first, then the chart it introduces: the model narrates and then
+          says "here is the chart". `pre-line` keeps the model's line breaks. */}
+      <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+        {answer}
+      </Typography>
+
       {chartConfig && (
-        <Box sx={{ mb: 1.5 }}>
+        <Box sx={{ mt: 1.5 }}>
           <InsightChart chartConfig={chartConfig} height={chartHeight} />
         </Box>
       )}
 
-      <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
-        {answer}
-      </Typography>
-
-      {chartConfig && !saved && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={handleSave}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} /> : <BookmarkBorderIcon />}
-          >
-            Save to dashboard
+      {report && (
+        <Box
+          sx={{
+            mt: 1.5,
+            p: 1.5,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            flexWrap: 'wrap',
+          }}
+        >
+          <DescriptionOutlinedIcon color="primary" />
+          <Box sx={{ flex: 1, minWidth: 200 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              {spec?.title ?? 'Report'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {spec
+                ? `${spec.period_label} · ${spec.kpis.length} KPIs · ${spec.blocks.length} blocks`
+                : 'One-page summary'}
+              {report.dropped.length > 0 ? ` · not shown: ${report.dropped.join(', ')}` : ''}
+            </Typography>
+          </Box>
+          <Button variant="outlined" onClick={onOpenReport} sx={{ minHeight: 48 }}>
+            Open report
           </Button>
-        </Box>
-      )}
-      {saved && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
-          <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
-            Saved to dashboard
-          </Typography>
         </Box>
       )}
     </Card>

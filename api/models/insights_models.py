@@ -36,6 +36,10 @@ class ReportRequest(BaseModel):
 
     request: str = Field(..., max_length=500, description="What the report should cover")
     today: date = Field(..., description="The caller's LOCAL calendar date, bound as $2 in generated SQL")
+    # The conversation this report is asked in. A report is a turn like any other
+    # since 2026-09-08: the job joins the thread and the trigger materialises the
+    # request and the headline, with the spec beside them.
+    thread_id: UUID | None = Field(default=None, description="ai_chat_threads.id this report is asked in")
 
 
 class ChatEnqueued(BaseModel):

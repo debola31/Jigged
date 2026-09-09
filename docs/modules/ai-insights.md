@@ -579,7 +579,9 @@ It is **written, never read back as chat history.**
 in the database, the access layer or the UI.
 
 **`ai_chat_threads`** — one conversation, per user (`created_by = auth.uid()`), `title` = the first
-question truncated, archived by `deleted_at`. **`ai_chat_messages`** — its append-only turns:
+question truncated, archived by `deleted_at`. **`ai_chat_messages`** — its append-only turns (since
+2026-09-08 an assistant row may carry `report`, the spec a report turn is drawn from, with the titles the
+chart gate dropped and the query count; a CHECK keeps it off user rows):
 `seq`, `role ∈ {user, assistant, summary}`, `content`, `chart_config`, `tool_trace` (the queries
 behind an assistant turn, audit only, never replayed), `covers_through_seq` (summary rows only),
 `token_estimate`, `job_id`. **Nothing writes a message by hand**: `ai_jobs_materialize_chat_turn()`,
@@ -618,9 +620,12 @@ company's, or is archived, is a plain-string 404; a second question while one is
 (`ai_jobs_one_in_flight_per_thread`). **The route never writes a message.** *(This paragraph used to
 say chat was stateless, and it was.)*
 
-**Saved-insights CRUD is not a backend route** — it runs client-side against the RLS-scoped table
-via [`utils/savedInsightsAccess.ts`](../../utils/savedInsightsAccess.ts), per the Supabase-first
-architecture rule.
+**Withdrawn 2026-09-08 — saved insights.** "Save to dashboard", the "Your Charts" grid and
+the saved-insights access module are gone. A chart is kept by having been answered: the History rail's
+Charts tab is a filter over `ai_chat_messages` rows that carry a `chart_config`, so nothing needs a save
+gesture to be found again. The `saved_insights` table remains with no reader until a later migration
+drops it; if pinned charts turn out to matter (watch `insights history opened` and the `charts` tab
+share), the way back is a Build mode that adds widgets from prompts, not the grid.
 
 **Backend** (`api/`): `routes/insights_routes.py` (the endpoint, chart validation and selection) ·
 `services/insights_service.py` (the chat system prompt and `execute_sql_tool`, and nothing else) ·
@@ -632,8 +637,8 @@ architecture rule.
 second, pre-gateway tool loop; that is deleted, and `base_provider` never carried the method the
 old wording attributed to it.
 
-**Frontend:** `components/insights/` (`InsightsChat`, `InsightCard`, `InsightChart`) and
-`components/dashboard/InsightsSection`.
+**Frontend:** `components/insights/` — `InsightsChat` (the chat-first area and its composer),
+`HistoryDrawer` (the rail), `ConversationTurnCard`, `InsightChart`, `ReportPreviewDialog`.
 
 **Env:** `LLM_CHAIN_INSIGHTS` selects the chain. Unset, it is `anthropic` (needs `ANTHROPIC_API_KEY`)
 and the route works the job inline; `ollama:<tag>` routes every question to the desktop worker, whose
@@ -656,18 +661,22 @@ Supabase vars.
 > `MetricPickerModal` do not exist**, and `20260812211807_prune_dashboard_metric_preferences.sql`
 > removed the preference keys. The metric row is not user-configurable.
 
-**Ask bar** — input plus example prompt chips, rotating loading messages, and a **Save button shown
-only when a chart survived validation**. Since September 2026 it is a conversation: the answered
-exchanges render newest-first under the input, and a recent-conversations menu switches or archives
-threads (see *Long conversations on a 32K context*).
+**The chat, first (2026-09-08).** Below the scorecards the AI area is one thing. Empty, it is a
+centred question with example chips — the shape of a search box — and a composer with two verbs, **Ask**
+and **Report**. Once a conversation exists the composer docks to the bottom and the exchanges read top
+to bottom above it, newest beside the box (`components/insights/InsightsChat.tsx`). A report asked in
+Report mode comes back as a turn carrying the page: the request, the headline, and an **Open report**
+card that draws the PDF from the spec stored on the message (`ai_chat_messages.report`). One
+**History** button opens the rail (`HistoryDrawer.tsx`) with three tabs: **Chats** (the caller's
+conversations, switch or archive), **Reports** (from the job rows, `ai_jobs.kind = 'report'`, each
+re-drawn on open) and **Charts** (every answer that carried a chart, opening its conversation). The
+lists load when their tab shows, never on dashboard load.
 
-**Your Charts** — the current user's saved cards in a responsive grid, each with question, chart,
-summary and a remove button; a dashed empty state inviting the first question.
-
-**Reports** — a card between the ask bar and the saved charts: **New report** opens a dialog that
-asks what the page should cover, and the shop's recent one-page summaries are listed from their own
-job rows (`ai_jobs.kind = 'report'`), each re-drawn from its stored spec on open. See *Reports:
-one-page executive summaries*.
+> **Withdrawn 2026-09-08.** The ask bar's newest-first thread with a recent-conversations menu, the
+> **Your Charts** grid with its Save button, and the **Reports** card with its request dialog. The
+> shop owner chose a chat-first page over three stacked sections, two of them usually empty, and
+> accepted losing pinned charts until use says otherwise. Every chart and report is still one click
+> away in History.
 
 ## Reports: one-page executive summaries
 
@@ -826,6 +835,17 @@ reworded line moves what the linker can see.
 
 ## Acceptance Criteria
 
+- [ ] **Given** a report asked in a conversation, **then** the job carries the thread, a thread the company
+  does not own is a 404 and an in-flight job on it a 409, and on success the trigger appends the request
+  and the headline with the spec in `ai_chat_messages.report` — *verified by
+  `api/tests/unit/test_insights_enqueue.py::TestTheReportDoor` and
+  `api/tests/integration/test_ai_chat_threads.py`*.
+- [ ] **Given** the dashboard with no conversation, **then** one centred question with example chips and no
+  list is read; **given** a conversation, **then** it reads oldest first with the composer docked under
+  it; **given** the History button, **then** conversations, reports and charts load only then and a
+  chart opens its conversation — *verified by `__tests__/components/insights/InsightsChat.test.tsx` and
+  `__tests__/utils/aiChatAccess.test.ts`*.
+
 Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
 `automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).
 
@@ -872,6 +892,10 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** two users in one company, **then** each sees only their own pins (`user_id = auth.uid()`), with no cap on either — *automation-pending (#367)*.
 
 ## Known gaps
+
+- **No pinned charts on the dashboard.** Withdrawn with the chat-first page (2026-09-08), deliberately, to
+  be re-evaluated on use: the Charts tab of History is the substitute, and a Build mode (widgets from
+  prompts) is the way back if owners want charts on the landing page.
 
 - **Nothing enforces that this doc's two table lists match the code.** Both had drifted — the
   count in four places, and one missing denylist entry. A test asserting the doc's lists against

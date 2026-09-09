@@ -47,7 +47,7 @@ function response(status: number, body: unknown): Response {
 describe('chatResultOf', () => {
   const job = (result: unknown): AiJob => ({
     id: 'j', status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
-    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null, kind: 'chat',
   });
 
   it('narrows the off-topic flag to a boolean and defaults it off', () => {
@@ -161,7 +161,7 @@ describe('submitReportRequest', () => {
   it('posts the request through the report door with the local date', async () => {
     fetchMock.mockResolvedValue(response(202, { job_id: 'job-r', status: 'queued', executor: 'worker' }));
 
-    const enqueued = await submitReportRequest('co-1', 'operations summary for this quarter');
+    const enqueued = await submitReportRequest('co-1', 'operations summary for this quarter', 'thread-7');
 
     expect(enqueued.job_id).toBe('job-r');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -169,6 +169,15 @@ describe('submitReportRequest', () => {
     const body = JSON.parse(init.body as string);
     expect(body.request).toBe('operations summary for this quarter');
     expect(body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // The conversation the report is asked in (2026-09-08): the trigger writes it there.
+    expect(body.thread_id).toBe('thread-7');
+  });
+
+  it('sends no thread key for a one-off report', async () => {
+    fetchMock.mockResolvedValue(response(202, { job_id: 'job-r', status: 'queued', executor: 'worker' }));
+    await submitReportRequest('co-1', 'x');
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect('thread_id' in body).toBe(false);
   });
 
   it('carries the status like a question does', async () => {
@@ -182,7 +191,7 @@ describe('submitReportRequest', () => {
 describe('listReports / reportResultOf', () => {
   const job = (result: unknown, id = 'j'): AiJob => ({
     id, status: 'succeeded', executor: 'worker', model: 'qwen3:32b', result: result as AiJob['result'],
-    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null,
+    error: null, error_kind: null, created_at: 'c', expires_at: null, lease_expires_at: null, batch_key: null, kind: 'chat',
   });
 
   it('reads only succeeded report jobs for the shop, newest first', async () => {

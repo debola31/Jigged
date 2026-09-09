@@ -229,12 +229,14 @@ tooltip. Empty: "No recent activity." on the card, "No activity yet." on the pag
 
 ## AI Insights
 
-Below Recent Activity: ask-bar (`InsightsChat`) + saved charts (`InsightsSection`), gated on the `ai_insights`
-flag, which is **opt-out** (on unless a system admin turns it off for the tenant) and stays hidden while the
-flag loads so it never flashes in then out. Full spec — text-to-SQL flow, persistence, prompts, and the "AI only
-on explicit user action" contract — is in [AI Insights & Charts](ai-insights.md). A **Reports** card sits between
-the ask bar and the saved charts: one-page executive summaries the AI composes on request, drawn in the browser
-from a stored spec ([Reports](ai-insights.md#reports-one-page-executive-summaries)).
+Below Recent Activity: the chat (`InsightsChat`), gated on the `ai_insights` flag, which is **opt-out** (on
+unless a system admin turns it off for the tenant) and stays hidden while the flag loads so it never flashes in
+then out. Since 2026-09-08 it is the whole AI area: a centred question until a conversation exists, then a
+composer docked under the exchanges; its **Report** verb asks for a one-page summary that comes back as a turn,
+and its **History** button opens a rail with past conversations, reports and charts. Full spec — text-to-SQL
+flow, persistence, prompts, and the "AI only on explicit user action" contract — is in
+[AI Insights & Charts](ai-insights.md); the surfaces are in its *Dashboard surfaces* section. *(A saved-charts
+grid and a Reports card used to sit under the ask bar; withdrawn, see that section.)*
 
 **Nothing on this page may call a paid AI provider on mount.** `page.tsx`'s effects fire plain Supabase reads
 only (`isDashboardEmpty`, `getDashboardActivity`); the ask-bar is driven by a submit. This is stated here, not
@@ -255,7 +257,7 @@ single-column at every width.
 ## Data refresh
 
 **As built:** everything is fetched **once on mount** and never again — metrics via `useLoad` in
-`DashboardMetrics` (and `InsightsSection`), Recent Activity and the empty-state check via `useEffect` in
+`DashboardMetrics`, Recent Activity and the empty-state check via `useEffect` in
 `page.tsx`. Changing the Completed card's period refetches. Otherwise there is no auto-poll, no live
 subscription, no refresh button and no pull-to-refresh; fresh data requires re-navigating.
 

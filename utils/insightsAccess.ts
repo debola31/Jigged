@@ -137,12 +137,18 @@ export async function submitChatQuery(
  * heartbeat -- and the same 202 with a job id; the ReportSpec lands on the job's
  * result and the browser renders it to PDF itself (utils/reportPdf.ts).
  */
-export async function submitReportRequest(companyId: string, request: string): Promise<ChatEnqueued> {
+export async function submitReportRequest(
+  companyId: string,
+  request: string,
+  threadId?: string | null,
+): Promise<ChatEnqueued> {
   const headers = await getAuthHeaders();
   const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/report`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ request, today: todayLocalISODate() }),
+    // A report asked in a conversation joins it (2026-09-08): the trigger writes
+    // the request and the headline into the thread with the spec beside them.
+    body: JSON.stringify({ request, today: todayLocalISODate(), ...(threadId ? { thread_id: threadId } : {}) }),
   });
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -204,6 +210,7 @@ export type AiJob = Pick<
   | 'expires_at'
   | 'lease_expires_at'
   | 'batch_key'
+  | 'kind'
 >;
 
 const TERMINAL: readonly string[] = ['succeeded', 'failed', 'timed_out'];
@@ -224,7 +231,7 @@ export function isInFlight(job: AiJob | null): boolean {
  * erasure CLAUDE.md forbids. Duplicating twelve column names is the cheaper price.
  */
 const AI_JOB_SELECT =
-  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key' as const;
+  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key, kind' as const;
 
 /**
  * Narrow `ai_jobs.result` to the answer shape.

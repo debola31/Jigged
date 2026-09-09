@@ -37,6 +37,66 @@ const EXAMPLE_PROMPTS = [
 ];
 
 /**
+ * Enqueue rejections that are EXPECTED, mapped to the reason that leaves in the
+ * event. These are exactly the five statuses the Sentry call below has always
+ * skipped, and this map is now the single place that list lives -- so the
+ * routing reads as one decision rather than a status array and a negation.
+ *
+ * 503 IS A REASON HERE AND NOT AN INCIDENT, deliberately. A box that is asleep
+ * has no code fix, so paging on it would fill the queue with exactly the
+ * non-actionable issues `ignoreErrors` in instrumentation-client.ts exists to
+ * keep out -- the failure mode that left this project with 55 stale ones. What
+ * was actually missing was never the alert, it was the RATE: how often a shop
+ * asks and finds the box off. That is a product question, so it lands in
+ * PostHog beside its siblings.
+ *
+ * Sentry's behaviour is UNCHANGED by this map. Anything unmapped still pages,
+ * which is what keeps an unforeseen status an error rather than quietly
+ * becoming a statistic.
+ */
+const REFUSAL_REASONS: Record<number, string> = {
+  403: 'disabled',
+  404: 'thread_missing',
+  409: 'busy',
+  429: 'rate_limited',
+  503: 'offline',
+};
+
+/**
+ * How long the shop waited for an answer, as a bucket.
+ *
+ * BUCKETED, NOT A DURATION, for the reason `elapsed_bucket` is on the operator
+ * events: the product question is which band a wait fell into, and a raw
+ * per-answer figure answers nothing the band does not. The scale is seconds to
+ * minutes rather than the operator helper's minutes to hours, which is why this
+ * is its own function and not a reuse of that one.
+ */
+function answerDurationBucket(createdAt: string | null | undefined): string {
+  if (!createdAt) return 'unknown';
+  const started = new Date(createdAt).getTime();
+  if (Number.isNaN(started)) return 'unknown';
+  const seconds = Math.max(0, Date.now() - started) / 1000;
+  if (seconds < 5) return 'under_5s';
+  if (seconds < 15) return '5s_15s';
+  if (seconds < 60) return '15s_60s';
+  if (seconds < 180) return '1m_3m';
+  return 'over_3m';
+}
+
+/**
+ * The SHAPE of a question — whether someone typed keywords or a sentence — and
+ * never a word of it. The shop's questions are its business data, so the text
+ * stays in `ai_jobs`; this is the most the registry allows about what was asked.
+ */
+function questionLengthBucket(text: string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  if (words < 5) return 'under_5w';
+  if (words < 15) return '5w_15w';
+  if (words < 40) return '15w_40w';
+  return 'over_40w';
+}
+
+/**
  * Requests for a document, offered beside the questions. There is no Report
  * verb: the words carry the intent, and the model calls compose_report when it
  * reads one. The chips show what to say.
@@ -248,6 +308,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         has_text_block: !!spec?.blocks.some((b) => b.type === 'text'),
         dropped_count: summary?.dropped.length ?? 0,
         tool_call_count: summary?.tool_call_count ?? 0,
+        duration_bucket: answerDurationBucket(job.job?.created_at),
       });
       return;
     }
@@ -265,6 +326,15 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       off_topic: !!job.result?.off_topic,
       grounding_corrected: !!job.result?.grounding_corrected,
       follow_up_count: job.result?.follow_ups?.length ?? 0,
+      // How long the shop waited. On a model running on the shop's own box this
+      // is the complaint that arrives before any other, and nothing recorded it.
+      duration_bucket: answerDurationBucket(job.job?.created_at),
+      // WHICH tools ran, not just how many. These are OUR schema — the names of
+      // the queries the model chose — so unlike the question they carry nothing
+      // of the customer's, and they are the closest the registry can legally get
+      // to what a shop asks ABOUT. Sorted and deduped so `parts,jobs` and
+      // `jobs,parts` are one breakdown value rather than two.
+      tool_names: Array.from(new Set(job.result?.tool_calls ?? [])).sort(),
     });
   }, [job.phase, job.job, job.result]);
 
@@ -348,6 +418,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         from_example: source === 'example',
         from_suggestion: source === 'suggestion',
         turn_index: turns.length,
+        question_length_bucket: questionLengthBucket(q),
       });
       job.watch(enqueued.job_id);
     } catch (err) {
@@ -359,7 +430,29 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       const message =
         err instanceof Error ? err.message : 'Failed to send your question. Please try again.';
       const status = err instanceof ChatEnqueueError ? err.status : undefined;
-      if (!(status !== undefined && [403, 404, 409, 429, 503].includes(status))) {
+      // A question REFUSED AT THE DOOR never becomes a job row, so `ai job
+      // settled` cannot see it -- and until this event existed the refusal was
+      // invisible in BOTH tools: this catch captured nothing, and Sentry is
+      // skipped for every one of these statuses. That is how "does the shop ever
+      // ask and find the box off" stayed unanswerable through the whole pilot.
+      //
+      // ONE LIST, TWO OUTCOMES, and it is the SAME list as before: a mapped
+      // status is an expected refusal and becomes a rate in PostHog; anything
+      // unmapped is still ours and still pages. Sentry's behaviour does not
+      // change here -- REFUSAL_REASONS holds exactly the statuses the old
+      // `[403, 404, 409, 429, 503]` array skipped, so the negation it replaced
+      // is now spelled as the map's own absence.
+      const refusal = status === undefined ? undefined : REFUSAL_REASONS[status];
+      if (refusal) {
+        posthog.capture('ai job refused', {
+          feature: 'insights',
+          reason: refusal,
+          turn_index: turns.length,
+          from_example: source === 'example',
+          from_suggestion: source === 'suggestion',
+          question_length_bucket: questionLengthBucket(q),
+        });
+      } else {
         Sentry.captureException(err);
       }
       // A thread the route no longer recognises (archived elsewhere, or gone) is

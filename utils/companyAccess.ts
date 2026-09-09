@@ -386,16 +386,6 @@ export interface CompanyBilling {
   canceled_at: string | null;
   ended_at: string | null;
   trial_end: string | null;
-  /**
-   * Previously-unbilled service, charged once on the first invoice (billing.md
-   * §6.1). Service-role-set; the browser only reads them to warn before checkout.
-   * `backpay_charged_at` non-null means it has already been paid, so the card must
-   * stop advertising it.
-   */
-  backpay_monthly_cents: number | null;
-  backpay_months: number | null;
-  backpay_first_month: string | null;
-  backpay_charged_at: string | null;
 }
 
 /**
@@ -411,7 +401,7 @@ export async function getCompanyBilling(companyId: string): Promise<CompanyBilli
   const { data, error } = await supabase
     .from('company_billing')
     .select(
-      'company_id, billing_exempt, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_price_id, current_period_end, cancel_at, canceled_at, ended_at, trial_end, backpay_monthly_cents, backpay_months, backpay_first_month, backpay_charged_at'
+      'company_id, billing_exempt, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_price_id, current_period_end, cancel_at, canceled_at, ended_at, trial_end'
     )
     .eq('company_id', companyId)
     .maybeSingle();

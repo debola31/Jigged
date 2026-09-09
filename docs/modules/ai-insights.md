@@ -349,6 +349,50 @@ rewrite is the answer and the argument for it is made** — one construct wide, 
 (the type note above `_FORBIDDEN_CLOCK` says why the other seven are not candidates), storing both
 the written and the executed SQL.
 
+**"I apologize for the error" — 2026-09-09, and the tool schema caused it.** Hours after the fix
+above shipped to the worker, prod and preview both started answering *"I apologize for the error. Let
+me attempt to retrieve the information for you once more."* `tool_trace` again had the receipts — the
+model was returning **the tool's JSON schema fused with the value**:
+
+```json
+"sql": { "sql": "SELECT j.customer_name …", "type": "string" }
+```
+
+That dict went straight into `validate_query`, where `sql.strip()` raised `AttributeError`. `_run_tool`
+caught it and returned `{"error": str(exc)}` **with no `error_kind`** — which the loop reads, by
+design, as *"ours, not the model's, no retry reaches it."* So the model was handed
+`'dict' object has no attribute 'strip'` with none of the `SQL_ERROR: … Rewrite the query` framing
+that makes a failure recoverable, and did the only thing left: apologised.
+
+**Two faults, and only one of them was new.** The over-stuffed `sql` parameter description was new —
+four lines with two labelled examples and a sentence about which expressions need a cast. Sampled
+against `qwen3:32b` on the box with the real system prompt:
+
+| `sql` parameter description | schema-shaped |
+|---|---|
+| Old (`$1` only) | 1 / 14 |
+| Four lines, two examples | **5 / 14** |
+| One line, one example (shipped) | 1 / 16 |
+
+A property's description is read **while that property is being generated**, so structure inside it
+invites the model to reproduce structure. The `$2` teaching moved to the tool description above,
+where the same sampling showed no such effect — and **0 of 16 calls reached for the clock**, so the
+CURRENT_DATE fix survives the retreat intact.
+
+**The second fault was older and worse: nothing defended the boundary.** The old description produces
+this shape too, just rarely, so a malformed argument could always turn into an unshaped exception.
+`sql_argument()` / `description_argument()` in
+[`chat_tools.py`](../../api/tools/chat_tools.py) now sit at all three unpack sites. They unwrap the
+known shape — the intended value is present verbatim under its own key, so this is a shape, not a
+guess — and yield `""` for anything else, which the validator refuses as an empty query: shaped,
+retryable, and carrying the rewrite instruction. **A model returning nonsense should cost a turn, not
+the conversation.**
+
+**And the operational lesson, which is the one to keep.** Nothing was deployed. The worker serves
+production from the local checkout ([ai-worker.md](../runbooks/ai-worker.md)), so an un-merged branch
+was answering real production questions, and the fault reached shop owners through a code path no
+deploy gate had ever seen. Anything the worker loads is in production the moment it restarts.
+
 **And the day boundary underneath it.** Postgres runs in UTC, so `CURRENT_DATE` is already tomorrow
 for the last hours of a working day in the Americas — enough to call a job late the evening before
 it is. The jobs list had always avoided this by threading the browser's date in as `p_today`; the

@@ -29,9 +29,11 @@ SQL_TOOL = next(t for t in CHAT_TOOLS if t["name"] == "execute_sql")
 SQL_PARAM = SQL_TOOL["input_schema"]["properties"]["sql"]["description"]
 TOOL_TEXT = SQL_TOOL["description"] + "\n" + SQL_PARAM
 
-# Anchored on the label: a bare `SELECT .*` would also match the prose "a single
-# SELECT statement" and "SELECT query".
-EXAMPLE = re.compile(r"^Example[^:]*:\s*(SELECT .+)$", re.MULTILINE)
+# Anchored on the LABEL, not on the line start: the description is one line and the
+# example sits inline at the end of it. A bare `SELECT .*` would also match the
+# prose "a single SELECT statement" and "SELECT query", which is why the literal
+# `Example:` is required.
+EXAMPLE = re.compile(r"Example[^:]*:\s*(SELECT [^\n]+)")
 
 
 def test_the_tool_names_the_bound_date_and_not_only_the_company():
@@ -69,26 +71,91 @@ def test_every_worked_example_passes_the_validator(example):
     assert valid, f"the tool's own example is refused by the validator: {msg}"
 
 
-def test_there_are_two_examples_and_one_of_them_is_bounded_by_today():
-    examples = EXAMPLE.findall(TOOL_TEXT)
-    assert len(examples) == 2, "one dateless example and one bounded by $2"
-    assert any("$2::date" in sql for sql in examples)
+def test_there_is_exactly_one_example_and_the_description_is_one_line():
+    """ONE example and one line, and both numbers are measured rather than chosen.
+
+    The first version of this change wrote four lines with two labelled examples.
+    Sampled against qwen3:32b on the box with the real system prompt, that made the
+    model return the JSON SCHEMA of the arguments instead of the arguments --
+    `{"sql": {"sql": "SELECT ...", "type": "string"}}` -- in 5 of 14 calls, against
+    1 of 14 for the old $1-only text and 1 of 16 for this one. It reached production
+    as "I apologize for the error. Let me attempt to retrieve the information for
+    you once more."
+
+    A property's description is read while that property is generated, so structure
+    in it invites structure in the value. The teaching about $2 lives in the tool
+    description above instead, where the same sampling showed no such effect and
+    0 of 16 calls reached for the clock.
+    """
+    assert len(EXAMPLE.findall(TOOL_TEXT)) == 1, (
+        "one example only -- two is what made the model echo the schema"
+    )
+    assert "\n" not in SQL_PARAM, (
+        "keep the sql parameter description to a single line; newlines in it are "
+        "part of the structure the model reproduces"
+    )
 
 
-def test_the_dated_example_bounds_a_date_column_not_a_timestamp():
+def test_no_example_compares_a_timestamp_column_against_the_bound_date():
     """$2::date against a TIMESTAMPTZ column is the bug this change is fighting.
 
     `created_at >= DATE_TRUNC('month', $2::date)` validates cleanly and compares a
     UTC instant to a local midnight -- the same day-boundary error as CURRENT_DATE,
-    wearing the fix's clothes. `due_date` is a DATE (schema_context.py), so the
-    exemplar cannot teach that.
+    wearing the fix's clothes. Asserted over every example rather than only a dated
+    one, so it still holds if someone adds a date to the example later.
     """
-    dated = [s for s in EXAMPLE.findall(TOOL_TEXT) if "$2" in s]
-    assert dated, "no dated example to check"
-    for sql in dated:
+    for sql in EXAMPLE.findall(TOOL_TEXT):
+        if "$2" not in sql:
+            continue
         assert "created_at" not in sql and "completed_at" not in sql, (
             "the worked example must not compare a timestamptz column against $2::date"
         )
+
+
+class TestTheArgumentBoundaryIsDefended:
+    """A local model sometimes returns the schema fused with the value.
+
+    Not hypothetical: it reached production on 2026-09-09, where the dict went into
+    validate_query, `sql.strip()` raised AttributeError, and _run_tool returned the
+    exception text with NO error_kind -- so the model got no rewrite instruction and
+    apologised to the shop owner instead of retrying.
+    """
+
+    def test_a_plain_string_passes_through(self):
+        from tools.chat_tools import description_argument, sql_argument
+
+        assert sql_argument({"sql": "SELECT 1"}) == "SELECT 1"
+        assert description_argument({"description": "Top customers"}) == "Top customers"
+
+    def test_the_schema_shape_is_unwrapped(self):
+        """The intended value is present verbatim under its own key, so this is a
+        known shape rather than a guess."""
+        from tools.chat_tools import description_argument, sql_argument
+
+        assert sql_argument({"sql": {"sql": "SELECT 1", "type": "string"}}) == "SELECT 1"
+        assert (
+            description_argument(
+                {"description": {"type": "string", "description": "Top customers"}}
+            )
+            == "Top customers"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [{}, {"sql": None}, {"sql": 42}, {"sql": []}, {"sql": {"type": "string"}}, {"sql": {"sql": 7}}],
+        ids=["missing", "null", "number", "list", "schema-only", "nested-non-string"],
+    )
+    def test_anything_else_becomes_an_empty_query(self, arguments):
+        """"" is deliberate: the validator refuses it as an empty query, which is
+        SHAPED and retryable and carries the rewrite instruction. Raising here, or
+        letting a dict through, is what produced an apology instead of an answer."""
+        from tools.chat_tools import sql_argument
+        from tools.sql_validator import validate_query_detailed
+
+        text = sql_argument(arguments)
+        assert text == ""
+        ok, message, reason = validate_query_detailed(text)
+        assert ok is False and reason == "empty" and message
 
 
 @pytest.mark.parametrize("term", ["late", "revenue", "job value", "open quote", "dormant"])

@@ -20,6 +20,59 @@ tool itself computes nothing, and it is never dispatched to anything.
 
 COMPOSE_REPORT_TOOL = "compose_report"
 
+
+def sql_argument(arguments: dict) -> str:
+    """The `sql` argument as a string, unwrapping the schema shape if need be.
+
+    A LOCAL MODEL SOMETIMES RETURNS THE SCHEMA INSTEAD OF THE VALUE:
+
+        {"sql": {"sql": "SELECT ...", "type": "string"},
+         "description": {"type": "string", "description": "Top customers"}}
+
+    -- the property definition and the value fused together. Measured on
+    qwen3:32b it happens on a small fraction of calls even with a short parameter
+    description, and it is not something a prompt can be relied on to prevent.
+
+    Until 2026-09-09 nothing checked: the dict went straight to validate_query,
+    `sql.strip()` raised AttributeError deep inside it, _run_tool caught the
+    exception and returned {"error": str(exc)} with NO error_kind -- which the loop
+    reads as "ours, not the model's, no retry reaches it". So the model got
+    `'dict' object has no attribute 'strip'` with no instruction attached, and
+    answered the shop owner "I apologize for the error. Let me attempt to retrieve
+    the information for you once more." That reached production.
+
+    Unwrapping is safe here because it is not a guess: the intended value is
+    present, verbatim, under its own key. Anything else returns "" so the validator
+    refuses it as an empty query -- shaped, retryable, and carrying the rewrite
+    instruction the model needs, which is the whole difference between a bad turn
+    and a dead one.
+    """
+    value = arguments.get("sql", "")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        inner = value.get("sql")
+        if isinstance(inner, str):
+            return inner
+    return ""
+
+
+def description_argument(arguments: dict) -> str:
+    """The `description` argument as a string, unwrapped the same way.
+
+    Cosmetic rather than load-bearing -- it is a label on a trace entry -- but a
+    dict here put `{"type": "string", "description": "..."}` into
+    ai_chat_messages.tool_trace, which is the audit record.
+    """
+    value = arguments.get("description", "")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        inner = value.get("description")
+        if isinstance(inner, str):
+            return inner
+    return ""
+
 # THE CLOCK RULE IS STATED HERE TOO, AND THAT IS NOT DRIFT. It is a mechanical
 # contract of this tool -- which values are bound -- not a business definition;
 # semantics.md still owns those and this file defines none. It is repeated here
@@ -38,9 +91,21 @@ COMPOSE_REPORT_TOOL = "compose_report"
 #
 # Only two clock functions are named, deliberately: _FORBIDDEN_CLOCK holds eight
 # and that list is the validator's to grow. Naming two keeps this sentence true
-# when it does. The examples are pinned to validate_query by
+# when it does. The example is pinned to validate_query by
 # api/tests/unit/test_chat_tools_contract.py -- an example the validator would
 # refuse teaches the model the failure, because the example is what it copies.
+#
+# THE `sql` DESCRIPTION IS ONE LINE WITH ONE EXAMPLE, AND THAT IS MEASURED.
+# The first version of this change wrote it as four lines with two labelled
+# examples and a sentence about which expressions need the cast. Against qwen3:32b
+# on the box, sampled with the real system prompt: that version made the model
+# emit the JSON SCHEMA of the arguments instead of the arguments --
+# `{"sql": {"sql": "SELECT ...", "type": "string"}}` -- in 5 of 14 calls, against
+# 1 of 14 for the old $1-only text and 0 of 8 for this one. A property's own
+# description is read while that property is being generated, and stuffing it with
+# structure invites the model to reproduce structure. Keep it to a sentence and one
+# example; put the reasoning in the tool description above, which is where the
+# same sampling showed no effect.
 
 CHAT_TOOLS: list[dict] = [
     {
@@ -61,14 +126,10 @@ CHAT_TOOLS: list[dict] = [
                 "sql": {
                     "type": "string",
                     "description": (
-                        "A single SELECT statement. $1 is the company_id; $2 is today's "
-                        "date. Write $2::date wherever the expression does not already fix "
-                        "the type — DATE_TRUNC, EXTRACT, AGE and interval arithmetic all "
-                        "need the cast; a comparison against a typed column does not.\n"
-                        "Example, no date needed: SELECT production_status, COUNT(*) AS count "
-                        "FROM jobs WHERE company_id = $1 GROUP BY production_status\n"
-                        "Example, bounded by today: SELECT COUNT(*) AS jobs FROM jobs "
-                        "WHERE company_id = $1 AND due_date BETWEEN $2::date AND $2::date + 7"
+                        "A single SELECT statement. $1 is the company_id and $2 is today's "
+                        "date; write $2::date where the type is not already fixed. "
+                        "Example: SELECT production_status, COUNT(*) AS count FROM jobs "
+                        "WHERE company_id = $1 GROUP BY production_status"
                     ),
                 },
                 "description": {

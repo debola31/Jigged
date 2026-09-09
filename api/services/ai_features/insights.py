@@ -52,6 +52,7 @@ from services.insights_presentation import (
 from services.llm.base import Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
 from services.llm.ollama_provider import OLLAMA_NUM_CTX
+from tools.chat_tools import description_argument, sql_argument
 from tools.tool_json import dumps_tool_result
 
 logger = logging.getLogger(__name__)
@@ -153,8 +154,13 @@ async def _run_tool(
             raise ValueError(f"Unknown tool: {call.name}")
         return await execute_sql_tool(
             company_id=company_id,
-            sql=call.arguments.get("sql", ""),
-            description=call.arguments.get("description", ""),
+            # Not arguments["sql"] directly: a local model sometimes returns the
+            # property's SCHEMA fused with its value. sql_argument unwraps that and
+            # yields "" for anything else, so the validator refuses it as an empty
+            # query -- shaped and retryable -- instead of AttributeError reaching
+            # the except below, which strips the error_kind the model needs.
+            sql=sql_argument(call.arguments),
+            description=description_argument(call.arguments),
             today=today,
             dsn=dsn,
         )
@@ -485,8 +491,8 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             if call.name != "execute_sql":
                 continue
             trace: dict[str, Any] = {
-                "sql": call.arguments.get("sql", ""),
-                "description": call.arguments.get("description", ""),
+                "sql": sql_argument(call.arguments),
+                "description": description_argument(call.arguments),
             }
             if "error" not in r:
                 # Zero rows is a SUCCESS: the query ran, and "none" is an answer.

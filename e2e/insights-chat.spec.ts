@@ -18,7 +18,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
  * CI has, and both of which would make this a test of the model's mood.
  */
 
-const COMPANY_NAME = 'E2E Test Company';
+// UNIQUE PER TEST, and that is not incidental. Both seeding tests run in the same
+// worker pool; with one shared title, each one's "delete then insert" wiped the
+// other's thread mid-run and the page found nothing. It passed for a while on
+// timing alone, which is the worst way for a test to pass.
 const THREAD_TITLE = 'E2E insights transcript';
 const QUESTION = 'how many open quotes do we have?';
 const ANSWER = 'You have 6 open quotes, worth $12,371.38 in total.';
@@ -36,37 +39,40 @@ function admin(): SupabaseClient {
 }
 
 /**
- * Seed one two-turn conversation owned by the signed-in user.
+ * Seed one two-turn conversation owned by the signed-in user, in the company the
+ * browser actually landed on.
  *
- * `created_by` must be that user or the thread's RLS hides it — which is the point
- * of the policy, and the reason this reads the id back from user_company_access
- * rather than assuming one.
+ * TAKES THE COMPANY FROM THE URL, never by name. Looking up 'E2E Test Company'
+ * seeded whichever row happened to carry that name while the browser opened
+ * whatever company homePathForRole picked — and a user with more than one company
+ * (which any other suite's seed data can create) put those two on different rows.
+ * The thread then existed, owned by the right user, on a company the page was not
+ * showing. Reading the id out of /dashboard/{companyId} cannot drift from what is
+ * on screen.
+ *
+ * `created_by` must be the signed-in user or the thread's RLS hides it — which is
+ * the point of the policy, and the reason this reads the id back from
+ * user_company_access rather than assuming one.
  */
-async function seedThread(): Promise<{ companyId: string; threadId: string }> {
+async function seedThread(companyId: string, suffix: string): Promise<{ threadId: string }> {
   const a = admin();
-
-  const { data: company } = await a
-    .from('companies')
-    .select('id')
-    .eq('name', COMPANY_NAME)
-    .limit(1)
-    .maybeSingle();
-  if (!company) throw new Error(`no company named ${COMPANY_NAME} — global-setup should have made it`);
+  const title = `${THREAD_TITLE} — ${suffix}`;
+  const company = { id: companyId };
 
   const { data: access } = await a
     .from('user_company_access')
     .select('user_id')
-    .eq('company_id', company.id)
+    .eq('company_id', companyId)
     .limit(1)
     .maybeSingle();
-  if (!access) throw new Error('no user_company_access row for the E2E company');
+  if (!access) throw new Error(`no user_company_access row for company ${companyId}`);
 
   // Idempotent: the spec may run against a database a previous run already touched.
-  await a.from('ai_chat_threads').delete().eq('title', THREAD_TITLE);
+  await a.from('ai_chat_threads').delete().eq('title', title);
 
   const { data: thread, error } = await a
     .from('ai_chat_threads')
-    .insert({ company_id: company.id, created_by: access.user_id, title: THREAD_TITLE })
+    .insert({ company_id: company.id, created_by: access.user_id, title })
     .select('id')
     .single();
   if (error || !thread) throw new Error(`seeding the thread failed: ${error?.message}`);
@@ -90,7 +96,16 @@ async function seedThread(): Promise<{ companyId: string; threadId: string }> {
   ]);
   if (msgError) throw new Error(`seeding the messages failed: ${msgError.message}`);
 
-  return { companyId: company.id, threadId: thread.id };
+  return { threadId: thread.id };
+}
+
+/** The company the browser opened, read from /dashboard/{companyId}. */
+async function openDashboard(page: import('@playwright/test').Page): Promise<string> {
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
+  const match = /\/dashboard\/([0-9a-f-]{36})/.exec(page.url());
+  if (!match) throw new Error(`could not read a companyId from ${page.url()}`);
+  return match[1];
 }
 
 test.describe('Insights chat', () => {
@@ -98,10 +113,12 @@ test.describe('Insights chat', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
-    await expect(page.getByText('BETA').first()).toBeVisible({ timeout: 15_000 });
     await expect(
       page.getByText('Jigged AI can make mistakes. Please double-check responses.').first(),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
+    // No title and no BETA pill: the caveat is the one standing statement here.
+    await expect(page.getByText('Ask the shop')).toHaveCount(0);
+    await expect(page.getByText('BETA')).toHaveCount(0);
 
     // The empty state is one question and a box, not a list.
     await expect(page.getByText('What do you want to know about the shop?')).toBeVisible();
@@ -114,7 +131,9 @@ test.describe('Insights chat', () => {
     // lives in three places (the hook, the enqueue error and the route).
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
-    await expect(page.getByText('BETA').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Chat History' })).toBeVisible({
+      timeout: 15_000,
+    });
 
     const body = (await page.locator('body').innerText()).toLowerCase();
     expect(body).not.toContain('ai box');
@@ -122,12 +141,11 @@ test.describe('Insights chat', () => {
   });
 
   test('reads as a conversation, and the scorecards stay put while it scrolls', async ({ page }) => {
-    const { companyId, threadId } = await seedThread();
+    const companyId = await openDashboard(page);
+    const { threadId } = await seedThread(companyId, 'transcript');
 
     // The browser remembers its thread in sessionStorage; this is how a reload
     // re-attaches, so it is also how a test opens one.
-    await page.goto('/');
-    await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
     await page.evaluate(
       ([key, id]) => window.sessionStorage.setItem(key, id),
       [`jigged.aiThread.${companyId}`, threadId] as const,
@@ -156,10 +174,9 @@ test.describe('Insights chat', () => {
   });
 
   test('offers the follow-up the model wrote, and asks it on a click', async ({ page }) => {
-    const { companyId, threadId } = await seedThread();
+    const companyId = await openDashboard(page);
+    const { threadId } = await seedThread(companyId, 'follow-ups');
 
-    await page.goto('/');
-    await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
     await page.evaluate(
       ([key, id]) => window.sessionStorage.setItem(key, id),
       [`jigged.aiThread.${companyId}`, threadId] as const,

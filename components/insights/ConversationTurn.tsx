@@ -39,12 +39,24 @@ interface ConversationTurnProps {
  *
  * NOT A CARD, since 2026-09-09. One `<Card>` per turn gave every exchange the
  * same weight and the same edges, so four turns read as four search results and
- * the question -- set as 12px caption -- was the smallest text on the screen. The
- * shape here is the one every chat people already use: the question is a short
- * right-aligned bubble, the answer runs full width underneath with no container
- * at all, and the asymmetry alone says who spoke. The report inset stays a
- * bordered object, because it is the one thing in a turn that IS a separate
- * object -- a document you open.
+ * the question -- set as 12px caption -- was the smallest text on the screen.
+ *
+ * TWO BUBBLES, MIRRORED. The question is a short right-aligned bubble tinted with
+ * the primary; the answer is a left-aligned one on a neutral translucent surface.
+ * The first pass left the answer unboxed, and on a wide dashboard column it read
+ * as page copy that happened to sit under a bubble rather than as the other half
+ * of an exchange -- the tail on one side with nothing answering it. The radii are
+ * deliberate mirrors (`4px` corner on the speaker's side) so the pair reads as a
+ * turn even when scrolled apart.
+ *
+ * NEUTRAL, NOT A SECOND TINT. design-system.md's callout rule: a subtle full
+ * border at white ~8% over a ~4% fill, never a coloured side-accent. A second
+ * saturated colour here would make every answer look like a status.
+ *
+ * ACTIONS AND SUGGESTIONS SIT OUTSIDE IT, and the report inset does too. The
+ * bubble holds what the assistant SAID; Copy, Hide chart and the follow-up chips
+ * are things you do about it, and a bordered report card inside a bordered bubble
+ * is two frames around one object.
  *
  * The chart hides CLIENT-SIDE ONLY. `ai_chat_messages` has no UPDATE or DELETE
  * grant for any role and must not get one: the turn is the record of what the
@@ -101,17 +113,43 @@ export default function ConversationTurn({
         </Typography>
       </Box>
 
-      {/* The answer, unboxed. `pre-line` keeps the model's line breaks. */}
-      <Box sx={{ maxWidth: { xs: '100%', sm: '92%' } }}>
-        <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-line' }}>
-          {answer}
-        </Typography>
+      {/* The answer. `pre-line` keeps the model's line breaks.
 
-        {chartConfig && !chartHidden && (
-          <Box sx={{ mt: 1.5 }}>
-            <InsightChart chartConfig={chartConfig} height={chartHeight} />
-          </Box>
-        )}
+          HUGS ITS CONTENT, like the question does. Left to stretch, a one-line
+          answer became a 1,050px-wide box three lines tall in empty space, while
+          the question beside it hugged its text -- so the pair read as a bubble
+          answered by a banner. alignSelf is what stops a flex column stretching
+          its children to the row.
+
+          EXCEPT WITH A CHART, which is width: 100% of whatever holds it: let the
+          box shrink to the prose and the chart shrinks with it. */}
+      <Box
+        sx={{
+          alignSelf: 'flex-start',
+          width: chartConfig && !chartHidden ? '100%' : 'auto',
+          maxWidth: { xs: '100%', sm: '92%' },
+        }}
+      >
+        <Box
+          sx={{
+            px: 1.75,
+            py: 1.25,
+            bgcolor: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid',
+            borderColor: 'rgba(255, 255, 255, 0.08)',
+            borderRadius: '12px 12px 12px 4px',
+          }}
+        >
+          <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+            {answer}
+          </Typography>
+
+          {chartConfig && !chartHidden && (
+            <Box sx={{ mt: 1.5 }}>
+              <InsightChart chartConfig={chartConfig} height={chartHeight} />
+            </Box>
+          )}
+        </Box>
 
         {report && (
           <Box

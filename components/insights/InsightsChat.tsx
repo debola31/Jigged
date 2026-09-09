@@ -19,7 +19,6 @@ import SendIcon from '@mui/icons-material/Send';
 import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
-import StatusChip from '@/components/common/StatusChip';
 import { useAiJob } from '@/hooks/useAiJob';
 import { useLoad } from '@/hooks/useLoad';
 import {
@@ -84,8 +83,16 @@ type QuestionSource = 'typed' | 'example' | 'suggestion';
  * fixed height means the dashboard above never moves and the transcript scrolls
  * inside itself. dvh, not vh, so a phone's collapsing address bar does not
  * change it mid-conversation.
+ *
+ * THE CEILING IS SET BY WHAT SITS ABOVE IT, not by taste. The scorecards,
+ * Recent Activity, this area's own header and the composer and its caveat come to
+ * roughly 460px on a desktop viewport; at 58dvh the pane pushed the caveat past
+ * the fold, so the last line of the screen was a sentence you had to scroll to
+ * finish reading. 44dvh keeps the whole exchange -- newest answer, composer,
+ * caveat -- on one screen at 900px and up, which is the point of giving the
+ * transcript its own scrollport at all.
  */
-const TRANSCRIPT_HEIGHT = { xs: 'clamp(280px, 52dvh, 460px)', md: 'clamp(340px, 58dvh, 620px)' };
+const TRANSCRIPT_HEIGHT = { xs: 'clamp(260px, 40dvh, 420px)', md: 'clamp(300px, 44dvh, 520px)' };
 
 interface InsightsChatProps {
   companyId: string;
@@ -443,18 +450,26 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const status = (
     <>
       {/* Working. aria-live so a screen reader is told the wait started and ended.
-          AMBER, because grey text.secondary read as inert -- people could not tell
-          the difference between "thinking" and "finished with nothing to say" on a
-          wait that routinely runs tens of seconds. warning.LIGHT for the text and
-          warning.MAIN for the spinner: design-system.md measures #fbbf24 at 6.28:1
-          on this ground against #f59e0b's 4.89:1, and states the split as a rule --
-          light for text, main for the mark. */}
+          AMBER ON THE MOVING PART ONLY. Grey text.secondary read as inert -- people
+          could not tell "thinking" from "finished with nothing to say" on a wait
+          that routinely runs tens of seconds. But the echoed question is not the
+          signal; it is context, and colouring it too makes the whole line read as a
+          warning about the question. So the question keeps text.secondary and the
+          rotating status carries the colour, which is also the only part that
+          changes while you watch it.
+
+          warning.LIGHT for the text and warning.MAIN for the spinner:
+          design-system.md measures #fbbf24 at 6.28:1 on this ground against
+          #f59e0b's 4.89:1, and states the split as a rule -- light for text, main
+          for the mark. */}
       {pending && (
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <CircularProgress size={16} color="warning" />
-          <Typography variant="body2" sx={{ color: 'warning.light' }}>
+          <Typography variant="body2" color="text.secondary">
             {askedQuestion ? `${askedQuestion} — ` : ''}
-            {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
+            <Box component="span" sx={{ color: 'warning.light' }}>
+              {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
+            </Box>
           </Typography>
         </Box>
       )}
@@ -518,19 +533,22 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Top row: what this is, and the way back to everything asked before. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography variant="h6" component="h2" sx={{ fontWeight: 600 }}>
-          Ask the shop
-        </Typography>
-        {/* Same badge the demo banner uses, for the same reason: a standing
-            statement about the surface, not a status that changes. */}
-        <StatusChip label="BETA" color="warning" sx={{ fontWeight: 600, letterSpacing: 0.5 }} />
-        <Box sx={{ flex: 1 }} />
+      {/* Top row: the way back to everything asked before.
+          NO TITLE AND NO BETA CHIP. Both were tried and both were clutter: the
+          empty state's own question already says what the area is, and the caveat
+          under the composer -- which is read on every turn rather than once at the
+          top -- says the thing a BETA pill was standing in for. Two labels for one
+          idea is one label too many on a surface this quiet.
+
+          New conversation is CONTAINED. As a text button beside an outlined one it
+          read as the lesser of the two, which is backwards: starting over is the
+          thing people reach for when an answer went wrong, and it was the first
+          thing missed on this screen. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <Stack direction="row" spacing={1}>
           {hasConversation && (
             <Button
-              variant="text"
+              variant="contained"
               startIcon={<AddCommentOutlinedIcon />}
               onClick={startNewConversation}
               sx={{ minHeight: 48 }}
@@ -539,7 +557,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             </Button>
           )}
           <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
-            History
+            Chat History
           </Button>
         </Stack>
       </Box>
@@ -608,7 +626,11 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
               {status}
             </Stack>
           </Box>
-          <Box sx={{ pt: 1.5, bgcolor: 'background.default' }}>
+          {/* NO bgcolor HERE. `background.default` was needed when this was
+              position: sticky and rows scrolled underneath it; as a flex sibling
+              below a real scrollport nothing passes behind it, and the opaque
+              #111439 painted a visible rectangle over the page's gradient. */}
+          <Box sx={{ pt: 1.5 }}>
             {composer}
             {disclaimer}
           </Box>

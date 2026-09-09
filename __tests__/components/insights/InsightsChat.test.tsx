@@ -222,13 +222,18 @@ describe('InsightsChat — the conversation', () => {
 });
 
 describe('InsightsChat — the surface says what it is', () => {
-  it('carries a BETA mark and the caveat, in the empty state and in a conversation', async () => {
+  it('says the caveat in the empty state and in a conversation, and nothing else', async () => {
     render(<InsightsChat companyId="co-1" />);
 
-    expect(screen.getByText('BETA')).toBeInTheDocument();
     expect(
       screen.getByText(/Jigged AI can make mistakes\. Please double-check responses\./),
     ).toBeInTheDocument();
+    // NO TITLE, NO BETA PILL. Both were tried and both were clutter: the empty
+    // state's own question says what this is, and the caveat under the composer
+    // -- read on every turn rather than once at the top -- says what the pill was
+    // standing in for. Asserted as absence so neither creeps back beside the other.
+    expect(screen.queryByText('Ask the shop')).not.toBeInTheDocument();
+    expect(screen.queryByText('BETA')).not.toBeInTheDocument();
 
     // Still said once the conversation has started -- a caveat that only appears
     // on an empty page is a caveat nobody reads.
@@ -237,10 +242,23 @@ describe('InsightsChat — the surface says what it is', () => {
     render(<InsightsChat companyId="co-1" />);
 
     expect(await screen.findByText('Six.')).toBeInTheDocument();
-    expect(screen.getAllByText('BETA').length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(/Please double-check responses\./).length,
     ).toBeGreaterThan(0);
+  });
+
+  it('offers starting over as the primary action, not the quiet one', async () => {
+    // Starting over is what people reach for when an answer went wrong, and as a
+    // text button beside an outlined History it read as the lesser of the two.
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
+    mockListThreadMessages.mockResolvedValue(turn(1, 'how many open quotes?', 'Six.'));
+    render(<InsightsChat companyId="co-1" />);
+
+    const newChat = await screen.findByRole('button', { name: /New conversation/ });
+    expect(newChat.className).toMatch(/MuiButton-contained/);
+    expect(screen.getByRole('button', { name: 'Chat History' }).className).toMatch(
+      /MuiButton-outlined/,
+    );
   });
 
   it('names no hardware while it is working — the wait says what it is doing, not where', async () => {
@@ -367,7 +385,7 @@ describe('InsightsChat — the History rail', () => {
     render(<InsightsChat companyId="co-1" />);
     expect(mockListThreads).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat History' }));
     const rail = await screen.findByRole('list', { name: 'Conversations' });
     expect(within(rail).getByText('Booked by month')).toBeInTheDocument();
     const posthog = (await import('posthog-js')).default;
@@ -387,7 +405,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat History' }));
     await user.click(await screen.findByRole('tab', { name: 'Reports' }));
     const list = await screen.findByRole('list', { name: 'Reports' });
     await user.click(within(list).getByText('Backlog and late jobs'));
@@ -405,7 +423,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat History' }));
     await user.click(await screen.findByRole('tab', { name: 'Charts' }));
     const list = await screen.findByRole('list', { name: 'Charts' });
     expect(within(list).getByText(/Trend · Sep 8/)).toBeInTheDocument();
@@ -423,7 +441,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat History' }));
     await user.click(await screen.findByRole('button', { name: 'Archive "Late jobs and customers"' }));
 
     expect(mockArchiveThread).toHaveBeenCalledWith('thread-9');

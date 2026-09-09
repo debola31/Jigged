@@ -669,6 +669,48 @@ describe('a bin holding two heats of one part', () => {
     expect(screen.queryByText(/Heat 4471/)).not.toBeInTheDocument();
   });
 
+  /**
+   * The side rail's per-place Add is this component restricted to one part, so it follows the
+   * dialogs' rule rather than the batch form's: the cert is staged beside the heat.
+   */
+  describe('the mill cert, on the single-part form', () => {
+    const renderRestrictedAdd = () =>
+      render(
+        <PlaceStockActionForm
+          action="add"
+          companyId="co1"
+          locationId="bin5"
+          locationName="Bin 5"
+          moveDestinations={DESTINATIONS}
+          restrictTo={{ partId: 'p-steel', partName: 'RAW-STEEL-BLANK', primaryUnit: 'ea' }}
+          onCancel={onCancel}
+          onDone={vi.fn()}
+        />,
+      );
+
+    it('appears with the heat and goes when it is cleared', async () => {
+      const user = userEvent.setup();
+      renderRestrictedAdd();
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      expect(
+        screen.queryByRole('button', { name: /Attach the mill cert/i }),
+      ).not.toBeInTheDocument();
+
+      const heat = screen.getByRole('textbox', { name: 'Heat' });
+      await user.type(heat, 'H-4471');
+      expect(
+        await screen.findByRole('button', { name: /Attach the mill cert/i }),
+      ).toBeInTheDocument();
+
+      // A staged file with no heat would upload against a lot minted for material nobody named.
+      await user.clear(heat);
+      expect(
+        screen.queryByRole('button', { name: /Attach the mill cert/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   /** `All` fills the balance of the line it sits on, not the part's total across heats. */
   it('fills only its own line from All', async () => {
     const user = userEvent.setup();

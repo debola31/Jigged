@@ -255,10 +255,10 @@ CREATE TRIGGER trg_snapshot_shipment_party
 --        which PostgREST can still resolve. The guard at the end of this section
 --        is what turns that silent miss into a failed migration.
 --
---    (b) THE DEFAULTS. utils/shipmentsAccess.ts passes exactly EIGHT named
---        arguments and omits p_notes entirely, relying on its DEFAULT. PostgREST
---        resolves an RPC by the set of names supplied, so a function whose
---        non-defaulted parameters are not all present is not a match: drop
+--    (b) THE DEFAULTS. utils/shipmentsAccess.ts passes every non-defaulted
+--        argument by name and omits p_notes entirely, relying on its DEFAULT.
+--        PostgREST resolves an RPC by the set of names supplied, so a function
+--        whose non-defaulted parameters are not all present is not a match: drop
 --        p_notes' default and every shipment creation returns PGRST202 the
 --        moment this lands. Frontend and migration deploy together, so there is
 --        no working intermediate state. All defaulted parameters stay trailing.

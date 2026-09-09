@@ -165,7 +165,7 @@ worked, leaves): a job attribute.
 | MRP run / netting | No trustworthy lead times or BOM depth; nobody in a 10-person shop acts on the output. J10 reorder points cover it. |
 | Multi-warehouse | One building; `inventory_locations` nests if a second appears. |
 | Customer-owned stock | Never enters stock — no ownership flag, ledger or valuation. |
-| Valuation / COGS / postings | QuickBooks owns money; Jigged tracks *quantities and identity* — cost is costing's (`part_pricing_tiers.cost_per_unit`, `compute_part_cost_at_qty`). |
+| Valuation / COGS / postings | QuickBooks owns money; Jigged tracks *quantities and identity* — cost is costing's (`part_pricing_tiers.cost_per_unit`, `compute_part_cost_at_qty`). **Withdrawn 2026-09-09, for the READ only** ([§5.15](#515-money-is-the-only-common-denominator-storage-has)): *"Jigged tracks quantities, not money"* — wrong because an owner could not ask anywhere how much was sitting on the shelves, and the answer is a number the shop already owns. Every WRITE stays a non-goal: no COGS posting, no journal entry, no cost layer (FIFO / LIFO / average), no landed or standard cost, no second place a cost is stored. |
 | Automatic purchasing | We propose the buy list, a human orders; auto needs vendor integration and unearned trust. |
 | Tool crib / perishable tooling | Different lifecycle (tool life, regrinds, checkout); own module later. |
 
@@ -178,6 +178,8 @@ worked, leaves): a job attribute.
 **Item** = `parts` — every part can carry stock, and the stocked thing *is* the manufacturable part, one master (no `inventory_items`; absorbed May, `27040f2`); identity fields live on the part's Details tab, a made part's materials on `parts_bom` (`routing_materials` gone). **Balance** = `parts.quantity`, or `part_location_stock.quantity` when tracked — authoritative. **Transaction** = `inventory_transactions`: append-only, **never replayed** — audit trail, not the balance's source. **Location** = `inventory_locations`, adjacency tree; its row `id` is what a QR encodes.
 
 **Absent entirely:** purchase orders · receiving · lots/certs · remnants · on-order · min/max · reserved · ABC · serial/expiry · landed, standard or average cost · location capacity.
+
+> **Two of those moved.** Lots and certs arrived 2026-09-06 and 2026-09-09 ([§5.6](#56-lots--resolved-dont-build-them)). And since 2026-09-09 the Storage page reports **on-hand cost** — read from the part's own purchase tier at the quantity held. That is a READ of a number costing already owns, not a costing layer: landed, standard and average cost all remain absent, and nothing writes a cost anywhere ([§5.15](#515-money-is-the-only-common-denominator-storage-has)).
 
 ### Data model — non-obvious bits only
 
@@ -328,7 +330,7 @@ Owner/admin: shortages become a vendor-grouped buy list → PO with expected dat
 
 ### J6 — Receive it
 
-Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost or cert — it does take the **heat number** since 2026-09-04, through the same `add_stock_at_location(p_heat_number)` a PO receipt will call; [§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 that receipt is also where a **lot** is created — the only place one can be, since a take may not invent one — and `lot_certificates` gives a cert somewhere to live, though nothing collects one yet: the founder's objection to scanning PDFs at the receiving bench is unanswered, not designed around. The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
+Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no screen. Match the PO, record what came, capture **heat/lot** + **cert PDF**, print a tag, put it away. **Missing**; closest is `OperatorReceivePartModal` (bin stock-in; no PO, vendor, cost or cert — it does take the **heat number** since 2026-09-04, through the same `add_stock_at_location(p_heat_number)` a PO receipt will call; [§5.6](#56-lots--resolved-dont-build-them)). Since 2026-09-06 that receipt is also where a **lot** is created — the only place one can be, since a take may not invent one — and since 2026-09-09 the receipt is where the **cert** is collected too — offered after the stock has landed, never in front of it ([§5.6a](#certs-are-collected-at-receiving--2026-09-09)). What is still missing here is the PO, the vendor and the cost, not the traceability. The tag is human-readable, **not** a second scannable object ([§5.3](#53-the-location-is-the-scan-anchor)).
 
 ### **J7 — Issue material to a job**
 
@@ -596,7 +598,7 @@ the third key, and no amount of care on the ledger substitutes for it.
 | `material_lots` | A heat, as a row. Identity is `(part_id, lower(btrim(lot_code)))`; `heat_number` is nullable and is **not** the same as the code — NULL says the material arrived without a heat we could read, and such a lot gets a minted code so untagged bar is still storable. Soft-deletes like everything else. |
 | `parts.lot_tracked` | Per part, default **false**. A shop holds ~9,000 parts and a handful of bar and plate is what needs tracing — the same call JobBOSS makes. Turned on by **recording a heat on a receipt**, not by a setting (see below). Never set directly: `set_part_lot_tracking()` flips it **and** migrates existing lot-less balances into a `PRE-TRACKING` lot in the same statement. |
 | `part_location_stock.lot_id` + `lot_key` | The third key. `lot_key` is a **stored generated column** collapsing NULL to the zero uuid, so `UNIQUE (part_id, location_id, lot_key)` is FULL and an upsert can infer it. Without it the NULL-lot rows would compare distinct from one another and one part could hold several balances at one place — no error, just `parts.quantity` counting the same steel twice. |
-| `lot_certificates` | The mill cert, attached to the **lot** and not to a movement. Schema only; no upload UI yet. |
+| `lot_certificates` | The mill cert, attached to the **lot** and not to a movement — a document outlives any single movement of the material. Collected since 2026-09-09 ([§5.6a](#certs-are-collected-at-receiving--2026-09-09)); several per lot is the design (mill cert + plating cert + re-test), and the newest is the current one by convention, with no column asserting it. |
 
 **Enforcement is asymmetric, and that is the whole design.** `resolve_lot()` takes two separate
 permissions rather than one: `p_create` (may this call bring a lot into existence?) and `p_mint`
@@ -668,11 +670,33 @@ That is the same collapsed-row fault as the count sheet, the part drawer, the op
 bin drawer and the part page's inventory tab — **six surfaces, one cause: a balance row is
 (part, place, lot), and any key or count that stops at the place is wrong.**
 
-**Certs are stored, not yet collected.** The founder's own objection to the obvious flow stands
-unanswered and is recorded rather than designed around: *"are people expected to scan things they
-receive into PDFs and then upload? that sounds like friction upon receiving."* The table exists so
-the seam is real; the journey does not, and a receiving screen that demands a scan before stock can
-be put away would be worse than no cert at all.
+#### Certs are collected at receiving — 2026-09-09
+
+[`lotCertificatesAccess.ts`](../../utils/lotCertificatesAccess.ts) ·
+[`CertAfterReceiptPanel.tsx`](../../components/inventory/CertAfterReceiptPanel.tsx). No migration:
+the seam was already complete.
+
+**Withdrawn:** *"are people expected to scan things they receive into PDFs and then upload? that
+sounds like friction upon receiving"* — wrong because they already do. The shop confirmed
+scanning certs to PDF is part of its existing workflow, so the upload attaches a file that exists
+rather than creating the scanning step. The quote stays because it is still the reason the panel
+sits *after* the write rather than in front of it.
+
+**Withdrawn:** *"a receiving screen that demands a scan before stock can be put away would be worse
+than no cert at all"* — wrong because nothing demands it, and the ordering is what guarantees that
+rather than a promise not to.
+
+| Decision | Why |
+|---|---|
+| The cert uploads **after** the stock RPC | The lot does not exist until the RPC creates it, so upload-first is impossible — and because the cert is a second, independent write, a failed one cannot un-land the stock. The exact inverse of [`MovementPhotoField`](../../components/operator/MovementPhotoField.tsx), which *must* upload first because `photo_path` is written at INSERT and immutable after. Both orderings are asserted in one file, `__tests__/components/operator/OperatorReceivePartModal.test.tsx` |
+| Gate on the returned `lot_id`, never on `parts.lot_tracked` | `add_stock_at_location` returns a lot exactly when the part is tracked, **including when this receipt turned tracking on**. None of the four add surfaces can read the flag beforehand anyway: `PartSelectOption` omits it, and `PartLocationActionModal.tracked` is set inside a loader that early-returns on the add path, so it is always false there |
+| `Done` is always enabled and takes focus | The never-blocks guarantee made structural. Nothing is red, nothing warns that no cert was attached, and no state of the panel can stop material being put away |
+| One control per **lot**, never per balance row | A lot on two shelves is two rows and one document. Per-row would offer two upload buttons for one cert and read as two missing certs. The [§5.6 collapsed-row fault](#56-lots--resolved-dont-build-them), biting in the opposite direction |
+| Absence is a plain control, never a warning | *"a lot with no rows is the normal state on the day material lands, and chasing it is an office task, not a dock task"* — the table's own comment |
+| Several per lot; newest is current; no `is_current` | A lot legitimately carries a mill cert plus a plating cert plus a re-test. A flag would need maintaining on delete and would still be wrong for that case. Replace = upload then delete, in that order, so a failed upload never leaves the lot with nothing |
+| No compression | `MovementPhotoField` re-encodes to 2048px/1.5 MB JPEG. The small print on an MTR *is* the content, and a re-encode destroys it first |
+| HEIC previews as a **download** | No browser renders it in an `<img>`, and iPhones produce it by default — so it is the ordinary case, not an edge one |
+| The UI's delete gate is **cosmetic** — deferred, not missed | `lot_certificates` carries one permissive `FOR ALL` policy where `part_attachments` has three, so any company member can delete a cert and — because `FOR ALL` covers UPDATE — silently repoint its `file_path`. Tightening it is three policies in one migration, deliberately deferred to ship this with no schema change |
 
 ### 5.7 Quoting never touches stock
 
@@ -930,6 +954,49 @@ with. The tree is 16 units and ~300 places at mixed depths and widths, from a fl
 pallet bay and a 4×12 small-parts cabinet.
 
 
+### 5.15 Money is the only common denominator storage has
+
+[`20260909152729_inventory_on_hand_cost.sql`](../../supabase/migrations/20260909152729_inventory_on_hand_cost.sql)
+· [`StorageInventoryTable.tsx`](../../components/inventory/StorageInventoryTable.tsx). Storage gained
+a second tab: every balance, with what it cost us, and a total at the foot. This is the reversal of
+the [§2 non-goal](#explicit-non-goals-deliberate-decided), and it needs an argument rather than a
+shrug, because the module refuses a quantity roll-up ten lines away.
+
+**Quantity does not sum, and that has not changed.** `primary_unit` is per part,
+`parts_unit_conversions` converts only *within* one part, and nothing in the schema relates one
+part's unit to another's — so 40 bearings + 3 castings + 200 inches of bar is a number with no
+dimension and no referent. That is why `inventory_location_occupancy` counts distinct parts and
+[`locationOccupancy.ts`](../../utils/locationOccupancy.ts) refuses a quantity roll-up.
+
+**Money is different in kind, not in degree.** `cost_per_unit` is dollars **per that part's own
+primary unit**, so multiplying by the balance carries every row out of its own unit into one they
+all share. The multiplication *is* the unit conversion, and it is the only one the schema owns —
+weight would need a density we do not store, and piece-equivalence does not exist.
+
+**The percentage ban is untouched and rests on something else.** A percentage needs a
+**denominator**, and `inventory_locations` has no capacity column, so "72% full" invents one. This
+invents nothing: every factor is a number a human typed. **The rule to carry forward is that we
+refuse numbers whose inputs we do not have, not numbers that are aggregates.**
+
+| Decision | Why |
+|---|---|
+| A `security_invoker` view, not an RPC | No write, no atomicity, no cross-tenant work. And the money gate must NOT live in SQL: `part_pricing_tiers` already grants SELECT to `authenticated` under a company-scoped policy, so an `is_company_admin()` check inside a definer function would make a display choice *look* like access control — the misreading [billing/dashboard.md](dashboard.md) spends three paragraphs preventing |
+| The tier is chosen at the part's **total** on-hand, not per balance | Otherwise one bar shows two different unit costs on two shelves, which reads as a bug, and a filtered total stops being the sum of its rows |
+| Both arms of the tier rule, floor included | Highest break ≤ quantity, **floored to the lowest break** when the shop holds fewer than the smallest one — mirroring `part_rollup_at_qty`'s bought arm and `resolveTier`. Taking only the first arm would report every part held in small quantity as uncosted, manufacturing gaps out of ordinary data |
+| `made` and `no_cost_tier` are separate gaps | A made part's cost lives in the routing + BOM rollup **by design**, so it has no purchase tier to be missing. One "uncosted" count would accuse a shop of not filling in a field that does not exist for that part |
+| The total is summed in the **browser**, over the filtered rows | The footer has to describe the rows above it; a server aggregate cannot follow a client filter without a round trip per keystroke. Safe only because the reader pages the complete set past `max_rows = 1000` and returns `truncated` when it hits its ceiling — at which point the surface **refuses to print a total** rather than printing a short one |
+| `costed_total` is NULL, never `$0` | "Nothing here has a cost on file" and "what is here is worth nothing" are different claims, and only one of them is true |
+| The gap disclosure renders whether or not the money does | How complete a shop's cost data is, is not itself a dollar figure — and a shop that cannot see the gap cannot close it |
+| Its own flag, `storage_inventory_cost`, not `dashboard_revenue` | That one hides REVENUE on a dashboard the shop floor walks past; this hides COST on an office-only page. One shop's answer to the first is not its answer to the second |
+| The tab strip lives in `page.tsx`, not `LocationsManager` | Its page bar deliberately holds only what belongs to neither column, and a view switcher is page-scope; `PLACE_DRAWER_WIDTH` padding sits on that component's root Box, so a sibling strip leaves the drawer's reflow arithmetic alone. It also unmounts the board on the other tab, so none of its three drawers can be left open behind a view without them |
+| Inventory is the default tab; `?unit=` still lands on Places | What is on the shelves is a daily question and reshaping storage is not — but every existing board deep link names a unit, and landing those on a table that ignores the parameter would break them silently |
+
+**Where the filter bites.** "Where" includes descendants, because stock only ever sits at a leaf
+([§5.14](#514-stock-always-names-a-location--unassigned-removed-2026-09-06),
+[`20260806160053`](../../supabase/migrations/20260806160053_location_children_hold_no_stock.sql)) —
+a filter matching a rack alone would return nothing, which looks exactly like an empty rack.
+
+
 ## 6. Sequencing
 
 **Phase 1 ✅ 2026-07-28** — J1 (closes FR-16), J9, J4, then J7 issue-to-job **job-first on the operator surface** (an earlier draft aimed it at the owner), plus the #59 patch. **Zero new tables, migrations or flags**: the figures already existed on `parts_bom`, `parts`, `inventory_transactions` — the gap was never schema. §5.2 resolved: a job is not a place. Carried: recursive BOM explode (J4), `job_part_id` on the ledger (J7), atomicity debt (§5.4).
@@ -1004,6 +1071,12 @@ Pinned by tests, not by prose.
 | J7 bin remove/receive + job-tagged depletion; owner-side job tag (#59) | `__tests__/components/operator/{OperatorBinView,OperatorReceivePartModal,OperatorLocationActionModal}.test.tsx`, `__tests__/components/parts/PartTransactionJobTag.test.tsx` |
 | Label → real `zxing-wasm` decode → location id; foreign-code rejection; camera errors | `__tests__/components/scanner/{scannerRoundTrip.test.ts,LocationScanner.test.tsx}` |
 | J1 opening balances via import | `api/tests/integration/test_parts_import_api.py` |
+| Mill certs — validation and caps, the `lots` storage prefix, `file_path` (not `storage_path`), insert rollback, row-first delete, and the batch read where absence means "no certs" while an error means an empty map | `__tests__/utils/lotCertificatesAccess.test.ts` (`validateLotCertificateFile`, `certificatePreviewKind`, `uploadLotCertificate`, `listLotCertificates`, `listLotCertificatesForLots`, `deleteLotCertificate`, `getLotCertificateUrl` — 32 its) |
+| A cert never blocks a receipt — `Done` enabled with no file, an upload failure leaving the stock recorded with a retry, and the ordering asserted on BOTH sides in one file (photo before the RPC, cert after it) | `__tests__/components/inventory/CertAfterReceiptPanel.test.tsx` (2 describes, 7 its), `__tests__/components/operator/OperatorReceivePartModal.test.tsx` (`the mill certificate, after the write` — 4 its) |
+| On-hand cost — paging past `max_rows`, the ceiling setting `truncated`, and a missing cost mapping to `null` and never to `0` | `__tests__/utils/inventoryOnHandAccess.test.ts` (`getStorageOnHand` — 8 its) |
+| The footer follows the filter; distinct-part counts; `null` not `$0`; the Where filter including descendants | `__tests__/lib/inventoryOnHand.test.ts` (`summariseOnHand`, `gapSentence`, `locationAndDescendants` — 14 its) |
+| Cost is doubly gated (tenant flag × admin × still-loading), the gap disclosure renders regardless, and no percentage or summed quantity reaches the screen | `__tests__/components/inventory/StorageInventoryTable.test.tsx` (3 describes, 9 its) |
+| **Not verified:** that the view's cost equals `part_rollup_at_qty` including the FLOOR arm. Checked by hand against the local stack on 2026-09-09 (0 mismatches over every bought part holding stock), but no seeded part is held below its smallest break, so the floor arm itself is unexercised — `automation-pending`, needs an integration test that constructs the case | — |
 
 **J1 asymmetry, pinned.** A location-tracked part's quantity is skipped *and the skip reported* — but a **brand-new** part at a locations-on company *does* get its quantity written, because the guard is `BEFORE UPDATE`, so `trg_auto_track_stocked_part` seeds the balance straight from the insert (`test_execute_writes_quantity_for_a_brand_new_part_even_with_locations_on`). Read J1's "deliberately not written" without this and you will "fix" the importer and silently zero opening balances for exactly the shops that turned locations on.
 

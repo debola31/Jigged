@@ -102,12 +102,26 @@ describe('featureFlags: dashboard_revenue (opt-out / default-on)', () => {
 describe('featureFlags: the registry itself', () => {
   it('readCompanyFeatures returns a dense map resolved against each default', () => {
     const noneSet = readCompanyFeatures({ settings: { features: {} } });
-    expect(noneSet).toEqual({ ai_insights: true, dashboard_revenue: true });
-
-    const bothOff = readCompanyFeatures({
-      settings: { features: { ai_insights: false, dashboard_revenue: false } },
+    expect(noneSet).toEqual({
+      ai_insights: true,
+      dashboard_revenue: true,
+      storage_inventory_cost: true,
     });
-    expect(bothOff).toEqual({ ai_insights: false, dashboard_revenue: false });
+
+    const allOff = readCompanyFeatures({
+      settings: {
+        features: {
+          ai_insights: false,
+          dashboard_revenue: false,
+          storage_inventory_cost: false,
+        },
+      },
+    });
+    expect(allOff).toEqual({
+      ai_insights: false,
+      dashboard_revenue: false,
+      storage_inventory_cost: false,
+    });
   });
 
   it('readCompanyFeatures drops keys the registry does not know', () => {
@@ -166,5 +180,26 @@ describe('featureFlags: the registry itself', () => {
       expect(f.label.length).toBeGreaterThan(0);
       expect(f.description.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('featureFlags: storage_inventory_cost', () => {
+  it('is registered, opt-out, and independent of the other flags', () => {
+    // Opt-OUT: a shop that has never visited /admin sees the costs.
+    expect(readCompanyFeatures({ settings: { features: {} } }).storage_inventory_cost).toBe(true);
+    // Explicit false wins over the default — the kill-switch half of opt-out.
+    expect(
+      readCompanyFeatures({ settings: { features: { storage_inventory_cost: false } } })
+        .storage_inventory_cost,
+    ).toBe(false);
+    // Independent of dashboard_revenue, and that separation is the point: one hides REVENUE on a
+    // dashboard the floor walks past, the other hides COST on an office-only page. A shop's answer
+    // to the first is not its answer to the second.
+    const revenueOff = readCompanyFeatures({ settings: { features: { dashboard_revenue: false } } });
+    expect(revenueOff.storage_inventory_cost).toBe(true);
+    const costOff = readCompanyFeatures({
+      settings: { features: { storage_inventory_cost: false } },
+    });
+    expect(costOff.dashboard_revenue).toBe(true);
   });
 });

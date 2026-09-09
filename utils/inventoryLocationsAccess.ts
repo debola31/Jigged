@@ -55,10 +55,18 @@ function chunk<T>(arr: T[], size: number): T[][] {
  *
  * Reads the `inventory_location_occupancy` view rather than counting
  * `part_location_stock` client-side. That is not an optimisation: PostgREST caps responses at
- * `max_rows` (1000 locally), and every stocked part gets an Unassigned balance row from
- * `trg_auto_track_stocked_part` — so a flat read on a few-thousand-part shop would **silently
- * truncate** and render wrong fill state with no error. The view returns one row per occupied
- * location instead.
+ * `max_rows` (1000 locally), so a flat read on a shop with more balances than that would
+ * **silently truncate** and render wrong fill state with no error. The view returns one row per
+ * occupied location instead.
+ *
+ * The cause this used to name — the `Unassigned` balance row every stocked part got from
+ * `trg_auto_track_stocked_part` — is gone (20260906182638, 20260802144310). **The hazard is
+ * unchanged and the arithmetic is worse, not better**: a balance is now (part, place, lot), which
+ * makes more rows than one-per-part-plus-a-bucket did. The header of
+ * `20260729205302_inventory_location_occupancy.sql` still names the old cause and is deliberately
+ * left alone — Supabase records each migration's text in `supabase_migrations.schema_migrations`,
+ * comments included, so editing a shipped one diverges from what prod ran. See
+ * `inventoryOnHandAccess.ts`, which pages rather than aggregating because its grain is the balance.
  *
  * **Occupied locations only.** An absent key means empty; go through
  * `occupancyFor` in `utils/locationOccupancy.ts` rather than reading the map directly.

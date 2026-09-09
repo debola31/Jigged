@@ -51,6 +51,10 @@ const menuItems: MenuItem[] = [
   // swapped relative to their industry meanings: "inventory" is the items, "storage"
   // is the places. Unconditional since the `inventory_locations` flag was retired
   // (Aug 2026) — every part has a place, so every shop has a Storage board.
+  // The word came back in 2026-09-09, as a TAB inside this page and not as a nav item: Storage now
+  // holds "Inventory" (what is on the shelves, with its cost) beside "Places" (the board). The
+  // split above still holds — Parts is the catalogue, Storage is where things live — and the tab
+  // names a view within the places area rather than a second list of items.
   { name: 'Storage', path: '/inventory/locations', icon: WarehouseIcon },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },

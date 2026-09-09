@@ -86,6 +86,15 @@ export const KNOWN_FEATURES = [
     // needed a backfill to undo. A kill-switch changes nothing until someone asks for it.
     defaultEnabled: true,
   },
+  {
+    key: 'storage_inventory_cost',
+    label: 'Storage Inventory Cost',
+    description:
+      "The cost figures on the Storage page's Inventory tab — cost per unit, each balance's value, and the total at the foot of the table. The table itself, the on-hand quantities, the places, the heats and the \"no cost on file\" disclosure stay visible whatever the flag says: how complete a shop's cost data is, is not itself a dollar figure, and a shop that cannot see it cannot fix it. On by default; turning it off leaves a shop with quantities only. Composes with the existing admin-only rule — a non-admin never sees the cost either way. Deliberately NOT dashboard_revenue: that flag hides REVENUE on a dashboard the shop floor walks past, this hides COST on an office-only page, and one shop's decision about the first is not a decision about the second.",
+    // Opt-OUT like its siblings: a GA feature with a kill-switch, not a pilot at named shops. An
+    // opt-in flag would ship a feature nobody can see until a system admin visits /admin per tenant.
+    defaultEnabled: true,
+  },
 ] as const;
 
 /**

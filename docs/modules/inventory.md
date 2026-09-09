@@ -991,10 +991,27 @@ refuse numbers whose inputs we do not have, not numbers that are aggregates.**
 | The tab strip lives in `page.tsx`, not `LocationsManager` | Its page bar deliberately holds only what belongs to neither column, and a view switcher is page-scope; `PLACE_DRAWER_WIDTH` padding sits on that component's root Box, so a sibling strip leaves the drawer's reflow arithmetic alone. It also unmounts the board on the other tab, so none of its three drawers can be left open behind a view without them |
 | Inventory is the default tab; `?unit=` still lands on Places | What is on the shelves is a daily question and reshaping storage is not — but every existing board deep link names a unit, and landing those on a table that ignores the parameter would break them silently |
 
-**Where the filter bites.** "Where" includes descendants, because stock only ever sits at a leaf
+**One search box per tab, and it matches the PATH.** The first cut had a `Search` field beside a
+`Where` select; they were two controls for one question and were visibly misaligned, because only
+one carried helper text. Inventory now has a single box matching the part, the heat and the place's
+full path — so typing a rack's name still narrows the table *and* the total to that rack. The path
+is what makes that work: stock only ever sits at a leaf
 ([§5.14](#514-stock-always-names-a-location--unassigned-removed-2026-09-06),
-[`20260806160053`](../../supabase/migrations/20260806160053_location_children_hold_no_stock.sql)) —
-a filter matching a rack alone would return nothing, which looks exactly like an empty rack.
+[`20260806160053`](../../supabase/migrations/20260806160053_location_children_hold_no_stock.sql)),
+so matching leaf names alone would answer "Raw stock rack" with nothing — indistinguishable from an
+empty rack. The Places tab's box was narrowed to locations in the same change: two searches that
+both found parts, one of them on a tab that cannot show a part, was the thing to remove.
+
+**The totals stayed in the footer; the grid gave way instead.** Putting them above the table was the
+obvious fix for "the footer scrolls off" and is wrong twice over: it puts a figure before the rows
+it sums, and it re-creates the scorecard strip this design deliberately dropped. The grid is capped
+at the viewport instead and scrolls internally, so the total is always on screen and still describes
+what is above it.
+
+**A row opens the part.** A row is a part somewhere, so clicking one opens
+[`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — everywhere
+that part is, with Add / Remove / Move / Adjust against each place. That drawer used to open from
+the Places board's search and moved here with the parts half of it.
 
 
 ## 6. Sequencing

@@ -16,7 +16,6 @@ import Card from '@mui/material/Card';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
-import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -25,8 +24,10 @@ import { useLoad } from '@/hooks/useLoad';
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getStorageOnHand, type OnHandRow } from '@/utils/inventoryOnHandAccess';
 import { getLocations } from '@/utils/inventoryLocationsAccess';
-import { gapSentence, locationAndDescendants, summariseOnHand } from '@/lib/inventoryOnHand';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
+import { gapSentence, summariseOnHand } from '@/lib/inventoryOnHand';
 import { computePathNames } from '@/lib/locationTree';
+import PartPlacesDrawer from '@/components/inventory/locations/place/PartPlacesDrawer';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -50,8 +51,13 @@ interface StorageInventoryTableProps {
    * that appears and then vanishes on a shared screen is worse than one that never appeared.
    */
   costEnabled: boolean;
-  /** Pre-selects the Where filter, so a place on the board can link straight into its own rows. */
-  initialLocationId?: string;
+  /**
+   * Walk to a place: leave this tab and select that storage UNIT on the board.
+   *
+   * Given a root id, because that is what the board's `?unit=` selects. The drawer hands back the
+   * leaf bin the stock sits in, and this component resolves it upward before crossing over.
+   */
+  onOpenPlace: (unitId: string) => void;
 }
 
 /**
@@ -74,15 +80,19 @@ interface StorageInventoryTableProps {
 export default function StorageInventoryTable({
   companyId,
   costEnabled,
-  initialLocationId,
+  onOpenPlace,
 }: StorageInventoryTableProps) {
   const gridRef = useRef<AgGridReact<OnHandRow>>(null);
   const [search, setSearch] = useState('');
-  const [locationId, setLocationId] = useState<string>(initialLocationId ?? '');
   const [onlyUncosted, setOnlyUncosted] = useState(false);
+  const [drawerPart, setDrawerPart] = useState<{
+    id: string;
+    name: string;
+    unit: string | null;
+  } | null>(null);
   const loggedRef = useRef(false);
 
-  const { data, loading, error } = useLoad(
+  const { data, loading, error, reload } = useLoad(
     () => Promise.all([getStorageOnHand(companyId), getLocations(companyId)]),
     [companyId],
   );
@@ -91,39 +101,53 @@ export default function StorageInventoryTable({
   const truncated = onHand?.truncated ?? false;
   const locations = useMemo(() => data?.[1] ?? [], [data]);
 
-  /** The Where options, as full paths so "Shelf A" under two racks is not two identical lines. */
-  const locationOptions = useMemo(() => {
+  /**
+   * Each place as its FULL path — "Raw stock rack › Row A › A-1".
+   *
+   * Load-bearing for the search, not decoration. Stock only ever sits at a leaf
+   * (20260806160053: a location with children holds none), so a search that matched only the leaf
+   * name would answer "Raw stock rack" with nothing at all — indistinguishable from an empty rack,
+   * and the exact trap the old Where filter's descendant walk existed to avoid. Matching the path
+   * gets the same answer from the one box, because every bin under a rack carries the rack's name.
+   */
+  const pathById = useMemo(() => {
     const byId = new Map(locations.map((l) => [l.id, l] as const));
-    return locations
-      .map((l) => ({ id: l.id, label: computePathNames(l.id, byId).join(' › ') }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+    return new Map(locations.map((l) => [l.id, computePathNames(l.id, byId).join(' › ')] as const));
   }, [locations]);
 
   /**
-   * Where, INCLUDING everything underneath.
+   * The storage unit a bin belongs to.
    *
-   * Stock only ever sits at a leaf (20260806160053: a location with children holds none), so
-   * picking a rack has to mean its bins — filtering on the rack alone would return nothing, which
-   * looks exactly like an empty rack and is actually a bug.
+   * The board selects UNITS, and stock sits in leaves, so walking from a part to its place has to
+   * climb first. Guarded against a parent chain that loops, which the schema should prevent but
+   * this walk must survive rather than hang the page.
    */
-  const allowedLocationIds = useMemo(
-    () => (locationId ? locationAndDescendants(locations, locationId) : null),
-    [locations, locationId],
-  );
+  const rootOf = useMemo(() => {
+    const parentOf = new Map(locations.map((l) => [l.id, l.parent_id] as const));
+    return (id: string) => {
+      const seen = new Set<string>();
+      let current = id;
+      for (;;) {
+        const parent = parentOf.get(current);
+        if (!parent || seen.has(parent)) return current;
+        seen.add(parent);
+        current = parent;
+      }
+    };
+  }, [locations]);
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (allowedLocationIds && !allowedLocationIds.has(r.locationId)) return false;
       if (onlyUncosted && r.gap === null) return false;
       if (!needle) return true;
       return (
         r.partName.toLowerCase().includes(needle) ||
-        r.locationName.toLowerCase().includes(needle) ||
+        (pathById.get(r.locationId) ?? r.locationName).toLowerCase().includes(needle) ||
         (r.heatNumber ?? '').toLowerCase().includes(needle)
       );
     });
-  }, [rows, allowedLocationIds, onlyUncosted, search]);
+  }, [rows, onlyUncosted, search, pathById]);
 
   const summary = useMemo(() => summariseOnHand(filtered), [filtered]);
   const gap = gapSentence(summary);
@@ -161,7 +185,15 @@ export default function StorageInventoryTable({
   const columnDefs = useMemo<ColDef<OnHandRow>[]>(() => {
     const cols: ColDef<OnHandRow>[] = [
       { field: 'partName', headerName: 'Part', flex: 2.2, minWidth: 200 },
-      { field: 'locationName', headerName: 'Place', flex: 1, minWidth: 120 },
+      {
+        field: 'locationName',
+        headerName: 'Place',
+        flex: 1.4,
+        minWidth: 160,
+        // The PATH, not the leaf. The search matches on the path, so showing only "A-1" would mean
+        // typing a rack's name filtered the table by something the table never displayed.
+        valueGetter: (p) => (p.data ? (pathById.get(p.data.locationId) ?? p.data.locationName) : ''),
+      },
       {
         field: 'heatNumber',
         headerName: 'Heat',
@@ -214,11 +246,29 @@ export default function StorageInventoryTable({
     }
 
     return cols;
-  }, [costEnabled]);
+    // `pathById` is read inside the Place column's valueGetter, so it belongs here: the locations
+    // resolve after the first render, and without it the column would keep the empty map it closed
+    // over and show blank places forever.
+  }, [costEnabled, pathById]);
 
+  /*
+   * A VIEWPORT-BOUND height, so the footer is always on screen.
+   *
+   * The alternative — moving the totals above the table — puts a figure before the rows it sums
+   * and re-creates the scorecard strip this design deliberately dropped. Keeping them in the footer
+   * is what makes them describe the rows above them; the grid scrolls internally instead, so the
+   * total never leaves the screen no matter how many rows there are.
+   *
+   * A shorter list still shrinks to fit rather than leaving dead space under it.
+   */
   const gridHeight = useMemo(() => {
-    if (loading || filtered.length === 0) return 480;
-    return Math.max(56 + 52 * Math.min(filtered.length, 25) + 56, 400);
+    if (loading || filtered.length === 0) return '320px';
+    // header + rows + pagination bar, capped by what is left of the viewport under the page
+    // chrome (app header, tabs, toolbar) and the footer itself.
+    const rowsHeight = 56 + 52 * Math.min(filtered.length, 25) + 56;
+    // CSS rather than `useMediaQuery`: jsdom has no `matchMedia`, so a JS branch here would be
+    // untestable — the house rule is that responsive behaviour is written as CSS.
+    return `min(${rowsHeight}px, max(320px, calc(100vh - 380px)))`;
   }, [loading, filtered.length]);
 
   if (error) {
@@ -227,36 +277,26 @@ export default function StorageInventoryTable({
 
   return (
     <Box>
+      {/*
+        ONE box, and it is the only filter.
+
+        It replaced a `Search` field beside a `Where` select — which were misaligned (the select
+        carried helper text and the search did not) and, more to the point, were two controls for
+        one question. The box matches the part, the heat, and the place's FULL PATH, so typing a
+        rack's name still narrows the table and the total to that rack. One search per tab: this
+        one finds what is on the shelves, and the Places tab's finds places.
+      */}
       <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2, flexWrap: 'wrap' }}>
         <TextField
           size="small"
-          label="Search"
+          label="Search parts, places or heats"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             onFilter('search', e.target.value.trim().length > 0);
           }}
-          sx={{ minWidth: 220 }}
+          sx={{ minWidth: 300 }}
         />
-        <TextField
-          select
-          size="small"
-          label="Where"
-          value={locationId}
-          onChange={(e) => {
-            setLocationId(e.target.value);
-            onFilter('where', e.target.value !== '');
-          }}
-          sx={{ minWidth: 220 }}
-          helperText={locationId ? 'Includes everything inside it' : ' '}
-        >
-          <MenuItem value="">Everywhere</MenuItem>
-          {locationOptions.map((o) => (
-            <MenuItem key={o.id} value={o.id}>
-              {o.label}
-            </MenuItem>
-          ))}
-        </TextField>
         {onlyUncosted && (
           <Chip
             label="Only without a cost"
@@ -266,11 +306,10 @@ export default function StorageInventoryTable({
           />
         )}
         <Box sx={{ flex: 1 }} />
-        {(search || locationId || onlyUncosted) && (
+        {(search || onlyUncosted) && (
           <Button
             onClick={() => {
               setSearch('');
-              setLocationId('');
               setOnlyUncosted(false);
             }}
           >
@@ -308,6 +347,18 @@ export default function StorageInventoryTable({
               getRowId={(params) => params.data.balanceId}
               enableCellTextSelection
               suppressCellFocus={false}
+              // A row is a part somewhere, so clicking one opens that PART — everywhere it is,
+              // with Add / Remove / Move / Adjust against each place. The same drawer the Places
+              // board used to open from its search, which is where it belongs now that the parts
+              // half of that search lives on this tab.
+              onRowClicked={(e) =>
+                e.data &&
+                setDrawerPart({
+                  id: e.data.partId,
+                  name: e.data.partName,
+                  unit: e.data.primaryUnit,
+                })
+              }
             />
           )}
         </Box>
@@ -355,6 +406,20 @@ export default function StorageInventoryTable({
         Shown whether or not the money is. How complete a shop's cost data is, is not itself a
         dollar figure — and a shop that cannot see the gap cannot close it.
       */}
+      <PartPlacesDrawer
+        part={drawerPart}
+        companyId={companyId}
+        // Leaves only: a place with children cannot hold stock, so offering a cabinet would put an
+        // error behind a legitimate-looking choice.
+        moveDestinations={stockDestinationOptions(locations)}
+        onClose={() => setDrawerPart(null)}
+        onOpenPlace={(locationId) => {
+          setDrawerPart(null);
+          onOpenPlace(rootOf(locationId));
+        }}
+        onChanged={reload}
+      />
+
       {gap && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
           {summary.noCostTierParts > 0 ? (

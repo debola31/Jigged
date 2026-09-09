@@ -66,7 +66,7 @@ test.describe('Storage — the Inventory tab', () => {
   test('shows one row per place, and totals only what has a cost', async ({ page }) => {
     await openStorage(page);
 
-    await page.getByRole('textbox', { name: 'Search' }).fill(SPLIT_PART);
+    await page.getByRole('textbox', { name: /Search parts/ }).fill(SPLIT_PART);
 
     // Split across two shelves: two rows, not one rolled-up line.
     await expect(page.getByRole('gridcell', { name: SPLIT_PART })).toHaveCount(2);
@@ -82,7 +82,7 @@ test.describe('Storage — the Inventory tab', () => {
   }) => {
     await openStorage(page);
 
-    await page.getByRole('textbox', { name: 'Search' }).fill(UNCOSTED_PART);
+    await page.getByRole('textbox', { name: /Search parts/ }).fill(UNCOSTED_PART);
 
     const row = page.getByRole('row').filter({ hasText: UNCOSTED_PART });
     await expect(row).toBeVisible();
@@ -102,7 +102,7 @@ test.describe('Storage — the Inventory tab', () => {
 
     const before = await page.getByText(/balances?$/).first().textContent();
 
-    await page.getByRole('textbox', { name: 'Search' }).fill(SPLIT_PART);
+    await page.getByRole('textbox', { name: /Search parts/ }).fill(SPLIT_PART);
     await expect(page.getByText('$130')).toBeVisible();
     await expect(page.getByText('2 balances')).toBeVisible();
 

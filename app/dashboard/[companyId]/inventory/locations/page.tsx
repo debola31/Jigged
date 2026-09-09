@@ -6,6 +6,8 @@ import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import GridViewIcon from '@mui/icons-material/GridView';
 
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import LocationsManager from '@/components/inventory/locations/LocationsManager';
@@ -22,7 +24,6 @@ export default function InventoryLocationsPage() {
 
   const unitId = searchParams.get('unit');
   const viewParam = searchParams.get('view');
-  const locationParam = searchParams.get('location');
 
   /*
    * Inventory is the default view, and Places is the one you ask for.
@@ -96,15 +97,22 @@ export default function InventoryLocationsPage() {
         onChange={(_, next: 'inventory' | 'places') => switchTo(next)}
         sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
       >
-        <Tab label="Inventory" value="inventory" />
-        <Tab label="Places" value="places" />
+        <Tab label="Inventory" value="inventory" icon={<Inventory2Icon />} iconPosition="start" />
+        <Tab label="Places" value="places" icon={<GridViewIcon />} iconPosition="start" />
       </Tabs>
 
       {view === 'inventory' ? (
         <StorageInventoryTable
           companyId={companyId}
           costEnabled={costEnabled}
-          initialLocationId={locationParam ?? undefined}
+          // Walking from a part to one of its places crosses tabs: the board is where a place
+          // opens, so this leaves Inventory rather than trying to show a bin grid inside a table.
+          onOpenPlace={(locationId) => {
+            const next = new URLSearchParams(searchParams.toString());
+            next.set('view', 'places');
+            next.set('unit', locationId);
+            router.replace(`?${next.toString()}`, { scroll: false });
+          }}
         />
       ) : (
         /* The "Back to Inventory" button is gone. Storage is a top-level sidebar item now, so

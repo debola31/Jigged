@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { summariseOnHand, gapSentence, locationAndDescendants } from '@/lib/inventoryOnHand';
+import { summariseOnHand, gapSentence } from '@/lib/inventoryOnHand';
 import type { OnHandRow } from '@/utils/inventoryOnHandAccess';
-import type { InventoryLocation } from '@/types/inventoryLocations';
 
 function row(over: Partial<OnHandRow> = {}): OnHandRow {
   return {
@@ -112,38 +111,5 @@ describe('gapSentence', () => {
     );
     expect(one).toMatch(/1 part has/);
     expect(two).toMatch(/2 parts have/);
-  });
-});
-
-describe('locationAndDescendants', () => {
-  const loc = (id: string, parent: string | null): InventoryLocation =>
-    ({ id, parent_id: parent, name: id }) as unknown as InventoryLocation;
-
-  const tree = [
-    loc('rack', null),
-    loc('rowA', 'rack'),
-    loc('A-1', 'rowA'),
-    loc('A-2', 'rowA'),
-    loc('cabinet', null),
-    loc('bin1', 'cabinet'),
-  ];
-
-  it('includes every bin under a unit — stock only ever sits at a leaf', () => {
-    // A location with children holds no stock (20260806160053), so filtering on the rack alone
-    // would return nothing at all, which looks exactly like an empty rack.
-    expect(locationAndDescendants(tree, 'rack')).toEqual(new Set(['rack', 'rowA', 'A-1', 'A-2']));
-  });
-
-  it('a leaf is just itself', () => {
-    expect(locationAndDescendants(tree, 'A-1')).toEqual(new Set(['A-1']));
-  });
-
-  it('does not leak into a sibling branch', () => {
-    expect(locationAndDescendants(tree, 'cabinet').has('A-1')).toBe(false);
-  });
-
-  it('survives a parent cycle rather than hanging the page', () => {
-    const cyclic = [loc('x', 'y'), loc('y', 'x')];
-    expect(locationAndDescendants(cyclic, 'x')).toEqual(new Set(['x', 'y']));
   });
 });

@@ -43,6 +43,15 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   getLocations: (...a: unknown[]) => mockGetLocations(...a),
 }));
 
+// The side rail reaches the network on open; this file is about the table handing it the part.
+const { mockDrawerProps } = vi.hoisted(() => ({ mockDrawerProps: { current: null as unknown } }));
+vi.mock('@/components/inventory/locations/place/PartPlacesDrawer', () => ({
+  default: (props: { part: unknown }) => {
+    mockDrawerProps.current = props;
+    return props.part ? <div data-testid="part-drawer" /> : null;
+  },
+}));
+
 import StorageInventoryTable from '@/components/inventory/StorageInventoryTable';
 import type { OnHandRow } from '@/utils/inventoryOnHandAccess';
 
@@ -74,12 +83,19 @@ const LOCATIONS = [
   { id: 'bin1', parent_id: 'cabinet', name: 'Bin 1' },
 ];
 
+const onOpenPlace = vi.fn();
+
 const renderTable = (costEnabled = true, rows: OnHandRow[] = [row()]) => {
   mockGetStorageOnHand.mockResolvedValue({ rows, truncated: false });
-  return render(<StorageInventoryTable companyId="c1" costEnabled={costEnabled} />, {
-    wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
-  });
+  return render(
+    <StorageInventoryTable companyId="c1" costEnabled={costEnabled} onOpenPlace={onOpenPlace} />,
+    { wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider> },
+  );
 };
+
+/** Fire AG Grid's row-click through the mock, which is all the table wires up. */
+const clickRow = (data: OnHandRow) =>
+  (capturedGridProps.current?.onRowClicked as (e: { data: OnHandRow }) => void)({ data });
 
 const columnHeaders = () =>
   ((capturedGridProps.current?.columnDefs ?? []) as Array<{ headerName: string }>).map(
@@ -135,7 +151,7 @@ describe('the total is honest or absent', () => {
 
   it('withholds the total entirely when the read was truncated', async () => {
     mockGetStorageOnHand.mockResolvedValue({ rows: [row()], truncated: true });
-    render(<StorageInventoryTable companyId="c1" costEnabled />, {
+    render(<StorageInventoryTable companyId="c1" costEnabled onOpenPlace={onOpenPlace} />, {
       wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
     });
     await screen.findByTestId('grid');
@@ -166,13 +182,13 @@ describe('filters move the total', () => {
     await screen.findByTestId('grid');
     expect(screen.getByText('$350')).toBeInTheDocument();
 
-    await user.type(screen.getByRole('textbox', { name: 'Search' }), '4140');
+    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), '4140');
 
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
     expect(screen.getByText(/1 part · 1 balance/)).toBeInTheDocument();
   });
 
-  it('a Where filter on a rack includes the bins inside it', async () => {
+  it('typing a rack name narrows to the bins inside it', async () => {
     const user = userEvent.setup();
     renderTable(true, [
       row({ balanceId: 'b1', locationId: 'A-1', onHandCost: 300 }),
@@ -180,12 +196,42 @@ describe('filters move the total', () => {
     ]);
     await screen.findByTestId('grid');
 
-    await user.click(screen.getByRole('combobox', { name: 'Where' }));
-    await user.click(await screen.findByRole('option', { name: 'Raw stock rack' }));
+    // Stock only ever sits at a LEAF, so matching only the leaf name would answer "Raw stock rack"
+    // with nothing — indistinguishable from an empty rack. The search matches the full path, which
+    // is how one box does what a separate Where control used to.
+    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'Raw stock rack');
 
-    // Stock only sits at leaves, so a rack that matched only itself would show nothing —
-    // indistinguishable from an empty rack.
     await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
     expect(screen.getByText(/1 part · 1 balance/)).toBeInTheDocument();
+  });
+
+  it('finds a row by its heat', async () => {
+    const user = userEvent.setup();
+    renderTable(true, [
+      row({ balanceId: 'b1', heatNumber: 'H-4471', onHandCost: 300 }),
+      row({ balanceId: 'b2', partId: 'p2', heatNumber: null, onHandCost: 50 }),
+    ]);
+    await screen.findByTestId('grid');
+
+    await user.type(screen.getByRole('textbox', { name: /Search parts/ }), 'H-4471');
+    await waitFor(() => expect(screen.getByText('$300')).toBeInTheDocument());
+  });
+});
+
+describe('a row opens the part', () => {
+  it('hands the clicked row s part to the side rail', async () => {
+    renderTable(true, [row({ partId: 'p9', partName: '4140 Bar', primaryUnit: 'in' })]);
+    await screen.findByTestId('grid');
+
+    clickRow(row({ partId: 'p9', partName: '4140 Bar', primaryUnit: 'in' }));
+
+    // A row is a part somewhere, so clicking it opens that PART — everywhere it is, with the four
+    // verbs against each place.
+    expect(await screen.findByTestId('part-drawer')).toBeInTheDocument();
+    expect((mockDrawerProps.current as { part: unknown }).part).toEqual({
+      id: 'p9',
+      name: '4140 Bar',
+      unit: 'in',
+    });
   });
 });

@@ -1,27 +1,20 @@
 /**
- * One box that finds a place OR a part.
+ * The Places tab's search: one box that finds a LOCATION.
  *
- * The behaviour worth defending is the second half. Storage is place-first, so until this existed
- * the only search on the page matched storage-unit NAMES — and typing a part number into it, which
- * is the obvious thing to do, produced "Nothing matches". A dead end in the box a person tries
- * first. These tests pin that a part now resolves to the SHELF, not merely to the cabinet.
+ * It used to find parts too, and most of this file defended that half. Both went to the Inventory
+ * tab on 2026-09-09 — the dead end the parts half closed (typing a part number into the only search
+ * on the page and being told "Nothing matches") is now closed by a whole tab for parts, and a
+ * search on the Places tab that answered with parts would be answering with things this tab cannot
+ * show. What is left is what this box is for, plus one test that pins the removal.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '../../../test-utils';
+import { render, screen } from '../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
-vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
-
-vi.mock('@/utils/inventoryLocationsAccess', () => ({
-  searchPartPlacements: vi.fn(async () => []),
-}));
-
 import StorageSearch from '@/components/inventory/locations/StorageSearch';
-import { searchPartPlacements } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 
-/** The tree is all this needs now — paths and roots are the part drawer's job, not the box's. */
 const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocation => ({
   company_id: 'co1',
   parent_id: null,
@@ -39,114 +32,52 @@ const node = (id: string, name: string, children: InventoryLocationNode[] = []) 
 const TREE = [node('cab3', 'Cabinet 3', [node('shelf-a', 'Shelf A')]), node('yard', 'Yard')];
 
 const onPick = vi.fn();
-
-const setup = () => render(<StorageSearch companyId="co1" tree={TREE} onPick={onPick} />);
+const setup = () => render(<StorageSearch tree={TREE} onPick={onPick} />);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(searchPartPlacements).mockResolvedValue([]);
 });
 
 describe('StorageSearch', () => {
   it('offers matching locations', async () => {
     const user = userEvent.setup();
     setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'cab');
-    expect(await screen.findByRole('option', { name: /Cabinet 3/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Yard/ })).not.toBeInTheDocument();
+    await user.type(screen.getByRole('combobox'), 'Cab');
+    expect(await screen.findByText('Cabinet 3')).toBeInTheDocument();
+    expect(screen.queryByText('Yard')).not.toBeInTheDocument();
   });
 
-  /** The dead end, closed: a part number typed into the only box now answers. */
-  it('finds a part', async () => {
+  it('hands back the unit that was picked, and clears itself', async () => {
     const user = userEvent.setup();
-    vi.mocked(searchPartPlacements).mockResolvedValue([
-      {
-        partId: 'p-oring',
-        partName: 'BUY-ORING-214',
-        primaryUnit: 'ea',
-        locationId: 'shelf-a',
-        quantity: 828,
-      },
-    ]);
     setup();
+    const box = screen.getByRole('combobox');
+    await user.type(box, 'Cab');
+    await user.click(await screen.findByText('Cabinet 3'));
 
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
-    expect(await screen.findByRole('option', { name: /BUY-ORING-214/ })).toBeInTheDocument();
+    expect(onPick).toHaveBeenCalledWith({ kind: 'place', id: 'cab3', label: 'Cabinet 3' });
+    // A search, not a selection that sticks: picking navigates and the box empties.
+    expect(box).toHaveValue('');
+  });
+
+  it('says no unit matched, rather than looking broken', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.type(screen.getByRole('combobox'), 'zzzz');
+    expect(await screen.findByText(/No storage unit matches/)).toBeInTheDocument();
   });
 
   /**
-   * The dropdown picks the PART. Where it lives is the answer, and it belongs on a surface that
-   * stays rather than in a menu that closes the moment you look away from it.
-   */
-  it('hands back the part, not a location', async () => {
-    const user = userEvent.setup();
-    vi.mocked(searchPartPlacements).mockResolvedValue([
-      {
-        partId: 'p-oring',
-        partName: 'BUY-ORING-214',
-        primaryUnit: 'ea',
-        locationId: 'shelf-a',
-        quantity: 828,
-      },
-    ]);
-    setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
-    await user.click(await screen.findByRole('option', { name: /BUY-ORING-214/ }));
-
-    expect(onPick).toHaveBeenCalledWith({
-      kind: 'part',
-      id: 'p-oring',
-      label: 'BUY-ORING-214',
-      unit: 'ea',
-    });
-  });
-
-  it('hands back the unit when a location is picked', async () => {
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'yard');
-    await user.click(await screen.findByRole('option', { name: /Yard/ }));
-
-    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: 'place', id: 'yard' }));
-  });
-
-  /**
-   * ONE ROW PER PART.
+   * The removal, pinned.
    *
-   * The read returns a row per (part, place) because that is what stock is — the same part on three
-   * shelves is three rows. Listing them as three options made you choose a shelf before you had
-   * seen what the choices were, and showed the part's name three times over.
+   * A part number typed here must find nothing — not because parts are unfindable, but because
+   * they are found on the other tab. If this box ever starts answering with parts again there are
+   * two searches that both find parts, and the one on the board answers with things the board
+   * cannot show.
    */
-  it('lists a part once however many locations it is in', async () => {
-    const user = userEvent.setup();
-    vi.mocked(searchPartPlacements).mockResolvedValue([
-      { partId: 'p1', partName: 'BUY-ORING-214', primaryUnit: 'ea', locationId: 'shelf-a', quantity: 828 },
-      { partId: 'p1', partName: 'BUY-ORING-214', primaryUnit: 'ea', locationId: 'yard', quantity: 552 },
-    ]);
-    setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
-
-    expect(await screen.findAllByRole('option', { name: /BUY-ORING-214/ })).toHaveLength(1);
-  });
-
-  /** One character matches most of a catalogue; the server is not asked until it means something. */
-  it('does not search on a single character', async () => {
+  it('does not answer with parts — that is the Inventory tab', async () => {
     const user = userEvent.setup();
     setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'o');
-    await waitFor(() => expect(searchPartPlacements).not.toHaveBeenCalled());
-  });
-
-  it('says nothing matched rather than looking broken', async () => {
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'zzzz');
-    expect(await screen.findByText(/nothing in storage matches/i)).toBeInTheDocument();
+    await user.type(screen.getByRole('combobox'), 'BUY-ORING-214');
+    expect(await screen.findByText(/No storage unit matches/)).toBeInTheDocument();
   });
 });

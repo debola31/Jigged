@@ -38,7 +38,6 @@ import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import StorageSearch, { type StorageHit } from './StorageSearch';
 import StorageActivity from './StorageActivity';
-import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
 import UnitAdjustDrawer from './place/UnitAdjustDrawer';
@@ -265,7 +264,6 @@ export default function LocationsManager({
   const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
 
   /** The part whose places are showing, if the search found one. */
-  const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
 
   /** The unit being bulk-adjusted, if any. Resolved from the tree so a rename lands in its header. */
   const [adjustUnitId, setAdjustUnitId] = useState<string | null>(null);
@@ -301,25 +299,19 @@ export default function LocationsManager({
    * in a menu that closes.
    */
   const onSearchPick = (hit: StorageHit) => {
-    if (hit.kind === 'place') {
-      setPlaceId(null);
-      setDrawerPlaceId(null);
-      setSearchPart(null);
-      showUnit(hit.id);
-      return;
-    }
-    setSearchPart({ id: hit.id, name: hit.label, unit: hit.unit });
+    setPlaceId(null);
+    setDrawerPlaceId(null);
+    showUnit(hit.id);
   };
 
   /**
-   * Walking from a part to one of its places.
+   * Walking from a movement in the activity feed to the place it happened.
    *
-   * Selects the unit the bin belongs to and opens that bin, and closes the part drawer — two
-   * drawers stacked would bury the thing just chosen under the thing that found it.
+   * Selects the unit the bin belongs to and opens that bin. It used to close a part drawer too;
+   * that drawer moved to the Inventory tab with the parts half of the search (2026-09-09).
    */
   const openPlaceFromPart = (locationId: string) => {
     const unitId = rootOf(locationId, byId);
-    setSearchPart(null);
     setPlaceId(locationId);
     setDrawerPlaceId(locationId);
     showUnit(unitId);
@@ -531,7 +523,7 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          <StorageSearch companyId={companyId} tree={tree} onPick={onSearchPick} />
+          <StorageSearch tree={tree} onPick={onSearchPick} />
 
           <Box sx={{ flex: 1 }} />
 
@@ -799,17 +791,6 @@ export default function LocationsManager({
         rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
         buried under both, which is the failure the old detail sheet was deleted for.
       */}
-      {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
-      <PartPlacesDrawer
-        part={searchPart}
-        companyId={companyId}
-        // Leaves only, never the put-away pile. The form excludes the place being moved FROM.
-        moveDestinations={stockDestinationOptions(locations)}
-        onClose={() => setSearchPart(null)}
-        onOpenPlace={openPlaceFromPart}
-        onChanged={reload}
-      />
-
       <PlaceDrawer
         place={drawerPlace}
         companyId={companyId}

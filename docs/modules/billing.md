@@ -37,6 +37,8 @@ Dedicated 1:1 satellite of `companies` (migration `stripe_billing_cache`). It is
 | `stripe_subscription_id`, `subscription_status`, `subscription_price_id` | cached sub state |
 | `current_period_end`, `cancel_at`, `canceled_at`, `ended_at`, `trial_end` | cached timestamps |
 | `override_price_id`, `override_trial_days` | reserved-customer checkout overrides (§6) |
+| `backpay_amount_cents`, `backpay_description` | one-time catch-up charge added to the first invoice (§6.1) |
+| `backpay_charged_at` | one-way latch — set on first `active`/`past_due`; stops a re-bill (§6.1) |
 | `subscription_event_at` | monotonic write-guard stamp (§5) |
 
 **Why a separate table, not columns on `companies`:** `companies` grants
@@ -252,11 +254,16 @@ Writes go through the `apply_stripe_subscription(...)` RPC (guarded upsert):
 - **Grandfather auto-clear:** `billing_exempt` clears only on `active`/`past_due`
   (a real paying relationship), **never on `trialing`** — so a grandfathered shop
   that starts a trial and cancels mid-trial keeps its free access.
+- **Backpay latch:** `backpay_charged_at` is stamped on the *same* condition, and
+  once set is never re-cleared. `/checkout` bills the catch-up only while it is NULL,
+  so this stamp is the entire cancel-then-resubscribe guard (§6.1). Trialing is
+  excluded for the same reason as above: an abandoned trial paid for nothing.
 
 **Endpoints** (`/api/stripe/*`, admin-only except the webhook):
 - `POST /checkout` — server picks the price (`override_price_id` else
   `STRIPE_PRICE_ID`) + trial (`override_trial_days` else 30); rejects demo (400) and
-  double-subscribe (409, checked against Stripe, not just the cache).
+  double-subscribe (409, checked against Stripe, not just the cache). Appends the
+  backpay line item when one is configured and unpaid (§6.1).
 - `POST /portal` — self-heals a stale cache first (§8); 409 → "subscribe" if no live
   sub.
 - `POST /webhook` — verifies signature; resolves the customer → company → sync.
@@ -288,6 +295,65 @@ Writes go through the `apply_stripe_subscription(...)` RPC (guarded upsert):
 
 Future price changes are **new Price objects** — never mutate/migrate an existing
 subscription's price.
+
+### 6.1 Backpay — charging for service already delivered
+
+A shop that ran on `billing_exempt` (a pilot, a grandfathered company) owes for the
+months already delivered when it finally subscribes. Rather than a separate invoice
+paid before or after checkout, `/checkout` appends a **one-time line item to the same
+Checkout Session**, so the hosted page shows the catch-up and the monthly price with
+**one total the customer approves once**.
+
+Set two columns (service-role), exactly like the price/trial overrides:
+
+```sql
+UPDATE public.company_billing
+SET backpay_amount_cents = 75000,
+    backpay_description  = 'Jigged service June 5 - September 9, 2026 (previously unbilled)'
+WHERE company_id = '…';
+```
+
+`backpay_description` is printed **verbatim on the invoice** their bookkeeper reads
+months later — word it so it explains itself. The amount is a plain integer, not a
+Price object: it is per-company and covers a specific window, so there is nothing
+reusable to point at.
+
+**Why it can't recur:** Stripe puts one-time line items on the **initial invoice
+only** ([Checkout Sessions](https://docs.stripe.com/api/checkout/sessions/create) —
+20 recurring + 20 one-time line items per session). Renewals carry the recurring
+price alone. That is a Stripe guarantee, not something this code arranges.
+
+**Two mechanisms that look right and are not** — both were checked and rejected, so
+don't "simplify" into them:
+
+- **`subscription_data.add_invoice_items` does not exist on Checkout Sessions.** It
+  is a `POST /v1/subscriptions` parameter. Stripe's guidance for Checkout is
+  explicitly *"add extra charges by specifying `line_items`"*.
+- **Pending invoice items (and `customer.balance` debits) are invisible on the
+  Checkout page but still land on the first invoice.** The customer would approve
+  $1,000 and be charged $1,750. `_backpay_line_item` **refuses with a 409** when the
+  customer has either, rather than trying to reconcile the difference — the displayed
+  total and the charged total must be the same number.
+
+**Also refused:** backpay combined with a trial (`trial_days > 0`). A trial zeroes
+the recurring line but not the one-time one, and "free trial that charges today" is
+undocumented territory. It raises a 500 and reports to Sentry, because it can only be
+a misconfiguration — reserved-price customers run `override_trial_days = 0`.
+
+> **`STRIPE_RESTRICTED_KEY` needs two scopes nothing else in this app uses:**
+> **Prices: read** and **Invoice items: read**. The backpay branch calls
+> `Price.retrieve` (to take the currency from the recurring price rather than
+> assuming USD — all line items in a session must share one) and `InvoiceItem.list`;
+> without them the endpoint 502s the first time a backpay company checks out.
+> **The sandbox `rk_test` key has both — verified 2026-09-09** by
+> `test_backpay_checkout_session_shows_both_lines`, which creates a real Session and
+> would 502 otherwise. **Restricted keys are per-mode objects with independent
+> scopes, so that says nothing about the live key** — check it in the Dashboard
+> before the first production backpay checkout.
+
+The `backpay_charged_at` latch (§5) is what stops a cancel-then-resubscribe from
+billing the catch-up twice. Ordinary checkouts are unaffected: the branch is skipped
+entirely when `backpay_amount_cents` is NULL, so no extra Stripe calls are made.
 
 ## 7. Rollout: grandfathering existing shops
 

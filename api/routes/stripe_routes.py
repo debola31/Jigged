@@ -305,6 +305,74 @@ def _resolve_company_for_event(s, client: Client, obj, customer_id: str | None) 
     return None
 
 
+def _backpay_line_item(
+    s, customer_id: str, price_id: str, billing: dict, trial_days: int
+) -> dict:
+    """Build the one-time Checkout line item for previously-unbilled service.
+
+    Stripe puts one-time line items on the INITIAL invoice only, so a backpay charge
+    can never leak onto a renewal. What that does NOT protect against is the first
+    invoice quietly exceeding the total the customer approved on the hosted page:
+    Checkout renders the session's line items, but the invoice it generates also
+    sweeps in any pending invoice item and applies any customer balance debit,
+    neither of which the page shows. Both are refused here rather than reconciled —
+    a customer who approves $1,000 must be charged $1,000.
+    """
+    # A trial zeroes the recurring line but not the one-time one, and the resulting
+    # "free trial that charges today" is undocumented territory. Reserved-price
+    # customers run trial_days = 0, so this is a misconfiguration, not a flow.
+    if trial_days > 0:
+        sentry_sdk.capture_message(
+            f"Backpay configured with a {trial_days}-day trial for company "
+            f"{billing.get('company_id')} — refusing to build the session"
+        )
+        raise HTTPException(
+            status_code=500, detail="Backpay cannot be combined with a trial"
+        )
+
+    try:
+        pending = s.InvoiceItem.list(customer=customer_id, pending=True, limit=1)
+        customer = s.Customer.retrieve(customer_id)
+        # Every line item in a session must share one currency; take it from the
+        # recurring price rather than assuming USD. This runs only on the backpay
+        # path, so an ordinary checkout adds no Stripe round-trip.
+        currency = _g(s.Price.retrieve(price_id), "currency")
+    except stripe.error.StripeError as e:
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=502, detail="Stripe error preparing backpay")
+
+    if _g(pending, "data"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This customer has pending invoice items; resolve them before "
+                "billing backpay."
+            ),
+        )
+    if _g(customer, "balance"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This customer has a non-zero account balance; resolve it before "
+                "billing backpay."
+            ),
+        )
+
+    return {
+        "quantity": 1,
+        "price_data": {
+            "currency": currency,
+            "unit_amount": int(billing["backpay_amount_cents"]),
+            # Inline product: the amount and the service window it covers are
+            # per-company, so there is no reusable Price to point at.
+            "product_data": {
+                "name": billing.get("backpay_description")
+                or "Previously unbilled service",
+            },
+        },
+    }
+
+
 # ───────────────────────── endpoints ─────────────────────────
 @router.post("/checkout", response_model=UrlResponse)
 async def create_checkout(body: CheckoutRequest, request: Request):
@@ -372,12 +440,23 @@ async def create_checkout(body: CheckoutRequest, request: Request):
             "end_behavior": {"missing_payment_method": "cancel"}
         }
 
+    # Backpay: previously-unbilled service, billed ONCE on the first invoice
+    # alongside the recurring price, so the customer approves a single total on a
+    # single hosted page. Service-role-set, like the price/trial overrides above.
+    line_items = [{"price": price_id, "quantity": 1}]
+    backpay_cents = billing.get("backpay_amount_cents") if billing else None
+    if backpay_cents and not billing.get("backpay_charged_at"):
+        line_items.append(
+            _backpay_line_item(s, customer_id, price_id, billing, trial_days)
+        )
+        subscription_data["metadata"]["backpay_amount_cents"] = str(backpay_cents)
+
     base = _app_base_url()
     try:
         session = s.checkout.Session.create(
             mode="subscription",
             customer=customer_id,
-            line_items=[{"price": price_id, "quantity": 1}],
+            line_items=line_items,
             subscription_data=subscription_data,
             client_reference_id=body.company_id,
             success_url=f"{_billing_url(base, body.company_id)}?session_id={{CHECKOUT_SESSION_ID}}",

@@ -171,6 +171,182 @@ def test_checkout_blocks_second_subscription_via_stripe(monkeypatch):
     assert exc.value.status_code == 409
 
 
+# ───────────────────────── checkout: backpay line item ─────────────────────────
+def _backpay_stripe(created, *, pending_items=None, balance=0):
+    """A Stripe double for the backpay path: no existing subscription, a clean
+    customer, and a Session.create that records the kwargs it was handed."""
+    pending_items = pending_items or []
+
+    class _FakeSubs:
+        @staticmethod
+        def list(customer=None, status=None, limit=None):
+            return _stripe_obj({"data": []})
+
+    class _FakeInvoiceItems:
+        @staticmethod
+        def list(customer=None, pending=None, limit=None):
+            # NB: the `pending` parameter deliberately does not shadow the fixture's
+            # configured items — the route passes pending=True.
+            return _stripe_obj({"data": pending_items})
+
+    class _FakeCustomers:
+        @staticmethod
+        def retrieve(cid):
+            return _stripe_obj({"id": cid, "balance": balance})
+
+    class _FakePrices:
+        @staticmethod
+        def retrieve(pid):
+            return _stripe_obj({"id": pid, "currency": "usd"})
+
+    class _FakeSessions:
+        @staticmethod
+        def create(**kwargs):
+            created.update(kwargs)
+            return _stripe_obj({"url": "https://checkout.stripe.test/s"})
+
+    class _FakeCheckout:
+        Session = _FakeSessions
+
+    class _FakeStripe:
+        Subscription = _FakeSubs
+        InvoiceItem = _FakeInvoiceItems
+        Customer = _FakeCustomers
+        Price = _FakePrices
+        checkout = _FakeCheckout
+
+    return _FakeStripe()
+
+
+def _backpay_client(**billing_extra):
+    billing = {
+        "company_id": "c1",
+        "stripe_customer_id": "cus_x",
+        "subscription_status": None,
+        "override_price_id": "price_founder",
+        "override_trial_days": 0,
+    }
+    billing.update(billing_extra)
+    return FakeClient({
+        "companies": [{"id": "c1", "is_demo": False, "email": None}],
+        "company_billing": [billing],
+    })
+
+
+def _run_backpay_checkout(monkeypatch, fake_stripe, client):
+    monkeypatch.setattr(sr, "_verify_company_admin", _noop_admin)
+    monkeypatch.setattr(sr, "_service_client", lambda: client)
+    monkeypatch.setattr(sr, "_stripe", lambda: fake_stripe)
+    monkeypatch.setenv("APP_BASE_URL", "https://jigged.test")
+    return asyncio.run(
+        sr.create_checkout(CheckoutRequest(company_id="c1"), FakeRequest())
+    )
+
+
+def test_checkout_appends_backpay_line_item(monkeypatch):
+    """The backpay rides on the SAME session as the recurring price, so the hosted
+    page shows one total. It must be a one-time price (no `recurring` key), which is
+    what makes Stripe put it on the initial invoice only."""
+    created: dict = {}
+    _run_backpay_checkout(
+        monkeypatch,
+        _backpay_stripe(created),
+        _backpay_client(
+            backpay_amount_cents=75000,
+            backpay_description="Jigged service June 5 - September 9, 2026",
+        ),
+    )
+
+    items = created["line_items"]
+    assert len(items) == 2
+    assert items[0] == {"price": "price_founder", "quantity": 1}
+
+    backpay = items[1]["price_data"]
+    assert backpay["unit_amount"] == 75000
+    assert backpay["currency"] == "usd"  # taken from the recurring price, not assumed
+    assert "recurring" not in backpay  # one-time => initial invoice only
+    assert backpay["product_data"]["name"] == "Jigged service June 5 - September 9, 2026"
+    # The subscription records why its first invoice was larger than $250.
+    assert created["subscription_data"]["metadata"]["backpay_amount_cents"] == "75000"
+
+
+def test_checkout_without_backpay_is_a_single_line_item(monkeypatch):
+    created: dict = {}
+    _run_backpay_checkout(monkeypatch, _backpay_stripe(created), _backpay_client())
+    assert created["line_items"] == [{"price": "price_founder", "quantity": 1}]
+    assert "backpay_amount_cents" not in created["subscription_data"]["metadata"]
+
+
+def test_checkout_does_not_rebill_an_already_charged_backpay(monkeypatch):
+    """Cancel-then-resubscribe must not charge the catch-up twice."""
+    created: dict = {}
+    _run_backpay_checkout(
+        monkeypatch,
+        _backpay_stripe(created),
+        _backpay_client(
+            backpay_amount_cents=75000,
+            backpay_charged_at="2026-09-09T00:00:00+00:00",
+        ),
+    )
+    assert created["line_items"] == [{"price": "price_founder", "quantity": 1}]
+
+
+def test_checkout_backpay_falls_back_to_a_generic_description(monkeypatch):
+    created: dict = {}
+    _run_backpay_checkout(
+        monkeypatch,
+        _backpay_stripe(created),
+        _backpay_client(backpay_amount_cents=75000, backpay_description=None),
+    )
+    name = created["line_items"][1]["price_data"]["product_data"]["name"]
+    assert name == "Previously unbilled service"
+
+
+def test_checkout_backpay_refuses_a_trial(monkeypatch):
+    """A trial zeroes the recurring line but not the one-time one. That combination
+    is a misconfiguration, and it must be loud rather than silently charged."""
+    created: dict = {}
+    with pytest.raises(HTTPException) as exc:
+        _run_backpay_checkout(
+            monkeypatch,
+            _backpay_stripe(created),
+            _backpay_client(backpay_amount_cents=75000, override_trial_days=30),
+        )
+    assert exc.value.status_code == 500
+    assert "trial" in exc.value.detail.lower()
+    assert not created  # no session was created
+
+
+def test_checkout_backpay_refuses_pending_invoice_items(monkeypatch):
+    """A pending invoice item is invisible on the Checkout page but IS swept into
+    the first invoice — the customer would approve one total and be charged another."""
+    created: dict = {}
+    with pytest.raises(HTTPException) as exc:
+        _run_backpay_checkout(
+            monkeypatch,
+            _backpay_stripe(created, pending_items=[{"id": "ii_1"}]),
+            _backpay_client(backpay_amount_cents=75000),
+        )
+    assert exc.value.status_code == 409
+    assert "pending invoice items" in exc.value.detail
+    assert not created
+
+
+def test_checkout_backpay_refuses_a_nonzero_customer_balance(monkeypatch):
+    """Same divergence, different mechanism: a balance debit is applied to the
+    invoice in full and never rendered on the Checkout page."""
+    created: dict = {}
+    with pytest.raises(HTTPException) as exc:
+        _run_backpay_checkout(
+            monkeypatch,
+            _backpay_stripe(created, balance=5000),
+            _backpay_client(backpay_amount_cents=75000),
+        )
+    assert exc.value.status_code == 409
+    assert "balance" in exc.value.detail
+    assert not created
+
+
 # ───────────────────────── portal: self-heal reconcile ─────────────────────────
 def _portal_client():
     return FakeClient({

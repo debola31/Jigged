@@ -135,3 +135,18 @@ class TestPath:
         """Logs are an append sink a rotation may clear; state does not live there."""
         monkeypatch.delenv("JIGGED_STATUS_FILE", raising=False)
         assert "Library/Logs" not in str(worker_status.path())
+
+
+class TestTheSuiteCannotEscape:
+    """A regression guard for the conftest fixture, not for status.py.
+
+    The first run of these tests wrote fixture data over the real file in
+    ~/Library/Application Support. Nothing failed, because nothing was looking.
+    This looks.
+    """
+
+    def test_the_autouse_fixture_redirects_the_path(self, tmp_path: Path) -> None:
+        assert worker_status.path().parent == tmp_path
+
+    def test_no_test_can_reach_the_real_location(self) -> None:
+        assert "Application Support" not in str(worker_status.path())

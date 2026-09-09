@@ -4,7 +4,6 @@ import { useRef, useState } from 'react';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import CircularProgress from '@mui/material/CircularProgress';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
@@ -125,13 +124,23 @@ export default function LotCertificateControl({
       {uploading ? (
         <CircularProgress size={20} />
       ) : newest ? (
+        /*
+          A Button, not a Chip.
+
+          A clickable Chip renders a plain div here: it opens on a mouse click and is invisible to
+          the keyboard and to a screen reader — the accessibility conformance the design system
+          treats as a requirement rather than polish. The e2e caught it by being unable to find the
+          control by role. It also makes the two states look alike, which they should: "Cert" and
+          "Add cert" are the same affordance in two conditions.
+        */
         <Tooltip title={`Open ${newest.file_name}`}>
-          <Chip
+          <Button
             size="small"
-            icon={<DescriptionOutlinedIcon />}
-            label={certificates.length > 1 ? `Certs (${certificates.length})` : 'Cert'}
+            startIcon={<DescriptionOutlinedIcon />}
             onClick={() => setViewing(newest)}
-          />
+          >
+            {certificates.length > 1 ? `Certs (${certificates.length})` : 'Cert'}
+          </Button>
         </Tooltip>
       ) : (
         <Button size="small" onClick={() => inputRef.current?.click()}>

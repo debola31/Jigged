@@ -236,7 +236,12 @@ export default function OperatorReceivePartModal({
                 lotId={landed.lotId}
                 surface="operator_receive"
                 heatLabel={landed.heatLabel}
-                onDone={onClose}
+                // See the note in PartLocationActionModal: the stock write's `onDone` already ran,
+                // before this panel existed, so a cert attached here needs a second refresh.
+                onDone={async () => {
+                  await onDone();
+                  onClose();
+                }}
               />
             )}
           </Stack>

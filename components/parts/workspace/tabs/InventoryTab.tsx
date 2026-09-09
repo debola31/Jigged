@@ -103,7 +103,11 @@ export default function InventoryTab({
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Heats and certificates
             </Typography>
-            <PartLotCertificates partId={partId} companyId={companyId} />
+            <PartLotCertificates
+              partId={partId}
+              companyId={companyId}
+              refreshKey={transactionsRefreshKey}
+            />
           </Box>
         )}
 

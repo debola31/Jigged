@@ -296,7 +296,14 @@ export default function OperatorLocationActionModal({
               lotId={landedLotId}
               surface="operator"
               heatLabel={heatNumber.trim() ? `Heat ${heatNumber.trim()}` : null}
-              onDone={onClose}
+              // Refresh the parent AGAIN, then close. The stock write already fired `onDone` —
+              // before this panel existed — so a cert attached here lands after the page last
+              // refetched, and without a second call the heats list keeps offering "Add cert"
+              // for a lot that now has one.
+              onDone={async () => {
+                await onDone();
+                onClose();
+              }}
             />
           </Box>
         ) : (

@@ -875,6 +875,30 @@ export const E2E_COST_SHELF = 'E2E Cost Shelf';
 export const E2E_UNCOSTED_PART = 'E2E-NO-COST';
 
 /**
+ * The part `storage-certificates.spec.ts` receives against, and its own shelf.
+ *
+ * It must start each run UNTRACKED and lot-less, because the journey under test is that recording a
+ * heat is what STARTS tracing a part — a one-way door. A find-or-skip fixture would leave the part
+ * tracked after the first run and silently stop exercising the thing the spec is named for.
+ */
+export const E2E_CERT_PART = 'E2E-CERT';
+export const E2E_CERT_SHELF = 'E2E Cert Shelf';
+
+/**
+ * A priced part split across two shelves, owned solely by `storage-inventory.spec.ts`.
+ *
+ * It exists because that spec asserts an EXACT total, and the first version borrowed
+ * `E2E-COUNT-SPLIT` — which `inventory-count.spec.ts` writes to. Both specs passed alone and the
+ * pair failed in a full run, which is the failure mode a shared mutable fixture always has.
+ *
+ * 40 + 12 at $2.50 is $130, and the split is the point: two rows for one part is what per-place
+ * grain means, and both must carry the SAME unit cost because the tier is chosen at the part total.
+ */
+export const E2E_VALUE_PART = 'E2E-VALUE';
+export const E2E_VALUE_SHELF_A = 'E2E Value Shelf A';
+export const E2E_VALUE_SHELF_B = 'E2E Value Shelf B';
+
+/**
  * Put an exact quantity of one part at one named place.
  *
  * ABSOLUTE, like `ensureSplitStock` below and for the same reason: CI starts clean and a dev
@@ -918,10 +942,7 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
     primary_unit: 'each',
-    // Priced since 2026-09-09 so the Storage Inventory table has a costed row to total. 52 held
-    // (40 + 12) at $2.50 is $130 — a figure `storage-inventory.spec.ts` asserts exactly, and the
-    // only fixture in the suite that already proves a part split across two shelves.
-    cost_per_unit: 2.5,
+    cost_per_unit: null,
   });
 
   const shelfA = await ensureLocation(supabase, companyId, E2E_SHELF_A);
@@ -942,6 +963,71 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
   if (error) throw new Error(`split stock upsert failed: ${error.message}`);
 
   await ensureUncostedStock(supabase, companyId);
+  await resetCertPart(supabase, companyId);
+  await ensureValueStock(supabase, companyId);
+}
+
+/** The priced, split part `storage-inventory.spec.ts` totals. ABSOLUTE, like its siblings. */
+async function ensureValueStock(supabase: SupabaseClient, companyId: string): Promise<void> {
+  const partId = await ensurePart(supabase, companyId, {
+    part_name: E2E_VALUE_PART,
+    description: 'Priced and split across two shelves, for the Storage Inventory total',
+    source: 'bought',
+    primary_unit: 'each',
+    cost_per_unit: 2.5,
+  });
+
+  const shelfA = await ensureLocation(supabase, companyId, E2E_VALUE_SHELF_A);
+  const shelfB = await ensureLocation(supabase, companyId, E2E_VALUE_SHELF_B);
+
+  const { error } = await supabase.from('part_location_stock').upsert(
+    [
+      { company_id: companyId, part_id: partId, location_id: shelfA, quantity: 40 },
+      { company_id: companyId, part_id: partId, location_id: shelfB, quantity: 12 },
+    ],
+    { onConflict: 'part_id,location_id,lot_key' },
+  );
+  if (error) throw new Error(`value stock upsert failed: ${error.message}`);
+}
+
+/**
+ * A part with no heats, no stock and tracking OFF — reset every run.
+ *
+ * ABSOLUTE like its siblings, and more so: `set_part_lot_tracking` is not symmetric. Recording a
+ * heat turns tracking on and migrates existing balances into a `PRE-TRACKING` lot, and turning it
+ * back off deliberately does NOT merge them back. So the only way to get a clean "this part has
+ * never seen a heat" starting state is to remove what the last run created.
+ *
+ * Order matters: `part_location_stock.lot_id` is ON DELETE RESTRICT, so balances go before lots.
+ * Certificates cascade with their lot (`lot_certificates.lot_id` is ON DELETE CASCADE), so they
+ * need no separate delete — the storage objects they pointed at are left behind as orphans, which
+ * is the same category of harmless litter the app already tolerates.
+ */
+async function resetCertPart(supabase: SupabaseClient, companyId: string): Promise<void> {
+  const partId = await ensurePart(supabase, companyId, {
+    part_name: E2E_CERT_PART,
+    description: 'Receives a heat, and a mill certificate with it',
+    source: 'bought',
+    primary_unit: 'each',
+    cost_per_unit: null,
+  });
+
+  await ensureLocation(supabase, companyId, E2E_CERT_SHELF);
+
+  const { error: balanceErr } = await supabase
+    .from('part_location_stock')
+    .delete()
+    .eq('part_id', partId);
+  if (balanceErr) throw new Error(`cert part balance reset failed: ${balanceErr.message}`);
+
+  const { error: lotErr } = await supabase.from('material_lots').delete().eq('part_id', partId);
+  if (lotErr) throw new Error(`cert part lot reset failed: ${lotErr.message}`);
+
+  const { error: partErr } = await supabase
+    .from('parts')
+    .update({ lot_tracked: false, quantity: 0 })
+    .eq('id', partId);
+  if (partErr) throw new Error(`cert part tracking reset failed: ${partErr.message}`);
 }
 
 /**

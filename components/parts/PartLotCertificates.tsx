@@ -19,10 +19,22 @@ const EMPTY_CERTS = new Map<string, LotCertificate[]>();
 interface PartLotCertificatesProps {
   partId: string;
   companyId: string;
+  /**
+   * Bumped by the workspace on every stock change.
+   *
+   * Needed because the cert read is keyed on the LOT IDS: a receipt that attaches a cert to a lot
+   * that already existed changes neither the id list nor the balances, so without this the section
+   * would go on offering "Add cert" for a lot that now has one.
+   */
+  refreshKey: number;
 }
 
 /**
  * Every heat this part has ever carried, and the certificate against each.
+ *
+ * **The only place a certificate is attached or opened on this page.** The balance rows above show
+ * a heat as identity and stop there: one lot is one document, and a lot that is both on a shelf and
+ * in this list would otherwise carry two "Add cert" buttons doing the same thing on one screen.
  *
  * **This is the office path, and it is the only surface that can answer the question that actually
  * gets asked**: *"the customer wants the cert for heat 4471"* — about a heat consumed last month.
@@ -36,15 +48,19 @@ interface PartLotCertificatesProps {
  *
  * Rendered only for a lot-tracked part, so an untracked one issues no request from here.
  */
-export default function PartLotCertificates({ partId, companyId }: PartLotCertificatesProps) {
+export default function PartLotCertificates({
+  partId,
+  companyId,
+  refreshKey,
+}: PartLotCertificatesProps) {
   const [error, setError] = useState<string | null>(null);
 
-  const { data: lots, loading } = useLoad(() => getLotsForPart(partId), [partId]);
+  const { data: lots, loading } = useLoad(() => getLotsForPart(partId), [partId, refreshKey]);
   const lotIds = (lots ?? []).map((l) => l.lotId);
   const lotKey = lotIds.join(',');
   const { data: certsData, reload: reloadCerts } = useLoad(
     () => listLotCertificatesForLots(lotIds),
-    [lotKey],
+    [lotKey, refreshKey],
   );
   const certsByLot = certsData ?? EMPTY_CERTS;
 

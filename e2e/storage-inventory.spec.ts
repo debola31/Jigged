@@ -6,8 +6,11 @@ import { test, expect, type Page } from '@playwright/test';
  * WHAT THIS COVERS THAT NOTHING ELSE CAN. The component tests mock the access layer, so they prove
  * the table renders what it is handed; they cannot prove the VIEW hands it the right thing, that
  * the tab is what a real user lands on, or that a part split across two shelves arrives as two rows
- * with one shared unit cost. That last one is why this reuses `E2E-COUNT-SPLIT` — it is the only
- * fixture in the suite that is genuinely split, and per-place grain is the whole shape of the table.
+ * with one shared unit cost.
+ *
+ * It uses its OWN split part rather than borrowing `E2E-COUNT-SPLIT`. The first version borrowed it,
+ * and both specs passed alone while the pair failed in a full run — `inventory-count.spec.ts` writes
+ * to that part, so an exact total anchored on it is only ever true until something counts it.
  *
  * The two figures are exact on purpose. 40 + 12 at $2.50 is $130, and `E2E-NO-COST` holds 7 with no
  * price: one costed row to prove the total, one uncosted row to prove it is EXCLUDED and said so in
@@ -16,9 +19,9 @@ import { test, expect, type Page } from '@playwright/test';
  * asserted by its em dash and its sentence, not by its absence.
  */
 
-const SPLIT_PART = 'E2E-COUNT-SPLIT';
+const SPLIT_PART = 'E2E-VALUE';
 const UNCOSTED_PART = 'E2E-NO-COST';
-const SHELF_A = 'E2E Shelf A';
+const SHELF_A = 'E2E Value Shelf A';
 
 async function openStorage(page: Page): Promise<string> {
   await page.goto('/');

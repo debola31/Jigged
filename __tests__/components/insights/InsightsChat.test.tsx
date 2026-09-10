@@ -315,7 +315,6 @@ describe('InsightsChat — the surface says what it is', () => {
     // prior reasoning -- "a caveat that only appears on an empty page is a caveat
     // nobody reads" -- was about it PERSISTING into the conversation, which it
     // still does; this is the other half of that sentence.
-    expect(screen.queryByText(/check the numbers before you act/)).not.toBeInTheDocument();
     expect(screen.queryByText(/can make mistakes/i)).not.toBeInTheDocument();
     // What stands in its place invites rather than warns, and every noun in it is
     // something schema_context.py actually describes.
@@ -332,9 +331,9 @@ describe('InsightsChat — the surface says what it is', () => {
     render(<InsightsChat companyId="co-1" />);
 
     expect(await screen.findByText('Six.')).toBeInTheDocument();
-    // Names the failure this system actually has -- reading a business term the
-    // owner's way -- rather than asking for distrust it gives no way to act on.
-    expect(screen.getAllByText(/check the numbers before you act/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Jigged AI can make mistakes\. Please double-check responses\./).length,
+    ).toBeGreaterThan(0);
   });
 
   it('offers starting over as the primary action, not the quiet one', async () => {
@@ -349,6 +348,45 @@ describe('InsightsChat — the surface says what it is', () => {
     expect(screen.getByRole('button', { name: 'Chat history' }).className).toMatch(
       /MuiButton-outlined/,
     );
+  });
+
+  it('restores the question from the job after leaving the page and coming back', async () => {
+    // THE WALK-AWAY CASE, and it is the normal one rather than an edge: a question
+    // runs for tens of seconds and a report for minutes, so people go and do
+    // something else. `askedQuestion` is React state and dies with the unmount, so
+    // returning used to show a spinner labelled with nothing — the answer was never
+    // at risk (the job handle survives in sessionStorage and the turn is written by
+    // a trigger), only the sentence saying what it was thinking about.
+    //
+    // Nothing is typed here: this mounts fresh onto a job already in flight, which
+    // is exactly what coming back looks like.
+    mockUseAiJob.mockReturnValue({
+      ...IDLE_JOB,
+      phase: 'pending',
+      job: { id: 'job-7', status: 'running', payload: { question: 'how many jobs are late right now?' } },
+    });
+    render(<InsightsChat companyId="co-1" />);
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('how many jobs are late right now?');
+  });
+
+  it('reads the report door\'s wording too, and shows nothing when the row has neither', async () => {
+    // The chat door writes payload.question, the report door writes payload.request.
+    mockUseAiJob.mockReturnValue({
+      ...IDLE_JOB,
+      phase: 'pending',
+      job: { id: 'job-8', status: 'running', payload: { request: 'one-page report on this quarter' } },
+    });
+    const { unmount } = render(<InsightsChat companyId="co-1" />);
+    expect(await screen.findByRole('status')).toHaveTextContent('one-page report on this quarter');
+    unmount();
+
+    // A job from an older shape degrades to no echo rather than rendering undefined.
+    mockUseAiJob.mockReturnValue({ ...IDLE_JOB, phase: 'pending', job: { id: 'job-9', status: 'running', payload: null } });
+    render(<InsightsChat companyId="co-1" />);
+    const bare = await screen.findByRole('status');
+    expect(bare.textContent).not.toMatch(/undefined|null/);
   });
 
   it('names no hardware while it is working — the wait says what it is doing, not where', async () => {

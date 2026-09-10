@@ -28,7 +28,13 @@ import {
   type ReportTurn,
   type ThreadMessage,
 } from '@/utils/aiChatAccess';
-import { ChatEnqueueError, reportResultOf, submitChatQuery, type ReportSummary } from '@/utils/insightsAccess';
+import {
+  askedQuestionOf,
+  ChatEnqueueError,
+  reportResultOf,
+  submitChatQuery,
+  type ReportSummary,
+} from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
 
 /**
@@ -288,6 +294,21 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const job = useAiJob(`insights.${companyId}`);
 
   const pending = asking || job.phase === 'pending';
+
+  /**
+   * What the wait is about, whether or not this tab is the one that asked.
+   *
+   * `askedQuestion` is React state and dies when the page unmounts, so someone who
+   * asked a question, went to look at a job while it worked and came back met a
+   * spinner labelled with nothing. The job handle already survives that trip in
+   * sessionStorage (useAiJob re-attaches to it), so the ANSWER was never at risk —
+   * only the sentence saying what was asked, which is the part that makes a
+   * minute-long wait legible rather than unnerving.
+   *
+   * Local state still wins when it is there: it is set the instant Send is
+   * pressed, where the row has not necessarily come back from the first poll yet.
+   */
+  const inFlightQuestion = askedQuestion || askedQuestionOf(job.job) || '';
   const storageKey = `${THREAD_STORAGE_PREFIX}${companyId}`;
 
   // Re-attach to the conversation after a reload. Deferred into a microtask for
@@ -621,7 +642,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <CircularProgress size={16} color="warning" />
           <Typography variant="body2" color="text.secondary">
-            {askedQuestion ? `${askedQuestion} — ` : ''}
+            {inFlightQuestion ? `${inFlightQuestion} — ` : ''}
             <Box component="span" sx={{ color: 'warning.light' }}>
               {loadingMessageFor(loadingTick)}
             </Box>
@@ -651,7 +672,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                 New conversation
               </Button>
             ) : (
-              <Button color="inherit" size="small" onClick={() => handleSubmit(askedQuestion)}>
+              <Button color="inherit" size="small" onClick={() => handleSubmit(inFlightQuestion)}>
                 Try again
               </Button>
             )
@@ -685,18 +706,17 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
    * an empty box for the whole ten-second wait -- the same warning-before-you-begin
    * reading, just later.
    *
-   * THE WORDING NAMES THE FAILURE THIS SYSTEM ACTUALLY HAS. "Jigged AI can make
-   * mistakes. Please double-check responses." was Anthropic's footer with the name
-   * swapped: it asks for distrust and offers no way to act on it, and "please" is a
-   * plea from a product whose audience is described in brand-guide.md as skeptical
-   * of software that over-promises. The assistant writes SQL against the shop's own
-   * data and can pick the wrong reading of a business term -- which it has, live --
-   * and the owner is the authority on what "revenue" means in his shop, so naming
-   * that is an audit he can perform.
+   * THE WORDING IS THE ORIGINAL, restored 2026-09-10 after a shorter-lived
+   * rewrite. That rewrite named the specific failure ("Jigged can read a term
+   * like revenue differently than you do") on the argument that it gives an audit
+   * the reader can perform. The owner asked for the plain sentence back, and it
+   * earns its place: it is short enough to be read on every turn rather than
+   * skimmed past, and it does not lead a nervous reader to think the ONLY thing
+   * that can go wrong is a misread definition.
    *
-   * IT IS A TONE CHANGE, NOT A SAFETY ONE. A randomised trial (PubMed 40998694)
+   * It is a TONE line, not a safety control. A randomised trial (PubMed 40998694)
    * found "can make mistakes" warnings moved verification behaviour not at all
-   * (15.3% vs 15.9%). Do not let this line be cited as a mitigation.
+   * (15.3% vs 15.9%). Do not let it be cited as a mitigation.
    */
   const disclaimer = (
     <Typography
@@ -704,8 +724,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       color="text.secondary"
       sx={{ display: 'block', textAlign: 'center', mt: 1 }}
     >
-      Answers are built from your shop&apos;s data. Jigged can read a term like &ldquo;revenue&rdquo;
-      differently than you do — check the numbers before you act.
+      Jigged AI can make mistakes. Please double-check responses.
     </Typography>
   );
 

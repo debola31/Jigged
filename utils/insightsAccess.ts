@@ -185,6 +185,7 @@ export type AiJob = Pick<
   | 'lease_expires_at'
   | 'batch_key'
   | 'kind'
+  | 'payload'
 >;
 
 const TERMINAL: readonly string[] = ['succeeded', 'failed', 'timed_out'];
@@ -205,7 +206,7 @@ export function isInFlight(job: AiJob | null): boolean {
  * erasure CLAUDE.md forbids. Duplicating twelve column names is the cheaper price.
  */
 const AI_JOB_SELECT =
-  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key, kind' as const;
+  'id, status, executor, model, result, error, error_kind, created_at, expires_at, lease_expires_at, batch_key, kind, payload' as const;
 
 /**
  * Narrow `ai_jobs.result` to the answer shape.
@@ -230,6 +231,33 @@ export function chatResultOf(job: AiJob | null): ChatResponse | null {
     off_topic: candidate.off_topic === true,
     grounding_corrected: candidate.grounding_corrected === true,
   };
+}
+
+/**
+ * The question this job is working on, read back off the job itself.
+ *
+ * WHY THE ROW AND NOT A SECOND STORAGE KEY. A question in flight lives in React
+ * state, and React state does not survive leaving the page — so someone who asked
+ * something, went to look at a job while it worked and came back found a spinner
+ * with no idea what it was thinking about. A wait that routinely runs tens of
+ * seconds (and minutes for a report) is exactly the wait people walk away from,
+ * so this is the normal path rather than an edge case.
+ *
+ * The question is ALREADY on the row the poll is reading; stashing a copy beside
+ * it would be a second source of truth that can disagree with the job it labels.
+ * `ai_chat_messages` cannot answer this either — the trigger writes both turns
+ * only when the job SUCCEEDS, so mid-flight there is no user turn to read.
+ *
+ * Checked at runtime rather than asserted: `payload` is `jsonb`, the chat door
+ * writes `question` and the report door writes `request`, and a job from an older
+ * shape must degrade to "no echo" rather than render `undefined`.
+ */
+export function askedQuestionOf(job: AiJob | null): string | null {
+  const raw = job?.payload;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  const asked = candidate.question ?? candidate.request;
+  return typeof asked === 'string' && asked.trim() ? asked : null;
 }
 
 /**

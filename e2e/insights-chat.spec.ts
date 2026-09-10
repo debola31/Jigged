@@ -121,7 +121,6 @@ test.describe('Insights chat', () => {
     // NO CAVEAT BEFORE THERE IS AN ANSWER. A warning about mistakes shown to
     // someone who has not yet done anything was the most off-putting thing on
     // this surface; it is read under the composer from the first answer on.
-    await expect(page.getByText(/check the numbers before you act/)).toHaveCount(0);
     await expect(page.getByText(/can make mistakes/i)).toHaveCount(0);
 
     // What stands in its place invites, and every noun in it is a subject the
@@ -172,8 +171,10 @@ test.describe('Insights chat', () => {
     await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(QUESTION)).toBeVisible();
 
-    // The caveat arrives with the answer, and names the failure this system has.
-    await expect(page.getByText(/check the numbers before you act/).first()).toBeVisible();
+    // The caveat arrives with the answer, not before there is one to caveat.
+    await expect(
+      page.getByText('Jigged AI can make mistakes. Please double-check responses.').first(),
+    ).toBeVisible();
 
     // THE POINT OF THE FIXED-HEIGHT PANE. Before this, the transcript grew the page
     // and every answer pushed the scorecards off the top. Overdue Jobs is the first

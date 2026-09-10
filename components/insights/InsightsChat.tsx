@@ -682,6 +682,22 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
               textAlign: 'left',
               px: 2,
               fontWeight: 400,
+              // MUI's ButtonBase sets `outline: 0` and neither the theme nor
+              // CssBaseline puts one back, so NO button in this app currently
+              // shows a keyboard focus ring -- verified in a browser, and the same
+              // gap design-system.md records for hand-rolled ButtonBase bands.
+              // These three are the primary way into the feature for someone who
+              // has not thought of a question yet, so they get one here rather
+              // than waiting for the app-wide fix.
+              // LONGHANDS, not the `outline` shorthand: measured in a browser, the
+              // shorthand landed as `solid 0px` -- the style applied and the width
+              // did not, so the ring was invisible while looking correct in source.
+              '&:focus-visible': {
+                outlineWidth: '2px',
+                outlineStyle: 'solid',
+                outlineColor: 'primary.light',
+                outlineOffset: '2px',
+              },
             }}
           >
             {prompt}

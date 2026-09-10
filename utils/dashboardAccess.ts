@@ -1072,24 +1072,6 @@ async function collectActivity(
 }
 
 /**
- * Compact dashboard "Recent Activity" card: the latest manager-relevant
- * business milestones (jobs created/completed, quotes created, shipments) —
- * deliberately NOT the high-volume per-note/photo floor chatter, which lives on
- * the dedicated /activity page. Newest first, capped (default 6).
- */
-export async function getDashboardActivity(
-  companyId: string,
-  opts?: { limit?: number },
-): Promise<ActivityItem[]> {
-  const limit = opts?.limit ?? 6;
-  const items = await collectActivity(companyId, {
-    types: ['job', 'quote', 'shipment'],
-    perSource: Math.max(limit * 3, 12),
-  });
-  return items.slice(0, limit);
-}
-
-/**
  * The dedicated /activity page stream: the full cross-module feed including
  * floor activity (notes, photos, operation completions). Optionally filtered by
  * type and paginated with a `before` cursor (pass the last item's timestamp to

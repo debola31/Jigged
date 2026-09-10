@@ -69,8 +69,11 @@ const turn = (seq: number, question: string, answer: string, extra: Record<strin
 
 async function ask(question: string) {
   const user = userEvent.setup();
-  // The placeholder changes once a conversation exists ('Ask a follow-up…').
-  await user.type(screen.getByPlaceholderText(/^Ask /), question);
+  // BY ACCESSIBLE NAME, NOT BY PLACEHOLDER. The placeholder is copy and changes
+  // with the state ('Type your question…' empty, 'Ask a follow-up…' in a
+  // conversation); aria-label is the contract a screen reader reads and the one
+  // thing about this field that must not drift.
+  await user.type(screen.getByLabelText('Your question'), question);
   await user.click(screen.getByRole('button', { name: 'Send question' }));
 }
 
@@ -150,12 +153,34 @@ describe('InsightsChat — what an enqueue refusal looks like', () => {
 });
 
 describe('InsightsChat — the conversation', () => {
-  it('opens on one centred question with example chips, and no lists', async () => {
+  it('gives every starter an icon, and never the wrong one', async () => {
+    // The icons ride in a PARALLEL array indexed alongside the prompts, because
+    // the prompts must stay a flat literal for api/tests/unit/test_chart_exemplar.py
+    // to regex-parse. A parallel array is the cost of that, and this is the guard:
+    // one short, and the last starter renders with no icon and no error.
     render(<InsightsChat companyId="co-1" />);
 
-    expect(screen.getByRole('heading', { name: 'What do you want to know about the shop?' })).toBeInTheDocument();
-    expect(screen.getByText('What is my revenue trend over time?')).toBeInTheDocument();
-    expect(screen.getByText('One-page report on this quarter')).toBeInTheDocument();
+    for (const prompt of ['How many jobs are late right now?', 'What is my revenue trend over time?', 'One-page report on this quarter']) {
+      const row = screen.getByRole('button', { name: new RegExp(prompt.replace(/[?]/g, '\\?')) });
+      expect(row.querySelector('svg')).not.toBeNull();
+    }
+  });
+
+  it('opens on one heading and three starters, and no lists', async () => {
+    render(<InsightsChat companyId="co-1" />);
+
+    // An offer, not a demand -- and scoped to what this does today, because the
+    // agentic work that would widen it does not exist yet.
+    expect(screen.getByRole('heading', { name: 'Ask about your shop' })).toBeInTheDocument();
+    // One that answers in prose, one that charts, one that comes back as a page.
+    expect(screen.getByRole('button', { name: /How many jobs are late right now\?/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /What is my revenue trend over time\?/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /One-page report on this quarter/ })).toBeInTheDocument();
+    // Three, not five: the two dropped questions were the weakest of the set.
+    expect(screen.queryByText(/quote pipeline/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/top customer/i)).not.toBeInTheDocument();
+    // The starters are an option, not the recommended path.
+    expect(screen.getByText('Or try one of these')).toBeInTheDocument();
     // One box, no picker: the words decide whether the answer is a page.
     expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull();
@@ -222,29 +247,34 @@ describe('InsightsChat — the conversation', () => {
 });
 
 describe('InsightsChat — the surface says what it is', () => {
-  it('says the caveat in the empty state and in a conversation, and nothing else', async () => {
+  it('says no caveat before there is an answer, and says one after', async () => {
     render(<InsightsChat companyId="co-1" />);
 
+    // NOT ON THE EMPTY PAGE. A warning about mistakes shown to someone who has
+    // not yet done anything was the most off-putting thing on this surface. The
+    // prior reasoning -- "a caveat that only appears on an empty page is a caveat
+    // nobody reads" -- was about it PERSISTING into the conversation, which it
+    // still does; this is the other half of that sentence.
+    expect(screen.queryByText(/check the numbers before you act/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can make mistakes/i)).not.toBeInTheDocument();
+    // What stands in its place invites rather than warns, and every noun in it is
+    // something schema_context.py actually describes.
     expect(
-      screen.getByText(/Jigged AI can make mistakes\. Please double-check responses\./),
+      screen.getByText('Ask about your jobs, quotes, parts, customers, vendors and work centers.'),
     ).toBeInTheDocument();
-    // NO TITLE, NO BETA PILL. Both were tried and both were clutter: the empty
-    // state's own question says what this is, and the caveat under the composer
-    // -- read on every turn rather than once at the top -- says what the pill was
-    // standing in for. Asserted as absence so neither creeps back beside the other.
+    // NO TITLE, NO BETA PILL. Both were tried and both were clutter.
     expect(screen.queryByText('Ask the shop')).not.toBeInTheDocument();
     expect(screen.queryByText('BETA')).not.toBeInTheDocument();
 
-    // Still said once the conversation has started -- a caveat that only appears
-    // on an empty page is a caveat nobody reads.
+    // Once an answer exists it is said under the composer, on every turn.
     window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
     mockListThreadMessages.mockResolvedValue(turn(1, 'how many open quotes?', 'Six.'));
     render(<InsightsChat companyId="co-1" />);
 
     expect(await screen.findByText('Six.')).toBeInTheDocument();
-    expect(
-      screen.getAllByText(/Please double-check responses\./).length,
-    ).toBeGreaterThan(0);
+    // Names the failure this system actually has -- reading a business term the
+    // owner's way -- rather than asking for distrust it gives no way to act on.
+    expect(screen.getAllByText(/check the numbers before you act/).length).toBeGreaterThan(0);
   });
 
   it('offers starting over as the primary action, not the quiet one', async () => {
@@ -256,7 +286,7 @@ describe('InsightsChat — the surface says what it is', () => {
 
     const newChat = await screen.findByRole('button', { name: /New conversation/ });
     expect(newChat.className).toMatch(/MuiButton-contained/);
-    expect(screen.getByRole('button', { name: 'Chat History' }).className).toMatch(
+    expect(screen.getByRole('button', { name: 'Chat history' }).className).toMatch(
       /MuiButton-outlined/,
     );
   });
@@ -315,10 +345,10 @@ describe('InsightsChat — a report is an answer, not a mode', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByText('PDF of the backlog and late jobs'));
+    await user.click(screen.getByRole('button', { name: /One-page report on this quarter/ }));
 
-    expect(mockCreateThread).toHaveBeenCalledWith('co-1', 'PDF of the backlog and late jobs');
-    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'PDF of the backlog and late jobs', 'thread-1');
+    expect(mockCreateThread).toHaveBeenCalledWith('co-1', 'One-page report on this quarter');
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'One-page report on this quarter', 'thread-1');
     const posthog = (await import('posthog-js')).default;
     expect(posthog.capture).toHaveBeenCalledWith('ai job enqueued', {
       feature: 'insights',
@@ -385,7 +415,7 @@ describe('InsightsChat — the History rail', () => {
     render(<InsightsChat companyId="co-1" />);
     expect(mockListThreads).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Chat History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
     const rail = await screen.findByRole('list', { name: 'Conversations' });
     expect(within(rail).getByText('Booked by month')).toBeInTheDocument();
     const posthog = (await import('posthog-js')).default;
@@ -405,7 +435,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'Chat History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
     await user.click(await screen.findByRole('tab', { name: 'Reports' }));
     const list = await screen.findByRole('list', { name: 'Reports' });
     await user.click(within(list).getByText('Backlog and late jobs'));
@@ -423,7 +453,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'Chat History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
     await user.click(await screen.findByRole('tab', { name: 'Charts' }));
     const list = await screen.findByRole('list', { name: 'Charts' });
     expect(within(list).getByText(/Trend · Sep 8/)).toBeInTheDocument();
@@ -441,7 +471,7 @@ describe('InsightsChat — the History rail', () => {
     const user = userEvent.setup();
     render(<InsightsChat companyId="co-1" />);
 
-    await user.click(screen.getByRole('button', { name: 'Chat History' }));
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
     await user.click(await screen.findByRole('button', { name: 'Archive "Late jobs and customers"' }));
 
     expect(mockArchiveThread).toHaveBeenCalledWith('thread-9');

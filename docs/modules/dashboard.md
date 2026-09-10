@@ -212,61 +212,48 @@ must never render as a confident `0`.
 
 ---
 
-## Recent Activity
+## Activity
 
-A glanceable feed built **UNION-on-read over the authoritative tables** — deliberate, not a pending "activity
-log table": per-tenant volume is tiny and the timestamps already live on the source rows, so a second source of
-truth would only invite drift. `getDashboardActivity` / `getActivityStream` in `utils/dashboardAccess.ts`; card
-rendered by `components/dashboard/RecentActivity.tsx`, a collapsible accordion whose state persists in
-`localStorage` (`jigged-recent-activity-expanded`).
+**Withdrawn from the dashboard 2026-09-10.** A compact "Recent Activity" card sat between the
+scorecards and the AI area, showing six business milestones from `getDashboardActivity`. It is gone,
+along with that function — `/dashboard/{companyId}/activity` had already outgrown it (nine type
+filters, pagination, a fuller query in `getActivityStream`) and the sidebar links straight there, so
+a six-row preview of a better screen was only costing the page a block. Nothing moved: the feed
+itself is unchanged.
+
+The feed is built **UNION-on-read over the authoritative tables** — deliberate, not a pending
+"activity log table": per-tenant volume is tiny and the timestamps already live on the source rows,
+so a second source of truth would only invite drift. `getActivityStream` in
+`utils/dashboardAccess.ts`.
 
 | Surface | Sources | Limit (per source before the merge) |
 |---|---|---|
-| Dashboard card | Quote created, job created, job completed, shipment (`shipments.created_at` → "shipped") | 6 (`max(limit × 3, 12)`) |
-| `/dashboard/{companyId}/activity` | the above **plus** **invoices** (`quickbooks_invoice_links`, `status = 'created'` only), notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
+| `/dashboard/{companyId}/activity` | Quote created, job created, job completed, shipment (`shipments.created_at` → "shipped"), **invoices** (`quickbooks_invoice_links`, `status = 'created'` only), notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
 
 Shipments come from the real `shipments` table — there is no `jobs.shipped_at` in the dual-status model.
-
-**Invoices are on the page but NOT on the card.** The card is the four business milestones and stays
-that way; adding a fifth is a deliberate decision, not a consequence of the source existing.
 
 ### An archived job takes its paperwork with it
 
 **None of these tables carries a `deleted_at`** — a shipment is *voided*, an invoice is voided, and
-an operation and a note belong to a job — so the job's flag is the only archive signal there is, and
-every source has to reach it through the join. `fetchShipmentActivity` and `fetchOperationActivity`
-did not, which meant an archived job's shipments and completions went on appearing in the feed after
-the job had left every other surface (fixed 2026-09-09, alongside invoices arriving; CLAUDE.md calls
-this the most-violated rule in the repo, and it is silent when broken).
-
-PostgREST honours **both** the table name and the alias for an embedded filter, so
-`.is('jobs.deleted_at', null)` is correct against a `job:jobs!inner(…)` embed — verified against the
-local stack rather than assumed.
-
-**Notes are the exception, and filter in JS.** Both of their job FKs are nullable — `job_id` for a
-job-subject note, `captured_job_id` for a durable part-subject one, and *neither* for a
-work-center-subject note — so an `!inner` join on either would silently drop a whole row kind. The
-skip therefore happens after the read, on the job the row actually resolves to.
-**Floor chatter is deliberately excluded from the card** and lives only on the `/activity` page, reached by the
-card's **"View all activity"** link (`viewAllHref`, set by `page.tsx`; the link renders only when it is). Each
-row: type-coloured icon, entity number (Q-0089 / J-0042), action text, relative timestamp with an absolute-time
-tooltip. Empty: "No recent activity." on the card, "No activity yet." on the page.
-
 ---
 
 ## AI Insights
 
-Below Recent Activity: the chat (`InsightsChat`), gated on the `ai_insights` flag, which is **opt-out** (on
-unless a system admin turns it off for the tenant) and stays hidden while the flag loads so it never flashes in
-then out. Since 2026-09-08 it is the whole AI area: a centred question until a conversation exists, then a
-composer docked under the exchanges; asked in words for a one-page report, it answers with one as a turn,
-and its **History** button opens a rail with past conversations, reports and charts. Full spec — text-to-SQL
+**Everything under the scorecards (2026-09-10).** The chat (`InsightsChat`) is gated on the
+`ai_insights` flag, which is **opt-out** (on unless a system admin turns it off for the tenant) and
+stays hidden while the flag loads so it never flashes in then out. It used to be the fourth block on
+a scrolling page; a centred input reads as calm when it IS the page and as an afterthought when it is
+a footer, which is what an owner meant by calling the surface intimidating. One column in every
+state — heading, transcript, composer, footer — with each slot emptying rather than moving, so the
+composer is one DOM node at one index and never remounts. Asked in words for a one-page report, it
+answers with one as a turn, and its **Chat history** button — inside the composer's column, not
+right-aligned to the full page width — opens a rail with past conversations, reports and charts. Full spec — text-to-SQL
 flow, persistence, prompts, and the "AI only on explicit user action" contract — is in
 [AI Insights & Charts](ai-insights.md); the surfaces are in its *Dashboard surfaces* section. *(A saved-charts
 grid and a Reports card used to sit under the ask bar; withdrawn, see that section.)*
 
 **Nothing on this page may call a paid AI provider on mount.** `page.tsx`'s effects fire plain Supabase reads
-only (`isDashboardEmpty`, `getDashboardActivity`); the ask-bar is driven by a submit. This is stated here, not
+only (`isDashboardEmpty`); the composer is driven by a submit. This is stated here, not
 just deferred, because **this is the page the rule was written from** — `AlertBadge` →
 `/api/insights/{id}/dashboard` once fired five Anthropic calls per dashboard load, nobody ever read the output,
 and it burned the credits in days (CLAUDE.md, "AI calls require an explicit user action"). A new tile is the
@@ -284,8 +271,8 @@ single-column at every width.
 ## Data refresh
 
 **As built:** everything is fetched **once on mount** and never again — metrics via `useLoad` in
-`DashboardMetrics`, Recent Activity and the empty-state check via `useEffect` in
-`page.tsx`. Changing the Completed card's period refetches. Otherwise there is no auto-poll, no live
+`DashboardMetrics`, the unfinished-work band's two reads, and the empty-state check via `useEffect`
+in `page.tsx`. Changing the Completed card's period refetches. Otherwise there is no auto-poll, no live
 subscription, no refresh button and no pull-to-refresh; fresh data requires re-navigating.
 
 **Intended, not built:** a manual refresh button plus a visible "last updated HH:MM", so numbers are

@@ -572,7 +572,7 @@ calls this the half that must not move. It is enforced in SQL rather than in rev
 **forgotten** timer, which is absolute; the office prompt catches an **overrun**, which is relative.
 
 **And the card's subject widened with pause.** It is now
-[`UnfinishedWorkCard`](../../components/dashboard/UnfinishedWorkCard.tsx), headed *Unfinished on the
+[`UnfinishedWorkBand`](../../components/dashboard/UnfinishedWorkBand.tsx), headed *Unfinished on the
 floor*, with a **Running** group and a **Paused** group backed by `get_paused_operations`. `Stop`
 appears on running rows only: a paused span is already closed, its minutes are recorded and correct,
 and the machine is free, so there is nothing there to stop.

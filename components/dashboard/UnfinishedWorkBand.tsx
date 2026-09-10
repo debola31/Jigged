@@ -7,8 +7,7 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
+  ButtonBase,
   Chip,
   Dialog,
   DialogActions,
@@ -30,6 +29,8 @@ import {
   formatDuration,
   longRunningThresholdMinutes,
 } from '@/lib/duration';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import type { OpenInterval, PausedOperation } from '@/types/operationInterval';
 
 /**
@@ -71,6 +72,20 @@ import type { OpenInterval, PausedOperation } from '@/types/operationInterval';
  * the honest resolution of that sentence rather than a contradiction of it: the
  * confirmation available is "this did not happen", not a number.
  *
+ * A BAND ABOVE THE SCORECARDS, NOT A CARD BELOW THEM (2026-09-10, renamed from
+ * UnfinishedWorkCard). This is a data-hygiene prompt rather than a business
+ * metric, and as a full card between the scorecards and the AI area it took a
+ * metric-sized block of the page to say something most days it has nothing to say
+ * about. As a band it announces the count and opens the detail behind it.
+ *
+ * THE WHOLE BAND IS THE BUTTON, copying OutsideWorkStrip.tsx on the Jobs page —
+ * same amber, same shape, same rule. It is a real `<button>` rather than a Box
+ * with an onClick, so it takes keyboard focus and fires on Enter and Space; and
+ * NOTHING INSIDE IT IS INTERACTIVE, because a nested button is invalid HTML and
+ * gives the row two competing accessible names. "See what's unfinished" is a
+ * plain span — the affordance, not the control. If a second action is ever wanted
+ * here, the band stops being a button first (docs/design-system.md).
+ *
  * NO OPERATOR NAMES. An open interval is a fact about a MACHINE — "Mill-2 has
  * been running since Friday 4pm" — and that is the fact the office acts on.
  * `get_open_intervals` does not return operator identity at all, so this is
@@ -100,7 +115,7 @@ function overrun(since: string, expectedMinutes: number) {
   return { ms, isLong: ms > thresholdMinutes * 60_000 };
 }
 
-export default function UnfinishedWorkCard({ companyId }: { companyId: string }) {
+export default function UnfinishedWorkBand({ companyId }: { companyId: string }) {
   /**
    * ONE STATE OBJECT FOR BOTH LISTS, not two.
    *
@@ -119,6 +134,9 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
   const rows = lists.open;
   const paused = lists.paused;
   const [loaded, setLoaded] = useState(false);
+  // The detail behind the band. Closed by default: the band is the summary, and
+  // the rows are what you open when the summary says something happened.
+  const [detailOpen, setDetailOpen] = useState(false);
   // The row whose Stop is being confirmed. Discarding measured time is not
   // undoable — `voided_at` has no inverse — so it is a confirm, per
   // docs/interaction-standards.md.
@@ -195,13 +213,96 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
     ...paused.filter((r) => overrun(r.paused_at, r.expected_minutes).isLong),
   ];
 
-  return (
-    <Card>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Unfinished on the floor
-        </Typography>
+  const total = rows.length + paused.length;
+  // Reads as a sentence rather than a pair of counts: "3 timers still unfinished
+  // -- 2 running, 1 paused". The split matters because the two need different
+  // things done about them, and the band is the only place it is stated before
+  // someone decides whether to open the detail at all.
+  const split = [
+    rows.length > 0 ? `${rows.length} running` : null,
+    paused.length > 0 ? `${paused.length} paused` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
+  return (
+    <>
+      <ButtonBase
+        onClick={() => setDetailOpen(true)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          width: '100%',
+          mb: 2,
+          px: 2,
+          py: 1.5,
+          borderRadius: 1,
+          textAlign: 'left',
+          justifyContent: 'flex-start',
+          // The values are OutsideWorkStrip's, deliberately: two amber bands on
+          // two office screens that mean "something is sitting" should not be two
+          // different ambers.
+          bgcolor: 'rgba(245, 158, 11, 0.10)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderLeft: '3px solid',
+          borderLeftColor: 'warning.main',
+          transition: 'background-color 120ms ease, border-color 120ms ease',
+          // Hover LIGHTENS the ground, which is the worse case for contrast on
+          // warning.light text, so the lift is small and the rest of the feedback
+          // is spent on the border. Measured on the strip this copies: 5.27:1 at
+          // rest, 4.93:1 hovered, against AA's 4.5:1.
+          '&:hover': {
+            bgcolor: 'rgba(245, 158, 11, 0.14)',
+            borderColor: 'rgba(245, 158, 11, 0.55)',
+            borderLeftColor: 'warning.main',
+          },
+          // ButtonBase ships no focus ring of its own. Without this the keyboard
+          // path to the detail is invisible.
+          '&:focus-visible': {
+            outline: '2px solid',
+            outlineColor: 'warning.light',
+            outlineOffset: '2px',
+          },
+        }}
+      >
+        <HourglassEmptyIcon sx={{ color: 'warning.main', flexShrink: 0 }} />
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="body1">
+            <Box component="strong" sx={{ color: 'warning.light' }}>
+              {total} {total === 1 ? 'timer' : 'timers'} still unfinished
+            </Box>{' '}
+            — {split}
+          </Typography>
+          {stale.length > 0 && (
+            <Typography variant="body2" color="text.secondary">
+              {stale.length === 1 ? 'One has' : `${stale.length} have`} been sitting longer than the
+              step should take.
+            </Typography>
+          )}
+        </Box>
+        <Box sx={{ flex: 1 }} />
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            flexShrink: 0,
+            color: 'warning.light',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Typography variant="button" sx={{ color: 'inherit', fontWeight: 'inherit' }}>
+            See what&apos;s unfinished
+          </Typography>
+          <ChevronRightIcon fontSize="small" />
+        </Box>
+      </ButtonBase>
+
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Unfinished on the floor</DialogTitle>
+        <DialogContent>
         {stale.length > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {/* Says what to DO, not who to blame. The times are wrong until
@@ -374,8 +475,17 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
             })}
           </Box>
         )}
-      </CardContent>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDetailOpen(false)} color="inherit">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
+      {/* Stacked over the detail on purpose: the confirm is about ONE row in the
+          list behind it, and closing it should return you to that list rather
+          than to the dashboard. */}
       <Dialog open={stopping !== null} onClose={() => (stopBusy ? undefined : setStopping(null))} maxWidth="xs" fullWidth>
         <DialogTitle>Stop this timer?</DialogTitle>
         <DialogContent>
@@ -418,7 +528,7 @@ export default function UnfinishedWorkCard({ companyId }: { companyId: string })
           </Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </>
   );
 }
 

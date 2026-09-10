@@ -550,6 +550,27 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # -- the final turn was not an answer -- and splitting it would cost a
     # migration to say something the reason in the message already says.
     non_answer = classify_non_answer(answer) if not sql_ok else None
+    if non_answer is None and not answer.strip():
+        # THE OTHER RULE APPLIED TO A GROUNDED ANSWER. `sql_ok` deliberately lets a
+        # grounded answer through "however it reads", because every other rule here
+        # is a judgement about prose and a rule that can reject a good answer
+        # eventually will. Emptiness is not a judgement: there is no prose to
+        # judge, and nothing for the person who waited to read.
+        #
+        # IT ALSO FAILS WORSE THAN A BAD ANSWER, which is why it cannot wait for
+        # the eval. The turn is materialised by a trigger that writes nothing for
+        # an empty answer, so the job settles 'succeeded', the spinner stops, and
+        # the question itself disappears -- no question bubble, no answer, no row
+        # in History. Live on the 2026-09-10 preview: two of four
+        # "What is my revenue trend over time?" asks charted correctly, answered
+        # with "", and left no trace. The owner reported it as questions going
+        # missing, and retried until one stuck.
+        #
+        # A chart with no sentence is lost with it, and that is the right trade:
+        # the prompt asks for the sentence first, a chart alone is not an answer
+        # for the reader this is built for, and failing visibly gives them the
+        # Try again they were already reaching for.
+        non_answer = "empty"
     if non_answer is None and echoes_exemplar(answer):
         # THE ONE RULE APPLIED TO A GROUNDED ANSWER TOO. The format example's
         # labels cannot be shop data, so a sentence carrying them is the example

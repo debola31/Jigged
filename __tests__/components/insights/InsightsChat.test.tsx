@@ -556,7 +556,13 @@ describe('InsightsChat — the History rail', () => {
     await user.click(screen.getByRole('button', { name: 'Chat history' }));
     await user.click(await screen.findByRole('tab', { name: 'Charts' }));
     const list = await screen.findByRole('list', { name: 'Charts' });
-    expect(within(list).getByText(/Trend · Sep 8/)).toBeInTheDocument();
+    // DATE AND TIME, not the date alone. Asking the same question twice in an
+    // afternoon -- what people do when an answer did not land -- produced a list of
+    // identical titles all reading "Sep 8", and the rail could not say which entry
+    // was which. Matched loosely on the clock part because the format follows the
+    // runner's locale and timezone, and pinning either makes this fail in CI
+    // rather than fail when the copy is wrong.
+    expect(within(list).getByText(/Trend · Sep 8, \d{1,2}:\d{2}/)).toBeInTheDocument();
     await user.click(within(list).getByText('Booked by month'));
 
     expect(window.sessionStorage.getItem('jigged.aiThread.co-1')).toBe('thread-2');

@@ -379,6 +379,48 @@ async def test_a_tool_call_the_model_only_described_is_not_an_answer(text):
     assert "tool_call_tag" in str(exc.value) or "sql_payload" in str(exc.value), str(exc.value)
 
 
+async def test_an_empty_answer_is_refused_even_when_the_query_succeeded():
+    """LIVE ON THE 2026-09-10 PREVIEW, and it failed silently rather than badly.
+
+    Two of four "What is my revenue trend over time?" asks came back with a valid
+    chart and an answer of "" -- the model put everything inside the fence, and
+    _strip_code_blocks correctly removed the fence. `sql_ok` then waved it through,
+    because every other rule in the gate is a judgement about prose and grounded
+    prose is deliberately left alone.
+
+    Emptiness is not a judgement, and it fails worse than a bad answer: the trigger
+    materialises no turn for one, so the job settles 'succeeded', the spinner
+    stops, and the QUESTION disappears -- no bubble, no answer, no row in History.
+    The owner reported it as questions going missing.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer('```json\n{"chart_type": "bar", "data": []}\n```')],
+        tool_results=[{"columns": ["month", "revenue"],
+                       "rows": [{"month": "2026-04", "revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue by month"}],
+    )
+
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+
+    assert "empty" in str(exc.value), str(exc.value)
+
+
+async def test_a_grounded_answer_that_merely_reads_oddly_still_goes_through():
+    """The other half, and the reason the empty rule is stated narrowly. `sql_ok`
+    exists so a rule that could reject a good grounded answer never gets the
+    chance; widening it to taste would eventually eat a real one.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("11792.66")],
+        tool_results=[{"columns": ["revenue"], "rows": [{"revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue"}],
+    )
+
+    result = await run(convo)
+    assert result["answer"] == "11792.66"
+
+
 async def test_a_uuid_in_a_result_row_does_not_kill_the_turn():
     """"Who is my top customer by revenue?" groups by c.id, so a UUID lands in the
     tool result -- and the loop wires each result in with a dumps. That dumps

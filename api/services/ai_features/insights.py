@@ -336,6 +336,37 @@ def _grounding_turns(text: str, figures: list[float]) -> list[Message]:
     return turns + [Message(role="user", content=GROUNDING_CORRECTION.format(figures=listed))]
 
 
+EMPTY_ANSWER_CORRECTION = (
+    "You returned a chart but no sentence, so the person asking sees an empty answer. "
+    "Write the one-sentence answer now, in plain words, using only figures from the "
+    "query results in this conversation. Do not repeat the chart JSON and do not put "
+    "the sentence inside a code fence."
+)
+
+
+def _empty_answer_turns(text: str) -> list[Message]:
+    """The corrective exchange for a turn that charted but never spoke.
+
+    A local 32B follows "write the one-sentence answer first, then exactly one
+    fenced block" most of the time and not always: on the 2026-09-10 preview, two
+    of four identical "What is my revenue trend over time?" asks put EVERYTHING
+    inside the fence and left no prose at all. Same prompt, same data, same model
+    -- that is sampling variance, not a defect any amount of code can delete.
+
+    So it is corrected rather than merely refused. The work is already done and
+    paid for by this point -- the query ran, the chart is valid, ~25k tokens are
+    spent -- and the alternative was the owner re-asking by hand, which re-runs the
+    whole job including the SQL. One more turn is the cheaper of the two by far.
+
+    Same shape as the two corrections beside it, including the conditional
+    assistant turn: `text` here is the fenced JSON the model did emit, so it is
+    normally present, and the guard is what stops an empty assistant message
+    reaching a vendor that rejects one outright.
+    """
+    turns = [Message(role="assistant", content=text)] if text.strip() else []
+    return turns + [Message(role="user", content=EMPTY_ANSWER_CORRECTION)]
+
+
 async def run(ctx: JobContext) -> dict[str, Any]:
     """Answer one question. Returns the shape ai_jobs.result stores.
 
@@ -403,6 +434,9 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # a July zero it had queried licensed an August zero it had not.
     known_figures: set[float] = set()
     grounding_corrected = False
+    # One correction each, and they are independent: a turn can chart-without-
+    # speaking once and invent a figure once without either spending the other's go.
+    empty_corrected = False
 
     tool_names: list[str] = []
     # What ran, for the thread's audit column. Never replayed into a prompt.
@@ -456,6 +490,23 @@ async def run(ctx: JobContext) -> dict[str, Any]:
                 logger.info(
                     "insights %s: correcting an ungrounded answer (%d figure(s))",
                     ctx.request_id, len(invented),
+                )
+                continue
+            # ONE corrective turn for a turn that charted but never spoke. The
+            # loop already knows -- `refusable` above is exactly this -- and used
+            # to break anyway, leaving the final gate to decide. That gate lets a
+            # grounded answer through however it reads, so an empty one settled as
+            # a success, materialised no turn, and took the question with it.
+            #
+            # Asked for only when the model actually produced something. A turn
+            # with no text at all is a different failure (the provider gave us
+            # nothing) and is left to the gate.
+            if not prose.strip() and result.text.strip() and not empty_corrected:
+                empty_corrected = True
+                messages = messages + _empty_answer_turns(result.text)
+                logger.info(
+                    "insights %s: correcting an answer that charted but said nothing",
+                    ctx.request_id,
                 )
                 continue
             break

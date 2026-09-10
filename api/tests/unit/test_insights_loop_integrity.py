@@ -379,22 +379,48 @@ async def test_a_tool_call_the_model_only_described_is_not_an_answer(text):
     assert "tool_call_tag" in str(exc.value) or "sql_payload" in str(exc.value), str(exc.value)
 
 
-async def test_an_empty_answer_is_refused_even_when_the_query_succeeded():
-    """LIVE ON THE 2026-09-10 PREVIEW, and it failed silently rather than badly.
+async def test_a_chart_with_no_sentence_is_corrected_once_and_then_answers():
+    """LIVE ON THE 2026-09-10 PREVIEW, and the happy path for it.
 
-    Two of four "What is my revenue trend over time?" asks came back with a valid
-    chart and an answer of "" -- the model put everything inside the fence, and
-    _strip_code_blocks correctly removed the fence. `sql_ok` then waved it through,
-    because every other rule in the gate is a judgement about prose and grounded
-    prose is deliberately left alone.
+    Two of four identical "What is my revenue trend over time?" asks put
+    EVERYTHING inside the fence: valid 6-point chart, ~25k tokens spent, and an
+    answer of "" once _strip_code_blocks did its job. Same prompt, same data, same
+    model — sampling variance in a local 32B, not something code can delete.
 
-    Emptiness is not a judgement, and it fails worse than a bad answer: the trigger
-    materialises no turn for one, so the job settles 'succeeded', the spinner
-    stops, and the QUESTION disappears -- no bubble, no answer, no row in History.
-    The owner reported it as questions going missing.
+    So the loop asks once more instead of throwing the work away. The owner was
+    already re-asking by hand, which re-runs the whole job including the SQL; one
+    corrective turn is much the cheaper of the two.
     """
     convo = Conversation(
-        turns=[_asks_for_sql(), _answer('```json\n{"chart_type": "bar", "data": []}\n```')],
+        turns=[
+            _asks_for_sql(),
+            _answer('```json\n{"chart_type": "bar", "data": []}\n```'),
+            # Only figures the stubbed query actually returned: the grounding guard
+        # sits right beside this one and will (correctly) chase an invented second.
+        _answer("Revenue was $11,792.66 in April."),
+        ],
+        tool_results=[{"columns": ["month", "revenue"],
+                       "rows": [{"month": "2026-04", "revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue by month"}],
+    )
+
+    result = await run(convo)
+
+    assert result["answer"] == "Revenue was $11,792.66 in April."
+    # The model is shown what it said and told what was wrong with it.
+    assert any("no sentence" in m.content for m in convo.seen[-1] if m.role == "user")
+
+
+async def test_a_chart_that_stays_silent_after_the_correction_is_refused():
+    """The backstop. One correction, not a loop — and if the second turn is empty
+    too, this fails visibly rather than settling 'succeeded' with nothing to show.
+
+    That silent settle is what took the question with it: the trigger materialises
+    no turn for an empty answer, so the spinner stopped and the question vanished
+    from the transcript and from History.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer('```json\n{"chart_type": "bar", "data": []}\n```'), _answer('```json\n{"chart_type": "bar", "data": []}\n```')],
         tool_results=[{"columns": ["month", "revenue"],
                        "rows": [{"month": "2026-04", "revenue": 11792.66}],
                        "row_count": 1, "description": "revenue by month"}],

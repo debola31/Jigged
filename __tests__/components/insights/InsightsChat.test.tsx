@@ -105,6 +105,65 @@ describe('InsightsChat — what an enqueue refusal looks like', () => {
     expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
+  it('a refusal at the door is a PostHog rate, not a Sentry incident', async () => {
+    mockSubmitChatQuery.mockRejectedValue(
+      new ChatEnqueueError("Insights are temporarily unavailable right now, so this can't run. Everything else still works.", 503),
+    );
+    render(<InsightsChat companyId="co-1" />);
+
+    await ask('How many jobs are late?');
+
+    const posthog = (await import('posthog-js')).default;
+    // The event the door-level refusal had no way to report before: it never
+    // becomes a job row, so `ai job settled` cannot see it, and Sentry is
+    // deliberately silent for it.
+    expect(posthog.capture).toHaveBeenCalledWith('ai job refused', {
+      feature: 'insights',
+      reason: 'offline',
+      turn_index: 0,
+      from_example: false,
+      from_suggestion: false,
+      question_length_bucket: '5w_15w',
+    });
+    // Nothing was enqueued, so the denominator must not move.
+    expect(posthog.capture).not.toHaveBeenCalledWith('ai job enqueued', expect.anything());
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it('each expected status carries its own reason, and none of them page', async () => {
+    const cases: [number, string][] = [
+      [429, 'rate_limited'],
+      [403, 'disabled'],
+      [409, 'busy'],
+      [404, 'thread_missing'],
+    ];
+    for (const [status, reason] of cases) {
+      vi.clearAllMocks();
+      mockSubmitChatQuery.mockRejectedValue(new ChatEnqueueError('nope', status));
+      const { unmount } = render(<InsightsChat companyId="co-1" />);
+
+      await ask('How many jobs are late?');
+
+      const posthog = (await import('posthog-js')).default;
+      expect(posthog.capture).toHaveBeenCalledWith('ai job refused', expect.objectContaining({ reason }));
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it('an unmapped failure still pages, and is not filed as a refusal', async () => {
+    mockSubmitChatQuery.mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<InsightsChat companyId="co-1" />);
+
+    await ask('How many jobs are late?');
+
+    const posthog = (await import('posthog-js')).default;
+    // The negation the REFUSAL_REASONS map replaced: absence from it is what
+    // keeps an unforeseen status an error rather than quietly becoming a rate.
+    expect(posthog.capture).not.toHaveBeenCalledWith('ai job refused', expect.anything());
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a 429 as an error carrying the shop’s real limit, and does not page', async () => {
     mockSubmitChatQuery.mockRejectedValue(
       new ChatEnqueueError('Rate limit exceeded. Maximum 20 AI chat queries per hour per company.', 429),
@@ -228,6 +287,7 @@ describe('InsightsChat — the conversation', () => {
       from_example: false,
       from_suggestion: false,
       turn_index: 2,
+      question_length_bucket: 'under_5w',
     });
   });
 
@@ -327,6 +387,7 @@ describe('InsightsChat — what to ask next', () => {
       from_example: false,
       from_suggestion: true,
       turn_index: 2,
+      question_length_bucket: 'under_5w',
     });
   });
 
@@ -356,6 +417,7 @@ describe('InsightsChat — a report is an answer, not a mode', () => {
       from_example: true,
       from_suggestion: false,
       turn_index: 0,
+      question_length_bucket: '5w_15w',
     });
   });
 

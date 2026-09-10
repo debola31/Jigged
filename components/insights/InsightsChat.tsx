@@ -484,10 +484,16 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         onKeyDown={handleKeyDown}
         disabled={pending}
         slotProps={{
-          input: {
-            sx: { minHeight: 48 },
-            'aria-label': 'Your question',
-          },
+          input: { sx: { minHeight: 48 } },
+          // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
+          // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
+          // the textarea itself had no accessible name at all: a screen reader
+          // announced the one control this feature exists for as unlabelled. Found
+          // by CI, where `getByLabel('Your question')` resolved to the div and
+          // Playwright refused it as "not an input element"; the same mismatch is
+          // why focusing that locator silently did nothing. `htmlInput` is the slot
+          // that reaches the real element, and is what the rest of the repo uses.
+          htmlInput: { 'aria-label': 'Your question' },
         }}
       />
       <Button

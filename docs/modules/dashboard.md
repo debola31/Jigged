@@ -148,6 +148,12 @@ collapse into one meaning. It arrives as a `revenueEnabled` prop from `page.tsx`
 company's flags, rather than a hook read inside `DashboardMetrics` — that would be a second `getCompany` on
 every dashboard load.
 
+**It does not govern the Storage page's on-hand cost**, which sits under its own
+`storage_inventory_cost` ([inventory.md §5.15](inventory.md#515-money-is-the-only-common-denominator-storage-has)).
+Recorded so nobody later tidies the two into one: this flag hides **revenue** on a dashboard the shop
+floor walks past, that one hides **cost** on an office-only page, and a shop's answer to the first is
+not its answer to the second. The admin-only rule and the withhold-while-loading rule are shared.
+
 ### Time period
 
 Only Completed is scoped to a period, so the Today / This Week toggle sits **on that card** rather than over

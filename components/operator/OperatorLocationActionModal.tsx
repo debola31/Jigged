@@ -10,6 +10,7 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
@@ -26,6 +27,10 @@ import type { LotOnHand } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
+import CertAfterReceiptPanel from '@/components/inventory/CertAfterReceiptPanel';
+import MillCertField from '@/components/inventory/MillCertField';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
+import { certificateUploadProperties } from '@/components/inventory/certificateTelemetry';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -136,6 +141,14 @@ export default function OperatorLocationActionModal({
   const [photo, setPhoto] = useState<File | null>(null);
   const showPhoto = action === 'add' || action === 'move';
 
+  /**
+   * The lot a top-up landed on, when there was one — which is also the only available answer to
+   * "is this part lot-tracked?" at this moment. Holds the dialog open to offer the certificate.
+   */
+  const [landedLotId, setLandedLotId] = useState<string | null>(null);
+  /** The cert chosen beside the heat. Staged: the lot does not exist until the RPC runs. */
+  const [certFile, setCertFile] = useState<File | null>(null);
+
   const handleEnter = async () => {
     setQuantity('');
     setUnit(primaryUnit);
@@ -205,15 +218,42 @@ export default function OperatorLocationActionModal({
         photoPath = await uploadMovementPhoto(companyId, locationId, photo);
       }
 
+      let addedLotId: string | null = null;
+      /** Only meaningful when a cert was staged; `true` when there was nothing to do. */
+      let certLanded = true;
       if (action === 'add') {
         // operatorId on every write, not just depletion: bin history has to be able to name
         // who put something away, and `created_by` (an auth user) is unreadable from the browser.
-        await addStockAtLocation(partId, locationId, qty, unit, {
+        const result = await addStockAtLocation(partId, locationId, qty, unit, {
           notes: notes || undefined,
           operatorId: operatorId || undefined,
           photoPath,
           heatNumber: heatNumber.trim() || undefined,
         });
+        addedLotId = result?.lot_id ?? null;
+
+        // AFTER the write and outside its failure path: a failed cert must never report a receipt
+        // that landed as one that did not.
+        if (addedLotId && certFile) {
+          try {
+            await uploadLotCertificate(companyId, addedLotId, certFile);
+            const fileProps = certificateUploadProperties(certFile);
+            posthog.capture('lot certificate uploaded', {
+              surface: 'operator',
+              at_receipt: true,
+              file_kind: fileProps.file_kind,
+              size_bucket: fileProps.size_bucket,
+              is_replacement: false,
+            });
+          } catch {
+            posthog.capture('lot certificate upload failed', {
+              surface: 'operator',
+              reason: 'failed',
+              attempt: 1,
+            });
+            certLanded = false;
+          }
+        }
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
           graceful: true,
@@ -247,6 +287,19 @@ export default function OperatorLocationActionModal({
         heat_captured: Boolean(lotId) || heatNumber.trim().length > 0,
       });
       await onDone();
+      /*
+       * A top-up of a lot-tracked part holds the dialog open to offer the certificate — but only
+       * that. Every other verb closes as before, because a take, a move and a count do not create
+       * a lot and there is nothing new to document.
+       *
+       * The panel configures itself from what the lot already holds, so a routine top-up of a bin
+       * whose cert is already filed reads as a confirmation rather than as a nag.
+       */
+      // Held open ONLY when the cert failed. The happy path has nothing left to say.
+      if (addedLotId && !certLanded) {
+        setLandedLotId(addedLotId);
+        return;
+      }
       onClose();
     } catch (e) {
       // Supabase errors are plain objects, not Error instances — `instanceof` would drop the
@@ -265,8 +318,26 @@ export default function OperatorLocationActionModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>{TITLES[action]}</DialogTitle>
+      <DialogTitle>{landedLotId ? 'Stocked' : TITLES[action]}</DialogTitle>
       <DialogContent>
+        {landedLotId ? (
+          <Box sx={{ mt: 1 }}>
+            <CertAfterReceiptPanel
+              companyId={companyId}
+              lotId={landedLotId}
+              surface="operator"
+              heatLabel={heatNumber.trim() ? `Heat ${heatNumber.trim()}` : null}
+              // Refresh the parent AGAIN, then close. The stock write already fired `onDone` —
+              // before this panel existed — so a cert attached here lands after the page last
+              // refetched, and without a second call the heats list keeps offering "Add cert"
+              // for a lot that now has one.
+              onDone={async () => {
+                await onDone();
+                onClose();
+              }}
+            />
+          </Box>
+        ) : (
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Typography variant="body2" color="text.secondary">
             <strong>{partName}</strong> at <strong>{locationName}</strong> — {currentQuantity}{' '}
@@ -319,7 +390,20 @@ export default function OperatorLocationActionModal({
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           )}
           {showHeatField && (
-            <HeatNumberField value={heatNumber} onChange={setHeatNumber} disabled={saving} />
+            <HeatNumberField
+              value={heatNumber}
+              onChange={(next) => {
+                setHeatNumber(next);
+                // Clearing the heat clears the cert with it: a staged file would otherwise upload
+                // against a lot minted for material nobody identified.
+                if (!next.trim()) setCertFile(null);
+              }}
+              disabled={saving}
+            />
+          )}
+          {/* Only once a heat is entered — the cert belongs with the number it certifies. */}
+          {showHeatField && heatNumber.trim().length > 0 && (
+            <MillCertField value={certFile} onChange={setCertFile} disabled={saving} />
           )}
           {/* Shown once the shelf actually holds lots, or whenever the part is tracked — in which
               case an empty picker is the answer ("none of this is recorded here"), not a gap. */}
@@ -351,14 +435,21 @@ export default function OperatorLocationActionModal({
             <ErrorAlert error={error} entity="stock" fallback="Failed to update stock." />
           )}
         </Stack>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving} size="large">
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={saving} size="large">
-          {CONFIRM[action]}
-        </Button>
+        {/* The panel owns an always-enabled Done while it is showing; Cancel and Confirm would
+            both be lies at that point — the write has already landed. */}
+        {!landedLotId && (
+          <>
+            <Button onClick={onClose} disabled={saving} size="large">
+              Cancel
+            </Button>
+            <Button onClick={handleSubmit} variant="contained" disabled={saving} size="large">
+              {CONFIRM[action]}
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );

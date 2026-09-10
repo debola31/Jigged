@@ -16,6 +16,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import StorageFilterField from '@/components/inventory/StorageFilterField';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -36,9 +37,7 @@ import LocationFormModal, { type LocationFormValues } from './LocationFormModal'
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
-import StorageSearch, { type StorageHit } from './StorageSearch';
 import StorageActivity from './StorageActivity';
-import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
 import UnitAdjustDrawer from './place/UnitAdjustDrawer';
@@ -180,8 +179,15 @@ export default function LocationsManager({
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [placeId, setPlaceId] = useState<string | null>(null);
-  /** Filters the unit list. Held here because the field lives in the page header. */
-
+  /**
+   * Filters the unit list. Held here because the field lives in the page header.
+   *
+   * It used to be an Autocomplete that PICKED a unit and selected it. A picker was the wrong shape
+   * for a list of ~22 things that is already on screen: you typed, read a dropdown, chose, and the
+   * list underneath never changed. Filtering the list narrows the thing you are looking at, which
+   * is what a search over a visible list should do.
+   */
+  const [unitQuery, setUnitQuery] = useState('');
 
 
   const [formState, setFormState] = useState<{
@@ -265,7 +271,6 @@ export default function LocationsManager({
   const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
 
   /** The part whose places are showing, if the search found one. */
-  const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
 
   /** The unit being bulk-adjusted, if any. Resolved from the tree so a rename lands in its header. */
   const [adjustUnitId, setAdjustUnitId] = useState<string | null>(null);
@@ -300,26 +305,14 @@ export default function LocationsManager({
    * the PART, and where it lives is the answer, which belongs on a surface that stays rather than
    * in a menu that closes.
    */
-  const onSearchPick = (hit: StorageHit) => {
-    if (hit.kind === 'place') {
-      setPlaceId(null);
-      setDrawerPlaceId(null);
-      setSearchPart(null);
-      showUnit(hit.id);
-      return;
-    }
-    setSearchPart({ id: hit.id, name: hit.label, unit: hit.unit });
-  };
-
   /**
-   * Walking from a part to one of its places.
+   * Walking from a movement in the activity feed to the place it happened.
    *
-   * Selects the unit the bin belongs to and opens that bin, and closes the part drawer — two
-   * drawers stacked would bury the thing just chosen under the thing that found it.
+   * Selects the unit the bin belongs to and opens that bin. It used to close a part drawer too;
+   * that drawer moved to the Inventory tab with the parts half of the search (2026-09-09).
    */
   const openPlaceFromPart = (locationId: string) => {
     const unitId = rootOf(locationId, byId);
-    setSearchPart(null);
     setPlaceId(locationId);
     setDrawerPlaceId(locationId);
     showUnit(unitId);
@@ -531,7 +524,7 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          <StorageSearch companyId={companyId} tree={tree} onPick={onSearchPick} />
+          <StorageFilterField label="Filter places" value={unitQuery} onChange={setUnitQuery} />
 
           <Box sx={{ flex: 1 }} />
 
@@ -689,6 +682,7 @@ export default function LocationsManager({
               </Box>
 
               <StorageUnitList
+                query={unitQuery}
                 tree={tree}
                 occupancy={occupancy}
                 selectedId={openUnit?.id ?? null}
@@ -799,17 +793,6 @@ export default function LocationsManager({
         rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
         buried under both, which is the failure the old detail sheet was deleted for.
       */}
-      {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
-      <PartPlacesDrawer
-        part={searchPart}
-        companyId={companyId}
-        // Leaves only, never the put-away pile. The form excludes the place being moved FROM.
-        moveDestinations={stockDestinationOptions(locations)}
-        onClose={() => setSearchPart(null)}
-        onOpenPlace={openPlaceFromPart}
-        onChanged={reload}
-      />
-
       <PlaceDrawer
         place={drawerPlace}
         companyId={companyId}

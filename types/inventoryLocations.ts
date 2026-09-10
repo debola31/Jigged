@@ -238,6 +238,40 @@ export interface MaterialLot {
   created_at: string;
 }
 
+/**
+ * A mill certificate (MTR) held against a lot. Mirrors `lot_certificates`.
+ *
+ * The path column is `file_path`, NOT `storage_path` — `part_attachments` uses the other name and
+ * the two are otherwise near-twins, so this is the one field to copy carefully.
+ *
+ * There is no `deleted_at`: a cert is a document, replaced rather than archived. Several rows per
+ * lot is the design (a mill cert plus a plating cert plus a re-test), and the NEWEST is the current
+ * one by convention — no column asserts it, because a flag would need maintaining on delete and
+ * would still be wrong for a lot legitimately carrying two current certs.
+ */
+export interface LotCertificate {
+  id: string;
+  company_id: string;
+  lot_id: string;
+  /** Path in the private `attachments` bucket, under `{companyId}/lots/{lotId}/`. */
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_at: string;
+  /** `user_company_access.id`, not an auth user id. */
+  uploaded_by: string | null;
+  /** Joined from `user_company_access(name)`; null when access was removed. */
+  uploaded_by_name: string | null;
+}
+
+/**
+ * How a cert can be shown. Derived from the filename every time — there is no `kind` column on
+ * `lot_certificates`, deliberately, because a cert is one thing and the viewer only needs to know
+ * how to paint it.
+ */
+export type LotCertificatePreview = 'pdf' | 'image' | 'download';
+
 /** One movement in a place's history, with its author and photo already resolved. */
 export interface LocationHistoryEntry {
   id: string;

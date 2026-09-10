@@ -141,6 +141,13 @@ jobs:
             echo "SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY"
             echo "ANTHROPIC_API_KEY=sk-mock-for-e2e"
             echo "ANTHROPIC_BASE_URL=http://localhost:9876"
+            # The bucket every upload goes to. `getStorageBucket()` in
+            # [utils/storageHelpers.ts](../../utils/storageHelpers.ts) THROWS when this is
+            # unset rather than defaulting, so without it every upload fails at the first
+            # line — and it went unnoticed here until 2026-09-09 because no E2E had ever
+            # exercised a file upload. `attachments` is the bucket
+            # 20260728212230 creates, so `supabase start` above has already made it.
+            echo "NEXT_PUBLIC_SUPABASE_S3_BUCKET=attachments"
           } >> $GITHUB_ENV
 
       - name: Run E2E (e2e/run-stack.mjs orchestrates anthropic mock + FastAPI + Next.js)

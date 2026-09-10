@@ -22,7 +22,7 @@
  * list with 48px targets and generous type, which is *required* on a phone and merely roomy on a
  * monitor. Roomy is not a defect. What a desk would genuinely want — sorting, filters, a date
  * range, export — is a different component for a different job, and the part page's
- * `PartTransactionHistoryTable` already occupies that shape.
+ * the part's Activity feed already occupies that shape.
  *
  * ## Lazy, and collapsed by default
  *

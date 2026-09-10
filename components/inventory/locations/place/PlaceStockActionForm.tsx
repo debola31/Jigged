@@ -122,6 +122,10 @@ import HeatNumberField from '@/components/inventory/HeatNumberField';
 import { useLoad } from '@/hooks/useLoad';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
+import CertAfterBatchPanel, { type LandedLot } from '@/components/inventory/CertAfterBatchPanel';
+import MillCertField from '@/components/inventory/MillCertField';
+import { uploadLotCertificate } from '@/utils/lotCertificatesAccess';
+import { certificateUploadProperties } from '@/components/inventory/certificateTelemetry';
 
 /** The three verbs that act on stock at one place. `adjust` has its own form. */
 export type PlaceStockAction = 'add' | 'deplete' | 'move';
@@ -298,6 +302,17 @@ export default function PlaceStockActionForm({
   const [failures, setFailures] = useState<Array<{ partName: string; message: string }>>([]);
   /** How many lines landed in the last partial save — captured, not recomputed from live state. */
   const [saved, setSaved] = useState(0);
+  /** Lots a clean batch created, held so their certificates can be offered once, together. */
+  const [landedLots, setLandedLots] = useState<LandedLot[] | null>(null);
+  /**
+   * The cert staged beside the heat, on the SINGLE-PART form.
+   *
+   * This component is two forms. Restricted to one part — the side rail's per-place Add — it is
+   * the same shape as the dialogs, so the cert is chosen with the heat and uploads after the write.
+   * Unrestricted it is a batch of lines each with its own heat, where there is nowhere sensible to
+   * stage a file per row; that keeps the panel offered once the batch has landed.
+   */
+  const [certFile, setCertFile] = useState<File | null>(null);
   /**
    * The caught error object, not a formatted string: `ErrorAlert` needs the object to tell a
    * billing block from an ordinary failure. Validation messages stay plain strings, which it
@@ -541,6 +556,14 @@ export default function PlaceStockActionForm({
     const failed: Array<{ partName: string; message: string }> = [];
     /** Row keys, not part ids: three lines of one bar succeed or fail independently. */
     const succeeded: string[] = [];
+    /**
+     * The lots the adds landed on, in line order.
+     *
+     * `result.lot_id` is the only reading of "is this part lot-tracked?" available here: an `add`
+     * row's own `lotId` is ALWAYS null (a receipt is where a lot comes into existence), so the row
+     * key cannot identify what the write produced.
+     */
+    const landed: LandedLot[] = [];
     for (let i = 0; i < lines.length; i += 1) {
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
@@ -551,11 +574,51 @@ export default function PlaceStockActionForm({
       const rowLot = row.lotId ?? undefined;
       try {
         if (action === 'add') {
-          await addStockAtLocation(row.partId, locationId, value, unit, {
+          const result = await addStockAtLocation(row.partId, locationId, value, unit, {
             notes: notes || undefined,
             operatorId: operatorId || undefined,
             heatNumber,
           });
+          if (result?.lot_id) {
+            if (restrictTo) {
+              /*
+               * Single part: the cert was staged with the heat, so upload it now and say nothing
+               * afterwards. Outside the write's own failure path — a failed cert must never report
+               * stock that landed as stock that did not.
+               */
+              if (certFile) {
+                try {
+                  await uploadLotCertificate(companyId, result.lot_id, certFile);
+                  const fileProps = certificateUploadProperties(certFile);
+                  posthog.capture('lot certificate uploaded', {
+                    surface: 'office_batch',
+                    at_receipt: true,
+                    file_kind: fileProps.file_kind,
+                    size_bucket: fileProps.size_bucket,
+                    is_replacement: false,
+                  });
+                } catch {
+                  posthog.capture('lot certificate upload failed', {
+                    surface: 'office_batch',
+                    reason: 'failed',
+                    attempt: 1,
+                  });
+                  // The one thing worth holding the form open for.
+                  landed.push({
+                    lotId: result.lot_id,
+                    partName: row.partName,
+                    heatLabel: heatNumber ? `Heat ${heatNumber}` : null,
+                  });
+                }
+              }
+            } else {
+              landed.push({
+                lotId: result.lot_id,
+                partName: row.partName,
+                heatLabel: heatNumber ? `Heat ${heatNumber}` : null,
+              });
+            }
+          }
         } else if (action === 'deplete') {
           await depleteStockAtLocation(row.partId, locationId, value, unit, {
             graceful,
@@ -633,6 +696,21 @@ export default function PlaceStockActionForm({
       setFailures(failed);
       return;
     }
+    /*
+     * A clean batch that created lots stays open once, to offer their certificates.
+     *
+     * This is the receiving-bench case the cert journey was cut over: a delivery arrives under
+     * several heats and goes onto the shelf in one pass. Offering the certs together, after the
+     * stock is already recorded, is what makes the scan optional rather than a gate.
+     *
+     * Only on a CLEAN batch. A partial failure already owns this form with its own
+     * disarm-what-landed protocol, and a second post-write state stacked on that one would leave
+     * two things claiming to describe what just happened.
+     */
+    if (landed.length > 0) {
+      setLandedLots(landed);
+      return;
+    }
     onCancel();
   };
 
@@ -653,9 +731,18 @@ export default function PlaceStockActionForm({
       }}
     >
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-        {TITLES[action]}
+        {landedLots ? 'Stocked' : TITLES[action]}
       </Typography>
 
+      {/*
+        The form is REPLACED once a clean batch has landed, for the reason the operator receive
+        dialog gives: leaving the fields on screen beside a message reads as "here is your form,
+        and also a note", and the obvious next move is to submit it again — against a bin that
+        already holds the material.
+      */}
+      {landedLots ? (
+        <CertAfterBatchPanel companyId={companyId} lots={landedLots} onDone={onCancel} />
+      ) : (
       <Stack spacing={2}>
         {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
@@ -867,7 +954,11 @@ export default function PlaceStockActionForm({
                           size="small"
                           label="Heat"
                           value={heatFor[rowKey(row)] ?? ''}
-                          onChange={(v) => setHeatFor((s) => ({ ...s, [rowKey(row)]: v }))}
+                          onChange={(v) => {
+                            setHeatFor((s) => ({ ...s, [rowKey(row)]: v }));
+                            // Clearing the heat clears the cert staged against it.
+                            if (restrictTo && !v.trim()) setCertFile(null);
+                          }}
                           disabled={saving}
                         />
                       </Box>
@@ -917,6 +1008,22 @@ export default function PlaceStockActionForm({
             })}
           </Stack>
         )}
+
+        {/*
+          The mill cert, on the SINGLE-PART form only — the side rail's per-place Add.
+          It appears once a heat has been typed and goes when that heat is cleared, the same rule
+          the dialogs follow: the cert is the paper stapled to the bar whose number you are reading
+          off the tag, not something to be asked for after Confirm.
+
+          Absent on the multi-row form, where each line carries its own heat and one file field
+          could not say which line it belonged to; that form keeps its after-the-batch panel.
+        */}
+        {restrictTo &&
+          showHeatField &&
+          rows.length === 1 &&
+          (heatFor[rowKey(rows[0])] ?? '').trim().length > 0 && (
+            <MillCertField value={certFile} onChange={setCertFile} disabled={saving} />
+          )}
 
         {/* One destination for the batch. Carrying a handful of things to one shelf is the act
             this models; a per-row destination would be a different feature and a longer row. */}
@@ -987,6 +1094,7 @@ export default function PlaceStockActionForm({
           </Button>
         </Stack>
       </Stack>
+      )}
     </Box>
   );
 }

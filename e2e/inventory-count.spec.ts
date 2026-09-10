@@ -53,7 +53,14 @@ test.describe('Inventory count — a part in two locations', () => {
     const row = page.getByText(PART, { exact: true });
     await expect(row).toHaveCount(1);
     // 52 = 40 + 12: the group header carries the shop-wide total, not one shelf's figure.
-    await expect(page.getByText('2 locations')).toBeVisible();
+    //
+    // Scoped to THIS part's row rather than the page. A bare page-wide "2 locations" was true only
+    // while this was the sole split fixture in the suite — the moment a second one appeared it
+    // matched twice and failed on strict mode, which is a fixture collision reported as a product
+    // bug. The row is what the assertion was always about.
+    await expect(
+      page.getByRole('checkbox', { name: `Count ${PART} in 2 locations` }),
+    ).toBeVisible();
   });
 
   /** The founder's complaint, as an assertion: no notice, and the part is on the sheet. */

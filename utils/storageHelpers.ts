@@ -38,7 +38,16 @@ export type StorageEntityType =
    * and is immutable afterwards. Grouping by place is the useful fallback anyway when someone has
    * to go looking in the bucket.
    */
-  | 'inventory-transactions';
+  | 'inventory-transactions'
+  /**
+   * Mill certificates, filed under the LOT id.
+   *
+   * The mirror image of `inventory-transactions` above: that one files under the location because
+   * the transaction row does not exist yet when its photo uploads. A cert is the other way round —
+   * `add_stock_at_location` returns the `lot_id` before the upload begins, so the cert can be filed
+   * under the thing it actually belongs to.
+   */
+  | 'lots';
 
 /**
  * Generate storage path with UUID prefix and sanitized filename

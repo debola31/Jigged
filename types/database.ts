@@ -4448,6 +4448,58 @@ export type Database = {
           },
         ]
       }
+      inventory_on_hand_cost: {
+        Row: {
+          balance_id: string | null
+          company_id: string | null
+          cost_below_min: boolean | null
+          cost_per_unit: number | null
+          gap_reason: string | null
+          heat_number: string | null
+          last_moved_at: string | null
+          location_id: string | null
+          location_name: string | null
+          lot_code: string | null
+          lot_id: string | null
+          on_hand_cost: number | null
+          part_id: string | null
+          part_name: string | null
+          part_total_quantity: number | null
+          primary_unit: string | null
+          quantity: number | null
+          source: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "material_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_part_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       _migrate_legacy_shipment_for_job: {

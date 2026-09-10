@@ -1,13 +1,19 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 import TextField from '@mui/material/TextField';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
+import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
 import StatusChip from '@/components/common/StatusChip';
@@ -32,6 +38,7 @@ import {
   addPartNote,
   deletePartNote,
   updatePartNote,
+  updateTransactionAnnotations,
   type PartActivityEvent,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
@@ -99,6 +106,40 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
   const [editingNote, setEditingNote] = useState<PartNote | null>(null);
   /** The comment pending delete confirmation. */
   const [deletingNote, setDeletingNote] = useState<PartNote | null>(null);
+  /** The movement being annotated. `notes` and `heat_number` are the ledger's only mutable columns. */
+  const [editingTxn, setEditingTxn] = useState<{
+    id: string;
+    notes: string;
+    heatNumber: string;
+  } | null>(null);
+  const [savingTxn, setSavingTxn] = useState(false);
+  /** What the row held when the dialog opened, so the telemetry can say what actually changed. */
+  const editingTxnOriginal = useRef<{ notes: string; heatNumber: string } | null>(null);
+
+  const saveTxn = async () => {
+    if (!editingTxn) return;
+    const before = editingTxnOriginal.current ?? { notes: '', heatNumber: '' };
+    setSavingTxn(true);
+    setRowError(null);
+    try {
+      await updateTransactionAnnotations(editingTxn.id, {
+        notes: editingTxn.notes,
+        heatNumber: editingTxn.heatNumber,
+      });
+      // The event the part's Storage tab used to send, unchanged — same act, new home.
+      // Booleans, never the heat itself: that is the customer's business data.
+      posthog.capture('stock movement annotated', {
+        notes_changed: editingTxn.notes !== before.notes,
+        heat_changed: editingTxn.heatNumber !== before.heatNumber,
+      });
+      setEditingTxn(null);
+      setRefreshTick((t) => t + 1);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not save that correction.');
+    } finally {
+      setSavingTxn(false);
+    }
+  };
   const [rowBusy, setRowBusy] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   const [body, setBody] = useState('');
@@ -303,6 +344,21 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
                       setRowError(null);
                       if (ev.kind === 'note') setDeletingNote(ev.note);
                     }}
+                    onEditTxn={() => {
+                      setRowError(null);
+                      if (ev.kind === 'transaction') {
+                        const opened = {
+                          id: ev.txn.id,
+                          notes: ev.txn.notes ?? '',
+                          heatNumber: ev.txn.heat_number ?? '',
+                        };
+                        editingTxnOriginal.current = {
+                          notes: opened.notes,
+                          heatNumber: opened.heatNumber,
+                        };
+                        setEditingTxn(opened);
+                      }
+                    }}
                   />
                 );
               })}
@@ -321,6 +377,44 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
           )}
         </CardContent>
       </Card>
+
+      {/*
+        Correcting a movement. Only `notes` and `heat_number` are writable on the ledger — it is
+        append-only otherwise — and both are transcriptions of what someone wrote down rather than
+        balance facts, which is why a typo on a mill tag is fixable and a quantity is not.
+      */}
+      <Dialog open={editingTxn !== null} onClose={() => setEditingTxn(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Correct this movement</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Heat number"
+              value={editingTxn?.heatNumber ?? ''}
+              onChange={(e) =>
+                setEditingTxn((t) => (t ? { ...t, heatNumber: e.target.value } : t))
+              }
+              fullWidth
+              slotProps={{ htmlInput: { autoCapitalize: 'characters', maxLength: 64 } }}
+            />
+            <TextField
+              label="Notes"
+              value={editingTxn?.notes ?? ''}
+              onChange={(e) => setEditingTxn((t) => (t ? { ...t, notes: e.target.value } : t))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditingTxn(null)} disabled={savingTxn}>
+            Cancel
+          </Button>
+          <Button variant="contained" onClick={saveTxn} disabled={savingTxn}>
+            {savingTxn ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {editingNote && (
       <NoteEditDialog
@@ -364,18 +458,54 @@ function FeedRow({
   canDelete,
   onEdit,
   onDelete,
+  onEditTxn,
 }: {
   ev: PartActivityEvent;
   canEdit: boolean;
   canDelete: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onEditTxn: () => void;
 }) {
   // Both controls sit at rest, and the delete stays a bare error-coloured trash
   // icon rather than moving into an overflow menu: docs/interaction-standards.md
   // requires the destructive control shown at rest, and this is a desktop surface
   // with the width and the hover to carry two icons. The operator surfaces use a
   // kebab instead, because their note headers already wrap on a 375px phone.
+  /*
+   * A stock movement can be ANNOTATED from here.
+   *
+   * `restrict_transaction_update_to_notes` leaves `notes` and `heat_number` the only mutable
+   * columns on the ledger — both are transcriptions of what someone wrote down rather than balance
+   * facts, and a typo on a mill tag has to be correctable somewhere (§5.8). That somewhere was the
+   * part's Storage tab, which is gone; this feed already lists every movement, so the correction
+   * belongs on the row rather than in a second copy of the ledger underneath it.
+   */
+  if (ev.kind === 'transaction') {
+    return (
+      <ListItem
+        alignItems="flex-start"
+        disableGutters
+        secondaryAction={
+          <Tooltip title="Correct the heat or notes">
+            <IconButton
+              size="small"
+              aria-label="Correct the heat or notes"
+              onClick={onEditTxn}
+            >
+              <EditOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        }
+      >
+        <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
+          <FeedIcon ev={ev} />
+        </ListItemIcon>
+        <ListItemText primary={<FeedPrimary ev={ev} />} secondary={<FeedSecondary ev={ev} />} />
+      </ListItem>
+    );
+  }
+
   const actions =
     ev.kind === 'note' && (canEdit || canDelete) ? (
       <>

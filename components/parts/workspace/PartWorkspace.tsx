@@ -36,13 +36,11 @@ import PartIdentitySection from './PartIdentitySection';
 import PartHeaderBar, { type PartTabDescriptor } from './PartHeaderBar';
 import { getPartSetupStatus, type PartSetupStatus } from './partSetupStatus';
 import WorkspaceTab from './tabs/WorkspaceTab';
-import InventoryTab from './tabs/InventoryTab';
 import UsageTab from './tabs/UsageTab';
 import HistoryTab from './tabs/HistoryTab';
 import FilesTab from './tabs/FilesTab';
 
 // Stable empty fallback so derived data doesn't churn while the first load runs.
-const EMPTY_CONVERSIONS: PartUnitConversion[] = [];
 
 /**
  * The part workspace: a maturity-adaptive record that leads with the
@@ -109,12 +107,12 @@ export default function PartWorkspace({
   // (and the priceability signal) reload.
   const [refreshKey, setRefreshKey] = useState(0);
   // Bumped after each stock transaction so the history table reloads.
-  const [transactionsRefreshKey, setTransactionsRefreshKey] = useState(0);
+
 
   // Inline conversion edits from the Storage tab take precedence over the
   // seed fetched on load (the editor owns the live list once it mounts). Reset
   // to null on a fresh part (partId-change remounts this component anyway).
-  const [conversionsOverride, setConversionsOverride] = useState<PartUnitConversion[] | null>(null);
+
 
   // Priceability — the same compute_part_cost machinery the parts list uses,
   // so the completeness chip can't disagree with the list ✓/⚠ column. null
@@ -151,7 +149,9 @@ export default function PartWorkspace({
       }
       return { part, conversions };
     },
-    [partId, refreshKey, transactionsRefreshKey],
+    // `transactionsRefreshKey` left with the Storage tab (2026-09-09): stock is written on
+    // Storage → Inventory now, not here, so there is no stock write on this page to refresh after.
+    [partId, refreshKey],
     {
       onError: (err) => {
         setError(err instanceof Error ? err.message : 'Failed to load part');
@@ -159,10 +159,6 @@ export default function PartWorkspace({
     },
   );
   const part = loadData?.part ?? null;
-  // Fed the deleted aggregate modal; now feeds the location modal's unit dropdown, so a shop can
-  // actually USE a conversion it has defined. `conversionsOverride` is what the editor writes
-  // back, so the dropdown updates without a re-fetch.
-  const unitConversions = conversionsOverride ?? loadData?.conversions ?? EMPTY_CONVERSIONS;
   // Create mode never fetches (no partId); only existing mode shows the spinner.
   const loading = mode === 'existing' && partLoading;
 
@@ -274,12 +270,6 @@ export default function PartWorkspace({
     }
   };
 
-  const handleTxnSuccess = () => {
-    // Bumping transactionsRefreshKey re-runs the part fetch (a useLoad dep) in
-    // place and reloads the transaction history table.
-    setTransactionsRefreshKey((k) => k + 1);
-  };
-
   // --- Tabs (URL-addressable via ?tab=) ---
   const visibleTabs = useMemo<PartTabDescriptor[]>(() => {
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
@@ -290,7 +280,19 @@ export default function PartWorkspace({
     // /inventory into Parts. The slug stays 'inventory' so existing ?tab=inventory
     // links keep working — the same treatment 'history' gets for the Activity tab
     // two lines down.
-    tabs.push({ slug: 'inventory', label: 'Storage' });
+    /*
+     * NO Storage tab — removed 2026-09-09.
+     *
+     * A shop holds ~9,000 parts and stocks a handful of them, so this tab was empty for most of
+     * the catalogue: a tab that is blank most times you open it is one people stop opening, and
+     * it split every stock action across two places. Storage → Inventory is the subset that IS
+     * stocked, and clicking a row there opens the same part with the same four verbs.
+     *
+     * What it held went with it: the balances and verbs to that side rail, heats and certificates
+     * to the same rail (the document axis), the transaction ledger to this page's Activity tab and
+     * the shop-wide feed, and the unit-conversion editor nowhere — there is no home for that
+     * setting yet and a half-hidden one on a tab nobody opens was not it.
+     */
     tabs.push({ slug: 'usage', label: 'Usage' });
     tabs.push({ slug: 'files', label: 'Files' });
     // Slug stays 'history' so existing ?tab=history deep links keep working.
@@ -468,18 +470,6 @@ export default function PartWorkspace({
           setupStatus={setupStatus}
           pricingGaps={pricingGaps}
           onDirtyChange={reportDirty}
-        />
-      )}
-
-      {activeTab === 'inventory' && (
-        <InventoryTab
-          part={part}
-          partId={partId}
-          companyId={companyId}
-          transactionsRefreshKey={transactionsRefreshKey}
-          unitConversions={unitConversions}
-          onConversionsChanged={setConversionsOverride}
-          onStockChanged={handleTxnSuccess}
         />
       )}
 

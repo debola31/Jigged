@@ -282,6 +282,34 @@ columns (which it skips by design) and `${…}` interpolations (which it skips w
 Driven from [`__tests__/schema/embedCheck.test.ts`](../__tests__/schema/embedCheck.test.ts) →
 `describe('schemaEmbedCheck — full project scan')` (2 `it`s).
 
+#### A grid column's `colId` is a SQL `ORDER BY`, so a derived column cannot be sortable
+
+The dashboard grids sort on the **server**. Each page wires AG Grid's `onSortChanged` to a handler
+that reads the sorted column's `colId` and passes it to its access-layer fetcher, which puts it
+straight into `.order()`. So a colId is not a UI label — it is a column name in a query.
+
+A ColDef written as `field: 'due_date'` is safe: AG Grid derives the colId from the field, and the
+field **is** the database column. A ColDef written with only `colId` is a **derived** column — its
+value comes from a `valueGetter` or `cellRenderer` reading an embedded row, and no such column
+exists on the table. **Leave one sortable and a click on its header sends PostgREST a column that
+does not exist**, Postgres answers `42703`, and the grid renders nothing.
+
+**This has shipped four times.** Customers (Contact / Email / Phone / Location) and Vendors
+(Services / Contact / Location) were fixed in place, each with a comment explaining the rule.
+Jobs (`parts`, `customer`) and Quotes (`customer`, `prepared_by`, `job`) then shipped it anyway,
+and the Jobs grid's Parts column reached production as Sentry `JAVASCRIPT-NEXTJS-39` — `column
+jobs.parts does not exist`. **It is invisible in development**: every real column sorts, and only
+the derived headers break, so nothing surfaces until an owner clicks one.
+
+The rule is therefore machine-enforced rather than written down: in any file wiring
+`onSortChanged`, a ColDef declaring `colId` must declare `sortable: false`, or sit in the check's
+allowlist with a reason. Scanner
+[`scripts/gridSortableColumnsCheck.ts`](../scripts/gridSortableColumnsCheck.ts) (its header carries
+the three things it deliberately cannot see), driven from
+[`__tests__/standards/gridSortableColumns.test.ts`](../__tests__/standards/gridSortableColumns.test.ts)
+and a named CI step. **Prefer `field:` over a bare `colId` whenever the column is real** — the
+intent then needs no list.
+
 ---
 
 ### 7. Database Schema

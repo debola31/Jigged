@@ -281,10 +281,19 @@ export default function QuotesPage() {
       pinned: 'left' as const,
     },
     {
+      // Customer, Created By and Jobs are read off embedded rows (`customers`,
+      // `created_by_member`, `jobs`) — none is a column on `quotes`. Sorting is
+      // SERVER-side (handleSortChanged feeds the colId into getAllQuotes's
+      // .order()), so a sortable derived column sends PostgREST a column name
+      // that does not exist and the grid fails to load. That is what a click on
+      // the Jobs grid's Parts header did — JAVASCRIPT-NEXTJS-39, `column
+      // jobs.parts does not exist`. These three were the same bug, unfired.
+      // Enforced now by __tests__/standards/gridSortableColumns.test.ts.
       colId: 'customer',
       headerName: 'Customer',
       flex: 1,
       minWidth: 160,
+      sortable: false,
       valueGetter: (params) => params.data?.customers?.name || '—',
     },
     {
@@ -304,6 +313,7 @@ export default function QuotesPage() {
       colId: 'prepared_by',
       headerName: 'Created By',
       width: 160,
+      sortable: false,
       valueGetter: (params) =>
         params.data?.created_by_member?.name ||
         params.data?.created_by_member?.email ||
@@ -327,6 +337,7 @@ export default function QuotesPage() {
       colId: 'job',
       headerName: 'Jobs',
       width: 160,
+      sortable: false,
       cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
         if (!params.data) return null;
         const jobs = params.data.jobs ?? [];

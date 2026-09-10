@@ -475,11 +475,24 @@ export default function JobsPage() {
         );
       },
     },
+    // Customer and Parts are read off embedded rows (`customers`, `job_parts`)
+    // — neither is a column on `jobs`. Sorting here is SERVER-side: the sorted
+    // column's colId goes straight into getAllJobs's .order(), so leaving a
+    // derived column sortable sent PostgREST a column name that does not exist
+    // and the whole grid failed to load. That is JAVASCRIPT-NEXTJS-39, from a
+    // click on the Parts header: `column jobs.parts does not exist`.
+    //
+    // Derived columns stay unsortable until there is something real to sort on,
+    // same as Status below and the same as the Customers and Vendors grids,
+    // which were fixed for this and then not swept for. The structural version
+    // of this rule is __tests__/standards/gridSortableColumns.test.ts — it
+    // fails the build on the next one rather than waiting for Sentry.
     {
       colId: 'customer',
       headerName: 'Customer',
       flex: 1,
       minWidth: 150,
+      sortable: false,
       valueGetter: (params) => {
         if (!params.data) return '';
         if (!params.data.customers) return '—';
@@ -491,6 +504,7 @@ export default function JobsPage() {
       headerName: 'Parts',
       flex: 1,
       minWidth: 200,
+      sortable: false,
       valueGetter: (params) => {
         if (!params.data) return '';
         const parts = params.data.job_parts ?? [];

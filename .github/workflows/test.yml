@@ -89,6 +89,20 @@ jobs:
         # the owner to map something the Map step does not offer.
         run: pnpm exec vitest run __tests__/standards/dataImportFieldParity.test.ts
 
+      - name: Grid sort check — no derived column offers a sort the database cannot answer
+        # Named for the same reason as the checks above. These grids sort SERVER-side:
+        # the sorted column's colId is handed to a PostgREST .order(), so a column
+        # whose value is computed from an embed rather than read from a real database
+        # column turns a header click into `column <table>.<colId> does not exist` and
+        # the grid renders nothing at all. It is invisible in development, because
+        # every real column sorts and only the derived headers break.
+        #
+        # Four pages have shipped this. Customers and Vendors were fixed with a comment
+        # explaining the rule; Jobs and Quotes then shipped it anyway, and the Jobs
+        # grid's Parts column reached production as Sentry JAVASCRIPT-NEXTJS-39. The
+        # comment was not enough, so this is the same rule as a build failure.
+        run: pnpm exec vitest run __tests__/standards/gridSortableColumns.test.ts
+
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage
 

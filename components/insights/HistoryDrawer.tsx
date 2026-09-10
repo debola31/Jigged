@@ -49,8 +49,27 @@ const NO_THREADS: ChatThread[] = [];
 const NO_REPORTS: ReportSummary[] = [];
 const NO_CHARTS: ChartTurn[] = [];
 
+/**
+ * When this was, to the minute.
+ *
+ * THE DATE ALONE WAS NOT ENOUGH TO TELL TWO ENTRIES APART. Asking the same
+ * question twice in an afternoon -- which is what people do when an answer did
+ * not land -- produced a list of identical titles all reading "Sep 10", so the
+ * rail could not say which was the one you wanted. A thread is minutes old far
+ * more often than it is days old, and the time is the only part that varies
+ * across the entries someone is actually choosing between.
+ *
+ * `toLocaleString` rather than a hand-rolled format: it is the browser's own
+ * clock convention, so a shop that reads 24-hour time gets 14:09 without a
+ * setting for it.
+ */
 function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 const CHART_LABEL: Record<string, string> = {

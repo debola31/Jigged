@@ -849,11 +849,24 @@ Supabase vars.
 > `MetricPickerModal` do not exist**, and `20260812211807_prune_dashboard_metric_preferences.sql`
 > removed the preference keys. The metric row is not user-configurable.
 
-**The chat, first (2026-09-08).** Below the scorecards the AI area is one thing. Empty, it is a
-centred question with example chips — the shape of a search box — and one composer with no picker:
-whether an answer is prose, a chart or a one-page report is the model's call from the words
-(`compose_report`, below). Once a conversation exists the composer docks to the bottom and the
-exchanges read top to bottom above it, newest beside the box (`components/insights/InsightsChat.tsx`).
+**The chat, first (2026-09-08); the whole page under the cards (2026-09-10).** Empty, the AI area is
+one heading — *Ask about your shop* — one composer with no picker, and three starter rows: one that
+answers in prose, one that charts, one that comes back as a page. Whether an answer is prose, a chart
+or a one-page report is the model's call from the words (`compose_report`, below).
+
+**ONE COLUMN IN EVERY STATE.** There is no longer an empty-state/conversation ternary: the order is
+heading, transcript, composer, footer, and each slot empties rather than moving, so the composer is a
+single DOM node at a single index for the life of the component. The swap it replaced was the
+surface's worst moment — submitting the first question replaced a calm centred box with a tall,
+nearly empty pane holding one spinner, and a failed enqueue snapped the layout back again. The
+exchanges read oldest first inside a fixed-height pane that scrolls on its own
+(`components/insights/InsightsChat.tsx`).
+
+**The caveat is not read until there is an answer to read it about**, and it names the failure this
+system actually has rather than asking for distrust it gives no way to act on. What stands in its
+place on the empty page is an invitation whose nouns are all subjects `schema_context.py` describes —
+Storage is absent because no inventory-location table is exposed, and invoices and QuickBooks are
+absent because they are on `SENSITIVE_TABLES` by design.
 A report — asked for in so many words, "one-page report on this quarter", "put that in a PDF" — comes
 back as a turn carrying the page: the request, the headline, and an **Open report** card that draws the
 PDF from the spec stored on the message (`ai_chat_messages.report`). One
@@ -1069,17 +1082,18 @@ reworded line moves what the linker can see.
   and is never dispatched — *verified by `api/tests/unit/test_report_handler.py`,
   `api/tests/unit/test_ai_jobs_enqueue.py::TestMarkSucceeded`, `worker/tests/test_db_reporting.py` and
   `api/tests/integration/test_ai_chat_threads.py`*.
-- [ ] **Given** the dashboard with no conversation, **then** one centred question with example chips and no
-  list is read; **given** a conversation, **then** it reads oldest first as a transcript — the question a
-  right-aligned bubble, the answer unboxed beneath it — inside a fixed-height pane that scrolls on its
-  own, with the composer under it and the scorecards above it unmoved; **given** the History button,
-  **then** conversations, reports and charts load only then and a chart opens its conversation —
-  *verified by `__tests__/components/insights/InsightsChat.test.tsx` and
-  `__tests__/utils/aiChatAccess.test.ts`*.
-- [ ] **Given** any state of the chat, **then** a BETA chip and "Jigged AI can make mistakes. Please
-  double-check responses." are read, and no copy anywhere in the path names the hardware inference runs
-  on; **given** an answer the model offered follow-ups for, **then** up to three appear as chips under
-  the NEWEST turn only and asking one reports `from_suggestion` — *verified by
+- [ ] **Given** the dashboard with no conversation, **then** one heading and exactly three starter rows
+  are read — one prose, one chart, one report, each a verbatim eval key — with no list; **given** a
+  conversation, **then** it reads oldest first as a transcript — the question a right-aligned bubble,
+  the answer unboxed beneath it — inside a fixed-height pane that scrolls on its own, with the composer
+  under it and the scorecards above it unmoved; **given** the Chat history button, **then**
+  conversations, reports and charts load only then and a chart opens its conversation — *verified by
+  `__tests__/components/insights/InsightsChat.test.tsx` and `__tests__/utils/aiChatAccess.test.ts`*.
+- [ ] **Given** the empty state, **then** NO caveat about mistakes is read — an invitation naming the
+  readable subjects stands in its place; **given** a settled answer, **then** the caveat is read under
+  the composer on every turn, and no copy anywhere in the path names the hardware inference runs on;
+  **given** an answer the model offered follow-ups for, **then** up to three appear as chips under the
+  NEWEST turn only and asking one reports `from_suggestion` — *verified by
   `__tests__/components/insights/InsightsChat.test.tsx` and
   `api/tests/unit/test_follow_ups_and_semantics_tail.py`*.
 

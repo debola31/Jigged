@@ -23,7 +23,7 @@ the tests that pin them. **Priority and build status live in [prd.md](../prd.md)
 | [AI Insights & Charts](ai-insights.md) | Natural-language questions over shop data (text-to-SQL), saved charts, and the allow/deny lists that keep sensitive tables out of the AI's reach. Flag `ai_insights` — **opt-out**, on unless a tenant disables it |
 | [Billing & Subscriptions](billing.md) | Stripe-hosted Checkout + Customer Portal, and the DB-enforced entitlement gate (`company_can_write`) every tenant table must carry |
 | [Customers](customers.md) | Customer identity, contacts, addresses, standing terms, credit status — and **the freight model** (`customer_carrier_accounts` → job → frozen shipment) |
-| [Dashboard](dashboard.md) | The post-login overview: pinned metric scorecards, the Recent Activity feed, and the AI area it hosts. Flag `dashboard_revenue` — **opt-out**, and it gates only the money lines on the scorecards, never the counts |
+| [Dashboard](dashboard.md) | The post-login overview: four metric scorecards under an unfinished-work band, and the AI area that owns everything below them. Flag `dashboard_revenue` — **opt-out**, and it gates only the money lines on the scorecards, never the counts |
 | [Data Import](data-import.md) | Guided onboarding import (Upload → Map → Review & Fix → Import) with idempotent natural-identity upsert; PRD and technical design in one doc. On for every tenant — the `data_import` flag went when the per-entity CSV wizards did |
 | [Demo Mode](demo-mode.md) | The pre-populated sandbox inside a real company, and what Reset does and does not delete |
 | [Feature Flags](feature-flags.md) | Where a flag lives, opt-in vs opt-out, the two places that each carry a default, and the checklist for retiring one |

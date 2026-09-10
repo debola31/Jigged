@@ -62,7 +62,7 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
 }));
 
-import { getDashboardActivity, getActivityStream } from '@/utils/dashboardAccess';
+import { getActivityStream } from '@/utils/dashboardAccess';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,55 +74,6 @@ beforeEach(() => {
   DATA.operations = [];
   DATA.invoices = [];
   delete DATA.error;
-});
-
-describe('getDashboardActivity', () => {
-  beforeEach(() => {
-    DATA.jobsCreated = [
-      { id: 'j1', job_number: 'J-1', created_at: '2026-06-23T05:00:00Z', completed_at: null, customer: { name: 'Acme' } },
-    ];
-    DATA.jobsCompleted = [
-      { id: 'j2', job_number: 'J-2', created_at: '2026-06-20T00:00:00Z', completed_at: '2026-06-23T06:00:00Z', customer: null },
-    ];
-    DATA.quotes = [
-      { id: 'q1', quote_number: 'Q-1', created_at: '2026-06-23T04:00:00Z', customer: { name: 'Beta' } },
-    ];
-    DATA.shipments = [
-      { id: 's1', created_at: '2026-06-23T07:00:00Z', job_id: 'j9', job: { job_number: 'J-9' }, customer: { name: 'Gamma' } },
-    ];
-    // These must NOT appear on the compact dashboard card.
-    DATA.notes = [
-      { id: 'n1', created_at: '2026-06-23T08:00:00Z', job_id: 'j1', job: { job_number: 'J-1' }, author: { name: 'Sam' }, media: [] },
-    ];
-    DATA.operations = [
-      { id: 'o1', completed_at: '2026-06-23T08:30:00Z', job_id: 'j1', jobs: { job_number: 'J-1' } },
-    ];
-  });
-
-  it('returns only business milestones (no notes/photos/operations), newest first', async () => {
-    const items = await getDashboardActivity('c1', { limit: 6 });
-
-    expect(items.map((i) => i.type).sort()).toEqual(['job', 'job', 'quote', 'shipment']);
-    expect(items.every((i) => ['job', 'quote', 'shipment'].includes(i.type))).toBe(true);
-    // Newest first: shipment 07:00 > job-completed 06:00 > job-created 05:00 > quote 04:00.
-    expect(items.map((i) => i.timestamp)).toEqual([
-      '2026-06-23T07:00:00Z',
-      '2026-06-23T06:00:00Z',
-      '2026-06-23T05:00:00Z',
-      '2026-06-23T04:00:00Z',
-    ]);
-    // Mapped fields: shipment uses the joined job number + customer + deep link.
-    const shipment = items[0];
-    expect(shipment.entityNumber).toBe('J-9');
-    expect(shipment.customerName).toBe('Gamma');
-    expect(shipment.href).toBe('/dashboard/c1/jobs/j9');
-  });
-
-  it('caps the card to the requested limit', async () => {
-    const items = await getDashboardActivity('c1', { limit: 2 });
-    expect(items).toHaveLength(2);
-    expect(items[0].timestamp).toBe('2026-06-23T07:00:00Z'); // still newest-first
-  });
 });
 
 describe('getActivityStream', () => {

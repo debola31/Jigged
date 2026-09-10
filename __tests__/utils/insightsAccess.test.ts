@@ -27,6 +27,7 @@ function queryStub(data: unknown) {
 vi.mock('@/lib/api', () => ({ API_BASE_URL: 'http://api.test' }));
 
 import {
+  askedQuestionOf,
   ChatEnqueueError,
   chatResultOf,
   listReports,
@@ -42,6 +43,31 @@ function response(status: number, body: unknown): Response {
     json: async () => body,
   } as unknown as Response;
 }
+
+describe('askedQuestionOf', () => {
+  // The question a job is working on, read off the job rather than stashed beside
+  // it: a copy in storage is a second source of truth that can disagree with the
+  // job it labels, and ai_chat_messages cannot answer mid-flight because the
+  // trigger writes both turns only when the job succeeds.
+  const job = (payload: unknown) => ({ payload }) as Parameters<typeof askedQuestionOf>[0];
+
+  it('reads the chat door\'s question and the report door\'s request', () => {
+    expect(askedQuestionOf(job({ question: 'how many jobs are late?' }))).toBe('how many jobs are late?');
+    expect(askedQuestionOf(job({ request: 'one-page report on this quarter' }))).toBe('one-page report on this quarter');
+  });
+
+  it('returns null rather than a value the UI would render as text', () => {
+    // A job from an older shape must degrade to "no echo", never to `undefined`
+    // printed at the reader.
+    expect(askedQuestionOf(null)).toBeNull();
+    expect(askedQuestionOf(job(null))).toBeNull();
+    expect(askedQuestionOf(job('a string'))).toBeNull();
+    expect(askedQuestionOf(job([{ question: 'x' }]))).toBeNull();
+    expect(askedQuestionOf(job({ question: 42 }))).toBeNull();
+    expect(askedQuestionOf(job({ question: '   ' }))).toBeNull();
+    expect(askedQuestionOf(job({}))).toBeNull();
+  });
+});
 
 describe('chatResultOf', () => {
   const job = (result: unknown): AiJob => ({

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 /**
@@ -31,7 +31,7 @@ import {
   getPausedOperations,
   voidOpenIntervalsForOperation,
 } from '@/utils/operationIntervalsAccess';
-import UnfinishedWorkCard from '@/components/dashboard/UnfinishedWorkCard';
+import UnfinishedWorkBand from '@/components/dashboard/UnfinishedWorkBand';
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -71,6 +71,20 @@ const pausedOperation = (over = {}) => ({
   ...over,
 });
 
+/**
+ * Open the detail behind the band.
+ *
+ * The rows moved behind a dialog on 2026-09-10: the band is the summary and the
+ * detail is what you open when the summary says something happened. Every
+ * assertion below that is about a ROW therefore opens it first — what those tests
+ * are for (an abandoned interval being actually stoppable, and no operator ever
+ * being named) is unchanged by where the rows are rendered.
+ */
+async function openDetail() {
+  render(<UnfinishedWorkBand companyId="co1" />);
+  await userEvent.click(await screen.findByRole('button', { name: /still unfinished/i }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mock(getOpenIntervals).mockResolvedValue([openInterval()]);
@@ -78,12 +92,48 @@ beforeEach(() => {
   mock(voidOpenIntervalsForOperation).mockResolvedValue(1);
 });
 
-describe('UnfinishedWorkCard', () => {
+describe('UnfinishedWorkBand', () => {
   it('renders nothing when nothing is running and nothing is paused', async () => {
     mock(getOpenIntervals).mockResolvedValue([]);
-    const { container } = render(<UnfinishedWorkCard companyId="co1" />);
+    const { container } = render(<UnfinishedWorkBand companyId="co1" />);
     await waitFor(() => expect(mock(getOpenIntervals)).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('summarises on the band, and the whole band is one button', async () => {
+    mock(getOpenIntervals).mockResolvedValue([openInterval(), openInterval({ interval_id: 'iv2' })]);
+    mock(getPausedOperations).mockResolvedValue([pausedOperation()]);
+    render(<UnfinishedWorkBand companyId="co1" />);
+
+    // Reads as a sentence, and the split is stated before anyone decides whether
+    // to open the detail — the two groups need different things done about them.
+    const band = await screen.findByRole('button', { name: /3 timers still unfinished/ });
+    expect(band).toHaveAccessibleName(/2 running, 1 paused/);
+
+    // ONE BUTTON, NOTHING NESTED. A nested button is invalid HTML and would give
+    // the row two competing accessible names, so the affordance is a plain span.
+    // design-system.md states this as a rule for a band that does one thing.
+    expect(within(band).queryByRole('button')).toBeNull();
+    expect(band).toHaveAccessibleName(/See what's unfinished/);
+  });
+
+  it('says nothing about counts it does not have — one running reads as one', async () => {
+    mock(getPausedOperations).mockResolvedValue([]);
+    render(<UnfinishedWorkBand companyId="co1" />);
+
+    const band = await screen.findByRole('button', { name: /still unfinished/i });
+    expect(band).toHaveAccessibleName(/1 timer still unfinished/);
+    expect(band).toHaveAccessibleName(/1 running/);
+    expect(band.textContent).not.toMatch(/paused/);
+  });
+
+  it('keeps the rows behind the band until someone opens them', async () => {
+    render(<UnfinishedWorkBand companyId="co1" />);
+    await screen.findByRole('button', { name: /still unfinished/i });
+
+    // The point of the band: on a page of four scorecards it announces the count
+    // and costs one line, instead of a metric-sized block of rows.
+    expect(screen.queryByRole('link', { name: 'J-0001' })).toBeNull();
   });
 
   it('links to the exact operation, not just the job', async () => {
@@ -91,13 +141,13 @@ describe('UnfinishedWorkCard', () => {
     // job routing four parts through one machine has four steps all called
     // `HAAS VF-3SSYT`. Landing on the job means picking one by eye, and the
     // office picked a completed one and concluded the card was lying.
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     const link = await screen.findByRole('link', { name: 'J-0001' });
     expect(link).toHaveAttribute('href', '/dashboard/co1/jobs/job1?op=jo1');
   });
 
   it('names no operator anywhere on the row', async () => {
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await screen.findByRole('link', { name: 'J-0001' });
     expect(screen.queryByText(/\bby\b/i)).not.toBeInTheDocument();
   });
@@ -107,7 +157,7 @@ describe('UnfinishedWorkCard', () => {
     // "Assembly Bench · J-0008 · Assembly Bench". The part is what tells four
     // identically-named steps apart, which is the confusion this whole change is
     // about — and no test caught it, only looking at the dialog did.
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
 
     expect(
@@ -116,7 +166,7 @@ describe('UnfinishedWorkCard', () => {
   });
 
   it('confirms before discarding, because a voided interval has no inverse', async () => {
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
 
     expect(await screen.findByText(/Stop this timer\?/)).toBeInTheDocument();
@@ -126,7 +176,7 @@ describe('UnfinishedWorkCard', () => {
   });
 
   it('discards by OPERATION when confirmed', async () => {
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await userEvent.click(await screen.findByRole('button', { name: /discard the timer/i }));
 
@@ -141,7 +191,7 @@ describe('UnfinishedWorkCard', () => {
     // A paused and B then left running becomes paused-eligible the instant Stop
     // voids B's. Refreshing only the running list makes the step vanish, which
     // reads as the Stop having finished the work.
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
 
     mock(getOpenIntervals).mockResolvedValue([]);
@@ -156,7 +206,7 @@ describe('UnfinishedWorkCard', () => {
     // The RPC is per-operation, so an ad-hoc step with two open intervals loses
     // both. Splicing would leave the other one on screen claiming a machine is
     // running that is not.
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
     mock(getOpenIntervals).mockResolvedValue([]);
     await userEvent.click(await screen.findByRole('button', { name: /discard the timer/i }));
@@ -165,7 +215,7 @@ describe('UnfinishedWorkCard', () => {
   });
 
   it('sends a count and no duration when a timer is discarded', async () => {
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await userEvent.click(await screen.findByRole('button', { name: /discard the timer/i }));
 
@@ -182,7 +232,7 @@ describe('UnfinishedWorkCard', () => {
     mock(voidOpenIntervalsForOperation).mockRejectedValue(
       new Error('Only an admin can discard a running timer'),
     );
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await userEvent.click(await screen.findByRole('button', { name: /stop/i }));
     await userEvent.click(await screen.findByRole('button', { name: /discard the timer/i }));
 
@@ -197,7 +247,7 @@ describe('UnfinishedWorkCard', () => {
     // leave the objection standing.
     mock(getOpenIntervals).mockResolvedValue([]);
     mock(getPausedOperations).mockResolvedValue([pausedOperation()]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
 
     expect(await screen.findByRole('link', { name: 'J-0042' })).toHaveAttribute(
       'href',
@@ -208,7 +258,7 @@ describe('UnfinishedWorkCard', () => {
   it('offers no Stop on a paused row, because there is no clock to stop', async () => {
     mock(getOpenIntervals).mockResolvedValue([]);
     mock(getPausedOperations).mockResolvedValue([pausedOperation()]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await screen.findByRole('link', { name: 'J-0042' });
 
     expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument();
@@ -218,7 +268,7 @@ describe('UnfinishedWorkCard', () => {
     // The running clock is the more urgent of the two — it is the one nobody but
     // this card can stop — so it must not disappear because the other read failed.
     mock(getPausedOperations).mockRejectedValue(new Error('nope'));
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
 
     expect(await screen.findByRole('link', { name: 'J-0001' })).toBeInTheDocument();
   });
@@ -228,9 +278,14 @@ describe('UnfinishedWorkCard', () => {
     // hours is 6x its estimate and plainly forgotten; the old flat rule said
     // nothing about it for another four hours.
     mock(getOpenIntervals).mockResolvedValue([openInterval({ expected_minutes: 20 })]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
 
-    expect(await screen.findByText(/sitting longer than the step should take/i)).toBeInTheDocument();
+    // SCOPED TO THE DIALOG. The band carries its own one-line version of this
+    // sentence, so an unscoped query now matches twice — the summary and the
+    // detail saying the same true thing in two places, by design.
+    expect(
+      within(await screen.findByRole('dialog')).getByText(/sitting longer than the step should take/i),
+    ).toBeInTheDocument();
     // The reason is stated, so a reader can judge whether the flag is fair.
     expect(screen.getByText(/est\. 20m/)).toBeInTheDocument();
   });
@@ -241,7 +296,7 @@ describe('UnfinishedWorkCard', () => {
     mock(getOpenIntervals).mockResolvedValue([
       openInterval({ started_at: hoursAgo(4), expected_minutes: 300 }),
     ]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
     await screen.findByRole('link', { name: 'J-0001' });
 
     expect(screen.queryByText(/sitting longer than the step should take/i)).not.toBeInTheDocument();
@@ -254,16 +309,21 @@ describe('UnfinishedWorkCard', () => {
     mock(getOpenIntervals).mockResolvedValue([
       openInterval({ started_at: hoursAgo(7), expected_minutes: 0 }),
     ]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
 
-    expect(await screen.findByText(/sitting longer than the step should take/i)).toBeInTheDocument();
+    // SCOPED TO THE DIALOG. The band carries its own one-line version of this
+    // sentence, so an unscoped query now matches twice — the summary and the
+    // detail saying the same true thing in two places, by design.
+    expect(
+      within(await screen.findByRole('dialog')).getByText(/sitting longer than the step should take/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/est\. /)).not.toBeInTheDocument();
   });
 
   it('counts a stale pause in the banner alongside a stale clock', async () => {
     mock(getOpenIntervals).mockResolvedValue([openInterval({ started_at: hoursAgo(7) })]);
     mock(getPausedOperations).mockResolvedValue([pausedOperation({ paused_at: hoursAgo(9) })]);
-    render(<UnfinishedWorkCard companyId="co1" />);
+    await openDetail();
 
     expect(await screen.findByText(/2 of these have/i)).toBeInTheDocument();
   });

@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -15,7 +14,9 @@ import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import HistoryIcon from '@mui/icons-material/History';
+import QuestionAnswerOutlinedIcon from '@mui/icons-material/QuestionAnswerOutlined';
 import SendIcon from '@mui/icons-material/Send';
+import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
 import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
@@ -27,14 +28,62 @@ import {
   type ReportTurn,
   type ThreadMessage,
 } from '@/utils/aiChatAccess';
-import { ChatEnqueueError, reportResultOf, submitChatQuery, type ReportSummary } from '@/utils/insightsAccess';
+import {
+  askedQuestionOf,
+  ChatEnqueueError,
+  reportResultOf,
+  submitChatQuery,
+  type ReportSummary,
+} from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
 
+/**
+ * Three starters: one that answers in prose, one that draws a chart, one that
+ * comes back as a page. Five became three on 2026-09-10 — two rows of chips in
+ * two unexplained colours read as a filter bar, and the two dropped questions
+ * were the weakest of the five. "Quote pipeline" in particular is the only
+ * user-facing word on this screen the rest of the app never shows (the scorecard
+ * says Open Quotes), it was at the centre of the "16 then 6 then 11" bug, and the
+ * owner marked its answer worse than Claude's twice in the final blind read.
+ *
+ * EVERY STRING IS ALREADY A MEASURED KEY, which is why this carries no eval risk:
+ * the first two are verbatim `pairs.json` `source_question` entries and verbatim
+ * `evals/insights_ab.py` DEFAULT_QUESTIONS, and the third is a verbatim
+ * `evals/route_probe.py` case. A starter that stops being a verbatim key would
+ * silently break the leave-one-out retrieval control, which excludes exemplars by
+ * exact string equality and would then hold nothing out.
+ *
+ * The late-jobs question leads for a reason beyond its answer: its number is
+ * checkable against the Overdue Jobs scorecard directly above it, and the two are
+ * pinned to each other by test_late_job_parity.py and __tests__/types/job.test.ts
+ * reading one shared fixture. That test exists because the chat once reported 7
+ * overdue where the dashboard showed 6. Nothing else on this screen buys
+ * first-contact trust that cheaply.
+ *
+ * KEEP THIS A FLAT ARRAY OF SINGLE-QUOTED STRING LITERALS UNDER THIS NAME.
+ * `api/tests/unit/test_chart_exemplar.py` regex-parses it out of this file to
+ * assert no starter is the prompt's chart exemplar and that none of them mentions
+ * vendors — the exemplar is a vendor-spend question, and a chip that collided with
+ * it would make the echo guard drop real answers. Icons ride alongside in
+ * EXAMPLE_ICONS rather than turning these into objects.
+ */
 const EXAMPLE_PROMPTS = [
+  'How many jobs are late right now?',
   'What is my revenue trend over time?',
-  'Who is my top customer by revenue?',
-  'What is my quote pipeline worth?',
+  'One-page report on this quarter',
 ];
+
+/**
+ * One icon per starter, by index — the shape of the answer each one comes back as.
+ *
+ * THE CHART ICON IS LICENSED BY MEASUREMENT, not by hope: `trend` is in the
+ * backend's `_CHART_TYPE_KEYWORDS` so it deterministically selects an area chart,
+ * and the revenue-trend question is the one the local model charted in every eval
+ * run. Do not put a chart icon on a starter whose words carry no chart keyword —
+ * a chart is never guaranteed (the gate drops anything under three points), and an
+ * icon promising one is a promise this surface cannot keep.
+ */
+const EXAMPLE_ICONS = [QuestionAnswerOutlinedIcon, ShowChartOutlinedIcon, DescriptionOutlinedIcon];
 
 /**
  * Enqueue rejections that are EXPECTED, mapped to the reason that leaves in the
@@ -97,16 +146,6 @@ function questionLengthBucket(text: string): string {
 }
 
 /**
- * Requests for a document, offered beside the questions. There is no Report
- * verb: the words carry the intent, and the model calls compose_report when it
- * reads one. The chips show what to say.
- */
-const EXAMPLE_REPORTS = [
-  'One-page report on this quarter',
-  'PDF of the backlog and late jobs',
-];
-
-/**
  * Rotating status while the answer is being worked out.
  *
  * interaction-standards.md §5 puts anything over ten seconds in a tier that must
@@ -124,6 +163,20 @@ const LOADING_MESSAGES = [
   'Working out the answer…',
   'Still going — a question can take up to a minute, a one-page report a few minutes.',
 ];
+
+/**
+ * The wait message CLAMPS at the last line; it does not cycle.
+ *
+ * It used to be `LOADING_MESSAGES[tick % length]` on a four-second tick, so at
+ * twelve seconds the wait said "Reading your shop data…" a second time and kept
+ * circling. A report runs for minutes: someone reading the same three lines for
+ * the fourth time has learned the messages are theatre rather than progress, and
+ * this is the first wait a first click produces. The last line is the honest
+ * terminal state — it says the thing that stays true however long this takes.
+ */
+function loadingMessageFor(tick: number): string {
+  return LOADING_MESSAGES[Math.min(tick, LOADING_MESSAGES.length - 1)];
+}
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
 
@@ -144,15 +197,18 @@ type QuestionSource = 'typed' | 'example' | 'suggestion';
  * inside itself. dvh, not vh, so a phone's collapsing address bar does not
  * change it mid-conversation.
  *
- * THE CEILING IS SET BY WHAT SITS ABOVE IT, not by taste. The scorecards,
- * Recent Activity, this area's own header and the composer and its caveat come to
- * roughly 460px on a desktop viewport; at 58dvh the pane pushed the caveat past
- * the fold, so the last line of the screen was a sentence you had to scroll to
- * finish reading. 44dvh keeps the whole exchange -- newest answer, composer,
- * caveat -- on one screen at 900px and up, which is the point of giving the
+ * THE CEILING IS SET BY WHAT SITS ABOVE IT, not by taste, and that budget
+ * CHANGED on 2026-09-10. It used to count the scorecards, Recent Activity, this
+ * area's own header, the composer and its caveat at roughly 460px. Recent
+ * Activity is gone and the header moved inside this column, which gives back
+ * about 120px: at a 900px viewport the page above now costs 64 (app header) + 24
+ * (padding) + 160 (four scorecards and their margin) = 248, and this column
+ * spends a further ~184 on its toolbar, composer, caveat and gaps. That leaves
+ * ~444px, so 48dvh (432px at 900) still keeps the whole exchange -- newest
+ * answer, composer, caveat -- on one screen, which is the point of giving the
  * transcript its own scrollport at all.
  */
-const TRANSCRIPT_HEIGHT = { xs: 'clamp(260px, 40dvh, 420px)', md: 'clamp(300px, 44dvh, 520px)' };
+const TRANSCRIPT_HEIGHT = { xs: 'clamp(240px, 38dvh, 400px)', md: 'clamp(320px, 48dvh, 560px)' };
 
 interface InsightsChatProps {
   companyId: string;
@@ -238,6 +294,21 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const job = useAiJob(`insights.${companyId}`);
 
   const pending = asking || job.phase === 'pending';
+
+  /**
+   * What the wait is about, whether or not this tab is the one that asked.
+   *
+   * `askedQuestion` is React state and dies when the page unmounts, so someone who
+   * asked a question, went to look at a job while it worked and came back met a
+   * spinner labelled with nothing. The job handle already survives that trip in
+   * sessionStorage (useAiJob re-attaches to it), so the ANSWER was never at risk —
+   * only the sentence saying what was asked, which is the part that makes a
+   * minute-long wait legible rather than unnerving.
+   *
+   * Local state still wins when it is there: it is set the instant Send is
+   * pressed, where the row has not necessarily come back from the first poll yet.
+   */
+  const inFlightQuestion = askedQuestion || askedQuestionOf(job.job) || '';
   const storageKey = `${THREAD_STORAGE_PREFIX}${companyId}`;
 
   // Re-attach to the conversation after a reload. Deferred into a microtask for
@@ -506,7 +577,13 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     });
   };
 
-  const placeholder = hasConversation ? 'Ask a follow-up…' : 'Ask a question, or ask for a one-page report…';
+  // NAMES THE MECHANIC, not the menu. The old empty-state placeholder listed what
+  // you could ask for ("…or ask for a one-page report"), which is the starters'
+  // job now that one of them is a report. It also never reached a screen reader:
+  // the field's aria-label wins the accessible-name computation, so that
+  // vocabulary was only ever visible to sighted users, and it is now carried by a
+  // control that is reachable either way.
+  const placeholder = hasConversation ? 'Ask a follow-up…' : 'Type your question…';
 
   const composer = (
     <Box sx={{ display: 'flex', gap: 1.5 }}>
@@ -521,10 +598,16 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         onKeyDown={handleKeyDown}
         disabled={pending}
         slotProps={{
-          input: {
-            sx: { minHeight: 48 },
-            'aria-label': 'Your question',
-          },
+          input: { sx: { minHeight: 48 } },
+          // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
+          // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
+          // the textarea itself had no accessible name at all: a screen reader
+          // announced the one control this feature exists for as unlabelled. Found
+          // by CI, where `getByLabel('Your question')` resolved to the div and
+          // Playwright refused it as "not an input element"; the same mismatch is
+          // why focusing that locator silently did nothing. `htmlInput` is the slot
+          // that reaches the real element, and is what the rest of the repo uses.
+          htmlInput: { 'aria-label': 'Your question' },
         }}
       />
       <Button
@@ -559,9 +642,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <CircularProgress size={16} color="warning" />
           <Typography variant="body2" color="text.secondary">
-            {askedQuestion ? `${askedQuestion} — ` : ''}
+            {inFlightQuestion ? `${inFlightQuestion} — ` : ''}
             <Box component="span" sx={{ color: 'warning.light' }}>
-              {LOADING_MESSAGES[loadingTick % LOADING_MESSAGES.length]}
+              {loadingMessageFor(loadingTick)}
             </Box>
           </Typography>
         </Box>
@@ -589,7 +672,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                 New conversation
               </Button>
             ) : (
-              <Button color="inherit" size="small" onClick={() => handleSubmit(askedQuestion)}>
+              <Button color="inherit" size="small" onClick={() => handleSubmit(inFlightQuestion)}>
                 Try again
               </Button>
             )
@@ -610,10 +693,31 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     </>
   );
 
-  // Said under the composer in both states. The assistant writes SQL against the
-  // shop's own data and can pick the wrong reading of a business term -- which it
-  // has, live -- so the surface says so rather than letting a confident sentence
-  // imply otherwise.
+  /**
+   * Said under the composer ONCE THERE IS AN ANSWER TO SAY IT ABOUT.
+   *
+   * It used to be read on the empty page too, which put a warning about mistakes
+   * in front of someone who had not yet done anything -- the single most
+   * off-putting thing on a surface a shop owner called scary. The prior reasoning
+   * for keeping it in both states was that "a caveat that only appears on an empty
+   * page is a caveat nobody reads"; that argument was about it PERSISTING into the
+   * conversation, and it still holds. This gates on a settled turn rather than on
+   * `pending`, because `pending` flips at submit and would put the warning under
+   * an empty box for the whole ten-second wait -- the same warning-before-you-begin
+   * reading, just later.
+   *
+   * THE WORDING IS THE ORIGINAL, restored 2026-09-10 after a shorter-lived
+   * rewrite. That rewrite named the specific failure ("Jigged can read a term
+   * like revenue differently than you do") on the argument that it gives an audit
+   * the reader can perform. The owner asked for the plain sentence back, and it
+   * earns its place: it is short enough to be read on every turn rather than
+   * skimmed past, and it does not lead a nervous reader to think the ONLY thing
+   * that can go wrong is a misread definition.
+   *
+   * It is a TONE line, not a safety control. A randomised trial (PubMed 40998694)
+   * found "can make mistakes" warnings moved verification behaviour not at all
+   * (15.3% vs 15.9%). Do not let it be cited as a mitigation.
+   */
   const disclaimer = (
     <Typography
       variant="caption"
@@ -624,111 +728,236 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     </Typography>
   );
 
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Top row: the way back to everything asked before.
-          NO TITLE AND NO BETA CHIP. Both were tried and both were clutter: the
-          empty state's own question already says what the area is, and the caveat
-          under the composer -- which is read on every turn rather than once at the
-          top -- says the thing a BETA pill was standing in for. Two labels for one
-          idea is one label too many on a surface this quiet.
+  /**
+   * What the empty page says in the slot the caveat vacated: an invitation, not a
+   * boundary and not a warning.
+   *
+   * THE NOUNS ARE LOAD-BEARING. Each one is a sidebar label AND a subject
+   * `api/tools/schema_context.py` actually describes, so the line cannot invite a
+   * question the assistant has to refuse. Storage is deliberately absent -- no
+   * inventory-location table is exposed, so "where is part X" cannot be answered.
+   * Invoices, payments and QuickBooks are deliberately absent for the opposite
+   * reason: they are on SENSITIVE_TABLES by design, and advertising them
+   * manufactures the one question the product refuses on purpose.
+   *
+   * NO PRIVACY CLAIM. "Nothing leaves your shop" would be untrue -- the question
+   * and the rows its queries return go to the model provider -- and an unprompted
+   * reassurance about a risk the reader had not considered is how you introduce
+   * the worry rather than settle it.
+   */
+  const scopeLine = (
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      sx={{ display: 'block', textAlign: 'center', mt: 1 }}
+    >
+      Ask about your jobs, quotes, parts, customers, vendors and work centers.
+    </Typography>
+  );
 
-          New conversation is CONTAINED. As a text button beside an outlined one it
-          read as the lesser of the two, which is backwards: starting over is the
-          thing people reach for when an answer went wrong, and it was the first
-          thing missed on this screen. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <Stack direction="row" spacing={1}>
-          {hasConversation && (
-            <Button
-              variant="contained"
-              startIcon={<AddCommentOutlinedIcon />}
-              onClick={startNewConversation}
-              sx={{ minHeight: 48 }}
-            >
-              New conversation
-            </Button>
-          )}
-          <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
-            Chat History
-          </Button>
-        </Stack>
-      </Box>
-
-      {!hasConversation && !pending ? (
-        // Empty: one centred question, the shape of a search box.
-        <Box sx={{ py: { xs: 4, md: 8 }, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2.5 }}>
-          <Typography variant="h5" component="h2" sx={{ fontWeight: 600, textAlign: 'center' }}>
-            What do you want to know about the shop?
-          </Typography>
-          <Box sx={{ width: '100%', maxWidth: 760 }}>{composer}</Box>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.75, justifyContent: 'center', maxWidth: 760 }}>
-            {EXAMPLE_PROMPTS.map((prompt) => (
-              <Chip
-                key={prompt}
-                label={prompt}
-                variant="outlined"
-                onClick={() => handleChipClick(prompt)}
-                disabled={pending}
-                sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-              />
-            ))}
-            {EXAMPLE_REPORTS.map((request) => (
-              <Chip
-                key={request}
-                label={request}
-                variant="outlined"
-                color="primary"
-                icon={<DescriptionOutlinedIcon />}
-                onClick={() => handleChipClick(request)}
-                disabled={pending}
-                sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-              />
-            ))}
-          </Stack>
-          <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 2 }}>{status}</Box>
-          <Box sx={{ width: '100%', maxWidth: 760 }}>{disclaimer}</Box>
-        </Box>
-      ) : (
-        // A conversation owns a fixed-height column: the transcript scrolls
-        // INSIDE it and the composer is a flex sibling below, so the scorecards
-        // and Recent Activity above stay where the owner left them. `position:
-        // sticky` is gone from the composer -- inside a real scrollport there is
-        // nothing for it to stick to, which is why it never docked before.
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: TRANSCRIPT_HEIGHT }}>
-          <Box
-            ref={paneRef}
-            // minHeight: 0 is load-bearing. A flex child's default min-height is
-            // its content, so without this the column grows instead of scrolling.
-            sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}
+  /**
+   * The three starters, as full-width rows rather than wrapped pills.
+   *
+   * PILLS WERE THE PROBLEM, not the copy. An outlined neutral chip is, in this
+   * app's own vocabulary, the de-emphasised OFF state (design-system.md gives
+   * `default` -> outlined for "Not connected", "No subscription"), and a row of
+   * them reads as a filter bar someone has switched off -- especially beside the
+   * Activity page's filter chips, which look exactly like this. Full sentences
+   * also wrapped into a ragged two-then-one centred block at 760px.
+   *
+   * ONE TREATMENT, NOT TWO. The report starter used to be `color="primary"` with
+   * an icon, encoding a two-category taxonomy nobody had explained. It was also a
+   * contrast bug: primary.main #4682B4 measures ~3.3:1 against the real ambient
+   * backdrop, under the 4.5:1 body floor. The icon now carries the distinction and
+   * the label colour is the same for all three.
+   *
+   * `variant="outlined"`, never `"text"` -- the theme paints text buttons
+   * primary.light with a hover underline, which would make three suggestions look
+   * like three links.
+   */
+  const starters = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {/* Subordinate to the box above it, and that is the whole job of the word
+          "Or": these are an option, not the recommended path. Sentence case
+          because brand-guide.md asks for it; the uppercase TRY NEXT in the
+          transcript is labelling a group inside a conversation, a different job. */}
+      <Typography variant="caption" color="text.secondary">
+        Or try one of these
+      </Typography>
+      {EXAMPLE_PROMPTS.map((prompt, i) => {
+        const Icon = EXAMPLE_ICONS[i];
+        return (
+          <Button
+            key={prompt}
+            fullWidth
+            variant="outlined"
+            startIcon={<Icon sx={{ color: 'text.secondary' }} />}
+            onClick={() => handleChipClick(prompt)}
+            disabled={pending}
+            sx={{
+              minHeight: 48,
+              justifyContent: 'flex-start',
+              textAlign: 'left',
+              px: 2,
+              fontWeight: 400,
+              // MUI's ButtonBase sets `outline: 0` and neither the theme nor
+              // CssBaseline puts one back, so NO button in this app currently
+              // shows a keyboard focus ring -- verified in a browser, and the same
+              // gap design-system.md records for hand-rolled ButtonBase bands.
+              // These three are the primary way into the feature for someone who
+              // has not thought of a question yet, so they get one here rather
+              // than waiting for the app-wide fix.
+              // LONGHANDS, not the `outline` shorthand: measured in a browser, the
+              // shorthand landed as `solid 0px` -- the style applied and the width
+              // did not, so the ring was invisible while looking correct in source.
+              '&:focus-visible': {
+                outlineWidth: '2px',
+                outlineStyle: 'solid',
+                outlineColor: 'primary.light',
+                outlineOffset: '2px',
+              },
+            }}
           >
-            <Stack spacing={2.5}>
-              {turns.map((turn, i) => (
-                <ConversationTurn
-                  key={turn.key}
-                  question={turn.question}
-                  answer={turn.answer}
-                  chartConfig={turn.chartConfig}
-                  report={turn.report}
-                  onOpenReport={() => openReportTurn(turn)}
-                  followUps={i === turns.length - 1 ? turn.followUps : []}
-                  onFollowUp={handleFollowUp}
-                  followUpsDisabled={pending}
-                />
-              ))}
-              {status}
+            {prompt}
+          </Button>
+        );
+      })}
+    </Box>
+  );
+
+  return (
+    /**
+     * ONE COLUMN, IN EVERY STATE.
+     *
+     * This used to be a ternary between an empty state and a conversation state,
+     * and the swap was the surface's worst moment: submitting the first question
+     * replaced a calm centred box with a tall, nearly empty pane holding one
+     * spinner line, and if that first question failed at enqueue the layout
+     * snapped back again. A first-time user could watch the page change shape
+     * twice before reading anything.
+     *
+     * The order is fixed -- heading, transcript, composer, footer -- and each slot
+     * empties rather than moving. THE COMPOSER IS ONE DOM NODE AT ONE INDEX for
+     * the life of the component: React reconciles children positionally and a
+     * `{cond && ...}` slot renders `false` in place rather than collapsing, so the
+     * node (and anything typed into it, and its focus) survives every transition.
+     * Do not wrap a slot in a fragment that changes the child count.
+     */
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* The way back to everything asked before, and the way to start over.
+            BOTH LIVE INSIDE THE COLUMN. Chat History used to be right-aligned to
+            the full content width while the composer was a 760px centred column,
+            so on a wide office monitor it floated several hundred pixels clear of
+            the thing it belonged to -- and further the wider the screen, on a
+            surface whose whole audience is at a desktop. Aligning it to the
+            composer's edge is the fix; it keeps `variant="outlined"` because
+            proximity already demotes it.
+
+            NO TITLE AND NO BETA CHIP. Both were tried and both were clutter: the
+            empty state's own heading says what the area is.
+
+            New conversation is CONTAINED. As a text button beside an outlined one
+            it read as the lesser of the two, which is backwards: starting over is
+            what people reach for when an answer went wrong.
+
+            On the empty page this row is not rendered at all -- History sits under
+            the starters instead, because returning to old work should never
+            outrank asking something new on the screen that exists to invite it. */}
+        {hasConversation && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="contained"
+                startIcon={<AddCommentOutlinedIcon />}
+                onClick={startNewConversation}
+                sx={{ minHeight: 48 }}
+              >
+                New conversation
+              </Button>
+              <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
+                Chat history
+              </Button>
             </Stack>
           </Box>
-          {/* NO bgcolor HERE. `background.default` was needed when this was
-              position: sticky and rows scrolled underneath it; as a flex sibling
-              below a real scrollport nothing passes behind it, and the opaque
-              #111439 painted a visible rectangle over the page's gradient. */}
-          <Box sx={{ pt: 1.5 }}>
-            {composer}
-            {disclaimer}
+        )}
+
+        {/* AN OFFER, NOT A DEMAND. "What do you want to know about the shop?" asked
+            the reader to introspect and specify at the exact moment they have no
+            question in mind, and said "the shop" while the chips said "my revenue".
+            Every approved headline in brand-guide.md is imperative.
+
+            DELIBERATELY SCOPED TO WHAT THIS DOES TODAY. Agentic work is planned --
+            raising a quote, starting a job, turning an uploaded PO into one -- and
+            a heading promising it now would earn the off-topic refusal on the first
+            attempt, which is the worst possible first contact. This heading, the
+            scope line and the starters are one package to revisit when the first of
+            those ships.
+
+            h4 at weight 500, not h5 at 600: bigger and calmer. Stopping at 500
+            rather than 400 is deliberate -- light-on-dark halates, and this theme
+            is built for 50-60 year old eyes under shop lighting. */}
+        {!hasConversation && (
+          <Typography variant="h4" component="h2" sx={{ fontWeight: 500, textAlign: 'center', mt: { xs: 2, md: 5 } }}>
+            Ask about your shop
+          </Typography>
+        )}
+
+        {/* The transcript owns a scrollport of its own so the scorecards above it
+            never move when an answer lands. Only present once there is a
+            conversation: while the first question is in flight the wait shows under
+            the composer instead, so the hero does not vanish into a tall empty box
+            for ten seconds. */}
+        {hasConversation && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', height: TRANSCRIPT_HEIGHT }}>
+            <Box
+              ref={paneRef}
+              // minHeight: 0 is load-bearing. A flex child's default min-height is
+              // its content, so without this the column grows instead of scrolling.
+              sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}
+            >
+              <Stack spacing={2.5}>
+                {turns.map((turn, i) => (
+                  <ConversationTurn
+                    key={turn.key}
+                    question={turn.question}
+                    answer={turn.answer}
+                    chartConfig={turn.chartConfig}
+                    report={turn.report}
+                    onOpenReport={() => openReportTurn(turn)}
+                    followUps={i === turns.length - 1 ? turn.followUps : []}
+                    onFollowUp={handleFollowUp}
+                    followUpsDisabled={pending}
+                  />
+                ))}
+                {status}
+              </Stack>
+            </Box>
           </Box>
-        </Box>
-      )}
+        )}
+
+        {composer}
+
+        {/* The wait and the alerts render where the answer will: inside the
+            transcript once one exists, directly under the composer before then.
+            Status carries no input and no focus, so moving it between the two
+            costs nothing and each position is the right one. */}
+        {!hasConversation && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>{status}</Box>}
+
+        {hasConversation ? (
+          disclaimer
+        ) : (
+          <>
+            {starters}
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
+                Chat history
+              </Button>
+            </Box>
+            {scopeLine}
+          </>
+        )}
+      </Box>
 
       <HistoryDrawer
         open={historyOpen}

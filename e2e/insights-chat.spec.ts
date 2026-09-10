@@ -109,20 +109,36 @@ async function openDashboard(page: import('@playwright/test').Page): Promise<str
 }
 
 test.describe('Insights chat', () => {
-  test('says what it is, and says it can be wrong', async ({ page }) => {
+  test('invites before it warns: a heading, three starters, and no caveat yet', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
+    // An offer, not a demand — and scoped to what the product does today.
+    await expect(page.getByRole('heading', { name: 'Ask about your shop' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // NO CAVEAT BEFORE THERE IS AN ANSWER. A warning about mistakes shown to
+    // someone who has not yet done anything was the most off-putting thing on
+    // this surface; it is read under the composer from the first answer on.
+    await expect(page.getByText(/can make mistakes/i)).toHaveCount(0);
+
+    // What stands in its place invites, and every noun in it is a subject the
+    // assistant can actually read.
     await expect(
-      page.getByText('Jigged AI can make mistakes. Please double-check responses.').first(),
-    ).toBeVisible({ timeout: 15_000 });
-    // No title and no BETA pill: the caveat is the one standing statement here.
+      page.getByText('Ask about your jobs, quotes, parts, customers, vendors and work centers.'),
+    ).toBeVisible();
+
+    // Three starters, one per shape of answer — not five, and not a filter bar.
+    await expect(page.getByRole('button', { name: /How many jobs are late right now\?/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /What is my revenue trend over time\?/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /One-page report on this quarter/ })).toBeVisible();
+    await expect(page.getByText(/quote pipeline/i)).toHaveCount(0);
+
+    // No title and no BETA pill: the heading says what this is.
     await expect(page.getByText('Ask the shop')).toHaveCount(0);
     await expect(page.getByText('BETA')).toHaveCount(0);
-
-    // The empty state is one question and a box, not a list.
-    await expect(page.getByText('What do you want to know about the shop?')).toBeVisible();
-    await expect(page.getByPlaceholder(/^Ask /)).toBeVisible();
+    await expect(page.getByLabel('Your question')).toBeVisible();
   });
 
   test('names no hardware anywhere on the surface', async ({ page }) => {
@@ -131,7 +147,7 @@ test.describe('Insights chat', () => {
     // lives in three places (the hook, the enqueue error and the route).
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
-    await expect(page.getByRole('button', { name: 'Chat History' })).toBeVisible({
+    await expect(page.getByRole('button', { name: 'Chat history' })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -154,6 +170,11 @@ test.describe('Insights chat', () => {
 
     await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(QUESTION)).toBeVisible();
+
+    // The caveat arrives with the answer, not before there is one to caveat.
+    await expect(
+      page.getByText('Jigged AI can make mistakes. Please double-check responses.').first(),
+    ).toBeVisible();
 
     // THE POINT OF THE FIXED-HEIGHT PANE. Before this, the transcript grew the page
     // and every answer pushed the scorecards off the top. Overdue Jobs is the first
@@ -191,6 +212,8 @@ test.describe('Insights chat', () => {
     // handleSubmit and the composer cleared -- not what came back. The stack runs
     // FastAPI against an Anthropic mock, but which sentence a mocked model returns
     // is not this test's business; that the suggestion is wired to the one door is.
-    await expect(page.getByPlaceholder(/^Ask /)).toHaveValue('');
+    // Found by accessible name rather than placeholder: the placeholder is copy
+    // and changes with the state, the label is the contract.
+    await expect(page.getByLabel('Your question')).toHaveValue('');
   });
 });

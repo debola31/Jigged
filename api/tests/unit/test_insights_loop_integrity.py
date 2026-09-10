@@ -379,6 +379,74 @@ async def test_a_tool_call_the_model_only_described_is_not_an_answer(text):
     assert "tool_call_tag" in str(exc.value) or "sql_payload" in str(exc.value), str(exc.value)
 
 
+async def test_a_chart_with_no_sentence_is_corrected_once_and_then_answers():
+    """LIVE ON THE 2026-09-10 PREVIEW, and the happy path for it.
+
+    Two of four identical "What is my revenue trend over time?" asks put
+    EVERYTHING inside the fence: valid 6-point chart, ~25k tokens spent, and an
+    answer of "" once _strip_code_blocks did its job. Same prompt, same data, same
+    model — sampling variance in a local 32B, not something code can delete.
+
+    So the loop asks once more instead of throwing the work away. The owner was
+    already re-asking by hand, which re-runs the whole job including the SQL; one
+    corrective turn is much the cheaper of the two.
+    """
+    convo = Conversation(
+        turns=[
+            _asks_for_sql(),
+            _answer('```json\n{"chart_type": "bar", "data": []}\n```'),
+            # Only figures the stubbed query actually returned: the grounding guard
+        # sits right beside this one and will (correctly) chase an invented second.
+        _answer("Revenue was $11,792.66 in April."),
+        ],
+        tool_results=[{"columns": ["month", "revenue"],
+                       "rows": [{"month": "2026-04", "revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue by month"}],
+    )
+
+    result = await run(convo)
+
+    assert result["answer"] == "Revenue was $11,792.66 in April."
+    # The model is shown what it said and told what was wrong with it.
+    assert any("no sentence" in m.content for m in convo.seen[-1] if m.role == "user")
+
+
+async def test_a_chart_that_stays_silent_after_the_correction_is_refused():
+    """The backstop. One correction, not a loop — and if the second turn is empty
+    too, this fails visibly rather than settling 'succeeded' with nothing to show.
+
+    That silent settle is what took the question with it: the trigger materialises
+    no turn for an empty answer, so the spinner stopped and the question vanished
+    from the transcript and from History.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer('```json\n{"chart_type": "bar", "data": []}\n```'), _answer('```json\n{"chart_type": "bar", "data": []}\n```')],
+        tool_results=[{"columns": ["month", "revenue"],
+                       "rows": [{"month": "2026-04", "revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue by month"}],
+    )
+
+    with pytest.raises(LLMErrorEcho) as exc:
+        await run(convo)
+
+    assert "empty" in str(exc.value), str(exc.value)
+
+
+async def test_a_grounded_answer_that_merely_reads_oddly_still_goes_through():
+    """The other half, and the reason the empty rule is stated narrowly. `sql_ok`
+    exists so a rule that could reject a good grounded answer never gets the
+    chance; widening it to taste would eventually eat a real one.
+    """
+    convo = Conversation(
+        turns=[_asks_for_sql(), _answer("11792.66")],
+        tool_results=[{"columns": ["revenue"], "rows": [{"revenue": 11792.66}],
+                       "row_count": 1, "description": "revenue"}],
+    )
+
+    result = await run(convo)
+    assert result["answer"] == "11792.66"
+
+
 async def test_a_uuid_in_a_result_row_does_not_kill_the_turn():
     """"Who is my top customer by revenue?" groups by c.id, so a UUID lands in the
     tool result -- and the loop wires each result in with a dumps. That dumps

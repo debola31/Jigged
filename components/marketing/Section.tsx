@@ -60,7 +60,7 @@ const surfaceSx: Record<Surface, object> = {
  * paid for the price strip and the FAQ without the page growing.
  */
 const SIZE_PY: Record<Size, { xs: number; md: number }> = {
-  major: { xs: 6, md: 10 },
+  major: { xs: 6, md: 9 },
   minor: { xs: 5, md: 7 },
   strip: { xs: 3.5, md: 5 },
 };

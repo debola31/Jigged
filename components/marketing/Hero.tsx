@@ -9,6 +9,7 @@ import Link from 'next/link';
 import posthog from 'posthog-js';
 import Reveal from './Reveal';
 import ScreenShot from './ScreenShot';
+import PhoneShot from './PhoneShot';
 import { HERO } from '@/lib/constants/marketing';
 import {
   gradientButtonSx,
@@ -161,16 +162,53 @@ export default function Hero() {
             distance={36}
             sx={{ flex: { md: '1 1 auto' }, width: '100%', minWidth: 0 }}
           >
-            {/* The one above-the-fold image, so it loads eagerly at high priority while
-                everything below stays lazy. Framing moved into the shared ScreenShot
-                component — this used to be a second, slightly drifted copy of the recipe
-                inside Features.tsx. */}
-            <ScreenShot
-              src="/screenshots/feature-job-status.png"
-              alt="Jigged job list showing the status of every job at a glance"
-              fade
-              priority
-            />
+            {/* Office and floor in one image — the headline's "whole shop, in one place"
+                made literal, and the fastest way to say the product spans both surfaces.
+
+                THIS IS THE ONLY DEVICE ON THE PAGE, AND IT IS A PHONE. Not a tablet: the
+                device model says operators use their own phone, no shop in the pilot uses
+                a tablet, and the marketing site has taken exactly one tablet pageview in
+                90 days. A tablet here would also contradict the best line in the
+                shop-floor section — "no tablet to buy, no kiosk, nothing to install" —
+                and reintroduce a cost objection the product doesn't have.
+
+                And the desktop shot deliberately gets NO laptop bezel. Every vendor in
+                this category shows office UI bare; a bezel shrinks the thing being sold
+                to make room for decorative aluminium, and legibility is the main way a
+                marketing screenshot fails. The phone is framed because a phone mockup is
+                what makes "this runs on the floor" readable at a glance; the desktop
+                needs no such signal.
+
+                The phone overlaps rather than sits beside, so it costs no page height,
+                and it is hidden below md where it would crowd the copy. */}
+            <Box sx={{ position: 'relative' }}>
+              <ScreenShot
+                src="/screenshots/feature-job-status.png"
+                alt="Jigged job list showing the status of every job at a glance"
+                fade
+                priority
+              />
+              <Box
+                aria-hidden={false}
+                sx={{
+                  display: { xs: 'none', md: 'block' },
+                  position: 'absolute',
+                  // Far enough right and low enough to clear the Status/Due columns —
+                  // the phone must overlap the shot's corner, never its content.
+                  right: { md: '-7%' },
+                  bottom: { md: '-24%' },
+                  width: { md: 132, lg: 152 },
+                  zIndex: 2,
+                }}
+              >
+                <PhoneShot
+                  src="/screenshots/feature-operator-queue.png"
+                  alt="The same shop on the floor — an operator's job queue on their phone"
+                  maxWidth={{ md: 152 }}
+                  glow="rgba(43, 188, 179, 0.26)"
+                />
+              </Box>
+            </Box>
           </Reveal>
         </Box>
       </Container>

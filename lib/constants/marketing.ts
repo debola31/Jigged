@@ -357,34 +357,32 @@ export const KNOWLEDGE = {
 };
 
 // ── Testimonial ─────────────────────────────────────────────────────────────────────
-// DO NOT SET `approved` TO TRUE WITHOUT JOHNNIE'S WRITTEN SIGN-OFF ON THIS EXACT WORDING.
+// APPROVED 2026-09-11. Johnnie Trammell signed off on this exact wording, which is what
+// `approved: true` records. The gate exists because two separate things require his
+// adoption of the sentence rather than merely his goodwill:
 //
-// The section renders nothing while `approved` is false, so this is a one-line change
-// once the email is in hand — and a deliberate barrier until it is. Two reasons it is a
-// barrier rather than a note:
-//
-//   1. Issues #489/#509 forbid an invented voice on this page, which is why
+//   1. Issues #489/#509 forbid an invented voice on this page — which is why
 //      Testimonial.tsx sat dormant for months rather than shipping a placeholder.
 //   2. The FTC's Endorsement Guides treat quotation marks as a representation that these
 //      are the endorser's exact words (16 CFR § 255.1(b)): copy "may not be presented out
 //      of context or reworded so as to distort in any way the endorser's opinion." The
-//      line below is a compression of a paraphrase of a conversation, so until Johnnie
-//      adopts it as his own in writing, the quotation marks are the problem. Once he
-//      replies "yes, publish that as my words", it is his sentence and the issue is gone.
-//      If he changes a word, use his word.
+//      line below is a compression of a paraphrase of a conversation, so it was his to
+//      adopt or change. He adopted it.
 //
-// ALSO STILL OWED, and the reason `disclosure` is not empty: Contour is on a reserved
-// $250 price with no trial (docs/modules/billing.md §1). That is a material connection
-// under the same Guides, so it is disclosed next to the quote rather than omitted. It
-// costs nothing in credibility and omitting it is the likeliest way this becomes a
-// problem.
+// IF THE WORDING CHANGES, THE FLAG GOES BACK TO FALSE until the new sentence is signed
+// off too. Editing an approved quote in place is the failure this gate is here to catch:
+// the approval is of these words, not of the idea of a quote.
 //
-// Worth collecting from him at the same time, in rough order of value: a number he will
-// stand behind (minutes to build a quote, or how long before he was running it); what
-// Jigged replaced; how the floor took to it; his exact title; town and state; headcount
-// and what they make; a phone photo at a machine.
+// `disclosure` is not decoration either. Contour is on a reserved $250 price with no
+// trial (docs/modules/billing.md §1), which is a material connection under the same
+// Guides, so it is disclosed next to the quote rather than omitted.
+//
+// Still worth collecting from him, in rough order of value: a number he will stand behind
+// (minutes to build a quote, or how long before he was running it); what Jigged replaced;
+// how the floor took to it; his exact title; town and state; headcount and what they make;
+// a phone photo at a machine. Any one of those would make this stronger than praise alone.
 export const TESTIMONIAL = {
-  approved: false,
+  approved: true,
   // Built from the two things he actually said. "I've used other ERPs" is the only
   // differentiating claim in the raw material — a comparison no vendor can make about
   // itself — and the second half is close to his own sentence. Everything a machine shop

@@ -31,7 +31,7 @@ export default function Testimonial() {
     <Box
       component="section"
       sx={{
-        py: { xs: 5, md: 6 },
+        py: { xs: 4, md: 5 },
         borderTop: '1px solid rgba(255,255,255,0.08)',
       }}
     >

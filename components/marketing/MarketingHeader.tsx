@@ -1,5 +1,6 @@
 'use client';
 
+import posthog from 'posthog-js';
 import { useState } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
@@ -83,6 +84,7 @@ export default function MarketingHeader() {
           <Button
             component={Link}
             href={CTA.href}
+            onClick={() => posthog.capture('marketing cta clicked', { location: 'header' })}
             variant="contained"
             size="small"
             sx={{ px: 2.25, ...gradientButtonSx }}
@@ -131,7 +133,10 @@ export default function MarketingHeader() {
           <Button
             component={Link}
             href={CTA.href}
-            onClick={() => setDrawerOpen(false)}
+            onClick={() => {
+              posthog.capture('marketing cta clicked', { location: 'header' });
+              setDrawerOpen(false);
+            }}
             variant="contained"
             fullWidth
             sx={{ mt: 2, py: 1.15, ...gradientButtonSx }}

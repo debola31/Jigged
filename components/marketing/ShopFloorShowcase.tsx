@@ -23,7 +23,7 @@ export default function ShopFloorShowcase() {
           display: 'flex',
           flexDirection: { xs: 'column', md: 'row' },
           alignItems: 'center',
-          gap: { xs: 7, md: 10 },
+          gap: { xs: 5, md: 10 },
         }}
       >
         {/* Copy + bullet points */}
@@ -102,6 +102,24 @@ export default function ShopFloorShowcase() {
                 </Box>
               ))}
             </Box>
+
+            {/* The sentence an owner needs before he will roll this out. It sits in the
+                copy column rather than the FAQ because it is an objection he has already
+                formed by the time he reaches the phones, and because it is the one claim
+                on the page guaranteed by the schema rather than by intention. */}
+            <Typography
+              sx={{
+                mt: 4,
+                pl: 2.5,
+                borderLeft: '2px solid rgba(127, 179, 224, 0.35)',
+                color: 'rgba(255, 255, 255, 0.72)',
+                fontSize: { xs: '0.98rem', md: '1.02rem' },
+                lineHeight: 1.6,
+                maxWidth: 520,
+              }}
+            >
+              {SHOP_FLOOR.noSurveillance}
+            </Typography>
           </Box>
         </Reveal>
 
@@ -121,14 +139,14 @@ export default function ShopFloorShowcase() {
           >
             <PhoneShot
               src={SHOP_FLOOR.images[0]}
-              alt={SHOP_FLOOR.alt}
+              alt={SHOP_FLOOR.altQueue}
               maxWidth={244}
               glow="rgba(70, 130, 180, 0.22)"
             />
             <Box sx={{ mt: { xs: 3, md: 7 } }}>
               <PhoneShot
                 src={SHOP_FLOOR.images[1]}
-                alt={SHOP_FLOOR.alt}
+                alt={SHOP_FLOOR.altStep}
                 maxWidth={244}
                 glow="rgba(43, 188, 179, 0.20)"
               />

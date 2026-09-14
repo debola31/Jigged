@@ -6,13 +6,11 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import Hero from './Hero';
 import CapabilityStrip from './CapabilityStrip';
-import Showcases from './Showcases';
-import Capabilities from './Capabilities';
-import ShopFloorShowcase from './ShopFloorShowcase';
+import WhatYouGet from './WhatYouGet';
 import KnowledgeCapture from './KnowledgeCapture';
-import Testimonial from './Testimonial';
 import HowItWorks from './HowItWorks';
 import Faq from './Faq';
+import Testimonial from './Testimonial';
 import FinalCTA from './FinalCTA';
 
 export default function LandingPageContent() {
@@ -37,21 +35,23 @@ export default function LandingPageContent() {
       <Hero />
       {/* Who it's for, in one line, plus the capabilities the shop will look for. */}
       <CapabilityStrip />
-      {/* The two pictures that carry the page, moved directly under the hero on
-          2026-09-14. They were sixth and seventh, behind three text sections, which is
-          the wrong order when they are the strongest thing here. */}
-      <Showcases />
-      {/* Breadth: twenty feature names, visible, for the height of one old feature row. */}
-      <Capabilities />
-      <ShopFloorShowcase />
+      {/* The whole product in five numbered rows, each with a picture. This replaced three
+          sections — a Quoting showcase, a chip grid naming the same capabilities again,
+          and a standalone shop-floor block — which were one argument told twice at
+          different resolutions. */}
+      <WhatYouGet />
+      {/* The one claim no incumbent makes, so it keeps its own section. */}
       <KnowledgeCapture />
-      {/* Renders nothing unless the quote is approved in writing — see the constant. */}
-      <Testimonial />
       {/* "No consultants, no six-month rollout" answers the objection that decides these
-          deals, so it sits just before the closing ask rather than in the middle. */}
+          deals, so it and the FAQ sit together as the objection-handling block. */}
       <HowItWorks />
       <Faq />
-      {/* One closing beat: the founding-shops message is folded into FinalCTA. */}
+      {/* Last word before the ask. Moved here from mid-page 2026-09-14: the quote is about
+          the product overall — "I've used other ERPs" — not about any one section, so the
+          adjacency argument for parking it under Knowledge capture never really held. As
+          the only quote on the page, it does most work closing the objection block.
+          Renders nothing unless approved in writing — see the constant. */}
+      <Testimonial />
       <FinalCTA />
     </>
   );

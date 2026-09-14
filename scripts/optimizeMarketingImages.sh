@@ -40,7 +40,9 @@ echo "Desktop captures →  .webp (1600w) + @900w"
 for src in public/screenshots/feature-job-status.png \
            public/screenshots/feature-drawings.png \
            public/screenshots/feature-insights.png \
-           public/screenshots/feature-quote.png; do
+           public/screenshots/feature-quote.png \
+           public/screenshots/feature-job.png \
+           public/screenshots/feature-storage.png; do
   [ -f "$src" ] || { echo "  (missing: $src — skipped)"; continue; }
   base="${src%.png}"
   optimise "$src" 1600 82 "${base}.webp"
@@ -50,7 +52,9 @@ done
 echo "Phone mockups →  .webp (720w)"
 for src in public/screenshots/feature-operator-queue.png \
            public/screenshots/feature-operator-step.png \
-           public/screenshots/feature-knowledge-note.png; do
+           public/screenshots/feature-knowledge-note.png \
+           public/screenshots/placeholder-phone-queue.png \
+           public/screenshots/placeholder-phone-step.png; do
   [ -f "$src" ] || { echo "  (missing: $src — skipped)"; continue; }
   base="${src%.png}"
   # -alpha_q keeps the transparent device silhouette clean; PhoneShot drop-shadows it,

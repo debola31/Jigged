@@ -179,7 +179,35 @@ export default function Showcases() {
                 distance={32}
                 sx={{ flex: { md: '1 1 auto' }, width: '100%', minWidth: 0 }}
               >
-                <ScreenShot src={s.image} alt={s.alt} />
+                {/* An optional second shot overlapping the first, the way the hero's phone
+                    does. It exists because the drawings screenshot on its own showed where
+                    the flow STARTS and stopped at the intermediary step; the quote is the
+                    thing the reader actually wants at the end of it. Hidden below md,
+                    where two overlapping screenshots are just clutter. */}
+                <Box sx={{ position: 'relative' }}>
+                  <ScreenShot src={s.image} alt={s.alt} />
+                  {s.inset && (
+                    <Box
+                      sx={{
+                        display: { xs: 'none', md: 'block' },
+                        position: 'absolute',
+                        // Low and right enough to leave the drawing itself readable —
+                        // the sheet is the part of the first shot people look at.
+                        right: { md: '-6%' },
+                        bottom: { md: '-24%' },
+                        width: { md: '48%' },
+                        zIndex: 2,
+                      }}
+                    >
+                      <ScreenShot
+                        src={s.inset}
+                        alt={s.insetAlt ?? ''}
+                        width={2404}
+                        height={1168}
+                      />
+                    </Box>
+                  )}
+                </Box>
               </Reveal>
             </Box>
           );

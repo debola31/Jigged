@@ -66,12 +66,12 @@ export default function Testimonial() {
               gap: { xs: 1.5, md: 2.5 },
             }}
           >
+            {/* Name only. The company is in the logo beside it, and printing it twice
+                is the kind of small redundancy this page is trying to shed. `role` is
+                kept on the constant for the logo's alt text and for the day this
+                becomes a name + title + town block. */}
             <Typography sx={{ color: 'rgba(255,255,255,0.9)', fontWeight: 600, fontSize: '1rem' }}>
               {TESTIMONIAL.name}
-              <Box component="span" sx={{ color: 'rgba(255,255,255,0.6)', fontWeight: 400 }}>
-                {' · '}
-                {TESTIMONIAL.role}
-              </Box>
             </Typography>
 
             {/* The supplied wordmark is black on transparent, which is invisible on this

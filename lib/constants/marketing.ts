@@ -25,7 +25,7 @@ export const MARKETING_META = {
   // KEEP UNDER ~155 CHARS. Google truncates the snippet around there. Front-load the
   // offer; the segment is folded in so "machine shop" still matches what an owner types.
   description:
-    'Run your machine shop in one place — quoting, jobs, parts, storage and invoicing, from the customer’s PO to the packing slip. Office to floor.',
+    'Run your machine shop in one place — quoting, jobs, parts, storage and invoicing, from the customer’s PO to the invoice. Office to floor.',
 };
 
 export const HERO = {
@@ -35,10 +35,15 @@ export const HERO = {
   eyebrow: 'Shop software for precision machine shops, 5 to 50 people',
   headlineLead: 'Your whole shop,',
   headlineEmphasis: 'in one place.',
-  // Cut from 45 words to 28 on 2026-09-14. The old version explained the knowledge story
-  // in full here AND again two sections down; the hero only has to make the offer land.
+  // Cut from 45 words to 26. Two redundancies went with it: the old version listed the
+  // modules AND described the span, which are the same claim twice, and it explained the
+  // knowledge story in full here and again two sections down.
+  //
+  // "TO THE INVOICE", not "to the packing slip" — the slip comes BEFORE invoicing, so
+  // naming it as the end of the line stopped the sentence one step short of where the
+  // work actually ends. This is now the ONLY place on the page that describes the span.
   subhead:
-    'Quoting, jobs, parts, storage and invoicing — from the customer’s PO to the packing slip. And what your best guy works out at the machine stays with the part.',
+    'Everything from the customer’s PO to the invoice — and what your best guy works out at the machine stays with the part.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   secondaryCta: { label: 'See how it works', href: '#how-it-works' },
 };
@@ -67,29 +72,39 @@ export type Showcase = {
   points?: string[];
   image: string;
   alt: string;
+  /** A second, smaller shot overlapping the first — the outcome, not the step. */
+  inset?: string;
+  insetAlt?: string;
 };
 
 export const SHOWCASES: Showcase[] = [
   {
     key: 'drawings',
     eyebrow: 'Quoting',
-    // The measured figure from the real customer package: 93 files became 31 parts
-    // (docs/modules/parts.md). A number an owner can picture beats "fast".
-    headline: '93 drawings. 31 parts. No typing.',
+    // WAS "93 drawings. 31 parts. No typing." Two problems with it, both raised in review:
+    // the count came from one customer's package and reads as borrowed rather than as a
+    // property of the product, and — worse — it advertised PART CREATION as though that
+    // were the point. Reading drawings is one on-ramp; the destination is the quote, and
+    // the old headline stopped at the intermediary step. The section now names both ends.
+    headline: 'Their prints in. Your quote out.',
     description:
-      'Drop the customer’s whole folder of prints. Jigged reads the title blocks and hands you one row per part to check before anything is created.',
+      'Drop the customer’s whole folder. Jigged reads the title blocks, you check one row per part, and the parts go straight into a quote.',
     points: [
       'Part number, material, finish and revision come off the print.',
-      // Customer 3's actual ask: calculated pricing for the bigger, repeatable orders and
+      // Customer 3's actual ask: calculated pricing on the bigger, repeatable orders and
       // room to type over it on the small or odd ones. Both exist — every quote line
       // carries its own `unit_price` and an `is_quote_override` flag.
-      'Priced from what the part costs — and you can type over it when the job is odd.',
+      'Priced from what the part costs — type over it when the job is odd.',
       // Verified: the extraction is deterministic and runs in the browser tab. No upload,
-      // no model, no network call in the whole flow.
+      // no model, no network call anywhere in the flow.
       'The drawings never leave your computer.',
     ],
     image: '/screenshots/feature-drawings.png',
     alt: 'A folder of engineering drawings read into a reviewable list of parts in Jigged, with the drawing shown beside the row it produced',
+    // The payoff, overlapping the first image the way the hero's phone does — so the
+    // section shows where the flow ENDS and not only where it starts.
+    inset: '/screenshots/feature-quote.png',
+    insetAlt: 'A finished Jigged quote — customer, line items, unit price and total',
   },
   {
     key: 'insights',
@@ -134,6 +149,11 @@ export const AI_TRUST = [
 // of prose sitting on top of the twenty words that do the work, and the review verdict was
 // the correct one: "even I won't read all that." The chips were always the content.
 //
+// AND THE CHIPS THEMSELVES ARE LABELS, NOT SENTENCES (same review, second pass). "Record
+// how many good pieces you finished" became "Record what you finished": this grid is a
+// breadth audit, so a chip only has to NAME the thing well enough that an owner recognises
+// it. The place to explain it is the showcase above or the FAQ below, not here.
+//
 // EVERY ITEM WAS CHECKED AGAINST THE CODE. Deliberately absent, because they do not exist:
 // supplier purchase orders and receiving (no schema), carrier label generation (no carrier
 // API), an invoice aging report — and anything resembling an operator scoreboard, which is
@@ -153,9 +173,9 @@ export const CAPABILITIES: Capability[] = [
     heading: 'Quoting — minutes, not evenings',
     items: [
       'Quotes and quote PDFs',
-      'Customers, contacts and terms',
-      'Per-part pricing, and override it',
-      'Read a whole folder of drawings',
+      'Customers and terms',
+      'Per-part pricing',
+      'Drawings straight to parts',
     ],
   },
   {
@@ -163,21 +183,21 @@ export const CAPABILITIES: Capability[] = [
     icon: 'job',
     heading: 'Every job, at a glance',
     items: [
-      'Jobs and printed travelers',
-      'Work centers and routed steps',
-      'Outside processing, sent and received',
-      'Packing slips, carrier and tracking',
+      'Jobs and travelers',
+      'Work centers and routing',
+      'Outside processing',
+      'Packing slips and tracking',
     ],
   },
   {
     key: 'floor',
     icon: 'phone',
-    heading: 'The floor, on the phone in his pocket',
+    heading: 'The floor, on his own phone',
     items: [
-      'Record how many good pieces you finished',
-      'Scan a shelf label or a traveler',
-      'Notes with photos and short video',
-      'A logbook for every machine',
+      'Record what you finished',
+      'Scan a label or traveler',
+      'Notes, photos and video',
+      'Machine logbooks',
     ],
   },
   {
@@ -185,10 +205,10 @@ export const CAPABILITIES: Capability[] = [
     icon: 'shelf',
     heading: 'Where it is, and where it came from',
     items: [
-      'Storage places you can scan',
-      'Stock counts with live variance',
-      'Heats and mill certificates',
-      'Vendors and outside services',
+      'Storage you can scan',
+      'Stock counts',
+      'Heats and mill certs',
+      'Vendors and services',
     ],
   },
   {
@@ -197,9 +217,9 @@ export const CAPABILITIES: Capability[] = [
     heading: 'Books, and a straight answer',
     items: [
       'QuickBooks Online and Desktop',
-      'See when an invoice gets paid',
-      'Ask about your own shop, in plain English',
-      'Bring your data in from spreadsheets',
+      'See when you’re paid',
+      'Ask in plain English',
+      'Import from spreadsheets',
     ],
   },
 ];

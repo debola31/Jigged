@@ -48,10 +48,12 @@ export default function Capabilities() {
   return (
     <Section id="features" surface="raised" maxWidth="lg" grid>
       <Reveal distance={28}>
+        {/* No subhead. It used to restate the span the hero already gives — the second
+            recital of one claim on a page that should have no redundancy — and the
+            heading above carries the argument on its own. */}
         <SectionHeading
           index="What you get"
           heading="Everything the shop needs. None of the enterprise weight."
-          subhead="One system from the customer’s purchase order to the packing slip — and one price for all of it."
         />
       </Reveal>
 

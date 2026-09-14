@@ -39,7 +39,8 @@ optimise() {
 echo "Desktop captures →  .webp (1600w) + @900w"
 for src in public/screenshots/feature-job-status.png \
            public/screenshots/feature-drawings.png \
-           public/screenshots/feature-insights.png; do
+           public/screenshots/feature-insights.png \
+           public/screenshots/feature-quote.png; do
   [ -f "$src" ] || { echo "  (missing: $src — skipped)"; continue; }
   base="${src%.png}"
   optimise "$src" 1600 82 "${base}.webp"

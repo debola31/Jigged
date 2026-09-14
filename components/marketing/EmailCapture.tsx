@@ -1,9 +1,13 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import { useState } from 'react';
 import { submitWaitlist } from '@/app/actions/waitlist';
+import {
+  reportWaitlistSubmitFailure,
+  SKEW_ALERT_MESSAGE,
+  GENERIC_ALERT_MESSAGE,
+} from '@/lib/serverActionSkew';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
@@ -31,7 +35,11 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [shopSize, setShopSize] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  // 'stale' is 'error' plus a cure: the deploy moved under them, so a reload fixes it.
+  // See lib/serverActionSkew.ts.
+  const [status, setStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error' | 'stale'
+  >('idle');
   const [message, setMessage] = useState('');
 
   const handleOpenModal = (e: React.FormEvent) => {
@@ -88,9 +96,9 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
       setStatus('success');
       setMessage("Thanks! We'll reach out shortly to get your shop set up.");
     } catch (err) {
-      setStatus('error');
-      setMessage('Something went wrong. Email us at hello@jigged.app');
-      Sentry.captureException(err, { level: 'warning' });
+      const isSkew = reportWaitlistSubmitFailure(err, source);
+      setStatus(isSkew ? 'stale' : 'error');
+      setMessage(isSkew ? SKEW_ALERT_MESSAGE : GENERIC_ALERT_MESSAGE);
     }
   };
 
@@ -243,9 +251,26 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
                   ))}
                 </TextField>
 
-                {status === 'error' && (
-                  <Alert severity="error">
-                    Something went wrong. Email us at hello@jigged.app
+                {status === 'error' && <Alert severity="error">{message}</Alert>}
+
+                {/* Recoverable, so it is a warning with the cure attached rather than a dead
+                    end. Reload only on their click — a reload discards what they typed, and
+                    doing that for them would lose the lead we are trying to keep. */}
+                {status === 'stale' && (
+                  <Alert
+                    severity="warning"
+                    action={
+                      <Button
+                        color="inherit"
+                        size="small"
+                        onClick={() => window.location.reload()}
+                        sx={{ minHeight: 44, fontWeight: 600 }}
+                      >
+                        Refresh
+                      </Button>
+                    }
+                  >
+                    {message}
                   </Alert>
                 )}
 

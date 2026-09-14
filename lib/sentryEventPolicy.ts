@@ -34,6 +34,44 @@ const AUTO_MECHANISM_TYPES = new Set(['auto.db.supabase.postgres', 'auto.db.supa
 export const RPC_SPAN_ATTRIBUTE = 'jigged.rpc';
 
 /**
+ * Next.js **E975**, thrown by `handleAction` when a POST is `multipart/form-data`, carries no
+ * `Next-Action` header, and contains no `$ACTION_*` fields at all — a generic form POST at a page
+ * that happens to own a server action. Next throws, the render 500s, and `onRequestError` files it
+ * unhandled (`next/dist/server/app-render/action-handler.js`, the
+ * `areAllActionIdsValid(formData, serverModuleMap) === false` branch, in both the node and edge
+ * halves).
+ *
+ * **This app cannot produce that request.** Its one server action, `submitWaitlist`, is only ever
+ * `await`ed from a click handler — a *fetch* action, which carries `Next-Action`, takes the branch
+ * above it, and on real skew is answered 404 with `x-nextjs-action-not-found` rather than thrown.
+ * There is no `<form action={serverAction}>`, no `useActionState`/`useFormState` and no
+ * `formAction` anywhere in the repo, so React emits no `$ACTION_ID_` hidden field for a native
+ * submit to carry. Sentry JAVASCRIPT-NEXTJS-3A was 12 such POSTs from two AS400463 datacenter IPs,
+ * with zero PostHog events in the window and no `waitlist` row behind them. A scanner.
+ *
+ * ANCHORED ON PURPOSE — the anchor is the whole safety argument:
+ *   - `^` confines this to the error Next throws directly. Sentry tests STRING patterns with
+ *     `includes()`, so an unanchored entry would also swallow a future error that merely *wraps*
+ *     this text — a different failure with a different cause.
+ *   - `Action\.` is what excludes the sibling. `getActionNotFoundError` (manifests-singleton.js)
+ *     renders `Failed to find Server Action "<id>". This request might be…` — the same sentence
+ *     with an id in the middle. That one IS deployment skew and must keep reporting.
+ *   - No `$`: the real message has a second line (`Read more: https://nextjs.org/…`) and Sentry
+ *     matches against the whole multi-line value.
+ *
+ * Not matched on the error code: `__NEXT_ERROR_CODE` is a non-enumerable own property that never
+ * reaches `exception.values[0].value`. The message text is the only handle.
+ *
+ * **Wired ONLY in `sentry.server.config.ts`.** Never add it to `instrumentation-client.ts`: the
+ * browser's deployment skew is a different error — `UnrecognizedActionError: Server Action "<id>"
+ * was not found on the server.` (E715) — reported by the `captureException` in EmailCapture.tsx
+ * and InviteForm.tsx, and it is the only signal that a real prospect hit this. Pinned in
+ * `__tests__/lib/serverActionSkewFilter.test.ts`.
+ */
+export const GENERIC_MULTIPART_POST_E975 =
+  /^Failed to find Server Action\. This request might be from an older or newer deployment\./;
+
+/**
  * Decide whether one automatically-captured Supabase event survives, and clean it up if it does.
  *
  * Returns `null` to drop, or the event to keep.

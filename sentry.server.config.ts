@@ -3,7 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
-import { applySupabaseEventPolicy } from "@/lib/sentryEventPolicy";
+import { applySupabaseEventPolicy, GENERIC_MULTIPART_POST_E975 } from "@/lib/sentryEventPolicy";
 
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
@@ -21,6 +21,18 @@ Sentry.init({
   // Enable sending user PII (Personally Identifiable Information)
   // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
   sendDefaultPii: true,
+
+  // Next E975 — scanner traffic, not a user. A generic multipart POST at a page that owns a
+  // server action makes Next throw and 500; this app's only action is called as a fetch action
+  // and cannot produce one. The reason, the sibling error this must NOT catch, and why the
+  // browser and edge configs are left alone: docs/telemetry.md § "`ignoreErrors` — what's
+  // filtered and why". Pinned by __tests__/lib/serverActionSkewFilter.test.ts.
+  //
+  // Server only, on purpose. `sentry.edge.config.ts` stays without an `ignoreErrors`: Next's edge
+  // branch throws the identical error, but no app route here runs on the edge runtime
+  // (`app/opengraph-image.tsx` is a GET metadata route, and there is no middleware.ts), so the
+  // same entry there would be a filter that cannot fire — which reads as protection and is not.
+  ignoreErrors: [GENERIC_MULTIPART_POST_E975],
 
   // Same Supabase-capture policy as the browser — see lib/sentryEventPolicy.ts.
   //

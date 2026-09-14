@@ -1,9 +1,13 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { submitWaitlist } from '@/app/actions/waitlist';
+import {
+  reportWaitlistSubmitFailure,
+  SKEW_ALERT_MESSAGE,
+  GENERIC_ALERT_MESSAGE,
+} from '@/lib/serverActionSkew';
 import { SHOP_SIZES } from '@/lib/constants/marketing';
 import { isValidEmail } from '@/lib/validators';
 import Container from '@mui/material/Container';
@@ -24,7 +28,12 @@ export default function InviteForm() {
   const [email, setEmail] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [shopSize, setShopSize] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  // 'stale' is 'error' plus a cure: the deploy moved under them, so a reload fixes it.
+  // See lib/serverActionSkew.ts.
+  const [status, setStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error' | 'stale'
+  >('idle');
+  const [message, setMessage] = useState(GENERIC_ALERT_MESSAGE);
 
   useEffect(() => {
     if (status !== 'success') return;
@@ -50,8 +59,9 @@ export default function InviteForm() {
       if (result.error) throw new Error(result.error);
       setStatus('success');
     } catch (err) {
-      setStatus('error');
-      Sentry.captureException(err, { level: 'warning' });
+      const isSkew = reportWaitlistSubmitFailure(err, 'invite_link');
+      setStatus(isSkew ? 'stale' : 'error');
+      setMessage(isSkew ? SKEW_ALERT_MESSAGE : GENERIC_ALERT_MESSAGE);
     }
   };
 
@@ -189,9 +199,26 @@ export default function InviteForm() {
                     ))}
                   </TextField>
 
-                  {status === 'error' && (
-                    <Alert severity="error">
-                      Something went wrong. Email us at hello@jigged.app
+                  {status === 'error' && <Alert severity="error">{message}</Alert>}
+
+                  {/* Recoverable, so it is a warning with the cure attached rather than a dead
+                      end. Reload only on their click — a reload discards what they typed, and
+                      doing that for them would lose the lead we are trying to keep. */}
+                  {status === 'stale' && (
+                    <Alert
+                      severity="warning"
+                      action={
+                        <Button
+                          color="inherit"
+                          size="small"
+                          onClick={() => window.location.reload()}
+                          sx={{ minHeight: 44, fontWeight: 600 }}
+                        >
+                          Refresh
+                        </Button>
+                      }
+                    >
+                      {message}
                     </Alert>
                   )}
 

@@ -12,12 +12,17 @@ import { blueprintGridSx } from './marketingStyles';
  * faint blueprint grid behind a section as its signature motif.
  */
 type Surface = 'transparent' | 'raised' | 'recess' | 'light';
+/**
+ * `strip` is a thin band that carries a whole argument without a section's ceremony —
+ * a rule above and below, no heading treatment. Introduced 2026-09-11 for the price band.
+ */
+type Size = 'major' | 'minor' | 'strip';
 
 interface SectionProps {
   id?: string;
   surface?: Surface;
   maxWidth?: 'sm' | 'md' | 'lg';
-  size?: 'major' | 'minor';
+  size?: Size;
   hairlineTop?: boolean;
   grid?: boolean;
   children: React.ReactNode;
@@ -49,6 +54,17 @@ const surfaceSx: Record<Surface, object> = {
   },
 };
 
+/**
+ * Vertical rhythm. Majors were `md: 16` (256px of padding per section) until 2026-09-11 —
+ * across eight sections that was ~1,800px of nothing, and cutting it to `md: 11` is what
+ * paid for the price strip and the FAQ without the page growing.
+ */
+const SIZE_PY: Record<Size, { xs: number; md: number }> = {
+  major: { xs: 6, md: 9 },
+  minor: { xs: 5, md: 7 },
+  strip: { xs: 3.5, md: 5 },
+};
+
 export default function Section({
   id,
   surface = 'transparent',
@@ -67,7 +83,7 @@ export default function Section({
       sx={{
         position: 'relative',
         scrollMarginTop: 80,
-        py: size === 'major' ? { xs: 9, md: 16 } : { xs: 6, md: 11 },
+        py: SIZE_PY[size],
         ...(hairlineTop && surface === 'transparent'
           ? { borderTop: '1px solid rgba(255, 255, 255, 0.08)' }
           : {}),

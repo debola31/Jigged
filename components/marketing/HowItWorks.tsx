@@ -6,8 +6,8 @@ import Typography from '@mui/material/Typography';
 import Section from './Section';
 import SectionHeading from './SectionHeading';
 import Reveal from './Reveal';
-import { STEPS } from '@/lib/constants/marketing';
-import { gradientTextSx, DISPLAY_FONT } from './marketingStyles';
+import { STEPS, FIRST_WEEK } from '@/lib/constants/marketing';
+import { gradientTextSx, DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
 
 export default function HowItWorks() {
   return (
@@ -18,8 +18,8 @@ export default function HowItWorks() {
 
       <Stack
         direction={{ xs: 'column', md: 'row' }}
-        spacing={{ xs: 4, md: 5 }}
-        sx={{ mt: { xs: 6, md: 9 } }}
+        spacing={{ xs: 3, md: 5 }}
+        sx={{ mt: { xs: 4, md: 7 } }}
       >
         {STEPS.map((step, i) => (
           <Reveal key={step.number} delay={i * 100} distance={24} sx={{ flex: 1 }}>
@@ -29,10 +29,10 @@ export default function HowItWorks() {
                   ...gradientTextSx,
                   fontFamily: DISPLAY_FONT,
                   fontWeight: 600,
-                  fontSize: { xs: '2.75rem', md: '3.5rem' },
+                  fontSize: { xs: '2.25rem', md: '3.5rem' },
                   lineHeight: 1,
                   letterSpacing: '-0.03em',
-                  mb: 2.5,
+                  mb: { xs: 1.5, md: 2.5 },
                 }}
               >
                 {step.number}
@@ -69,6 +69,75 @@ export default function HowItWorks() {
           </Reveal>
         ))}
       </Stack>
+
+      {/* The concrete answer to "how long until we're running", which the reviews in this
+          category say is the objection that actually kills these deals — ahead of price.
+          Moved up the page with this section for the same reason. */}
+      <Reveal delay={200} distance={20}>
+        <Box
+          sx={{
+            mt: { xs: 4, md: 6 },
+            pt: { xs: 3.5, md: 4.5 },
+            borderTop: '1px solid rgba(255,255,255,0.14)',
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            gap: { xs: 3, md: 6 },
+            alignItems: { md: 'baseline' },
+          }}
+        >
+          <Typography
+            component="h3"
+            sx={{
+              fontFamily: DISPLAY_FONT,
+              fontWeight: 600,
+              fontSize: { xs: '1.2rem', md: '1.35rem' },
+              letterSpacing: '-0.02em',
+              flexShrink: 0,
+            }}
+          >
+            {FIRST_WEEK.heading}
+          </Typography>
+
+          <Box>
+            <Box
+              component="ul"
+              sx={{
+                listStyle: 'none',
+                p: 0,
+                m: 0,
+                display: 'flex',
+                flexDirection: { xs: 'column', md: 'row' },
+                flexWrap: 'wrap',
+                gap: { xs: 1.25, md: 3 },
+              }}
+            >
+              {FIRST_WEEK.days.map((day) => (
+                <Typography
+                  component="li"
+                  key={day}
+                  sx={{
+                    color: 'rgba(255, 255, 255, 0.82)',
+                    fontSize: { xs: '1rem', md: '1.02rem' },
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {day}
+                </Typography>
+              ))}
+            </Box>
+            <Typography
+              sx={{
+                mt: 2,
+                color: EYEBROW_COLOR,
+                fontSize: { xs: '1rem', md: '1.02rem' },
+                lineHeight: 1.55,
+              }}
+            >
+              {FIRST_WEEK.demo}
+            </Typography>
+          </Box>
+        </Box>
+      </Reveal>
     </Section>
   );
 }

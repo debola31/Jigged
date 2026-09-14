@@ -1,5 +1,6 @@
 'use client';
 
+import posthog from 'posthog-js';
 import { useState } from 'react';
 import { submitWaitlist } from '@/app/actions/waitlist';
 import {
@@ -42,6 +43,7 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
   const [message, setMessage] = useState('');
 
   const handleOpenModal = (e: React.FormEvent) => {
+    posthog.capture('marketing cta clicked', { location: 'final' });
     e.preventDefault();
     setModalOpen(true);
   };
@@ -80,6 +82,16 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
       });
 
       if (result.error) throw new Error(result.error);
+
+      // The shop's own details never leave for PostHog — only the SHAPE of the
+      // interaction, per the registry rule in CLAUDE.md. `source` says which band on the
+      // page converted; `shop_size` is the picker's own enum and is the one thing that
+      // tells us whether the page is reaching shops the product is actually built for.
+      // Name, email and company are deliberately absent.
+      posthog.capture('waitlist submitted', {
+        source,
+        shop_size: shopSize || null,
+      });
 
       setStatus('success');
       setMessage("Thanks! We'll reach out shortly to get your shop set up.");

@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'edge';
-export const alt = 'Jigged — Manufacturing Operations System';
+export const alt = 'Jigged — Your whole shop, in one place';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -118,7 +118,7 @@ export default async function Image() {
                 marginTop: 8,
               }}
             >
-              Manufacturing Operations System
+              Shop software for precision machine shops
             </div>
           </div>
         </div>
@@ -133,7 +133,7 @@ export default async function Image() {
             letterSpacing: '0.5px',
           }}
         >
-          Your Shop Floor, Finally Under Control
+          Your whole shop, in one place
         </div>
 
         {/* Domain */}

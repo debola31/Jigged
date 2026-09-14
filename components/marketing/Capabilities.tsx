@@ -5,7 +5,13 @@ import Typography from '@mui/material/Typography';
 import Section from './Section';
 import SectionHeading from './SectionHeading';
 import Reveal from './Reveal';
+import RequestQuoteOutlinedIcon from '@mui/icons-material/RequestQuoteOutlined';
+import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
+import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
+import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
+import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
 import { CAPABILITIES } from '@/lib/constants/marketing';
+import type { Capability } from '@/lib/constants/marketing';
 import { DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
 
 /**
@@ -29,6 +35,15 @@ import { DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
  * would cost more height than the cell it illustrates and the two showcase sections
  * below already carry the proof.
  */
+/** Keyed by `Capability.icon` — keep this map in step with the union in marketing.ts. */
+const ICONS: Record<Capability['icon'], typeof WorkOutlineIcon> = {
+  quote: RequestQuoteOutlinedIcon,
+  job: WorkOutlineIcon,
+  phone: PhoneIphoneIcon,
+  shelf: WarehouseOutlinedIcon,
+  books: AccountBalanceOutlinedIcon,
+};
+
 export default function Capabilities() {
   return (
     <Section id="features" surface="raised" maxWidth="lg" grid>
@@ -48,7 +63,9 @@ export default function Capabilities() {
           gap: { xs: 1.5, md: 2.5 },
         }}
       >
-        {CAPABILITIES.map((cell, i) => (
+        {CAPABILITIES.map((cell, i) => {
+          const Icon = ICONS[cell.icon];
+          return (
           <Reveal
             key={cell.key}
             delay={i * 70}
@@ -71,30 +88,37 @@ export default function Capabilities() {
                 border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
-              <Typography
-                component="h3"
-                sx={{
-                  fontFamily: DISPLAY_FONT,
-                  fontWeight: 600,
-                  fontSize: { xs: '1.18rem', md: '1.4rem' },
-                  lineHeight: 1.15,
-                  letterSpacing: '-0.02em',
-                  mb: 1.25,
-                }}
-              >
-                {cell.heading}
-              </Typography>
-
-              <Typography
-                sx={{
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  fontSize: '1rem',
-                  lineHeight: 1.55,
-                  mb: 1.75,
-                }}
-              >
-                {cell.body}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.75, mb: 2 }}>
+                <Box
+                  aria-hidden
+                  sx={{
+                    flexShrink: 0,
+                    width: 40,
+                    height: 40,
+                    borderRadius: 1.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: 'rgba(127, 179, 224, 0.1)',
+                    border: '1px solid rgba(127, 179, 224, 0.24)',
+                  }}
+                >
+                  <Icon sx={{ fontSize: 22, color: EYEBROW_COLOR }} />
+                </Box>
+                <Typography
+                  component="h3"
+                  sx={{
+                    fontFamily: DISPLAY_FONT,
+                    fontWeight: 600,
+                    fontSize: { xs: '1.18rem', md: '1.35rem' },
+                    lineHeight: 1.2,
+                    letterSpacing: '-0.02em',
+                    mt: 0.5,
+                  }}
+                >
+                  {cell.heading}
+                </Typography>
+              </Box>
 
               {/* Same list, two paints. As chips from sm up; below that the chip chrome
                   is dropped and the items flow as one dot-separated line.
@@ -141,7 +165,8 @@ export default function Capabilities() {
               </Box>
             </Box>
           </Reveal>
-        ))}
+          );
+        })}
       </Box>
     </Section>
   );

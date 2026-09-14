@@ -10,6 +10,10 @@ import { DISPLAY_FONT } from './marketingStyles';
  * The one real quote, rendered directly under the knowledge-capture section — the claim
  * on this page most in need of a human voice.
  *
+ * A material-connection disclosure line ran under the attribution for two days and was
+ * removed on request 2026-09-14. The reasoning behind it, and the arrangement it referred
+ * to, are recorded with the TESTIMONIAL constant so the removal reads as a decision.
+ *
  * IT RENDERS NOTHING UNTIL `TESTIMONIAL.approved` IS TRUE. That gate is deliberate and
  * the reasoning lives with the constant in lib/constants/marketing.ts: issues #489/#509
  * forbid an invented voice here, and the FTC's Endorsement Guides treat quotation marks
@@ -97,11 +101,6 @@ export default function Testimonial() {
             </Box>
           </Box>
 
-          <Typography
-            sx={{ mt: 1.75, color: 'rgba(255,255,255,0.42)', fontSize: '0.8rem', lineHeight: 1.5 }}
-          >
-            {TESTIMONIAL.disclosure}
-          </Typography>
         </Box>
       </Reveal>
     </Box>

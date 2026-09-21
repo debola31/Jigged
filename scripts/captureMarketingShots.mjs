@@ -12,6 +12,14 @@
  * runs it standalone and there is no Safari toolbar in frame) and composited into a device
  * mockup by hand.
  *
+ * THE PHONE SHOTS ARE A REAL SHOP, AND THAT IS CLEARED. Unlike everything captured here —
+ * which runs against the seeded demo company — the three phone shots are live captures from
+ * Contour Tool & Machine: their station list, a real part, and a real machinist's note
+ * describing how he set a job up. Johnnie Trammell cleared all three on 2026-09-21.
+ * Recording it because the clearance is not obvious from the files, and because the note in
+ * particular is exactly the kind of shop know-how the section it illustrates promises to
+ * protect. A replacement capture of the same screens needs the same permission.
+ *
  * USAGE
  *   1. Local Supabase must be running and hold the seed (`Vanguard Precision Works`).
  *      DO NOT run `supabase db reset` to get it: the local stack is shared between

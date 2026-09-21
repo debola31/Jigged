@@ -209,8 +209,8 @@ export const KNOWLEDGE = {
   body: 'Your best machinist knows the trick that saves an hour on that fixture. In Jigged he leaves a note, a photo or a short video right on the job — and it stays with the part.',
   micro:
     'It’s the difference between software that tracks work and software that remembers it.',
-  image: '/screenshots/placeholder-phone-note.png',
-  alt: 'Placeholder for an operator note with a photo attached',
+  image: '/screenshots/feature-knowledge-note.png',
+  alt: 'A note a machinist left on the job in Jigged — how he set the part up, with two photos and a colleague marking it helpful',
 };
 
 // ── Testimonial ─────────────────────────────────────────────────────────────────────

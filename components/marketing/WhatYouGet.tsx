@@ -12,7 +12,6 @@ import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import QrCodeScannerOutlinedIcon from '@mui/icons-material/QrCodeScannerOutlined';
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
-import QrCode2OutlinedIcon from '@mui/icons-material/QrCode2Outlined';
 import ChecklistOutlinedIcon from '@mui/icons-material/ChecklistOutlined';
 import VerifiedOutlinedIcon from '@mui/icons-material/VerifiedOutlined';
 import Section from './Section';
@@ -20,7 +19,7 @@ import SectionHeading from './SectionHeading';
 import Reveal from './Reveal';
 import ScreenShot from './ScreenShot';
 import PhoneShot from './PhoneShot';
-import { WHAT_YOU_GET, AI_EXAMPLES, AI_TRUST } from '@/lib/constants/marketing';
+import { WHAT_YOU_GET, AI_EXAMPLES } from '@/lib/constants/marketing';
 import { DISPLAY_FONT, EYEBROW_COLOR, gradientTextSx, eyebrowSx } from './marketingStyles';
 
 /**
@@ -71,29 +70,6 @@ function AskExamples() {
           </Typography>
         </Box>
       ))}
-      <Box
-        component="ul"
-        sx={{
-          listStyle: 'none',
-          p: 0,
-          mt: 1.5,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 0.75,
-          pl: 2.25,
-          borderLeft: '2px solid rgba(127, 179, 224, 0.35)',
-        }}
-      >
-        {AI_TRUST.map((line) => (
-          <Typography
-            component="li"
-            key={line}
-            sx={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.94rem', lineHeight: 1.5 }}
-          >
-            {line}
-          </Typography>
-        ))}
-      </Box>
     </Box>
   );
 }
@@ -110,7 +86,6 @@ const BULLET_ICONS: Record<string, typeof LockOutlinedIcon> = {
   camera: PhotoCameraOutlinedIcon,
   scan: QrCodeScannerOutlinedIcon,
   machine: BuildOutlinedIcon,
-  label: QrCode2OutlinedIcon,
   count: ChecklistOutlinedIcon,
   cert: VerifiedOutlinedIcon,
 };
@@ -121,7 +96,7 @@ export default function WhatYouGet() {
       <Reveal distance={28}>
         <SectionHeading
           index="What you get"
-          heading="Everything the shop needs. None of the enterprise weight."
+          heading="Everything the shop needs, and nothing it doesn’t."
         />
       </Reveal>
 
@@ -268,9 +243,14 @@ export default function WhatYouGet() {
                         sx={{
                           display: { xs: 'none', md: 'block' },
                           position: 'absolute',
-                          right: { md: '-6%' },
-                          bottom: { md: '-24%' },
-                          width: { md: '48%' },
+                          // Bigger and lower than it was. The quote is the OUTCOME of this
+                          // row — prints go in, a quote comes out — and at 48% it read as
+                          // a footnote to the step that produces it. At 68% the totals are
+                          // legible and it is plainly the thing the row is about, while the
+                          // drawing behind still shows where it came from.
+                          right: { md: '-11%' },
+                          bottom: { md: '-30%' },
+                          width: { md: '62%' },
                           zIndex: 2,
                         }}
                       >

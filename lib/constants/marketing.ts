@@ -3,6 +3,17 @@
 //
 // HOUSE RULE: when a line is worded a particular way for a reason, record the reason here.
 //
+// THIRD RULE, added 2026-09-21 after a claim-by-claim audit against the code found SEVEN
+// false statements on this page at once. None was careless writing; each was a plausible
+// belief nobody re-checked. The worst two: "The drawings never leave your computer", which
+// was wrong because `attachFiles()` in utils/drawingImportCreate.ts uploads every print as a
+// part attachment on Create — the READING is local, the files are not — and a promise on the
+// pricing page that open jobs import, when `KNOWN_ENTITIES` has never included jobs.
+//
+// So: A CAPABILITY CLAIM IS NOT TRUE BECAUSE IT WAS TRUE WHEN WRITTEN, OR BECAUSE A DOC SAYS
+// SO. Before any line here asserts what the product does, open the code that does it. The
+// module docs lag, and this file outlives the memory of whoever wrote the line.
+
 // SECOND RULE, added 2026-09-14 after review: DO NOT WRITE THE "BEFORE" UNLESS SOMEONE
 // WATCHED IT. A Today/With-Jigged table shipped here for two days and every row of its
 // left column was invented — shops were said to re-key everything into QuickBooks at
@@ -56,7 +67,7 @@ export const HERO = {
 // the number, and repeating it on the home page bought a second recital of the same terms
 // on a page that is trying to lose text, not gain it.
 export const CAPABILITY_STRIP = {
-  label: 'Built with precision machine shops running 5 to 50 people',
+  label: 'Built with a working machine shop',
   tags: ['CNC milling', 'Turning', 'Deburring', 'Anodizing', 'Inspection'],
 };
 
@@ -91,8 +102,6 @@ export type Step = {
   insetAlt?: string;
   /** Renders as a phone rather than a desktop screenshot. */
   phone?: boolean;
-  /** True while the art is a labelled stand-in rather than a real capture. */
-  placeholder?: boolean;
 };
 
 export const WHAT_YOU_GET: Step[] = [
@@ -112,9 +121,6 @@ export const WHAT_YOU_GET: Step[] = [
       // over it on the odd ones. Both exist — every quote line carries its own
       // `unit_price` and an `is_quote_override` flag.
       { icon: 'price', label: 'Priced from cost — and you can override it' },
-      // Verified: the extraction is deterministic and runs in the browser tab. No upload,
-      // no model, no network call anywhere in the flow.
-      { icon: 'lock', label: 'The drawings never leave your computer' },
     ],
     image: '/screenshots/feature-drawings.png',
     alt: 'A folder of engineering drawings read into a reviewable list of parts in Jigged, with the drawing shown beside the row it produced',
@@ -132,8 +138,10 @@ export const WHAT_YOU_GET: Step[] = [
     // assistant — and mixing them made both rows read as a list of unrelated nouns.
     items: [
       { icon: 'outside', label: 'Outside processing, sent and received' },
-      { icon: 'ship', label: 'Packing slips, carrier and tracking' },
-      { icon: 'invoice', label: 'Invoice into QuickBooks, and see when you’re paid' },
+      // NOT "and tracking": there is no tracking_number column anywhere. A shipment
+      // carries a carrier label and the customer's own freight account.
+      { icon: 'ship', label: 'Packing slips, and freight on the customer’s own account' },
+      { icon: 'invoice', label: 'Invoice into QuickBooks — Online or Desktop' },
     ],
     image: '/screenshots/feature-job.png',
     alt: 'A Jigged job — customer, purchase order, due date, routed operations and the activity from the floor',
@@ -161,9 +169,8 @@ export const WHAT_YOU_GET: Step[] = [
     description:
       'Print a label for every shelf, then scan it to see what is there or move what is on it.',
     items: [
-      { icon: 'label', label: 'A printable label for every shelf' },
       { icon: 'count', label: 'Stock counts with live variance' },
-      { icon: 'cert', label: 'Heats and mill certs, receiving to packing slip' },
+      { icon: 'cert', label: 'Heat numbers on the packing slip, mill certs filed to the lot' },
     ],
     image: '/screenshots/feature-storage.png',
     alt: 'The Jigged storage board — a rack drawn as numbered bins, each with its own printable label',
@@ -195,18 +202,13 @@ export const AI_EXAMPLES = [
   { q: 'Which customers haven’t ordered since the spring?', a: 'Three. Longest gap is 214 days.' },
 ];
 
-// Two lines, in body text, never collapsed.
-export const AI_TRUST = [
-  'Included in the price. No AI add-on, no per-question billing.',
-  'It reads your data. It cannot change it.',
-];
 
 export const KNOWLEDGE = {
   eyebrow: 'Knowledge capture',
   heading: 'Keep the knowledge that usually walks out the door.',
   // Trimmed 2026-09-14. The old version spent sixty words setting up a point the heading
   // had already made.
-  body: 'Your best machinist knows the trick that saves an hour on that fixture. In Jigged he leaves a note, a photo or a short video right on the job — and it stays with the part.',
+  body: 'Your best machinist knows the trick that saves an hour on that fixture. In Jigged he leaves a note, a photo or a short video right on the job — and the next man to run that part reads it.',
   micro:
     'It’s the difference between software that tracks work and software that remembers it.',
   image: '/screenshots/feature-knowledge-note.png',
@@ -254,7 +256,7 @@ export const STEPS: HowItWorksStep[] = [
     number: '01',
     headline: 'Bring your shop in',
     description:
-      'Your parts, customers and prices come in from the files you already have. No consultants, no six-month rollout.',
+      'No consultants, no six-month rollout.',
   },
   {
     number: '02',
@@ -266,7 +268,7 @@ export const STEPS: HowItWorksStep[] = [
     number: '03',
     headline: 'Ship and get paid',
     description:
-      'Log what ships, invoice from the job, and see it land in QuickBooks.',
+      'Log what ships and invoice straight from the job.',
   },
 ];
 
@@ -275,7 +277,7 @@ export const STEPS: HowItWorksStep[] = [
 export const FIRST_WEEK = {
   heading: 'Your first week',
   days: [
-    'Day one — your customers and parts go in from a spreadsheet.',
+    'Day one — your customers and parts go in from a CSV.',
     'Day two — quote a job and send the PDF.',
     'Day three — an operator picks his station and records a step.',
   ],
@@ -286,7 +288,9 @@ export const FIRST_WEEK = {
 };
 
 // ── FAQ ─────────────────────────────────────────────────────────────────────────────
-// Four, down from eight. Removed on request, in two passes. The four that went:
+// Three, down from eight, over three passes. The five that went:
+//   - "How long until we're actually running?" — removed 2026-09-21. Not on request: every
+//     clause of it appeared verbatim within one scroll, in STEPS[0] and FIRST_WEEK.demo.
 //   - "Will my guys be tracked?" — removed 2026-09-21. Note what goes with it: the
 //     no-surveillance guarantee is now absent from the page entirely, the floor copy
 //     having lost its stopwatch line a week earlier. It remains true, and remains
@@ -305,19 +309,15 @@ export const FAQ = [
     a: 'It is built for precision shops up to about 50 people. Bigger than that and you will want something with a planner and a full-time admin behind it.',
   },
   {
-    q: 'How long until we’re actually running?',
-    a: 'Days, not quarters. Your parts, customers and prices load from the files you already have, and there is a sample shop you can walk around before you load anything.',
-  },
-  {
     q: 'Do I have to re-key everything from my spreadsheets?',
-    a: 'No. Point the importer at your spreadsheets or your old system’s export — it recognises a Tangle or JobBOSS/E2 one — and it maps the columns, then shows you what needs fixing before anything saves.',
+    a: 'No. Save your spreadsheet, or an export from Tangle, JobBOSS or E2, as CSV. Point the importer at it — it maps the columns, then shows you what needs fixing before anything saves.',
   },
   {
     q: 'Does it replace QuickBooks?',
     // Corrected 2026-09-14 to describe what shops actually do: they invoice when they
     // invoice, not in a month-end batch, and the mirror tells them when it was paid
     // (`qb_status` / `qb_balance`, kept current by Intuit webhooks).
-    a: 'No, and it shouldn’t. Invoice a job whenever you’re ready and Jigged creates it in QuickBooks — Online or Desktop — then shows you when it’s paid. Your books stay the system of record.',
+    a: 'No, and it shouldn’t. Invoice a job whenever you’re ready and Jigged creates it in QuickBooks — Online or Desktop. On Online it also shows you when it’s paid. QuickBooks stays your books.',
   },
 ];
 
@@ -326,8 +326,6 @@ export const FINAL_CTA = {
   heading: 'Ready to stop fighting your software?',
   subhead:
     'We’re taking on a small group of precision shops as founding partners — they shape where Jigged goes, and get in before we open it up.',
-  primaryCta: { label: 'Request access', href: '/invite/early-access' },
-  emailLabel: 'Or request early access and we’ll reach out:',
 };
 
 // ── Pricing page (/pricing) ─────────────────────────────────────────────────────────
@@ -354,7 +352,7 @@ export const PRICING = {
   includes: [
     'Unlimited users. Every feature included.',
     'Quoting, jobs, the shop floor, storage, shipping and QuickBooks.',
-    '30-day trial. Month to month. Cancel anytime.',
+    '30-day trial, card up front. Month to month. Cancel anytime.',
   ],
   cta: { label: 'Request access', href: '/invite/early-access' },
   contact: {
@@ -374,7 +372,7 @@ export const PRICING = {
     },
     {
       q: 'What does setup look like?',
-      a: 'We set up your shop with you. Your parts, customers and open jobs load from the files you already have — the importer maps your columns and flags what needs fixing before anything saves.',
+      a: 'We set up your shop with you. Your parts, customers, vendors, work centers and routings load from the files you already have, as CSV — the importer maps your columns and flags what needs fixing before anything saves. Open jobs you key in as you go.',
     },
   ],
 };

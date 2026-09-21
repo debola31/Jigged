@@ -140,7 +140,7 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
             }}
           >
             <Box sx={{ display: { xs: 'none', md: 'inline' } }}>
-              Request Access for Your Shop
+              Request access for your shop
             </Box>
             <Box sx={{ display: { xs: 'inline', md: 'none' } }}>
               Request Early Access
@@ -174,7 +174,7 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
           }}
         >
           <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
-            Request Access for Your Shop
+            Request access for your shop
           </Typography>
           <IconButton
             onClick={handleCloseModal}

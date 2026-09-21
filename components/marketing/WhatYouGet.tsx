@@ -2,7 +2,19 @@
 
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import SwapHorizOutlinedIcon from '@mui/icons-material/SwapHorizOutlined';
+import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
+import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
+import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
+import QrCodeScannerOutlinedIcon from '@mui/icons-material/QrCodeScannerOutlined';
+import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
+import QrCode2OutlinedIcon from '@mui/icons-material/QrCode2Outlined';
+import ChecklistOutlinedIcon from '@mui/icons-material/ChecklistOutlined';
+import VerifiedOutlinedIcon from '@mui/icons-material/VerifiedOutlined';
 import Section from './Section';
 import SectionHeading from './SectionHeading';
 import Reveal from './Reveal';
@@ -86,6 +98,23 @@ function AskExamples() {
   );
 }
 
+/** Keyed by a bullet's `icon` — keep this map in step with the rows in marketing.ts. */
+const BULLET_ICONS: Record<string, typeof LockOutlinedIcon> = {
+  print: DescriptionOutlinedIcon,
+  price: TuneOutlinedIcon,
+  lock: LockOutlinedIcon,
+  outside: SwapHorizOutlinedIcon,
+  ship: LocalShippingOutlinedIcon,
+  invoice: ReceiptLongOutlinedIcon,
+  done: CheckCircleOutlinedIcon,
+  camera: PhotoCameraOutlinedIcon,
+  scan: QrCodeScannerOutlinedIcon,
+  machine: BuildOutlinedIcon,
+  label: QrCode2OutlinedIcon,
+  count: ChecklistOutlinedIcon,
+  cert: VerifiedOutlinedIcon,
+};
+
 export default function WhatYouGet() {
   return (
     <Section id="features" surface="raised" maxWidth="lg" grid>
@@ -163,39 +192,49 @@ export default function WhatYouGet() {
                     {row.description}
                   </Typography>
 
-                  <Box
-                    component="ul"
-                    sx={{
-                      listStyle: 'none',
-                      p: 0,
-                      m: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                    }}
-                  >
-                    {row.items.map((item) => (
-                      <Box
-                        component="li"
-                        key={item}
-                        sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.25 }}
-                      >
-                        <CheckRoundedIcon
-                          aria-hidden
-                          sx={{ fontSize: 17, color: EYEBROW_COLOR, mt: '3px', flexShrink: 0 }}
-                        />
-                        <Typography
-                          sx={{
-                            color: 'rgba(255, 255, 255, 0.86)',
-                            fontSize: '1rem',
-                            lineHeight: 1.45,
-                          }}
-                        >
-                          {item}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
+                  {row.items && (
+                    <Box
+                      component="ul"
+                      sx={{
+                        listStyle: 'none',
+                        p: 0,
+                        m: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 1.25,
+                      }}
+                    >
+                      {row.items.map((item) => {
+                        const Icon = BULLET_ICONS[item.icon] ?? CheckCircleOutlinedIcon;
+                        return (
+                          <Box
+                            component="li"
+                            key={item.label}
+                            sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}
+                          >
+                            <Icon
+                              aria-hidden
+                              sx={{
+                                fontSize: 20,
+                                color: EYEBROW_COLOR,
+                                mt: '2px',
+                                flexShrink: 0,
+                              }}
+                            />
+                            <Typography
+                              sx={{
+                                color: 'rgba(255, 255, 255, 0.86)',
+                                fontSize: '1rem',
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              {item.label}
+                            </Typography>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                  )}
 
                   {row.key === 'books' && <AskExamples />}
                 </Box>
@@ -207,35 +246,17 @@ export default function WhatYouGet() {
                 distance={32}
                 sx={{ flex: { md: '1 1 auto' }, width: '100%', minWidth: 0 }}
               >
-                {row.placeholder ? (
-                  /* Two phones, staggered — the queue and the step screen, which is the
-                     pair the old standalone floor section carried. They are labelled
-                     stand-ins so the slots the real captures will fill are visible in
-                     review rather than imagined. */
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'flex-start',
-                      gap: { xs: 1.5, md: 2.5 },
-                    }}
-                  >
+                {row.phone ? (
+                  /* One phone, large enough to read. The floor row carried two staggered
+                     placeholders while the art was pending; with a real capture in hand a
+                     single legible screen beats two small ones. */
+                  <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                     <PhoneShot
                       src={row.image}
                       alt={row.alt}
-                      maxWidth={{ xs: 150, md: 228 }}
+                      maxWidth={{ xs: 230, md: 292 }}
                       glow="rgba(70, 130, 180, 0.22)"
                     />
-                    {row.inset && (
-                      <Box sx={{ mt: { xs: 3, md: 6 } }}>
-                        <PhoneShot
-                          src={row.inset}
-                          alt={row.insetAlt ?? ''}
-                          maxWidth={{ xs: 150, md: 228 }}
-                          glow="rgba(43, 188, 179, 0.20)"
-                        />
-                      </Box>
-                    )}
                   </Box>
                 ) : (
                   <Box sx={{ position: 'relative' }}>

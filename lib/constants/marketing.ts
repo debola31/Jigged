@@ -82,12 +82,15 @@ export type Step = {
   eyebrow: string;
   headline: string;
   description: string;
-  items: string[];
+  /** Each bullet names an icon in WhatYouGet.tsx — keep the two in step. */
+  items?: { icon: string; label: string }[];
   image: string;
   alt: string;
   /** A second, smaller shot overlapping the first — the outcome, not the step. */
   inset?: string;
   insetAlt?: string;
+  /** Renders as a phone rather than a desktop screenshot. */
+  phone?: boolean;
   /** True while the art is a labelled stand-in rather than a real capture. */
   placeholder?: boolean;
 };
@@ -96,21 +99,22 @@ export const WHAT_YOU_GET: Step[] = [
   {
     key: 'quote',
     eyebrow: 'Quoting',
-    // WAS "93 drawings. 31 parts. No typing." The count came from one customer's package,
-    // so it read as borrowed rather than as a property of the product — and worse, it
-    // advertised PART CREATION when the destination is the quote. Reading drawings is one
-    // on-ramp; the headline now names both ends of the flow.
     headline: 'Their prints in. Your quote out.',
     description:
       'Drop the customer’s whole folder. Jigged reads the title blocks, you check one row per part, and the parts go straight into a quote.',
+    // THREE BULLETS, AND EACH ONE HAS TO EARN ITS LINE. This row used to carry "Quotes and
+    // quote PDFs" and "Customers and terms" — nouns that name a screen rather than tell a
+    // shop owner anything he did not assume. The test now: would a man who already runs a
+    // shop learn something, or change his mind, by reading it? If not, it is not a bullet.
     items: [
-      'Quotes and quote PDFs',
-      'Customers and terms',
-      // Customer 3's actual ask: calculated pricing on the bigger repeatable orders, room
-      // to type over it on the small or odd ones. Both exist — every quote line carries
-      // its own `unit_price` and an `is_quote_override` flag.
-      'Per-part pricing, and override it',
-      'Drawings straight to parts',
+      { icon: 'print', label: 'Material, finish and revision read off the print' },
+      // Customer 3's actual ask: calculated pricing on the repeatable orders, room to type
+      // over it on the odd ones. Both exist — every quote line carries its own
+      // `unit_price` and an `is_quote_override` flag.
+      { icon: 'price', label: 'Priced from cost — and you can override it' },
+      // Verified: the extraction is deterministic and runs in the browser tab. No upload,
+      // no model, no network call anywhere in the flow.
+      { icon: 'lock', label: 'The drawings never leave your computer' },
     ],
     image: '/screenshots/feature-drawings.png',
     alt: 'A folder of engineering drawings read into a reviewable list of parts in Jigged, with the drawing shown beside the row it produced',
@@ -123,11 +127,13 @@ export const WHAT_YOU_GET: Step[] = [
     headline: 'Every job, at a glance',
     description:
       'Making, shipping and billing move independently, because in a real shop they do.',
+    // QuickBooks moved here from the AI row on 2026-09-21. It never belonged beside "ask
+    // your shop in plain English" — billing is part of the job's life, not part of the
+    // assistant — and mixing them made both rows read as a list of unrelated nouns.
     items: [
-      'Jobs and travelers',
-      'Work centers and routing',
-      'Outside processing',
-      'Packing slips and tracking',
+      { icon: 'outside', label: 'Outside processing, sent and received' },
+      { icon: 'ship', label: 'Packing slips, carrier and tracking' },
+      { icon: 'invoice', label: 'Invoice into QuickBooks, and see when you’re paid' },
     ],
     image: '/screenshots/feature-job.png',
     alt: 'A Jigged job — customer, purchase order, due date, routed operations and the activity from the floor',
@@ -136,22 +142,17 @@ export const WHAT_YOU_GET: Step[] = [
     key: 'floor',
     eyebrow: 'The shop floor',
     headline: 'The floor, on his own phone',
-    // Carries what the standalone shop-floor section used to say. The device claim is the
-    // load-bearing part: operators use their own phone, no shop in the pilot uses a tablet,
-    // and the marketing site has taken one tablet pageview in ninety days.
     description:
-      'Your guys already have the device. He signs in once, picks his station, and sees only the jobs waiting on him — nothing to buy, nothing to install.',
+      'Your guys already have the device. He picks his station, sees the jobs waiting on him, and records what he finished — nothing to buy, nothing to install.',
     items: [
-      'Record what you finished',
-      'Scan a label or traveler',
-      'Notes, photos and video',
-      'Machine logbooks',
+      { icon: 'done', label: 'Record what you finished' },
+      { icon: 'camera', label: 'Notes, photos and video at the machine' },
+      { icon: 'scan', label: 'Scan a shelf label or a traveler' },
+      { icon: 'machine', label: 'A logbook for every machine' },
     ],
-    image: '/screenshots/placeholder-phone-queue.png',
-    alt: 'Placeholder for the operator job queue on a phone',
-    inset: '/screenshots/placeholder-phone-step.png',
-    insetAlt: 'Placeholder for the step screen where an operator records what he finished',
-    placeholder: true,
+    image: '/screenshots/feature-operator-step.png',
+    alt: 'An operator recording how many pieces he finished on a job step in Jigged, with notes, photos and video on the same screen',
+    phone: true,
   },
   {
     key: 'stock',
@@ -160,26 +161,23 @@ export const WHAT_YOU_GET: Step[] = [
     description:
       'Print a label for every shelf, then scan it to see what is there or move what is on it.',
     items: [
-      'Storage you can scan',
-      'Stock counts',
-      'Heats and mill certs',
-      'Vendors and services',
+      { icon: 'label', label: 'A printable label for every shelf' },
+      { icon: 'count', label: 'Stock counts with live variance' },
+      { icon: 'cert', label: 'Heats and mill certs, receiving to packing slip' },
     ],
     image: '/screenshots/feature-storage.png',
     alt: 'The Jigged storage board — a rack drawn as numbered bins, each with its own printable label',
   },
   {
     key: 'books',
-    eyebrow: 'Books, and answers',
+    eyebrow: 'Ask your shop',
     headline: 'AI that only knows your shop',
     description:
       'Ask in the words you’d use out loud. Get a number, a chart, or a one-page report on your letterhead.',
-    items: [
-      'QuickBooks Online and Desktop',
-      'See when you’re paid',
-      'Ask in plain English',
-      'Import from spreadsheets',
-    ],
+    // NO BULLETS. It used to carry four, three of which were QuickBooks and import items
+    // that had nothing to do with the assistant, and the fourth — "Ask in plain English" —
+    // was the description again. The worked questions below ARE this row's detail: a
+    // reader cannot judge a text field, only an answer.
     image: '/screenshots/feature-insights.png',
     alt: 'The Jigged dashboard answering a plain-English question about the shop with a chart',
   },
@@ -208,11 +206,11 @@ export const KNOWLEDGE = {
   heading: 'Keep the knowledge that usually walks out the door.',
   // Trimmed 2026-09-14. The old version spent sixty words setting up a point the heading
   // had already made.
-  body: 'Your best machinist knows the trick that saves an hour on that fixture. In Jigged he leaves a note, a photo or a short video right on the job — and it stays with the part, so the next person runs it right.',
+  body: 'Your best machinist knows the trick that saves an hour on that fixture. In Jigged he leaves a note, a photo or a short video right on the job — and it stays with the part.',
   micro:
-    'No incumbent ERP does this. It’s the difference between software that tracks work and software that remembers it.',
-  image: '/screenshots/feature-knowledge-note.png',
-  alt: 'An operator note with a photo attached to a job in Jigged',
+    'It’s the difference between software that tracks work and software that remembers it.',
+  image: '/screenshots/placeholder-phone-note.png',
+  alt: 'Placeholder for an operator note with a photo attached',
 };
 
 // ── Testimonial ─────────────────────────────────────────────────────────────────────
@@ -256,19 +254,19 @@ export const STEPS: HowItWorksStep[] = [
     number: '01',
     headline: 'Bring your shop in',
     description:
-      'Your parts, customers and prices come in from the files you already have — messy headers and all. No consultants, no six-month rollout.',
+      'Your parts, customers and prices come in from the files you already have. No consultants, no six-month rollout.',
   },
   {
     number: '02',
     headline: 'Quote and track',
     description:
-      'Build a quote, turn it into a job against the customer’s PO, and follow every step from one place.',
+      'Turn a quote into a job against the customer’s PO, then follow every step from one place.',
   },
   {
     number: '03',
     headline: 'Ship and get paid',
     description:
-      'Log what goes out the door, invoice from the job, and see it land in QuickBooks.',
+      'Log what ships, invoice from the job, and see it land in QuickBooks.',
   },
 ];
 
@@ -288,7 +286,11 @@ export const FIRST_WEEK = {
 };
 
 // ── FAQ ─────────────────────────────────────────────────────────────────────────────
-// Five, down from eight on 2026-09-14. The three that went:
+// Four, down from eight. Removed on request, in two passes. The four that went:
+//   - "Will my guys be tracked?" — removed 2026-09-21. Note what goes with it: the
+//     no-surveillance guarantee is now absent from the page entirely, the floor copy
+//     having lost its stopwatch line a week earlier. It remains true, and remains
+//     enforced by the schema; it is simply no longer claimed here.
 //   - "What does the AI actually see?" — it answers with today's table allowlist, and that
 //     list is about to widen. A page that documents a boundary we are moving is a page
 //     that will be wrong.
@@ -300,7 +302,7 @@ export const FIRST_WEEK = {
 export const FAQ = [
   {
     q: 'Is this right for a shop my size?',
-    a: 'It is built for precision shops running up to about 50 people. Bigger than that and you will want something with a planner and a full-time admin behind it.',
+    a: 'It is built for precision shops up to about 50 people. Bigger than that and you will want something with a planner and a full-time admin behind it.',
   },
   {
     q: 'How long until we’re actually running?',
@@ -308,18 +310,14 @@ export const FAQ = [
   },
   {
     q: 'Do I have to re-key everything from my spreadsheets?',
-    a: 'No. Point the importer at your spreadsheets or your old system’s export and it maps the columns for you — it recognises a Tangle or JobBOSS/E2 export — then shows you what needs fixing before anything saves.',
-  },
-  {
-    q: 'Will my guys be tracked?',
-    a: 'No. Jigged never displays a score, a count, an average or a leaderboard — not to them, and not to you. There is no per-operator performance screen, and there will not be one.',
+    a: 'No. Point the importer at your spreadsheets or your old system’s export — it recognises a Tangle or JobBOSS/E2 one — and it maps the columns, then shows you what needs fixing before anything saves.',
   },
   {
     q: 'Does it replace QuickBooks?',
     // Corrected 2026-09-14 to describe what shops actually do: they invoice when they
     // invoice, not in a month-end batch, and the mirror tells them when it was paid
     // (`qb_status` / `qb_balance`, kept current by Intuit webhooks).
-    a: 'No, and it shouldn’t. Invoice a job whenever you’re ready and Jigged creates it in QuickBooks — Online or Desktop — then shows you when it’s been paid. Your books stay the system of record.',
+    a: 'No, and it shouldn’t. Invoice a job whenever you’re ready and Jigged creates it in QuickBooks — Online or Desktop — then shows you when it’s paid. Your books stay the system of record.',
   },
 ];
 

@@ -202,8 +202,8 @@ export default function Hero() {
                 }}
               >
                 <PhoneShot
-                  src="/screenshots/feature-operator-queue.png"
-                  alt="The same shop on the floor — an operator's job queue on their phone"
+                  src="/screenshots/feature-operator-station.png"
+                  alt="The same shop on the floor — an operator picking his station on his phone"
                   maxWidth={{ md: 152 }}
                   glow="rgba(43, 188, 179, 0.26)"
                 />

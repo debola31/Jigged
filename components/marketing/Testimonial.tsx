@@ -2,51 +2,107 @@
 
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Section from './Section';
 import Reveal from './Reveal';
-import { gradientTextSx } from './marketingStyles';
+import { TESTIMONIAL } from '@/lib/constants/marketing';
+import { DISPLAY_FONT } from './marketingStyles';
 
 /**
- * Testimonial section. DORMANT until a real, approved quote exists (issue #489/#509
- * forbid an invented voice) — it is intentionally not rendered in LandingPageContent.
- * When Shane's (or another) quote is approved, pass real props and uncomment the
- * import + usage in LandingPageContent. No placeholder ships live.
+ * The one real quote, rendered directly under the knowledge-capture section — the claim
+ * on this page most in need of a human voice.
+ *
+ * A material-connection disclosure line ran under the attribution for two days and was
+ * removed on request 2026-09-14. The reasoning behind it, and the arrangement it referred
+ * to, are recorded with the TESTIMONIAL constant so the removal reads as a decision.
+ *
+ * IT RENDERS NOTHING UNTIL `TESTIMONIAL.approved` IS TRUE. That gate is deliberate and
+ * the reasoning lives with the constant in lib/constants/marketing.ts: issues #489/#509
+ * forbid an invented voice here, and the FTC's Endorsement Guides treat quotation marks
+ * as a claim that these are the endorser's exact words. The copy is a compression of a
+ * paraphrase, so it needs the endorser's written adoption before it can wear quote marks.
+ * Flipping the flag is the whole deployment step once that email exists.
+ *
+ * The disclosure line below the attribution is not optional decoration: the shop is on a
+ * reserved discounted price, which is a material connection under the same Guides.
+ *
+ * Set deliberately small and quiet — no giant curly quotes, no five-star graphic. Both
+ * read as a marketing asset rather than a person, and a flawless rating measurably
+ * depresses trust rather than raising it.
  */
-interface TestimonialProps {
-  quote: string;
-  name: string;
-  role: string;
-  company: string;
-}
+export default function Testimonial() {
+  if (!TESTIMONIAL.approved) return null;
 
-export default function Testimonial({ quote, name, role, company }: TestimonialProps) {
   return (
-    <Section maxWidth="md" hairlineTop>
-      <Reveal>
-        <Box sx={{ textAlign: 'center' }}>
-          <Typography sx={{ ...gradientTextSx, fontSize: '3rem', lineHeight: 1, mb: 2 }}>
-            &ldquo;
-          </Typography>
+    <Box
+      component="section"
+      sx={{
+        py: { xs: 4, md: 5 },
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+      }}
+    >
+      <Reveal distance={20}>
+        <Box sx={{ maxWidth: 720, mx: 'auto', px: { xs: 3, md: 0 }, textAlign: 'center' }}>
           <Typography
             component="blockquote"
             sx={{
+              m: 0,
+              fontFamily: DISPLAY_FONT,
               fontWeight: 500,
-              fontSize: { xs: '1.4rem', md: '1.9rem' },
+              color: '#fff',
+              fontSize: { xs: '1.3rem', md: '1.6rem' },
               lineHeight: 1.35,
-              letterSpacing: '-0.01em',
-              maxWidth: 760,
-              mx: 'auto',
-              mb: 4,
+              letterSpacing: '-0.02em',
             }}
           >
-            {quote}
+            “{TESTIMONIAL.quote}”
           </Typography>
-          <Typography sx={{ color: '#fff', fontWeight: 600 }}>{name}</Typography>
-          <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.95rem' }}>
-            {role}, {company}
-          </Typography>
+
+          <Box
+            sx={{
+              mt: 3,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: { xs: 1.5, md: 2.5 },
+            }}
+          >
+            {/* Name only. The company is in the logo beside it, and printing it twice
+                is the kind of small redundancy this page is trying to shed. `role` is
+                kept on the constant for the logo's alt text and for the day this
+                becomes a name + title + town block. */}
+            <Typography sx={{ color: 'rgba(255,255,255,0.9)', fontWeight: 600, fontSize: '1rem' }}>
+              {TESTIMONIAL.name}
+            </Typography>
+
+            {/* The supplied wordmark is black on transparent, which is invisible on this
+                page. It sits on a light chip rather than being inverted, because a CSS
+                invert would swing the blue CTM mark to orange. Replace the chip with a
+                bare <img> once a reversed logo arrives from the shop. */}
+            <Box
+              sx={{
+                px: 1.5,
+                py: 0.75,
+                borderRadius: 1,
+                bgcolor: 'rgba(255,255,255,0.92)',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <Box
+                component="img"
+                src={TESTIMONIAL.logo}
+                alt={TESTIMONIAL.logoAlt}
+                width={552}
+                height={102}
+                loading="lazy"
+                decoding="async"
+                sx={{ height: 22, width: 'auto', display: 'block' }}
+              />
+            </Box>
+          </Box>
+
         </Box>
       </Reveal>
-    </Section>
+    </Box>
   );
 }

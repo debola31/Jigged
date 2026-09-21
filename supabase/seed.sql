@@ -28,7 +28,7 @@
 --
 -- Logins after reset — all password `jigged-dev-1234`.
 -- Vanguard Precision Works team:
---   dev@jigged.test         admin     (Dev Seed User)
+--   dev@jigged.test         admin     (Ray Whitfield)
 --   admin2@jigged.test      admin     (Morgan Reyes)
 --   user1@jigged.test       user      (Sam Carter)
 --   user2@jigged.test       user      (Jamie Lin)
@@ -94,7 +94,7 @@ insert into auth.users (
   crypt('jigged-dev-1234', gen_salt('bf')),
   now(),
   '{"provider":"email","providers":["email"]}'::jsonb,
-  '{"display_name":"Dev Seed User"}'::jsonb,
+  '{"display_name":"Ray Whitfield"}'::jsonb,
   now() - interval '365 days', now(),
   '', '', '', ''
 ) on conflict (id) do nothing;
@@ -148,7 +148,7 @@ on conflict (company_id) do nothing;
 insert into public.user_company_access (id, user_id, company_id, role, name) values
   ('23000000-0000-0000-0000-000000000001',
    '11111111-1111-1111-1111-111111111111',
-   '22222222-2222-2222-2222-222222222222', 'admin', 'Dev Seed User')
+   '22222222-2222-2222-2222-222222222222', 'admin', 'Ray Whitfield')
 on conflict do nothing;
 
 -- ── Additional team members ──────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -209,7 +209,14 @@ describe('OperatorWarehouseHomePage — the selection survives a Back', () => {
     vi.mocked(getRecentActivity).mockResolvedValue([entry({ itemName: 'SOMETHING-ELSE' })]);
     renderPage();
 
-    expect(await screen.findByTestId('picked')).toHaveTextContent('RAW-AL6061-BLANK');
+    // waitFor on the CONTENT, not findByTestId on the element. The stub at the top of
+    // this file renders <span data-testid="picked">{value?.part_name ?? ''}</span>, so the
+    // span exists — empty — from the first paint, and findByTestId resolves against it
+    // before the part has loaded. It passed on a fast machine and failed on a loaded CI
+    // runner, which is the signature of the bug rather than of an unlucky day.
+    await waitFor(() =>
+      expect(screen.getByTestId('picked')).toHaveTextContent('RAW-AL6061-BLANK')
+    );
     // Part selected means the shop-wide feed stays hidden, exactly as if you had just picked it.
     expect(screen.queryByText('SOMETHING-ELSE')).not.toBeInTheDocument();
   });

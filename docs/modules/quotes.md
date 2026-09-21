@@ -595,7 +595,7 @@ is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared
 of the three whose left slot is already occupied:
 
 ```
-Prepared by Dev Seed User · dev@jigged.test        Generated with jigged.app · Page 1 of 1
+Prepared by Ray Whitfield · dev@jigged.test        Generated with jigged.app · Page 1 of 1
 ```
 
 The preparer credit keeps the left — it is the only place a quote records who to ring about the

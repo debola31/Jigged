@@ -5,13 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import Hero from './Hero';
-import LogoCloud from './LogoCloud';
-import PainPoints from './PainPoints';
-import Features from './Features';
-import ShopFloorShowcase from './ShopFloorShowcase';
+import CapabilityStrip from './CapabilityStrip';
+import WhatYouGet from './WhatYouGet';
 import KnowledgeCapture from './KnowledgeCapture';
 import HowItWorks from './HowItWorks';
-// import Testimonial from './Testimonial'; // Re-enable once a real quote is confirmed
+import Faq from './Faq';
+import Testimonial from './Testimonial';
 import FinalCTA from './FinalCTA';
 
 export default function LandingPageContent() {
@@ -34,15 +33,25 @@ export default function LandingPageContent() {
   return (
     <>
       <Hero />
-      <LogoCloud />
-      <PainPoints />
-      <Features />
-      <ShopFloorShowcase />
+      {/* Who it's for, in one line, plus the capabilities the shop will look for. */}
+      <CapabilityStrip />
+      {/* The whole product in five numbered rows, each with a picture. This replaced three
+          sections — a Quoting showcase, a chip grid naming the same capabilities again,
+          and a standalone shop-floor block — which were one argument told twice at
+          different resolutions. */}
+      <WhatYouGet />
+      {/* The one claim no incumbent makes, so it keeps its own section. */}
       <KnowledgeCapture />
+      {/* "No consultants, no six-month rollout" answers the objection that decides these
+          deals, so it and the FAQ sit together as the objection-handling block. */}
       <HowItWorks />
-      {/* <Testimonial /> Re-enable once a real quote is confirmed */}
-      {/* One closing beat: the founding-shops message is folded into FinalCTA — a separate
-          early-access band above it just repeated the same pitch before the same button. */}
+      <Faq />
+      {/* Last word before the ask. Moved here from mid-page 2026-09-14: the quote is about
+          the product overall — "I've used other ERPs" — not about any one section, so the
+          adjacency argument for parking it under Knowledge capture never really held. As
+          the only quote on the page, it does most work closing the objection block.
+          Renders nothing unless approved in writing — see the constant. */}
+      <Testimonial />
       <FinalCTA />
     </>
   );

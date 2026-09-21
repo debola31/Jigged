@@ -16,7 +16,7 @@ export default function KnowledgeCapture() {
           display: 'flex',
           flexDirection: { xs: 'column', md: 'row' },
           alignItems: 'center',
-          gap: { xs: 6, md: 10 },
+          gap: { xs: 4, md: 10 },
         }}
       >
         {/* Copy — the emotional core, set large */}
@@ -72,7 +72,13 @@ export default function KnowledgeCapture() {
           distance={40}
           sx={{ flex: { md: '1 1 auto' }, width: '100%', display: 'flex', justifyContent: 'center' }}
         >
-          <PhoneShot src={KNOWLEDGE.image} alt={KNOWLEDGE.alt} maxWidth={322} />
+          {/* 322 on desktop; smaller on a phone, where a 0.48-aspect mockup at full
+              column width is 667px of a 390px-wide screen all by itself. */}
+          <PhoneShot
+            src={KNOWLEDGE.image}
+            alt={KNOWLEDGE.alt}
+            maxWidth={{ xs: 232, md: 322 }}
+          />
         </Reveal>
       </Box>
     </Section>

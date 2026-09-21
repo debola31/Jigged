@@ -7,16 +7,21 @@ import Reveal from './Reveal';
 import { CAPABILITY_STRIP } from '@/lib/constants/marketing';
 
 /**
- * Honest credibility strip. No customer logos are cleared yet, so this states who
- * Jigged is for + the shop capabilities it covers. Structured so a real grayscale
- * logo row can replace the tags later without touching the layout.
+ * Honest credibility strip. No customer logos are cleared yet, so this states who Jigged
+ * is for — including the headcount, which is the reader's own self-recognition test — and
+ * the shop capabilities it covers. Structured so a real grayscale logo row can replace the
+ * tags later without touching the layout.
+ *
+ * This is the old LogoCloud, restored. A price + terms band briefly took its place; that
+ * came out on 2026-09-14 because /pricing already carries the number and repeating it
+ * bought a second recital of the same terms on a page trying to lose text.
  */
-export default function LogoCloud() {
+export default function CapabilityStrip() {
   return (
     <Box
       component="section"
       sx={{
-        py: { xs: 4, md: 5 },
+        py: { xs: 3, md: 4 },
         borderTop: '1px solid rgba(255, 255, 255, 0.07)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.07)',
       }}
@@ -28,7 +33,7 @@ export default function LogoCloud() {
               display: 'flex',
               flexDirection: { xs: 'column', md: 'row' },
               alignItems: 'center',
-              gap: { xs: 2.5, md: 4 },
+              gap: { xs: 2, md: 4 },
               justifyContent: 'center',
             }}
           >

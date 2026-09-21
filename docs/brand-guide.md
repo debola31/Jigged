@@ -105,22 +105,36 @@ background-attachment: fixed;
 
 ### Marketing Pages
 
-For landing pages, coming-soon pages, and marketing materials, use **Inter** — a clean, highly legible sans-serif designed for screens.
+For landing pages, coming-soon pages, and marketing materials, use **Space Grotesk** for display
+type — headlines, section headings, large numerals — over the system stack for body copy.
+
+*(Corrected 2026-09-11: this section specified **Inter** and had done since it was written, but the
+marketing layout has never loaded it. `app/(marketing)/layout.tsx`
+loads Space Grotesk at weights 500/600/700 and exposes it as `--font-space-grotesk`, which
+[`marketingStyles.ts`](../components/marketing/marketingStyles.ts) reads as `DISPLAY_FONT`. The
+implementation is the one that shipped and was validated, so the guide follows the code rather than
+the other way round.)*
 
 | Element | Font | Weight | Size |
 |---------|------|--------|------|
-| Hero headline | Inter | 700 (Bold) | 48–64px |
-| Section heading | Inter | 600 (Semi-bold) | 32–40px |
-| Subheading | Inter | 600 (Semi-bold) | 24–28px |
-| Body text | Inter | 400 (Regular) | 16–18px |
-| Caption / fine print | Inter | 400 (Regular) | 14px |
+| Hero headline | Space Grotesk | 600 | `clamp(2.75rem, 7vw, 5.5rem)` |
+| Section heading | Space Grotesk | 600 | `clamp(2rem, 4.6vw, 3.4rem)` |
+| Subheading | Space Grotesk | 600 | 20–24px |
+| Body text | System stack | 400 (Regular) | 16–18px |
+| Caption / fine print | System stack | 400 (Regular) | 14px |
 
-**Loading Inter:** Add via [Google Fonts](https://fonts.google.com/specimen/Inter) or `next/font`:
+**Loading it:** already done, once, in the marketing route group's layout — do not add a second
+loader:
 
 ```typescript
-import { Inter } from 'next/font/google';
+import { Space_Grotesk } from 'next/font/google';
 
-const inter = Inter({ subsets: ['latin'] });
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  variable: '--font-space-grotesk',
+  display: 'swap',
+});
 ```
 
 ### In-App (Reference)
@@ -130,7 +144,10 @@ The app uses a system font stack — see `lib/theme.ts`:
 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif
 ```
 
-Marketing pages may use Inter for headings while falling back to the system stack for body text if preferred.
+Marketing pages use Space Grotesk for headings and the system stack for body text. Small text —
+eyebrows, captions, chips — must **never** use the brand gradient as a fill: the gradient sweeps
+through a steel stop at roughly 4.3:1 and fails small-text contrast. `EYEBROW_COLOR` (`#7FB3E0`)
+exists for that, and clears 8:1 on the indigo ground.
 
 ### Typography Rules
 

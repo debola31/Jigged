@@ -186,10 +186,9 @@ export default function CorrectInvoiceQuantitiesDialog({
         reopened_a_part: reopening.length > 0,
       });
       onCorrected(
-        `Updated what invoice ${selected.docNumber ? `#${selected.docNumber}` : ''} billed.`.replace(
-          '  ',
-          ' ',
-        ),
+        selected.docNumber
+          ? `Updated what invoice #${selected.docNumber} billed.`
+          : 'Updated what that invoice billed.',
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That correction could not be saved.');
@@ -208,10 +207,9 @@ export default function CorrectInvoiceQuantitiesDialog({
     >
       <DialogTitle>
         {selected
-          ? `Correct what invoice ${selected.docNumber ? `#${selected.docNumber}` : ''} billed`.replace(
-              '  ',
-              ' ',
-            )
+          ? selected.docNumber
+            ? `Correct what invoice #${selected.docNumber} billed`
+            : 'Correct what this invoice billed'
           : `Correct what an invoice billed on ${jobNumber}`}
       </DialogTitle>
       <DialogContent dividers>
@@ -260,15 +258,17 @@ export default function CorrectInvoiceQuantitiesDialog({
             {selected.url ? (
               <Typography variant="body2" sx={{ mb: 2 }}>
                 <Link href={selected.url} target="_blank" rel="noopener">
-                  Open #{selected.docNumber ?? ''} in QuickBooks
+                  Open {selected.docNumber ? `#${selected.docNumber}` : 'this invoice'} in
+                  QuickBooks
                   <OpenInNewIcon fontSize="inherit" sx={{ ml: 0.5, verticalAlign: 'middle' }} />
                 </Link>{' '}
                 to check the quantities against the invoice itself.
               </Typography>
             ) : (
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                In QuickBooks press Ctrl+F, search Invoice # {selected.docNumber ?? ''}, and read the
-                quantities off the invoice itself.
+                {selected.docNumber
+                  ? `In QuickBooks press Ctrl+F, search Invoice # ${selected.docNumber}, and read the quantities off the invoice itself.`
+                  : 'Open this invoice in QuickBooks and read the quantities off it.'}
               </Typography>
             )}
 

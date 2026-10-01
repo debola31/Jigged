@@ -11,12 +11,15 @@ import CircularProgress from '@mui/material/CircularProgress';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import AddIcon from '@mui/icons-material/Add';
+import EditNoteIcon from '@mui/icons-material/EditNote';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
 import posthog from 'posthog-js';
 
 import StatusChip from '@/components/common/StatusChip';
+import CorrectInvoiceQuantitiesDialog from '@/components/jobs/CorrectInvoiceQuantitiesDialog';
+import { useUserRole } from '@/hooks/useUserRole';
 import {
   getQuickBooksInvoiceLinksForJob,
   syncQuickBooksInvoiceStatus,
@@ -47,17 +50,23 @@ const EMPTY: QuickBooksInvoiceView[] = [];
 export default function InvoicesMenu({
   companyId,
   jobId,
+  jobNumber,
   refreshKey = 0,
   onCreate,
+  onCorrected,
   disabled,
 }: {
   companyId: string;
   jobId: string;
+  jobNumber: string;
   refreshKey?: number;
   onCreate: () => void;
+  onCorrected: (message: string) => void;
   disabled?: boolean;
 }) {
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
+  const [correctOpen, setCorrectOpen] = useState(false);
+  const { role } = useUserRole();
   const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null);
   const [checking, setChecking] = useState(false);
   /** Non-null once a check has failed. `message` carries a 400's wording, shown
@@ -77,6 +86,12 @@ export default function InvoicesMenu({
   );
   const invoices = data ?? EMPTY;
   const online = invoices.filter((inv) => inv.provider === 'qbo');
+  // A voided invoice records nothing, so it has nothing to correct (the RPC refuses
+  // it too). Office roles only: an operator has no business on an invoice, and the
+  // dashboard has no operator redirect, so this is a real gate rather than a
+  // formality -- though correct_invoice_recorded_quantities refuses them regardless.
+  const correctable = invoices.filter((inv) => inv.voidedAt === null && inv.lines.length > 0);
+  const canCorrect = correctable.length > 0 && role !== null && role !== 'operator';
   const today = localDateISO();
 
   /**
@@ -200,11 +215,11 @@ export default function InvoicesMenu({
                       // became of it. Joined with a separator they would read as
                       // one sentence about a single event.
                       <>
-                        <span style={{ display: 'block' }}>{formatDate(inv.createdAt)}</span>
+                        <span style={{ display: 'block' }}>{createdLine(inv)}</span>
                         <span style={{ display: 'block' }}>{payment.secondary}</span>
                       </>
                     ) : (
-                      formatDate(inv.createdAt)
+                      createdLine(inv)
                     )
                   }
                 />
@@ -237,7 +252,7 @@ export default function InvoicesMenu({
                       ? copied.ok
                         ? 'Copied'
                         : 'Press Ctrl+C to copy'
-                      : formatDate(inv.createdAt)
+                      : createdLine(inv)
                   }
                   slotProps={
                     copied?.id === inv.id
@@ -326,7 +341,36 @@ export default function InvoicesMenu({
           <AddIcon fontSize="small" sx={{ mr: 1 }} />
           Create invoice
         </MenuItem>
+        {canCorrect && (
+          // One entry rather than a control on each invoice row: a QuickBooks Online
+          // row IS a link (the whole MenuItem is an <a>), and nesting a second
+          // control inside it is the accessibility problem, not a layout one. The
+          // dialog picks the invoice instead, and skips the step when there is one.
+          <MenuItem
+            onClick={() => {
+              setAnchor(null);
+              setCorrectOpen(true);
+            }}
+          >
+            <EditNoteIcon fontSize="small" sx={{ mr: 1 }} />
+            Correct what an invoice billed…
+          </MenuItem>
+        )}
       </Menu>
+      <CorrectInvoiceQuantitiesDialog
+        open={correctOpen}
+        jobId={jobId}
+        jobNumber={jobNumber}
+        invoices={correctable}
+        onClose={() => setCorrectOpen(false)}
+        onCorrected={(message) => {
+          setCorrectOpen(false);
+          // Re-read this menu's own list AND tell the page, whose edit-form floor,
+          // per-part breakdown and activity rail all read invoiced quantity too.
+          void refresh();
+          onCorrected(message);
+        }}
+      />
     </>
   );
 }
@@ -391,6 +435,14 @@ function newestCheck(invoices: QuickBooksInvoiceView[]): string | null {
 
 function formatCurrency(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+}
+/** When Jigged billed it, and -- when someone has since corrected the per-part
+ *  quantities Jigged recorded -- that too. Said out loud because the alternative is
+ *  a line total that quietly disagrees with the invoice Jigged pushed, which is the
+ *  silent discrepancy this whole feature exists to undo. */
+function createdLine(inv: QuickBooksInvoiceView): string {
+  const created = formatDate(inv.createdAt);
+  return inv.correctedAt ? `${created} · corrected ${formatDate(inv.correctedAt)}` : created;
 }
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '';

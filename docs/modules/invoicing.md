@@ -28,10 +28,15 @@ combination. When creating an invoice the user picks a **per-part quantity to bi
 - **Price lock:** each invoice **snapshots** the part's `unit_price` at push time. Once
   *any* quantity of a part is invoiced, that part's price is locked (edit it via a
   QuickBooks credit/reissue). This keeps `job_parts.total_price` a faithful revenue figure.
-- **Additive only (v1):** invoices are only ever created. Reducing a line below what's
-  already invoiced is blocked; corrections/voids/credits happen directly in QuickBooks.
-  (`quickbooks_invoice_links.voided_at` exists and is filtered everywhere, so a future
-  in-app void/credit phase needs no schema change.)
+- **Additive, except for correcting the record:** invoices are only ever *created* — a
+  quantity increase is billed by a new invoice, never a revision — and reducing a
+  *job part* below what is already invoiced stays blocked. What Jigged RECORDED an
+  invoice as billing is separately correctable; see
+  [§Correcting a recorded quantity](#correcting-a-recorded-quantity). Voids and credit
+  memos still happen in QuickBooks.
+  **Withdrawn:** *"corrections … happen directly in QuickBooks"* — wrong because the
+  only in-QuickBooks correction that reaches Jigged is a void, which zeroes the whole
+  invoice rather than one quantity, and never for Desktop.
 
 ### The 10 → 15 journey
 Order 10 → ship & invoice 9 → customer bumps the order to 15 → ship & invoice the
@@ -47,7 +52,11 @@ to `partially_invoiced` via a trigger.
 - `quickbooks_invoice_line_items` — `(invoice_link_id, job_part_id, quantity, unit_price,
   total_price)`; `UNIQUE(invoice_link_id, job_part_id)`. The Jigged-side source of truth
   for qty-invoiced. Written service-role by the push endpoint, atomic with the QBO call.
-  A `BEFORE INSERT` trigger hard-blocks over-invoicing (Σ created non-void qty ≤ ordered).
+  A `BEFORE INSERT OR UPDATE OF quantity, job_part_id, invoice_link_id` trigger hard-blocks
+  over-invoicing (Σ created non-void qty ≤ ordered) — it covers a *corrected* line, not
+  just a new one, and excludes the row's own invoice from the sum so a reduction always
+  passes. **Withdrawn:** *"a `BEFORE INSERT` trigger"* — it never was INSERT-only
+  ([`20260702011324`](../../supabase/migrations/20260702011324_multi_invoice_per_job.sql)).
 - `invoicing_status` on `job_parts` + `jobs` — `uninvoiced | partially_invoiced |
   fully_invoiced`, maintained by triggers cloned from the `fulfillment_status` family
   (`compute_job_part_invoicing_status`, `sync_job_invoicing_status_from_parts`, recompute
@@ -218,6 +227,47 @@ menu is normally one Intuit call.
 A one-time backfill made every existing job current at launch; after that these two paths are the
 only things that write the mirror. **There is no scheduler and no poll** — see the deferred list.
 
+## Correcting a recorded quantity
+
+**As-built 2026-10-01**, schema in
+[`20261001025551`](../../supabase/migrations/20261001025551_correct_recorded_invoice_quantities.sql).
+Jigged's note of what an invoice billed is editable; the QuickBooks document is not, and
+never is. Lowering a recorded quantity reopens the un-billed remainder through the
+existing line-item triggers, and the ordinary push then bills it.
+
+**The bug that forced it.** Before partial invoicing, billing half a job meant pushing the
+whole invoice from Jigged and editing it down in QuickBooks. §7b of
+[`20260702011324`](../../supabase/migrations/20260702011324_multi_invoice_per_job.sql)
+backfilled every legacy `created` invoice as having billed each part's **full current
+quantity**, on the stated assumption that `job_parts.quantity == the invoiced qty`. For a
+hand-edited invoice that is false, so `qty_invoiceable` is 0 forever. Found live on J-0018:
+12 ordered, 3 shipped and invoiced, backfilled as 12 — and the recorded line total was
+$2,274.48 against a mirrored QuickBooks total of $585.12.
+
+**Why not a backfill.** CLAUDE.md requires a data-at-rest problem to be fixed at rest, and
+this is its named exception: only the shop knows what its QuickBooks document billed.
+`qb_total_amt` cannot settle it either, being tax-inclusive and so not comparable with
+Jigged's line total (§Payment status). So the dialog links to the invoice and the shop
+reads the quantity off it. One company was affected platform-wide, which is also why
+there is no detector.
+
+| Rule | Why |
+|---|---|
+| Office roles only (`admin`, `user`), never `operator` | Invoicing is already member-level, so admin-only would rebuild the support escalation this removes. The dashboard has no operator redirect, so the UI gate is real — and the RPC refuses an operator regardless |
+| Billing gate asserted **by hand** in the function | `SECURITY DEFINER` walks past the restrictive `billing_gate_*` policies. Both invoice tables left `tenant_tables_missing_write_gate()`'s exempt list in the same migration, so from here a definer function writing either one without consulting `company_can_write` fails CI — neither guard could see this before |
+| `total_price` recomputed server-side | It is Jigged's revenue figure and the price is locked once invoiced; a caller that supplied it could make the amount disagree with its own quantity |
+| A line corrected to 0 is **deleted** | `qb_ili_quantity_positive` forbids a zero line, and a line that billed nothing is not a line |
+| An invoice may not be corrected to record **nothing** | Σ line total 0 breaks the mirror's void test, which reads "QuickBooks says 0 while Jigged says > 0" — a genuinely voided invoice would start reading as **paid**. Voiding is that operation, and it belongs in QuickBooks |
+| `corrected_at` / `corrected_by` stamped, and shown in the Invoices menu | A line total that quietly disagrees with the invoice Jigged pushed is the same silent discrepancy this feature exists to undo |
+
+**The browser still cannot write either invoice table.** The same migration revoked the
+`INSERT`/`UPDATE`/`DELETE` that `quickbooks_invoice_line_items` had carried for
+`authenticated` since 2026-07-02 — it predates
+[`20260716025048`](../../supabase/migrations/20260716025048_align_data_api_default_privileges.sql),
+which is explicitly not retroactive, so the table had been one RLS policy away from being
+browser-writable with no CI check watching. Its parent was closed on day one; it now
+matches.
+
 ## Editing gates (`utils/jobsAccess.ts`)
 
 - `updateJobPartQuantity` — floor is `max(qty_shipped, qty_invoiced)`; increases always
@@ -233,8 +283,12 @@ only things that write the mirror. **There is no scheduler and no poll** — see
 
 ## Not built (deferred)
 
-In-app void / credit-memo / correction of a created invoice (do it in QBO). Jigged's
-invoiced-qty reflects invoices *issued from Jigged*.
+In-app void / credit-memo of a created invoice (do it in QBO). Jigged's invoiced-qty
+reflects invoices *issued from Jigged*.
+**Withdrawn 2026-10-01:** this used to list *correction* of a created invoice here too.
+Correcting what Jigged RECORDED an invoice as billing now ships — see
+[§Correcting a recorded quantity](#correcting-a-recorded-quantity). Voiding does not:
+`voided_by` is still written by nothing.
 
 **Corrected 2026-09-03:** this used to add *"a credit issued directly in QBO does not sync back"*,
 which is now wrong for half of what it covered. A **void or delete** in QuickBooks Online does come

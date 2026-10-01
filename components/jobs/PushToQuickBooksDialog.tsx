@@ -156,7 +156,20 @@ export default function PushToQuickBooksDialog({
   const anyError = billable.some((p) => !!lineError(p.job_part_id, p.qty_invoiceable));
 
   const notConnected = preflight !== null && preflight.connected === false;
+  // `billable` filters on a price AND on there being something left, so an empty
+  // list has three different causes. It used to render one sentence for all of
+  // them -- "Everything on this job is already invoiced" -- which was simply false
+  // for a job with no parts and for a part with no price yet, and which offered no
+  // next step in the one case where it WAS true.
+  const priced = parts.filter((p) => p.unit_price !== null);
   const nothingBillable = preflight?.connected === true && billable.length === 0;
+  const emptyReason: 'no_parts' | 'no_price' | 'all_invoiced' | null = !nothingBillable
+    ? null
+    : parts.length === 0
+      ? 'no_parts'
+      : priced.length === 0
+        ? 'no_price'
+        : 'all_invoiced';
   const canPush =
     !loading && !pushing && preflight?.connected === true && anyToBill && !anyError;
 
@@ -358,9 +371,26 @@ export default function PushToQuickBooksDialog({
               Quantities to invoice
             </Typography>
             {nothingBillable ? (
-              <Alert severity="info">
-                Everything on this job is already invoiced.
-              </Alert>
+              emptyReason === 'no_parts' ? (
+                <Alert severity="info">This job has no parts on it to invoice.</Alert>
+              ) : emptyReason === 'no_price' ? (
+                <Alert severity="info">
+                  No part on this job has a price yet. Set one on the job, then invoice it.
+                </Alert>
+              ) : (
+                // The one case that used to be a dead end: Jigged says it is all
+                // billed, and before partial invoicing existed it may be saying that
+                // wrongly (docs/modules/invoicing.md -- the 2026-07-02 backfill
+                // recorded legacy invoices at the full ordered quantity). Name the
+                // exact control that fixes it rather than leaving a disabled button
+                // and no next step, per interaction-standards.md §4.
+                <Alert severity="info">
+                  <AlertTitle>Everything on this job is already recorded as invoiced</AlertTitle>
+                  If an earlier invoice actually billed less than that, open the Invoices menu and
+                  choose <strong>Correct what an invoice billed</strong> — the rest of the job then
+                  reopens and you can invoice it here.
+                </Alert>
+              )
             ) : (
               <Table size="small">
                 <TableHead>

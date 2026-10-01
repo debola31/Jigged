@@ -31,7 +31,7 @@ the tests that pin them. **Priority and build status live in [prd.md](../prd.md)
 | [Invitation System](invitation-system.md) | Email invitations — the only way to add a team member. Referrals descoped (#338) |
 | [Legal Acceptance](legal-acceptance.md) | Clickwrap consent, the frozen document versions, and the append-only acceptance record |
 | [QuickBooks Desktop](quickbooks-desktop.md) | Pushing invoices into a locally installed QuickBooks Desktop via Conductor: the Web Connector round trip, the unknown-outcome state machine, and the four places its behaviour is the mirror image of QuickBooks Online |
-| [Invoicing](invoicing.md) | Many invoices per job (progressive, ship-capped, price-locked) and the QuickBooks Online integration that owns the document and its numbering |
+| [Invoicing](invoicing.md) | Many invoices per job (progressive, ordered-capped, price-locked) and the QuickBooks Online integration that owns the document and its numbering |
 | [Jobs](jobs.md) | The job record and its three independent status axes; operations, outside-vendor steps, materials, attachments |
 | [Machine Maintenance](machine-maintenance.md) | An operator-written logbook per machine, reached from the selected station. Core for every tenant — the pilot flag is retired, and a selected station is now the only gate |
 | [Operator View](operator-view.md) | The shop-floor app on the operator's own phone: station selection, the dispatch queue, quantity capture, the notes loop, and the surveillance guardrail |

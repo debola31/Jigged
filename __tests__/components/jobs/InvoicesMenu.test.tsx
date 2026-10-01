@@ -6,6 +6,8 @@ import InvoicesMenu from '@/components/jobs/InvoicesMenu';
 const getQuickBooksInvoiceLinksForJob = vi.fn();
 const syncQuickBooksInvoiceStatus = vi.fn();
 const localDateISO = vi.fn();
+const getJobPartInvoiceSummaries = vi.fn();
+const correctInvoiceRecordedQuantities = vi.fn();
 
 /**
  * A REAL class, hoisted so the mock factory can hand back the constructor itself
@@ -33,8 +35,16 @@ vi.mock('@/utils/quickbooksAccess', () => ({
     getQuickBooksInvoiceLinksForJob(...args),
   syncQuickBooksInvoiceStatus: (...args: unknown[]) => syncQuickBooksInvoiceStatus(...args),
   localDateISO: () => localDateISO(),
+  // Imported by the correction dialog this menu now owns.
+  getJobPartInvoiceSummaries: (...args: unknown[]) => getJobPartInvoiceSummaries(...args),
+  correctInvoiceRecordedQuantities: (...args: unknown[]) =>
+    correctInvoiceRecordedQuantities(...args),
   QuickBooksError,
 }));
+
+/** The correction entry is office-only, so the role decides whether it is drawn. */
+const userRole = vi.fn(() => ({ role: 'user', isAdmin: false, loading: false }));
+vi.mock('@/hooks/useUserRole', () => ({ useUserRole: () => userRole() }));
 
 const copyText = vi.fn();
 vi.mock('@/utils/clipboard', () => ({
@@ -46,6 +56,16 @@ vi.mock('posthog-js', () => ({ default: { capture: vi.fn() } }));
 import posthog from 'posthog-js';
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
+/** The menu's required props, with the two the correction path added. */
+const props = (over: Record<string, unknown> = {}) => ({
+  companyId: 'c1',
+  jobId: 'j1',
+  jobNumber: 'J-0018',
+  onCreate: vi.fn(),
+  onCorrected: vi.fn(),
+  ...over,
+});
 
 /**
  * Pinned, because the menu prints "as of Sep 1" and "Checked Sep 1, 1:00 PM" in
@@ -86,6 +106,7 @@ function invoice(overrides: Record<string, unknown> = {}) {
     qbDueDate: null,
     qbTxnDate: null,
     qbStatusCheckedAt: null,
+    correctedAt: null,
     ...overrides,
   };
 }
@@ -163,7 +184,7 @@ describe('InvoicesMenu', () => {
 
   it('links out to QuickBooks Online when there is a url', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBO]);
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu();
 
     const row = await screen.findByRole('menuitem', { name: /1001/ });
@@ -172,7 +193,7 @@ describe('InvoicesMenu', () => {
 
   it('copies the invoice number instead of navigating for a Desktop invoice', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBD]);
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu();
 
     const row = await screen.findByRole('menuitem', { name: /Copy invoice number 1100/ });
@@ -190,7 +211,7 @@ describe('InvoicesMenu', () => {
 
   it('tells the user how to use the number when nothing can be linked', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBD]);
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu();
 
     expect(await screen.findByText(/press Ctrl\+F, paste it into Invoice #/)).toBeInTheDocument();
@@ -198,7 +219,7 @@ describe('InvoicesMenu', () => {
 
   it('does not show the Desktop hint when the invoices are linkable', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBO]);
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu();
 
     await screen.findByRole('menuitem', { name: /1001/ });
@@ -208,7 +229,7 @@ describe('InvoicesMenu', () => {
   it('says how to copy by hand rather than claiming success when the copy fails', async () => {
     copyText.mockResolvedValue(false);
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBD]);
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu();
 
     await userEvent.click(await screen.findByRole('menuitem', { name: /Copy invoice number 1100/ }));
@@ -237,7 +258,7 @@ describe('InvoicesMenu — payment status', () => {
       skipped_other_realm: 0,
     });
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(await screen.findByText('Paid')).toBeInTheDocument();
@@ -252,7 +273,7 @@ describe('InvoicesMenu — payment status', () => {
   it('does not re-read Supabase when the backend decided nothing was stale', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([PAID]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     // The freshness caption is the proof the round trip finished.
@@ -270,7 +291,7 @@ describe('InvoicesMenu — payment status', () => {
     syncQuickBooksInvoiceStatus.mockReturnValue(gate.promise);
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([PAID]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     const button = await screen.findByRole('button', { name: /Invoices \(1\)/ });
     fireEvent.click(button);
     fireEvent.click(button);
@@ -305,7 +326,7 @@ describe('InvoicesMenu — payment status', () => {
       }),
     ]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(await screen.findByText('Overdue')).toBeInTheDocument();
@@ -330,7 +351,7 @@ describe('InvoicesMenu — payment status', () => {
       }),
     ]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(await screen.findByText('Voided in QuickBooks')).toBeInTheDocument();
@@ -346,7 +367,7 @@ describe('InvoicesMenu — payment status', () => {
     // we already have — and a chip here could only ever say "unknown".
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBD]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     await screen.findByRole('menuitem', { name: /Copy invoice number 1100/ });
@@ -364,7 +385,7 @@ describe('InvoicesMenu — payment status', () => {
     syncQuickBooksInvoiceStatus.mockReturnValue(gate.promise);
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([PAID]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(await screen.findByText('Checking QuickBooks…')).toBeInTheDocument();
@@ -389,7 +410,7 @@ describe('InvoicesMenu — payment status', () => {
       ),
     );
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(
@@ -410,7 +431,7 @@ describe('InvoicesMenu — payment status', () => {
       new QuickBooksError('Reconnect QuickBooks first — we can’t check payments until then.', 400),
     );
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
 
     expect(
@@ -425,7 +446,7 @@ describe('InvoicesMenu — payment status', () => {
     // shop owner would have to think about. A regression that adds one fails here.
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([PAID]);
 
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
     await screen.findByText('Paid');
 
@@ -446,13 +467,13 @@ describe('InvoicesMenu — payment status', () => {
       skipped_other_realm: 0,
     });
 
-    const { unmount } = render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    const { unmount } = render(<InvoicesMenu {...props()} />);
     await openMenu(1);
     await waitFor(() => expect(posthog.capture).toHaveBeenCalledTimes(1));
     unmount();
 
     syncQuickBooksInvoiceStatus.mockRejectedValue(new QuickBooksError('down', 409, 'qbo_unreachable'));
-    render(<InvoicesMenu companyId="c1" jobId="j1" onCreate={vi.fn()} />);
+    render(<InvoicesMenu {...props()} />);
     await openMenu(1);
     await waitFor(() => expect(posthog.capture).toHaveBeenCalledTimes(2));
 
@@ -484,5 +505,147 @@ describe('InvoicesMenu — payment status', () => {
     // business in analytics — 1077.5 is the amount both branches had in hand.
     expect(JSON.stringify(okCall[1])).not.toContain('1077');
     expect(JSON.stringify(failCall[1])).not.toContain('1077');
+  });
+});
+
+
+/**
+ * The correction entry, and the state it exists for.
+ *
+ * The dead end it answers: a job the 2026-07-02 backfill recorded as fully invoiced
+ * (20260702011324 §7b) can never be invoiced again, because `qty_invoiceable` is 0
+ * forever. Correcting what Jigged RECORDED the invoice as billing is the way back,
+ * and this menu is where it is reached.
+ */
+describe('InvoicesMenu — correcting a recorded quantity', () => {
+  /** An invoice that actually records a quantity. The shared `invoice()` default
+   *  carries `lines: []`, which has nothing to correct. */
+  const WITH_LINES = invoice({
+    lines: [{ jobPartId: 'jp1', partName: 'RAIL CUT', quantity: 12, unitPrice: 189.54, totalPrice: 2274.48 }],
+    total: 2274.48,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localDateISO.mockReturnValue(TODAY);
+    syncQuickBooksInvoiceStatus.mockResolvedValue({
+      checked: false,
+      checked_at: null,
+      invoices: [],
+      skipped_other_realm: 0,
+    });
+    userRole.mockReturnValue({ role: 'user', isAdmin: false, loading: false });
+    getJobPartInvoiceSummaries.mockResolvedValue([
+      { job_part_id: 'jp1', qty_ordered: 12, qty_invoiced: 12 },
+    ]);
+    correctInvoiceRecordedQuantities.mockResolvedValue({ linesChanged: 1, linesRemoved: 0 });
+  });
+
+  it('offers nothing to correct on an invoice that records no quantity', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([QBO]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    expect(screen.queryByText(/Correct what an invoice billed/)).not.toBeInTheDocument();
+  });
+
+  it('offers the correction once an invoice records a quantity', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    expect(await screen.findByText(/Correct what an invoice billed/)).toBeInTheDocument();
+  });
+
+  it('keeps the correction away from an operator', async () => {
+    userRole.mockReturnValue({ role: 'operator', isAdmin: false, loading: false });
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    expect(screen.queryByText(/Correct what an invoice billed/)).not.toBeInTheDocument();
+  });
+
+  it('never offers to correct an invoice that has been voided', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([
+      { ...WITH_LINES, voidedAt: '2026-09-01T00:00:00Z' },
+    ]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    expect(screen.queryByText(/Correct what an invoice billed/)).not.toBeInTheDocument();
+  });
+
+  it('says when an invoice\'s recorded quantities were corrected', async () => {
+    // Said out loud because the alternative is a line total that quietly disagrees
+    // with the invoice Jigged pushed — the silent discrepancy this feature undoes.
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([
+      { ...WITH_LINES, correctedAt: '2026-09-20T00:00:00Z' },
+    ]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    // Sep 19 in Chicago, not Sep 20: UTC midnight is the previous evening there,
+    // which is exactly what the pinned TZ above exists to make deterministic.
+    expect(await screen.findByText(/corrected Sep 19, 2026/)).toBeInTheDocument();
+  });
+
+  it('records what the invoice really billed and tells the page the job moved', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    const onCorrected = vi.fn();
+    render(<InvoicesMenu {...props({ onCorrected })} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    await userEvent.click(await screen.findByText(/Correct what an invoice billed/));
+
+    // One invoice, so the dialog skips the picker and opens straight on its lines.
+    const field = await screen.findByDisplayValue('12');
+    await userEvent.clear(field);
+    await userEvent.type(field, '3');
+
+    // The consequence is stated before the commit, not discovered after it.
+    expect(await screen.findByText(/9 RAIL CUT will reopen for invoicing/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Save correction/ }));
+
+    await waitFor(() =>
+      expect(correctInvoiceRecordedQuantities).toHaveBeenCalledWith('l1', [
+        { jobPartId: 'jp1', quantity: 3 },
+      ]),
+    );
+    await waitFor(() => expect(onCorrected).toHaveBeenCalled());
+    expect(mock(posthog.capture)).toHaveBeenCalledWith('invoice record corrected', {
+      provider: 'qbo',
+      line_count: 1,
+      lines_changed: 1,
+      lines_removed: 0,
+      reopened_a_part: true,
+    });
+  });
+
+  it('refuses a correction that would leave the invoice recording nothing', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    await userEvent.click(await screen.findByText(/Correct what an invoice billed/));
+
+    const field = await screen.findByDisplayValue('12');
+    await userEvent.clear(field);
+    await userEvent.type(field, '0');
+
+    expect(
+      await screen.findByText(/An invoice has to record at least some quantity/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save correction/ })).toBeDisabled();
+    expect(correctInvoiceRecordedQuantities).not.toHaveBeenCalled();
+  });
+
+  it('refuses more than the job ordered, before the server has to', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    await userEvent.click(await screen.findByText(/Correct what an invoice billed/));
+
+    const field = await screen.findByDisplayValue('12');
+    await userEvent.clear(field);
+    await userEvent.type(field, '13');
+
+    expect(await screen.findByText(/more than the job ordered — at most 12/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save correction/ })).toBeDisabled();
   });
 });

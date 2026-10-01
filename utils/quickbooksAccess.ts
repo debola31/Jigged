@@ -1,5 +1,7 @@
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import { API_BASE_URL } from '@/lib/api';
+import { toError, toFriendlyError, shouldReportSupabaseError } from '@/lib/supabaseErrors';
 import {
   toInvoiceStatus,
   type InvoicePaymentFacts,
@@ -424,6 +426,10 @@ export interface QuickBooksInvoiceView extends InvoicePaymentFacts {
   /** The invoice date QuickBooks holds. Mirrored for completeness; the menu shows
    *  created_at, which is when Jigged issued it. */
   qbTxnDate: string | null;
+  /** Set when someone corrected the per-part quantities Jigged RECORDED against
+   *  this invoice, so `lines` and `total` are no longer what the push wrote. The
+   *  QuickBooks document is unchanged either way — Jigged never edits it. */
+  correctedAt: string | null;
 }
 
 /** All created invoices for a job, newest first, with their per-part lines —
@@ -444,7 +450,7 @@ export async function getQuickBooksInvoiceLinksForJob(
     .from('quickbooks_invoice_links')
     .select(
       `id, qb_invoice_id, qb_invoice_doc_number, qb_invoice_url, created_at,
-       provider, realm_id, voided_at,
+       provider, realm_id, voided_at, corrected_at,
        qb_status, qb_total_amt, qb_balance, qb_due_date, qb_txn_date, qb_status_checked_at,
        quickbooks_invoice_line_items (
          job_part_id, quantity, unit_price, total_price,
@@ -487,8 +493,68 @@ export async function getQuickBooksInvoiceLinksForJob(
       qbDueDate: r.qb_due_date,
       qbTxnDate: r.qb_txn_date,
       qbStatusCheckedAt: r.qb_status_checked_at,
+      correctedAt: r.corrected_at,
     };
   });
+}
+
+/** One line of a correction: what this invoice ACTUALLY billed of that part.
+ *  `quantity` 0 means the invoice did not bill the part at all, and the recorded
+ *  line is removed. */
+export interface InvoiceQuantityCorrection {
+  jobPartId: string;
+  quantity: number;
+}
+
+/**
+ * Correct the per-part quantities Jigged RECORDED against one created invoice.
+ *
+ * This fixes Jigged's note of what QuickBooks billed; it never touches the
+ * QuickBooks document, which keeps its number, date and payment status. Lowering a
+ * recorded quantity reopens the un-billed remainder, so the normal Create invoice
+ * flow can bill it — see docs/modules/invoicing.md.
+ *
+ * Through an RPC rather than a typed table write because the browser has no
+ * INSERT/UPDATE/DELETE grant on either invoice table (20260620122700:138 and
+ * 20261001025551), and because `total_price` must be recomputed server-side from
+ * the locked `unit_price` snapshot: a client that supplied it could make Jigged's
+ * revenue figure disagree with its own quantities.
+ *
+ * Idempotent — re-sending the numbers already stored reports zero changes and does
+ * no trigger work.
+ */
+export async function correctInvoiceRecordedQuantities(
+  invoiceLinkId: string,
+  lines: InvoiceQuantityCorrection[],
+): Promise<{ linesChanged: number; linesRemoved: number }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('correct_invoice_recorded_quantities', {
+    p_invoice_link_id: invoiceLinkId,
+    p_lines: lines.map((l) => ({ job_part_id: l.jobPartId, quantity: l.quantity })),
+  });
+  if (error) {
+    // Every refusal this function raises itself arrives as P0001, and all of them are
+    // states a shop can act on: an operator trying it, a quantity above what was
+    // ordered, a voided invoice, nothing left recorded. shouldReportSupabaseError does
+    // NOT drop P0001 — it cannot, because a raise elsewhere may well be a defect — so
+    // the judgement is made here. What still reports: a genuine 42501 (the grant or
+    // the gate is wrong), and a 23514 from assert_invoice_not_over_ordered, which
+    // would mean this function's own cap and the at-rest backstop disagree.
+    const raisedDeliberately = (error as { code?: string }).code === 'P0001';
+    if (!raisedDeliberately && shouldReportSupabaseError(error)) {
+      Sentry.captureException(toError(error, 'Failed to correct recorded invoice quantities'), {
+        tags: { area: 'invoicing', op: 'correct_recorded_quantities' },
+      });
+    }
+    // Every validation message the function raises is already a user-facing
+    // sentence raised as P0001, which friendlyErrorMessage passes through verbatim.
+    throw toFriendlyError(error, { entity: 'invoice' });
+  }
+  const row = (data ?? {}) as { lines_changed?: number; lines_removed?: number };
+  return {
+    linesChanged: Number(row.lines_changed ?? 0),
+    linesRemoved: Number(row.lines_removed ?? 0),
+  };
 }
 
 /** `numeric` columns arrive as numbers, but null must stay null: Number(null) is

@@ -3268,6 +3268,8 @@ export type Database = {
       quickbooks_invoice_links: {
         Row: {
           company_id: string
+          corrected_at: string | null
+          corrected_by: string | null
           created_at: string
           id: string
           job_id: string
@@ -3296,6 +3298,8 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          corrected_at?: string | null
+          corrected_by?: string | null
           created_at?: string
           id?: string
           job_id: string
@@ -3324,6 +3328,8 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          corrected_at?: string | null
+          corrected_by?: string | null
           created_at?: string
           id?: string
           job_id?: string
@@ -4725,6 +4731,10 @@ export type Database = {
         }[]
       }
       contact_block_snapshot: { Args: { p_contact_id: string }; Returns: Json }
+      correct_invoice_recorded_quantities: {
+        Args: { p_invoice_link_id: string; p_lines: Json }
+        Returns: Json
+      }
       create_demo_company: {
         Args: {
           p_source_company_id: string

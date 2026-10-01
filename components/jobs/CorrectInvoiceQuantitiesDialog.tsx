@@ -85,6 +85,7 @@ export default function CorrectInvoiceQuantitiesDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
   const [summaries, setSummaries] = useState<JobPartInvoiceSummary[] | null>(null);
+  const [capUnknown, setCapUnknown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,13 +106,18 @@ export default function CorrectInvoiceQuantitiesDialog({
     setError(null);
     setSelectedId(null);
     setQtyById({});
+    setCapUnknown(false);
     setLoading(true);
     try {
       setSummaries(await getJobPartInvoiceSummaries(jobId));
     } catch {
-      // Not fatal: without ordered quantities the cap is left to the server, which
-      // enforces it anyway. Saying so beats blocking the whole correction.
+      // Not fatal -- the invoice's own lines come from the list this dialog was
+      // handed, and the server enforces the cap regardless. But it is SAID, not
+      // swallowed: without the ordered quantities the field cannot refuse a
+      // too-high number up front, and a Save that ends in a refusal is the
+      // confirm-then-error dead end interaction-standards.md §4 rules out.
       setSummaries(null);
+      setCapUnknown(true);
     } finally {
       setLoading(false);
     }
@@ -264,6 +270,14 @@ export default function CorrectInvoiceQuantitiesDialog({
                 In QuickBooks press Ctrl+F, search Invoice # {selected.docNumber ?? ''}, and read the
                 quantities off the invoice itself.
               </Typography>
+            )}
+
+            {capUnknown && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                Jigged couldn&apos;t read this job&apos;s ordered quantities just now, so it can&apos;t
+                check your numbers against them here. A quantity above what was ordered will be
+                refused when you save.
+              </Alert>
             )}
 
             {selected.correctedAt && (

@@ -635,6 +635,26 @@ describe('InvoicesMenu — correcting a recorded quantity', () => {
     expect(correctInvoiceRecordedQuantities).not.toHaveBeenCalled();
   });
 
+  it('says so when it cannot check the ordered quantities, instead of going quiet', async () => {
+    // A Save that ends in a server refusal is the confirm-then-error dead end
+    // interaction-standards.md §4 rules out, so the lost cap is stated up front.
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    getJobPartInvoiceSummaries.mockRejectedValue(new Error('offline'));
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    await userEvent.click(await screen.findByText(/Correct what an invoice billed/));
+
+    expect(
+      await screen.findByText(/couldn't read this job's ordered quantities/),
+    ).toBeInTheDocument();
+
+    // Still usable: the correction itself does not depend on those figures.
+    const field = await screen.findByDisplayValue('12');
+    await userEvent.clear(field);
+    await userEvent.type(field, '3');
+    expect(screen.getByRole('button', { name: /Save correction/ })).toBeEnabled();
+  });
+
   it('refuses more than the job ordered, before the server has to', async () => {
     getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
     render(<InvoicesMenu {...props()} />);

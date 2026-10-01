@@ -159,7 +159,13 @@ export default function CorrectInvoiceQuantitiesDialog({
   const anyError = selected?.lines.some((l) => !!lineError(l.jobPartId, l.quantity)) ?? false;
   const changed =
     selected?.lines.some((l) => Math.abs(typed(l.jobPartId) - l.quantity) > 1e-9) ?? false;
-  const allZero = selected?.lines.every((l) => typed(l.jobPartId) <= 0) ?? false;
+  // Gated on every field being filled, so clearing one to retype shows that field's
+  // own error rather than announcing that the invoice would record nothing -- which
+  // is a claim about a state the user has not actually asked for yet.
+  const allFilled =
+    selected?.lines.every((l) => (qtyById[l.jobPartId] ?? '').trim() !== '') ?? false;
+  const allZero =
+    allFilled && (selected?.lines.every((l) => typed(l.jobPartId) <= 0) ?? false);
   const newTotal =
     selected?.lines.reduce((sum, l) => sum + typed(l.jobPartId) * l.unitPrice, 0) ?? 0;
 

@@ -635,6 +635,21 @@ describe('InvoicesMenu — correcting a recorded quantity', () => {
     expect(correctInvoiceRecordedQuantities).not.toHaveBeenCalled();
   });
 
+  it('does not claim the invoice would record nothing while a field is merely empty', async () => {
+    getQuickBooksInvoiceLinksForJob.mockResolvedValue([WITH_LINES]);
+    render(<InvoicesMenu {...props()} />);
+    await userEvent.click(await screen.findByRole('button', { name: /Invoices \(1\)/ }));
+    await userEvent.click(await screen.findByText(/Correct what an invoice billed/));
+
+    await userEvent.clear(await screen.findByDisplayValue('12'));
+
+    expect(await screen.findByText(/Enter what this invoice billed/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/An invoice has to record at least some quantity/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save correction/ })).toBeDisabled();
+  });
+
   it('says so when it cannot check the ordered quantities, instead of going quiet', async () => {
     // A Save that ends in a server refusal is the confirm-then-error dead end
     // interaction-standards.md §4 rules out, so the lost cap is stated up front.

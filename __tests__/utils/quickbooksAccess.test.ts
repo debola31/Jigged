@@ -30,6 +30,9 @@ const { mockSupabase, queueBuilders } = vi.hoisted(() => {
     // Only the backend-bound helpers touch this: authHeader() reads the session to
     // put a bearer token on the FastAPI call. The PostgREST reads above never do.
     auth: { getSession: vi.fn() },
+    // correctInvoiceRecordedQuantities goes through an RPC: the browser has no
+    // write grant on either invoice table.
+    rpc: vi.fn(),
   };
   return {
     mockSupabase: supabase,
@@ -43,7 +46,11 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
 }));
 
+const captureException = vi.fn();
+vi.mock('@sentry/nextjs', () => ({ captureException: (...a: unknown[]) => captureException(...a) }));
+
 import {
+  correctInvoiceRecordedQuantities,
   getJobPartInvoiceSummaries,
   getQuickBooksInvoiceLinksForJob,
   syncQuickBooksInvoiceStatus,
@@ -407,5 +414,73 @@ describe('syncQuickBooksInvoiceStatus', () => {
     );
     expect(err.code).toBeUndefined();
     expect(isQuickBooksUnreachable(err)).toBe(false);
+  });
+});
+
+
+describe('correctInvoiceRecordedQuantities', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('sends the per-part quantities the invoice really billed, snake_cased', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: { job_id: 'j1', lines_changed: 1, lines_removed: 0 },
+      error: null,
+    });
+
+    const result = await correctInvoiceRecordedQuantities('link-1', [
+      { jobPartId: 'jp1', quantity: 3 },
+      { jobPartId: 'jp2', quantity: 0 },
+    ]);
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('correct_invoice_recorded_quantities', {
+      p_invoice_link_id: 'link-1',
+      p_lines: [
+        { job_part_id: 'jp1', quantity: 3 },
+        { job_part_id: 'jp2', quantity: 0 },
+      ],
+    });
+    expect(result).toEqual({ linesChanged: 1, linesRemoved: 0 });
+  });
+
+  it('surfaces the refusal the function raised, word for word', async () => {
+    // Every validation message is raised as P0001 precisely so friendlyErrorMessage
+    // passes it through instead of flattening it to "Something went wrong".
+    mockSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: 'P0001',
+        message:
+          'An invoice has to record at least some quantity. To make this invoice count for nothing, void it in QuickBooks.',
+      },
+    });
+
+    await expect(correctInvoiceRecordedQuantities('link-1', [])).rejects.toThrow(
+      /void it in QuickBooks/,
+    );
+  });
+
+  it('does not report an expected refusal to Sentry', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: { code: 'P0001', message: 'Correcting an invoice is an office task.' },
+    });
+
+    await expect(correctInvoiceRecordedQuantities('link-1', [])).rejects.toThrow(/office task/);
+    // An operator trying it, or a lapsed shop, is a state the shop can act on — not
+    // a defect, and an issue queue with those in it is one people stop reading.
+    expect(captureException).not.toHaveBeenCalled();
+  });
+
+  it('explains a lapsed subscription instead of calling it a permission problem', async () => {
+    mockSupabase.rpc.mockResolvedValue({
+      data: null,
+      error: { code: '42501', message: 'company abc has no active subscription' },
+    });
+
+    await expect(correctInvoiceRecordedQuantities('link-1', [])).rejects.toThrow(
+      /subscription isn't active/,
+    );
   });
 });

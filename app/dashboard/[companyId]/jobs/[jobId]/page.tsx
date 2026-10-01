@@ -468,8 +468,17 @@ export default function JobDetailPage() {
             <InvoicesMenu
               companyId={companyId}
               jobId={jobId}
+              jobNumber={job.job_number}
               refreshKey={invoicesRefreshKey}
               onCreate={() => setPushDialogOpen(true)}
+              onCorrected={(message) => {
+                setPushSuccess(message);
+                setInvoicesRefreshKey((k) => k + 1);
+                // Same fan-out as a push: correcting a recorded quantity moves
+                // invoicing_status, the edit-form's quantity floor, the per-part
+                // breakdown and the price lock, none of which watch invoicesRefreshKey.
+                void refreshAfterWrite();
+              }}
               disabled={actionLoading}
             />
           )}

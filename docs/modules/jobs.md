@@ -251,7 +251,7 @@ with a single Save. *(An earlier inline "edit icon next to the Order qty chip" i
 
 | Rule | Detail |
 |---|---|
-| Quantity floor | `> 0`; cannot drop below `max(already-shipped, already-invoiced)`. Invoiced can exceed shipped only when a shipment was voided after invoicing. |
+| Quantity floor | `> 0`; cannot drop below `max(already-shipped, already-invoiced)`. Invoiced can exceed shipped only when a shipment was voided after invoicing. **If the floor is wrong because Jigged recorded the wrong invoiced quantity, correct the invoice rather than raising the order** — [Invoicing §Correcting a recorded quantity](invoicing.md#correcting-a-recorded-quantity). Inflating the order to get past the floor corrupts a second number to work around the first. |
 | Increases always allowed | Even on an invoiced job — **that is how you bill more**: raise the order, then invoice the delta on a new invoice. |
 | Price lock | A part's unit price locks once **any** quantity of it is invoiced (each invoice froze its own price snapshot, so the order total must stay a faithful revenue figure). Un-invoiced parts on the same job stay repriceable. Repricing an invoiced part is a QuickBooks credit/reissue. |
 | Cancelled parts | Not editable, quantity or price. |
@@ -466,8 +466,9 @@ Add/remove happens on the Edit screen; the detail card is `readOnly embedded` �
 
 **Invoicing.** Job-keyed, and a job can have **many** invoices (progressive billing). The picker
 defaults each line to shipped-but-unbilled and caps at ordered-but-unbilled — billing ahead of
-shipping is allowed (a packing slip isn't a delivery) and only softly flagged. Full spec:
-[Invoicing](invoicing.md).
+shipping is allowed (a packing slip isn't a delivery) and only softly flagged. What an invoice
+RECORDED as billed is itself correctable, which is what reopens a job the pre-2026-07-02 backfill
+left looking fully invoiced. Full spec: [Invoicing](invoicing.md).
 
 **Each QuickBooks Online invoice in the Invoices menu carries a payment chip** — paid, partly paid,
 open, overdue, voided or deleted in QuickBooks, with the balance. It refreshes when the menu opens,
@@ -766,6 +767,7 @@ unless stated.
 | Delete **archives**, scoped to id + company, **even with shipments and an invoice** | `describe('deleteJob')` — 4 it |
 | A `sent` op holds its part at `in_progress`; admin Complete/Undo refuse an external op | `describe('deriveStatusFromOps with the sent (at-vendor) state')` — 2 it; `describe('admin op guards refuse external (outside-vendor) ops')` — 2 it |
 | Invoice creation advances `invoicing_status` and lists the invoice | [`e2e/job-invoicing.spec.ts`](../../e2e/job-invoicing.spec.ts) `test.describe('Job invoicing (QuickBooks)')` — 1 test |
+| Correcting what an invoice RECORDED reopens the un-billed remainder; office-only, billing-gated, ordered-capped, and never down to nothing | [`test_correct_invoice_recorded_quantities.py`](../../api/tests/integration/test_correct_invoice_recorded_quantities.py) — 15 tests; `describe('InvoicesMenu — correcting a recorded quantity')` — 9 it; `describe('correctInvoiceRecordedQuantities')` — 4 it. End-to-end through a real QuickBooks push `automation-pending` |
 | Job-level recompute cascade (part change → `compute_job_production_status` → job row) | `automation-pending` — SQL in `supabase/migrations/` |
 | Auto-progression: first op complete → job `in_progress` (no manual Start Job); last op across all parts complete → job `completed` (no manual Mark Complete) | `automation-pending` |
 | Marking a ready op complete makes the next-sequence op on that part ready; Undo returns it to pending | `automation-pending` (`completeJobOperation` / `undoJobOperation`) |

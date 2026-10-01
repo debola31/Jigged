@@ -1407,3 +1407,199 @@ async def test_reconnecting_the_same_realm_still_works_with_history(
         assert conn["reconnect_required"] is False
     finally:
         _cleanup(supabase_admin, cid)
+
+
+# ───────────────── the J-0018 case, end to end ─────────────────
+async def test_correcting_a_legacy_over_recorded_invoice_lets_the_rest_be_billed(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    """THE REPORTED CASE, reproduced whole: correct the record, then actually bill the rest.
+
+    A shop reported J-0018 as "originally fully invoiced" with the remainder shipping
+    that day and no way to invoice it. Cause: §7b of 20260702011324 backfilled every
+    legacy `created` invoice as having billed each part's FULL ordered quantity, which
+    is false for an invoice the shop edited DOWN inside QuickBooks — the only way to
+    part-bill before 2026-07-02. Production: 12 ordered, 3 shipped and invoiced on
+    2026-07-01, 9 shipped on 2026-09-30, one line item recording 12.
+
+    The other tests here prove the correction moves `invoicing_status`. This one proves
+    the step that actually matters to the shop and that nothing else covers: that the
+    PUSH ROUTE then accepts the reopened remainder. `qty_invoiceable` is computed in
+    the backend (load_billable_parts), not from the corrected row directly, so
+    "the status moved" and "a second invoice can be created" are two different claims.
+    """
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    _map_customer(supabase_admin, cid, seed["customer_id"])
+    job_part_id = seed["job_part_id"]
+
+    # An active subscription, because the correction RPC consults company_can_write by
+    # hand while the PUSH route does not -- it runs service-role and bypasses RLS. That
+    # asymmetry is real and deliberate: a browser-reachable write is gated, and the
+    # push route's bypass is the pre-existing gap (see create_shipment_with_line_items
+    # on definer_writers_missing_write_gate()'s exempt list). The seeded fixture company
+    # carries no company_billing row, so without this the correction alone would 42501.
+    supabase_admin.table("company_billing").upsert(
+        {"company_id": cid, "subscription_status": "active"}, on_conflict="company_id"
+    ).execute()
+
+    # Her numbers: 12 ordered, 3 of them shipped and billed back in July.
+    supabase_admin.table("job_parts").update({"quantity": 12}).eq("id", job_part_id).execute()
+    _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], job_part_id, 3)
+
+    unit_price = float(
+        supabase_admin.table("job_parts")
+        .select("unit_price")
+        .eq("id", job_part_id)
+        .single()
+        .execute()
+        .data["unit_price"]
+    )
+
+    # The legacy invoice exactly as the backfill left it: one line at the FULL 12,
+    # while the real QuickBooks document billed 3.
+    legacy = (
+        supabase_admin.table("quickbooks_invoice_links")
+        .insert(
+            {
+                "company_id": cid,
+                "job_id": seed["job_id"],
+                "realm_id": "realm-rt",
+                "qb_request_id": str(uuid4()),
+                "qb_invoice_id": "INV-LEGACY",
+                "qb_invoice_doc_number": "93587",
+                "status": "created",
+                "provider": "qbo",
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+    supabase_admin.table("quickbooks_invoice_line_items").insert(
+        {
+            "company_id": cid,
+            "invoice_link_id": legacy,
+            "job_part_id": job_part_id,
+            "quantity": 12,
+            "unit_price": unit_price,
+            "total_price": round(12 * unit_price, 4),
+        }
+    ).execute()
+
+    calls = {"n": 0}
+
+    def _fake_create_invoice(db, company_id, payload, request_id):
+        calls["n"] += 1
+        return {"id": f"INV-{calls['n']}", "doc_number": f"D-{calls['n']}", "sync_token": "0"}
+
+    monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
+    token = seeded_user_a["access_token"]
+    preflight_path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/preflight"
+    invoice_path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
+
+    try:
+        # ── 1. THE DEFECT. Nothing left to invoice, and the push refuses.
+        pre = await _post(token, preflight_path, {})
+        assert pre.status_code == 200, pre.text
+        part = next(p for p in pre.json()["parts"] if p["job_part_id"] == job_part_id)
+        assert part["qty_ordered"] == 12
+        assert part["qty_invoiced"] == 12
+        assert part["qty_invoiceable"] == 0
+
+        blocked = await _post(
+            token,
+            invoice_path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": job_part_id, "quantity": 1}],
+            },
+        )
+        assert blocked.status_code == 400, blocked.text
+        assert calls["n"] == 0  # QuickBooks was never called
+
+        # The rest goes out today.
+        _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], job_part_id, 9)
+
+        # ── 2. THE CORRECTION, through the real RPC as the signed-in office user.
+        result = (
+            seeded_user_a["client"]
+            .rpc(
+                "correct_invoice_recorded_quantities",
+                {
+                    "p_invoice_link_id": legacy,
+                    "p_lines": [{"job_part_id": job_part_id, "quantity": 3}],
+                },
+            )
+            .execute()
+        )
+        assert result.data["lines_changed"] == 1
+
+        # ── 3. THE BACKEND NOW SEES THE REMAINDER. This is the claim under test.
+        pre2 = await _post(token, preflight_path, {})
+        assert pre2.status_code == 200, pre2.text
+        part2 = next(p for p in pre2.json()["parts"] if p["job_part_id"] == job_part_id)
+        assert part2["qty_invoiced"] == 3
+        assert part2["qty_invoiceable"] == 9
+        assert part2["unit_price"] is not None  # or the dialog filters it out of `billable`
+
+        # ── 4. AND THE SECOND INVOICE ACTUALLY GOES THROUGH.
+        second = await _post(
+            token,
+            invoice_path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": job_part_id, "quantity": 9}],
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["already_existed"] is False
+        assert calls["n"] == 1
+
+        # ── 5. THE RECORD IS NOW HONEST: 3 + 9 == 12 ordered, on two invoices.
+        links = (
+            supabase_admin.table("quickbooks_invoice_links")
+            .select("id")
+            .eq("job_id", seed["job_id"])
+            .eq("status", "created")
+            .execute()
+            .data
+        )
+        assert len(links) == 2
+        recorded = (
+            supabase_admin.table("quickbooks_invoice_line_items")
+            .select("quantity")
+            .eq("job_part_id", job_part_id)
+            .execute()
+            .data
+        )
+        assert sum(float(r["quantity"]) for r in recorded) == 12
+        jp = (
+            supabase_admin.table("job_parts")
+            .select("invoicing_status")
+            .eq("id", job_part_id)
+            .single()
+            .execute()
+            .data
+        )
+        assert jp["invoicing_status"] == "fully_invoiced"
+
+        # ── 6. AND THE CAP IS BACK. The correction reopened 9, not the floodgates.
+        third = await _post(
+            token,
+            invoice_path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": job_part_id, "quantity": 1}],
+            },
+        )
+        assert third.status_code == 400, third.text
+    finally:
+        # The fixture company is session-scoped and other tests assert on an absent
+        # billing row, so put it back the way it was found.
+        supabase_admin.table("company_billing").delete().eq("company_id", cid).execute()
+        _cleanup(supabase_admin, cid)

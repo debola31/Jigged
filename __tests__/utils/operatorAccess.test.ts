@@ -885,7 +885,15 @@ describe('getNewHelpful', () => {
    * in the argument handed to the filter.
    */
   it('sends the seen-cursor to the filter without truncating its microseconds', async () => {
-    const microseconds = '2026-08-03T04:49:36.836237+00:00';
+    // Built relative to now, and deliberately not a literal. A literal
+    // ('2026-08-03T04:49:36.836237+00:00') sat inside the rolling
+    // NEW_HELPFUL_WINDOW_DAYS = 56 window when this was written and fell outside it
+    // on 2026-09-28, after which getNewHelpful correctly preferred the window and
+    // this assertion failed on a function nobody had touched. A cursor that must be
+    // INSIDE a window relative to today cannot be pinned to a date.
+    const microseconds = new Date(Date.now() - 86_400_000)
+      .toISOString()
+      .replace(/\.(\d{3})Z$/, '.$1237+00:00');
     expect(await cursorSentFor(microseconds)).toBe(microseconds);
   });
 

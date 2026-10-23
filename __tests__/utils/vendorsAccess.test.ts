@@ -46,12 +46,25 @@ describe('vendorsAccess', () => {
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
     });
 
-    it('applies name + city ilike when search is non-empty', async () => {
+    it('searches name only when no address city matches', async () => {
       mockQueryBuilder.data = [];
       await getAllVendors('co-1', 'acme');
+      expect(mockQueryBuilder.or).toHaveBeenCalledWith('name.ilike."%acme%"');
+    });
+
+    // City lives on vendor_addresses, not vendors — filtering vendors.city is
+    // a 42703 (Sentry JAVASCRIPT-NEXTJS-3G). The match is resolved to ids.
+    it('never filters a city column on vendors, and ORs address matches in by id', async () => {
+      mockQueryBuilder.data = [{ vendor_id: 'v1' }, { vendor_id: 'v2' }, { vendor_id: 'v1' }];
+      await getAllVendors('co-1', 'detroit');
+      expect(mockSupabase.from).toHaveBeenCalledWith('vendor_addresses');
+      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('city', '%detroit%');
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'name.ilike."%acme%",city.ilike."%acme%"',
+        'name.ilike."%detroit%",id.in.(v1,v2)',
       );
+      for (const [arg] of (mockQueryBuilder.or as ReturnType<typeof vi.fn>).mock.calls) {
+        expect(arg).not.toMatch(/city/);
+      }
     });
 
     it('skips the or() filter when search is whitespace', async () => {

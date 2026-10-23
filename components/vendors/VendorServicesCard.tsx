@@ -365,8 +365,6 @@ export default function VendorServicesCard({
             {editor.mode === 'add' && editorRow}
           </Box>
         )}
-
-        {services.length === 0 && editor.mode === 'add' && editorRow}
       </CardContent>
 
       {/* Archive NEVER blocks, even at routing_operations_count > 0: every

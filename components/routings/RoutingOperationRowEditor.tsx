@@ -46,6 +46,12 @@ export interface OperationEditorValue {
 
 interface RoutingOperationRowEditorProps {
   workCenters: StepTargetOption[];
+  /**
+   * Names of vendors with no live service. They have nothing to pick, so when
+   * the typed text matches one, the empty list explains that rather than
+   * leaving the user to conclude the vendor is missing.
+   */
+  vendorsWithoutServices?: string[];
   /** When provided, the editor is in edit mode (work center picker is locked). */
   initial?: OperationEditorValue;
   onSave: (value: OperationEditorValue) => void;
@@ -94,6 +100,7 @@ function initialPriceStr(initial: OperationEditorValue | undefined): string {
 
 export default function RoutingOperationRowEditor({
   workCenters,
+  vendorsWithoutServices = [],
   initial,
   onSave,
   onCancel,
@@ -111,6 +118,15 @@ export default function RoutingOperationRowEditor({
   );
   const [instructions, setInstructions] = useState(initial?.instructions ?? '');
   const [touched, setTouched] = useState(false);
+  const [pickerInput, setPickerInput] = useState('');
+
+  const typed = pickerInput.trim().toLowerCase();
+  const serviceLessMatch = typed
+    ? vendorsWithoutServices.find((name) => name.toLowerCase().includes(typed))
+    : undefined;
+  const noOptionsText = serviceLessMatch
+    ? `${serviceLessMatch} has no services yet. Add one on its page under Vendors, then pick it here.`
+    : 'No matching work center or outside service.';
 
   useEffect(() => {
     setWorkCenter(initial?.workCenter ?? null);
@@ -250,6 +266,9 @@ export default function RoutingOperationRowEditor({
             }
             value={workCenter}
             onChange={(_, newValue) => handleTargetChange(newValue)}
+            inputValue={pickerInput}
+            onInputChange={(_, v) => setPickerInput(v)}
+            noOptionsText={noOptionsText}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             disabled={isEdit}
             renderOption={(props, option) => (

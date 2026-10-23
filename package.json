@@ -26,6 +26,7 @@
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",
     "@mui/x-charts": "^7.28.0",
+    "@sentry/cli": "^3.8.2",
     "@sentry/nextjs": "^10.46.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.99.1",

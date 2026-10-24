@@ -3,7 +3,7 @@
 import { getSupabase } from '@/lib/supabase';
 import { toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
-import { orIlikeValue } from '@/utils/searchFilter';
+import { escapeIlikePattern, orIlikeValue } from '@/utils/searchFilter';
 
 // Insert payload for the vendors table, minus company_id which is added
 // at the boundary. Narrowing this avoids the Record<string, unknown>
@@ -36,6 +36,26 @@ export async function getAllVendors(
   let offset = 0;
   let hasMore = true;
 
+  // Search the vendor name + the city of any of its addresses. City lives on
+  // vendor_addresses (a vendor can have several), not on vendors, so the city
+  // match is resolved to vendor ids first and OR'd in by id. Filtering
+  // `city` on vendors directly is a 42703 — it is what broke this search.
+  // Contact-name search would need the same through vendor_contacts; defer
+  // until usability shows users want it.
+  const term = search.trim();
+  let cityMatchIds: string[] = [];
+  if (term) {
+    const { data: addressRows, error: addressError } = await supabase
+      .from('vendor_addresses')
+      .select('vendor_id')
+      .ilike('city', `%${escapeIlikePattern(term)}%`);
+    if (addressError) {
+      console.error('Error searching vendor addresses:', addressError);
+      throw addressError;
+    }
+    cityMatchIds = [...new Set((addressRows || []).map((r) => r.vendor_id))];
+  }
+
   while (hasMore) {
     let query = supabase
       .from('vendors')
@@ -45,10 +65,13 @@ export async function getAllVendors(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    if (search.trim()) {
-      // Search the vendor name + city only. Contact-name search would require a
-      // join through vendor_contacts; defer until usability shows users want it.
-      query = query.or(`name.ilike.${orIlikeValue(search)},city.ilike.${orIlikeValue(search)}`);
+    if (term) {
+      const nameFilter = `name.ilike.${orIlikeValue(term)}`;
+      query = query.or(
+        cityMatchIds.length > 0
+          ? `${nameFilter},id.in.(${cityMatchIds.join(',')})`
+          : nameFilter,
+      );
     }
 
     const { data, error } = await query;

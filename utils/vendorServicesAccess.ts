@@ -89,6 +89,7 @@ export async function getVendorServicesForRouting(
   id: string;
   name: string;
   unit_price: number | null;
+  vendor_id: string;
   vendor_name: string | null;
 }>> {
   const supabase = getSupabase();
@@ -97,12 +98,13 @@ export async function getVendorServicesForRouting(
     id: string;
     name: string;
     unit_price: number | null;
+    vendor_id: string;
     vendor: { name: string } | { name: string }[] | null;
   };
 
   const { data, error } = await supabase
     .from('vendor_services')
-    .select('id, name, unit_price, vendor:vendors(name)')
+    .select('id, name, unit_price, vendor_id, vendor:vendors(name)')
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .order('name', { ascending: true });
@@ -118,6 +120,7 @@ export async function getVendorServicesForRouting(
       id: r.id,
       name: r.name,
       unit_price: r.unit_price !== null ? Number(r.unit_price) : null,
+      vendor_id: r.vendor_id,
       vendor_name: vendor?.name ?? null,
     };
   });

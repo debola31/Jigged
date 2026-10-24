@@ -21,6 +21,7 @@ import RoutingOperationRowEditor, {
 } from './RoutingOperationRowEditor';
 import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
 import { getVendorServicesForRouting } from '@/utils/vendorServicesAccess';
+import { getAllVendors } from '@/utils/vendorsAccess';
 import { formatTime } from '@/types/routings';
 
 const generateTempId = () => `temp-op-${crypto.randomUUID()}`;
@@ -46,6 +47,10 @@ export default function RoutingOperationsList({
   disabled = false,
 }: RoutingOperationsListProps) {
   const [workCenters, setWorkCenters] = useState<StepTargetOption[]>([]);
+  // Vendors with no live service contribute nothing to the picker, so a user
+  // typing one's name gets an empty list and no reason why. Their names let
+  // the editor say so instead.
+  const [vendorsWithoutServices, setVendorsWithoutServices] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorState, setEditorState] = useState<
@@ -69,8 +74,13 @@ export default function RoutingOperationsList({
     Promise.all([
       getWorkCentersForRouting(companyId),
       getVendorServicesForRouting(companyId),
+      getAllVendors(companyId),
     ])
-      .then(([stations, services]) => {
+      .then(([stations, services, vendors]) => {
+        const vendorIdsWithServices = new Set(services.map((vs) => vs.vendor_id));
+        setVendorsWithoutServices(
+          vendors.filter((v) => !vendorIdsWithServices.has(v.id)).map((v) => v.name),
+        );
         setWorkCenters([
           ...stations.map((wc) => ({
             id: wc.id,
@@ -278,6 +288,7 @@ export default function RoutingOperationsList({
           {editorState.mode === 'add' && (
             <RoutingOperationRowEditor
               workCenters={workCenters}
+              vendorsWithoutServices={vendorsWithoutServices}
               index={rows.length}
               onSave={handleEditorSave}
               onCancel={() => setEditorState({ mode: 'closed' })}

@@ -62,6 +62,7 @@ GRIP_GAIN = 0.3                  # squeeze (rad/s) per newton short of a digit's
 NEAR_M = 0.02                    # a finger this close to the gripped object bends the contact way
 TOUCH_N = 0.2                    # a digit with less force than this on the object isn't touching it
 SKIN_MU = 0.6                    # skin on aluminium (Seo & Armstrong 2009, moonshot/body/data/anatomy.json grip)
+NEVER_HELD = ["lever"]           # mechanism parts the hand never touches: it holds the knob, which spins round the lever
 GRIP_OBJECT = {"blank_faces": "blank", "blank_slide": "blank", "blank_press": "blank", "knob": "knob",
                "tip_para_a": "para_a", "tip_para_b": "para_b"}
 
@@ -308,6 +309,17 @@ class ViseTake:
                     out.append(f"{m.geom(a).name[2:]}/{m.geom(b).name}")
         return out
 
+    def touching(self) -> list[str]:
+        """Everything the right hand and arm touch this frame, by geom name."""
+        m, d = self.model, self.data
+        out = set()
+        for i in range(d.ncon):
+            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+            for a, b in ((g1, g2), (g2, g1)):
+                if m.geom(a).name.startswith("R_") and not m.geom(b).name.startswith("R_"):
+                    out.add(m.geom(b).name)
+        return sorted(out)
+
     def hand_touching(self) -> bool:
         """Is any part of the hand or arm in contact with anything? (Then touch, not sight, guides it.)"""
         d, m = self.data, self.model
@@ -490,7 +502,7 @@ class ViseTake:
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing", "stray", "pose")}
+                               "slip", "lag", "pushing", "stray", "touching", "pose")}
         hold_rel, t0w = None, time.time()
         hold0 = self.iv["hold_object"][0]
         for k in range(n):
@@ -556,6 +568,7 @@ class ViseTake:
             rec["pose"].append(self.pose_record())
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
+            rec["touching"].append(self.touching())
             rec["pushing"].append(any(e["t0"] - 0.05 <= tk < e["t1"] + 0.15 for e in self.iv["press"]) or
                                   any(e["t0"] <= tk < e["t1"] for e in self.iv["enclose"]) or
                                   self.crank_at(tk)[1] is not None)
@@ -594,8 +607,9 @@ class ViseTake:
                 "forearm": d.body("R_forearm").xmat.reshape(3, 3) @ H0}
 
     def export_sim(self, path: Path) -> None:
-        """Write the run as trainual's sim.npz (sim/run_take.py's keys), so its skin bake and Cycles render take it.
-        The camera is the reference's head path: the trunk follows the plan to within millimetres."""
+        """Write the run as trainual's sim.npz (sim/run_take.py's keys), so its skin bake and Cycles render take it,
+        and beside it checks.json, what moonshot/validate/take.py reads that sim.npz doesn't carry. The camera is
+        the reference's head path: the trunk follows the plan to within millimetres."""
         rec, rd = self.rec, self.rd
         n = len(rec["pose"])
         P = {k: np.array([p[k] for p in rec["pose"]]) for k in rec["pose"][0]}
@@ -606,6 +620,8 @@ class ViseTake:
                  opening=np.array(rec["opening"]), para=np.array(rec["para"]), effort=rd["effort"][:n],
                  grip=rd["grip"][:n], clamp=np.array(rec["clamp"]), slip=np.array(rec["slip"]),
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
+        (Path(path).parent / "checks.json").write_text(
+            json.dumps({"touching": rec["touching"], "never_held": NEVER_HELD}), encoding="utf-8")
 
     def plan_time_for_phi(self, e, phi):
         k0, k1 = (int(np.searchsorted(self.t, x)) for x in (e["t0"], e["t1"]))
@@ -681,7 +697,7 @@ class ViseTake:
 
 def main(argv: list[str]) -> None:
     seconds = float(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
-    run = ViseTake()
+    run = ViseTake(Path(argv[argv.index("--take") + 1]) if "--take" in argv else None)
     rep = run.run(seconds)
     if "--export" in argv:
         run.export_sim(Path(argv[argv.index("--export") + 1]))

@@ -47,5 +47,5 @@ def check(name: str, good: list[str], bad: list[str]):
 
 def load_all() -> dict[str, Check]:
     """Import every check module so it registers itself."""
-    from moonshot.validate import penetration  # noqa: F401
+    from moonshot.validate import body, contact, penetration  # noqa: F401
     return CHECKS

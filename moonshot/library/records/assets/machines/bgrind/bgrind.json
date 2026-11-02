@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "bgrind",
+  "name": "Bench grinder",
+  "category": "machines",
+  "make": "Generic",
+  "model": "8 in bench grinder (wire wheel and grinding wheel)",
+  "description": "Double-ended bench grinder with a grinding wheel and a wire / polishing wheel for hand deburring and polishing.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Wheels", "value": "2 x 8 in (typical)"},
+    {"name": "Motor", "value": 0.75, "unit": "hp", "note": "typical"},
+    {"name": "Speed", "value": 3450, "unit": "rpm", "note": "typical"}
+  ],
+  "source_urls": ["https://grabcad.com/library/bench-grinder-15"],
+  "source_files": ["Bench Grinder STEP.STEP", "Bench Grinder STL.STL"],
+  "license": "GrabCAD community model by Ersin (2022), GrabCAD terms of use; not self-made or CC0",
+  "notes": "The model has no maker or ratings; the specs are typical for an 8 in bench grinder.",
+  "file": "bgrind.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 162953,
+  "bbox": {"min": [-157.0, -209.0, 0.0], "max": [157.0, 209.0, 298.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Bench Grinder STEP.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 162953,
+      "deflection_mm": 0.123,
+      "simplified": false,
+      "glb_bytes": 2914644,
+      "dropped_line_primitives": 1
+    }
+  }
+}

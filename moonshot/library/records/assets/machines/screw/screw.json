@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "screw",
+  "name": "Screw secondary-op machine",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Bowl-fed slotting and cross-drilling machine",
+  "description": "Bowl-fed secondary-operation machine that slots or cross-drills screw-machine parts.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Feed", "value": "vibratory bowl"},
+    {"name": "Operation", "value": "slitting saw slotting or cross drilling"},
+    {"name": "Rate", "value": "20-60 parts/min (typical)"}
+  ],
+  "source_urls": [],
+  "source_files": ["screw.step"],
+  "license": "self-made placeholder (planner.placeholders.screw_slotter)",
+  "notes": "GENERIC: no CAD found.",
+  "file": "screw.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1216,
+  "bbox": {"min": [-457.2, -304.8, 0.0], "max": [457.2, 304.8, 1320.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/screw.step",
+    "placeholder": "screw_slotter",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1216,
+      "deflection_mm": 0.344,
+      "simplified": false,
+      "glb_bytes": 32312
+    }
+  }
+}

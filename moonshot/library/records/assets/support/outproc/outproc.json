@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "outproc",
+  "name": "Outside-process staging rack",
+  "category": "support",
+  "make": "Generic",
+  "model": "48 x 24 x 72 in staging shelving",
+  "description": "Where parts wait for vendors' heat treat, coating and anodize, which appear in routings as outside steps.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Rack", "value": "48 x 24 x 72 in, three shelves"},
+    {"name": "Processes", "value": "heat treat, coating, anodize"}
+  ],
+  "source_urls": [],
+  "source_files": ["outproc.step"],
+  "license": "self-made placeholder (planner.placeholders.outside_process_rack)",
+  "notes": "GENERIC: outside processes are done by vendors; this rack is their marker on the floor.",
+  "file": "outproc.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 156,
+  "bbox": {"min": [-609.6, -304.8, 0.0], "max": [609.6, 304.8, 1930.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/outproc.step",
+    "placeholder": "outside_process_rack",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 156,
+      "deflection_mm": 0.473,
+      "simplified": false,
+      "glb_bytes": 8336
+    }
+  }
+}

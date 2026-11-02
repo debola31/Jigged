@@ -1,0 +1,58 @@
+{
+  "id": "ct-slbeam",
+  "name": "SLBEAM l-block",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "prismatic",
+  "material": "4140 alloy steel, pre-hardened 28-32 HRC",
+  "heat_treat": null,
+  "finish": "Black oxide (outside vendor)",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "3.00 x 1.50 x 2.00 in, 0.75 legs",
+  "units": "in",
+  "bbox_mm": [
+    76.2,
+    38.1,
+    50.8
+  ],
+  "solids": 1,
+  "drawing_scale": "1:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "Inside 90° ±0°10', square to .001",
+      "Legs .750 ±.002",
+      "2X Ø.281 thru, C'BORE Ø.44 x .30",
+      "2X #7 (Ø.201) x .75 deep, tap 1/4-20"
+    ]
+  },
+  "machines_likely": [
+    "band_saw",
+    "vmc",
+    "black_oxide (outside)",
+    "inspection"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "Saw",
+      "Hurco mill",
+      "Black oxide (outside)",
+      "QC"
+    ]
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.697,
+    "bodies": 1,
+    "faces": 18,
+    "date": "2026-10-20"
+  }
+}

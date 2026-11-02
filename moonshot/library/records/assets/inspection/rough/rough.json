@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "rough",
+  "name": "Surface roughness tester",
+  "category": "inspection",
+  "make": "Mitutoyo",
+  "model": "SJ-210 class",
+  "description": "Portable stylus profilometer that measures surface finish (Ra).",
+  "generic": true,
+  "key_specs": [
+    {"name": "Range", "value": "Ra 0.02-6350 uin (typical)"},
+    {"name": "Stylus", "value": "2 um tip, 60 degree"}
+  ],
+  "source_urls": [],
+  "source_files": ["rough.step"],
+  "license": "self-made placeholder (planner.placeholders.roughness_tester)",
+  "notes": "GENERIC: Mitutoyo's CAD needs a login; none on GrabCAD.",
+  "file": "rough.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 188,
+  "bbox": {"min": [-99.7, -67.3, 0.0], "max": [99.7, 67.3, 52.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/rough.step",
+    "placeholder": "roughness_tester",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 188,
+      "deflection_mm": 0.049,
+      "simplified": false,
+      "glb_bytes": 8020
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "id": "mcm-8492a054",
+  "name": "Press-fit drill bushing with head, 0.125\" ID x 1/4\" OD x 1/2\" long",
+  "source": {
+    "kind": "McMaster-Carr catalog CAD",
+    "origin": "https://www.mcmaster.com/8492A054/",
+    "part_no": "8492A054",
+    "files": {
+      "step": "8492A054_Press-Fit Drill Bushing with Head.STEP",
+      "pdf": "8492A054_Press-Fit Drill Bushing with Head.pdf"
+    },
+    "license": "McMaster-Carr CAD, downloaded from a logged-in account; check their terms before redistributing"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "Steel, Rockwell C61 (hardened)",
+  "heat_treat": null,
+  "finish": "Ground",
+  "quantity": null,
+  "quantity_note": "Catalog part, no order quantity",
+  "size": "Ø0.250 OD (Ø0.359 head) x 0.50 in",
+  "units": "in",
+  "tolerances": {
+    "general": "McMaster catalog specs",
+    "critical": [
+      "ID 0.1250 +0.0001/+0.0004",
+      "OD 0.250 +0.0013/+0.0015 press fit (catalog)",
+      "Length 0.500 ±0.015",
+      "Head Ø0.359 x 0.094 thick"
+    ]
+  },
+  "machines_likely": [
+    "lathe",
+    "heat_treat (outside)",
+    "cylindrical_grinder",
+    "internal_grinder",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Purchased part; machines_likely is how a shop would make it.",
+  "selection_reason": "Hardened, ID/OD ground bushing held to tenths: the tightest round tolerance in the set.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.495,
+    "bodies": 1,
+    "faces": 17,
+    "date": "2026-10-20"
+  }
+}

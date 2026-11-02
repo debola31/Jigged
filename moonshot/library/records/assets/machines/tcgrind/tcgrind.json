@@ -1,0 +1,49 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tcgrind",
+  "name": "Tool & cutter grinder",
+  "category": "machines",
+  "make": "ANCA",
+  "model": "TX7",
+  "description": "5-axis CNC tool and cutter grinder for making and resharpening end mills and drills, 8 in wheels.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Axes", "value": 5, "unit": "axes", "note": "X, Y, Z linear; C 264 deg, A 360 deg rotary"},
+    {"name": "Max tool diameter", "value": 8, "unit": "in", "note": "most listings; some give 12 in"},
+    {"name": "Max tool length", "value": 15.75, "unit": "in"},
+    {"name": "Grinding wheel diameter", "value": 8, "unit": "in"},
+    {"name": "Spindle power", "value": 49, "unit": "hp", "note": "36.5 kW, 10,000 rpm max"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/anca-tx7",
+    "https://www.machinetools.com/en/for-sale/726496-anca-tx7-plus-tool-and-cutter-grinders/spec_sheet",
+    "https://www.equipt.com/listings/20990-used-2007-anca-tx7-plus-tool-and-cutter-grinders-in-illinois"
+  ],
+  "source_files": [
+    "anca_tx7.stp",
+    "anca_tx7.igs",
+    "anca_tx7.stl",
+    "anca_tx7.asm.zip",
+    "anca_tx7.png"
+  ],
+  "license": "GrabCAD community model by alcezist (2012), GrabCAD terms of use; not self-made or CC0",
+  "notes": "A layout model (enclosure blocks, no internals), enough for the shop floor. ANCA's own TX7 page no longer lists the model, so specs are from dealer listings, which disagree on max tool diameter.",
+  "file": "tcgrind.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 6160,
+  "bbox": {"min": [-1177.3, -958.8, 0.0], "max": [1177.3, 958.8, 2243.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/anca_tx7.stp",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 6160,
+      "deflection_mm": 0.755,
+      "simplified": false,
+      "glb_bytes": 123876
+    }
+  }
+}

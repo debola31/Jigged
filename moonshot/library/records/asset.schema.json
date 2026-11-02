@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:setupguide:asset:0.1",
+  "title": "Asset record",
+  "description": "assets/<category>/<id>/<id>.json: what an asset is, where it came from, and how its GLB was built. Geometry fields are in the asset frame (mm, +Z up); the GLB itself is glTF (metres, +Y up). Closed objects, so a misspelled field is an error.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "id", "name", "category", "make", "model", "description", "generic", "key_specs", "source_urls",
+    "source_files", "license", "file", "units", "up", "attach_points", "build"
+  ],
+  "if": { "required": ["pending"] },
+  "else": { "required": ["triangles", "bbox"] },
+  "properties": {
+    "schema": { "const": "setupguide.asset/0.1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "category": { "enum": ["machines", "workholding", "tooling", "inspection", "consumables", "hand_tools", "support"] },
+    "make": { "type": "string", "minLength": 1 },
+    "model": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1, "description": "One line for the operator." },
+    "generic": { "type": "boolean", "description": "A placeholder built in cadquery from the specs, not a sourced model." },
+    "key_specs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "value": {
+            "oneOf": [
+              { "type": "number" },
+              { "type": "string", "minLength": 1 },
+              { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+            ]
+          },
+          "unit": { "type": "string", "minLength": 1 },
+          "note": { "type": "string" }
+        },
+        "if": { "properties": { "value": { "not": { "type": "string" } } } },
+        "then": { "required": ["unit"] }
+      }
+    },
+    "source_urls": { "type": "array", "items": { "type": "string", "pattern": "^https://" } },
+    "source_files": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "license": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" },
+    "pending": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Not built yet, and why (e.g. NEEDS-FUSION: export the X_T to STEP). planner.assets removes it after a build."
+    },
+    "file": { "type": "string", "pattern": "\\.glb$" },
+    "units": { "const": "mm" },
+    "up": { "const": "+Z" },
+    "triangles": { "type": "integer", "minimum": 1 },
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "$ref": "#/$defs/vec3" },
+        "max": { "$ref": "#/$defs/vec3" }
+      }
+    },
+    "attach_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "t", "q"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "t": { "$ref": "#/$defs/vec3" },
+          "q": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number" } }
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "max_triangles"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1, "description": "Source file, relative to the record." },
+        "up": { "enum": ["+Z", "+Y"], "description": "Up axis of the source file (default +Z)." },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "description": "Mesh and glTF sources: factor to metres." },
+        "resize": {
+          "description": "Reuse a model at another size: one factor, or [x, y, z] factors in the asset frame (+Z up).",
+          "oneOf": [
+            { "type": "number", "exclusiveMinimum": 0 },
+            { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "exclusiveMinimum": 0 } }
+          ]
+        },
+        "turn": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["axis", "degrees"],
+          "description": "Turn a model that lies on its side after the up-axis conversion: right-handed, about an asset-frame axis.",
+          "properties": { "axis": { "enum": ["x", "y", "z"] }, "degrees": { "type": "number" } }
+        },
+        "exclude": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Component names (globs) left out." },
+        "placeholder": { "type": "string", "description": "planner.placeholders builder that writes `from` first." },
+        "compose": { "type": "string", "description": "planner.compose builder that writes `from` from several originals in source/." },
+        "max_triangles": { "type": "integer", "minimum": 1 },
+        "result": { "type": "object", "description": "Written by planner.assets: what the last build did." }
+      }
+    }
+  },
+  "$defs": {
+    "vec3": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } }
+  }
+}

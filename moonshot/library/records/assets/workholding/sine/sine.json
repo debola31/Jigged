@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "sine",
+  "name": "Sine plate, 6 x 6 in",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "6 x 6 in sine plate (McMaster 5216A24 class)",
+  "description": "Sine plate that sets precise angles with a gauge-block stack under its roll; shown at 10 degrees.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Size", "value": "6 x 6 in, 2 in high closed"},
+    {"name": "Roll centres", "value": 5, "unit": "in"},
+    {"name": "Accuracy", "value": 0.0002, "unit": "in"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/5216A24/"],
+  "source_files": ["sine.step"],
+  "license": "self-made placeholder (planner.placeholders.sine_plate_6x6)",
+  "notes": "GENERIC: McMaster's sine plate (5216A24) and sine bar (3349N11) have no CAD; sized from 5216A24's table.",
+  "file": "sine.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 324,
+  "bbox": {"min": [-78.3, -76.2, 0.0], "max": [78.3, 76.2, 74.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/sine.step",
+    "placeholder": "sine_plate_6x6",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 324,
+      "deflection_mm": 0.046,
+      "simplified": false,
+      "glb_bytes": 9948
+    }
+  }
+}

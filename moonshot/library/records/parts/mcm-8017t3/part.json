@@ -1,0 +1,51 @@
+{
+  "id": "mcm-8017t3",
+  "name": "Tapped D-profile rotary shaft, 1/2\" dia x 6\"",
+  "source": {
+    "kind": "McMaster-Carr catalog CAD",
+    "origin": "https://www.mcmaster.com/8017T3/",
+    "part_no": "8017T3",
+    "files": {
+      "step": "8017T3_Tapped D-Profile Rotary Shaft.STEP",
+      "pdf": "8017T3_Tapped D-Profile Rotary Shaft.pdf"
+    },
+    "license": "McMaster-Carr CAD, downloaded from a logged-in account; check their terms before redistributing"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "1045 carbon steel, Rockwell B90",
+  "heat_treat": null,
+  "finish": "Polished, precision ground, turned",
+  "quantity": null,
+  "quantity_note": "Catalog part, no order quantity",
+  "size": "Ø0.500 x 6.00 in",
+  "units": "in",
+  "tolerances": {
+    "general": "McMaster catalog specs",
+    "critical": [
+      "Ø0.500 +0.000/-0.003",
+      "D-flat 0.217 in from flat to OD, full 6 in length",
+      "1/4\"-20 tapped one end",
+      "Straightness 0.012 in per ft",
+      "Length 6.000 ±0.0625"
+    ]
+  },
+  "machines_likely": [
+    "band_saw",
+    "lathe",
+    "cylindrical_grinder",
+    "vmc",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Purchased part; machines_likely is how a shop would make it.",
+  "selection_reason": "Precision ground shaft with a milled D-flat and a tapped end: grind, mill and tap on a round part.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.157,
+    "bodies": 1,
+    "faces": 40,
+    "date": "2026-10-20"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "hgauge",
+  "name": "Height gauge and surface plate",
+  "category": "inspection",
+  "make": "Generic",
+  "model": "12 in digital height gauge on a 12 x 18 in granite plate",
+  "description": "Digital height gauge on a granite surface plate for height checks from a flat reference.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Range", "value": [0, 12], "unit": "in"},
+    {"name": "Resolution", "value": 0.0005, "unit": "in"},
+    {"name": "Accuracy", "value": 0.001, "unit": "in", "note": "typical"},
+    {"name": "Surface plate", "value": "12 x 18 x 3 in granite, grade A"}
+  ],
+  "source_urls": [],
+  "source_files": ["hgauge.step"],
+  "license": "self-made placeholder (planner.placeholders.height_gauge_on_plate)",
+  "notes": "GENERIC: GrabCAD's height gage is a render scene whose floor is merged into the gauge body, so it can't be isolated.",
+  "file": "hgauge.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 72,
+  "bbox": {"min": [-228.6, -152.4, 0.0], "max": [228.6, 152.4, 495.3]},
+  "attach_points": [],
+  "build": {
+    "from": "source/hgauge.step",
+    "placeholder": "height_gauge_on_plate",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 72,
+      "deflection_mm": 0.148,
+      "simplified": false,
+      "glb_bytes": 6436
+    }
+  }
+}

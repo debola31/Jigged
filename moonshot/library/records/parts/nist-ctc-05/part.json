@@ -1,0 +1,50 @@
+{
+  "id": "nist-ctc-05",
+  "name": "NIST CTC-05 (Combined Test Case 5)",
+  "source": {
+    "kind": "NIST MBE PMI validation and conformance test models",
+    "origin": "https://www.nist.gov/el/systems-integration-division-73400/mbe-pmi-validation-and-conformance-testing/download-free-cad",
+    "files": {
+      "step": "nist_ctc_05_asme1_ap242-e1.stp",
+      "pdf": "nist_ctc_05_asme1_rd.pdf"
+    },
+    "license": "US Government work (NIST), public domain in the US"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": null,
+  "material_note": "Not specified on the NIST drawing",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown (test model)",
+  "size": "Ø22.0 flange, ~21 in. long (558.8 x 527.1 x 482.6 mm bbox)",
+  "units": "in",
+  "tolerances": {
+    "general": "ASME Y14.5-1994 GD&T; see drawing.pdf",
+    "critical": [
+      "Ø10.000 ±.001 bore (datum B)",
+      "Circularity .002 on shaft (datum A)",
+      "Total/circular runout .002-.035 to A-B",
+      "Concentricity Ø.030"
+    ]
+  },
+  "machines_likely": [
+    "band_saw",
+    "lathe",
+    "vmc",
+    "cylindrical_grinder",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "No real routing (test model); machines_likely is inferred.",
+  "selection_reason": "Turned flange-and-shaft with runout to A-B and milled flats/slots: the round part with lathe-then-mill and grind.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.406,
+    "bodies": 1,
+    "faces": 156,
+    "date": "2026-10-20"
+  }
+}

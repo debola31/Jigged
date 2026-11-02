@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tsetter",
+  "name": "Renishaw OTS tool setter",
+  "category": "workholding",
+  "make": "Renishaw",
+  "model": "OTS (A-5401-2001, Haas)",
+  "description": "Optical table-mounted tool setter that measures tool length and diameter in the VMCs.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Stylus", "value": "12.7 mm (0.5 in) disc"},
+    {"name": "Repeatability", "value": 4e-05, "unit": "in", "note": "1.0 um 2-sigma (Renishaw)"},
+    {"name": "Transmission", "value": "optical"}
+  ],
+  "source_urls": ["https://grabcad.com/library/renishaw-ots-1"],
+  "source_files": ["User Library-A-5401-2001 (OTS Haas).step"],
+  "license": "GrabCAD community model by Shokhnur R (2023), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Renishaw part A-5401-2001 is the OTS kit Haas fits.",
+  "file": "tsetter.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47516,
+  "bbox": {"min": [-31.2, -59.4, 0.0], "max": [31.2, 59.4, 103.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/User Library-A-5401-2001 (OTS Haas).step",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 50034,
+      "deflection_mm": 0.034,
+      "simplified": true,
+      "glb_bytes": 1050568
+    }
+  }
+}

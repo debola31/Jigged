@@ -1,0 +1,39 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "wrench",
+  "name": "Wrenches, hex keys and chuck key",
+  "category": "hand_tools",
+  "make": "Generic",
+  "model": "Setup wrench set",
+  "description": "Combination wrench, L hex key, vise handle and T-handle chuck key used to tighten vises, holders and chucks.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Combination wrench", "value": "3/4 in"},
+    {"name": "Hex key", "value": "5/16 in L"},
+    {"name": "Vise handle", "value": "for the Kurt vises"},
+    {"name": "Chuck key", "value": "T-handle"}
+  ],
+  "source_urls": [],
+  "source_files": ["wrench.step"],
+  "license": "self-made placeholder (planner.placeholders.wrench_set)",
+  "notes": "GENERIC: McMaster's hand tool pages are category tiles without product CAD in the time allowed.",
+  "file": "wrench.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 444,
+  "bbox": {"min": [-228.6, -127.0, 0.0], "max": [228.6, 127.0, 45.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/wrench.step",
+    "placeholder": "wrench_set",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 444,
+      "deflection_mm": 0.105,
+      "simplified": false,
+      "glb_bytes": 14628
+    }
+  }
+}

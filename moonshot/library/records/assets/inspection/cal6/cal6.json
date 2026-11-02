@@ -1,0 +1,53 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "cal6",
+  "name": "Digital caliper",
+  "category": "inspection",
+  "make": "Mitutoyo",
+  "model": "500-196-30",
+  "description": "6 in / 150 mm absolute digital caliper for outside, inside, depth and step measurements to 0.0005 in.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Range", "value": [0, 6], "unit": "in"},
+    {"name": "Range (metric)", "value": [0, 150], "unit": "mm"},
+    {"name": "Resolution", "value": 0.0005, "unit": "in"},
+    {"name": "Resolution (metric)", "value": 0.01, "unit": "mm"},
+    {"name": "Accuracy", "value": 0.001, "unit": "in", "note": "plus or minus"},
+    {"name": "Scale", "value": "ABSOLUTE AOS electromagnetic inductive encoder"},
+    {"name": "Battery", "value": "SR44"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/mitutoyo-digital-caliper-2",
+    "https://www.msi-viking.com/product/2007",
+    "https://www.imssupply.com/catalog/mitutoyo/500-196-30.html"
+  ],
+  "source_files": [
+    "Mitutoyo Digital Caliper.step",
+    "Mitutoyo Digital Caliper.iges",
+    "Mitutoyo Digital Caliper.f3d",
+    "Mitutoyo Digital Caliper.sat",
+    "Mitutoyo Digital Caliper.smt",
+    "Mitutoyo Digital Caliper Renderings/Mitutoyo Digital Caliper Image 01.jpg … 08.jpg"
+  ],
+  "license": "GrabCAD community model by Ersin (2017), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Built from the STEP file. The model includes the storage case (\"Caliper Box\"), which is left out. Specs from dealer listings (shop.mitutoyo.com did not load).",
+  "file": "cal6.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47493,
+  "bbox": {"min": [-116.6, -38.2, 0.0], "max": [116.6, 38.2, 12.5]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Mitutoyo Digital Caliper.step",
+    "up": "+Y",
+    "exclude": ["Caliper Box*"],
+    "max_triangles": 50000,
+    "result": {
+      "excluded": ["Caliper Box"],
+      "meshed_triangles": 55573,
+      "deflection_mm": 0.049,
+      "simplified": true,
+      "glb_bytes": 1024080
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "sgrind",
+  "name": "Surface grinder",
+  "category": "machines",
+  "make": "Generic",
+  "model": "10 x 24 manual surface grinder",
+  "description": "Manual reciprocating-table surface grinder with a 10 x 24 in magnetic chuck and a 10 in wheel.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Chuck size",
+      "value": "10 x 24 in (254 x 610 mm)",
+      "note": "measured from the model; matches the author's 10 x 24 description"
+    },
+    {"name": "Max grinding length", "value": 24, "unit": "in", "note": "chuck length"},
+    {"name": "Max grinding width", "value": 10, "unit": "in", "note": "chuck width"},
+    {"name": "Wheel size", "value": "10 x 1 in (254 x 25 mm)", "note": "measured from the model"},
+    {
+      "name": "Table size with splash guards",
+      "value": "66.9 x 13.1 in (1700 x 334 mm)",
+      "note": "measured from the model"
+    },
+    {
+      "name": "Wheel to chuck, as modelled",
+      "value": 6.4,
+      "unit": "in",
+      "note": "head position in the file, not the maximum"
+    }
+  ],
+  "source_urls": ["https://grabcad.com/library/surface-grinder-7"],
+  "source_files": [
+    "Surface Grinder Machine.STEP",
+    "Surface Grinder Machine.SLDPRT",
+    "Surface Grinder.SW View.jpg",
+    "Surface Grinder.34.1.jpg",
+    "Surface Grinder.35.jpg"
+  ],
+  "license": "GrabCAD community model by Edgar Gidoni (2023), GrabCAD terms of use; not self-made or CC0",
+  "notes": "No 6 x 18 class grinder with usable CAD turned up: the Clausing CSG-3A618 on GrabCAD is a block mock-up with a 5.2 m body, and the others give no size. This is a 10 x 24 model built for machine-shop training; there is no manufacturer, so the specs are measured from the model.",
+  "file": "sgrind.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 69404,
+  "bbox": {"min": [-850.0, -722.1, 0.0], "max": [850.0, 722.1, 1600.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Surface Grinder Machine.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 69404,
+      "deflection_mm": 0.549,
+      "simplified": false,
+      "glb_bytes": 1241196
+    }
+  }
+}

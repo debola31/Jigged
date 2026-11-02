@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "gblock",
+  "name": "Gauge blocks and pin gauges",
+  "category": "inspection",
+  "make": "Generic",
+  "model": "81-piece inch gauge-block set and pin-gauge set",
+  "description": "Reference gauge blocks for setting sizes and angles, and plug pin gauges for hole checks.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Gauge blocks", "value": "81 pieces, 0.050-4.000 in, grade 0 (typical)"},
+    {"name": "Pin gauges", "value": "0.061-0.250 in by 0.001 in (typical)"}
+  ],
+  "source_urls": [],
+  "source_files": ["gblock.step"],
+  "license": "self-made placeholder (planner.placeholders.gauge_block_set)",
+  "notes": "GENERIC: McMaster's gauge-block and pin-gauge pages are category tiles without product CAD in the time allowed.",
+  "file": "gblock.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2300,
+  "bbox": {"min": [-279.4, -123.8, 0.0], "max": [279.4, 123.8, 279.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/gblock.step",
+    "placeholder": "gauge_block_set",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2300,
+      "deflection_mm": 0.134,
+      "simplified": false,
+      "glb_bytes": 68928
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tmx8",
+  "name": "Hurco TMX8MYi turning centre",
+  "category": "machines",
+  "make": "Hurco",
+  "model": "TMX8MYi",
+  "description": "Y-axis turning centre with live tooling and an 8 in chuck: 20 in swing, 10.9 in turning diameter, 20.7 in machining length.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Swing", "value": 20, "unit": "in"},
+    {"name": "Max turning diameter", "value": 10.9, "unit": "in"},
+    {"name": "Max machining length", "value": 20.7, "unit": "in"},
+    {"name": "Chuck", "value": 8, "unit": "in"},
+    {"name": "Bar capacity", "value": 2.6, "unit": "in"},
+    {"name": "Max spindle speed", "value": 4500, "unit": "rpm"},
+    {"name": "Spindle power", "value": 33.5, "unit": "hp"}
+  ],
+  "source_urls": [
+    "https://www.equipt.com/listings/77490-new-hurco-tmx8mysi-cnc-lathes-in-utah",
+    "https://www.equipt.com/listings/35660-new-hurco-tmx8myi-cnc-lathes-in-kentucky"
+  ],
+  "source_files": ["tmx8.step"],
+  "license": "self-made placeholder (planner.placeholders.hurco_tmx8myi)",
+  "notes": "GENERIC: no Hurco lathe CAD on GrabCAD or Sketchfab, and Hurco publishes none. Specs are from dealer listings (mostly the TMX8MYSi, its sub-spindle sibling).",
+  "file": "tmx8.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 72,
+  "bbox": {"min": [-1473.2, -927.1, 0.0], "max": [1473.2, 927.1, 2032.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/tmx8.step",
+    "placeholder": "hurco_tmx8myi",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 72,
+      "deflection_mm": 0.806,
+      "simplified": false,
+      "glb_bytes": 6096
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "mic1",
+  "name": "Outside micrometer",
+  "category": "inspection",
+  "make": "Mitutoyo",
+  "model": "103-177",
+  "description": "0-1 in outside micrometer with ratchet stop, for checking diameters and thicknesses to 0.0001 in.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Range", "value": [0, 1], "unit": "in"},
+    {"name": "Graduation", "value": 0.001, "unit": "in"},
+    {"name": "Accuracy", "value": 0.0001, "unit": "in", "note": "plus or minus"},
+    {"name": "Spindle diameter", "value": 6.35, "unit": "mm"},
+    {"name": "Throat depth", "value": 28, "unit": "mm", "note": "one dealer listing"},
+    {"name": "Measuring faces", "value": "Carbide tipped, with ratchet stop"}
+  ],
+  "source_urls": [
+    "https://www.msi-viking.com/Mitutoyo-103-177-Outside-Mechanical-Micrometer-",
+    "https://se.rs-online.com/web/p/micrometers/0572072",
+    "https://baoanjsc.com.vn/products/outside-micrometers-mitutoyo-103-177_321207_en.aspx"
+  ],
+  "source_files": ["mic1.step"],
+  "license": "self-made placeholder (planner.placeholders.micrometer_0_1in)",
+  "notes": "GENERIC: McMaster's Mitutoyo 0-1 in micrometers (103-259, 103-135) have no CAD even when logged in. The only Mitutoyo micrometer STEP on GrabCAD is a 350-352 Digimatic micrometer head (no frame), kept in Downloads/sourcing/mic1; Mitutoyo CAD on 3Dfindit needs a login. Placeholder shown opened to 0.5 in, lying on its side.",
+  "file": "mic1.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 920,
+  "bbox": {"min": [-64.0, -24.9, 0.0], "max": [64.0, 24.9, 18.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/mic1.step",
+    "placeholder": "micrometer_0_1in",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 920,
+      "deflection_mm": 0.028,
+      "simplified": false,
+      "glb_bytes": 24316
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "para",
+  "name": "Parallel set",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "8642A515 (pair); set 86425A65",
+  "description": "Hardened 1/8 in parallels, 6 in long, in matched pairs that lift the part above the vise seat; the 1.000 in pair is shown.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Thickness", "value": 0.125, "unit": "in"},
+    {"name": "Length", "value": 6, "unit": "in"},
+    {"name": "Height (pair shown)", "value": 1.0, "unit": "in"},
+    {
+      "name": "Height range (set 86425A65)",
+      "value": [0.5, 1.625],
+      "unit": "in",
+      "note": "10 pairs in 1/8 in steps"
+    },
+    {"name": "Height tolerance", "value": 0.001, "unit": "in", "note": "plus or minus"},
+    {"name": "Parallelism", "value": 0.0002, "unit": "in", "note": "plus or minus; matched pair"},
+    {"name": "Holes", "value": 2, "unit": "holes"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/8642A515/", "https://www.mcmaster.com/86425A65/"],
+  "source_files": ["8642A515_Parallels with 2 Precision-Ground Sides.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "McMaster's STEP for the 1 in pair from the 6 x 1/8 in range (the 10-pair set 86425A65 has no CAD). Replaces the earlier cadquery placeholder.",
+  "file": "para.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 616,
+  "bbox": {"min": [-76.2, -46.0, 0.0], "max": [76.2, 46.0, 25.4]},
+  "attach_points": [
+    {"name": "para_a_top", "t": [0.0, -44.45, 25.4], "q": [0.0, 0.0, 0.707107, 0.707107]},
+    {"name": "para_a_face", "t": [0.0, -42.9, 12.7], "q": [-0.707107, -0.0, -0.0, 0.707107]},
+    {"name": "para_a_end_l", "t": [-76.2, -44.45, 17.4], "q": [0.707107, 0.0, -0.707107, 0.0]},
+    {"name": "para_a_end_r", "t": [76.2, -44.45, 17.4], "q": [0.0, 0.707107, 0.0, 0.707107]},
+    {"name": "para_b_top", "t": [0.0, 44.45, 25.4], "q": [0.0, 0.0, 0.707107, 0.707107]},
+    {"name": "para_b_face", "t": [0.0, 42.9, 12.7], "q": [0.707107, 0.0, 0.0, 0.707107]},
+    {"name": "para_b_end_l", "t": [-76.2, 44.45, 17.4], "q": [0.707107, 0.0, -0.707107, 0.0]},
+    {"name": "para_b_end_r", "t": [76.2, 44.45, 17.4], "q": [0.0, 0.707107, 0.0, 0.707107]}
+  ],
+  "build": {
+    "from": "source/8642A515_Parallels with 2 Precision-Ground Sides.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 616,
+      "deflection_mm": 0.036,
+      "simplified": false,
+      "glb_bytes": 14896
+    }
+  }
+}

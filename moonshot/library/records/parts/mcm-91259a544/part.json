@@ -1,0 +1,51 @@
+{
+  "id": "mcm-91259a544",
+  "name": "Alloy steel shoulder screw, 1/4\" x 1-1/4\" shoulder, 10-24",
+  "source": {
+    "kind": "McMaster-Carr catalog CAD",
+    "origin": "https://www.mcmaster.com/91259A544/",
+    "part_no": "91259A544",
+    "files": {
+      "step": "91259A544_Alloy Steel Shoulder Screw.STEP",
+      "pdf": "91259A544_Alloy Steel Shoulder Screw.pdf"
+    },
+    "license": "McMaster-Carr CAD, downloaded from a logged-in account; check their terms before redistributing"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "Alloy steel, Rockwell C32",
+  "heat_treat": null,
+  "finish": "Black oxide; ground shoulder",
+  "quantity": null,
+  "quantity_note": "Catalog part, no order quantity",
+  "size": "Ø0.250 shoulder x 1.25 in, 3/8\" knurled head",
+  "units": "in",
+  "tolerances": {
+    "general": "McMaster catalog specs",
+    "critical": [
+      "Shoulder Ø0.250 -0.004/-0.002",
+      "Shoulder length ±0.005",
+      "10-24 UNC-3A thread, 3/8\" long",
+      "1/8\" hex socket"
+    ]
+  },
+  "machines_likely": [
+    "lathe",
+    "thread_roller",
+    "heat_treat (outside)",
+    "cylindrical_grinder",
+    "black_oxide (outside)",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Purchased part; machines_likely is how a shop would make it.",
+  "selection_reason": "Turned, threaded, heat-treated and ground fastener with a knurled socket head: a production screw-machine part.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.925,
+    "bodies": 1,
+    "faces": 349,
+    "date": "2026-10-20"
+  }
+}

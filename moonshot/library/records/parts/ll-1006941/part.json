@@ -1,0 +1,54 @@
+{
+  "id": "ll-1006941",
+  "name": "Robot pedestal (Robotersockel)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1006941",
+    "files": {
+      "step": "1006941-_314-092-59192-02-0000.step",
+      "pdf": "1006941-_314-092-59195-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "weldment",
+  "material": "Plain carbon steel: 6x6x1/4 wall tube + 2 plates 15.9 mm",
+  "heat_treat": null,
+  "finish": "Powdercoat RAL 7035",
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "254 x 254 x 940.9 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "Ø8.000 dowel holes (P.F. and S.F.)",
+      "Ø170 bolt circle 4X M8",
+      "36X M6 on 4 faces of tube",
+      "Plates welded centered on tube, 6 mm fillets"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "band_saw",
+    "vmc",
+    "welder",
+    "powder_coat (outside)",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Three-piece weldment (tube + 2 plates) with dowel holes and powdercoat: saw, mill, weld and paint in one job.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.123,
+    "bodies": 3,
+    "faces": 94,
+    "date": "2026-10-20"
+  }
+}

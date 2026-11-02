@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "hone",
+  "name": "Bore honing machine",
+  "category": "machines",
+  "make": "Sunnen",
+  "model": "ML-5000 class horizontal hone",
+  "description": "Horizontal stroking hone that finishes bores to size, roundness and surface finish.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Bore range", "value": "0.06-6.5 in (typical for the class)"},
+    {"name": "Size control", "value": "0.0001 in (typical)"},
+    {"name": "Finish", "value": "Ra 4-16 uin (typical)"}
+  ],
+  "source_urls": [],
+  "source_files": ["hone.step"],
+  "license": "self-made placeholder (planner.placeholders.honing_machine)",
+  "notes": "GENERIC: no honing machine CAD on GrabCAD or Sketchfab. Sized and specified as typical for a Sunnen ML-5000 class bench hone.",
+  "file": "hone.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 340,
+  "bbox": {"min": [-660.4, -381.0, 0.0], "max": [660.4, 381.0, 1473.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/hone.step",
+    "placeholder": "honing_machine",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 340,
+      "deflection_mm": 0.424,
+      "simplified": false,
+      "glb_bytes": 11308
+    }
+  }
+}

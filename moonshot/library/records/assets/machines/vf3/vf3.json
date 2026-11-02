@@ -1,0 +1,61 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "vf3",
+  "name": "Haas VF-3SSYT vertical machining centre",
+  "category": "machines",
+  "make": "Haas",
+  "model": "VF-3SSYT",
+  "description": "Super-speed 40-taper VMC with extended Y: 40 x 26 x 25 in travels on a 54 x 24 in table, 12,000 rpm, 30+1 side-mount changer.",
+  "generic": false,
+  "key_specs": [
+    {"name": "X travel", "value": 40.0, "unit": "in"},
+    {"name": "Y travel", "value": 26.0, "unit": "in"},
+    {"name": "Z travel", "value": 25.0, "unit": "in"},
+    {"name": "Spindle nose to table", "value": [4.2, 29.2], "unit": "in"},
+    {"name": "Table", "value": "54.0 x 24.0 in, 7 T-slots 0.626-0.630 in on 3.15 in centres"},
+    {"name": "Max weight on table", "value": 1750, "unit": "lb"},
+    {"name": "Max spindle speed", "value": 12000, "unit": "rpm"},
+    {"name": "Spindle power", "value": 30.0, "unit": "hp"},
+    {"name": "Taper", "value": "CT40 (BT40, HSK-A63 options)"},
+    {"name": "Tool changer", "value": "30+1 side-mount (SMTC)"},
+    {
+      "name": "Max tool diameter (full)",
+      "value": 2.5,
+      "unit": "in",
+      "note": "5.0 in with adjacent pockets empty"
+    },
+    {"name": "Max tool length", "value": 13.0, "unit": "in", "note": "from gauge line"}
+  ],
+  "source_urls": [
+    "https://www.haascnc.com/machines/vertical-mills/vf-series/models/medium/vf-3ssyt.html",
+    "https://pub-aem.haascnc.com/content/dam/haascnc/pdp_feed/3d/vf-3ssyt-solid_models_12_2021.zip"
+  ],
+  "source_files": ["VF-3_SSYT_YT_STEP_12_2021.STEP", "VF-3_SSYT_YT_x_t_12_2021.x_t"],
+  "license": "Haas Automation 3D model download (manufacturer marketing file, 2021); not self-made or CC0",
+  "notes": "Haas ships one model for the VF-3SS-YT and VF-3YT with both changers and three tables. Left out: the 20-pocket umbrella changer, the 50-pocket SMTC and the two low-table variants, leaving the standard table and 30+1 SMTC.",
+  "file": "vf3.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 111315,
+  "bbox": {"min": [-1903.9, -1469.1, -0.1], "max": [1903.9, 1469.0, 3111.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/VF-3_SSYT_YT_STEP_12_2021.STEP",
+    "up": "+Y",
+    "exclude": ["20-UMB*", "50-SMTC*", "Table_Low-*"],
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [
+        "20-UMB_VF-3_SS-YT_11_2021",
+        "50-SMTC_VF-3_SS_YT_11_2021",
+        "50-SMTC-VF-MD-YT-37-3630-",
+        "Table_Low-Metric_VF-3_SS_YT_11_2021_37-3624_defeature",
+        "Table_Low-Inch_VF-3_SS_YT_11_2021_37-3624_defeature"
+      ],
+      "meshed_triangles": 111315,
+      "deflection_mm": 6.928203230275509e+96,
+      "simplified": false,
+      "glb_bytes": 2753660
+    }
+  }
+}

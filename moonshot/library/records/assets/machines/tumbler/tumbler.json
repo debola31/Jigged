@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tumbler",
+  "name": "Vibratory finisher",
+  "category": "machines",
+  "make": "Generic",
+  "model": "1.5 cu ft bowl vibratory finisher",
+  "description": "Bowl-type vibratory finisher that deburrs and polishes small parts in batches with ceramic or plastic media.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Bowl capacity", "value": 1.5, "unit": "cu ft", "note": "typical"},
+    {"name": "Bowl diameter", "value": 30, "unit": "in"},
+    {"name": "Motor", "value": 0.75, "unit": "hp", "note": "typical"}
+  ],
+  "source_urls": [],
+  "source_files": ["tumbler.step"],
+  "license": "self-made placeholder (planner.placeholders.vibratory_finisher)",
+  "notes": "GENERIC: GrabCAD's vibratory tumbler is parts only, with no assembly STEP; McMaster has no CAD.",
+  "file": "tumbler.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2860,
+  "bbox": {"min": [-380.9, -381.0, 0.0], "max": [380.9, 381.0, 812.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/tumbler.step",
+    "placeholder": "vibratory_finisher",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2860,
+      "deflection_mm": 0.27,
+      "simplified": false,
+      "glb_bytes": 64396
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "id": "nist-ftc-09",
+  "name": "NIST FTC-09 (Fully-Toleranced Test Case 9)",
+  "source": {
+    "kind": "NIST MBE PMI validation and conformance test models",
+    "origin": "https://www.nist.gov/el/systems-integration-division-73400/mbe-pmi-validation-and-conformance-testing/download-free-cad",
+    "files": {
+      "step": "nist_ftc_09_asme1_rd.stp",
+      "pdf": "nist_ftc_09_asme1_rd.pdf"
+    },
+    "license": "US Government work (NIST), public domain in the US"
+  },
+  "visibility": "public",
+  "part_type": "sheet",
+  "material": "304 stainless steel sheet, 11 ga (.1195 thick), ASTM A240",
+  "material_note": null,
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown (test model)",
+  "size": "279.4 x 190.5 x 3.0 mm",
+  "units": "in",
+  "tolerances": {
+    "general": "ASME Y14.5-1994 GD&T; see drawing.pdf",
+    "critical": [
+      "Fully toleranced flat pattern, ASME Y14.5 (see PDF)"
+    ]
+  },
+  "machines_likely": [
+    "laser_cutter",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "No real routing (test model); machines_likely is inferred.",
+  "selection_reason": "Stainless flat sheet part, fully toleranced: the only stainless material, and laser-only work.",
+  "problems": [
+    "The AP242-e1 file (nist_ftc_09_asme1_ap242-e1.stp) has no loadable solid in OCCT/cadquery (Bnd_Box is void), so the AP203 geometry-only file from the same rev D is used. It has no PMI."
+  ],
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.183,
+    "bodies": 1,
+    "faces": 158,
+    "date": "2026-10-20"
+  }
+}

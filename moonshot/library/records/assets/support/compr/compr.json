@@ -1,0 +1,39 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "compr",
+  "name": "Air compressor",
+  "category": "support",
+  "make": "Generic",
+  "model": "150 L (40 gal) horizontal-tank piston compressor",
+  "description": "Tank-mounted piston compressor that supplies shop air for tools, blow-off and the machines' air inputs.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Tank", "value": 150, "unit": "L", "note": "about 40 gal"},
+    {"name": "Pressure", "value": 125, "unit": "psi", "note": "typical"},
+    {"name": "Output", "value": "about 10-14 cfm at 90 psi (typical)"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/150l-industrial-heavy-duty-air-compressor-precision-layout-model-1"
+  ],
+  "source_files": ["150L air compressor.STEP", "150L air compressor.IGS"],
+  "license": "GrabCAD community model by WANG QING (2026), GrabCAD terms of use; not self-made or CC0",
+  "notes": "The device list suggests Kaeser, which publishes no CAD. Pressure and output are typical for the tank size.",
+  "file": "compr.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 284998,
+  "bbox": {"min": [-777.5, -263.0, 0.0], "max": [777.5, 263.0, 1052.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/150L air compressor.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 471370,
+      "deflection_mm": 7.801,
+      "simplified": true,
+      "glb_bytes": 7672144
+    }
+  }
+}

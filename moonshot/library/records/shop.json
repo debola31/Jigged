@@ -1,0 +1,1081 @@
+{
+  "$schema": "./shop.schema.json",
+  "schema": "setupguide.shop/0.1",
+  "shop": {
+    "id": "cedar-ridge",
+    "name": "Cedar Ridge Machine Works",
+    "fictional": true,
+    "units": "inch",
+    "note": "Fictional shop for the setup-guide prototype. Machine capability values are tagged: sourced (a published figure, with its URL; mostly dealer listings, since haascnc.com blocks automated fetches) or typical (a representative figure for the class). Check them against the manufacturer's sheets before relying on them.",
+    "conventions": {"probe_tool_number": 20, "default_wcs": "G54"}
+  },
+  "machines": [
+    {
+      "id": "vf2-1",
+      "name": "Haas VF-2 (bay 1)",
+      "kind": "vmc",
+      "make": "Haas",
+      "model": "VF-2",
+      "control": "Haas NGC",
+      "guide_support": true,
+      "asset": "vf2",
+      "travels": {
+        "x": 30.0,
+        "y": 16.0,
+        "z": 20.0,
+        "basis": "sourced",
+        "source": "https://www.haascnc.com/machines/vertical-mills/vf-series/models/small/vf-2.html"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine size and position tolerance on milled features; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "table": {
+        "length": 36.0,
+        "width": 14.0,
+        "max_load_lb": 3000,
+        "t_slots": {"count": 3, "width": 0.625, "spacing": 4.921}
+      },
+      "spindle": {
+        "interface": "CAT40",
+        "max_rpm": 8100,
+        "power_hp": 30,
+        "nose_to_table": {"min": 4.0, "max": 24.0}
+      },
+      "tool_changer": {"type": "carousel", "capacity": 20},
+      "work_offsets": ["G54", "G55", "G56", "G57", "G58", "G59"]
+    },
+    {
+      "id": "vf3-1",
+      "name": "Haas VF-3SSYT (bay 2)",
+      "kind": "vmc",
+      "make": "Haas",
+      "model": "VF-3SSYT",
+      "control": "Haas NGC",
+      "guide_support": true,
+      "asset": "vf3",
+      "travels": {
+        "x": 40.0,
+        "y": 26.0,
+        "z": 25.0,
+        "basis": "sourced",
+        "source": "https://www.haascnc.com/machines/vertical-mills/vf-series/models/medium/vf-3ssyt.html"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine size and position tolerance on milled features; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "table": {
+        "length": 54.0,
+        "width": 24.0,
+        "max_load_lb": 1750,
+        "t_slots": {"count": 7, "width": 0.625, "spacing": 3.15}
+      },
+      "spindle": {
+        "interface": "CAT40",
+        "max_rpm": 12000,
+        "power_hp": 30,
+        "nose_to_table": {"min": 4.2, "max": 29.2}
+      },
+      "tool_changer": {"type": "side_mount", "capacity": 30},
+      "work_offsets": ["G54", "G55", "G56", "G57", "G58", "G59"]
+    },
+    {
+      "id": "hmc-1",
+      "name": "Haas EC-400 horizontal mill",
+      "kind": "hmc",
+      "make": "Haas",
+      "model": "EC-400",
+      "control": "Haas NGC",
+      "guide_support": false,
+      "asset": "hmc",
+      "travels": {
+        "x": 22.0,
+        "y": 25.0,
+        "z": 22.0,
+        "basis": "sourced",
+        "source": "https://www.haascnc.com/machines/horizontal-mills/ec-series/models/ec-400.html"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine size and position tolerance on milled features; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "spindle": {"interface": "CAT40", "max_rpm": 8100, "power_hp": 30},
+      "tool_changer": {"type": "side_mount", "capacity": 30},
+      "capacity": {"pallet_size": [15.75, 15.75], "pallets": 2}
+    },
+    {
+      "id": "fadal-1",
+      "name": "Fadal VMC 4020",
+      "kind": "vmc",
+      "make": "Fadal",
+      "model": "VMC 4020",
+      "guide_support": false,
+      "asset": "fadal",
+      "note": "The device list also names a 30 x 60 Fadal (VMC 6030), not modelled.",
+      "travels": {
+        "x": 40.0,
+        "y": 20.0,
+        "z": 20.0,
+        "basis": "sourced",
+        "source": "https://surplusrecord.com/listing/fadal-vmc4020ht-40-x-20-y-20-z-10000-rpm-21-automatic-tool-changer-48-x20-table-22-5-hp-cat-40-2004-752415/"
+      },
+      "achievable_tolerance": {"value": 0.001, "basis": "typical", "note": "older machine: routine +/-0.001 in; tighter with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "spindle": {"interface": "CAT40", "max_rpm": 10000, "power_hp": 22.5},
+      "capacity": {"table": [48.0, 20.0]}
+    },
+    {
+      "id": "hurco-vm1-1",
+      "name": "Hurco VM1",
+      "kind": "vmc",
+      "make": "Hurco",
+      "model": "VM1",
+      "control": "Hurco WinMax",
+      "guide_support": false,
+      "asset": "hurco",
+      "note": "The device list's Hurco VMC / TRM30HT: the Hurco VM1 is modelled; the toolroom mill is not.",
+      "travels": {
+        "x": 26.0,
+        "y": 14.0,
+        "z": 18.0,
+        "basis": "sourced",
+        "source": "https://surplusrecord.com/listing/hurco-vm-1-cnc-vertical-machining-center-16-automatic-tool-changer-26-x-14-y-18-z-8000-rpm-10-hp-chip-auger-coolant-system-2006-669749/"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine size and position tolerance on milled features; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "spindle": {"interface": "CAT40", "max_rpm": 8000, "power_hp": 10},
+      "tool_changer": {"type": "side_mount", "capacity": 16},
+      "capacity": {"table": [29.0, 14.0]}
+    },
+    {
+      "id": "st25-1",
+      "name": "Haas ST-25 (bay 3)",
+      "kind": "lathe",
+      "make": "Haas",
+      "model": "ST-25",
+      "control": "Haas NGC",
+      "guide_support": false,
+      "asset": "st25",
+      "work_envelope": {
+        "kind": "turning",
+        "dims": {"max_diameter": 13.0, "max_length": 22.5, "swing": 21.0, "bar_capacity": 3.0},
+        "basis": "sourced",
+        "source": "https://www.haascnc.com/machines/lathes/st/models/standard/st-25.html"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine diameter tolerance; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "spindle": {"interface": "A2-6", "max_rpm": 3400, "power_hp": 30},
+      "lathe": {"chuck": 10.0, "bar_capacity": 3.0, "max_cutting_diameter": 13.0, "max_cutting_length": 22.5, "turret_stations": 12}
+    },
+    {
+      "id": "tmx8-1",
+      "name": "Hurco TMX8MYi turning centre",
+      "kind": "lathe",
+      "make": "Hurco",
+      "model": "TMX8MYi",
+      "guide_support": false,
+      "asset": "tmx8",
+      "work_envelope": {
+        "kind": "turning",
+        "dims": {"max_diameter": 10.9, "max_length": 20.7, "swing": 20.0, "bar_capacity": 2.6, "chuck": 8.0},
+        "basis": "sourced",
+        "source": "https://www.equipt.com/listings/77490-new-hurco-tmx8mysi-cnc-lathes-in-utah",
+        "note": "dealer figures for the TMX8MYSi, the sub-spindle sibling"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine diameter tolerance; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "mazak-1",
+      "name": "Mazak QT-Primos 100",
+      "kind": "lathe",
+      "make": "Mazak",
+      "model": "QT-Primos 100",
+      "guide_support": false,
+      "asset": "mazak",
+      "work_envelope": {
+        "kind": "turning",
+        "dims": {"max_diameter": 7.09, "max_length": 7.87, "swing": 17.48, "bar_capacity": 1.4, "chuck": 6.0},
+        "basis": "sourced",
+        "source": "https://mazak.com/jp-en/products/qt-primos"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "routine diameter tolerance; +/-0.0002 in with care"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "manual-lathe-1",
+      "name": "Manual engine lathe",
+      "kind": "manual_lathe",
+      "make": "Generic",
+      "model": "Gap-bed engine lathe",
+      "guide_support": false,
+      "asset": "mlathe",
+      "note": "Stands in for the shop's ProtoTRAK 1745 toolroom lathe; the generic model is a bigger gap-bed lathe.",
+      "work_envelope": {
+        "kind": "turning",
+        "dims": {"swing": 26.0, "between_centers": 120.0},
+        "basis": "typical",
+        "note": "estimated from the model's 194 in length"
+      },
+      "achievable_tolerance": {"value": 0.001, "basis": "typical", "note": "manual turning, one-offs"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "knee-mill-1",
+      "name": "Bridgeport-type knee mill",
+      "kind": "knee_mill",
+      "make": "Generic",
+      "model": "Bridgeport-type turret knee mill",
+      "guide_support": false,
+      "asset": "kmill",
+      "note": "The device list's Bridgeport / Acer knee mill.",
+      "travels": {"x": 30.0, "y": 12.0, "z": 16.0, "basis": "typical", "note": "Bridgeport Series I class; Z is the knee, plus 5 in of quill"},
+      "achievable_tolerance": {"value": 0.001, "basis": "typical", "note": "manual milling with DRO"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "titanium", "plastics"],
+        "basis": "typical"
+      },
+      "table": {
+        "length": 42.0,
+        "width": 9.0,
+        "t_slots": {"count": 3, "width": 0.625, "spacing": 2.5}
+      },
+      "spindle": {"interface": "R8", "max_rpm": 4200, "power_hp": 2},
+      "capacity": {"quill_travel": 5.0}
+    },
+    {
+      "id": "grinder-1",
+      "name": "10x24 surface grinder",
+      "kind": "surface_grinder",
+      "make": "Generic",
+      "model": "10 x 24 manual surface grinder",
+      "guide_support": false,
+      "asset": "sgrind",
+      "work_envelope": {
+        "kind": "grinding",
+        "dims": {"length": 24.0, "width": 10.0, "wheel_diameter": 10.0},
+        "basis": "typical",
+        "note": "chuck and wheel measured from the model"
+      },
+      "achievable_tolerance": {"value": 0.0001, "basis": "typical", "note": "flatness and size on ground faces"},
+      "materials": {
+        "values": ["carbon_steel", "alloy_steel", "tool_steel", "hardened_steel", "stainless_steel", "cast_iron", "carbide"],
+        "basis": "typical",
+        "note": "carbide with a diamond wheel"
+      }
+    },
+    {
+      "id": "tc-grinder-1",
+      "name": "ANCA TX7 tool and cutter grinder",
+      "kind": "tool_cutter_grinder",
+      "make": "ANCA",
+      "model": "TX7",
+      "guide_support": false,
+      "asset": "tcgrind",
+      "work_envelope": {
+        "kind": "tool",
+        "dims": {"max_tool_diameter": 8.0, "max_tool_length": 15.75, "wheel_diameter": 8.0},
+        "basis": "sourced",
+        "source": "https://www.machinetools.com/en/for-sale/726496-anca-tx7-plus-tool-and-cutter-grinders/spec_sheet"
+      },
+      "achievable_tolerance": {"value": 0.0002, "basis": "typical", "note": "tool diameter and geometry"},
+      "materials": {"values": ["carbide", "tool_steel"], "basis": "typical", "note": "solid carbide and HSS tools"}
+    },
+    {
+      "id": "tool-grinder-1",
+      "name": "Deckel SO single-lip cutter grinder",
+      "kind": "tool_grinder",
+      "make": "Deckel",
+      "model": "SO",
+      "guide_support": false,
+      "asset": "pgrind",
+      "note": "The device list's manual precision grinder (profile and flute grinding of tools).",
+      "work_envelope": {
+        "kind": "tool",
+        "dims": {"max_collet": 0.625, "wheel_diameter": 4.0, "max_radius": 0.4},
+        "basis": "sourced",
+        "source": "https://surplusrecord.com/listing/deckel-so-tool-cutter-grinder-1-32-11-16-collet-capacity-1-6-travel-3400-rpm-1040329/"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "form and relief on single-lip cutters"},
+      "materials": {"values": ["carbide", "tool_steel"], "basis": "typical"}
+    },
+    {
+      "id": "hone-1",
+      "name": "Bore honing machine",
+      "kind": "hone",
+      "make": "Sunnen",
+      "model": "ML-5000 class",
+      "guide_support": false,
+      "asset": "hone",
+      "work_envelope": {
+        "kind": "bore",
+        "dims": {"min_bore": 0.06, "max_bore": 6.5},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.0001, "basis": "typical", "note": "bore size and roundness"},
+      "materials": {
+        "values": ["carbon_steel", "alloy_steel", "stainless_steel", "hardened_steel", "cast_iron", "aluminum", "brass", "bronze"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "edm-1",
+      "name": "Mitsubishi MD+PRO II wire EDM",
+      "kind": "wire_edm",
+      "make": "Mitsubishi",
+      "model": "MD+PRO II",
+      "guide_support": false,
+      "asset": "wedm",
+      "travels": {
+        "x": 12.6,
+        "y": 9.8,
+        "z": 8.7,
+        "basis": "sourced",
+        "source": "https://www.machinetools.com/en/for-sale/548415-mitsubishi-edm-md-plus-pro-ii-wire-edm/spec_sheet"
+      },
+      "achievable_tolerance": {"value": 0.0002, "basis": "typical", "note": "profile size after a skim pass"},
+      "materials": {
+        "values": [
+          "tool_steel",
+          "hardened_steel",
+          "carbide",
+          "carbon_steel",
+          "stainless_steel",
+          "titanium",
+          "nickel_alloy",
+          "copper",
+          "brass",
+          "aluminum"
+        ],
+        "basis": "typical",
+        "note": "any electrically conductive material"
+      },
+      "capacity": {"wire_diameter": 0.01}
+    },
+    {
+      "id": "saw-1",
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "kind": "band_saw",
+      "make": "McMaster-Carr",
+      "model": "8962N13 (9 x 16 in horizontal)",
+      "guide_support": false,
+      "asset": "bandsaw",
+      "work_envelope": {
+        "kind": "saw",
+        "dims": {"round": 9.0, "rectangle_height": 9.0, "rectangle_width": 16.0},
+        "basis": "sourced",
+        "source": "https://www.mcmaster.com/8962N13/"
+      },
+      "achievable_tolerance": {"value": 0.015, "basis": "typical", "note": "cut length; stock is sawn oversize and machined"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "laser-1",
+      "name": "Fiber laser marker",
+      "kind": "laser_marker",
+      "make": "Generic",
+      "model": "Cabinet fiber laser marker",
+      "guide_support": false,
+      "asset": "laser",
+      "work_envelope": {
+        "kind": "marking_field",
+        "dims": {"x": 4.3, "y": 4.3},
+        "basis": "typical",
+        "note": "110 x 110 mm F-theta lens"
+      },
+      "achievable_tolerance": {"value": 0.002, "basis": "typical", "note": "mark position on a fixtured part"},
+      "materials": {
+        "values": ["aluminum", "stainless_steel", "carbon_steel", "tool_steel", "titanium", "brass", "carbide", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "etch-1",
+      "name": "Electro-chemical etch marker",
+      "kind": "etch_marker",
+      "make": "Generic",
+      "model": "Bench electrochemical marking unit",
+      "guide_support": false,
+      "asset": "etch",
+      "work_envelope": {
+        "kind": "marking_field",
+        "dims": {"x": 2.0, "y": 1.0},
+        "basis": "typical",
+        "note": "stencil window"
+      },
+      "achievable_tolerance": {"value": 0.01, "basis": "typical", "note": "mark position with a hand-placed stencil"},
+      "materials": {
+        "values": [
+          "carbon_steel",
+          "alloy_steel",
+          "stainless_steel",
+          "tool_steel",
+          "hardened_steel",
+          "aluminum",
+          "titanium",
+          "carbide",
+          "brass",
+          "copper"
+        ],
+        "basis": "typical",
+        "note": "conductive metals only"
+      }
+    },
+    {
+      "id": "braze-1",
+      "name": "Torch braze station",
+      "kind": "braze_station",
+      "make": "Generic",
+      "model": "Oxy-acetylene brazing bench",
+      "guide_support": false,
+      "asset": "braze",
+      "work_envelope": {
+        "kind": "bench",
+        "dims": {"length": 48.0, "width": 30.0},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.005, "basis": "typical", "note": "tip position after brazing; ground to size afterwards"},
+      "materials": {"values": ["carbide", "carbon_steel", "alloy_steel", "tool_steel"], "basis": "typical", "note": "carbide tips on steel bodies"}
+    },
+    {
+      "id": "welder-1",
+      "name": "PrimeWeld TIG225X TIG welder",
+      "kind": "welder",
+      "make": "PrimeWeld",
+      "model": "TIG225X",
+      "guide_support": false,
+      "asset": "welder",
+      "note": "The device list names TIG / MIG; the TIG unit is modelled.",
+      "work_envelope": {
+        "kind": "weld",
+        "dims": {"max_aluminum_thickness": 0.25, "max_current_a": 225},
+        "basis": "sourced",
+        "source": "https://weldguru.com/primeweld-tig225x-review/"
+      },
+      "achievable_tolerance": {"value": 0.03, "basis": "typical", "note": "weldment dimensions; critical faces are machined after welding"},
+      "materials": {"values": ["carbon_steel", "alloy_steel", "stainless_steel", "aluminum", "copper"], "basis": "typical"}
+    },
+    {
+      "id": "belt-sander-1",
+      "name": "Kalamazoo 2FSM belt sander",
+      "kind": "belt_sander",
+      "make": "Kalamazoo",
+      "model": "2FSM",
+      "guide_support": false,
+      "asset": "belt",
+      "work_envelope": {
+        "kind": "belt",
+        "dims": {"belt_width": 2.0, "belt_length": 48.0, "platen_width": 2.75, "platen_length": 8.0},
+        "basis": "sourced",
+        "source": "https://www.kbctools.ca/itemdetail/2-002-2FSM",
+        "note": "platen size from the 2FSMS listing, a sibling model"
+      },
+      "achievable_tolerance": {"value": 0.005, "basis": "typical", "note": "hand deburring and edge breaks"},
+      "materials": {"values": ["aluminum", "brass", "carbon_steel", "stainless_steel", "tool_steel", "plastics"], "basis": "typical"}
+    },
+    {
+      "id": "bench-grinder-1",
+      "name": "Bench grinder",
+      "kind": "bench_grinder",
+      "make": "Generic",
+      "model": "8 in bench grinder",
+      "guide_support": false,
+      "asset": "bgrind",
+      "note": "The device list's bench grinder with deburr / polish wheels.",
+      "work_envelope": {
+        "kind": "wheels",
+        "dims": {"wheel_diameter": 8.0, "wheel_width": 1.0},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.01, "basis": "typical", "note": "hand deburring and tool touch-up"},
+      "materials": {
+        "values": ["carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron"],
+        "basis": "typical",
+        "note": "aluminium on the wire wheel only"
+      }
+    },
+    {
+      "id": "blast-1",
+      "name": "Sand blast cabinet",
+      "kind": "blast_cabinet",
+      "make": "GueriTech",
+      "model": "Shop sand blast cabinet (DIY design)",
+      "guide_support": false,
+      "asset": "blast",
+      "work_envelope": {
+        "kind": "chamber",
+        "dims": {"width": 47.0, "depth": 25.0},
+        "basis": "typical",
+        "note": "measured from the model"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "removes less than 0.0005 in: a finish, not a sizing step"},
+      "materials": {"values": ["aluminum", "carbon_steel", "stainless_steel", "tool_steel", "titanium", "cast_iron", "brass"], "basis": "typical"}
+    },
+    {
+      "id": "tumbler-1",
+      "name": "Vibratory finisher",
+      "kind": "vibratory_finisher",
+      "make": "Generic",
+      "model": "1.5 cu ft bowl vibratory finisher",
+      "guide_support": false,
+      "asset": "tumbler",
+      "note": "The device list's tumbler / vibratory finisher.",
+      "work_envelope": {
+        "kind": "chamber",
+        "dims": {"bowl_diameter": 30.0, "capacity_cu_ft": 1.5},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "edge break and finish only"},
+      "materials": {"values": ["aluminum", "brass", "carbon_steel", "stainless_steel", "titanium", "plastics"], "basis": "typical"}
+    },
+    {
+      "id": "secondary-op-1",
+      "name": "Screw secondary-op machine",
+      "kind": "secondary_op",
+      "make": "Generic",
+      "model": "Bowl-fed slotting and cross-drilling machine",
+      "guide_support": false,
+      "asset": "screw",
+      "work_envelope": {
+        "kind": "part",
+        "dims": {"max_diameter": 0.5, "max_length": 2.0},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.005, "basis": "typical", "note": "slot or cross-hole position"},
+      "materials": {"values": ["carbon_steel", "stainless_steel", "brass", "aluminum"], "basis": "typical"}
+    },
+    {
+      "id": "drill-press-1",
+      "name": "Column drill press",
+      "kind": "drill_press",
+      "make": "Generic",
+      "model": "Floor column drilling machine",
+      "guide_support": false,
+      "asset": "dpress",
+      "note": "The device list's drill press / tapping arm; the tapping arm is not modelled.",
+      "work_envelope": {
+        "kind": "drilling",
+        "dims": {"max_drill": 1.25, "quill_travel": 5.0, "table": [16.0, 16.0]},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.005, "basis": "typical", "note": "hole position to a layout or drill jig"},
+      "materials": {
+        "values": ["aluminum", "brass", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel", "cast_iron", "plastics"],
+        "basis": "typical"
+      }
+    },
+    {
+      "id": "arbor-press-1",
+      "name": "Palmgren No. 1 arbor press",
+      "kind": "arbor_press",
+      "make": "Palmgren",
+      "model": "No. 1 (1 ton)",
+      "guide_support": false,
+      "asset": "apress",
+      "work_envelope": {
+        "kind": "press",
+        "dims": {"max_height": 5.0, "throat": 4.0, "capacity_tons": 1},
+        "basis": "typical"
+      },
+      "achievable_tolerance": {"value": 0.005, "basis": "typical", "note": "pressed-in height against a stop"},
+      "materials": {"values": ["aluminum", "brass", "bronze", "carbon_steel", "alloy_steel", "stainless_steel", "plastics"], "basis": "typical"}
+    },
+    {
+      "id": "comparator-1",
+      "name": "Starrett HB350 optical comparator",
+      "kind": "optical_comparator",
+      "make": "Starrett",
+      "model": "HB350 14-inch bench",
+      "guide_support": false,
+      "asset": "compar",
+      "work_envelope": {
+        "kind": "stage",
+        "dims": {"travel_x": 8.0, "travel_y": 4.0, "screen_diameter": 14.0},
+        "basis": "sourced",
+        "source": "https://surplusrecord.com/listing/14-starrett-hb350-comparator-15-3-x5-table-area-10x-lens-8-horizontal-4-vertical-travel-on-stand-571619/"
+      },
+      "achievable_tolerance": {"value": 0.0005, "basis": "typical", "note": "what it can check: profile to the chart at 10x"},
+      "materials": {
+        "values": [
+          "aluminum",
+          "brass",
+          "carbon_steel",
+          "alloy_steel",
+          "stainless_steel",
+          "tool_steel",
+          "hardened_steel",
+          "titanium",
+          "carbide",
+          "plastics"
+        ],
+        "basis": "typical"
+      }
+    }
+  ],
+  "workholding": [
+    {
+      "id": "vise-6in-1",
+      "kind": "vise",
+      "name": "Kurt D688 6\" vise #1",
+      "asset": "d688",
+      "location": "vf2-1",
+      "jaw_width": 6.0,
+      "jaw_height": 1.735,
+      "max_opening": 8.8,
+      "base_to_seat": 2.885,
+      "keyed": true
+    },
+    {
+      "id": "vise-6in-2",
+      "kind": "vise",
+      "name": "Kurt HDL6AL 6\" double-station vise",
+      "asset": "vise6",
+      "location": "vf3-1",
+      "jaw_width": 6.0,
+      "jaw_height": 1.735,
+      "max_opening": 4.0,
+      "base_to_seat": 3.125,
+      "keyed": true,
+      "stations": 2
+    },
+    {
+      "id": "soft-jaws-1",
+      "kind": "soft_jaws",
+      "name": "McMaster 1005N29 machinable aluminium soft jaws, 6\"",
+      "asset": "softjaw",
+      "location": "vf2-1",
+      "quantity": 2,
+      "size": [6.0, 1.5, 2.0]
+    },
+    {
+      "id": "parallels-1",
+      "kind": "parallel_set",
+      "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+      "asset": "para",
+      "thickness": 0.125,
+      "length": 6.0,
+      "heights": [0.5, 0.625, 0.75, 0.875, 1.0, 1.125, 1.25, 1.375, 1.5, 1.625]
+    },
+    {"id": "vise-stop-1", "kind": "vise_stop", "name": "Swing-arm vise stop #1", "asset": "vstop", "location": "vf2-1", "reach": 6.0},
+    {"id": "vise-stop-2", "kind": "vise_stop", "name": "Swing-arm vise stop #2", "asset": "vstop", "location": "vf3-1", "reach": 6.0},
+    {
+      "id": "edge-finder-1",
+      "kind": "edge_finder",
+      "name": "Edge finder, .200 tip",
+      "asset": "edgef",
+      "tip_diameter": 0.2,
+      "shank_diameter": 0.5
+    },
+    {
+      "id": "probe-1",
+      "kind": "spindle_probe",
+      "name": "Renishaw OMP40-2 spindle probe, 6 mm ruby stylus",
+      "asset": "probe",
+      "location": "vf2-1",
+      "taper": "CAT40",
+      "tool_number": 20,
+      "stylus_ball_diameter": 0.236
+    },
+    {"id": "tool-setter-1", "kind": "tool_setter", "name": "Renishaw OTS tool setter", "asset": "tsetter", "location": "vf2-1"},
+    {
+      "id": "blocks-123-1",
+      "kind": "block_123",
+      "name": "McMaster 8630A74 1-2-3 blocks (pair)",
+      "size": [1.0, 2.0, 3.0],
+      "quantity": 2,
+      "asset": "blk123"
+    },
+    {
+      "id": "clamp-kit-1",
+      "kind": "clamp_kit",
+      "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+      "asset": "clamps",
+      "capacity": {"stud_diameter": 0.5, "slot_width": 0.625, "step_block_range": [0.75, 6.0]}
+    },
+    {
+      "id": "angle-plate-1",
+      "kind": "angle_plate",
+      "name": "McMaster 2353A67 angle plate, 4-1/2 x 6 x 5\"",
+      "asset": "angle",
+      "size": [4.5, 6.0, 5.0]
+    },
+    {
+      "id": "v-blocks-1",
+      "kind": "v_block",
+      "name": "Hardened V-block pair with clamps (McMaster 2361A61)",
+      "asset": "vblock",
+      "quantity": 2,
+      "size": [2.5, 2.5, 2.0],
+      "capacity": {"max_diameter": 1.625}
+    },
+    {
+      "id": "sine-plate-1",
+      "kind": "sine_plate",
+      "name": "6 x 6\" sine plate",
+      "asset": "sine",
+      "location": "grinder-1",
+      "size": [6.0, 6.0, 2.0]
+    },
+    {
+      "id": "chuck-3jaw-1",
+      "kind": "lathe_chuck",
+      "name": "Kitagawa BR10 10\" 3-jaw power chuck",
+      "asset": "chuck3",
+      "location": "st25-1",
+      "mount": "A2-6",
+      "capacity": {"diameter": 10.0, "through_hole": 3.19}
+    },
+    {
+      "id": "collet-chuck-5c-1",
+      "kind": "collet_chuck",
+      "name": "Royal 5C collet chuck, A2-6",
+      "asset": "c5",
+      "location": "st25-1",
+      "mount": "A2-6",
+      "capacity": {"collet_max": 1.0625, "flange_diameter": 7.45}
+    },
+    {
+      "id": "live-center-1",
+      "kind": "live_center",
+      "name": "MT4 live center",
+      "asset": "livectr",
+      "location": "st25-1",
+      "mount": "MT4",
+      "capacity": {"max_load_lb": 1850, "max_rpm": 3000}
+    },
+    {
+      "id": "mag-chuck-1",
+      "kind": "magnetic_chuck",
+      "name": "Suburban 6x18 permanent magnetic chuck",
+      "asset": "magchk",
+      "location": "grinder-1",
+      "capacity": {"length": 18.5, "width": 6.0, "height": 2.625, "pole_pitch": 0.25}
+    },
+    {
+      "id": "spin-indexer-1",
+      "kind": "spin_indexer",
+      "name": "5C collet spin / index fixture",
+      "asset": "spindex",
+      "location": "grinder-1",
+      "capacity": {"collet_max": 1.0625}
+    },
+    {
+      "id": "edm-fixture-1",
+      "kind": "edm_fixture",
+      "name": "EDM fixture plate with edge clamps, 12 x 8\"",
+      "asset": "edmfix",
+      "location": "edm-1",
+      "capacity": {"plate": [12.0, 8.0]}
+    }
+  ],
+  "holders": [
+    {"id": "cat40-em-0500-1", "taper": "CAT40", "kind": "end_mill_holder", "bore": 0.5, "gauge_length": 2.5, "asset": "cat40"},
+    {"id": "cat40-em-0500-2", "taper": "CAT40", "kind": "end_mill_holder", "bore": 0.5, "gauge_length": 2.5, "asset": "cat40"},
+    {"id": "cat40-em-0375-1", "taper": "CAT40", "kind": "end_mill_holder", "bore": 0.375, "gauge_length": 2.5, "asset": "cat40"},
+    {"id": "cat40-em-0750-1", "taper": "CAT40", "kind": "end_mill_holder", "bore": 0.75, "gauge_length": 2.5, "asset": "cat40"},
+    {"id": "cat40-em-0500-3", "taper": "CAT40", "kind": "end_mill_holder", "bore": 0.5, "gauge_length": 1.75, "asset": "cat40"},
+    {
+      "id": "cat40-er32-1",
+      "taper": "CAT40",
+      "kind": "collet_chuck",
+      "collet": "ER32",
+      "capacity": {"min": 0.078, "max": 0.787},
+      "gauge_length": 2.756,
+      "asset": "cat40"
+    },
+    {
+      "id": "cat40-er32-2",
+      "taper": "CAT40",
+      "kind": "collet_chuck",
+      "collet": "ER32",
+      "capacity": {"min": 0.078, "max": 0.787},
+      "gauge_length": 2.756,
+      "asset": "cat40"
+    },
+    {
+      "id": "cat40-dc-0500-1",
+      "taper": "CAT40",
+      "kind": "drill_chuck",
+      "capacity": {"min": 0.0, "max": 0.5},
+      "gauge_length": 3.5,
+      "asset": "cat40"
+    },
+    {"id": "cat40-sma-0750-1", "taper": "CAT40", "kind": "shell_mill_arbor", "pilot": 0.75, "gauge_length": 1.75, "asset": "cat40"}
+  ],
+  "tools": [
+    {
+      "id": "em-0500-3fl",
+      "kind": "end_mill",
+      "description": "1/2\" 3-flute carbide end mill",
+      "diameter": 0.5,
+      "material": "carbide",
+      "flutes": 3,
+      "flute_length": 1.0,
+      "overall_length": 3.0,
+      "shank_diameter": 0.5,
+      "corner_radius": 0.0,
+      "asset": "em12"
+    },
+    {
+      "id": "em-0375-3fl",
+      "kind": "end_mill",
+      "description": "3/8\" 3-flute carbide end mill",
+      "diameter": 0.375,
+      "material": "carbide",
+      "flutes": 3,
+      "flute_length": 0.875,
+      "overall_length": 2.5,
+      "shank_diameter": 0.375,
+      "corner_radius": 0.0,
+      "asset": "em38"
+    },
+    {
+      "id": "em-0250-3fl",
+      "kind": "end_mill",
+      "description": "1/4\" 3-flute carbide end mill",
+      "diameter": 0.25,
+      "material": "carbide",
+      "flutes": 3,
+      "flute_length": 0.75,
+      "overall_length": 2.5,
+      "shank_diameter": 0.25,
+      "corner_radius": 0.0,
+      "asset": "em14"
+    },
+    {
+      "id": "spot-0500-90",
+      "kind": "spot_drill",
+      "description": "1/2\" 90-degree carbide spot drill (McMaster 2911A639)",
+      "diameter": 0.5,
+      "material": "carbide",
+      "point_angle": 90,
+      "overall_length": 3.0,
+      "shank_diameter": 0.5,
+      "asset": "spot"
+    },
+    {
+      "id": "drill-0201",
+      "kind": "drill",
+      "description": "#7 (.201\") cobalt jobber drill",
+      "diameter": 0.201,
+      "designation": "#7",
+      "material": "cobalt",
+      "point_angle": 135,
+      "flute_length": 2.4375,
+      "overall_length": 3.625,
+      "shank_diameter": 0.201,
+      "asset": "drill"
+    },
+    {
+      "id": "drill-0266",
+      "kind": "drill",
+      "description": "H (.266\") cobalt jobber drill",
+      "diameter": 0.266,
+      "designation": "H",
+      "material": "cobalt",
+      "point_angle": 135,
+      "flute_length": 2.875,
+      "overall_length": 4.125,
+      "shank_diameter": 0.266,
+      "asset": "drillh"
+    },
+    {
+      "id": "drill-0281",
+      "kind": "drill",
+      "description": "K (.281\") cobalt jobber drill",
+      "diameter": 0.281,
+      "designation": "K",
+      "material": "cobalt",
+      "point_angle": 135,
+      "flute_length": 2.875,
+      "overall_length": 4.25,
+      "shank_diameter": 0.281,
+      "asset": "drillk"
+    },
+    {
+      "id": "chamfer-0500-90",
+      "kind": "chamfer_mill",
+      "description": "1/2\" 90-degree carbide chamfer mill (McMaster 3073A48)",
+      "diameter": 0.5,
+      "material": "carbide",
+      "flutes": 2,
+      "point_angle": 90,
+      "overall_length": 3.0,
+      "shank_diameter": 0.5,
+      "asset": "chamf"
+    },
+    {
+      "id": "fm-2000",
+      "kind": "face_mill",
+      "description": "2\" indexable face mill, 4 inserts (McMaster 8826A11)",
+      "diameter": 2.0,
+      "material": "indexable",
+      "flutes": 4,
+      "asset": "facem"
+    },
+    {
+      "id": "tap-0250-20",
+      "kind": "tap",
+      "description": "1/4-20 UNC HSS spiral-point plug tap (McMaster 2523A411)",
+      "diameter": 0.25,
+      "designation": "1/4-20",
+      "material": "hss",
+      "flutes": 2,
+      "flute_length": 1.0,
+      "overall_length": 2.5,
+      "asset": "tap"
+    },
+    {
+      "id": "boring-bar-0750",
+      "kind": "boring_bar",
+      "description": "3/4\" shank boring bar, 1/2\" min bore, TPMT-221 insert (McMaster 3249A208)",
+      "diameter": 0.5,
+      "designation": "TPMT-221",
+      "material": "indexable",
+      "shank_diameter": 0.75,
+      "overall_length": 4.625,
+      "max_depth": 2.625,
+      "asset": "boring"
+    }
+  ],
+  "inspection": [
+    {
+      "id": "caliper-6-1",
+      "kind": "caliper",
+      "name": "6\" digital caliper",
+      "make": "Mitutoyo",
+      "model": "500-196-30",
+      "asset": "cal6",
+      "range": {"min": 0.0, "max": 6.0},
+      "resolution": 0.0005,
+      "accuracy": 0.001
+    },
+    {
+      "id": "micrometer-1-1",
+      "kind": "micrometer",
+      "name": "0-1\" outside micrometer",
+      "make": "Mitutoyo",
+      "model": "103-177",
+      "asset": "mic1",
+      "range": {"min": 0.0, "max": 1.0},
+      "resolution": 0.001,
+      "accuracy": 0.0001
+    },
+    {
+      "id": "test-indicator-1",
+      "kind": "test_indicator",
+      "name": "Dial test indicator on a magnetic base",
+      "make": "Mitutoyo",
+      "model": "513-404-10E",
+      "asset": "dti",
+      "range": {"min": 0.0, "max": 0.0315},
+      "resolution": 0.0004,
+      "accuracy": 0.0003
+    },
+    {
+      "id": "height-gauge-1",
+      "kind": "height_gauge",
+      "name": "12\" digital height gauge on a 12 x 18\" granite plate",
+      "asset": "hgauge",
+      "range": {"min": 0.0, "max": 12.0},
+      "resolution": 0.0005,
+      "accuracy": 0.001
+    },
+    {
+      "id": "gauge-blocks-1",
+      "kind": "gauge_blocks",
+      "name": "81-piece gauge-block set and pin gauges",
+      "asset": "gblock",
+      "range": {"min": 0.05, "max": 4.0}
+    },
+    {
+      "id": "thread-gauge-1",
+      "kind": "thread_gauge",
+      "name": "1/4-20 go/no-go thread plug gauge",
+      "make": "McMaster-Carr",
+      "model": "2366A113",
+      "asset": "thread",
+      "designation": "1/4-20 UNC-2B"
+    },
+    {
+      "id": "roughness-1",
+      "kind": "roughness_tester",
+      "name": "Portable surface roughness tester",
+      "make": "Mitutoyo",
+      "model": "SJ-210 class",
+      "asset": "rough",
+      "specs": {"measures": "Ra, Rz", "range_ra_uin": "0.02-6350"}
+    }
+  ],
+  "consumables": [
+    {
+      "id": "grinding-wheel-1",
+      "kind": "grinding_wheel",
+      "name": "10 x 1 x 3\" aluminium oxide grinding wheel",
+      "asset": "gwheel",
+      "location": "grinder-1",
+      "specs": {"diameter": 10.0, "width": 1.0, "bore": 3.0, "abrasive": "A46-H vitrified"}
+    },
+    {
+      "id": "dresser-1",
+      "kind": "wheel_dresser",
+      "name": "Diamond wheel dresser and dressing stick",
+      "asset": "dresser",
+      "location": "grinder-1"
+    },
+    {
+      "id": "edm-wire-1",
+      "kind": "edm_wire",
+      "name": "0.010\" brass EDM wire, P5 spool",
+      "asset": "wire",
+      "location": "edm-1",
+      "specs": {"wire_diameter": 0.01, "spool": "P5, about 5 kg"}
+    }
+  ],
+  "hand_tools": [
+    {"id": "wrenches-1", "kind": "wrench_set", "name": "Wrenches, hex keys, vise handle and chuck key", "asset": "wrench"},
+    {"id": "deburr-1", "kind": "deburring_kit", "name": "Deburring tools, files and abrasive pads", "asset": "deburr"}
+  ],
+  "support": [
+    {
+      "id": "compressor-1",
+      "kind": "air_compressor",
+      "name": "150 L air compressor",
+      "asset": "compr",
+      "specs": {"tank_gal": 40, "pressure_psi": 125}
+    },
+    {"id": "parts-washer-1", "kind": "parts_washer", "name": "Solvent parts washer", "asset": "washer"},
+    {"id": "presetter-1", "kind": "tool_presetter", "name": "CAT40 optical tool presetter", "asset": "preset"},
+    {"id": "benches-1", "kind": "workbench", "name": "Workbenches, tool cabinets and carts", "asset": "bench", "quantity": 3}
+  ],
+  "outside_processes": [
+    {"id": "heat-treat", "kind": "heat_treat", "name": "Heat treat (vendor)", "asset": "outproc"},
+    {"id": "coating", "kind": "coating", "name": "Coating (vendor)", "asset": "outproc"},
+    {"id": "anodize", "kind": "anodize", "name": "Anodize (vendor)", "asset": "outproc"}
+  ]
+}

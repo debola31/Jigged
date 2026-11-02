@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "softjaw",
+  "name": "Machinable soft jaws, 6 in",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "1005N29",
+  "description": "6061 aluminium machinable vise jaw, 6 in wide x 2 in high x 1.5 in thick, cut to hold odd shapes.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Width", "value": 6, "unit": "in"},
+    {"name": "Height", "value": 2, "unit": "in"},
+    {"name": "Thickness", "value": 1.5, "unit": "in"},
+    {"name": "Material", "value": "6061 aluminium"},
+    {"name": "Mounting holes", "value": "0.532 in on 3-7/8 in centres, for 1/2 in screws"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/1005N29/"],
+  "source_files": ["1005N29_Milling-Machine Vise Jaws.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "file": "softjaw.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1544,
+  "bbox": {"min": [-76.2, -50.8, 0.0], "max": [76.2, 50.8, 50.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/1005N29_Milling-Machine Vise Jaws.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1544,
+      "deflection_mm": 0.038,
+      "simplified": false,
+      "glb_bytes": 35416
+    }
+  }
+}

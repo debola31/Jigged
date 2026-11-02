@@ -1,0 +1,40 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill",
+  "name": "Jobber drill",
+  "category": "tooling",
+  "make": "McMaster-Carr (Dormer Pramet)",
+  "model": "27995A617",
+  "description": "#7 (0.201 in) TiN-coated cobalt jobber drill, 135 degree split point: the tap drill for 1/4-20 threads.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 0.201, "unit": "in", "note": "#7 wire gauge"},
+    {"name": "Point angle", "value": 135, "unit": "deg", "note": "split point"},
+    {"name": "Flute length (max drilling depth)", "value": 2.44, "unit": "in"},
+    {"name": "Overall length", "value": 3.625, "unit": "in"},
+    {"name": "Flutes", "value": 2, "unit": "flutes"},
+    {"name": "Material", "value": "Cobalt steel, TiN coated (NAS907 Type J)"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/27995A617/"],
+  "source_files": ["27995A617_Cobalt Steel Drill Bit.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "McMaster's STEP for a #7 cobalt jobber with the same size as the shop's drill-0201 (Haas 03-0290 has no model). Replaces the earlier cadquery placeholder. The H and K drills (drillh, drillk) reuse this STEP resized; the spot drill has its own (spot).",
+  "file": "drill.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47498,
+  "bbox": {"min": [-2.6, -2.6, 0.0], "max": [2.6, 2.6, 93.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/27995A617_Cobalt Steel Drill Bit.STEP",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 51542,
+      "deflection_mm": 0.019,
+      "simplified": true,
+      "glb_bytes": 687416
+    }
+  }
+}

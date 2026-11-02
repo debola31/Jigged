@@ -1,0 +1,43 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "cat40",
+  "name": "CAT40 end mill holder",
+  "category": "tooling",
+  "make": "Haas Tooling",
+  "model": "04-0001",
+  "description": "CAT40 side-lock (Weldon) holder for 1/2 in shank end mills, 1.75 in gage length, through-spindle coolant capable.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Taper", "value": "CAT40 (CT40), 5/8-11 retention knob thread"},
+    {"name": "Bore", "value": 0.5, "unit": "in", "note": "H5 tolerance, 7/16-20 Weldon set screw"},
+    {"name": "Gage length", "value": 1.75, "unit": "in"},
+    {"name": "Body diameter", "value": 1.25, "unit": "in"},
+    {"name": "Balanced to", "value": 20000, "unit": "rpm"},
+    {"name": "Weight", "value": 2.4, "unit": "lb"}
+  ],
+  "source_urls": [
+    "https://www.haastooling.com/p/04-0001",
+    "https://www.haastooling.com/content/dam/haascnc/ecommerce-assets/3d-models/04-0001.stp"
+  ],
+  "source_files": ["04-0001.stp"],
+  "license": "Haas Tooling 3D model download (manufacturer file); not self-made or CC0",
+  "notes": "Haas sells only the 1.75 in gauge length in CT40 1/2 in. Every CAT40 holder in shop.json uses this model, including the 3/8 and 3/4 in end mill holders, the ER32 collet chucks, the drill chuck and the shell mill arbor, whose own gauge lengths stay in their entries.",
+  "file": "cat40.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 26724,
+  "bbox": {"min": [-30.5, -31.7, 0.0], "max": [30.5, 31.7, 112.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/04-0001.stp",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 26724,
+      "deflection_mm": 0.03,
+      "simplified": false,
+      "glb_bytes": 418152
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# The moonshot pipeline's Python dependencies, installed into the `jigged` conda env (Python 3.12) on the hub and
+# every worker: conda run -n jigged pip install -r moonshot/requirements.txt
+# Pinned to what the M4 Max ran trainual's accepted takes with; new pins resolved with
+# pip --uploaded-prior-to <today - 14 days>.
+mujoco==3.17.0
+numpy==2.5.4
+scipy==1.18.1
+trimesh==5.2.0
+jsonschema==4.26.0
+cadquery==2.8.0
+cadquery-ocp==7.9.3.1.1
+MyoSuite==3.0.0
+hypothesis==6.170.1
+import-linter==2.15
+pytest==9.1.1

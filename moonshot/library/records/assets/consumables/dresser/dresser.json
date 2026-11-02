@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "dresser",
+  "name": "Wheel dresser and dressing stick",
+  "category": "consumables",
+  "make": "Generic",
+  "model": "Single-point diamond dresser and Al2O3 stick",
+  "description": "Diamond dresser on a magnetic base that trues the grinding wheel, and a dressing stick that opens it up.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Diamond", "value": "single point, 1/2 carat (typical)"},
+    {"name": "Holder", "value": "7/16 in shank at 15 degrees"},
+    {"name": "Stick", "value": "1 x 1 x 6 in"}
+  ],
+  "source_urls": [],
+  "source_files": ["dresser.step"],
+  "license": "self-made placeholder (planner.placeholders.wheel_dresser)",
+  "notes": "GENERIC: McMaster's dresser pages had no CAD in the time allowed.",
+  "file": "dresser.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 184,
+  "bbox": {"min": [-76.2, -50.8, 0.0], "max": [76.2, 50.8, 65.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/dresser.step",
+    "placeholder": "wheel_dresser",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 184,
+      "deflection_mm": 0.039,
+      "simplified": false,
+      "glb_bytes": 7432
+    }
+  }
+}

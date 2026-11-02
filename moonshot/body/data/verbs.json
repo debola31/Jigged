@@ -1,0 +1,98 @@
+{
+  "schema": "setupguide.verbs/0.1",
+  "units": "mm",
+  "about": "Hand verbs for plan 0.2 (docs/PLAN.md). A verb is a short clip of the palm frame relative to a grip frame, plus finger shapes. blender/build_hands.py bakes every verb x grasp x side into hands.glb as an action named <verb>[_<grasp>].<L|R>; the web player (web/src/operate/motions.ts) reads this file for the same numbers.",
+  "frames": {
+    "grip": "On the asset: origin at the contact point, +Z out of the surface toward the hand, +X the direction the fingers run along the surface.",
+    "palm": "On the hand: origin on the palm skin over the middle metacarpal, +X toward the middle fingertip, +Z out of the palm. hands.json gives it relative to each wrist bone. The palm pads stand about 8 mm proud of it, hence the flat grasp's pad.",
+    "shapes": "Curl angles (deg, about each bone's X; + bends toward the palm) for the three bones of fingers 2-5 and the thumb; MakeHuman's rest hand is already curled, so a flat hand needs negative curls. thumb_spread swings the thumb about its first bone's Z. Angles from a search that puts the fingertips where each grasp needs them (blender/README.md).",
+    "contact": "Where the palm frame sits at contact: grip frame, turned rot_z_deg about +Z, flipped so palm +Z points into the surface, then lifted standoff_mm along grip +Z. A key's `palm` is a further offset in the contact frame (mm, then degrees XYZ).",
+    "approach": "A grasp's optional approach direction (contact frame, unit): a verb key's palm Z offset (how far off the surface the hand is) moves the palm along it instead of along +Z. Fingertip grasps come in from above, back along the fingers, rather than straight out of a vertical face.",
+    "index_tip": "standoff \"index_tip\": instead of the palm, the index fingertip pad of the grasp's shape (hands.json pads) sits on the contact point, so a fingertip grasp touches with the fingertip and keeps the palm clear."
+  },
+  "shapes": {
+    "relax": {"fingers": [16, 22, 14], "thumb": [6, 10, 10], "spread": 4},
+    "open":  {"fingers": [4, 6, 4], "thumb": [-4, 2, 2], "spread": 8},
+    "aperture": {"fingers": [-12, -14, -8], "thumb": [-30, -10, -6], "thumb_spread": 25, "spread": 8},
+    "flat":  {"fingers": [-5, -30, -18], "thumb": [-60, -20, -12], "thumb_spread": 60, "spread": 0},
+    "power": {"fingers": [45, 60, 36], "thumb": [-10, -20, -12], "thumb_spread": 40, "spread": 0},
+    "pinch": {"fingers": [40, 70, 42], "thumb": [-40, 10, 6], "thumb_spread": 45, "spread": 0, "override": {"finger4": [80, 80, 48], "finger5": [80, 80, 48]}},
+    "tips":  {"fingers": [8, 18, 12], "thumb": [-30, 50, 30], "thumb_spread": 50, "spread": 0, "override": {"finger3": [18, 34, 22], "finger4": [45, 55, 35], "finger5": [45, 55, 35]}},
+    "point": {"fingers": [70, 85, 55], "thumb": [24, 30, 20], "spread": 0, "override": {"finger2": [4, 6, 4]}}
+  },
+  "grasps": {
+    "power": {"shape": "power", "rot_z_deg": {"L": 90, "R": -90}, "standoff": "radius", "pad_mm": 8.0},
+    "flat":  {"shape": "flat", "rot_z_deg": {"L": 0, "R": 0}, "standoff": 0, "pad_mm": 8.5},
+    "tips":  {"shape": "tips", "rot_z_deg": {"L": 0, "R": 0}, "standoff": "index_tip", "pad_mm": 1.0, "approach": [-0.85, 0, 0.53]},
+    "tip":   {"shape": "point", "rot_z_deg": {"L": 0, "R": 0}, "standoff": "index_tip", "pad_mm": 1.0}
+  },
+  "stagger_s": {"about": "Fingers do not move together: each finger's keys are delayed by this much (thumb to little), the index leading, as in reach-to-grasp recordings.", "fingers": [0.02, 0.0, 0.035, 0.07, 0.1]},
+  "verbs": {
+    "grab": {
+      "duration": 1.2, "grasps": ["power", "flat", "tips"],
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 90], "rot": [0, 0, 0], "shape": "relax"},
+        {"t": 0.6, "palm": [0, 0, 22], "shape": "aperture"},
+        {"t": 0.85, "palm": [0, 0, 4], "shape": "open"},
+        {"t": 0.95, "palm": [0, 0, 0], "shape": "open"},
+        {"t": 1.2, "palm": [0, 0, 0], "shape": "@grasp"}
+      ]
+    },
+    "place": {
+      "duration": 1.2, "grasps": ["power", "flat", "tips"],
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 0], "shape": "@grasp"},
+        {"t": 0.35, "palm": [0, 0, 0], "shape": "open"},
+        {"t": 0.6, "palm": [0, 0, 12], "shape": "aperture"},
+        {"t": 1.2, "palm": [0, 0, 90], "shape": "relax"}
+      ]
+    },
+    "hold": {
+      "duration": 1.0, "grasps": ["power", "flat", "tips"], "loop": true,
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 0], "shape": "@grasp"},
+        {"t": 0.5, "palm": [0, 0, 0], "rot": [0, 0, 1.5], "shape": "@grasp"},
+        {"t": 1.0, "palm": [0, 0, 0], "shape": "@grasp"}
+      ]
+    },
+    "slide": {
+      "duration": 1.4, "grasps": ["flat", "tips"], "attach": "start",
+      "about": "Push the part along the grip's +X (the fingers' direction) by 5 mm; the plan moves the part the same 5 mm. The palm is anchored where the verb starts, not on the moving part.",
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 0], "shape": "flat"},
+        {"t": 0.3, "palm": [0, 0, 0], "shape": "flat"},
+        {"t": 1.1, "palm": [5, 0, 0], "shape": "flat"},
+        {"t": 1.4, "palm": [5, 0, 0], "shape": "flat"}
+      ]
+    },
+    "rotate": {
+      "duration": 1.0, "grasps": ["power"], "loop": true,
+      "about": "Hold the crank knob while the handle turns; the player moves the knob, the hand rides it (attach: position).",
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 0], "shape": "power"},
+        {"t": 0.5, "palm": [0, 0, 0], "rot": [0, 6, 0], "shape": "power"},
+        {"t": 1.0, "palm": [0, 0, 0], "shape": "power"}
+      ]
+    },
+    "push": {
+      "duration": 1.0, "grasps": ["flat"],
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 40], "shape": "flat"},
+        {"t": 0.45, "palm": [0, 0, 0], "shape": "flat"},
+        {"t": 0.75, "palm": [0, 0, 0], "shape": "flat"},
+        {"t": 1.0, "palm": [0, 0, 40], "shape": "flat"}
+      ]
+    },
+    "measure": {
+      "duration": 1.6, "grasps": ["tip"],
+      "about": "Fingertip check: press the parallel and feel for movement.",
+      "keys": [
+        {"t": 0.0, "palm": [0, 0, 50], "shape": "relax"},
+        {"t": 0.6, "palm": [0, 0, 0], "shape": "point"},
+        {"t": 0.85, "palm": [0, 0, 0], "rot": [0, -2, 0], "shape": "point"},
+        {"t": 1.1, "palm": [0, 0, 0], "rot": [0, 2, 0], "shape": "point"},
+        {"t": 1.6, "palm": [0, 0, 50], "shape": "relax"}
+      ]
+    }
+  }
+}

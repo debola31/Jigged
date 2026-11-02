@@ -1,0 +1,40 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "em12",
+  "name": "1/2 in end mill",
+  "category": "tooling",
+  "make": "Helical Solutions",
+  "model": "03452 (H45AL-SR-30500)",
+  "description": "1/2 in 3-flute carbide square end mill for aluminium, 1 in length of cut, 3 in overall.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 0.5, "unit": "in"},
+    {"name": "Flutes", "value": 3, "unit": "flutes", "note": "45 degree helix"},
+    {"name": "Length of cut", "value": 1.0, "unit": "in"},
+    {"name": "Overall length", "value": 3.0, "unit": "in"},
+    {"name": "Shank diameter", "value": 0.5, "unit": "in"},
+    {"name": "Coating", "value": "ZPLUS"}
+  ],
+  "source_urls": ["https://www.helicaltool.com/products/tool-details-03452"],
+  "source_files": ["Helical_03452.STEP"],
+  "license": "Helical Solutions SIM/tool-library STEP (manufacturer file); not self-made or CC0",
+  "notes": "Helical's STEP is its simulation model: the cutting envelope and shank as plain cylinders, without flutes. Haas Tooling's matching end mill (03-0086) has no 3D model, and McMaster needs a login.",
+  "file": "em12.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 504,
+  "bbox": {"min": [-6.3, -6.3, 0.0], "max": [6.3, 6.3, 76.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Helical_03452.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 504,
+      "deflection_mm": 0.016,
+      "simplified": false,
+      "glb_bytes": 13136
+    }
+  }
+}

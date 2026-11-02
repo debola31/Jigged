@@ -1,0 +1,46 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "pgrind",
+  "name": "Deckel SO single-lip cutter grinder",
+  "category": "machines",
+  "make": "Deckel",
+  "model": "SO",
+  "description": "Manual single-lip cutter and tool grinder for profile and flute grinding of form tools; the indexing workhead holds the cutter in a collet against a cup wheel.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Collet capacity", "value": 0.625, "unit": "in", "note": "5/8 in, dealer listing"},
+    {"name": "Grinding wheel", "value": 4, "unit": "in", "note": "diameter"},
+    {"name": "Spindle speed", "value": 4500, "unit": "rpm"},
+    {"name": "Max radius ground", "value": 0.4, "unit": "in"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/deckel-so-flute-grinder-1",
+    "https://surplusrecord.com/listing/deckel-so-tool-cutter-grinder-1-32-11-16-collet-capacity-1-6-travel-3400-rpm-1040329/"
+  ],
+  "source_files": [
+    "dECKEL MILL FLUTE GRINDER.IGS",
+    "Deckel SO flute grinder.step (exported from the IGES in Fusion)",
+    "deckel_so.step (composed)"
+  ],
+  "license": "GrabCAD community model by Bill (2023), GrabCAD terms of use; not self-made or CC0",
+  "notes": "GrabCAD's model is only the SO's indexing workhead (248 mm long, true size): IGES only (113 MB), imported in Fusion and exported to STEP. planner.compose.deckel_so sets it on a modelled stand, base, swivel table and wheel head, sized for an SO on its stand (about 24 x 18 x 46 in). Specs are from dealer listings, which differ.",
+  "file": "pgrind.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 276125,
+  "bbox": {"min": [-310.0, -230.0, 0.0], "max": [310.0, 230.0, 1130.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/deckel_so.step",
+    "compose": "deckel_so",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 276125,
+      "deflection_mm": 0.274,
+      "simplified": false,
+      "glb_bytes": 6712252
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "id": "ct-tpg322",
+  "name": "TPG322 triangle insert, ground chipbreaker",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "insert",
+  "material": "Carbide, C2 grade",
+  "heat_treat": null,
+  "finish": "Uncoated, ground",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "3/8 IC triangle, 1/8 thick, 1/32 nose radius, 11° clearance",
+  "units": "in",
+  "bbox_mm": [
+    13.49,
+    15.34,
+    3.18
+  ],
+  "solids": 1,
+  "drawing_scale": "6:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "IC .375 ±.001 (G class)",
+      "Thickness .125 ±.001",
+      "Nose R 1/32 (.031)",
+      "11° clearance (P)",
+      "Chipbreaker land .010, groove .055 x .008 deep"
+    ]
+  },
+  "machines_likely": [
+    "surface_grinder",
+    "inspection"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "Harig grinder",
+      "Quick check"
+    ]
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.438,
+    "bodies": 1,
+    "faces": 22,
+    "date": "2026-10-20"
+  }
+}

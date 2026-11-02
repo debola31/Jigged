@@ -1,0 +1,48 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "compar",
+  "name": "Optical comparator",
+  "category": "machines",
+  "make": "Starrett",
+  "model": "HB350",
+  "description": "14 in horizontal-beam bench comparator: projects a part's magnified silhouette onto the screen to check its profile against a chart.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Screen diameter", "value": 14, "unit": "in"},
+    {
+      "name": "Magnification (standard lens)",
+      "value": 10,
+      "unit": "x",
+      "note": "bayonet lens mount takes other lenses"
+    },
+    {"name": "Stage size", "value": "15.3 x 5 in"},
+    {"name": "Stage travel", "value": "8 x 4 in", "note": "horizontal x vertical"},
+    {"name": "Stage load", "value": 66, "unit": "lb"}
+  ],
+  "source_urls": [
+    "https://surplusrecord.com/listing/14-starrett-hb350-comparator-15-3-x5-table-area-10x-lens-8-horizontal-4-vertical-travel-on-stand-571619/",
+    "https://www.surplusrecord.com/listing/14-starrett-hb350-horizontal-bench-optical-comparator-10x-lens-8-horizontal-travel-4-vertical-travel-qc-2000-digital-read-out-programmable-geo-funct-edge-detection-1049475/"
+  ],
+  "source_files": ["compar.step"],
+  "license": "self-made placeholder (planner.placeholders.comparator_14in)",
+  "notes": "GENERIC: no comparator CAD on GrabCAD, Sketchfab or Starrett/Mitutoyo pages. Starrett no longer lists the 14 in HB350, so specs are from dealer listings. Overall size is estimated for a bench unit.",
+  "file": "compar.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1560,
+  "bbox": {"min": [-330.2, -317.5, 0.0], "max": [330.2, 317.5, 914.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/compar.step",
+    "placeholder": "comparator_14in",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1560,
+      "deflection_mm": 0.259,
+      "simplified": false,
+      "glb_bytes": 39572
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "washer",
+  "name": "Parts washer",
+  "category": "support",
+  "make": "Generic",
+  "model": "Drum-mounted solvent parts washer",
+  "description": "Solvent sink parts washer that cleans parts before inspection.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Sink", "value": "34 x 22 in"},
+    {"name": "Reservoir", "value": 30, "unit": "gal", "note": "drum"}
+  ],
+  "source_urls": [],
+  "source_files": ["washer.step"],
+  "license": "self-made placeholder (planner.placeholders.parts_washer)",
+  "notes": "GENERIC: no parts washer CAD on McMaster or GrabCAD.",
+  "file": "washer.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 660,
+  "bbox": {"min": [-431.8, -292.1, 0.0], "max": [431.8, 292.1, 1346.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/washer.step",
+    "placeholder": "parts_washer",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 660,
+      "deflection_mm": 0.341,
+      "simplified": false,
+      "glb_bytes": 18092
+    }
+  }
+}

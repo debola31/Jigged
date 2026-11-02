@@ -1,0 +1,50 @@
+{
+  "id": "ll-1011443",
+  "name": "Bracket (Halterung)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1011443",
+    "files": {
+      "step": "1011443-_314-092-59919-02-0000.step",
+      "pdf": "1011443-_314-092-59932-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "sheet",
+  "material": "5052-H32 aluminum, 10 ga (2.6 mm)",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "56.7 x 25.0 x 40.0 mm formed",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "1 bend UP 90° R3",
+      "13.5 x 21.5 slot, 2X Ø4.5 thru"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "laser_cutter",
+    "press_brake",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Tiny single-bend aluminum sheet bracket: a different alloy and scale from the steel cover.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.627,
+    "bodies": 1,
+    "faces": 24,
+    "date": "2026-10-20"
+  }
+}

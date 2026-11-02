@@ -1,0 +1,43 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "bandsaw",
+  "name": "Horizontal band saw",
+  "category": "machines",
+  "make": "McMaster-Carr",
+  "model": "8962N13",
+  "description": "9 x 16 in horizontal band saw that cuts bar stock to length in its quick-release vise, mitring 45 degrees left and 60 right.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Capacity, round", "value": 9, "unit": "in"},
+    {"name": "Capacity, rectangle", "value": "9 x 16 in", "note": "height x depth"},
+    {"name": "Max miter", "value": "45 deg left, 60 deg right"},
+    {"name": "Blade size", "value": "131-1/2 x 1 x 0.035 in"},
+    {"name": "Blade speed", "value": [98, 262], "unit": "sfpm"},
+    {"name": "Motor", "value": 1.5, "unit": "hp", "note": "120 V single phase, direct drive"},
+    {"name": "Feed", "value": "Manual or automatic"},
+    {"name": "Overall size", "value": "90.5 x 37 x 71 in"},
+    {"name": "Weight", "value": 880, "unit": "lb"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/8962N13/"],
+  "source_files": ["8962N13_Horizontal Band Saw for Metal.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "McMaster's own STEP, available once logged in. It replaces the GrabCAD S-280 saw, which was X_T only (that file stays in Downloads/sourcing/bandsaw).",
+  "file": "bandsaw.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 284996,
+  "bbox": {"min": [-1145.5, -594.2, 0.0], "max": [1145.5, 594.2, 1799.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/8962N13_Horizontal Band Saw for Metal.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 466852,
+      "deflection_mm": 6.296,
+      "simplified": true,
+      "glb_bytes": 7481068
+    }
+  }
+}

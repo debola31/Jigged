@@ -1,0 +1,44 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "c5",
+  "name": "5C collet chuck + collets",
+  "category": "workholding",
+  "make": "Royal Products",
+  "model": "42057",
+  "description": "5C pullback collet chuck for the lathe's A2-6 spindle; a 5C collet in the nose grips small round bar more accurately than the 3-jaw.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Collet type", "value": "5C"},
+    {"name": "Capacity", "value": 1.0625, "unit": "in", "note": "1-1/16 in round"},
+    {"name": "Mount", "value": "A2-6 spindle"},
+    {"name": "Overall length", "value": 6.0, "unit": "in"},
+    {"name": "Nose diameter x length", "value": "2.63 x 1.05 in"},
+    {"name": "Body diameter", "value": 3.14, "unit": "in"},
+    {"name": "Flange diameter", "value": 7.45, "unit": "in"},
+    {"name": "Max speed", "value": 6000, "unit": "rpm"},
+    {"name": "Max clamping force", "value": 15750, "unit": "lbf"},
+    {"name": "Weight", "value": 19, "unit": "lb"}
+  ],
+  "source_urls": ["https://royalproducts.com/product/42057/"],
+  "source_files": ["220473-0-42057.stp"],
+  "license": "Royal Products CAD download (manufacturer file, 42057), obtained through Royal's file-access form; not self-made or CC0",
+  "notes": "Royal's STEP for the 42057, downloaded after filling in Royal's access form with the details you gave. Axis along X, as it sits on the lathe spindle. The earlier cadquery placeholder was replaced.",
+  "file": "c5.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 29445,
+  "bbox": {"min": [-79.4, -94.6, 0.0], "max": [79.4, 94.6, 189.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/220473-0-42057.stp",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 29445,
+      "deflection_mm": 0.071,
+      "simplified": false,
+      "glb_bytes": 508620
+    }
+  }
+}

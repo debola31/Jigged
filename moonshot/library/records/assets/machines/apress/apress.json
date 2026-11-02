@@ -1,0 +1,41 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "apress",
+  "name": "Palmgren No. 1 arbor press",
+  "category": "machines",
+  "make": "Palmgren",
+  "model": "No. 1 (1 ton)",
+  "description": "Hand-lever 1-ton arbor press for press-fitting pins, bushings and bearings.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Capacity", "value": 1, "unit": "ton"},
+    {"name": "Ram", "value": "1 x 1 in square (typical for 1 ton)"},
+    {"name": "Max work height", "value": 5, "unit": "in", "note": "typical"},
+    {"name": "Throat depth", "value": 4, "unit": "in", "note": "typical"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/palmgren-no-1-arbor-press-1",
+    "https://www.tractorsupply.com/tsc/product/palmgren-arbor-press"
+  ],
+  "source_files": ["Palmgren No.1 Arbor Press v36.step"],
+  "license": "GrabCAD community model by Lisa Fida (2020), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Palmgren's listing gives the 1 ton rating but no dimensions, so ram, height and throat are typical figures.",
+  "file": "apress.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 103931,
+  "bbox": {"min": [-115.7, -188.9, 0.0], "max": [115.7, 188.9, 382.5]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Palmgren No.1 Arbor Press v36.step",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 103931,
+      "deflection_mm": 0.117,
+      "simplified": false,
+      "glb_bytes": 2623268
+    }
+  }
+}

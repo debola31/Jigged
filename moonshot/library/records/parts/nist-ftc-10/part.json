@@ -1,0 +1,47 @@
+{
+  "id": "nist-ftc-10",
+  "name": "NIST FTC-10 (Fully-Toleranced Test Case 10)",
+  "source": {
+    "kind": "NIST MBE PMI validation and conformance test models",
+    "origin": "https://www.nist.gov/el/systems-integration-division-73400/mbe-pmi-validation-and-conformance-testing/download-free-cad",
+    "files": {
+      "step": "nist_ftc_10_asme1_ap242-e2.stp",
+      "pdf": "nist_ftc_10_asme1_rb.pdf"
+    },
+    "license": "US Government work (NIST), public domain in the US"
+  },
+  "visibility": "public",
+  "part_type": "prismatic",
+  "material": null,
+  "material_note": "Not specified on the NIST drawing",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown (test model)",
+  "size": "158 x 75 x 31 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ASME Y14.5-1994 GD&T; see drawing.pdf",
+    "critical": [
+      "3X Ø3.5 G6 pins/holes, position Ø0.8 to D|B|C",
+      "8X Ø2.5 ±0.15 cross-drilled intersecting holes",
+      "4X Ø7 ±0.25 side bores",
+      "Profile 1.2 A|B|C inside pocket"
+    ]
+  },
+  "machines_likely": [
+    "vmc",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "No real routing (test model); machines_likely is inferred.",
+  "selection_reason": "Small housing with a deep pocket, cross-drilled holes and dense GD&T: multi-side precision VMC work at a small scale.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 3.119,
+    "bodies": 13,
+    "faces": 282,
+    "date": "2026-10-20"
+  }
+}

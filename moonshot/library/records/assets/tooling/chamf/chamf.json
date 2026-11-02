@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "chamf",
+  "name": "1/2 in chamfer mill",
+  "category": "tooling",
+  "make": "McMaster-Carr (Ultra Tool)",
+  "model": "3073A48",
+  "description": "1/2 in 90 degree 2-flute uncoated carbide chamfer mill, 3 in overall.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 0.5, "unit": "in"},
+    {"name": "Cutting angle", "value": 90, "unit": "deg"},
+    {"name": "Flutes", "value": 2, "unit": "flutes"},
+    {"name": "Overall length", "value": 3, "unit": "in"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/3073A48/"],
+  "source_files": ["3073A48_Carbide Chamfer End Mill.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "file": "chamf.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 812,
+  "bbox": {"min": [-6.3, -6.3, 0.0], "max": [6.3, 6.3, 76.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/3073A48_Carbide Chamfer End Mill.STEP",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 812,
+      "deflection_mm": 0.016,
+      "simplified": false,
+      "glb_bytes": 17116
+    }
+  }
+}

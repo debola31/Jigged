@@ -16,6 +16,7 @@ the detail, including the doc-writing standard in [writing-docs.md](writing-docs
 | [interaction-standards.md](interaction-standards.md) | Normative interaction rules, **machine-enforced** by `scripts/interactionStandardsCheck.ts` |
 | [telemetry.md](telemetry.md) | Everything we collect: Sentry/Vercel observability, PostHog product analytics, the traps, and the **machine-enforced** event registry |
 | [brand-guide.md](brand-guide.md) | Palette, logo, and the only writing-voice guidance in the repo |
+| [moonshot/shop-and-pipeline-plan.md](moonshot/shop-and-pipeline-plan.md) | **Plan, not built**: the showcase for AI-generated work instructions, where a part becomes captioned instruction videos rendered on a home farm. Owns the success criteria and the test strategy for agent-written code; tasks live in [moonshot/checklist.md](moonshot/checklist.md). |
 
 ## Modules
 

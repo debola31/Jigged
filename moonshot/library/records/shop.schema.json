@@ -1,0 +1,480 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:setupguide:shop:0.1",
+  "title": "Setup-guide shop configuration",
+  "description": "Machines, workholding, CAT40 holders, cutting tools, inspection instruments, consumables, hand tools, support equipment and outside processes. Every entry names its 3D asset (assets/). All lengths are inches (shop.units). Every object is closed (additionalProperties: false) so a misspelled field is an error, not a silently ignored value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "shop", "machines", "workholding", "holders", "tools", "inspection", "consumables", "hand_tools", "support", "outside_processes"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema": { "const": "setupguide.shop/0.1" },
+    "shop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "fictional", "units", "conventions"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "fictional": { "type": "boolean" },
+        "units": { "const": "inch", "description": "Unit for every length in this file." },
+        "note": { "type": "string" },
+        "conventions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["probe_tool_number", "default_wcs"],
+          "properties": {
+            "probe_tool_number": { "type": "integer", "minimum": 1 },
+            "default_wcs": { "$ref": "#/$defs/wcs" }
+          }
+        }
+      }
+    },
+    "machines": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/machine" } },
+    "workholding": { "type": "array", "items": { "$ref": "#/$defs/workholding" } },
+    "holders": { "type": "array", "items": { "$ref": "#/$defs/holder" } },
+    "tools": { "type": "array", "items": { "$ref": "#/$defs/tool" } },
+    "inspection": { "type": "array", "items": { "$ref": "#/$defs/instrument" } },
+    "consumables": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["grinding_wheel", "wheel_dresser", "edm_wire"] } } }
+    },
+    "hand_tools": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["wrench_set", "deburring_kit"] } } }
+    },
+    "support": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/item",
+        "properties": { "kind": { "enum": ["air_compressor", "parts_washer", "tool_presetter", "workbench"] } }
+      }
+    },
+    "outside_processes": {
+      "type": "array",
+      "description": "Vendor processes that appear in routings as outside steps; the asset is the staging rack where parts wait.",
+      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["heat_treat", "coating", "anodize"] } } }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "length": { "type": "number", "exclusiveMinimum": 0 },
+    "wcs": { "enum": ["G54", "G55", "G56", "G57", "G58", "G59"] },
+    "interface": {
+      "description": "Spindle taper (mills, holders) or spindle nose (lathes).",
+      "enum": ["CAT40", "BT40", "HSK63A", "R8", "A2-5", "A2-6", "A2-8"]
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "number", "minimum": 0 },
+        "max": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "capacity": {
+      "type": "object",
+      "description": "Named headline capacities (lengths, or lists of lengths).",
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/length" },
+          { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/length" } }
+        ]
+      }
+    },
+    "specs": {
+      "type": "object",
+      "description": "Named headline specs; the unit is in the name unless it is inches (e.g. tank_gal, pressure_psi).",
+      "additionalProperties": { "type": ["number", "string"] }
+    },
+    "basis": {
+      "enum": ["sourced", "typical"],
+      "description": "sourced: a published figure for this make and model (give the source URL). typical: a representative figure for the class of machine."
+    },
+    "tagged": {
+      "description": "Common fields of a capability value: where it comes from.",
+      "type": "object",
+      "required": ["basis"],
+      "properties": {
+        "basis": { "$ref": "#/$defs/basis" },
+        "source": { "type": "string", "pattern": "^https://" },
+        "note": { "type": "string" }
+      },
+      "if": { "properties": { "basis": { "const": "sourced" } } },
+      "then": { "required": ["source"] }
+    },
+    "travels": {
+      "description": "Axis travels.",
+      "$ref": "#/$defs/tagged",
+      "unevaluatedProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "$ref": "#/$defs/length" },
+        "y": { "$ref": "#/$defs/length" },
+        "z": { "$ref": "#/$defs/length" }
+      }
+    },
+    "work_envelope": {
+      "description": "The type-equivalent of travels for machines without X/Y/Z axes: what size of work or cut the machine takes.",
+      "$ref": "#/$defs/tagged",
+      "unevaluatedProperties": false,
+      "required": ["kind", "dims"],
+      "properties": {
+        "kind": {
+          "enum": ["turning", "grinding", "tool", "bore", "saw", "belt", "wheels", "stage", "marking_field", "bench", "weld", "chamber", "part", "drilling", "press"]
+        },
+        "dims": { "$ref": "#/$defs/capacity", "minProperties": 1 }
+      }
+    },
+    "achievable_tolerance": {
+      "description": "Plus or minus, inches: the size or position tolerance the machine holds routinely on the shop's parts.",
+      "$ref": "#/$defs/tagged",
+      "unevaluatedProperties": false,
+      "required": ["value"],
+      "properties": { "value": { "$ref": "#/$defs/length" } }
+    },
+    "materials": {
+      "description": "Part materials the machine works on.",
+      "$ref": "#/$defs/tagged",
+      "unevaluatedProperties": false,
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "aluminum", "brass", "bronze", "copper", "carbon_steel", "alloy_steel", "stainless_steel", "tool_steel",
+              "hardened_steel", "cast_iron", "titanium", "nickel_alloy", "carbide", "plastics"
+            ]
+          }
+        }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "make", "model", "guide_support", "asset", "achievable_tolerance", "materials"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": [
+            "vmc",
+            "hmc",
+            "lathe",
+            "manual_lathe",
+            "knee_mill",
+            "surface_grinder",
+            "tool_cutter_grinder",
+            "tool_grinder",
+            "hone",
+            "wire_edm",
+            "band_saw",
+            "laser_marker",
+            "etch_marker",
+            "braze_station",
+            "welder",
+            "belt_sander",
+            "bench_grinder",
+            "blast_cabinet",
+            "vibratory_finisher",
+            "secondary_op",
+            "drill_press",
+            "arbor_press",
+            "optical_comparator"
+          ]
+        },
+        "make": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "control": { "type": "string" },
+        "guide_support": {
+          "type": "boolean",
+          "description": "Setup guides can be generated for this machine. Prototype: two vertical machining centres."
+        },
+        "asset": { "$ref": "#/$defs/id", "description": "glTF asset id (assets/)." },
+        "note": { "type": "string" },
+        "travels": { "$ref": "#/$defs/travels" },
+        "work_envelope": { "$ref": "#/$defs/work_envelope" },
+        "achievable_tolerance": { "$ref": "#/$defs/achievable_tolerance" },
+        "materials": { "$ref": "#/$defs/materials" },
+        "table": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length", "width", "t_slots"],
+          "properties": {
+            "length": { "$ref": "#/$defs/length" },
+            "width": { "$ref": "#/$defs/length" },
+            "max_load_lb": { "$ref": "#/$defs/length" },
+            "t_slots": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "width", "spacing"],
+              "properties": {
+                "count": { "type": "integer", "minimum": 1 },
+                "width": { "$ref": "#/$defs/length" },
+                "spacing": { "$ref": "#/$defs/length" }
+              }
+            }
+          }
+        },
+        "spindle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interface", "max_rpm"],
+          "properties": {
+            "interface": { "$ref": "#/$defs/interface" },
+            "max_rpm": { "type": "integer", "minimum": 1 },
+            "power_hp": { "$ref": "#/$defs/length" },
+            "nose_to_table": { "$ref": "#/$defs/range" }
+          }
+        },
+        "tool_changer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "capacity"],
+          "properties": {
+            "type": { "enum": ["carousel", "side_mount"] },
+            "capacity": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "work_offsets": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/wcs" } },
+        "lathe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["chuck", "bar_capacity", "max_cutting_diameter", "max_cutting_length", "turret_stations"],
+          "properties": {
+            "chuck": { "$ref": "#/$defs/length" },
+            "bar_capacity": { "$ref": "#/$defs/length" },
+            "max_cutting_diameter": { "$ref": "#/$defs/length" },
+            "max_cutting_length": { "$ref": "#/$defs/length" },
+            "turret_stations": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "capacity": { "$ref": "#/$defs/capacity", "description": "Headline capacities for machines the guides do not target yet." }
+      },
+      "anyOf": [{ "required": ["travels"] }, { "required": ["work_envelope"] }],
+      "allOf": [
+        {
+          "if": { "properties": { "guide_support": { "const": true } } },
+          "then": {
+            "required": ["travels", "table", "spindle", "tool_changer", "work_offsets"],
+            "properties": { "kind": { "const": "vmc" } }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["vmc", "hmc", "knee_mill", "wire_edm"] } } },
+          "then": { "required": ["travels"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["lathe", "manual_lathe"] } } },
+          "then": { "required": ["work_envelope"], "properties": { "work_envelope": { "properties": { "kind": { "const": "turning" } } } } }
+        }
+      ]
+    },
+    "workholding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "name", "asset"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "enum": [
+            "vise",
+            "soft_jaws",
+            "parallel_set",
+            "vise_stop",
+            "edge_finder",
+            "spindle_probe",
+            "tool_setter",
+            "block_123",
+            "clamp_kit",
+            "angle_plate",
+            "v_block",
+            "sine_plate",
+            "lathe_chuck",
+            "collet_chuck",
+            "live_center",
+            "magnetic_chuck",
+            "spin_indexer",
+            "edm_fixture"
+          ]
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "asset": { "$ref": "#/$defs/id" },
+        "location": { "$ref": "#/$defs/id", "description": "Machine id where this normally lives." },
+        "quantity": { "type": "integer", "minimum": 1 },
+        "jaw_width": { "$ref": "#/$defs/length" },
+        "jaw_height": { "$ref": "#/$defs/length", "description": "Vise seat (where parallels sit) to jaw top." },
+        "max_opening": { "$ref": "#/$defs/length" },
+        "base_to_seat": { "$ref": "#/$defs/length", "description": "Table (vise base) to vise seat." },
+        "keyed": { "type": "boolean", "description": "Has keys that locate in a T-slot." },
+        "stations": { "type": "integer", "minimum": 1, "description": "Vise: clamping stations (2 for a double-station vise)." },
+        "mount": { "type": "string", "minLength": 1, "description": "Chucks and centres: spindle mount, adapter or taper, e.g. A2-6 or MT4." },
+        "capacity": { "$ref": "#/$defs/capacity" },
+        "thickness": { "$ref": "#/$defs/length" },
+        "length": { "$ref": "#/$defs/length" },
+        "heights": {
+          "description": "Available heights; each is a matched pair.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/length" }
+        },
+        "reach": { "$ref": "#/$defs/length", "description": "Vise stop: furthest stop face from the jaw end." },
+        "tip_diameter": { "$ref": "#/$defs/length" },
+        "shank_diameter": { "$ref": "#/$defs/length" },
+        "taper": { "$ref": "#/$defs/interface" },
+        "tool_number": { "type": "integer", "minimum": 1 },
+        "stylus_ball_diameter": { "$ref": "#/$defs/length" },
+        "size": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/length" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "vise" } } },
+          "then": { "required": ["jaw_width", "jaw_height", "max_opening", "base_to_seat", "keyed"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "parallel_set" } } },
+          "then": { "required": ["thickness", "length", "heights"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "vise_stop" } } },
+          "then": { "required": ["reach"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "edge_finder" } } },
+          "then": { "required": ["tip_diameter", "shank_diameter"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "spindle_probe" } } },
+          "then": { "required": ["taper", "tool_number", "stylus_ball_diameter"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["block_123", "angle_plate", "sine_plate", "soft_jaws"] } } },
+          "then": { "required": ["size"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "block_123" } } },
+          "then": { "required": ["quantity"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["lathe_chuck", "collet_chuck", "magnetic_chuck", "v_block", "live_center", "spin_indexer", "clamp_kit", "edm_fixture"] } } },
+          "then": { "required": ["capacity"] }
+        }
+      ]
+    },
+    "holder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "taper", "kind", "gauge_length", "asset"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "taper": { "$ref": "#/$defs/interface" },
+        "kind": { "enum": ["end_mill_holder", "collet_chuck", "drill_chuck", "shell_mill_arbor"] },
+        "bore": { "$ref": "#/$defs/length" },
+        "collet": { "enum": ["ER16", "ER20", "ER25", "ER32", "ER40"] },
+        "capacity": { "$ref": "#/$defs/range" },
+        "pilot": { "$ref": "#/$defs/length" },
+        "gauge_length": { "$ref": "#/$defs/length", "description": "Gauge line to holder nose." },
+        "asset": { "$ref": "#/$defs/id" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "end_mill_holder" } } }, "then": { "required": ["bore"] } },
+        { "if": { "properties": { "kind": { "const": "collet_chuck" } } }, "then": { "required": ["collet", "capacity"] } },
+        { "if": { "properties": { "kind": { "const": "drill_chuck" } } }, "then": { "required": ["capacity"] } },
+        { "if": { "properties": { "kind": { "const": "shell_mill_arbor" } } }, "then": { "required": ["pilot"] } }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "description", "diameter", "material", "asset"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["end_mill", "spot_drill", "drill", "tap", "face_mill", "chamfer_mill", "boring_bar"] },
+        "description": { "type": "string", "minLength": 1 },
+        "diameter": { "$ref": "#/$defs/length", "description": "Cutting diameter; for a boring bar, the smallest bore it enters." },
+        "designation": { "type": "string", "description": "Drill size name or tap thread, e.g. #7, H or 1/4-20; insert code for a boring bar." },
+        "material": { "enum": ["carbide", "hss", "cobalt", "indexable"] },
+        "flutes": { "type": "integer", "minimum": 1 },
+        "flute_length": { "$ref": "#/$defs/length" },
+        "overall_length": { "$ref": "#/$defs/length" },
+        "shank_diameter": { "$ref": "#/$defs/length" },
+        "corner_radius": { "type": "number", "minimum": 0 },
+        "point_angle": { "type": "number", "exclusiveMinimum": 0, "maximum": 180 },
+        "max_depth": { "$ref": "#/$defs/length", "description": "Boring bar: deepest bore it reaches." },
+        "asset": { "$ref": "#/$defs/id" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "end_mill" } } },
+          "then": { "required": ["flutes", "flute_length", "overall_length", "shank_diameter", "corner_radius"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["drill", "spot_drill", "chamfer_mill"] } } },
+          "then": { "required": ["point_angle", "overall_length", "shank_diameter"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "tap" } } },
+          "then": { "required": ["designation", "flutes", "overall_length"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "face_mill" } } },
+          "then": { "required": ["flutes"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "boring_bar" } } },
+          "then": { "required": ["designation", "shank_diameter", "overall_length", "max_depth"] }
+        }
+      ]
+    },
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "name", "asset"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "enum": ["caliper", "micrometer", "test_indicator", "height_gauge", "gauge_blocks", "thread_gauge", "roughness_tester"]
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "make": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "asset": { "$ref": "#/$defs/id" },
+        "location": { "$ref": "#/$defs/id", "description": "Machine id where this normally lives." },
+        "range": { "$ref": "#/$defs/range" },
+        "resolution": { "$ref": "#/$defs/length" },
+        "accuracy": { "$ref": "#/$defs/length", "description": "Plus or minus." },
+        "designation": { "type": "string", "description": "Thread gauge: thread and class, e.g. 1/4-20 UNC-2B." },
+        "specs": { "$ref": "#/$defs/specs" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "enum": ["caliper", "micrometer", "test_indicator", "height_gauge"] } } },
+          "then": { "required": ["range", "resolution"] }
+        },
+        { "if": { "properties": { "kind": { "const": "thread_gauge" } } }, "then": { "required": ["designation"] } }
+      ]
+    },
+    "item": {
+      "description": "Consumables, hand tools, support equipment and outside processes: what it is, its asset and headline specs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "name", "asset"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "type": "string" },
+        "name": { "type": "string", "minLength": 1 },
+        "make": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "asset": { "$ref": "#/$defs/id" },
+        "location": { "$ref": "#/$defs/id", "description": "Machine id where this normally lives." },
+        "quantity": { "type": "integer", "minimum": 1 },
+        "specs": { "$ref": "#/$defs/specs" }
+      }
+    }
+  }
+}

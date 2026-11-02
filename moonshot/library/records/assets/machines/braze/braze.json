@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "braze",
+  "name": "Torch braze station",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Oxy-acetylene brazing bench",
+  "description": "Firebrick-topped bench with an oxy-acetylene torch, for brazing carbide tips onto tool bodies.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Bench", "value": "48 x 30 in steel"},
+    {"name": "Gases", "value": "oxygen and acetylene cylinders"},
+    {"name": "Filler", "value": "silver braze alloy with flux (typical)"}
+  ],
+  "source_urls": [],
+  "source_files": ["braze.step"],
+  "license": "self-made placeholder (planner.placeholders.braze_station)",
+  "notes": "GENERIC: no braze station CAD found.",
+  "file": "braze.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 616,
+  "bbox": {"min": [-762.0, -381.0, 0.0], "max": [762.0, 381.0, 1320.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/braze.step",
+    "placeholder": "braze_station",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 616,
+      "deflection_mm": 0.431,
+      "simplified": false,
+      "glb_bytes": 20928
+    }
+  }
+}

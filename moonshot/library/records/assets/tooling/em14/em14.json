@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "em14",
+  "name": "1/4 in end mill",
+  "category": "tooling",
+  "make": "Helical Solutions",
+  "model": "03452 resized (1/4 in, 2.5 in OAL)",
+  "description": "1/4 in 3-flute carbide square end mill, 2.5 in overall: the 1/2 in Helical model resized.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 0.25, "unit": "in"},
+    {"name": "Overall length", "value": 2.5, "unit": "in"},
+    {"name": "Flutes", "value": 3, "unit": "flutes"}
+  ],
+  "source_urls": ["https://www.helicaltool.com/products/tool-details-03452"],
+  "source_files": ["Helical_03452.STEP"],
+  "license": "Helical Solutions SIM/tool-library STEP (manufacturer file); not self-made or CC0",
+  "notes": "Reuses em12's STEP scaled to 1/4 in diameter and 2.5 in overall.",
+  "file": "em14.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 504,
+  "bbox": {"min": [-3.2, -3.2, 0.0], "max": [3.2, 3.2, 63.5]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Helical_03452.STEP",
+    "up": "+Y",
+    "resize": [0.5, 0.5, 0.8333],
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 504,
+      "deflection_mm": 0.016,
+      "simplified": false,
+      "glb_bytes": 13136
+    }
+  }
+}

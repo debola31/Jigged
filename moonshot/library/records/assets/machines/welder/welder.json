@@ -1,0 +1,42 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "welder",
+  "name": "PrimeWeld TIG225X AC/DC TIG welder",
+  "category": "machines",
+  "make": "PrimeWeld",
+  "model": "TIG225X (TIG225ACDCP)",
+  "description": "AC/DC inverter TIG welder with pulse, for steel, stainless and aluminium repairs and fabrications.",
+  "generic": false,
+  "key_specs": [
+    {"name": "TIG output", "value": [20, 225], "unit": "A", "note": "240 V; 20-140 A on 120 V"},
+    {"name": "Duty cycle", "value": "40% at 225 A; 100% at 155 A (240 V)"},
+    {"name": "AC balance", "value": "30-70%"},
+    {"name": "Aluminium", "value": "1/16-1/4 in"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/primeweld-tig225acdcp-1",
+    "https://weldguru.com/primeweld-tig225x-review/"
+  ],
+  "source_files": ["PRIMEWELD TIG225ACDCP.step"],
+  "license": "GrabCAD community model by Tim Koenig (2019), GrabCAD terms of use; not self-made or CC0",
+  "notes": "The device list names TIG / MIG; this is the TIG unit. Specs are from review sites quoting PrimeWeld's sheet. The file stands the welder on its front panel; build.turn sets it on its feet.",
+  "file": "welder.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 284991,
+  "bbox": {"min": [-149.5, -260.7, 0.0], "max": [149.5, 260.7, 555.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/PRIMEWELD TIG225ACDCP.step",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 330937,
+      "deflection_mm": 0.168,
+      "simplified": true,
+      "glb_bytes": 5853064
+    },
+    "turn": {"axis": "x", "degrees": -90}
+  }
+}

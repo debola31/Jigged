@@ -1,0 +1,41 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "livectr",
+  "name": "Live center, MT4",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "MT4 live center (McMaster 3229A34 class)",
+  "description": "Ball-bearing live center that supports the end of long parts in the lathe tailstock.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Taper", "value": "Morse 4"},
+    {"name": "Point", "value": "60 degree"},
+    {"name": "Max load", "value": 1850, "unit": "lb"},
+    {"name": "Max speed", "value": 3000, "unit": "rpm"},
+    {"name": "Runout", "value": 0.0003, "unit": "in"},
+    {"name": "Overall length", "value": 7.23, "unit": "in"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/3229A34/"],
+  "source_files": ["livectr.step"],
+  "license": "self-made placeholder (planner.placeholders.live_center_mt4)",
+  "notes": "GENERIC: McMaster's MT4 live centers (3229A34, 3259A28) have no CAD; sized from 3229A34's table.",
+  "file": "livectr.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2655,
+  "bbox": {"min": [-91.6, -32.0, 0.0], "max": [91.6, 32.0, 64.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/livectr.step",
+    "placeholder": "live_center_mt4",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2655,
+      "deflection_mm": 0.041,
+      "simplified": false,
+      "glb_bytes": 47788
+    }
+  }
+}

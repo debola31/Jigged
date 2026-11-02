@@ -1,0 +1,51 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "chuck3",
+  "name": "3-jaw chuck",
+  "category": "workholding",
+  "make": "Kitagawa",
+  "model": "BR10",
+  "description": "10 in hydraulic three-jaw power chuck for the ST-25 spindle; soft jaws are bored to hold each part.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Chuck diameter",
+      "value": 254,
+      "unit": "mm",
+      "note": "10 in, the ST-25's standard chuck size"
+    },
+    {"name": "Through-hole", "value": 81, "unit": "mm"},
+    {"name": "Jaws", "value": "3 jaws, serrated master jaws for standard Kitagawa soft jaws (SJ)"},
+    {"name": "Mount", "value": "Recess mount; A2-6 spindle nose (ST-25) through an adaptor plate"},
+    {"name": "Max speed", "value": 4500, "unit": "rpm"},
+    {"name": "Gripping force", "value": 123, "unit": "kN"},
+    {"name": "Weight", "value": 35.8, "unit": "kg"}
+  ],
+  "source_urls": [
+    "https://brchuck.com/en/download/",
+    "https://prod.kiw.co.jp/mtools/inc/data/3D/BR10_STEP.zip",
+    "https://www.kitagawa.global/ae/products/vises/mc-power-vise-multi-type/br10",
+    "https://www.haascnc.com/machines/lathes/st/models/standard/st-25.html"
+  ],
+  "source_files": ["BR10_STEP.zip", "DEV-BR10-OC.STEP", "DEV-BR10-UC.STEP"],
+  "license": "Kitagawa Corporation CAD data, downloaded under Kitagawa's terms of use (accepted 2026-10-19 at your request): no reproducing or altering it for profit; not self-made or CC0",
+  "notes": "Kitagawa's own STEP from brchuck.com, jaws in the closed (OC) position; the open-jaw (UC) file is kept as an original. Includes the soft jaws, T-nuts, cover, draw nut and the three M16 mounting bolts. Axis along X, as it sits on the lathe spindle. 3Dfindit needs a login, and the GrabCAD 'Kitagawa B12' is a 12 in chuck, the wrong size for the ST-25.",
+  "file": "chuck3.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47498,
+  "bbox": {"min": [-80.1, -127.0, 0.0], "max": [80.1, 127.0, 254.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/DEV-BR10-OC.STEP",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 96320,
+      "deflection_mm": 0.084,
+      "simplified": true,
+      "glb_bytes": 1094832
+    }
+  }
+}

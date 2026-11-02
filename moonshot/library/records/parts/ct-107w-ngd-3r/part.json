@@ -1,0 +1,59 @@
+{
+  "id": "ct-107w-ngd-3r",
+  "name": ".107W NGD-3R groove insert, top notch",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "insert",
+  "material": "Carbide, C5 grade",
+  "heat_treat": null,
+  "finish": "AlTiN coating (outside)",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "1/2 IC triangle, .187 thick, .107 wide tip",
+  "units": "in",
+  "bbox_mm": [
+    22.0,
+    20.57,
+    4.76
+  ],
+  "solids": 1,
+  "drawing_scale": "4:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "Groove width .107 ±.0005",
+      "Edge hone .0005-.001",
+      "7° front clearance",
+      "Right hand (3R)"
+    ]
+  },
+  "machines_likely": [
+    "wire_edm",
+    "edge_hone",
+    "laser_marker",
+    "inspection"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "EDM",
+      "Hone",
+      "Laser",
+      "Quick check"
+    ],
+    "note": "AlTiN is in the description but not in the routing; assumed outside coating after laser."
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.344,
+    "bodies": 1,
+    "faces": 14,
+    "date": "2026-10-20"
+  }
+}

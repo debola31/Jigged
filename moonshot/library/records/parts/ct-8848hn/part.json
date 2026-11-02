@@ -1,0 +1,62 @@
+{
+  "id": "ct-8848hn",
+  "name": "8848HN thread bar",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "Steel shank (4140 HT 40-44 HRC typical)",
+  "heat_treat": null,
+  "finish": "Ground shank, laser marked",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "Ø.750 x 6.00 OAL",
+  "units": "in",
+  "bbox_mm": [
+    19.05,
+    19.05,
+    152.4
+  ],
+  "solids": 1,
+  "drawing_scale": "1.5:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "Shank Ø.7500 +.0000/-.0005 (h6)",
+      "Pilot/head Ø.625 +.0000/-.0003",
+      "Runout head to shank .0005 TIR",
+      "Weldon flat .060 deep x 1.25 long",
+      "Head flats .500 ±.002"
+    ]
+  },
+  "machines_likely": [
+    "lathe",
+    "cylindrical_grinder",
+    "vmc",
+    "laser_marker",
+    "inspection"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "Hurco lathe",
+      "Grind",
+      "Hurco mill",
+      "Grind",
+      "Laser",
+      "QC"
+    ]
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.377,
+    "bodies": 1,
+    "faces": 21,
+    "date": "2026-10-20"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "wire",
+  "name": "EDM brass wire spool",
+  "category": "consumables",
+  "make": "Generic",
+  "model": "0.010 in brass EDM wire, P5 spool",
+  "description": "Spool of hard brass wire electrode for the wire EDM.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Wire", "value": 0.01, "unit": "in", "note": "0.25 mm hard brass"},
+    {"name": "Spool", "value": "P5, about 5 kg"}
+  ],
+  "source_urls": [],
+  "source_files": ["wire.step"],
+  "license": "self-made placeholder (planner.placeholders.edm_wire_spool)",
+  "notes": "GENERIC: a spool needs no download.",
+  "file": "wire.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2108,
+  "bbox": {"min": [-80.0, -80.0, 0.0], "max": [80.0, 80.0, 100.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/wire.step",
+    "placeholder": "edm_wire_spool",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2108,
+      "deflection_mm": 0.049,
+      "simplified": false,
+      "glb_bytes": 48672
+    }
+  }
+}

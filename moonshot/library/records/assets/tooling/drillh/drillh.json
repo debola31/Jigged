@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drillh",
+  "name": "H jobber drill",
+  "category": "tooling",
+  "make": "McMaster-Carr (Dormer Pramet)",
+  "model": "27995A617 resized (H, 0.266 in)",
+  "description": "H (0.266 in) cobalt jobber drill, 4.125 in overall: the #7 McMaster model resized.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 0.266, "unit": "in"},
+    {"name": "Overall length", "value": 4.125, "unit": "in"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/27995A617/"],
+  "source_files": ["27995A617_Cobalt Steel Drill Bit.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "Reuses the #7 drill's STEP scaled to 0.266 in diameter and 4.125 in overall.",
+  "file": "drillh.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47498,
+  "bbox": {"min": [-3.4, -3.4, 0.0], "max": [3.4, 3.4, 106.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/27995A617_Cobalt Steel Drill Bit.STEP",
+    "up": "+Z",
+    "resize": [1.3234, 1.3234, 1.1379],
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 51542,
+      "deflection_mm": 0.019,
+      "simplified": true,
+      "glb_bytes": 687416
+    }
+  }
+}

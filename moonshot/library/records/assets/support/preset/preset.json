@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "preset",
+  "name": "Tool presetter",
+  "category": "support",
+  "make": "Generic",
+  "model": "Optical CAT40 tool presetter (Zoller / Parlec class)",
+  "description": "Optical presetter that measures tool length and diameter off the machine.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Spindle", "value": "CAT40"},
+    {"name": "Measuring range", "value": "Z 16 in x D 12 in (typical)"},
+    {"name": "Accuracy", "value": 0.0001, "unit": "in", "note": "typical"}
+  ],
+  "source_urls": [],
+  "source_files": ["preset.step"],
+  "license": "self-made placeholder (planner.placeholders.tool_presetter)",
+  "notes": "GENERIC: no presetter CAD found.",
+  "file": "preset.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 496,
+  "bbox": {"min": [-457.2, -304.8, 0.0], "max": [457.3, 304.8, 1651.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/preset.step",
+    "placeholder": "tool_presetter",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 496,
+      "deflection_mm": 0.397,
+      "simplified": false,
+      "glb_bytes": 15116
+    }
+  }
+}

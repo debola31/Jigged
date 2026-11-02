@@ -1,0 +1,66 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "st25",
+  "name": "CNC lathe",
+  "category": "machines",
+  "make": "Haas",
+  "model": "ST-25",
+  "description": "2-axis turning centre with a 10 in chuck and 12-station BOT turret: 21 in swing, cuts 13 in dia x 22.5 in long.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Max part swing", "value": 21.0, "unit": "in"},
+    {"name": "Max cutting diameter (BOT turret)", "value": 13.0, "unit": "in"},
+    {"name": "Max cutting length", "value": 22.5, "unit": "in"},
+    {"name": "Chuck size", "value": 10, "unit": "in"},
+    {"name": "Bar capacity", "value": 3.0, "unit": "in"},
+    {"name": "Spindle bore", "value": 3.5, "unit": "in"},
+    {"name": "Spindle nose", "value": "A2-6"},
+    {"name": "Max spindle speed", "value": 3400, "unit": "rpm"},
+    {"name": "Spindle power", "value": 30.0, "unit": "hp"},
+    {"name": "Turret stations", "value": 12, "unit": "stations", "note": "BOT (bolt-on) turret"},
+    {"name": "Shipping weight", "value": 9000, "unit": "lb"}
+  ],
+  "source_urls": [
+    "https://www.haascnc.com/machines/lathes/st/models/standard/st-25.html",
+    "https://pub-aem.haascnc.com/content/dam/haascnc/pdp_feed/3d/ST-20-25_Reboot_Solid_Model_2019-05r2.zip"
+  ],
+  "source_files": [
+    "ST20-25_Reboot_2-axis_STEP_2019-05.STEP",
+    "ST20-25_Reboot_2-axis_XT_2019-05.x_t"
+  ],
+  "license": "Haas Automation 3D model download (manufacturer marketing file, 2019); not self-made or CC0",
+  "notes": "Haas ships one model for the ST-20 and ST-25 with every option in place. Left out: the 8 in chuck, BMT65 and VDI turrets, the sub-spindle and its 5 in chuck, and the tailstock option, leaving the standard 10 in chuck and BOT turret.",
+  "file": "st25.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 284990,
+  "bbox": {"min": [-1999.3, -1125.5, -0.1], "max": [1999.4, 1125.5, 2005.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/ST20-25_Reboot_2-axis_STEP_2019-05.STEP",
+    "up": "+Y",
+    "exclude": [
+      "ST15 8 Inch*",
+      "BMT65 Turret",
+      "VDI Turret*",
+      "ST-20 Sub Spindle",
+      "5 Inch Chuck*",
+      "ST-20 Tailstock Option"
+    ],
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [
+        "ST15 8 Inch - 200mm Chuck(DEFAULT)",
+        "ST-20 Tailstock Option",
+        "ST-20 Sub Spindle",
+        "5 Inch Chuck (ST20 Sub Spindle)(RETRACT)",
+        "BMT65 Turret",
+        "VDI Turret ST20-25r2"
+      ],
+      "meshed_triangles": 453838,
+      "deflection_mm": 1.002,
+      "simplified": true,
+      "glb_bytes": 7638260
+    }
+  }
+}

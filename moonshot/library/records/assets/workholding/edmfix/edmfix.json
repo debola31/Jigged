@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "edmfix",
+  "name": "EDM fixture plate and edge clamps",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "12 x 8 in EDM fixture plate",
+  "description": "Ground fixture plate on risers with edge clamps that hold parts in the wire EDM tank.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Plate", "value": "12 x 8 x 3/4 in, 1 in hole grid"},
+    {"name": "Clamps", "value": "2 edge clamps"}
+  ],
+  "source_urls": [],
+  "source_files": ["edmfix.step"],
+  "license": "self-made placeholder (planner.placeholders.edm_fixture_plate)",
+  "notes": "GENERIC: no EDM fixture CAD found (System 3R and Erowa need logins).",
+  "file": "edmfix.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 11736,
+  "bbox": {"min": [-152.4, -101.6, 0.0], "max": [152.4, 101.6, 71.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/edmfix.step",
+    "placeholder": "edm_fixture_plate",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 11736,
+      "deflection_mm": 0.075,
+      "simplified": false,
+      "glb_bytes": 259336
+    }
+  }
+}

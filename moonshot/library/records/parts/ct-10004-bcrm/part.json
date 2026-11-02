@@ -1,0 +1,65 @@
+{
+  "id": "ct-10004-bcrm",
+  "name": "10004-BCRM brazed carbide reamer",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "4140 body, 3/8 shank; carbide tips (C2), silver braze",
+  "heat_treat": null,
+  "finish": "Ground tips; bright",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "Ø.750 body x 1.25, Ø.375 shank x 2.00, 3.25 OAL",
+  "units": "in",
+  "bbox_mm": [
+    19.41,
+    19.05,
+    82.55
+  ],
+  "solids": 7,
+  "drawing_scale": "2:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "Cutting Ø (tips) .7600 +.0002/-.0000",
+      "Shank Ø.3750 +.0000/-.0005",
+      "Tip runout .0003 TIR to shank",
+      "6 flutes, 60° spacing",
+      "45° x .040 lead chamfer"
+    ]
+  },
+  "machines_likely": [
+    "band_saw",
+    "lathe",
+    "knee_mill",
+    "cylindrical_grinder",
+    "wire_edm",
+    "brazing",
+    "tool_cutter_grinder"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "Saw",
+      "Lathe",
+      "Bridgeport",
+      "Grind",
+      "EDM",
+      "Braze",
+      "Anca"
+    ]
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 1.302,
+    "bodies": 7,
+    "faces": 71,
+    "date": "2026-10-20"
+  }
+}

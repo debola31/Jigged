@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "etch",
+  "name": "Electro-chemical etch marker",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Bench electrochemical marking unit",
+  "description": "Low-voltage electrolytic marker that etches part numbers through a stencil.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Output", "value": "AC (dark mark) and DC (etch), 0-25 V (typical)"},
+    {"name": "Mark depth", "value": "up to 0.001 in (typical)"}
+  ],
+  "source_urls": [],
+  "source_files": ["etch.step"],
+  "license": "self-made placeholder (planner.placeholders.etch_marker)",
+  "notes": "GENERIC: no CAD on McMaster, GrabCAD or Sketchfab.",
+  "file": "etch.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 404,
+  "bbox": {"min": [-196.9, -106.0, 0.0], "max": [196.9, 106.0, 127.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/etch.step",
+    "placeholder": "etch_marker",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 404,
+      "deflection_mm": 0.093,
+      "simplified": false,
+      "glb_bytes": 13272
+    }
+  }
+}

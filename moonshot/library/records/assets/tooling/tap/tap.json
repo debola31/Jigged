@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tap",
+  "name": "1/4-20 spiral-point tap",
+  "category": "tooling",
+  "make": "McMaster-Carr",
+  "model": "2523A411",
+  "description": "1/4-20 UNC HSS spiral-point plug tap for through holes, 2.5 in overall; its tap drill is the #7.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Thread", "value": "1/4-20 UNC"},
+    {"name": "Thread length", "value": 1, "unit": "in"},
+    {"name": "Overall length", "value": 2.5, "unit": "in"},
+    {"name": "Flutes", "value": 2, "unit": "flutes"},
+    {"name": "Tap drill", "value": "#7 (0.201 in)"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/2523A411/"],
+  "source_files": ["2523A411_High-Speed Steel Chip-Clearing Tap.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "file": "tap.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 11892,
+  "bbox": {"min": [-3.2, -3.2, 0.0], "max": [3.2, 3.2, 66.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/2523A411_High-Speed Steel Chip-Clearing Tap.STEP",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 11892,
+      "deflection_mm": 0.014,
+      "simplified": false,
+      "glb_bytes": 231456
+    }
+  }
+}

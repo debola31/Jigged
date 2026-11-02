@@ -1,0 +1,41 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "vblock",
+  "name": "V-block",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "2361A61 (pair)",
+  "description": "Pair of hardened 90 degree V-blocks with screw clamps, for holding round stock square to the table.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Block size", "value": "2-1/2 x 2-1/2 x 2 in", "note": "L x W x H, without clamp"},
+    {"name": "V angle", "value": 90, "unit": "deg"},
+    {"name": "Workpiece diameter", "value": [0.15625, 1.625], "unit": "in"},
+    {"name": "V depth x width", "value": "3/4 x 1-1/2 in"},
+    {"name": "Squareness and parallelism", "value": 0.0002, "unit": "in"},
+    {"name": "Material", "value": "Hardened steel, with clamp"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/2361A61/"],
+  "source_files": ["2361A61_V-Block.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "McMaster sells these singly; the asset places two (planner.compose.v_block_pair) 1 in apart as a pair. Replaces the earlier cadquery placeholder.",
+  "file": "vblock.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47500,
+  "bbox": {"min": [-75.0, -31.0, 0.0], "max": [75.0, 31.0, 91.3]},
+  "attach_points": [],
+  "build": {
+    "from": "source/vblock_pair.step",
+    "compose": "v_block_pair",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 150260,
+      "deflection_mm": 1.491,
+      "simplified": true,
+      "glb_bytes": 1114768
+    }
+  }
+}

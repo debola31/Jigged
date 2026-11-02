@@ -1,0 +1,319 @@
+{
+  "schema": "setupguide.anatomy/0.2",
+  "about": "Joint ranges and couplings for the anatomical hand (motion/hand_model.py) and arm (motion/arm_model.py). Degrees. Angles are anatomical: 0 = straight / neutral, + = flexion, abduction toward the thumb side (so the little finger's abduction is negative), radial deviation, pronation. Thumb CMC angles are measured from NIMBLE's relaxed MRI thumb, with the measured arcs placed around it. Every number's source and evidence level is in docs/hand-physics-plan-2026-10.md, section 3.",
+  "ranges_deg": {
+    "cmc2_flex": [
+      0,
+      3
+    ],
+    "cmc3_flex": [
+      0,
+      3
+    ],
+    "cmc4_flex": [
+      0,
+      20
+    ],
+    "cmc5_flex": [
+      0,
+      27
+    ],
+    "index_mcp_flex": [
+      -20,
+      87
+    ],
+    "middle_mcp_flex": [
+      -22,
+      90
+    ],
+    "ring_mcp_flex": [
+      -22,
+      87
+    ],
+    "little_mcp_flex": [
+      -27,
+      89
+    ],
+    "index_mcp_abd": [
+      -15,
+      15
+    ],
+    "middle_mcp_abd": [
+      -10,
+      10
+    ],
+    "ring_mcp_abd": [
+      -15,
+      15
+    ],
+    "little_mcp_abd": [
+      -20,
+      15
+    ],
+    "pip": [
+      -5,
+      105
+    ],
+    "dip": [
+      -10,
+      80
+    ],
+    "thumb_cmc_flex": [
+      -20,
+      25
+    ],
+    "thumb_cmc_abd": [
+      -10,
+      32
+    ],
+    "thumb_cmc_roll": [
+      -12,
+      16
+    ],
+    "thumb_mcp_flex": [
+      -8,
+      60
+    ],
+    "thumb_mcp_abd": [
+      -5,
+      5
+    ],
+    "thumb_ip": [
+      -15,
+      80
+    ]
+  },
+  "per_finger_deg": {
+    "little_pip": [
+      -5,
+      100
+    ],
+    "index_dip": [
+      -10,
+      75
+    ],
+    "middle_dip": [
+      -10,
+      85
+    ],
+    "ring_dip": [
+      -10,
+      80
+    ],
+    "little_dip": [
+      -10,
+      85
+    ]
+  },
+  "coupling": {
+    "dip_per_pip_free": {
+      "index": 0.52,
+      "middle": 0.75,
+      "ring": 0.52,
+      "little": 0.8
+    },
+    "dip_per_pip_contact": {
+      "index": [
+        0.44,
+        -2.5
+      ],
+      "middle": [
+        0.81,
+        -14
+      ],
+      "ring": [
+        0.58,
+        -12
+      ],
+      "little": [
+        0.87,
+        -10.5
+      ]
+    },
+    "cmc4_per_mcp": 0.2,
+    "cmc5_per_cmc4": 1.3,
+    "thumb_roll_per_cmc_flex": 0.36,
+    "mcp_abd_loss_at_90": 0.7,
+    "enslave": {
+      "ring->little": 0.3,
+      "ring->middle": 0.2,
+      "middle->index": 0.1,
+      "middle->ring": 0.1
+    },
+    "flex_tilt_deg": {
+      "index": -4,
+      "middle": 0,
+      "ring": 5,
+      "little": 10
+    }
+  },
+  "wrist_deg": {
+    "flexion": 80,
+    "extension": 65,
+    "radial": 20,
+    "ulnar": 35,
+    "functional": {
+      "flexion": 54,
+      "extension": 60,
+      "radial": 17,
+      "ulnar": 40
+    },
+    "dart_thrower_plane_deg": 43
+  },
+  "forearm_deg": {
+    "pronation": 77,
+    "supination": 82,
+    "functional": {
+      "pronation": 65,
+      "supination": 77
+    }
+  },
+  "elbow_deg": {
+    "flexion": [
+      0,
+      145
+    ]
+  },
+  "grip": {
+    "safety_margin": [
+      0.4,
+      0.55
+    ],
+    "skin_aluminium_mu": 0.6,
+    "preload_s": 0.23,
+    "loading_s": 0.21,
+    "peak_aperture_frac": [
+      0.71,
+      0.77
+    ],
+    "aperture_per_size": [
+      0.74,
+      0.92
+    ],
+    "pad_compression_mm_at_5N": [
+      2,
+      3
+    ]
+  },
+  "body": {
+    "about": "Trunk and right-arm ranges for motion/body_model.py (conventions in its docstring). Provisional: literature active ranges, checked against the 1st-99th percentiles of GRAB+ARCTIC manipulation (motion/human_data.py).",
+    "ranges_deg": {
+      "trunk_flex": [
+        -10,
+        45
+      ],
+      "trunk_lat": [
+        -20,
+        20
+      ],
+      "trunk_rot": [
+        -30,
+        30
+      ],
+      "sh_plane": [
+        -30,
+        130
+      ],
+      "sh_elev": [
+        0,
+        150
+      ],
+      "sh_rot": [
+        -80,
+        80
+      ],
+      "elbow": [
+        0,
+        145
+      ],
+      "pron": [
+        -82,
+        77
+      ],
+      "wr_flex": [
+        -65,
+        80
+      ],
+      "wr_dev": [
+        -35,
+        20
+      ],
+      "sc_prot": [
+        -25,
+        45
+      ],
+      "sc_elev": [
+        -15,
+        35
+      ]
+    },
+    "comfort": {
+      "about": "Range-normalised comfort cost sum w*((q-centre)/half)^2 (Cruse 1990 U-shaped per-joint comfort; Santos/Marler normalisation). Centres/bands from Gates 2016 functional peaks, RULA bands (McAtamney 1993) and Morrey 1981; weight ordering from Kee & Karwowski 2001 (shoulder accrues discomfort fastest, elbow slowest). Pronation costs x3 beyond +/-45 of its centre (RULA 'near end of range'). Tuned 2026-10-28 after validation: trunk axial rotation x3 and humeral rotation x2 (centre 5) so the trunk stays within people's p99 (13 deg) and humeral internal rotation within Gates' <23 deg typical.",
+      "centre": {
+        "trunk_flex": 10,
+        "trunk_lat": 0,
+        "trunk_rot": 0,
+        "sh_plane": 50,
+        "sh_elev": 20,
+        "sh_rot": 5,
+        "elbow": 85,
+        "pron": 15,
+        "wr_flex": -10,
+        "wr_dev": -5,
+        "sc_prot": 0,
+        "sc_elev": 0
+      },
+      "half": {
+        "trunk_flex": 20,
+        "trunk_lat": 8,
+        "trunk_rot": 10,
+        "sh_plane": 40,
+        "sh_elev": 30,
+        "sh_rot": 30,
+        "elbow": 40,
+        "pron": 35,
+        "wr_flex": 25,
+        "wr_dev": 15,
+        "sc_prot": 30,
+        "sc_elev": 25
+      },
+      "weight": {
+        "trunk_flex": 1,
+        "trunk_lat": 2,
+        "trunk_rot": 6,
+        "sh_plane": 1,
+        "sh_elev": 3,
+        "sh_rot": 4,
+        "elbow": 1,
+        "pron": 2.5,
+        "wr_flex": 2,
+        "wr_dev": 2.5,
+        "sc_prot": 1,
+        "sc_elev": 1.5
+      }
+    },
+    "speed_max_deg_s": {
+      "trunk_flex": 30,
+      "trunk_lat": 20,
+      "trunk_rot": 30,
+      "sh_plane": 180,
+      "sh_elev": 150,
+      "sh_rot": 150,
+      "elbow": 200,
+      "pron": 250,
+      "wr_flex": 200,
+      "wr_dev": 150,
+      "sc_prot": 150,
+      "sc_elev": 120
+    },
+    "anthropometry_mm": {
+      "source": "ANSUR II 2012, 50th percentile male",
+      "stature": 1755,
+      "acromion_height": 1439,
+      "eye_height": 1640,
+      "biacromial": 415,
+      "elbow_to_grip": 348
+    },
+    "about_girdle": "sc_prot / sc_elev are mm of glenohumeral-centre travel in the thorax frame (clavicle + scapula). Ranges: about +/-30 deg of sternoclavicular protraction/retraction and 0-35 deg elevation on a ~150 mm clavicle give roughly -25..45 mm forward and -15..35 mm up (textbook SC ranges; [unverified] exact values)."
+  }
+}

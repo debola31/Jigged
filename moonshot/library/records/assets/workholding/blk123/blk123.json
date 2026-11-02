@@ -1,0 +1,40 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "blk123",
+  "name": "1-2-3 blocks (pair)",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "8630A74",
+  "description": "Matched pair of hardened 1 x 2 x 3 in setup blocks with 23 holes, for raising and squaring parts.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Size", "value": "1 x 3 x 2 in"},
+    {"name": "Tolerance", "value": 0.0003, "unit": "in", "note": "length, width and height"},
+    {"name": "Squareness", "value": 0.0001, "unit": "in"},
+    {"name": "Parallelism", "value": 0.0002, "unit": "in"},
+    {"name": "Holes", "value": "23: 5 threaded 3/8-16, 18 plain 25/64 in"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/8630A74/"],
+  "source_files": ["8630A74_Setup Blocks.STEP", "blk123_pair.step (composed)"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "McMaster's STEP is one block; the pair is composed (planner.compose.block_123_pair).",
+  "file": "blk123.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47498,
+  "bbox": {"min": [-38.1, -38.1, 0.0], "max": [38.1, 38.1, 50.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/blk123_pair.step",
+    "compose": "block_123_pair",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 94468,
+      "deflection_mm": 0.024,
+      "simplified": true,
+      "glb_bytes": 1062844
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "ct-brmb0143",
+  "name": "BRMB0143 form tool",
+  "source": {
+    "kind": "modeled lookalike",
+    "origin": "parts/_tools/contour_parts.py",
+    "based_on": "Contour part description; typical dimensions, not a customer print"
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "M2 HSS, hardened 63-65 HRC",
+  "heat_treat": null,
+  "finish": "Ground, laser marked",
+  "quantity": null,
+  "quantity_note": "Not given",
+  "size": "Ø1.125 head x .75, Ø.750 shank x 2.50",
+  "units": "in",
+  "bbox_mm": [
+    28.58,
+    23.81,
+    82.55
+  ],
+  "solids": 1,
+  "drawing_scale": "2:1",
+  "tolerances": {
+    "general": ".XX ±.010, .XXX ±.005, angles ±0°30' (assumed)",
+    "critical": [
+      "Shank Ø.7500 +.0000/-.0005",
+      "Form R.125 ±.0005, profile .0005 to shank",
+      "Rake face on center ±.002",
+      "Head Ø1.125 ±.001"
+    ]
+  },
+  "machines_likely": [
+    "cylindrical_grinder",
+    "wire_edm",
+    "laser_marker",
+    "inspection"
+  ],
+  "routing": {
+    "known": true,
+    "source": "real shop routing, provided by the user (ground truth)",
+    "steps": [
+      "Grinding",
+      "EDM",
+      "Laser",
+      "QC"
+    ]
+  },
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.619,
+    "bodies": 1,
+    "faces": 11,
+    "date": "2026-10-20"
+  }
+}

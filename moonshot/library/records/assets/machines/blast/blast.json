@@ -1,0 +1,42 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "blast",
+  "name": "Sand blast cabinet",
+  "category": "machines",
+  "make": "GueriTech",
+  "model": "Shop sand blast cabinet (DIY design)",
+  "description": "Glove-box abrasive blast cabinet with a viewing window and hopper, for surface finish and scale removal.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Working chamber", "value": "about 47 x 25 in (measured from the model)"},
+    {"name": "Air", "value": "80-120 psi, 10-20 cfm (typical siphon gun)"},
+    {"name": "Media", "value": "glass bead or aluminium oxide (typical)"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/gueritech-sandblasting-sandblast-cabinet-for-shop-and-garage-diy-1"
+  ],
+  "source_files": [
+    "GueriTech_Sand_Blast_Cabinet-ASM.STEP",
+    "GueriTech_Sand_Blast_Cabinet-ASM.IGS"
+  ],
+  "license": "GrabCAD community model by GueriTech Research (2021), GrabCAD terms of use; not self-made or CC0",
+  "notes": "A build-it-yourself cabinet design rather than a catalogue product; air and media figures are typical.",
+  "file": "blast.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 82760,
+  "bbox": {"min": [-596.6, -318.5, 0.0], "max": [596.6, 318.5, 1500.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/GueriTech_Sand_Blast_Cabinet-ASM.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 82760,
+      "deflection_mm": 0.404,
+      "simplified": false,
+      "glb_bytes": 2332924
+    }
+  }
+}

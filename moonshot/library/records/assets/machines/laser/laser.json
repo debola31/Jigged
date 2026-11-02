@@ -1,0 +1,40 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "laser",
+  "name": "Fiber laser marking machine",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Cabinet fiber laser marker (20-50 W class)",
+  "description": "Enclosed fiber laser that marks part numbers, dates and logos on metal and plastic parts.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Laser source", "value": "Fiber, 1064 nm, 20-50 W (typical)"},
+    {"name": "Marking field", "value": "110 x 110 mm (4.3 x 4.3 in), typical F-theta lens"},
+    {"name": "Marking depth", "value": "0.001-0.005 in on steel (typical)"}
+  ],
+  "source_urls": ["https://grabcad.com/library/laser-marking-machine-4"],
+  "source_files": [
+    "Laser Marking Machine.IGS",
+    "Laser Marking Machine.step (exported from the IGES in Fusion)"
+  ],
+  "license": "GrabCAD community model by Xiao Yusen (2025), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Only IGES is published (50 MB); it was imported in Fusion and exported to STEP. The model has no maker or ratings, so the specs are typical for a cabinet fiber marker.",
+  "file": "laser.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 290342,
+  "bbox": {"min": [-466.3, -387.3, 0.0], "max": [466.3, 387.2, 1389.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Laser Marking Machine.step",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 393640,
+      "deflection_mm": 0.37,
+      "simplified": true,
+      "glb_bytes": 6838244
+    }
+  }
+}

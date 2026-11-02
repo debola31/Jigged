@@ -1,0 +1,58 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "wedm",
+  "name": "Wire EDM",
+  "category": "machines",
+  "make": "Mitsubishi",
+  "model": "MD+PRO II",
+  "description": "CNC wire EDM: 12.6 x 9.8 x 8.7 in travels, parts up to 1,100 lb, 15 degree taper, 0.004-0.012 in wire.",
+  "generic": false,
+  "key_specs": [
+    {"name": "X travel", "value": 12.6, "unit": "in"},
+    {"name": "Y travel", "value": 9.8, "unit": "in"},
+    {"name": "Z travel", "value": 8.7, "unit": "in"},
+    {
+      "name": "U/V travel",
+      "value": 1.2,
+      "unit": "in",
+      "note": "plus or minus; one listing gives 1.3 in"
+    },
+    {
+      "name": "Max part size (submerged)",
+      "value": "27.5 x 23.2 x 8.4 in",
+      "note": "another listing gives 27.6 x 21.7 x 8.5 in"
+    },
+    {"name": "Max part weight", "value": 1100, "unit": "lb"},
+    {"name": "Max taper angle", "value": 15, "unit": "deg", "note": "at 3.93 in thickness"},
+    {"name": "Wire diameter", "value": [0.004, 0.012], "unit": "in"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/wire-edm-mitsubishi-md-pro-ii-1",
+    "https://www.machinetools.com/en/for-sale/548415-mitsubishi-edm-md-plus-pro-ii-wire-edm/spec_sheet",
+    "https://surplusrecord.com/listing/mitsubishi-mdpro-ii-ba8-cnc-wire-electrical-discharge-machine-12-598-x-9-843-y-8-661-z-1-26-u-v-31x23x18-5-tank-automatic-wire-threading-2007-561543/"
+  ],
+  "source_files": [
+    "Mitsubishi MD+PRO II.IGS",
+    "Mitsubishi MD+PRO II.step (exported from the IGES in Fusion)"
+  ],
+  "license": "GrabCAD community model by José Luis Meléndez Gallardo (2021), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Only an IGES file is published (no STEP or X_T). OCCT's IGES reader ran over an hour on it, so the IGES was imported in Fusion and exported to STEP, which is what the build reads. Mitsubishi has no spec page for this discontinued model, so specs are from used-machine dealer listings, which differ slightly.",
+  "file": "wedm.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 287858,
+  "bbox": {"min": [-812.8, -901.1, 0.0], "max": [812.9, 901.0, 1952.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Mitsubishi MD+PRO II.step",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 502119,
+      "deflection_mm": 6.23,
+      "simplified": true,
+      "glb_bytes": 7527860
+    }
+  }
+}

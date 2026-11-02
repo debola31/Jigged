@@ -1,0 +1,47 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "mlathe",
+  "name": "Manual engine lathe",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Gap-bed engine lathe",
+  "description": "Large geared-head gap-bed engine lathe with carriage, cross slide, compound, tailstock and DRO, for one-offs and long turning.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Type", "value": "Geared-head gap-bed engine lathe"},
+    {
+      "name": "Overall size",
+      "value": "194 x 44 x 67 in (4.93 x 1.12 x 1.71 m)",
+      "note": "measured from the model"
+    },
+    {
+      "name": "Distance between centres",
+      "value": 120,
+      "unit": "in",
+      "note": "estimated from the bed length"
+    },
+    {"name": "Swing over bed", "value": 26, "unit": "in", "note": "typical for a lathe this size"}
+  ],
+  "source_urls": ["https://grabcad.com/library/conventional-lathe-machine-1"],
+  "source_files": ["Conventional Lathe Machine VDF v1.step"],
+  "license": "GrabCAD community model by Jeroen (2020), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Stands in for the shop's ProtoTRAK 1745 toolroom lathe: no TRAK or ProtoTRAK model turned up, and this generic model is a much bigger lathe (194 in long). The file stands it on its back, so it is read +Z up. Centres and swing are estimates; the model has no maker.",
+  "file": "mlathe.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 285102,
+  "bbox": {"min": [-2465.1, -560.4, 0.0], "max": [2465.1, 560.5, 1710.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Conventional Lathe Machine VDF v1.step",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 398180,
+      "deflection_mm": 1.068,
+      "simplified": true,
+      "glb_bytes": 6107556
+    }
+  }
+}

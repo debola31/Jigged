@@ -1,0 +1,53 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "vise6",
+  "name": "6 in machine vise",
+  "category": "workholding",
+  "make": "Kurt",
+  "model": "HDL6AL",
+  "description": "Two-station 6 in vise with 1.735 in machinable aluminium jaws; each station opens to 4.00 in.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Jaw width", "value": 6.0, "unit": "in"},
+    {"name": "Max opening (each of 2 stations)", "value": 4.0, "unit": "in"},
+    {"name": "Jaw height (aluminium jaws, L)", "value": 1.735, "unit": "in"},
+    {"name": "Bed height, base to seat (A)", "value": 3.125, "unit": "in"},
+    {"name": "Body length (C)", "value": 21.0, "unit": "in"},
+    {"name": "Length with screw end (C + F)", "value": 22.45, "unit": "in"},
+    {"name": "Overall height (A + L)", "value": 4.86, "unit": "in"},
+    {
+      "name": "Weight, base only",
+      "value": 71,
+      "unit": "lb",
+      "note": "Penn Tool shipping estimate; HDL6J with hard jaws is listed at 97 lb (KBC Tools)"
+    },
+    {"name": "Clamping force at 70 ft-lb", "value": 7450, "unit": "lbf"}
+  ],
+  "source_urls": [
+    "https://www.kurtworkholding.com/product/kurt-manual-vise-base-w-hard-jaw-kit-6-english/",
+    "https://www.kurtworkholding.com/wp-content/uploads/2026/02/Kurt-HDL6_Side-and-End-View-988x1440.jpg",
+    "https://www.penntoolco.com/kurt-6-hdl-anglock-manual-vise-english-base-assembly-hdl6/",
+    "https://www.kbctools.ca/itemdetail/8-302-HDL6J"
+  ],
+  "source_files": ["kurtworkhdg_HDL6AL.stp"],
+  "license": "Kurt Workholding CAD download (manufacturer file, part HDLM6-C in the STEP); not self-made or CC0",
+  "notes": "HDL6 is Kurt's double-station AngLock vise; AL is the machinable aluminium jaw option. Specs are from Kurt's HDL6 page and drawing (inches). In shop.json it is vise-6in-2 on the VF-3SSYT; vise-6in-1 on the VF-2 is the single-station Kurt D688 (asset d688).",
+  "file": "vise6.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 38646,
+  "bbox": {"min": [-290.7, -76.2, 0.0], "max": [290.7, 76.2, 123.3]},
+  "attach_points": [],
+  "build": {
+    "from": "source/kurtworkhdg_HDL6AL.stp",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 38646,
+      "deflection_mm": 0.123,
+      "simplified": false,
+      "glb_bytes": 758988
+    }
+  }
+}

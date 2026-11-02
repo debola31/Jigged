@@ -167,7 +167,7 @@ gantt
 | Rules | Standard safety rules, no PPE; they block a run like a physics failure |
 | Code | New, in Jigged (§10); trainual is the reference |
 | Compute | Windows hub; both Macs and any rented GPU are workers only |
-| Sharing | All 20 parts may be shared with anyone, from mid-build; 7 are private customer parts (L&L) |
+| Sharing | All 20 parts may be shared with anyone, from mid-build |
 | Licences | Non-commercial research licences (GRAB, ARCTIC, MANO, NIMBLE) accepted for research. **Reopen first if this ever becomes product.** |
 | Hosting | Videos and published models in Supabase Storage, never the Next build |
 | Deadline | Fri Nov 13, sharing included; first part Thu Nov 5 |
@@ -502,7 +502,7 @@ Outside processes (heat treat, plating, coating) are one "send out and receive" 
 - **Python** runs in the `jigged` conda env (CLAUDE.md); Blender scripts run in Blender's own Python.
 - **Records and schemas are committed. Big binaries are not**: every Vercel build clones the repo.
 - **The data root is `C:\jigged-data`**, outside OneDrive. It holds the vendor CAD originals (1.8 GB, can't be
-  fetched again), the private parts, the hand model and arm posture file, the CC0 textures, and the reference
+  fetched again), the parts' STEP and PDF files, the hand model and arm posture file, the CC0 textures, and the reference
   takes.
 - **The farm queue is not Jigged's `ai_jobs` queue** and calls no model, so CLAUDE.md's AI-call rule doesn't bite.
 

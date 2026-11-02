@@ -1,0 +1,39 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "clamps",
+  "name": "Strap clamps, T-nuts and studs",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "8957A43 kit (4999A32 step clamp shown)",
+  "description": "One clamping setup from the 5/8 in T-slot kit: step clamp, step block, stud, T-slot nut and flange nut.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Kit", "value": "8957A43: 53 pieces for 5/8 in slots, 1/2-13 thread"},
+    {"name": "Step clamps", "value": "2 each 2.5, 4 and 6 in"},
+    {"name": "Studs", "value": "4 each 3-8 in"},
+    {"name": "Step blocks", "value": "3 pairs, 3/4-6 in range"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/8957A43/", "https://www.mcmaster.com/4999A32/"],
+  "source_files": ["4999A32_Step Setup Clamp.STEP", "clamp_set.step (composed)"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "The kit has no CAD; McMaster's step clamp STEP is used, and the step block, stud, T-nut and nut are modelled to the kit's sizes (planner.compose.clamp_set).",
+  "file": "clamps.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 600,
+  "bbox": {"min": [-114.3, -65.1, 0.0], "max": [114.3, 65.1, 57.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/clamp_set.step",
+    "compose": "clamp_set",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 600,
+      "deflection_mm": 0.054,
+      "simplified": false,
+      "glb_bytes": 17252
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "magchk",
+  "name": "Magnetic chuck",
+  "category": "workholding",
+  "make": "Suburban Tool",
+  "model": "MCB-618-FP",
+  "description": "6 x 18 in fine-pole permanent magnetic chuck for the surface grinder; a lever switches the magnet on to hold steel parts flat.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Size", "value": "18-1/2 x 6 in"},
+    {"name": "Height", "value": 2.625, "unit": "in"},
+    {
+      "name": "Pole pitch",
+      "value": 0.25,
+      "unit": "in",
+      "note": "1/8 in steel poles with 1/8 in separators"
+    },
+    {"name": "Type", "value": "Permanent magnet, fine pole"},
+    {"name": "Weight", "value": 70, "unit": "lb"}
+  ],
+  "source_urls": [
+    "https://www.penntoolco.com/suburban-tool-rectangular-permanent-magnetic-chuck-mcb-618-fp-fine-pole-18-1-2-x-6-x-2-5-8-77-548-6",
+    "https://shop.butlerbros.com/catalogue/product/1093067"
+  ],
+  "source_files": ["magchk.step"],
+  "license": "self-made placeholder (planner.placeholders.magnetic_chuck_6x18)",
+  "notes": "GENERIC: no 6 x 18 permanent magnetic chuck CAD. McMaster's 18-1/2 x 6 fine-pole chuck (5016A37) has no CAD even when logged in; none on GrabCAD; TraceParts and 3Dfindit need a login. Placeholder sized to the Suburban listing, with pole stripes and the on/off handle.",
+  "file": "magchk.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1916,
+  "bbox": {"min": [-243.2, -76.2, 0.0], "max": [243.2, 76.2, 109.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/magchk.step",
+    "placeholder": "magnetic_chuck_6x18",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1916,
+      "deflection_mm": 0.104,
+      "simplified": false,
+      "glb_bytes": 74324
+    }
+  }
+}

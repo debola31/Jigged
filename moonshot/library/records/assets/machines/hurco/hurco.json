@@ -1,0 +1,46 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "hurco",
+  "name": "Hurco VM1 vertical machining centre",
+  "category": "machines",
+  "make": "Hurco",
+  "model": "VM1",
+  "description": "Compact 40-taper VMC: 26 x 14 x 18 in travels on a 29 x 14 in table, 8,000 rpm, 16-tool side-mount changer.",
+  "generic": true,
+  "key_specs": [
+    {"name": "X travel", "value": 26, "unit": "in"},
+    {"name": "Y travel", "value": 14, "unit": "in"},
+    {"name": "Z travel", "value": 18, "unit": "in"},
+    {"name": "Table", "value": "29 x 14 in, 750 lb"},
+    {"name": "Max spindle speed", "value": 8000, "unit": "rpm"},
+    {"name": "Spindle power", "value": 10, "unit": "hp"},
+    {"name": "Taper", "value": "CAT40"},
+    {"name": "Tool changer", "value": "16-pocket side mount"}
+  ],
+  "source_urls": [
+    "https://surplusrecord.com/listing/hurco-vm-1-cnc-vertical-machining-center-16-automatic-tool-changer-26-x-14-y-18-z-8000-rpm-10-hp-chip-auger-coolant-system-2006-669749/",
+    "https://grabcad.com/library/hurco-vm1-vertical-milling-machine-model-1"
+  ],
+  "source_files": ["hurco.step"],
+  "license": "self-made placeholder (planner.placeholders.hurco_vm1)",
+  "notes": "GENERIC: GrabCAD has a Hurco VM1 model (Dick Lowe, 2016), but its download archive stayed 'being created' for over an hour and the single-file link did nothing. Specs are from a dealer listing; the enclosure size is estimated.",
+  "file": "hurco.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 72,
+  "bbox": {"min": [-1193.8, -769.6, 0.0], "max": [1193.8, 769.7, 2438.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/hurco.step",
+    "placeholder": "hurco_vm1",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 72,
+      "deflection_mm": 0.749,
+      "simplified": false,
+      "glb_bytes": 5700
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "gwheel",
+  "name": "Grinding wheel, 10 x 1 x 3 in",
+  "category": "consumables",
+  "make": "Generic",
+  "model": "Vitrified aluminium oxide wheel (A46-H class)",
+  "description": "Surface-grinding wheel for steel; diamond or CBN wheels of the same size cover carbide.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Size", "value": "10 x 1 x 3 in"},
+    {"name": "Abrasive", "value": "white aluminium oxide, 46 grit, H grade (typical)"},
+    {"name": "Max speed", "value": 3800, "unit": "rpm", "note": "typical rating"}
+  ],
+  "source_urls": [],
+  "source_files": ["gwheel.step"],
+  "license": "self-made placeholder (planner.placeholders.grinding_wheel_10in)",
+  "notes": "GENERIC: a plain disc needs no download.",
+  "file": "gwheel.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1468,
+  "bbox": {"min": [-127.0, -127.0, 0.0], "max": [127.0, 127.0, 25.9]},
+  "attach_points": [],
+  "build": {
+    "from": "source/gwheel.step",
+    "placeholder": "grinding_wheel_10in",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1468,
+      "deflection_mm": 0.072,
+      "simplified": false,
+      "glb_bytes": 34504
+    }
+  }
+}

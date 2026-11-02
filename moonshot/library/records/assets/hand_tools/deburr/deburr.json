@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "deburr",
+  "name": "Deburring tools, files and abrasive pads",
+  "category": "hand_tools",
+  "make": "Generic",
+  "model": "Hand deburring kit",
+  "description": "Swivel-blade deburring tool, 10 in flat file and maroon abrasive pad for removing burrs by hand.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Deburring tool", "value": "swivel blade, 3.2 mm"},
+    {"name": "File", "value": "10 in flat, second cut"},
+    {"name": "Pad", "value": "6 x 9 in maroon (very fine)"}
+  ],
+  "source_urls": [],
+  "source_files": ["deburr.step"],
+  "license": "self-made placeholder (planner.placeholders.deburr_set)",
+  "notes": "GENERIC: McMaster's deburring pages are category tiles without product CAD in the time allowed.",
+  "file": "deburr.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 456,
+  "bbox": {"min": [-203.2, -130.2, 0.0], "max": [203.2, 130.2, 35.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/deburr.step",
+    "placeholder": "deburr_set",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 456,
+      "deflection_mm": 0.097,
+      "simplified": false,
+      "glb_bytes": 13964
+    }
+  }
+}

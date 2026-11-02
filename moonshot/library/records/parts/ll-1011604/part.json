@@ -1,0 +1,51 @@
+{
+  "id": "ll-1011604",
+  "name": "Cover (Blende)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1011604",
+    "files": {
+      "step": "1011604-_314-092-60020-02-0000.step",
+      "pdf": "1011604-_314-092-60021-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "sheet",
+  "material": "Plain carbon steel sheet",
+  "heat_treat": null,
+  "finish": "Powdercoat RAL 7035",
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "220.7 x 192.7 x 158.3 mm formed (534.6 x 297.4 flat)",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "2 bends DOWN 90° R3, 2 bends DOWN 45° R3",
+      "2X 6.6 x 21.6 slots"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "laser_cutter",
+    "press_brake",
+    "powder_coat (outside)",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Formed steel sheet with four bends and powdercoat: the laser-and-brake job, with no machining.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.753,
+    "bodies": 1,
+    "faces": 66,
+    "date": "2026-10-20"
+  }
+}

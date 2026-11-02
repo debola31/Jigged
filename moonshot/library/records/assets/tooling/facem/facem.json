@@ -1,0 +1,42 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "facem",
+  "name": "2 in face mill",
+  "category": "tooling",
+  "make": "McMaster-Carr (Mil-Tec)",
+  "model": "8826A11",
+  "description": "2 in indexable face mill body for 4 carbide inserts, 3/4 in arbor hole, for the shell mill arbor.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Diameter", "value": 2, "unit": "in"},
+    {"name": "Thickness", "value": 1.72, "unit": "in"},
+    {"name": "Arbor hole", "value": 0.75, "unit": "in", "note": "0.313 in keyway"},
+    {"name": "Inserts", "value": 4, "unit": "inserts"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/8826A11/"],
+  "source_files": [
+    "8826A11_Replaceable Carbide-Insert Milling Cutter.STEP",
+    "face_mill.step (rotated upright)"
+  ],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "notes": "The file's axis is X; planner.compose.face_mill_upright stands it on its back face. Inserts are sold separately and not shown.",
+  "file": "facem.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 45712,
+  "bbox": {"min": [-23.4, -23.4, 0.0], "max": [23.4, 23.4, 42.9]},
+  "attach_points": [],
+  "build": {
+    "from": "source/face_mill.step",
+    "compose": "face_mill_upright",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 45712,
+      "deflection_mm": 0.017,
+      "simplified": false,
+      "glb_bytes": 802624
+    }
+  }
+}

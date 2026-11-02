@@ -1,0 +1,51 @@
+{
+  "id": "ll-1007224",
+  "name": "Spacer (Abstandhalter)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1007224",
+    "files": {
+      "step": "1007224-_314-092-59399-02-0000.step",
+      "pdf": "1007224-_314-092-59935-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "round",
+  "material": "6061-T6",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "Ø63.0 x 12.2 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "2X Ø31.500 g6 (-0.009/-0.025) spigots, one each face",
+      "5X Ø6.6 thru on bolt pattern"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "band_saw",
+    "lathe",
+    "vmc",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Aluminum disc that needs both lathe (two g6 spigots, two ops) and mill (bolt circle): the lathe-then-mill handoff.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.667,
+    "bodies": 1,
+    "faces": 18,
+    "date": "2026-10-20"
+  }
+}

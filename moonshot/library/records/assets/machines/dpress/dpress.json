@@ -1,0 +1,40 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "dpress",
+  "name": "Column drill press",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Floor column drilling machine",
+  "description": "Floor-standing column drill press with a geared head, round column and work table, for simple drilling and tapping.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Drilling capacity", "value": 1.25, "unit": "in", "note": "in steel, typical"},
+    {"name": "Spindle", "value": "MT3, 6-12 speeds (typical)"},
+    {"name": "Quill travel", "value": 5, "unit": "in", "note": "typical"},
+    {"name": "Table", "value": "about 16 x 16 in (typical)"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/column-drilling-machine-vertical-drill-press-cad-model-industrial-workshop-equipment-design-1"
+  ],
+  "source_files": ["Colum drilling machine.STEP"],
+  "license": "GrabCAD community model by Muhammad Qasim Sajid (2026), GrabCAD terms of use; not self-made or CC0",
+  "notes": "The model has no maker or ratings; the specs are typical for a floor column drill. A tapping arm is not modelled.",
+  "file": "dpress.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 93340,
+  "bbox": {"min": [-815.7, -298.1, 0.0], "max": [815.6, 298.1, 1947.2]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Colum drilling machine.STEP",
+    "up": "+Y",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 93340,
+      "deflection_mm": 0.523,
+      "simplified": false,
+      "glb_bytes": 1725828
+    }
+  }
+}

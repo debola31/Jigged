@@ -1,0 +1,65 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "mallet",
+  "name": "Soft-face mallet",
+  "category": "hand_tools",
+  "make": "Generic",
+  "model": "Soft-face mallet, 1.75 in urethane faces",
+  "description": "Dead-blow style mallet with replaceable urethane faces, for tapping a part down onto its parallels without marking it.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Head diameter",
+      "value": 1.73,
+      "unit": "in"
+    },
+    {
+      "name": "Head length",
+      "value": 4.13,
+      "unit": "in"
+    },
+    {
+      "name": "Overall length",
+      "value": 12.1,
+      "unit": "in"
+    }
+  ],
+  "source_urls": [],
+  "source_files": [
+    "mallet.glb"
+  ],
+  "license": "self-made (blender/build_mallet.py)",
+  "notes": "GENERIC: built by blender/build_mallet.py for the vise-load guide's tap-down step; replaces nothing.",
+  "file": "mallet.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2032,
+  "bbox": {
+    "min": [
+      -22.0,
+      -52.5,
+      -0.0
+    ],
+    "max": [
+      307.6,
+      52.5,
+      44.0
+    ]
+  },
+  "attach_points": [
+    {"name": "mallet_grip", "t": [214.8, 0.0, 22.0], "q": [0.0, 0.0, 0.0, 1.0]},
+    {"name": "mallet_face", "t": [0.0, -52.5, 22.0], "q": [0.707107, 0.0, 0.0, 0.707107]}
+  ],
+  "build": {
+    "from": "source/mallet.glb",
+    "up": "+Y",
+    "scale": 1.0,
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2032,
+      "simplified": false,
+      "glb_bytes": 56348
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "kmill",
+  "name": "Bridgeport-type turret knee mill",
+  "category": "machines",
+  "make": "Generic",
+  "model": "Bridgeport-type turret knee mill (9 x 42 in table)",
+  "description": "Manual vertical knee mill with a ram-and-turret head, quill feed and a 9 x 42 in table, for simple features and one-offs.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Table", "value": "9 x 42 in", "note": "typical Bridgeport Series I"},
+    {"name": "X travel", "value": 30, "unit": "in", "note": "typical"},
+    {"name": "Y travel", "value": 12, "unit": "in", "note": "typical"},
+    {"name": "Knee (Z) travel", "value": 16, "unit": "in", "note": "typical"},
+    {"name": "Quill travel", "value": 5, "unit": "in", "note": "typical"},
+    {"name": "Spindle", "value": "R8, 60-4,200 rpm, 2 hp (typical)"}
+  ],
+  "source_urls": ["https://grabcad.com/library/turret-milling-machine-1"],
+  "source_files": ["ALL1.STEP"],
+  "license": "GrabCAD community model by cheng chia (2020), GrabCAD terms of use; not self-made or CC0",
+  "notes": "No Bridgeport or Acer model with an assembled STEP turned up (the Bridgeport-type model on GrabCAD is loose parts). This turret mill is modelled at about 1:7 (296 mm tall), so it is resized x7 to a Bridgeport's 82 in height and 66 in depth. Specs are typical Series I figures; the model has no maker.",
+  "file": "kmill.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 259506,
+  "bbox": {"min": [-758.3, -828.8, 0.0], "max": [758.3, 828.8, 2074.8]},
+  "attach_points": [],
+  "build": {
+    "from": "source/ALL1.STEP",
+    "up": "+Y",
+    "resize": 7.0,
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 259506,
+      "deflection_mm": 0.088,
+      "simplified": false,
+      "glb_bytes": 6588332
+    }
+  }
+}

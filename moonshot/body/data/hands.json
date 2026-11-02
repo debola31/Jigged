@@ -1,0 +1,309 @@
+{
+  "schema": "setupguide.hands/0.1",
+  "file": "hands.glb",
+  "units": "mm",
+  "up": "+Z",
+  "forward": "-Y",
+  "fps": 30,
+  "verbs": "verbs.json",
+  "license": "MakeHuman/MPFB base mesh and rig (CC0); mindfront_aksel_skin from MakeHuman skins02 (CC0)",
+  "root": "arms_root",
+  "palm_axes": "palm frame = palm.<side> bone frame with x = bone +Y, y = bone -X, z = bone +Z",
+  "sides": {
+    "L": {
+      "shoulder": [
+        170.02,
+        0.0,
+        0.0
+      ],
+      "upper_mm": 242.0,
+      "fore_mm": 238.48,
+      "chain": [
+        "upperarm01.L",
+        "upperarm02.L",
+        "lowerarm01.L",
+        "lowerarm02.L",
+        "wrist.L"
+      ],
+      "palm_in_wrist": {
+        "t": [
+          15.85,
+          51.91,
+          -6.02
+        ],
+        "q": [
+          -0.057762,
+          0.724049,
+          -0.012173,
+          0.687218
+        ]
+      },
+      "index_pad_in_palm": [
+        104.03,
+        31.18,
+        27.97
+      ],
+      "pads": {
+        "relax": {
+          "index": [
+            83.57,
+            24.78,
+            40.93
+          ],
+          "thumb": [
+            40.33,
+            49.77,
+            45.62
+          ]
+        },
+        "open": {
+          "index": [
+            105.68,
+            23.13,
+            26.13
+          ],
+          "thumb": [
+            34.71,
+            71.36,
+            39.34
+          ]
+        },
+        "aperture": {
+          "index": [
+            122.36,
+            32.65,
+            -7.74
+          ],
+          "thumb": [
+            -13.89,
+            101.0,
+            27.45
+          ]
+        },
+        "flat": {
+          "index": [
+            120.62,
+            43.68,
+            -13.4
+          ],
+          "thumb": [
+            -50.02,
+            104.71,
+            -14.82
+          ]
+        },
+        "power": {
+          "index": [
+            29.04,
+            12.96,
+            27.62
+          ],
+          "thumb": [
+            -26.1,
+            85.01,
+            47.51
+          ]
+        },
+        "pinch": {
+          "index": [
+            28.85,
+            14.21,
+            20.89
+          ],
+          "thumb": [
+            -35.84,
+            81.53,
+            40.13
+          ]
+        },
+        "tips": {
+          "index": [
+            90.41,
+            27.98,
+            36.16
+          ],
+          "thumb": [
+            -24.94,
+            32.41,
+            53.24
+          ]
+        },
+        "point": {
+          "index": [
+            104.03,
+            31.18,
+            27.97
+          ],
+          "thumb": [
+            39.75,
+            3.22,
+            39.24
+          ]
+        }
+      }
+    },
+    "R": {
+      "shoulder": [
+        -170.02,
+        0.0,
+        0.0
+      ],
+      "upper_mm": 242.0,
+      "fore_mm": 238.48,
+      "chain": [
+        "upperarm01.R",
+        "upperarm02.R",
+        "lowerarm01.R",
+        "lowerarm02.R",
+        "wrist.R"
+      ],
+      "palm_in_wrist": {
+        "t": [
+          -15.85,
+          51.91,
+          -6.02
+        ],
+        "q": [
+          -0.057762,
+          -0.724049,
+          0.012173,
+          0.687218
+        ]
+      },
+      "index_pad_in_palm": [
+        104.03,
+        -31.18,
+        27.97
+      ],
+      "pads": {
+        "relax": {
+          "index": [
+            83.57,
+            -24.78,
+            40.93
+          ],
+          "thumb": [
+            40.33,
+            -49.77,
+            45.62
+          ]
+        },
+        "open": {
+          "index": [
+            105.68,
+            -23.13,
+            26.13
+          ],
+          "thumb": [
+            34.71,
+            -71.36,
+            39.34
+          ]
+        },
+        "aperture": {
+          "index": [
+            122.36,
+            -32.65,
+            -7.74
+          ],
+          "thumb": [
+            32.8,
+            -99.88,
+            -19.54
+          ]
+        },
+        "flat": {
+          "index": [
+            120.62,
+            -43.68,
+            -13.4
+          ],
+          "thumb": [
+            -17.31,
+            -91.78,
+            -75.37
+          ]
+        },
+        "power": {
+          "index": [
+            29.04,
+            -12.96,
+            27.62
+          ],
+          "thumb": [
+            51.66,
+            -84.14,
+            -28.56
+          ]
+        },
+        "pinch": {
+          "index": [
+            28.85,
+            -14.21,
+            20.89
+          ],
+          "thumb": [
+            44.69,
+            -82.11,
+            -35.59
+          ]
+        },
+        "tips": {
+          "index": [
+            90.41,
+            -27.98,
+            36.16
+          ],
+          "thumb": [
+            49.88,
+            -39.04,
+            -2.38
+          ]
+        },
+        "point": {
+          "index": [
+            104.03,
+            -31.18,
+            27.97
+          ],
+          "thumb": [
+            39.75,
+            -3.22,
+            39.24
+          ]
+        }
+      }
+    }
+  },
+  "actions": [
+    "grab.L",
+    "grab.R",
+    "grab_flat.L",
+    "grab_flat.R",
+    "grab_tips.L",
+    "grab_tips.R",
+    "place.L",
+    "place.R",
+    "place_flat.L",
+    "place_flat.R",
+    "place_tips.L",
+    "place_tips.R",
+    "hold.L",
+    "hold.R",
+    "hold_flat.L",
+    "hold_flat.R",
+    "hold_tips.L",
+    "hold_tips.R",
+    "slide.L",
+    "slide.R",
+    "slide_tips.L",
+    "slide_tips.R",
+    "rotate.L",
+    "rotate.R",
+    "push.L",
+    "push.R",
+    "measure.L",
+    "measure.R"
+  ],
+  "glb_bytes": 1805892
+}

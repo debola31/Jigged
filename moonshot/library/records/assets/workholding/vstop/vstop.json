@@ -1,0 +1,50 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "vstop",
+  "name": "Vise stop",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "Articulating swing-arm vise stop",
+  "description": "Swing-arm stop that bolts to the vise; its sliding rod sets where each part's end sits so every part loads in the same place.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Stop rod length (reach)",
+      "value": 6.26,
+      "unit": "in",
+      "note": "159 mm, measured from the model"
+    },
+    {"name": "Overall height", "value": 6.47, "unit": "in", "note": "164 mm, measured from the model"},
+    {"name": "Mounting", "value": "M10 socket head cap screw into a slot nut on the vise or table"}
+  ],
+  "source_urls": ["https://grabcad.com/library/vise-stop-5"],
+  "source_files": [
+    "Vise Stop.STEP",
+    "01.jpg",
+    "05.jpg",
+    "09.jpg",
+    "E01.jpg",
+    "E02.jpg",
+    "E03.jpg"
+  ],
+  "license": "GrabCAD community model by Michael Lin (2022), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Kurt's 6AWS workstop page has no CAD and 3Dfindit's Kurt catalogue has no workstop; McMaster needs a login. This community model is a generic swing-arm stop, so specs are measured from it.",
+  "file": "vstop.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 48162,
+  "bbox": {"min": [-20.0, -94.8, 0.0], "max": [20.0, 94.8, 164.4]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Vise Stop.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 48162,
+      "deflection_mm": 0.051,
+      "simplified": false,
+      "glb_bytes": 925020
+    }
+  }
+}

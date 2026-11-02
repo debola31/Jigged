@@ -1,0 +1,156 @@
+# Every pass/fail number the moonshot checks use, each with its source and a one-line reason.
+# PROTECTED (docs/moonshot/shop-and-pipeline-plan.md §6, rule 1): a PR that changes this file may not change code.
+#
+# source is one of:
+#   measured  - from the accepted reference take (C:\jigged-data\reference\setup-take\report.md)
+#   study     - a published measurement of people; the citation is in `reason`
+#   spec      - a maker's spec sheet
+#   decided   - a decision recorded in the plan
+#   proposed  - a starting point, kept until measured data says otherwise (plan §11)
+# value is a number, or [low, high] for a band.
+
+# --- Body (plan §3.1) ---
+
+[body.joint_range_tolerance_deg]
+value = 1.0
+unit = "deg"
+source = "measured"
+reason = "MuJoCo's soft joint limits overshoot by up to 0.9 deg on the reference take"
+
+[body.posture_frames_in_range_frac]
+value = 0.95
+unit = "fraction of frames"
+source = "proposed"
+reason = "Trunk-to-wrist angles inside the 1st-99th percentile of GRAB and ARCTIC; standing work differs from their seated data"
+
+[body.posture_nll_median_max]
+value = 25.0
+unit = "negative log-likelihood"
+source = "measured"
+reason = "People's own 95th percentile under the posture prior (ARCTIC sample); the reference take's median is 24.9"
+
+[body.muscle_activation_max]
+value = 1.0
+unit = "fraction of maximum"
+source = "decided"
+reason = "No muscle may exceed its maximum when the take is replayed through MyoSuite (plan §3.1)"
+
+[body.muscle_hold_activation_max]
+value = 0.30
+unit = "fraction of maximum"
+source = "proposed"
+reason = "Sustained holds stay well under maximum effort"
+
+[body.muscle_hold_min_s]
+value = 5.0
+unit = "s"
+source = "proposed"
+reason = "A hold this long counts as sustained for muscle_hold_activation_max"
+
+# --- Physics (plan §5.1) ---
+
+[physics.grip_safety_margin]
+value = [1.7, 2.2]
+unit = "x slip force"
+source = "study"
+reason = "Guillery 2013; Hiramatsu 2015: grip is 40-55% above the force at which the object would slip"
+
+[physics.grip_slip_mm]
+value = 2.0
+unit = "mm"
+source = "proposed"
+reason = "Reference take slipped 1.66 mm through a 28 deg turn; anything past 2 mm reads as a fumble"
+
+[physics.placement_mm]
+value = 2.0
+unit = "mm"
+source = "proposed"
+reason = "Reference take placed the blank within 1.53 mm of plan"
+
+[physics.placement_deg]
+value = 1.0
+unit = "deg"
+source = "proposed"
+reason = "Reference take placed the blank level (0.0 deg)"
+
+[physics.force_target_frac]
+value = 0.05
+unit = "fraction of target"
+source = "proposed"
+reason = "Reference take's 30 N push reached 29.7 N"
+
+[physics.tracking_lag_mm]
+value = 10.0
+unit = "mm"
+source = "proposed"
+reason = "Reference take lagged 6.77 mm at worst; more means the physics refused the planned motion"
+
+[physics.collision_penetration_mm]
+value = 2.5
+unit = "mm"
+source = "proposed"
+reason = "Reference take's finger collision shapes went 2.03 mm into solids at worst"
+
+[physics.skin_penetration_mm]
+value = 1.0
+unit = "mm"
+source = "measured"
+reason = "trainual's rendered-skin limit; worst on the load-blank take was 0.461 mm over 1,275 frames"
+
+[physics.stock_deviation_mm]
+value = 0.1
+unit = "mm"
+source = "decided"
+reason = "Simulated stock must match the part's STEP on machined faces (plan §2, O2)"
+
+# --- Like a person (plan §5.2) ---
+
+[person.grasp_preload_ms]
+value = [139, 321]
+unit = "ms"
+source = "study"
+reason = "Guillery 2013: preload 230 +/- 91 ms"
+
+[person.grasp_loading_ms]
+value = [163, 265]
+unit = "ms"
+source = "study"
+reason = "Guillery 2013: loading 214 +/- 51 ms"
+
+[person.reach_to_grasp_left_s]
+value = [0.26, 0.62]
+unit = "s"
+source = "measured"
+reason = "Interquartile range from trainual's tracked vise-setup video (reference-timing.json)"
+
+[person.reach_to_grasp_right_s]
+value = [0.32, 0.67]
+unit = "s"
+source = "measured"
+reason = "Interquartile range from trainual's tracked vise-setup video (reference-timing.json)"
+
+[person.peak_aperture_reach_frac]
+value = [0.71, 0.77]
+unit = "fraction of reach"
+source = "study"
+reason = "Bhatia 2022; Smeets 2020: the hand opens widest 71-77% of the way through the reach"
+
+[person.aperture_per_object_mm]
+value = [0.74, 0.92]
+unit = "mm per mm"
+source = "study"
+reason = "Bhatia 2022; Smeets 2020: peak opening grows 0.74-0.92 mm per mm of object size"
+
+# --- How the tests prove themselves (plan §5.4) ---
+
+[tests.perturbed_pass_frac]
+value = 0.95
+unit = "fraction of runs"
+source = "proposed"
+reason = "A skill must still succeed with the part offset, a different mass or different friction"
+
+[tests.fast_tier_s]
+value = 180
+unit = "s"
+source = "proposed"
+reason = "Agents run the fast tier on every change; a slow loop gets skipped (plan §6)"

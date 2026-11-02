@@ -231,6 +231,8 @@ const CODE_PATH_PREFIXES = [
   // then every backticked worker/ path in the runbooks was silently UNCHECKED --
   // ai-worker.md cites worker/config.py and nothing verified it resolved.
   'worker/',
+  // Added 2026-11-01 with the moonshot pipeline, so docs/moonshot/ citations of its files are checked.
+  'moonshot/',
   'utils/',
   'components/',
   'app/',

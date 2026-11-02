@@ -1,0 +1,51 @@
+{
+  "id": "ll-1005337",
+  "name": "Pallet inlay (Paletteneinlage)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1005337",
+    "files": {
+      "step": "1005337-_314-092-58260-02-0000.step",
+      "pdf": "1005337-_314-092-59986-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "plate",
+  "material": "Delrin (acetal), black",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "600 x 400 x 19.1 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "12X nest pockets 25.70 / 159.00 (+0.10/0)",
+      "Parallelism 0.2 to A, 12X",
+      "2X Ø8.000 slip fit for dowel",
+      "Outline 600/400 (-0.3/-0.5)"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "vmc",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Large plastic plate with 12 toleranced nests and undercuts: big-table VMC work, a plastic, and 630 faces.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 2.333,
+    "bodies": 1,
+    "faces": 630,
+    "date": "2026-10-20"
+  }
+}

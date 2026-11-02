@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "angle",
+  "name": "Angle plate",
+  "category": "workholding",
+  "make": "McMaster-Carr",
+  "model": "2353A67",
+  "description": "Cast-iron angle plate with 4 slots, 4-1/2 x 6 x 5 in, that holds parts at 90 degrees.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Size", "value": "4.5 L x 6 W x 5 H in"},
+    {"name": "Squareness", "value": 0.002, "unit": "in", "note": "per 6 in"},
+    {"name": "Parallelism", "value": 0.002, "unit": "in", "note": "per 6 in"},
+    {"name": "Slots", "value": "4 x 11/16 in"},
+    {"name": "Weight", "value": 13, "unit": "lb"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/2353A67/"],
+  "source_files": ["2353A67_Angle Plate with 4 Slots.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "file": "angle.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2270,
+  "bbox": {"min": [-76.2, -57.1, 0.0], "max": [76.2, 57.1, 127.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/2353A67_Angle Plate with 4 Slots.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 2270,
+      "deflection_mm": 0.046,
+      "simplified": false,
+      "glb_bytes": 43612
+    }
+  }
+}

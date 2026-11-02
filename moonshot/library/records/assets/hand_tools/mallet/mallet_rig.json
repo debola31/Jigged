@@ -1,0 +1,61 @@
+{
+ "schema": "setupguide.rig/0.1",
+ "glb": "mallet_rig.glb",
+ "units": "mm",
+ "up": "+Z",
+ "root": "mallet",
+ "nodes": {
+  "mallet": {
+   "parent": null,
+   "t": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  }
+ },
+ "grips": {
+  "mallet_grip": {
+   "node": "mallet",
+   "t": [
+    214.8,
+    0.0,
+    22.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "grasp": "power",
+   "radius_mm": 12.0
+  },
+  "mallet_face": {
+   "node": "mallet",
+   "t": [
+    0.0,
+    -52.5,
+    22.0
+   ],
+   "q": [
+    0.707107,
+    0.0,
+    0.0,
+    0.707107
+   ],
+   "grasp": "flat"
+  }
+ },
+ "params": {
+  "grip_diameter_mm": 24.0,
+  "head_diameter_mm": 44.0,
+  "head_length_mm": 105.0
+ }
+}

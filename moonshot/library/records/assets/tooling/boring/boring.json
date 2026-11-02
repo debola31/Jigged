@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "boring",
+  "name": "Boring bar with TPMT insert",
+  "category": "tooling",
+  "make": "McMaster-Carr (Borite)",
+  "model": "3249A208",
+  "description": "3/4 in shank carbide-insert boring bar for 1/2 in minimum bores, 2-5/8 in deep, with a TPMT-221 insert.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Shank diameter", "value": 0.75, "unit": "in"},
+    {"name": "Min bore", "value": 0.5, "unit": "in"},
+    {"name": "Max depth", "value": 2.625, "unit": "in"},
+    {"name": "Overall length", "value": 4.625, "unit": "in"},
+    {"name": "Insert", "value": "TPMT-221 carbide, 1/64 in nose radius"}
+  ],
+  "source_urls": ["https://www.mcmaster.com/3249A208/"],
+  "source_files": ["3249A208_Carbide-Insert Boring Lathe Tool.STEP"],
+  "license": "McMaster-Carr CAD download (vendor file); not self-made or CC0",
+  "file": "boring.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 6833,
+  "bbox": {"min": [-58.7, -9.5, 0.0], "max": [58.7, 9.5, 19.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/3249A208_Carbide-Insert Boring Lathe Tool.STEP",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 6833,
+      "deflection_mm": 0.024,
+      "simplified": false,
+      "glb_bytes": 116352
+    }
+  }
+}

@@ -57,9 +57,9 @@ Machines, as of 2026-11-01:
 
   Its ~4.9 GB of rendered PNG frames weren't copied. Nothing needs them.
 - [ ] Move the vendor originals in from `C:\trainual\assets\*\*\source\` (1.8 GB)
-- [ ] Move the 7 private parts in from `C:\trainual\parts\ll-*\`
+- [ ] Copy all 20 parts' files in from `C:\trainual\parts\`
 - [ ] Copy the GLBs and records in from `C:\trainual\assets\` (the records then get committed under `moonshot/`)
-- [ ] **Back up** the vendor originals, the private parts and the print package
+- [ ] **Back up** the vendor originals, the parts and the print package
   (`~\Downloads\PARTS PACKAGE FOR DATA ENTRY FROM PRINTS`) to an external drive. None of them can be fetched again.
 - [ ] You, whenever you like: delete trainual's old `renders/` on the M4 Max (5.1 GB) and the copy in
   `~\Downloads\trainual` (6.2 GB). Everything needed from them is in the data root.

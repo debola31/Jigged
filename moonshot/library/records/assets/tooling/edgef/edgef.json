@@ -1,0 +1,50 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "edgef",
+  "name": "Edge finder",
+  "category": "tooling",
+  "make": "Generic",
+  "model": "0.500 x 0.200 mechanical edge finder (Starrett 827A class)",
+  "description": "Spring-loaded mechanical edge finder: run it at about 1,000 rpm against a part edge and the tip kicks off-centre when the spindle is 0.100 in from the edge.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Shank diameter", "value": 0.5, "unit": "in"},
+    {"name": "Tip diameter", "value": 0.2, "unit": "in"},
+    {"name": "Overall length", "value": 3.11, "unit": "in", "note": "79 mm, measured from the model"},
+    {"name": "Other end", "value": "Conical centre-point finder"}
+  ],
+  "source_urls": ["https://grabcad.com/library/o-50-edge-finder-1"],
+  "source_files": [
+    "Ø.50-EDGE-FINDER.STEP",
+    "Ø.50-EDGE-FINDER.IGS",
+    "Ø.50-EDGE-FINDER.SLDASM",
+    "BODY.SLDPRT",
+    "TIP.SLDPRT",
+    "CENTER-POINT.SLDPRT",
+    "9654K14_STEEL EXTENSION SPRING.SLDPRT",
+    "Ø.50-EDGE-FINDER.dwg",
+    "Ø.50-EDGE-FINDER.JPG",
+    "Ø.50-EDGE-FINDER.1.JPG",
+    "Untitled.JPG"
+  ],
+  "license": "GrabCAD community model by James Subity (2021), GrabCAD terms of use; not self-made or CC0",
+  "notes": "McMaster needs a login. This community model has the standard 0.500 shank and 0.200 tip (checked on the cylinder faces). Shown tip down, as it hangs in the spindle.",
+  "file": "edgef.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47496,
+  "bbox": {"min": [-7.0, -7.8, 0.0], "max": [7.0, 7.8, 78.9]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Ø.50-EDGE-FINDER.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 62050,
+      "deflection_mm": 0.041,
+      "simplified": true,
+      "glb_bytes": 691628
+    }
+  }
+}

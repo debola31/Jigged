@@ -1,0 +1,61 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "vf2",
+  "name": "CNC mill",
+  "category": "machines",
+  "make": "Haas",
+  "model": "VF-2",
+  "description": "40-taper vertical machining centre: 30 x 16 x 20 in travels on a 36 x 14 in table, 20-tool carousel.",
+  "generic": false,
+  "key_specs": [
+    {"name": "X travel", "value": 30.0, "unit": "in"},
+    {"name": "Y travel", "value": 16.0, "unit": "in"},
+    {"name": "Z travel", "value": 20.0, "unit": "in"},
+    {"name": "Table length", "value": 36.0, "unit": "in"},
+    {"name": "Table width", "value": 14.0, "unit": "in"},
+    {"name": "T-slots", "value": "3 x 0.626-0.630 in on 4.92 in centres"},
+    {"name": "Max weight on table", "value": 3000, "unit": "lb"},
+    {"name": "Spindle taper", "value": "CAT40"},
+    {"name": "Max spindle speed", "value": 8100, "unit": "rpm"},
+    {"name": "Spindle power", "value": 30.0, "unit": "hp"},
+    {"name": "Tool changer", "value": "20-pocket carousel"},
+    {"name": "Spindle nose to table", "value": [4.0, 24.0], "unit": "in"},
+    {"name": "Max tool diameter (full)", "value": 3.5, "unit": "in"},
+    {"name": "Max tool weight", "value": 12.0, "unit": "lb"}
+  ],
+  "source_urls": [
+    "https://www.haascnc.com/machines/vertical-mills/vf-series/models/small/vf-2.html",
+    "https://pub-aem.haascnc.com/content/dam/haascnc/pdp_feed/3d/vf-2_solid_models_1_2023.zip"
+  ],
+  "source_files": [
+    "VF-2_STEP__1_2023.step",
+    "VF-2_x_t__1_2023.x_t",
+    "VF-2TR_STEP__1_2023.STEP",
+    "VF-2TR_x_t__1_2023.x_t"
+  ],
+  "license": "Haas Automation 3D model download (manufacturer marketing file, 2023); not self-made or CC0",
+  "notes": "Built from VF-2_STEP__1_2023.step. The model carries both tool changers; the 30-pocket side-mount changer and its arms are left out to match the standard 20-pocket carousel. VF-2TR (trunnion) files are kept as originals only.",
+  "file": "vf2.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 285205,
+  "bbox": {"min": [-1178.5, -1124.7, 0.0], "max": [1178.5, 1124.8, 2724.1]},
+  "attach_points": [],
+  "build": {
+    "from": "source/VF-2_STEP__1_2023.step",
+    "up": "+Y",
+    "exclude": ["30-PKT SMTC*", "SMTC-ARM*"],
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [
+        "30-PKT SMTC_VF-2_1_2023",
+        "SMTC-ARM LOW_VF-2_1_2023",
+        "SMTC-ARM HIGH_VF-2_1_2023"
+      ],
+      "meshed_triangles": 362096,
+      "deflection_mm": 0.85,
+      "simplified": true,
+      "glb_bytes": 6044616
+    }
+  }
+}

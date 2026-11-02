@@ -1,0 +1,65 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "hmc",
+  "name": "Haas EC-400 horizontal machining centre",
+  "category": "machines",
+  "make": "Haas",
+  "model": "EC-400",
+  "description": "40-taper dual-pallet HMC with a full 4th (B) axis: 22 x 25 x 22 in travels, two 400 mm pallets, 30+1 side-mount changer.",
+  "generic": false,
+  "key_specs": [
+    {"name": "X travel", "value": 22.0, "unit": "in"},
+    {"name": "Y travel", "value": 25.0, "unit": "in"},
+    {"name": "Z travel", "value": 22.0, "unit": "in"},
+    {"name": "Pallets", "value": "2 x 400 x 400 mm (15.75 in), 15 s change"},
+    {"name": "Max pallet load", "value": 880, "unit": "lb"},
+    {"name": "B axis", "value": "full 4th, 0.001 deg resolution, +/-15 arc-sec indexing accuracy"},
+    {"name": "Max spindle speed", "value": 8100, "unit": "rpm"},
+    {"name": "Spindle power", "value": 30.0, "unit": "hp"},
+    {"name": "Taper", "value": "CT40 (BT40, HSK-A63 options)"},
+    {"name": "Tool changer", "value": "30+1 side-mount (SMTC)"},
+    {"name": "Max tool length", "value": 12.0, "unit": "in", "note": "from gauge line"}
+  ],
+  "source_urls": [
+    "https://www.haascnc.com/machines/horizontal-mills/ec-series/models/ec-400.html",
+    "https://pub-aem.haascnc.com/content/dam/haascnc/pdp_feed/3d/ec-400_30_50_100_SMTCs_solid_models_06_2026.zip"
+  ],
+  "source_files": ["EC-400_ 30_50_100_6_2026.STEP", "EC-400_ 30_50_100_6_2026.x_t"],
+  "license": "Haas Automation 3D model download (manufacturer marketing file, 2026); not self-made or CC0",
+  "notes": "The device list's generic horizontal mill, as Haas's EC-400. The model carries every option: left out are the 50- and 100-pocket changers, the HSK spindle, the metric pallets, the floor anchor template and the lowered changer arm.",
+  "file": "hmc.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 170857,
+  "bbox": {"min": [-1635.7, -2437.7, 0.1], "max": [1635.7, 2437.7, 2283.9]},
+  "attach_points": [],
+  "build": {
+    "from": "source/EC-400_ 30_50_100_6_2026.STEP",
+    "up": "+Y",
+    "exclude": [
+      "EC-400- SMTC 50",
+      "EC-400- SMTC 100*",
+      "EC-400 - HSK Spindle",
+      "EC-400- Metric Pallet*",
+      "EC-400- Anchor Patterns",
+      "EC-400-Tool Changer Arm Down"
+    ],
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [
+        "EC-400- Anchor Patterns",
+        "EC-400- Metric Pallet 1",
+        "EC-400- Metric Pallet 2",
+        "EC-400-Tool Changer Arm Down",
+        "EC-400 - HSK Spindle",
+        "EC-400- SMTC 50",
+        "EC-400- SMTC 100 Enclosure",
+        "EC-400- SMTC 100"
+      ],
+      "meshed_triangles": 170857,
+      "deflection_mm": 1.261,
+      "simplified": false,
+      "glb_bytes": 4567972
+    }
+  }
+}

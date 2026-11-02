@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "bench",
+  "name": "Workbench, tool cabinet and cart",
+  "category": "support",
+  "make": "Generic",
+  "model": "72 x 30 in workbench, drawer cabinet and tool cart",
+  "description": "Maple-top workbench with a drawer cabinet underneath and a rolling tool cart beside it.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Bench top", "value": "72 x 30 in, 34 in high"},
+    {"name": "Cart", "value": "30 x 18 in, two shelves"}
+  ],
+  "source_urls": [],
+  "source_files": ["bench.step"],
+  "license": "self-made placeholder (planner.placeholders.workbench_set)",
+  "notes": "GENERIC: McMaster's workbench pages had no product CAD in the time allowed.",
+  "file": "bench.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 716,
+  "bbox": {"min": [-1349.4, -381.0, 0.0], "max": [1349.4, 381.0, 863.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/bench.step",
+    "placeholder": "workbench_set",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 716,
+      "deflection_mm": 0.587,
+      "simplified": false,
+      "glb_bytes": 23288
+    }
+  }
+}

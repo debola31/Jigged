@@ -1,0 +1,57 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "dti",
+  "name": "Dial test indicator + mag base",
+  "category": "inspection",
+  "make": "Mitutoyo",
+  "model": "513-404-10E on a magnetic stand",
+  "description": "Lever-type dial test indicator on a magnetic base, for sweeping a vise jaw or picking up a bore to within 0.01 mm.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Range", "value": 0.8, "unit": "mm", "note": "0.031 in"},
+    {"name": "Resolution", "value": 0.01, "unit": "mm", "note": "0.0004 in; dial reads 0-40-0"},
+    {"name": "Accuracy", "value": 0.008, "unit": "mm", "note": "plus or minus"},
+    {"name": "Dial diameter", "value": 40, "unit": "mm"},
+    {"name": "Stem diameter", "value": 8, "unit": "mm"},
+    {
+      "name": "Magnetic base",
+      "value": "Switchable base, post and arm with clamp",
+      "note": "model from the M.B.I. set, no maker or holding force given"
+    }
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/mitutoyo-dial-test-indicator-1",
+    "https://grabcad.com/library/dial-test-indicator-with-magnetic-stand-1",
+    "https://www.tequipment.net/Mitutoyo/513-404-10E/Dial-Test-Indicators",
+    "https://uk.rs-online.com/web/p/dti-gauges/3976613"
+  ],
+  "source_files": [
+    "Relógio apalpador Mitutoyo 0,01mm.STEP",
+    "Relógio apalpador Mitutoyo 0,01mm.JPG",
+    "Relógio apalpador Mitutoyo 0,01mm 02.JPG",
+    "Dial Test Indicator with Magnetic Stand.STEP",
+    "Dial Test Indicator with Magnetic Stand.x_b",
+    "Renderings/Dial Test Indicator with Magnetic Stand IMG_01.JPG"
+  ],
+  "license": "GrabCAD community models by Gabriel Fraga (2023, indicator) and M.B.I. (2021, stand), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Two GrabCAD STEPs combined (planner.compose.dti_on_magnetic_stand): the stand's own plunger dial indicator is left out and the Mitutoyo lever DTI hangs in the arm clamp, stylus down. No Noga base or Interapid DTI CAD was found without a login. The indicator is metric (0.01 mm); a US shop would more likely use the inch 513-402-10E.",
+  "file": "dti.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 47488,
+  "bbox": {"min": [-75.6, -39.6, 0.0], "max": [75.6, 39.6, 228.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/dti_on_stand.step",
+    "compose": "dti_on_magnetic_stand",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 106233,
+      "deflection_mm": 2.283,
+      "simplified": true,
+      "glb_bytes": 1067352
+    }
+  }
+}

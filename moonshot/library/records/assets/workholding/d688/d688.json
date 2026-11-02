@@ -1,0 +1,48 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "d688",
+  "name": "Kurt D688 6 in vise",
+  "category": "workholding",
+  "make": "Kurt",
+  "model": "D688",
+  "description": "Single-station 6 in AngLock vise with an 8.8 in opening and 1.735 in hard jaws.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Jaw width", "value": 6.0, "unit": "in"},
+    {"name": "Max opening", "value": 8.8, "unit": "in"},
+    {"name": "Jaw depth", "value": 1.735, "unit": "in"},
+    {"name": "Clamping force", "value": 7968, "unit": "lbf", "note": "at 80 ft-lb"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/kurt-d688-cnc-vise-1",
+    "https://www.surplusrecord.com/listing/kurt-d688-angleloc-machine-vise-plain-style-6-x-8-8-x-1-735-jaw-76196-426039/",
+    "https://ctemag.com/?p=109173"
+  ],
+  "source_files": ["kurtworkholding_d688.stp"],
+  "license": "Kurt Workholding CAD file (kurtworkholding_d688.stp) shared on GrabCAD by Steve Moran (2016); not self-made or CC0",
+  "notes": "Kurt's own STEP, reposted on GrabCAD. vise-6in-1 on the VF-2.",
+  "file": "d688.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 21012,
+  "bbox": {"min": [-239.7, -112.4, 0.0], "max": [239.7, 112.4, 117.3]},
+  "attach_points": [
+    {"name": "vise_handle_grip", "t": [297.7, 0.0, 159.29], "q": [0.0, 0.0, 0.0, 1.0]},
+    {"name": "jaw_top", "t": [64.25, 0.0, 110.9], "q": [0.0, 0.0, 1.0, 0.0]},
+    {"name": "jaw_face_moving", "t": [-5.9, 0.0, 73.2], "q": [-0.5, -0.5, 0.5, 0.5]},
+    {"name": "jaw_face_fixed", "t": [-165.9, 0.0, 73.2], "q": [0.5, 0.5, 0.5, 0.5]},
+    {"name": "jaw_seat", "t": [-165.9, 0.0, 73.2], "q": [0.0, 0.0, 0.0, 1.0]}
+  ],
+  "build": {
+    "from": "source/kurtworkholding_d688.stp",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 21012,
+      "deflection_mm": 0.109,
+      "simplified": false,
+      "glb_bytes": 434460
+    }
+  }
+}

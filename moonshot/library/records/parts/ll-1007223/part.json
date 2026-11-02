@@ -1,0 +1,51 @@
+{
+  "id": "ll-1007223",
+  "name": "Gripper jaw (Greiferbacke)",
+  "source": {
+    "kind": "customer print package",
+    "origin": "L&L - PARTS PACKAGE FOR DATA ENTRY FROM PRINTS",
+    "item_no": "1007223",
+    "files": {
+      "step": "1007223-_314-092-59398-02-0000.step",
+      "pdf": "1007223-_314-092-59983-10-0000.pdf"
+    }
+  },
+  "visibility": "public",
+  "part_type": "prismatic",
+  "material": "AISI 4140 PHT",
+  "heat_treat": "Pre-hardened (PHT)",
+  "finish": "Zinc plus trivalent chromate",
+  "quantity": null,
+  "quantity_note": "Not shown on the print",
+  "size": "75.0 x 49.0 x 40.0 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ISO 2768-mK; title block X.X ±0.2, X.XX ±0.10, X.XXX ±0.010, angles ±0°30'",
+    "critical": [
+      "2X Ø10.000 H7 (+0.015/0) dowel bores",
+      "M4x0.7-6H through, Ø6.5 thru with 90° c'sink"
+    ]
+  },
+  "notes": [
+    "Break all sharp corners 0.2 x 45°",
+    "All holes and machined surfaces free of paint",
+    "All surfaces Ra 6.3"
+  ],
+  "machines_likely": [
+    "band_saw",
+    "vmc",
+    "zinc_plating (outside)",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "Real routing not known; machines_likely is inferred from the print.",
+  "selection_reason": "Prismatic alloy-steel part with H7 dowel bores, an internal R10 step and zinc plating: the tight-tolerance VMC job of the set.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.859,
+    "bodies": 1,
+    "faces": 33,
+    "date": "2026-10-20"
+  }
+}

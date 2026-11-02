@@ -1,0 +1,37 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "probe",
+  "name": "Renishaw OMP40-2 spindle probe",
+  "category": "workholding",
+  "make": "Renishaw",
+  "model": "OMP40-2",
+  "description": "Compact optical touch probe for setting work offsets on the VMCs, with a 6 mm ruby-ball stylus.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Body diameter", "value": 40, "unit": "mm"},
+    {"name": "Repeatability", "value": 4e-05, "unit": "in", "note": "1.0 um 2-sigma (Renishaw)"},
+    {"name": "Transmission", "value": "optical"}
+  ],
+  "source_urls": ["https://grabcad.com/library/renishaw-omp-40-2-1"],
+  "source_files": ["Renishaw OMP 40-2.STEP"],
+  "license": "GrabCAD community model by Michael Lin (2022), GrabCAD terms of use; not self-made or CC0",
+  "notes": "Shown without its CAT40 shank. Repeatability is Renishaw's published figure.",
+  "file": "probe.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 16672,
+  "bbox": {"min": [-20.0, -20.0, 0.0], "max": [20.0, 20.0, 103.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/Renishaw OMP 40-2.STEP",
+    "up": "+Y",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 16672,
+      "deflection_mm": 0.024,
+      "simplified": false,
+      "glb_bytes": 337256
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "spindex",
+  "name": "5C collet spin / index fixture",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "5C spin-index fixture (Harig / Suburban class)",
+  "description": "Spin fixture that holds round tools in a 5C collet and indexes them for grinding on the surface grinder.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Collet", "value": "5C, up to 1-1/16 in"},
+    {"name": "Index", "value": "24 positions (typical)"},
+    {"name": "Centre height", "value": 3.25, "unit": "in", "note": "typical"}
+  ],
+  "source_urls": [],
+  "source_files": ["spindex.step"],
+  "license": "self-made placeholder (planner.placeholders.spin_indexer_5c)",
+  "notes": "GENERIC: no spin-index fixture CAD found.",
+  "file": "spindex.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1508,
+  "bbox": {"min": [-109.2, -57.2, 0.0], "max": [109.2, 57.2, 139.7]},
+  "attach_points": [],
+  "build": {
+    "from": "source/spindex.step",
+    "placeholder": "spin_indexer_5c",
+    "up": "+Z",
+    "max_triangles": 50000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1508,
+      "deflection_mm": 0.057,
+      "simplified": false,
+      "glb_bytes": 37008
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "id": "nist-ctc-01",
+  "name": "NIST CTC-01 (Combined Test Case 1)",
+  "source": {
+    "kind": "NIST MBE PMI validation and conformance test models",
+    "origin": "https://www.nist.gov/el/systems-integration-division-73400/mbe-pmi-validation-and-conformance-testing/download-free-cad",
+    "files": {
+      "step": "nist_ctc_01_asme1_ap242-e1.stp",
+      "pdf": "nist_ctc_01_asme1_rd.pdf"
+    },
+    "license": "US Government work (NIST), public domain in the US"
+  },
+  "visibility": "public",
+  "part_type": "prismatic",
+  "material": null,
+  "material_note": "Not specified on the NIST drawing",
+  "heat_treat": null,
+  "finish": null,
+  "quantity": null,
+  "quantity_note": "Not shown (test model)",
+  "size": "800 x 450 x 150 mm",
+  "units": "mm",
+  "tolerances": {
+    "general": "ASME Y14.5-1994 GD&T; see drawing.pdf",
+    "critical": [
+      "Ø20 +0.05/-0.10 and Ø20 +0.10/-0.05 side holes",
+      "Ø35 0/-0.2 and Ø35 +0.2/0 bosses",
+      "Position Ø0.75 A|B|C slots",
+      "Flatness 0.2 on datum A",
+      "Profile 1.25 A|B|C, 0.5 A on hex boss",
+      "Perpendicularity 1.5 to A",
+      "60° ±0.5° angle"
+    ]
+  },
+  "machines_likely": [
+    "band_saw",
+    "vmc",
+    "inspection"
+  ],
+  "routing": null,
+  "routing_note": "No real routing (test model); machines_likely is inferred.",
+  "selection_reason": "Large prismatic plate with pockets and bosses: a big-envelope VMC part with full GD&T.",
+  "player_check": {
+    "ok": true,
+    "state": "ready",
+    "seconds": 0.99,
+    "bodies": 1,
+    "faces": 117,
+    "date": "2026-10-20"
+  }
+}

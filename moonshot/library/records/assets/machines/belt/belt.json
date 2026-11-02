@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "belt",
+  "name": "Belt sander",
+  "category": "machines",
+  "make": "Kalamazoo",
+  "model": "2FSM",
+  "description": "Bench 2 x 48 in belt sander with a platen and tilting table, for deburring and breaking edges.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Belt size", "value": "2 x 48 in"},
+    {"name": "Belt speed", "value": 4500, "unit": "sfpm"},
+    {"name": "Motor", "value": 0.5, "unit": "hp", "note": "115 V single phase"},
+    {"name": "Platen size", "value": "2.75 x 8 in", "note": "from the 2FSMS listing, a sibling model"},
+    {"name": "Contact wheel diameter", "value": 5, "unit": "in"},
+    {"name": "Table", "value": "5 x 2.5 in, tilting"}
+  ],
+  "source_urls": [
+    "https://www.kbctools.ca/itemdetail/2-002-2FSM",
+    "https://penntoolco.com/kalamazoo-2fs-vertical-or-horizontal-2-x-48-belt-sander-no-motor-2fs",
+    "https://www.equipt.com/listings/262831-new-kalamazoo-industries-2fsms-wide-belt-sanders-in-florida"
+  ],
+  "source_files": ["belt.step"],
+  "license": "self-made placeholder (planner.placeholders.belt_sander_2x48)",
+  "notes": "GENERIC: no 2 x 48 belt sander CAD. Kalamazoo publishes none; McMaster's 2 x 48 sander (46275A71) has no CAD even when logged in; GrabCAD has 2 x 72 knife grinders and other sizes. Placeholder sized from the specs: belt loop, wheels, platen, table, motor.",
+  "file": "belt.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 1340,
+  "bbox": {"min": [-215.9, -152.4, 0.0], "max": [215.9, 152.4, 560.3]},
+  "attach_points": [],
+  "build": {
+    "from": "source/belt.step",
+    "placeholder": "belt_sander_2x48",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 1340,
+      "deflection_mm": 0.154,
+      "simplified": false,
+      "glb_bytes": 34664
+    }
+  }
+}

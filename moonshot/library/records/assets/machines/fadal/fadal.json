@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "fadal",
+  "name": "Fadal VMC 4020 vertical machining centre",
+  "category": "machines",
+  "make": "Fadal",
+  "model": "VMC 4020",
+  "description": "Older 40-taper VMC: 40 x 20 x 20 in travels on a 48 x 20 in table, 10,000 rpm, 21-tool changer.",
+  "generic": true,
+  "key_specs": [
+    {"name": "X travel", "value": 40, "unit": "in"},
+    {"name": "Y travel", "value": 20, "unit": "in"},
+    {"name": "Z travel", "value": 20, "unit": "in"},
+    {"name": "Table", "value": "48 x 20 in"},
+    {"name": "Max spindle speed", "value": 10000, "unit": "rpm"},
+    {"name": "Spindle power", "value": 22.5, "unit": "hp"},
+    {"name": "Taper", "value": "CAT40"},
+    {"name": "Tool changer", "value": "21-pocket"}
+  ],
+  "source_urls": [
+    "https://surplusrecord.com/listing/fadal-vmc4020ht-40-x-20-y-20-z-10000-rpm-21-automatic-tool-changer-48-x20-table-22-5-hp-cat-40-2004-752415/"
+  ],
+  "source_files": ["fadal.step"],
+  "license": "self-made placeholder (planner.placeholders.fadal_vmc4020)",
+  "notes": "GENERIC: no Fadal CAD on GrabCAD, Sketchfab or Fusion's library. The device list also names a 30 x 60 Fadal (VMC 6030), which this record does not cover. Specs are from dealer listings; the enclosure size is estimated.",
+  "file": "fadal.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 96,
+  "bbox": {"min": [-1485.9, -1074.4, -0.1], "max": [1485.9, 1074.4, 2641.6]},
+  "attach_points": [],
+  "build": {
+    "from": "source/fadal.step",
+    "placeholder": "fadal_vmc4020",
+    "up": "+Z",
+    "max_triangles": 300000,
+    "result": {
+      "excluded": [],
+      "meshed_triangles": 96,
+      "deflection_mm": 0.904,
+      "simplified": false,
+      "glb_bytes": 7196
+    }
+  }
+}

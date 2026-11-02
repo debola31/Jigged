@@ -1,0 +1,17 @@
+[importlinter]
+root_package = moonshot
+
+[importlinter:contract:layers]
+name = Stages import only downward, through the contracts (plan §5)
+type = layers
+layers =
+    moonshot.orchestrate
+    moonshot.validate
+    moonshot.render
+    moonshot.sim
+    moonshot.motion
+    moonshot.planning
+    moonshot.cards
+    moonshot.world
+    moonshot.body | moonshot.library
+    moonshot.contracts

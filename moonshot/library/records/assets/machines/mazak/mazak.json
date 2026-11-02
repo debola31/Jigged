@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "mazak",
+  "name": "Mazak QT-Primos 100 CNC lathe",
+  "category": "machines",
+  "make": "Mazak",
+  "model": "QT-Primos 100",
+  "description": "Compact 2-axis turning centre with a 6 in chuck: 17.5 in swing, 7.1 in max machining diameter, 7.9 in machining length.",
+  "generic": false,
+  "key_specs": [
+    {"name": "Swing", "value": 17.48, "unit": "in"},
+    {"name": "Max machining diameter", "value": 7.09, "unit": "in", "note": "180 mm"},
+    {"name": "Max machining length", "value": 7.87, "unit": "in", "note": "200 mm"},
+    {"name": "Chuck", "value": 6, "unit": "in"},
+    {"name": "Bar capacity", "value": 1.4, "unit": "in"},
+    {"name": "Max spindle speed", "value": 5000, "unit": "rpm"}
+  ],
+  "source_urls": [
+    "https://grabcad.com/library/cnc-lathe-mazak-primos-50s-100s-1",
+    "https://mazak.com/jp-en/products/qt-primos",
+    "https://www.equipt.com/listings/32330-new-mazak-qt-primos-100-cnc-lathes-in-texas"
+  ],
+  "source_files": ["cnc lathe mazak primos 50s 100s.stp"],
+  "license": "GrabCAD community model by Mahmud Rosid (2017), GrabCAD terms of use; not self-made or CC0",
+  "notes": "A layout model (enclosure and control, no internals). The author's title says Primos 50S/100S; specs are for the QT-Primos 100 from Mazak's page and a dealer listing. The human figure in the file is left out.",
+  "file": "mazak.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 220,
+  "bbox": {"min": [-777.8, -656.1, 0.0], "max": [777.8, 656.1, 1700.0]},
+  "attach_points": [],
+  "build": {
+    "from": "source/cnc lathe mazak primos 50s 100s.stp",
+    "up": "+Z",
+    "exclude": ["Human Body Model - Simple"],
+    "max_triangles": 300000,
+    "result": {
+      "excluded": ["Human Body Model - Simple"],
+      "meshed_triangles": 220,
+      "deflection_mm": 0.53,
+      "simplified": false,
+      "glb_bytes": 9232
+    }
+  }
+}

@@ -1,0 +1,178 @@
+{
+ "schema": "setupguide.rig/0.1",
+ "glb": "d688_rig.glb",
+ "units": "mm",
+ "up": "+Z",
+ "root": "d688_rig",
+ "nodes": {
+  "d688_rig": {
+   "parent": null,
+   "t": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "d688_body": {
+   "parent": "d688_rig",
+   "t": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "d688_jaw": {
+   "parent": "d688_rig",
+   "t": [
+    -5.9,
+    0.0,
+    73.2
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "d688_handle": {
+   "parent": "d688_rig",
+   "t": [
+    239.7,
+    0.0,
+    39.29
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  "d688_handle_knob": {
+   "parent": "d688_handle",
+   "t": [
+    0.0,
+    0.0,
+    120.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  }
+ },
+ "grips": {
+  "vise_handle_grip": {
+   "node": "d688_handle_knob",
+   "t": [
+    58.0,
+    0.0,
+    0.0
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "grasp": "power",
+   "radius_mm": 13.5
+  },
+  "jaw_top": {
+   "node": "d688_jaw",
+   "t": [
+    70.15,
+    0.0,
+    37.7
+   ],
+   "q": [
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "grasp": "flat"
+  },
+  "jaw_face_moving": {
+   "node": "d688_jaw",
+   "t": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "q": [
+    -0.5,
+    -0.5,
+    0.5,
+    0.5
+   ],
+   "grasp": "flat"
+  },
+  "jaw_face_fixed": {
+   "node": "d688_rig",
+   "t": [
+    -165.9,
+    0.0,
+    73.2
+   ],
+   "q": [
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "grasp": "flat"
+  },
+  "jaw_seat": {
+   "node": "d688_rig",
+   "t": [
+    -165.9,
+    0.0,
+    73.2
+   ],
+   "q": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "grasp": "flat"
+  }
+ },
+ "params": {
+  "jaw_opening_mm": 160.0,
+  "jaw_opening_max_mm": 223.5,
+  "jaw_fixed_face_x_mm": -165.9,
+  "jaw_axis": [
+   1,
+   0,
+   0
+  ],
+  "screw_lead_mm": 6.35,
+  "handle_axis": [
+   1,
+   0,
+   0
+  ],
+  "seat_z_mm": 73.2,
+  "jaw_half_width_mm": 76.2,
+  "jaw_plate_top_z_mm": 117.3,
+  "lever_mm": 120.0,
+  "knob_offset_mm": 58.0
+ }
+}

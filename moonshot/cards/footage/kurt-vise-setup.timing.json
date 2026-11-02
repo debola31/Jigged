@@ -1,0 +1,34 @@
+{
+ "source": "Kurt 'Double Station Manual Vise Setup' (YouTube), analysed locally with MediaPipe Hand Landmarker; the video is not in the repo",
+ "measured": {
+  "Left": {
+   "n": 24,
+   "dur_median_s": 0.35,
+   "dur_iqr": [
+    0.26,
+    0.62
+   ],
+   "peak_speed_frac_median": 0.47,
+   "peak_aperture_frac_median": 0.42,
+   "twist_deg_s_median": null,
+   "twist_deg_s_p90": null
+  },
+  "Right": {
+   "n": 43,
+   "dur_median_s": 0.47,
+   "dur_iqr": [
+    0.32,
+    0.67
+   ],
+   "peak_speed_frac_median": 0.44,
+   "peak_aperture_frac_median": 0.5,
+   "twist_deg_s_median": 81.5,
+   "twist_deg_s_p90": 754.6
+  }
+ },
+ "used_for": [
+  "minimum-jerk reaches (peak speed ~45-50% of the move)",
+  "grip aperture peak at ~60% of the approach",
+  "crank speed about 1-2 turns/s (was ~4.4 turns/s)"
+ ]
+}

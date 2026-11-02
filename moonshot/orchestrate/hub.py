@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import shutil
 import sys
@@ -112,6 +113,8 @@ def make_handler(queue: Queue, root: Path, token: str):
         def do_POST(self):
             if not self._authed():
                 return
+            if self.path == "/blobs":
+                return self._put_blob()
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             except json.JSONDecodeError:
@@ -137,6 +140,29 @@ def make_handler(queue: Queue, root: Path, token: str):
             except KeyError as e:
                 return self._json(HTTPStatus.BAD_REQUEST, {"error": f"missing field {e}"})
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+        def _put_blob(self):
+            """A worker's result file: stored under its sha256, which the worker states (X-Sha256) and the hub checks,
+            so a truncated upload is refused rather than stored under the wrong name."""
+            want = self.headers.get("X-Sha256", "")
+            if len(want) != 64 or not set(want) <= SHA256_HEX:
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": "X-Sha256 must be the file's sha256"})
+            left = int(self.headers.get("Content-Length", 0))
+            tmp = blobs / f".{want}.{secrets.token_hex(8)}.part"
+            h = hashlib.sha256()
+            with open(tmp, "wb") as f:
+                while left > 0:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                    f.write(chunk)
+                    left -= len(chunk)
+            if h.hexdigest() != want:
+                tmp.unlink(missing_ok=True)
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": f"arrived with hash {h.hexdigest()[:12]}"})
+            os.replace(tmp, blobs / want)
+            return self._json(HTTPStatus.OK, {"digest": want})
 
     return Handler
 

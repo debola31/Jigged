@@ -84,6 +84,20 @@ class Worker:
         os.replace(tmp, dest)
         return dest
 
+    def upload(self, path: Path) -> str:
+        """Send a result file to the hub's blob store; returns its sha256, the name it goes by from now on."""
+        data = Path(path).read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        req = urllib.request.Request(f"{self.hub}/blobs", data=data, headers={
+            "Authorization": f"Bearer {self.token}", "X-Sha256": digest, "Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                return json.loads(r.read())["digest"]
+        except (urllib.error.URLError, OSError) as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code < 500:
+                raise
+            raise HubUnreachable(str(e)) from e
+
     def cached(self) -> list[str]:
         return [p.name for p in self.cache.iterdir() if len(p.name) == 64]
 
@@ -204,7 +218,17 @@ def blender_bench(worker: Worker, job: dict, inputs: list[Path]) -> dict:
         return out
 
 
-HANDLERS: dict[str, Handler] = {"noop": noop, "probe": probe, "blender_bench": blender_bench}
+def _production(name: str) -> Handler:
+    """A production job kind (moonshot/orchestrate/jobs.py), imported only when one runs: they need the pipeline's
+    heavy dependencies, which this module doesn't."""
+    def run(worker: Worker, job: dict, inputs: list[Path]) -> dict:
+        from moonshot.orchestrate import jobs
+        return getattr(jobs, name)(worker, job, inputs)
+    return run
+
+
+HANDLERS: dict[str, Handler] = {"noop": noop, "probe": probe, "blender_bench": blender_bench,
+                                "vise_take": _production("vise_take"), "bake_render": _production("bake_render")}
 
 
 def main() -> None:
@@ -214,13 +238,14 @@ def main() -> None:
     ap.add_argument("--gpu-mem", type=float, default=0)
     ap.add_argument("--cache-only", action="store_true")
     ap.add_argument("--blender")
+    ap.add_argument("--trainual", help="trainual's checkout, whose renderer bake_render runs")
     ap.add_argument("--device", default="METAL")
     ap.add_argument("--home", type=Path, default=data_root() / "worker")
     ap.add_argument("--token-file", type=Path, default=data_root() / "queue" / "token")
     a = ap.parse_args()
     caps = {"kinds": a.kinds.split(","), "gpu_mem_gb": a.gpu_mem, "cache_only": a.cache_only, "device": a.device}
     w = Worker(a.name, caps, a.token_file.read_text().strip(), hub_url(), a.home, HANDLERS,
-               options={"blender": a.blender, "device": a.device})
+               options={"blender": a.blender, "device": a.device, "trainual": a.trainual})
     print(f"[worker {a.name}] hub {w.hub}, kinds {caps['kinds']}", flush=True)
     w.run_forever()
 

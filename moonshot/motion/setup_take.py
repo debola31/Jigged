@@ -155,6 +155,10 @@ class Take:
                     g = P.solve_body(th0, iters=spec.get("iters", 700))
                     if best is None or g["loss"] < best["loss"]:
                         best = g
+                if "refine" in spec:                         # a second stage from the best, with more targets
+                    P = G.Problem(self.th, spec["colliders"], spec["refine"], best["q"],
+                                  body=dict(lumbar=LUMBAR, prior=self.prior, load_kg=spec.get("load", 0.0)))
+                    best = P.solve_body(best["theta"], iters=800, lr=0.01)
                 best["obj"] = spec["obj"].tolist()
                 data[name] = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in best.items()}
                 if self.verbose:
@@ -224,13 +228,14 @@ class Take:
         A, U, R = torch.as_tensor(a0), torch.as_tensor(KNOB_AXIS), VISE["knob_r"]
         sc = VISE["screw_axis"]
 
-        def on_knob(lo, hi, comp=2.0):
+        def on_knob(lo, hi, comp=2.0, w=1.0):
             def f(cc, n):
                 rel = cc - A
                 t = rel @ U
                 radial = torch.linalg.norm(rel - t * U)
                 to_axis = -(rel - t * U) / radial
-                return (radial - (R - comp)) ** 2 + 20 * (1.0 - n @ to_axis) ** 2 + 0.5 * (torch.relu(lo - t) ** 2 + torch.relu(t - hi) ** 2)
+                return w * ((radial - (R - comp)) ** 2 + 20 * (1.0 - n @ to_axis) ** 2
+                            + 0.5 * (torch.relu(lo - t) ** 2 + torch.relu(t - hi) ** 2))
             return f
         q0 = h.neutral()
         for n in ("index", "middle", "ring", "little"):
@@ -240,13 +245,19 @@ class Take:
             lambda p: G.sdf_cyl(p, a0, a0 + KNOB_AXIS * VISE["knob_len"], R),
             # the lever, swept: the fist keeps its orientation while cranking, so relative to it the lever turns a
             # full circle round the knob's root, through anything near it (docs/moonshot/physics.md). One-sided, from
-            # the lever's outer face back past the vise's end 2 mm behind it: a thin disc let the solver push the
-            # hand out through its back, between the lever and the vise
-            lambda p: G.sdf_cyl(p, a0 + np.array([0, -6.0, 0]), a0 + np.array([0, 150.0, 0]), VISE["lever"] + 8.0),
+            # 1 mm off the lever's outer face back past the vise's end 2 mm behind it: a thin disc let the solver push
+            # the hand out through its back, between the lever and the vise
+            lambda p: G.sdf_cyl(p, a0 + np.array([0, -7.0, 0]), a0 + np.array([0, 150.0, 0]), VISE["lever"] + 8.0),
             box([VISE["x"], sc[1] + 120, 880], [110, 120, 30])],
-            targets={"index": on_knob(28, 40), "middle": on_knob(46, 58), "ring": on_knob(62, 74), "little": on_knob(76, 88),
-                     "thumb": on_knob(22, 44)},
-            starts=[S(8, 0, 5, pl, 25, 0, 70, p, -10, 0) for p in (-20, 10) for pl in (30, 60)])
+            # clear of the lever, the fist sits out along the 90 mm knob: middle, ring and little wrap it, then the
+            # index and thumb settle onto it lightly. Solved all at once, the five fall into poorer optima (pads off
+            # the knob, fingers out of order), so the second stage refines from the first
+            targets={"middle": on_knob(26, 38), "ring": on_knob(46, 58), "little": on_knob(66, 80),
+                     "thumb": on_knob(10, 50, w=0.2)},
+            refine={"middle": on_knob(36, 52), "ring": on_knob(52, 68), "little": on_knob(68, 86),
+                    "index": on_knob(8, 40, w=0.3), "thumb": on_knob(10, 60, w=0.5)},
+            iters=1500,
+            starts=[S(8, 0, 5, pl, 25, 0, 70, p, wf, 0) for p in (-20, 10) for wf in (-10, 15) for pl in (30, 60)])
         # 5. measure: the index pad on a parallel's exposed end (beyond the blank's end, between the jaws); the other
         # fingers curled out of the way, thumb tucked
         q0 = h.neutral()

@@ -4,9 +4,12 @@
 [shop-and-pipeline-plan.md §3 and §5](shop-and-pipeline-plan.md#5-checks-and-tests); tasks in
 [checklist.md](checklist.md).
 
-**The principle: MuJoCo enforces only what the model tells it.** It solves contacts, friction, joint limits, motor
-strength and mechanism constraints exactly as written, and nothing else. A physical rule the model leaves out, and
-no check catches, is not enforced, however real the video looks. Every rule below is therefore one of three
+**The principle: MuJoCo enforces only what our scene description tells it.** That description (MuJoCo calls it the
+model; nothing to do with Claude) is the MJCF our code writes: the bodies and their collision shapes, the joints and
+their limits, the motors and their strength, and the mechanisms' constraints, from
+[`skeleton.py`](../../moonshot/body/skeleton.py) and [`moonshot/world/`](../../moonshot/world/). MuJoCo solves
+contacts, friction and forces for exactly what is written there, and nothing else. A physical rule the description
+leaves out, and no check catches, is not enforced, however real the video looks. Every rule below is therefore one of three
 things: a constraint MuJoCo solves, a check that fails the take, or a named gap.
 
 ## How a take is made
@@ -18,8 +21,8 @@ things: a constraint MuJoCo solves, a check that fails the take, or a named gap.
 | Render | trainual's `motion/skin_bake.py` and `blender/showcase_physics.py`, not yet ported | NIMBLE's skin on the simulated hand. Skin that lands inside an object is pressed onto its surface, with the depth recorded per vertex. |
 | Checks | [`moonshot/tests/gates/`](../../moonshot/tests/gates/), [`moonshot/validate/`](../../moonshot/validate/) | Pass or fail on the physics run. |
 
-**A faithful replay is not a check.** When the plan asks for something impossible and the body model has no rule
-against it, the physics reproduces it exactly. That is how both failures below reached a render.
+**A faithful replay is not a check.** When the plan asks for something impossible and the scene description has no
+rule against it, the physics reproduces it exactly. That is how both failures below reached a render.
 
 ## The rules
 

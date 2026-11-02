@@ -1,0 +1,17 @@
+{
+ "about": "Segment masses and lengths for the body model (moonshot/body/skeleton.py). source: study | proposed, as in moonshot/thresholds.toml.",
+ "body_mass_kg": {"value": 85.0, "source": "proposed",
+  "reason": "About the ANSUR II 50th-percentile adult male; confirm against the ANSUR II tables"},
+ "mass_fraction": {
+  "upper_arm": 0.0271, "forearm": 0.0162, "hand": 0.0061,
+  "source": "study", "reason": "de Leva 1996, J Biomech 29(9):1223-1230, male (as reproduced by the Visual3D wiki)"},
+ "thorax_head_fraction": {"value": 0.392, "source": "proposed",
+  "reason": "Everything above the lumbar pivot: de Leva 1996 head 6.94% + upper trunk 15.96% + middle trunk 16.33%; the subdivision is from memory, verify against the paper"},
+ "girdle_kg": {"value": 0.5, "source": "proposed",
+  "reason": "Clavicle and scapula with their attached muscle, carried by the shoulder girdle's slide joints"},
+ "length_mm": {
+  "lumbar_height": 955, "shoulder_from_lumbar": [190, 0, 440], "neck_from_lumbar": [0, 10, 510],
+  "upper_arm": 300, "forearm": 265,
+  "source": "study", "reason": "ANSUR II 2012, 50th-percentile male, as trainual's motion/body_model.py derived them (acromion 1439 mm, biacromial 415 mm)"},
+ "elbow_to_grip_mm": {"value": 348, "source": "study", "reason": "ANSUR II 2012, 50th-percentile male"}
+}

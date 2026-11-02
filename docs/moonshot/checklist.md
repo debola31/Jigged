@@ -40,9 +40,9 @@ Machines, as of 2026-11-01:
 - [x] `moonshot/requirements.txt` installed in the `jigged` env on all three (2026-11-01): Python 3.12 (hub
   3.12.13, M1 Pro 3.12.16, M4 Max 3.12.12), MuJoCo 3.17.0, numpy 2.5.4, cadquery 2.8.0, MyoSuite 3.0.0. The M1
   Pro's env was a fresh 3.14 with only pip, so it was switched to 3.12 in place.
-- [ ] **Needs your permission:** the hub and all three workers start automatically after a reboot (a Startup
-  entry on the hub, a launchd agent on each Mac). Claude Code's permission check blocked it as persistence; until
-  then they run as plain background processes and stop on reboot.
+- [x] No automatic restart after a reboot (your decision, 2026-11-01): the hub and workers run as plain background
+  processes. If a machine reboots, its worker (or the hub) is started again by hand; leased jobs simply lapse and
+  go to another worker meanwhile.
 - [x] Benchmark (2026-11-01): one 1080p frame of the vise take (frame 480, 96 samples, untuned) on each machine,
   through the queue. Warm: **M4 Max 7.96 s, M1 Pro 39.65 s (0.20×), GTX 1070 42.43 s (0.19×)**. The M1 Pro's first
   run took 134 s compiling its Metal kernels; the M4 Max's had been compiled already.
@@ -52,7 +52,6 @@ Machines, as of 2026-11-01:
 - [x] Home upload: **0.5–0.8 MB/s** (4–6.5 Mbit/s); download about 28 MB/s. A 67 MB scene pack takes 1.5–2.5 min to
   reach a rented GPU: fine when each lease is a whole step, but cloud packs should be staged in the provider's storage
   once, not streamed per job.
-- [ ] Cycles tuning on review frames (lever 1), then re-forecast
 
 ## 2. Data root (`C:\jigged-data`)
 
@@ -95,13 +94,18 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 ## 3b. Body model, usage cards and checks (§3–§5), before any station
 
-- [ ] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
-  strength and couplings (§3.1)
+- [x] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
+  strength and couplings (§3.1). `moonshot/body/skeleton.py`, 2026-11-02: 59 motors, 14 coupled joints, 42.7 kg
+  above the hips. Known gaps: the wrist's limit is a box, with its ellipse left to the §5.2 check; the scapula
+  doesn't yet follow shoulder elevation; fingers have no recorded top speed; 14 of 23 strengths are *proposed*
+  (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
 - [ ] Two-joint muscle couplings: wrist bend moves the fingers (§3.1)
 - [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1)
 - [ ] Body conformance tests pass: range, speed, strength, strength curves, couplings, muscle check agrees,
-  proportions, gravity (§3.1)
+  proportions, gravity (§3.1). Range, speed, strength, couplings, proportions, gravity and left-right mirroring
+  pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-02); strength curves and the muscle check wait on
+  their own items.
 - [ ] Watch the deformable-pad trigger: count grip assists and grip complaints per station (§3.1). Only if it
   fires: MuJoCo deformable fingertip and palm pads.
 - [ ] Record conformance tests for every machine and tool as it lands (§3.2)
@@ -129,7 +133,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
 - [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review, once render jobs report
   frame times (track G)
-- [ ] **End of Nov 2:** reliable → keep; otherwise switch to Flamenco (§8)
+- [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
+  intact; the scene pack fetched by hash and verified on each worker
+- [x] **Keep our own queue** rather than switching to Flamenco (§8), on the tests and the live run (2026-11-01)
 
 ## 5. Tracks: checks first, then the work
 

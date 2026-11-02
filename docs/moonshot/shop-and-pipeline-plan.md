@@ -410,7 +410,8 @@ Step 3 targets: nominal 100%, perturbed at least 95% (*proposed*).
 ### 5.5 Known gaps in the reference take
 
 It fails six checks. The new body model must fix them, or you consciously loosen the threshold:
-- the wrist past its flexion-deviation ellipse (1.12 against 1.0) while the blank is held up, 3.8–5.0 s;
+- the wrist past its flexion-deviation ellipse (1.12 against 1.0) while the blank is held up, 3.8–5.0 s, and
+  to 1.04 twice while cranking;
 - the crank gripped round the lever's joint, which sweeps through the fist each turn (found on review
   2026-11-01; why neither was caught: [physics.md](physics.md));
 - finger spread up to 5.4° past range (435 frames);

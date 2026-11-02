@@ -488,7 +488,7 @@ class ViseTake:
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing", "stray")}
+                               "slip", "lag", "pushing", "stray", "pose")}
         hold_rel, t0w = None, time.time()
         hold0 = self.iv["hold_object"][0]
         for k in range(n):
@@ -551,6 +551,7 @@ class ViseTake:
             rec["clamp"].append(clamp)
             rec["depth"].append(depth)
             rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
+            rec["pose"].append(self.pose_record())
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
             rec["pushing"].append(any(e["t0"] - 0.05 <= tk < e["t1"] + 0.15 for e in self.iv["press"]) or
@@ -574,6 +575,35 @@ class ViseTake:
                     f"hand {sum(f.values()):.1f} N clamp {clamp:.0f} N")
         self.rec = rec
         return self.report(n)
+
+    def pose_record(self) -> dict:
+        """The body's pose this frame, in trainual's take terms (motion/body_model.py), for rendering."""
+        m, d, b = self.model, self.data, self.body
+        anat = lambda name: b.joints[name].rest + (math.degrees(d.qpos[m.jnt_qposadr[m.joint(name).id]])
+                                                   if b.joints[name].kind == "hinge"
+                                                   else d.qpos[m.jnt_qposadr[m.joint(name).id]] * 1000)  # noqa: E731
+        from moonshot.sim.reference import ARM
+        theta = [anat(n if n.startswith("trunk") else f"R_{n}") for n in ARM]
+        names = [str(x) for x in self.rd["names"]]
+        return {"q": [anat(f"R_{n}") for n in names], "theta": theta,
+                "dp": [anat(f"pelvis_{a}") for a in "xyz"],
+                "H": d.body("R_hand").xmat.reshape(3, 3) @ H0, "W": d.body("R_hand").xpos * 1000,
+                "S": d.body("R_humerus").xpos * 1000, "E": d.body("R_forearm").xpos * 1000,
+                "forearm": d.body("R_forearm").xmat.reshape(3, 3) @ H0}
+
+    def export_sim(self, path: Path) -> None:
+        """Write the run as trainual's sim.npz (sim/run_take.py's keys), so its skin bake and Cycles render take it.
+        The camera is the reference's head path: the trunk follows the plan to within millimetres."""
+        rec, rd = self.rec, self.rd
+        n = len(rec["pose"])
+        P = {k: np.array([p[k] for p in rec["pose"]]) for k in rec["pose"][0]}
+        th = P["theta"]
+        np.savez(path, t=rd["t"][:n], q=P["q"], H=P["H"], W=P["W"], S=P["S"], E=P["E"], forearm=P["forearm"],
+                 theta=th, dp=P["dp"], arm=np.stack([th[:, 7], th[:, 8], th[:, 9], th[:, 6], np.zeros(n)], 1),
+                 blank=np.array(rec["blank"]), blank_R=np.array(rec["blank_R"]), crank=np.array(rec["crank"]),
+                 opening=np.array(rec["opening"]), para=np.array(rec["para"]), effort=rd["effort"][:n],
+                 grip=rd["grip"][:n], clamp=np.array(rec["clamp"]), slip=np.array(rec["slip"]),
+                 eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
 
     def plan_time_for_phi(self, e, phi):
         k0, k1 = (int(np.searchsorted(self.t, x)) for x in (e["t0"], e["t1"]))
@@ -651,6 +681,8 @@ def main(argv: list[str]) -> None:
     seconds = float(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
     run = ViseTake()
     rep = run.run(seconds)
+    if "--export" in argv:
+        run.export_sim(Path(argv[argv.index("--export") + 1]))
     ref = json.loads((take_dir() / "sim-report.json").read_text(encoding="utf-8"))
     print(json.dumps({"new_core": rep, "trainual": ref}, indent=1))
 

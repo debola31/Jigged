@@ -171,9 +171,14 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     dofs_at = {}
     for d in hand["dofs"]:
         dofs_at.setdefault(d["joint"], []).append(d)
-    hulls = hand["hulls"]
-    hand_density = frac["hand"] * mass / sum(h["volume_mm3"] for h in hulls.values())       # kg per mm^3
-    meshes = []
+    vols = {}
+    for nm, c in hand["capsules"].items():
+        r, ln = c["radius_mm"] * M, np.linalg.norm(np.subtract(c["to_mm"], c["from_mm"])) * M
+        vols[nm] = math.pi * r * r * ln + 4 / 3 * math.pi * r ** 3
+    palm_r = 0.016
+    palm_len = np.linalg.norm((J[5] + J[20]) / 2 - J[0]) * M
+    vols["_palm"] = math.pi * palm_r ** 2 * palm_len + 4 / 3 * math.pi * palm_r ** 3
+    hand_density = frac["hand"] * mass / sum(vols.values())
 
     def hand_xml(side, T, indent):
         R = T @ attach
@@ -188,18 +193,18 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
             for d in dofs_at.get(j, []):
                 out.append(ind + "  " + add_joint(f"{side}_{d['name']}", d["name"], "hinge", sign * (R @ d["axis"]),
                                                   *d["range_deg"], rest=d["rest_deg"]))
-            if names[j] in hulls:
-                # the skin's own hull (moonshot/body/derive_hand.py); the carpal's is the palm
-                h, mesh = hulls[names[j]], f"{side}_hull_{names[j]}"
-                v = (np.array(h["vertices_mm"]) @ R.T - P[j]) * M
-                meshes.append(f'    <mesh name="{mesh}" inertia="convex" vertex="{_f(v.ravel())}"/>')
+            if names[j] in hand["capsules"]:
+                c = hand["capsules"][names[j]]
+                a, b = (R @ np.array(c["from_mm"]) - P[j]) * M, (R @ np.array(c["to_mm"]) - P[j]) * M
                 pad = names[j].startswith("dis")
                 fr = ' condim="4" friction="0.6 0.012 0.0001"' if pad else ' condim="3" friction="0.6 0.004 0.0001"'
-                gname = "palm" if j == 0 else names[j]
-                out.append(f'{ind}  <geom name="{side}_g_{gname}" class="skin" type="mesh" mesh="{mesh}" '
-                           f'mass="{hand_density * h["volume_mm3"]:.6f}"{fr}/>')
+                out.append(f'{ind}  <geom name="{side}_g_{names[j]}" class="skin" type="capsule" '
+                           f'size="{c["radius_mm"] * M:.5f}" fromto="{_f(a)} {_f(b)}" '
+                           f'mass="{hand_density * vols[names[j]]:.6f}"{fr}/>')
             if j == 0:
                 tip = (P[5] + P[20]) / 2 * M
+                out.append(f'{ind}  <geom name="{side}_g_palm" class="skin" type="capsule" size="{palm_r}" '
+                           f'fromto="0 0 0 {_f(tip)}" mass="{hand_density * vols["_palm"]:.6f}"/>')
                 if side == "R" and load_kg > 0:
                     out.append(f'{ind}  <body name="load" pos="{_f(tip * 0.8)}"><geom name="load" type="box" '
                                f'size="0.02 0.02 0.02" mass="{load_kg}" contype="0" conaffinity="0"/></body>')
@@ -269,9 +274,6 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
           tolerance="1e-10" iterations="60" ls_iterations="20" noslip_iterations="2" gravity="0 0 -9.81">
     <flag multiccd="enable"/>
   </option>
-  <asset>
-{chr(10).join(meshes)}
-  </asset>
   <default>
     <joint limited="true" solreflimit="0.004 1" solimplimit="0.95 0.99 0.001"/>
     <default class="skin">

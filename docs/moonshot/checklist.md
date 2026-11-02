@@ -122,8 +122,11 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [ ] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
   Stage 1 done (2026-11-02): at trainual's angles the body puts the elbow exactly and the wrist within 1.2 mm where
   trainual did; driven through the whole 31.8 s take with gravity, it keeps the wrist within 0.1 mm of plan with no
-  motor at full strength (`moonshot/tests/gates/test_reference_take.py`, physics tier). Next: the vise, blank and
-  parallels, and the per-verb outcomes.
+  motor at full strength (`moonshot/tests/gates/test_reference_take.py`, physics tier). Stage 2 (2026-11-02): with
+  the vise, blank and parallels, every verb reproduces on the full body (`moonshot/sim/vise_take.py`, gates in
+  `moonshot/tests/gates/test_vise_take.py`): lifted by friction with a 12.7 / 13.1 N grip, 1.85 mm slip, set down
+  within 0.7 mm and flat, seated on the fixed jaw, pushed at 30.0 N, cranked 2.256 turns to 75.76 mm, both parallels
+  found pinched. Still failing: free-motion wrist lag reaches 37 mm against 10 mm at a few moments.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
 - [ ] Timestep halving converges
 - [ ] The four known gaps in §5.5: three fixed by the new body model; trunk rotation given a standing-work range (§11)

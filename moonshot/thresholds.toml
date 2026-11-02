@@ -154,3 +154,15 @@ value = 180
 unit = "s"
 source = "proposed"
 reason = "Agents run the fast tier on every change; a slow loop gets skipped (plan §6)"
+
+[physics.parallel_pinched_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "A parallel the clamped part pinches doesn't move under a 3 N fingertip press; the reference take's moved 0.16 mm at most"
+
+[physics.mechanism_ratio_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "Jaw travel matches crank turns x screw lead within this, the rest being contact compliance (the reference take: 0.5 mm)"

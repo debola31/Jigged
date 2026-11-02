@@ -94,14 +94,28 @@ def hand_couplings(spec: dict) -> list[Coupling]:
     return out
 
 
+def set_finger_contact(model, body: BodyModel, side: str, finger: str, contact: bool) -> None:
+    """Switch a finger's DIP-from-PIP coupling between free motion and contact (Roda-Sales et al. 2022: in contact
+    the fingertip joint bends dip = k*pip + c, with different k and c). A gripping finger uses the contact form;
+    with the free form its pad lands millimetres off, enough to miss a face and pinch an edge."""
+    spec = json.loads((DATA / "anatomy.json").read_text(encoding="utf-8"))["coupling"]
+    k, c = spec["dip_per_pip_contact"][finger] if contact else (spec["dip_per_pip_free"][finger], 0.0)
+    f, ld = body.joints[f"{side}_{finger}_dip"], body.joints[f"{side}_{finger}_pip"]
+    eq = model.equality(f"couple_{side}_{finger}_dip").id
+    model.eq_data[eq, 0] = math.radians(k * ld.rest + c - f.rest)
+    model.eq_data[eq, 1] = k
+
+
 def _f(v) -> str:
     return " ".join(f"{float(x):.6g}" for x in v)
 
 
-def build(load_kg: float = 0.0) -> BodyModel:
+def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = None) -> BodyModel:
     """The body model. load_kg > 0 puts a mass of that size rigidly in the right palm (a held object, for the
-    strength tests)."""
-    anatomy, segs, strength = _load("anatomy.json"), _load("segments.json"), _load("strength.json")["joints"]
+    strength tests). pelvis_mm places the lumbar pivot in the world (default: on the origin, at standing height)."""
+    anatomy, segs, strength_data = _load("anatomy.json"), _load("segments.json"), _load("strength.json")
+    strength, hand_kp = strength_data["joints"], strength_data["hand_stiffness_nm_per_rad"]
+    body_kp = strength_data["body_stiffness"]
     hand = _load("hand_rest.json")
     ranges, speeds = anatomy["body"]["ranges_deg"], anatomy["body"]["speed_max_deg_s"]
     L = segs["length_mm"]
@@ -219,15 +233,23 @@ def build(load_kg: float = 0.0) -> BodyModel:
         if not j.driven:
             continue
         lo_s, hi_s = j.strength
-        err = math.radians(5) if j.kind == "hinge" else 0.005          # full strength at 5 deg / 5 mm off target
-        acts.append(f'    <position name="a_{j.name}" joint="{j.name}" kp="{max(lo_s, hi_s) / err:.4f}" '
-                    f'dampratio="1" forcelimited="true" forcerange="{-lo_s} {hi_s}" ctrllimited="false"/>')
+        key = strength_key(j.base)
+        if key in hand_kp:                      # fingers (strength.json hand_stiffness_nm_per_rad)
+            kp, ratio = hand_kp[key], 0.7
+        else:                                   # trunk, girdle, arm, pelvis (strength.json body_stiffness)
+            kp, ratio = body_kp[j.base], 1
+        acts.append(f'    <position name="a_{j.name}" joint="{j.name}" kp="{kp:.4f}" '
+                    f'dampratio="{ratio}" forcelimited="true" forcerange="{-lo_s} {hi_s}" ctrllimited="false"/>')
         # ctrl is unlimited because it carries the controller's feedforward on top of the target; the controller
         # clamps targets to the joint's range, and forcerange is what caps the motor at the joint's strength
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
+  <!-- grasping settings from MuJoCo's own guidance, as trainual's accepted take used them: elliptic cones,
+       impratio 10, Newton, a tight tolerance, and noslip iterations so a held part doesn't creep out of the grip -->
   <option timestep="0.001" integrator="implicitfast" solver="Newton" cone="elliptic" impratio="10"
-          iterations="60" ls_iterations="20" gravity="0 0 -9.81"/>
+          tolerance="1e-10" iterations="60" ls_iterations="20" noslip_iterations="2" gravity="0 0 -9.81">
+    <flag multiccd="enable"/>
+  </option>
   <default>
     <joint limited="true" solreflimit="0.004 1" solimplimit="0.95 0.99 0.001"/>
     <default class="skin">
@@ -235,7 +257,7 @@ def build(load_kg: float = 0.0) -> BodyModel:
     </default>
   </default>
   <worldbody>
-    <body name="pelvis" pos="0 0 {segs["length_mm"]["lumbar_height"] * M:.4f}">
+    <body name="pelvis" pos="{_f(np.array(pelvis_mm or (0, 0, segs["length_mm"]["lumbar_height"])) * M)}">
 {chr(10).join("      " + p for p in pelvis)}
       <geom name="g_pelvis" class="skin" type="sphere" size="0.12" mass="{pel["mass_kg"]}" contype="0" conaffinity="0"/>
       <body name="thorax">

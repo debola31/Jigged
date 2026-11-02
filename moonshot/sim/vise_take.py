@@ -34,7 +34,7 @@ from moonshot.sim.reference import ReferenceTake, take_dir
 from moonshot.world import cell
 from moonshot.world import vise as V
 
-SQUEEZE_DEG = 7.5
+SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for capsules 4-5 mm inside them
 STIFFEN = 4.0
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
@@ -225,9 +225,11 @@ class ViseTake:
         ft = np.zeros(6)
         for dg, seg in PAD.items():
             g = m.geom(f"R_g_{seg}").id
-            if mujoco.mj_geomDistance(m, d, g, obj, 0.025, ft) >= 0.025:
+            dist = mujoco.mj_geomDistance(m, d, g, obj, 0.025, ft)
+            if dist >= 0.025:
                 continue                                   # this digit isn't on the object
-            n = ft[3:] - ft[:3]
+            # pad to object; a pad already pressed in gets the segment out of the object, so it turns round
+            n = (ft[3:] - ft[:3]) * (1.0 if dist >= 0 else -1.0)
             n = n / (np.linalg.norm(n) + 1e-12)
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, ft[:3], m.geom_bodyid[g])
@@ -509,10 +511,13 @@ class ViseTake:
             tk = k / fps
             want_enc = any(e["t0"] <= tk < e["t1"] for e in self.iv["enclose"])
             if want_enc and not d.eq_active[enc]:
-                kb = self.body_id["knob"]
-                pk = d.xpos[kb] + d.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
-                hb = self.body_id["R_hand"]
-                m.eq_data[enc, 3:6] = d.xmat[hb].reshape(3, 3).T @ (pk - d.xpos[hb])
+                # the knob held where the grip was planned in the hand, not wherever the hand happens to be: frozen
+                # at the hand's real pose, the knob sat 5 mm nearer the lever than planned, and the index's base hit it
+                kb, hb, p = self.body_id["knob"], self.body_id["R_hand"], self.plan
+                self.set_plan(self.plan_time(tk))
+                mujoco.mj_kinematics(m, p)
+                pk = p.xpos[kb] + p.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
+                m.eq_data[enc, 3:6] = p.xmat[hb].reshape(3, 3).T @ (pk - p.xpos[hb])
                 d.eq_active[enc] = 1
             elif not want_enc and d.eq_active[enc]:
                 d.eq_active[enc] = 0

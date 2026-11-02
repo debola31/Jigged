@@ -23,11 +23,23 @@ from moonshot.config import data_root
 
 OUT = Path(__file__).resolve().parent / "data" / "hand_rest.json"
 INSET_MM = 2.0          # capsules sit inside the skin by the pad's compression, so contact presses skin that far
+# a phalanx's capsule: centred in its skin, its radius this percentile of it less the pads' compression (2-3 mm
+# under 5 N, plan §3.1). Fingertips reach further: their pads carry the grip
+PHALANX_PCT = {"pro": 60, "int": 75, "dis": 90}
+PHALANX_INSET_MM = 2.5
 
 
 def fit_capsules(hand: AnatomicalHand, J: np.ndarray) -> dict[int, tuple[np.ndarray, np.ndarray, float]]:
     """Per bone: a capsule from its joint to its child joint, radius = the skin's distance from that segment
-    (40th percentile of the skin vertices that bone mostly moves), minus the pad's compression."""
+    (40th percentile of the skin vertices that bone mostly moves), minus the pad's compression.
+
+    A phalanx's bone runs nearer the back of the finger than the pad, so a capsule round the bone left the pad's
+    skin 4-5 mm outside it, and that skin sank as far into whatever the hand held (docs/moonshot/physics.md). A
+    phalanx's capsule is instead centred in its skin's cross-section, its radius a percentile of the skin
+    (PHALANX_PCT) less the pads' compression: the pad's skin then ends 2-3 mm outside it, as far as a pad
+    compresses, and nowhere does the capsule reach past the skin. Fitted to the skin itself (1 mm in), the capsules
+    bulged past it at their sides and backs, into the crank's lever and the vise's jaws. The palm's bones keep the
+    bone-centred fit: a flat, broad palm doesn't fit a capsule either way."""
     m = hand.model
     skin = (hand.rest_v[m.skin_sep:] - hand.rest_J[0]) * hand.scale
     sw = m.sw[m.skin_sep:]
@@ -46,7 +58,13 @@ def fit_capsules(hand: AnatomicalHand, J: np.ndarray) -> dict[int, tuple[np.ndar
         p = skin[sel]
         u = (b - a) / np.linalg.norm(b - a)
         t = np.clip((p - a) @ u, 0, np.linalg.norm(b - a))
-        r = float(np.percentile(np.linalg.norm(p - (a + np.outer(t, u)), axis=1), 40)) - INSET_MM
+        radial = p - (a + np.outer(t, u))
+        if JOINTS[j].startswith(("pro", "int", "dis")):
+            c = radial.mean(0)                                 # the cross-section's centre, off the bone
+            a, b = a + c, b + c
+            r = float(np.percentile(np.linalg.norm(radial - c, axis=1), PHALANX_PCT[JOINTS[j][:3]])) - PHALANX_INSET_MM
+        else:
+            r = float(np.percentile(np.linalg.norm(radial, axis=1), 40)) - INSET_MM
         if JOINTS[j].startswith("dis"):          # the tip joint sits inside the pulp: reach to the pad's end
             b = b + u * max(0.0, r * 0.4)
         caps[j] = (a, b, max(r, 4.0))

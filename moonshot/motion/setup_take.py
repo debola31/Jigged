@@ -186,8 +186,10 @@ class Take:
         jaw_clear = JAW_TOP - (self.set_down[2] + hz)
         near_gap = self.opening0 - self.size[1] - PLACE_GAP
         cols = [box(c, self.half), box([c[0], c[1], TABLE_Z - 50], [400, 300, 50])]
-        for y0, y1 in ((hy + PLACE_GAP, hy + PLACE_GAP + 45), (-hy - near_gap - 45, -hy - near_gap)):
-            cols.append(box([c[0], c[1] + (y0 + y1) / 2, top + jaw_clear - 40], [76.2, (y1 - y0) / 2, 40]))
+        # the jaws where it is set down, 2.5 mm bigger: the physics fingers reach up to 2 mm past the skin at their
+        # backs and sides, and a thumb on the moving jaw nudges the part as it goes down
+        for y0, y1 in ((hy + PLACE_GAP - 2.5, hy + PLACE_GAP + 45), (-hy - near_gap - 45, -hy - near_gap + 2.5)):
+            cols.append(box([c[0], c[1] + (y0 + y1) / 2, top + jaw_clear - 40 + 1.25], [76.2, (y1 - y0) / 2, 41.25]))
         q0 = h.neutral()
         for n in ("index", "middle", "ring", "little"):
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 25.0, 40.0
@@ -245,9 +247,10 @@ class Take:
             lambda p: G.sdf_cyl(p, a0, a0 + KNOB_AXIS * VISE["knob_len"], R),
             # the lever, swept: the fist keeps its orientation while cranking, so relative to it the lever turns a
             # full circle round the knob's root, through anything near it (docs/moonshot/physics.md). One-sided, from
-            # 1 mm off the lever's outer face back past the vise's end 2 mm behind it: a thin disc let the solver push
-            # the hand out through its back, between the lever and the vise
-            lambda p: G.sdf_cyl(p, a0 + np.array([0, -7.0, 0]), a0 + np.array([0, 150.0, 0]), VISE["lever"] + 8.0),
+            # 6 mm off the lever's outer face (the physics hand settles a few millimetres from its planned grip) back
+            # past the vise's end 2 mm behind it: a thin disc let the solver push the hand out through its back,
+            # between the lever and the vise
+            lambda p: G.sdf_cyl(p, a0 + np.array([0, -12.0, 0]), a0 + np.array([0, 150.0, 0]), VISE["lever"] + 8.0),
             box([VISE["x"], sc[1] + 120, 880], [110, 120, 30])],
             # clear of the lever, the fist sits out along the 90 mm knob: middle, ring and little wrap it, then the
             # index and thumb settle onto it lightly. Solved all at once, the five fall into poorer optima (pads off
@@ -383,8 +386,8 @@ class Take:
         R0, p0 = self.blank_at(t0)
         Rt = Rotation.from_euler("x", -tilt_deg, degrees=True).as_matrix()
         self.move_blank(t0, t0 + 0.9, np.eye(3), INSPECT)
-        # the turn takes 0.75 s: stopping a 28 deg turn in trainual's 0.6 s slipped the blank 2.0 mm in the grip
-        self.move_blank(t0 + 0.9, t0 + 1.65, Rt, INSPECT + [0, 0, 10])
+        # the turn takes 0.9 s: stopping a 28 deg turn in trainual's 0.6 s slips the blank over 2 mm in the grip
+        self.move_blank(t0 + 0.9, t0 + 1.8, Rt, INSPECT + [0, 0, 10])
         self.move_blank(t0 + 2.0, t0 + dur, np.eye(3), INSPECT)
         self.look(t0 + 0.1, INSPECT)
         self.add(t0, t0 + dur, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])

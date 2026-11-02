@@ -36,8 +36,8 @@ def anat(body, d, m, name):
 
 def test_the_skeleton_has_every_joint(body):
     m = mujoco.MjModel.from_xml_string(body.xml)
-    assert m.njnt == 73                                         # trunk 3 + 2 x (girdle 2, arm 7, hand 26)
-    assert m.nu == 73 - 14                                      # the 7 coupled joints per side have no motor
+    assert m.njnt == 76                                 # pelvis 3 + trunk 3 + 2 x (girdle 2, arm 7, hand 26)
+    assert m.nu == 76 - 14                              # the 7 coupled joints per side have no motor
 
 
 def test_left_is_the_right_mirrored(body, sim):
@@ -94,14 +94,14 @@ def _hold_arm_forward(body, load_kg):
     b = build(load_kg=load_kg)
     m = mujoco.MjModel.from_xml_string(b.xml)
     d = mujoco.MjData(m)
-    ctl = Controller(b, m, d)
     pose = {"R_sh_plane": 90, "R_sh_elev": 90, "R_elbow": 0, "R_pron": 0, "R_wr_flex": 0}
     for name, v in pose.items():                           # start there, so only holding is tested
         j = b.joints[name]
         d.qpos[m.jnt_qposadr[m.joint(name).id]] = math.radians(v - j.rest)
+    mujoco.mj_forward(m, d)
+    ctl = Controller(b, m, d)
     ctl.set(pose)
-    for i, a in enumerate(ctl.acts):
-        d.ctrl[a] = ctl.target[i]
+    ctl.setpoint[:] = ctl.target
     ctl.run(1.5)
     return b, m, d
 
@@ -144,6 +144,35 @@ def test_coupled_joints_follow_their_leaders(body, sim):
         j = body.joints[f"R_{c.follower}"]
         want = min(j.hi, max(j.lo, c.k * ld + c.c))
         assert abs(f - want) < 3.0, f"{c.follower} = {f:.1f}, coupling wants {want:.1f} from {c.leader} = {ld:.1f}"
+
+
+def min_jerk(t, T):
+    s = np.clip(t / T, 0, 1)
+    return (10 * s**3 - 15 * s**4 + 6 * s**5,
+            (30 * s**2 - 60 * s**3 + 30 * s**4) / T,
+            (60 * s - 180 * s**2 + 120 * s**3) / T**2)
+
+
+def test_the_body_keeps_up_with_a_planned_reach(body):
+    """A 1 s minimum-jerk reach from hanging to straight out in front, with the hand closing: the wrist stays
+    within the tracking-lag threshold of its plan, and no motor needs more than its strength."""
+    m = mujoco.MjModel.from_xml_string(body.xml)
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    ctl = Controller(body, m, d)
+    goal = {"R_sh_plane": 90, "R_sh_elev": 90, "R_elbow": 20, "R_wr_flex": -10,
+            "R_index_mcp_flex": 60, "R_index_pip": 70, "R_thumb_cmc_flex": 15}
+    q0 = d.qpos.copy()
+    delta = np.zeros(m.nq)
+    for name, v in goal.items():
+        j = body.joints[name]
+        delta[m.jnt_qposadr[m.joint(name).id]] = math.radians(v - j.rest) - q0[m.jnt_qposadr[m.joint(name).id]]
+    worst = 0.0
+    for s in range(1500):
+        p, v, a = min_jerk(s * m.opt.timestep, 1.0)
+        ctl.track(q0 + p * delta, v * delta, a * delta)
+        worst = max(worst, np.linalg.norm(d.body("R_hand").xpos - ctl.planned_body_pos("R_hand")) * 1000)
+    assert worst < threshold("physics.tracking_lag_mm").value, f"wrist lagged {worst:.1f} mm behind its plan"
 
 
 def test_segment_masses_and_lengths_match_the_anthropometry(body, sim):

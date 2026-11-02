@@ -31,6 +31,7 @@ SIDES = {"R": np.eye(3), "L": MIRROR}
 
 # Trunk and arm: (name, kind, axis for the right side). Each body's joints compose in the order listed, about
 # axes in its own frame, which reproduces trainual's R = Rz(-rot) Ry(lat) Rx(-flex), Rz(plane) Ry(-elev) Rz(rot), ...
+PELVIS = [("pelvis_x", (1, 0, 0)), ("pelvis_y", (0, 1, 0)), ("pelvis_z", (0, 0, 1))]   # the legs, not modelled
 TRUNK = [("trunk_rot", (0, 0, -1)), ("trunk_lat", (0, 1, 0)), ("trunk_flex", (-1, 0, 0))]
 GIRDLE = [("sc_prot", (0, 1, 0)), ("sc_elev", (0, 0, 1))]
 SHOULDER = [("sh_plane", (0, 0, 1)), ("sh_elev", (0, -1, 0)), ("sh_rot", (0, 0, 1))]
@@ -115,7 +116,8 @@ def build(load_kg: float = 0.0) -> BodyModel:
         body.joints[name] = Joint(name, base, kind, lo, hi, rest, speed, (float(s[0]), float(s[1])),
                                   driven=base not in followers)
         conv = (lambda x: math.radians(x - rest)) if kind == "hinge" else (lambda x: (x - rest) * M)
-        extra = ' damping="0.004" armature="0.00012"' if base not in speeds else ' damping="0.5" armature="0.01"'
+        heavy = base in speeds or base.startswith("pelvis")         # trunk, girdle, arm, pelvis vs the hand
+        extra = ' damping="0.5" armature="0.01"' if heavy else ' damping="0.004" armature="0.00012"'
         return (f'<joint name="{name}" type="{kind}" axis="{_f(axis)}" range="{conv(lo):.6f} {conv(hi):.6f}"'
                 f'{extra}/>')
 
@@ -201,6 +203,8 @@ def build(load_kg: float = 0.0) -> BodyModel:
 
     thorax_kg = segs["thorax_head_fraction"]["value"] * mass
     neck = np.array(L["neck_from_lumbar"], float) * M
+    pel = segs["pelvis"]
+    pelvis = [add_joint(n, n, "slide", ax, *pel["shift_mm"], speed=pel["speed_mm_s"]) for n, ax in PELVIS]
     trunk = [add_joint(n, n, "hinge", ax, *ranges[n], speed=speeds[n]) for n, ax in TRUNK]
     eq = []
     for side in SIDES:
@@ -217,7 +221,9 @@ def build(load_kg: float = 0.0) -> BodyModel:
         lo_s, hi_s = j.strength
         err = math.radians(5) if j.kind == "hinge" else 0.005          # full strength at 5 deg / 5 mm off target
         acts.append(f'    <position name="a_{j.name}" joint="{j.name}" kp="{max(lo_s, hi_s) / err:.4f}" '
-                    f'dampratio="1" forcelimited="true" forcerange="{-lo_s} {hi_s}" inheritrange="1"/>')
+                    f'dampratio="1" forcelimited="true" forcerange="{-lo_s} {hi_s}" ctrllimited="false"/>')
+        # ctrl is unlimited because it carries the controller's feedforward on top of the target; the controller
+        # clamps targets to the joint's range, and forcerange is what caps the motor at the joint's strength
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
   <option timestep="0.001" integrator="implicitfast" solver="Newton" cone="elliptic" impratio="10"
@@ -230,6 +236,8 @@ def build(load_kg: float = 0.0) -> BodyModel:
   </default>
   <worldbody>
     <body name="pelvis" pos="0 0 {segs["length_mm"]["lumbar_height"] * M:.4f}">
+{chr(10).join("      " + p for p in pelvis)}
+      <geom name="g_pelvis" class="skin" type="sphere" size="0.12" mass="{pel["mass_kg"]}" contype="0" conaffinity="0"/>
       <body name="thorax">
 {chr(10).join("        " + t for t in trunk)}
         <geom name="g_thorax" class="skin" type="capsule" size="0.12" fromto="0 0 0.08 {_f(neck - [0, 0, 0.08])}"

@@ -119,7 +119,11 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   the production checks that run on every frame (§5.1–5.2)
 - [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
   hand opening; matches its footage (cards with footage only)
-- [ ] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`)
+- [ ] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
+  Stage 1 done (2026-11-02): at trainual's angles the body puts the elbow exactly and the wrist within 1.2 mm where
+  trainual did; driven through the whole 31.8 s take with gravity, it keeps the wrist within 0.1 mm of plan with no
+  motor at full strength (`moonshot/tests/gates/test_reference_take.py`, physics tier). Next: the vise, blank and
+  parallels, and the per-verb outcomes.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
 - [ ] Timestep halving converges
 - [ ] The four known gaps in §5.5: three fixed by the new body model; trunk rotation given a standing-work range (§11)

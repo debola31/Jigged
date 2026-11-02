@@ -1,6 +1,9 @@
 {
  "about": "Peak isometric strength per joint motor: [against the joint's positive direction, along it], N m for hinges, N for the shoulder girdle's slides. These are single peaks; strength curves by angle and speed are a separate checklist item. source: study | proposed.",
  "joints": {
+  "pelvis_x":   {"max": [2000, 2000], "source": "proposed", "reason": "The legs' push on the pelvis, far above what a weight shift needs"},
+  "pelvis_y":   {"max": [2000, 2000], "source": "proposed", "reason": "As pelvis_x"},
+  "pelvis_z":   {"max": [2000, 2000], "source": "proposed", "reason": "As pelvis_x; also carries the upper body's weight"},
   "trunk_flex": {"max": [150, 150], "source": "proposed", "reason": "Trunk flexion/extension strength well above the ~30 N m it costs to hold a 20 deg lean"},
   "trunk_lat":  {"max": [120, 120], "source": "proposed", "reason": "Lateral bend, below flexion"},
   "trunk_rot":  {"max": [70, 70],   "source": "proposed", "reason": "Axial trunk rotation, the weakest trunk direction"},

@@ -1,9 +1,17 @@
-"""Drives the body model's motors toward target angles no faster than each joint can move (plan §3.1).
+"""Drives the body model's motors: like a robot joint controller, and like the nervous system, it anticipates.
 
-A position servo alone would jump to a new target as fast as its strength allows. Like a robot joint controller,
-this slews each motor's setpoint toward its target at the joint's measured top speed (anatomy.json body
-speed_max_deg_s), so a planner can't make an arm move faster than a person's. Joints with no recorded top speed
-(the fingers) are not capped; that is a known gap, not a claim that fingers are unlimited.
+Every motor is a position servo capped at its joint's strength (moonshot/body/skeleton.py). A servo that only
+reacts to error lags under load: driving trainual's vise take that way left the wrist a median 20 mm behind its
+plan. So each motor's command also carries the torque the motion is expected to need, still capped by the motor's
+strength, so feedforward can never make the body stronger than a person:
+
+- `set` + `step`: a new target per joint, approached no faster than the joint's measured top speed
+  (anatomy.json body speed_max_deg_s), with gravity and velocity forces fed forward.
+- `track`: a planned trajectory (position, velocity, acceleration per joint), with full inverse dynamics fed
+  forward. On the reference take this keeps the wrist within 0.1 mm of plan. A plan's speeds are not capped
+  here; the production speed check judges them (plan §5.2).
+
+Joints with no recorded top speed (the fingers) are not capped by `step`; a known gap, not a claim.
 """
 from __future__ import annotations
 
@@ -18,33 +26,49 @@ from moonshot.body.skeleton import BodyModel
 class Controller:
     def __init__(self, body: BodyModel, model: mujoco.MjModel, data: mujoco.MjData):
         self.model, self.data = model, data
-        self.acts, self.max_step, self.rest, self.unit = [], [], [], []
-        for j in body.joints.values():
-            if not j.driven:
-                continue
-            self.acts.append(model.actuator(f"a_{j.name}").id)
-            to_q = math.radians if j.kind == "hinge" else (lambda x: x * 0.001)
-            self.unit.append(to_q)
-            self.rest.append(j.rest)
-            self.max_step.append(to_q(j.speed) * model.opt.timestep if j.speed else math.inf)
-        self.names = [j.name for j in body.joints.values() if j.driven]
+        driven = [j for j in body.joints.values() if j.driven]
+        self.names = [j.name for j in driven]
         self.index = {n: i for i, n in enumerate(self.names)}
-        self.target = np.array([data.ctrl[a] for a in self.acts], dtype=float)
+        self.acts = np.array([model.actuator(f"a_{n}").id for n in self.names])
+        jid = model.actuator_trnid[self.acts, 0]
+        self.dof, self.qadr = model.jnt_dofadr[jid], model.jnt_qposadr[jid]
+        self.range = model.jnt_range[jid].copy()
+        self.kp = model.actuator_gainprm[self.acts, 0].copy()
+        self.kv = -model.actuator_biasprm[self.acts, 2].copy()
+        self.unit = [math.radians if j.kind == "hinge" else (lambda x: x * 0.001) for j in driven]
+        self.rest = [j.rest for j in driven]
+        self.max_step = np.array([self.unit[i](j.speed) * model.opt.timestep if j.speed else math.inf
+                                  for i, j in enumerate(driven)])
+        self.target = data.qpos[self.qadr].copy()
+        self.setpoint = self.target.copy()
+        self._plan = mujoco.MjData(model)
 
     def set(self, anatomical: dict[str, float]) -> None:
-        """New targets, in anatomical degrees (mm for the shoulder girdle), by joint name."""
+        """New targets, in anatomical degrees (mm for the girdle and pelvis), clamped to each joint's range."""
         for name, value in anatomical.items():
             i = self.index[name]
-            lo, hi = self.model.actuator_ctrlrange[self.acts[i]]
-            self.target[i] = float(np.clip(self.unit[i](value - self.rest[i]), lo, hi))
+            self.target[i] = float(np.clip(self.unit[i](value - self.rest[i]), *self.range[i]))
 
     def step(self) -> None:
-        """Move each setpoint one timestep toward its target, then step the physics."""
-        for i, a in enumerate(self.acts):
-            delta = self.target[i] - self.data.ctrl[a]
-            self.data.ctrl[a] += float(np.clip(delta, -self.max_step[i], self.max_step[i]))
-        mujoco.mj_step(self.model, self.data)
+        """Move each setpoint one timestep toward its target at the joint's top speed, feed gravity forward, step."""
+        self.setpoint += np.clip(self.target - self.setpoint, -self.max_step, self.max_step)
+        d = self.data
+        d.ctrl[self.acts] = self.setpoint + d.qfrc_bias[self.dof] / self.kp
+        mujoco.mj_step(self.model, d)
 
     def run(self, seconds: float) -> None:
         for _ in range(round(seconds / self.model.opt.timestep)):
             self.step()
+
+    def track(self, qpos: np.ndarray, qvel: np.ndarray, qacc: np.ndarray) -> None:
+        """One timestep along a planned trajectory (full-length model vectors), with inverse dynamics fed forward."""
+        p = self._plan
+        p.qpos[:], p.qvel[:], p.qacc[:] = qpos, qvel, qacc
+        mujoco.mj_inverse(self.model, p)
+        self.setpoint = qpos[self.qadr].copy()
+        self.data.ctrl[self.acts] = self.setpoint + (p.qfrc_inverse[self.dof] + self.kv * qvel[self.dof]) / self.kp
+        mujoco.mj_step(self.model, self.data)
+
+    def planned_body_pos(self, body: str) -> np.ndarray:
+        """Where the plan put a body at the last `track` step (world, metres)."""
+        return self._plan.body(body).xpos.copy()

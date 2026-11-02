@@ -7,6 +7,8 @@
   "source": "study", "reason": "de Leva 1996, J Biomech 29(9):1223-1230, male (as reproduced by the Visual3D wiki)"},
  "thorax_head_fraction": {"value": 0.392, "source": "proposed",
   "reason": "Everything above the lumbar pivot: de Leva 1996 head 6.94% + upper trunk 15.96% + middle trunk 16.33%; the subdivision is from memory, verify against the paper"},
+ "pelvis": {"mass_kg": 9.5, "shift_mm": [-50, 50], "speed_mm_s": 300, "source": "proposed",
+  "reason": "The legs aren't modelled: the pelvis shifts on three driven slides standing in for them. The reference take shifts it up to 10 mm at up to 136 mm/s; mass is de Leva's lower trunk (11.17%)"},
  "girdle_kg": {"value": 0.5, "source": "proposed",
   "reason": "Clavicle and scapula with their attached muscle, carried by the shoulder girdle's slide joints"},
  "length_mm": {

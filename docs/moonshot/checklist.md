@@ -123,16 +123,17 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into
   the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
   (measured on NIMBLE's skin from the physics run, agreeing with the bake) and the lever are per-frame checks that
-  `moonshot/validate/take.py` runs before a render; body vs. people is still the gates' only.
+  `moonshot/validate/take.py` runs before a render, and the re-planned vise take passes all three (the skin at
+  3.45 mm against the pads' 3.5 mm, decided 2026-11-02); body vs. people is still the gates' only.
 - [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
   hand opening; matches its footage (cards with footage only)
 - [x] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
   Done 2026-11-02, on the take the ported planner (`moonshot/motion/`) writes, since trainual's stopped being the bar
-  on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 12.7 / 13.1 N grip, 1.83 mm
-  slip, set down within 0.9 mm and flat, seated on the fixed jaw, pushed at 30.0 N, cranked 2.258 turns to 75.75 mm
-  and clamped at 4,653 N, both parallels found pinched; the body alone follows the plan with no motor at full
-  strength (`test_vise_take.py`, `test_reference_take.py`, physics tier). Open elsewhere: the skin's depth (the
-  port-the-checks item) and free-motion wrist lag, 37 mm against 10 mm, which belongs to the planner: near-misses
+  on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 13.0 / 14.0 N grip, 1.76 mm
+  slip, set down within 1.53 mm and flat, seated on the fixed jaw, pushed at 29.9 N, cranked 2.259 turns to 75.75 mm
+  and clamped at 4,759 N, both parallels found pinched; the body alone follows the plan with no motor at full
+  strength (`test_vise_take.py`, `test_reference_take.py`, physics tier). Open elsewhere: free-motion wrist lag,
+  39 mm against 10 mm, which belongs to the planner: near-misses
   (`stray_contacts`), no arm volume in planning, and the held blank's inertia not fed forward, which trips a latent
   launch of the blank on the parallels during cranking.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle

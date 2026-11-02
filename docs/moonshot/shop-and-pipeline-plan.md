@@ -416,7 +416,8 @@ It fails six checks. The new body model must fix them, or you consciously loosen
   2026-11-01; why neither was caught: [physics.md](physics.md)). Both are fixed in the re-planned take
   (2026-11-02);
 - finger spread up to 5.4° past range (435 frames);
-- skin 1.52 mm into the table, and 8.27 mm into the knob;
+- skin 1.52 mm into the table, and 8.27 mm into the knob (3.45 mm at worst on the re-planned take, within the
+  pads' compression, 2026-11-02);
 - shoulder rotation at 154°/s against 150°/s;
 - trunk rotation outside the recorded-people range in 359 frames. That data is seated tabletop work, so a
   separate range for standing bench work may be the honest fix.

@@ -112,7 +112,7 @@ flowchart LR
         direction TB
         WC["Wrist inside its ellipse"]:::ok
         NH["Hand never touches<br/>the lever"]:::ok
-        SD["Skin depth<br/>inside solids"]:::bad
+        SD["Skin depth<br/>inside solids"]:::ok
     end
     subgraph MJ["MuJoCo solves it"]
         direction TB
@@ -123,7 +123,7 @@ flowchart LR
         SC["Lead-screw ratio"]:::ok
         VF["Machine travel<br/>and interlocks"]:::ok
         LV["Lever vs the hand"]:::ok
-        HS["Hand vs solids<br/>capsules inside the skin"]:::part
+        HS["Hand vs solids<br/>capsules 2.5 mm inside the pads"]:::ok
     end
     classDef ok fill:#c8e6c9,stroke:#2e7d32,color:#000
     classDef part fill:#fff3c4,stroke:#f9a825,color:#000
@@ -137,15 +137,15 @@ gates in the table above.
 | Rule | Modelled as | Status on the re-planned take |
 |---|---|---|
 | Each joint within its range | MuJoCo joint limits | Holds |
-| **Wrist flexion and deviation limit each other** (an ellipse, Gracia-Ibanez 2020) | 32 tangent tendon limits per wrist, at most 0.5% outside it; the planner caps the wrist at 0.95 | Holds: the plan 0.95 at most, the physics run 0.98 (following the real knob while cranking). trainual's plan reached 1.12. [Figure 1](#1-the-wrist) |
+| **Wrist flexion and deviation limit each other** (an ellipse, Gracia-Ibanez 2020) | 32 tangent tendon limits per wrist, at most 0.5% outside it; the planner caps the wrist at 0.95 | Holds: the plan 0.95 at most, the physics run 0.96. trainual's plan reached 1.12. [Figure 1](#1-the-wrist) |
 | Motor strength | `forcerange` per motor | Holds: no motor at full strength; 14 of 23 strengths are *proposed* |
 | Strength by angle and speed | Not modelled | Gap |
-| **The hand doesn't pass through solids** | A capsule per finger bone: 40th-percentile skin radius, minus 2 mm | **Fails.** About 5.5 mm into the blank and the knob wherever the hand holds them (median in contact), 6.48 mm at worst, 428 of 955 frames over 4 mm, against a 1.0 mm limit set on a rigid-skinned hand; pads compress 2–3 mm. The capsules sit inside the skin; skin-sized fingers need the grasp's closure re-planned. [Figure 3](#3-the-skin) |
+| **The hand doesn't pass through solids** | A capsule per finger bone; a phalanx's centred in its skin, 2.5 mm inside the pad (the pads' compression); the palm's round its bone | Holds: the skin 3.45 mm at worst inside what the hand holds (the fingertips during the 30 N push), against 3.5. With capsules round the bones it was 6.48 mm. [Figure 3](#3-the-skin) |
 | **The hand doesn't pass through mechanism parts** | The lever collides with the hand; the knob grip is solved clear of the whole circle it sweeps | Holds: no frame touches it. The draft wrapped it with 872 skin vertices. [Figure 2](#2-the-crank) |
-| Parts lifted by friction, without slip | Skin friction 0.6 (Seo & Armstrong 2009), grip-force regulation | Holds: 1.83 mm of slip against 2.0 |
+| Parts lifted by friction, without slip | Skin friction 0.6 (Seo & Armstrong 2009), grip-force regulation | Holds: 13.0 / 14.0 N, 1.76 mm of slip against 2.0 |
 | Mechanisms obey their ratios | The lead screw as a joint equality | Holds |
 | The machine within spec, and its interlocks | Servos capped at rapid speed; `vf2.Control` | Holds |
-| The body keeps up with its plan | Lag measured, not gated | Gap: 37 mm against 10 mm |
+| The body keeps up with its plan | Lag measured, not gated | Gap: 39 mm against 10 mm |
 | Muscles under 100% | MyoSuite replay, not built | Gap |
 
 ## The three failures, before and after
@@ -194,7 +194,7 @@ Each holds something in place whatever the geometry it stands in for, so each ne
 
 | Shortcut | Stands in for | What it hid | Checked by |
 |---|---|---|---|
-| `enclose`: a soft connect from the knob to the hand while cranking | Flesh conforming round the knob, which capsules can't | It held the knob wherever the hand was, including wrapped round the lever's joint | `never_held_parts` for the lever; the skin depth for the knob |
+| `enclose`: a soft connect from the knob to the hand while cranking, where the grip was planned | Flesh conforming round the knob, which capsules can't | It held the knob wherever the hand was, including wrapped round the lever's joint, and 5 mm nearer the lever than planned | `never_held_parts` for the lever; the skin depth for the knob |
 | `screw_lock`: the crank locked while not driven | The lead screw self-locking under clamp load | — | Nothing yet |
 | `keep_para_*`: parallels welded to the table until checked | Parallels resting under their own friction | — | Nothing yet |
 
@@ -209,6 +209,8 @@ Each holds something in place whatever the geometry it stands in for, so each ne
   It's wrong because that was measured against the table alone; against the knob it's 8.27 mm.
 - **Withdrawn:** a five-digit knob grip with the index from 28 mm along the knob (trainual's). It's wrong because it
   only closes with the knuckles behind the lever (2026-11-02).
+- **Withdrawn:** 1.0 mm as the skin's limit. It's wrong because it was measured on trainual's rigid-skinned hand,
+  and a pad compresses 2–3 mm under 5 N; 3.5 mm, decided 2026-11-02.
 - **Withdrawn:** the skin's own hulls as drop-in physics fingers (2026-11-02). It's wrong because the grasp's
   approach and closure were tuned to capsules inside the skin: skin-sized fingers touch the blank early and lightly,
   the arm backs off, and the grab fails.

@@ -439,8 +439,8 @@ It fails four checks. The new body model must fix them, or you consciously loose
 
 | # | Part | Routing | Steps | Group |
 |---|---|---|---|---|
-| 1 | **nist-ctc-01**, NIST prismatic test part | band saw → VMC → inspection | 16 | **G1, Thu Nov 5: first shared** |
-| 2 | nist-ftc-10, NIST prismatic | VMC → inspection | 12 | G1 |
+| 1 | **nist-ftc-10**, NIST prismatic, 158 × 75 × 31 mm | VMC → inspection | 12 | **G1, Thu Nov 5: first shared** |
+| 2 | nist-ctc-01, NIST prismatic test part, 800 × 450 × 150 mm | band saw → VMC → inspection | 16 | G1, **open question** (§11) |
 | 3 | ll-1005337, L&L Delrin pallet inlay | VMC → inspection | 13 | G1 |
 | 4 | ct-slbeam, Contour L-block, 4140 | saw → Hurco VM1 → black oxide → QC | 17 | G1, Fri Nov 6 |
 | 5 | ll-1007223, L&L gripper jaw, 4140 | saw → VMC → zinc plate → inspection | 17 | G1, Fri Nov 6 |
@@ -461,7 +461,9 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | 20 | ct-10004-bcrm, Contour brazed reamer | saw → lathe → knee mill → grind → wire EDM → braze → ANCA | 45 | G5 |
 | | **Total** | | **≈ 420** | |
 
-`nist-ctc-01` goes first: it needs only three stations and exercises the VMC chain that 9 of the 20 parts share.
+`nist-ftc-10` goes first: it is public, hand-sized, needs only two stations, and exercises the VMC chain that 9 of the 20 parts share.
+
+**Withdrawn:** `nist-ctc-01` first — wrong because its 800 × 450 × 150 mm (about 146 kg in aluminium) exceeds the VF-2's X and Y travel and can't be lifted by hand (found 2026-11-02).
 
 ## 8. Compute
 
@@ -510,7 +512,12 @@ Outside processes (heat treat, plating, coating) are one "send out and receive" 
 
 ## 11. Open questions
 
-None outstanding.
+1. **`nist-ctc-01` doesn't fit the shop as modelled** (found 2026-11-02). At 800 × 450 × 150 mm it exceeds the
+   VF-2's X and Y travel (762 / 406 mm), would weigh about 146 kg in aluminium, and is beyond a band saw's usual
+   capacity. Options: (a) the VF-3 (1016 × 508 mm travel) with an overhead hoist added to the shop; (b) machine it at
+   a stated scale that fits the VF-2 by hand, with the drawing's dimensions scaled to match; (c) replace it with
+   another public part. My recommendation is (b) at 1:4 (200 × 112.5 × 37.5 mm, about 2.3 kg), labelled as a
+   scale model, since NIST's test cases exist to exercise GD&T, not size. `nist-ftc-10` goes first meanwhile.
 
 **Decided 2026-11-01** (you delegated 1 and 2 to my judgement):
 

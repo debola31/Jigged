@@ -171,9 +171,9 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 
 - [ ] Nov 1: vise compiles in the new core; benchmark sets the forecast
 - [ ] Nov 2: queue reliable; vise take reproduced in the new core
-- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ctc-01` drafts reviewed by you
-- [ ] Nov 4: render queue live; `nist-ctc-01` finals
-- [ ] **Nov 5: `nist-ctc-01` on the web; sharing starts**
+- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you
+- [ ] Nov 4: render queue live; `nist-ftc-10` finals
+- [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant

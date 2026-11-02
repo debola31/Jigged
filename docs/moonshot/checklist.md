@@ -118,16 +118,17 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   (`test_cell_conformance.py`); the generated tools pass their record tests.
 - [ ] The usage-card format (§4), with the first cards for the G1 tools: band saw, VMC controls, calipers,
   micrometer, indicator. The format is done (2026-11-01, `moonshot/cards/card.schema.json`), with the card behind
-  the reference take (`kurt-vise-load-and-clamp`). The five G1 cards are written and pass `test_cards.py`
-  (2026-11-02, branch `feature/moonshot-cards`): `bandsaw-cut-to-length`, `vf2-controls`, `caliper-measure-bore`,
-  `micrometer-measure-thickness`, `dti-sweep-face`. Open: your review of their proposed values (each phase tags
-  them `[proposed: …]`, with the reason in the card's notes), then the physics tier, before a card counts as
-  done (§6).
+  the reference take (`kurt-vise-load-and-clamp`). The G1 cards are written and pass `test_cards.py`
+  (2026-11-02, branch `feature/moonshot-cards`): `bandsaw-cut-to-length`, `vf2-controls`, `vf2-tool-setter`,
+  `caliper-measure-bore`, `micrometer-measure-thickness`, `dti-sweep-face`. Open: your review of their proposed
+  values (each phase tags them `[proposed: …]`, with the reason in the card's notes), then the physics tier,
+  before a card counts as done (§6).
 - [ ] For each G1 card: the maker's instructions found; YouTube or research-dataset footage found, downloaded to
   `C:\jigged-data\footage\` and hand-tracked (bonus, not required; videos never committed or published).
-  2026-11-02: maker's instructions found and cited for all five. The band saw's are JET's HBS-916 manual: McMaster
-  names no maker for 8962N13 and publishes no manual. No footage yet: tracking it needs MediaPipe, which isn't in
-  the `jigged` env the farm runs on.
+  2026-11-02: maker's instructions found and cited for every card. The band saw's are JET's HBS-916 manual:
+  McMaster names no maker for 8962N13 and publishes no manual. MediaPipe 1.2.0 is in the hub's `jigged` env (it
+  changed no existing package) with its hand model in `C:\jigged-data\footage\`, and trainual's two tracking
+  scripts run on it. No footage downloaded yet: downr.org needs the browser, which wasn't connected.
 - [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station
 
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into

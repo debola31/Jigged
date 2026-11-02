@@ -1,0 +1,42 @@
+{
+ "schema": "jigged.card/1",
+ "id": "vf2-tool-setter",
+ "name": "Measure a tool's length on the VF-2's tool setter through VPS",
+ "assets": ["vf2", "tsetter"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "the pendant keys; rests on Feed Hold while the cycle runs",
+   "grasps": {"keys": "fingertip_press", "feed_hold": "fingertip_press"},
+   "contacts": [{"digit": "index", "on": "keys"}, {"digit": "index", "on": "feed_hold"}]
+  },
+  "steadying": {
+   "side": "L", "role": "holds a steel scale against the tool for its gauge length; presses Cycle Start; otherwise rests at the side",
+   "grasps": {"scale": "palmar_pinch", "cycle_start": "fingertip_press"},
+   "contacts": [{"digit": "thumb", "on": "scale"}, {"digit": "index", "on": "scale"}, {"digit": "index", "on": "cycle_start"}]
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "EDIT, then the VPS tab, PROBING, TOOL SETTING [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 4, "ends_on": "the tool-setting cycles on screen", "source": 0},
+  {"phase": "operate", "what": "Choose the cycle: Auto Length Rotating for end mills and face mills, Non-rotating for drills, reamers and taps, Length and Diameter where the diameter matters [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 2, "ends_on": "the cycle's variables page open", "source": 0},
+  {"phase": "reach", "what": "Doors open, the steadying hand brings a 6 in steel scale up to the tool in the spindle", "duration_s": [0.32, 0.67], "source": 1},
+  {"phase": "check", "what": "Hold the scale upright, its end against the spindle nose, and read it at the tool's tip: the approximate gauge length [proposed: force_n, duration_s, the 1/16 in]",
+   "action": "read", "on": "scale", "force_n": 1, "duration_s": 3, "ends_on": "the length read to about 1/16 in", "source": 0},
+  {"phase": "operate", "what": "Key in the tool number, the gauge length and the diameter; F4, Output to MDI [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 8, "ends_on": "the generated G65 line waiting in MDI", "source": 0},
+  {"phase": "operate", "what": "Close both doors and start it as in vf2-controls, phases 14 to 19: the steadying hand presses Cycle Start, the working hand rests on Feed Hold [proposed: force_n, duration_s]",
+   "action": "press", "on": "cycle_start", "force_n": 5, "duration_s": 0.3, "ends_on": "the program starts", "source": 0},
+  {"phase": "check", "what": "Hands off while the machine takes the tool to the tool setter, spins it for a rotating cycle and touches it off [proposed: duration_s]",
+   "action": "read", "on": "tool", "duration_s": [20, 40], "ends_on": "the program ends and the tool's length offset is written", "source": 0}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Haas Factory Outlet (Productivity Inc.), 'Haas Probe Training Manual: NG2 Next Generation VPS System' (CK-6/2016), OTS and 'Setting of Tool Length Offsets using VPS'",
+   "url": "https://www.productivity.com/wp-content/uploads/2019/01/Haas-Spindle-and-Tool-Probe-PROBE-VPS.pdf",
+   "gives": "the OTS sets tool length offsets and measures diameters; VPS > Probing > Tool Setting, the cycle chosen by tool type, the tool number, an approximate gauge length 'measured with a scale' and the diameter keyed in, F4 to output to MDI, then run in MDI; only Probe Manual Length needs the tool jogged over the setter by hand"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as no footage of this machine was tracked",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+ ],
+ "notes": "The tool setter the nist-ftc-10 plan names for Z: it sets each tool's length. The work Z (the part's top) still comes from a touch-off (vf2-controls) or the spindle probe. The manual is for the 2016 NG2 control; a newer NGC may name the VPS menus differently, so check against the shop's control. The doors and Cycle Start are not repeated here: phase 6 points at vf2-controls. Proposed, with reasons (phase numbers count from 1): 3 N on the keys (#1, #2, #5), 1 N holding the scale (#4) and 5 N on Cycle Start (#6, the station's proposed affordance force), since no source gives a force; reading to about 1/16 in (#4), since the manual asks only for an approximate length; every duration but the reach (#3), since the manual gives none: #1 4 s, #2 2 s, #4 3 s, #5 8 s, #6 0.3 s, #7 20-40 s for the machine's own cycle."
+}

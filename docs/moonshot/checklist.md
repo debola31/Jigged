@@ -96,7 +96,7 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 - [x] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
   strength and couplings (§3.1). `moonshot/body/skeleton.py`, 2026-11-01: 59 motors, 14 coupled joints, 42.7 kg
-  above the hips. Known gaps: the wrist's limit is a box, with its ellipse left to the §5.2 check; the scapula
+  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Known gaps: the scapula
   doesn't yet follow shoulder elevation; fingers have no recorded top speed; 14 of 23 strengths are *proposed*
   (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
@@ -119,10 +119,15 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station
 
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into
-  the production checks that run on every frame (§5.1–5.2)
+  the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
+  (measured on NIMBLE's skin from the physics run, agreeing with the bake) and the lever are per-frame checks that
+  `moonshot/validate/take.py` runs before a render; body vs. people is still the gates' only.
 - [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
   hand opening; matches its footage (cards with footage only)
 - [ ] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
+  2026-11-02: that take stopped being the bar on review (`docs/moonshot/physics.md`); the re-planned take, with the
+  wrist inside its ellipse and the crank gripped clear of the lever, meets every per-verb outcome (1.83 mm slip,
+  2.258 turns to 75.75 mm, 4,653 N clamp) and `test_planner_port.py` is retired. Its skin fails the depth check.
   Stage 1 done (2026-11-01): at trainual's angles the body puts the elbow exactly and the wrist within 1.2 mm where
   trainual did; driven through the whole 31.8 s take with gravity, it keeps the wrist within 0.1 mm of plan with no
   motor at full strength (`moonshot/tests/gates/test_reference_take.py`, physics tier). Stage 2 (2026-11-01): with
@@ -201,3 +206,4 @@ Each draft you reject gets a row, and the row closes only when its conversion la
 
 | Date | Part / step | What was wrong | Converted to (monitor, scenario, or "eye only") |
 |---|---|---|---|
+| 2026-11-01 | Vise take draft | The wrist past its ellipse at 4 s; the crank gripped round the lever's joint, which turns through the fist | Checks `wrist_ellipse` and `never_held_parts` (`moonshot/validate/`), gate `test_wrist_ellipse.py`; closed 2026-11-02 |

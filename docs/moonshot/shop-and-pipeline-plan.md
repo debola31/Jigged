@@ -413,7 +413,8 @@ It fails six checks. The new body model must fix them, or you consciously loosen
 - the wrist past its flexion-deviation ellipse (1.12 against 1.0) while the blank is held up, 3.8–5.0 s, and
   to 1.04 twice while cranking;
 - the crank gripped round the lever's joint, which sweeps through the fist each turn (found on review
-  2026-11-01; why neither was caught: [physics.md](physics.md));
+  2026-11-01; why neither was caught: [physics.md](physics.md)). Both are fixed in the re-planned take
+  (2026-11-02);
 - finger spread up to 5.4° past range (435 frames);
 - skin 1.52 mm into the table, and 8.27 mm into the knob;
 - shoulder rotation at 154°/s against 150°/s;

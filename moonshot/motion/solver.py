@@ -19,8 +19,8 @@ Costs (weights in BodySolver.W):
 - trunk: a little lean is free, more costs (people's p95 is 26 deg);
 - effort: gravity moment at the shoulder (arm mass and anything held, times its lever arm);
 - smoothness: squared angular acceleration, plus a penalty on speeds above people's p99 per joint;
-- limits: joint ranges are hard (sigmoid parameterisation); the wrist's flexion-deviation ellipse is a
-  barrier;
+- limits: joint ranges are hard (sigmoid parameterisation), and so is the wrist's flexion-deviation ellipse
+  (`wrist_inside`): as a soft cost it was outweighed, and the reference take bent the wrist to 1.12 on it;
 - clearance: the elbow and forearm stay out of the table and the machine's boxes.
 """
 from __future__ import annotations
@@ -36,6 +36,27 @@ from moonshot.config import data_root
 from moonshot.motion import kinematics as BM
 
 SPEC = json.loads(ANATOMY.read_text(encoding="utf-8"))
+WRIST_KNEE, WRIST_MAX = 0.8, 0.95      # ellipse units, 1.0 the edge
+
+
+def wrist_ellipse(fl, dv):
+    """How far out on the wrist's flexion-deviation ellipse (Gracia-Ibanez 2020) a wrist is: 1.0 is the edge.
+    fl: flexion (+) / extension (-), dv: radial (+) / ulnar (-), degrees; numpy or torch."""
+    wd = SPEC["wrist_deg"]
+    lib = torch if isinstance(fl, torch.Tensor) else np
+    ef = lib.where(fl > 0, fl / wd["flexion"], fl / wd["extension"])
+    ed = lib.where(dv > 0, dv / wd["radial"], dv / wd["ulnar"])
+    return lib.sqrt(ef ** 2 + ed ** 2 + 1e-12)
+
+
+def wrist_inside(th):
+    """th with its wrist pulled inside the ellipse, smoothly: unchanged up to WRIST_KNEE, never past WRIST_MAX.
+    A hard limit by construction, as the sigmoids are for each joint's range. th: (n, 12) degrees, torch."""
+    fl, dv = th[:, 8], th[:, 9]
+    e = wrist_ellipse(fl, dv)
+    span = WRIST_MAX - WRIST_KNEE
+    s = torch.where(e > WRIST_KNEE, (WRIST_KNEE + span * torch.tanh((e - WRIST_KNEE) / span)) / e, torch.ones_like(e))
+    return torch.cat([th[:, :8], (fl * s)[:, None], (dv * s)[:, None], th[:, 10:]], 1)
 
 
 class ArmPrior:
@@ -61,8 +82,8 @@ class ArmPrior:
 
 def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
-    research-based centres, extra cost for pronation far from its centre, a barrier near every limit, the
-    wrist's flexion-deviation ellipse, and the people's prior. th: (n, 10) degrees -> (n,)."""
+    research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
+    people's prior. th: (n, 10) degrees -> (n,)."""
     cf = SPEC["body"]["comfort"]
     t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)
     ctr, half, w = t("centre"), t("half"), t("weight")
@@ -73,11 +94,6 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3):
     span = hi - lo
     near = torch.relu(0.1 - (th - lo) / span) + torch.relu(0.1 - (hi - th) / span)
     c = c + 1e3 * (near ** 2).sum(-1)
-    wd = SPEC["wrist_deg"]
-    fl, dv = th[:, 8], th[:, 9]
-    ef = torch.where(fl > 0, fl / wd["flexion"], fl / wd["extension"])
-    ed = torch.where(dv > 0, dv / wd["radial"], dv / wd["ulnar"])
-    c = c + 400 * torch.relu(torch.sqrt(ef ** 2 + ed ** 2 + 1e-9) - 0.95) ** 2
     if prior is not None:
         c = c + w_prior * prior.nll(th[:, 3:10])
     return c
@@ -92,7 +108,7 @@ def ranges():
 
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
-         "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2, "ellipse": 400.0,
+         "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
@@ -131,7 +147,7 @@ class BodySolver:
 
     # -- solve ------------------------------------------------------------------------------
     def angles(self, u):
-        return self.lo + (self.hi - self.lo) * torch.sigmoid(u)
+        return wrist_inside(self.lo + (self.hi - self.lo) * torch.sigmoid(u))
 
     def free(self, theta):
         th = torch.as_tensor(theta, dtype=torch.float64)

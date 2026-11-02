@@ -336,8 +336,8 @@ class Problem:
 
     def solve_body(self, theta0, iters=500, lr=0.04, verbose=False):
         """Grasp with the hand placed by the body: variables are the finger angles and the 10 body
-        angles (body_model.NAMES); costs add the posture prior, the wrist ellipse, gravity effort and
-        trunk lean to the contact and penetration terms."""
+        angles (body_model.NAMES), the wrist inside its ellipse by construction (solver.wrist_inside); costs
+        add the posture prior, gravity effort and trunk lean to the contact and penetration terms."""
         from moonshot.motion import kinematics as BM
         from moonshot.motion import solver as BSV
         th = self.th
@@ -352,12 +352,11 @@ class Problem:
         u = th.free(self.q0).clone().requires_grad_(True)
         opt = torch.optim.Adam([u, ub], lr=lr)
         L = torch.as_tensor(b["lumbar"], dtype=dt)
-        wd = BSV.SPEC["wrist_deg"]
         best = None
         for it in range(iters):
             opt.zero_grad()
             q = th.angles(u)
-            tb = lo + (hi - lo) * torch.sigmoid(ub)
+            tb = BSV.wrist_inside((lo + (hi - lo) * torch.sigmoid(ub))[None])[0]
             f = BM.torch_fk(tb[None], L)
             H, W = f["H"][0], f["W"][0]
             world, joints, G, M = th.forward(q, H, W)

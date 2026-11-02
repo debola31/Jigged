@@ -37,6 +37,7 @@ GIRDLE = [("sc_prot", (0, 1, 0)), ("sc_elev", (0, 0, 1))]
 SHOULDER = [("sh_plane", (0, 0, 1)), ("sh_elev", (0, -1, 0)), ("sh_rot", (0, 0, 1))]
 ELBOW = [("elbow", (1, 0, 0)), ("pron", (0, 0, 1))]
 WRIST = [("wr_flex", (0, 1, 0)), ("wr_dev", (1, 0, 0))]
+WRIST_FACETS = 32
 
 
 def _load(name: str) -> dict:
@@ -108,6 +109,28 @@ def set_finger_contact(model, body: BodyModel, side: str, finger: str, contact: 
 
 def _f(v) -> str:
     return " ".join(f"{float(x):.6g}" for x in v)
+
+
+def wrist_ellipse_tendons(body: BodyModel, side: str, wd: dict) -> list[str]:
+    """The wrist's flexion-deviation ellipse (Gracia-Ibanez 2020) as MuJoCo limits. Each joint's range alone is a
+    box, which allows full flexion with full ulnar deviation (1.41 on the ellipse), so the ellipse is circumscribed
+    by WRIST_FACETS tangent lines, each a fixed tendon fl/F cos(a) + dv/D sin(a) <= 1 (degrees; F and D the semi-axes
+    of its quadrant). The ellipse is convex, so each tangent bounds all of it; between tangent points the polygon
+    is at most 1/cos(180/WRIST_FACETS deg) outside it, 0.5% at 32, and it meets the box at the four axes."""
+    fl, dv = body.joints[f"{side}_wr_flex"], body.joints[f"{side}_wr_dev"]
+    out = []
+    for k in range(WRIST_FACETS):
+        a = 2 * math.pi * k / WRIST_FACETS
+        c, s = math.cos(a), math.sin(a)
+        kf = c / (wd["flexion"] if c >= 0 else wd["extension"])
+        kd = s / (wd["radial"] if s >= 0 else wd["ulnar"])
+        # anatomical degrees = degrees(qpos) + rest
+        hi = 1 - kf * fl.rest - kd * dv.rest
+        terms = "".join(f'<joint joint="{j.name}" coef="{math.degrees(x):.6f}"/>'
+                        for j, x in ((fl, kf), (dv, kd)) if abs(x) > 1e-9)
+        out.append(f'    <fixed name="{side}_wrist_ellipse_{k}" range="-100 {hi:.6f}" solreflimit="0.004 1" '
+                   f'solimplimit="0.95 0.99 0.001">{terms}</fixed>')
+    return out
 
 
 def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = None) -> BodyModel:
@@ -242,6 +265,7 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
                     f'dampratio="{ratio}" forcelimited="true" forcerange="{-lo_s} {hi_s}" ctrllimited="false"/>')
         # ctrl is unlimited because it carries the controller's feedforward on top of the target; the controller
         # clamps targets to the joint's range, and forcerange is what caps the motor at the joint's strength
+    tendons = [t for side in SIDES for t in wrist_ellipse_tendons(body, side, anatomy["wrist_deg"])]
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
   <!-- grasping settings from MuJoCo's own guidance, as trainual's accepted take used them: elliptic cones,
@@ -273,6 +297,9 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
   <equality>
 {chr(10).join(eq)}
   </equality>
+  <tendon>
+{chr(10).join(tendons)}
+  </tendon>
   <actuator>
 {chr(10).join(acts)}
   </actuator>

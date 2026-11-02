@@ -26,21 +26,33 @@ Machines, as of 2026-11-01:
 - [x] The hub's key in both Macs' `~/.ssh/authorized_keys`; the hub logs in to both without a password (2026-11-01)
 - [x] M1 Pro: `sudo pmset -a sleep 0` and `sudo pmset -a disablesleep 1` (2026-11-01). **Not on the M4 Max**:
   lid-closed sleep is what keeps it from overheating in a bag.
-- [ ] Hub: Settings → System → Power → "When plugged in, put my device to sleep": **Never**
-- [ ] Hub: Windows Update → **Pause updates** until Nov 14, and set active hours to cover the day
+- [x] Hub: Settings → System → Power → "When plugged in, put my device to sleep": **Never** (verified 2026-11-01)
+- [x] Hub: Windows Update paused until Dec 6, active hours 06:00–00:00 (verified 2026-11-01)
 - [ ] Optional: let a laptop SSH into the hub without a password. Paste its `~/.ssh/id_ed25519.pub` line into
   `C:\ProgramData\ssh\administrators_authorized_keys`, then in an Administrator window run
   `icacls.exe "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"`
-- [ ] **Sign off the strategy doc**, §3–§5 (body model, usage cards, checks) especially. Its §11 questions are decided.
+- [x] **Sign off the strategy doc** (2026-11-01)
 
 **Me** (after sign-off):
 - [x] Both Macs checked: macOS 26.6.2, Blender 5.2.3 LTS (2026-11-01)
-- [ ] Blender 5.2.3 LTS on the hub, matching the Macs
-- [ ] Miniforge and the `jigged` conda env with the pipeline's dependencies on both Macs (neither has conda); the
-  pipeline's dependencies added to the hub's `jigged` env
-- [ ] The hub process starts at logon as a scheduled task
-- [ ] Benchmark: one 1080p frame of the vise take on each machine → render settings and the first forecast (§8)
-- [ ] Measure home upload speed (§8, cloud reserve)
+- [x] Blender 5.2.3 LTS on the hub, matching the Macs: portable build at `C:\blender\blender-5.2.3-windows-x64`,
+  checksum verified (2026-11-01). The older 5.2.2 install is left in place.
+- [x] `moonshot/requirements.txt` installed in the `jigged` env on all three (2026-11-01): Python 3.12 (hub
+  3.12.13, M1 Pro 3.12.16, M4 Max 3.12.12), MuJoCo 3.17.0, numpy 2.5.4, cadquery 2.8.0, MyoSuite 3.0.0. The M1
+  Pro's env was a fresh 3.14 with only pip, so it was switched to 3.12 in place.
+- [ ] **Needs your permission:** the hub and all three workers start automatically after a reboot (a Startup
+  entry on the hub, a launchd agent on each Mac). Claude Code's permission check blocked it as persistence; until
+  then they run as plain background processes and stop on reboot.
+- [x] Benchmark (2026-11-01): one 1080p frame of the vise take (frame 480, 96 samples, untuned) on each machine,
+  through the queue. Warm: **M4 Max 7.96 s, M1 Pro 39.65 s (0.20×), GTX 1070 42.43 s (0.19×)**. The M1 Pro's first
+  run took 134 s compiling its Metal kernels; the M4 Max's had been compiled already.
+- [x] First forecast: 145,000 frames × 7.96 s ≈ **321 M4 Max-hours** untuned, against about **255** of farm time
+  Nov 4–11 (farm ≈ 1.34×), so about 20% short. Cycles tuning (lever 1, 30–40%) closes it alone; if tuning gets
+  under 20%, the cloud reserve is needed (§8).
+- [x] Home upload: **0.5–0.8 MB/s** (4–6.5 Mbit/s); download about 28 MB/s. A 67 MB scene pack takes 1.5–2.5 min to
+  reach a rented GPU: fine when each lease is a whole step, but cloud packs should be staged in the provider's storage
+  once, not streamed per job.
+- [ ] Cycles tuning on review frames (lever 1), then re-forecast
 
 ## 2. Data root (`C:\jigged-data`)
 
@@ -56,27 +68,29 @@ Machines, as of 2026-11-01:
   - `originals\hand_tools\mallet\`: the only CAD original not already on the hub.
 
   Its ~4.9 GB of rendered PNG frames weren't copied. Nothing needs them.
-- [ ] Move the vendor originals in from `C:\trainual\assets\*\*\source\` (1.8 GB)
-- [ ] Copy all 20 parts' files in from `C:\trainual\parts\`
-- [ ] Copy the GLBs and records in from `C:\trainual\assets\` (the records then get committed under `moonshot/`)
-- [ ] **Back up** the vendor originals, the parts and the print package
-  (`~\Downloads\PARTS PACKAGE FOR DATA ENTRY FROM PRINTS`) to an external drive. None of them can be fetched again.
-- [ ] You, whenever you like: delete trainual's old `renders/` on the M4 Max (5.1 GB) and the copy in
-  `~\Downloads\trainual` (6.2 GB). Everything needed from them is in the data root.
+- [x] Vendor originals copied to `originals\` from `C:\trainual\assets\*\*\source\` (76 folders, 1.7 GB; 2026-11-01)
+- [x] All 20 parts' files copied to `parts\` (2026-11-01)
+- [x] GLBs and previews copied to `library\` (155 files, 105 MB); records, anatomy data and grasp timing
+  committed under `moonshot/` (2026-11-01)
+- [x] The vise take frozen at frame 480 as a self-contained scene pack, `packs\vise-bench.blend` (67 MB)
+- [x] Backup: there is no external drive, so the second copy is `C:\trainual` (kept, never deleted) plus the print
+  package in `~\Downloads`. **Both copies are on the same disk**: this guards against deleting a file, not
+  against the disk failing. A copy on the M1 Pro would cover that, if you want it.
+- [x] The old trainual copies stay (your decision, 2026-11-01).
 
 Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on the M4 Max), trainual's web build,
 `node_modules`, virtual environments and its old `.env`.
 
 ## 3. Code skeleton in Jigged (day 1)
 
-- [ ] Branch for the skeleton
-- [ ] `moonshot/` with the four stages (library, part, plan, video), each importing only the data files between them
-- [ ] Fences: `/moonshot` in `.vercelignore`, `moonshot/**` in `vercel.json` `excludeFiles` (stays at or under 256
-  characters)
-- [ ] Add `moonshot/` to the doc-link check's path prefixes, so this doc's citations get checked
-- [ ] The thresholds file: every value in §3 and §5, with its source (study, spec sheet, reference take, or *proposed*)
-- [ ] The CI check for §6 rule 1: a PR may change thresholds, reference outputs or bad takes, or the code, not both
-- [ ] The CI check that every physics and realism check has a bad take it catches (§5.4, counterfactuals)
+- [x] Branch `feature/moonshot-foundation`, PR [#879](https://github.com/debola31/Jigged/pull/879)
+- [x] `moonshot/` with its layered packages; import-linter enforces that stages import only downward
+- [x] Fences: `/moonshot` in `.vercelignore`, `moonshot/**` in `vercel.json` `excludeFiles` (now 253 of 256)
+- [x] `moonshot/` added to the doc-link check's path prefixes
+- [x] `moonshot/thresholds.toml`: every value in §3 and §5, with its source and reason
+- [x] `moonshot/tools/bar_check.py`, run in CI: a PR may change the bar or the code, not both
+- [x] The check registry refuses a check without a good and a bad take, and the gate test runs them all. First
+  check: skin penetration, proved against the reference take's 1,275 frames and two bad takes.
 - [ ] A CI job for the fast tier, timed against the 3-minute target (§6)
 
 ## 3b. Body model, usage cards and checks (§3–§5), before any station
@@ -108,10 +122,13 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 ## 4. Job queue (timeboxed Nov 1–2)
 
-- [ ] Queue on the hub: SQLite, HTTP API, leases
-- [ ] Workers on all three machines
-- [ ] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network
-- [ ] Dashboard on the tailnet: workers, queue by group, hours against forecast, cloud credit, failures, drafts
+- [x] Queue on the hub: SQLite, HTTP API, leases, content-addressed inputs, token auth (2026-11-01)
+- [x] Workers on all three machines: `hub-gtx1070` (CUDA, GPU only), `m1-pro`, `m4-max` (Metal)
+- [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
+  restart with jobs intact
+- [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
+- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review, once render jobs report
+  frame times (track G)
 - [ ] **End of Nov 2:** reliable → keep; otherwise switch to Flamenco (§8)
 
 ## 5. Tracks: checks first, then the work

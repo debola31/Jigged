@@ -466,8 +466,8 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | | |
 |---|---|
 | **Frames** | About 420 steps × 20 s, minus 25–35% reused, at 24 fps ≈ **145,000 frames** |
-| **Cost** | Target 7 s per 1080p frame on the M4 Max ≈ **280 M4 Max-hours**; benchmarked on day 1 |
-| **Farm** | M4 Max 1.0 + M1 Pro ~0.25 + GTX 1070 ~0.15 (GPU only) ≈ 1.35×; Nov 4–11 ≈ **255 M4 Max-hours** |
+| **Cost** | **Measured 2026-11-01:** 7.96 s per untuned 1080p frame (96 samples) on the M4 Max ≈ **321 M4 Max-hours**; the target after tuning is 4–5 s |
+| **Farm** | **Measured:** M4 Max 1.0 + M1 Pro 0.20 + GTX 1070 0.19 (GPU only) ≈ 1.34× with the M4 Max at ~95%; Nov 4–11 ≈ **255 M4 Max-hours**, about 20% short untuned |
 | **Closing the gap** | 1. Cycles tuning toward 4–5 s per frame (30–40%, closes it alone) · 2. more reuse · 3. the cloud reserve · 4. an honest cut in a repeated motion |
 | **Cloud reserve** | RTX 4090 at about $0.30–0.40/h, about 2.3× an M4 Max: $50 ≈ 250 M4 Max-hours. $50 prepaid, no auto-top-up; rented only if the forecast slips past Nov 11, with your approval. |
 | **Job queue** | Our own: SQLite on the hub, polling workers, leases, each worker with its own cache. Timeboxed to Nov 1–2; Flamenco is the fallback, but its single shared folder doesn't suit the travelling M4 Max or cloud workers. |

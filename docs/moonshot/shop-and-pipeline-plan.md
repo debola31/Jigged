@@ -463,7 +463,7 @@ It fails four checks. The new body model must fix them, or you consciously loose
 
 `nist-ftc-10` goes first: it is public, hand-sized, needs only two stations, and exercises the VMC chain that 9 of the 20 parts share.
 
-**Withdrawn:** `nist-ctc-01` first — wrong because its 800 × 450 × 150 mm (about 146 kg in aluminium) exceeds the VF-2's X and Y travel and can't be lifted by hand (found 2026-11-02).
+**Withdrawn:** `nist-ctc-01` first — wrong because its 800 × 450 × 150 mm (about 146 kg in aluminium) exceeds the VF-2's X and Y travel and can't be lifted by hand (found 2026-11-01).
 
 ## 8. Compute
 
@@ -512,7 +512,7 @@ Outside processes (heat treat, plating, coating) are one "send out and receive" 
 
 ## 11. Open questions
 
-1. **`nist-ctc-01` doesn't fit the shop as modelled** (found 2026-11-02). At 800 × 450 × 150 mm it exceeds the
+1. **`nist-ctc-01` doesn't fit the shop as modelled** (found 2026-11-01). At 800 × 450 × 150 mm it exceeds the
    VF-2's X and Y travel (762 / 406 mm), would weigh about 146 kg in aluminium, and is beyond a band saw's usual
    capacity. Options: (a) the VF-3 (1016 × 508 mm travel) with an overhead hoist added to the shop; (b) machine it at
    a stated scale that fits the VF-2 by hand, with the drawing's dimensions scaled to match; (c) replace it with

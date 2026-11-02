@@ -13,7 +13,7 @@
     {"id": "outline", "kind": "profile", "tool": "em12", "what": "Profile the body and the four mounting ears to the model outline"},
     {"id": "pocket", "kind": "pocket", "tool": "em38", "what": "Rough and finish the pocket 17 mm deep (profile 1.2 to A B C)",
      "features": [{"type": "plane", "normal": "-Y", "at_mm": 17.0}]},
-    {"id": "cross_drill", "kind": "drill", "tool": "drill-2.5", "what": "Drill 8X Ø2.5 ±0.15 from the pocket floor into the cross bores (note 4)",
+    {"id": "cross_drill", "kind": "drill", "tool": "drill-2p5", "what": "Drill 8X Ø2.5 ±0.15 from the pocket floor into the cross bores (note 4)",
      "features": [{"type": "hole", "dia_mm": 2.5, "axis": "Y", "count": 8}]},
     {"id": "ears", "kind": "drill", "tool": "drill-6", "what": "Drill 4X Ø6 ±0.15 through the mounting ears",
      "features": [{"type": "hole", "dia_mm": 6.0, "axis": "Y", "count": 4}]}
@@ -27,7 +27,7 @@
      "features": [{"type": "hole", "dia_mm": 16.0, "axis": "Z", "count": 4}, {"type": "hole", "dia_mm": 25.0, "axis": "Z", "count": 3}]},
     {"id": "pads", "kind": "pocket", "tool": "em14", "what": "Mill the oval boss and the three coplanar pads (datum D)",
      "features": [{"type": "plane", "normal": "+Y", "at_mm": 27.0}, {"type": "plane", "normal": "+Y", "at_mm": 31.0}]},
-    {"id": "pins", "kind": "ream", "tool": "ream-3.5", "what": "Drill and ream 3X Ø3.5 G6 to D B C",
+    {"id": "pins", "kind": "ream", "tool": "ream-3p5", "what": "Drill and ream 3X Ø3.5 G6 to D B C",
      "features": [{"type": "hole", "dia_mm": 3.5, "axis": "Y", "count": 6}]},
     {"id": "taps", "kind": "tap", "tool": "tap-m3", "what": "Drill Ø2.5 and tap 6X M3x0.5-6g",
      "features": [{"type": "hole", "dia_mm": 2.46, "axis": "Y", "count": 6}]},
@@ -53,14 +53,14 @@
    "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "Standing on end against a stop; check it's square with the indicator"},
    "wcs": {"code": "G54", "x": "probe the side", "y": "probe datum A", "z": "top of the end"},
    "operations": [
-    {"id": "deep", "kind": "drill", "tool": "drill-5.5", "what": "Peck-drill Ø5.5 ±0.2, 35 ±1 deep",
+    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill Ø5.5 ±0.2, 35 ±1 deep",
      "features": [{"type": "hole", "dia_mm": 5.5, "axis": "X", "count": 2}]}
    ]},
   {"id": "op60", "title": "Op 60: second end", "machine": "vf2", "face_up": "-X",
    "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "As Op 50, the other way up"},
    "wcs": {"code": "G54", "x": "probe the side", "y": "probe datum A", "z": "top of the end"},
    "operations": [
-    {"id": "deep", "kind": "drill", "tool": "drill-5.5", "what": "Peck-drill Ø5.5 ±0.2, 27.5 ±1 deep"}
+    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill Ø5.5 ±0.2, 27.5 ±1 deep"}
    ]}
  ],
  "finish": [

@@ -71,5 +71,6 @@
     "placeholder": "generators.drill",
     "up": "+Z",
     "max_triangles": 50000
-  }
+  },
+  "triangles": 63257
 }

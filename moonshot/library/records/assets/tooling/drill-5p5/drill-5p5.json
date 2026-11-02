@@ -1,26 +1,26 @@
 {
   "schema": "setupguide.asset/0.1",
-  "id": "drill-2.5",
-  "name": "2.5 mm jobber drill",
+  "id": "drill-5p5",
+  "name": "5.5 mm jobber drill",
   "category": "tooling",
   "make": "Generic",
-  "model": "drill 2.5 mm",
-  "description": "2.5 mm jobber drill, cobalt HSS, 2 flutes.",
+  "model": "drill 5.5 mm",
+  "description": "5.5 mm jobber drill, cobalt HSS, 2 flutes.",
   "generic": true,
   "key_specs": [
     {
       "name": "Diameter",
-      "value": 2.5,
+      "value": 5.5,
       "unit": "mm"
     },
     {
       "name": "Flute length",
-      "value": 30,
+      "value": 57,
       "unit": "mm"
     },
     {
       "name": "Overall length",
-      "value": 57,
+      "value": 93,
       "unit": "mm"
     },
     {
@@ -34,7 +34,7 @@
     },
     {
       "name": "Mass",
-      "value": 1.92,
+      "value": 14.68,
       "unit": "g",
       "note": "volume x material density"
     },
@@ -46,30 +46,31 @@
   ],
   "source_urls": [],
   "source_files": [
-    "drill-2.5.step"
+    "drill-5p5.step"
   ],
   "license": "self-made parametric generator (moonshot.library.generators, family drill)",
   "notes": "Generated from its dimensions; replace with a vendor STEP when one is sourced.",
-  "file": "drill-2.5.glb",
+  "file": "drill-5p5.glb",
   "units": "mm",
   "up": "+Z",
   "bbox": {
     "min": [
-      -1.25,
-      -1.26,
+      -2.76,
+      -2.76,
       -0.01
     ],
     "max": [
-      1.25,
-      1.26,
-      57.0
+      2.76,
+      2.76,
+      93.0
     ]
   },
   "attach_points": [],
   "build": {
-    "from": "source/drill-2.5.step",
+    "from": "source/drill-5p5.step",
     "placeholder": "generators.drill",
     "up": "+Z",
     "max_triangles": 50000
-  }
+  },
+  "triangles": 71135
 }

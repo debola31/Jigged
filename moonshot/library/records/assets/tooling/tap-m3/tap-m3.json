@@ -70,5 +70,6 @@
     "placeholder": "generators.tap",
     "up": "+Z",
     "max_triangles": 50000
-  }
+  },
+  "triangles": 2569
 }

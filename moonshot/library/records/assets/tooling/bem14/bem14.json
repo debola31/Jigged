@@ -66,5 +66,6 @@
     "placeholder": "generators.ball_end_mill",
     "up": "+Z",
     "max_triangles": 50000
-  }
+  },
+  "triangles": 30695
 }

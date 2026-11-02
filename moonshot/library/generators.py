@@ -37,11 +37,11 @@ class Tool:
 
 
 TOOLS = [
-    Tool("drill-2.5", "drill", "2.5 mm jobber drill", 2.5, 30, 57, "cobalt HSS", 2),
-    Tool("drill-5.5", "drill", "5.5 mm jobber drill", 5.5, 57, 93, "cobalt HSS", 2),
+    Tool("drill-2p5", "drill", "2.5 mm jobber drill", 2.5, 30, 57, "cobalt HSS", 2),
+    Tool("drill-5p5", "drill", "5.5 mm jobber drill", 5.5, 57, 93, "cobalt HSS", 2),
     Tool("drill-6", "drill", "6 mm jobber drill", 6.0, 63, 93, "cobalt HSS", 2),
     Tool("drill-7", "drill", "7 mm jobber drill", 7.0, 69, 109, "cobalt HSS", 2),
-    Tool("ream-3.5", "reamer", "3.5 mm machine reamer, G6", 3.5, 20, 70, "carbide", 6, helix_deg=0.0),
+    Tool("ream-3p5", "reamer", "3.5 mm machine reamer, G6", 3.5, 20, 70, "carbide", 6, helix_deg=0.0),
     Tool("tap-m3", "tap", "M3x0.5 spiral-point tap", 3.0, 12, 56, "HSS", 3, helix_deg=0.0, thread="M3x0.5-6H"),
     Tool("bem14", "ball_end_mill", "1/4 in ball end mill", 6.35, 19.05, 63.5, "carbide", 2),
 ]
@@ -117,7 +117,7 @@ def record(t: Tool, shape: cq.Workplane) -> dict:
     }
 
 
-def write_glb(shape: cq.Workplane, path: Path, tolerance_mm: float = 0.01) -> None:
+def write_glb(shape: cq.Workplane, path: Path, tolerance_mm: float = 0.01) -> int:
     """glTF is metres and +Y up; the library's geometry is millimetres and +Z up."""
     import numpy as np
     import trimesh
@@ -127,6 +127,7 @@ def write_glb(shape: cq.Workplane, path: Path, tolerance_mm: float = 0.01) -> No
     mesh = trimesh.Trimesh(v, np.array(faces), process=True)
     mesh.visual.face_colors = [184, 184, 191, 255]
     mesh.export(path, include_normals=True)          # smooth shading: no faceted flutes in close-ups
+    return len(mesh.faces)
 
 
 def write(t: Tool) -> Path:
@@ -136,11 +137,12 @@ def write(t: Tool) -> Path:
     src.mkdir(parents=True, exist_ok=True)
     lib.mkdir(parents=True, exist_ok=True)
     cq.exporters.export(shape, str(src / f"{t.id}.step"))
-    write_glb(shape, lib / f"{t.id}.glb")
+    triangles = write_glb(shape, lib / f"{t.id}.glb")
     rec_dir = RECORDS / "tooling" / t.id
     rec_dir.mkdir(parents=True, exist_ok=True)
     out = rec_dir / f"{t.id}.json"
-    out.write_text(json.dumps(record(t, shape), indent=2) + "\n", encoding="utf-8")
+    rec = record(t, shape) | {"triangles": triangles}
+    out.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
     return out
 
 

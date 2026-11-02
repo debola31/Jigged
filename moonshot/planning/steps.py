@@ -17,9 +17,9 @@ VISE_NAMES = {"vise6": "the 6 in vise"}
 FACE_UP = {"-Y": "pocket side up", "+Y": "scalloped side up", "+Z": "on its F65 side", "-Z": "on its F81 side",
            "+X": "standing on one end", "-X": "standing on the other end"}
 TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em38": "the 3/8 in end mill",
-              "em14": "the 1/4 in end mill", "bem14": "the 1/4 in ball end mill", "drill-2.5": "the 2.5 mm drill",
-              "drill-6": "the 6 mm drill", "drill-7": "the 7 mm drill", "drill-5.5": "the 5.5 mm drill",
-              "ream-3.5": "the 3.5 mm reamer", "tap-m3": "the M3 tap"}
+              "em14": "the 1/4 in end mill", "bem14": "the 1/4 in ball end mill", "drill-2p5": "the 2.5 mm drill",
+              "drill-6": "the 6 mm drill", "drill-7": "the 7 mm drill", "drill-5p5": "the 5.5 mm drill",
+              "ream-3p5": "the 3.5 mm reamer", "tap-m3": "the M3 tap"}
 
 
 def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", **extra) -> dict:

@@ -90,7 +90,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] `moonshot/tools/bar_check.py`, run in CI: a PR may change the bar or the code, not both
 - [x] The check registry refuses a check without a good and a bad take, and the gate test runs them all. First
   check: skin penetration, proved against the reference take's 1,275 frames and two bad takes.
-- [ ] A CI job for the fast tier, timed against the 3-minute target (§6)
+- [x] A CI job for the fast tier, timed against the 3-minute target (§6): `Moonshot Tests` in
+  `.github/workflows/test.yml`, `timeout 180`; green on 2026-11-02 at 11 s. It runs on pull requests and pushes to
+  `main`, so this branch's later commits first run it at merge.
 
 ## 3b. Body model, usage cards and checks (§3–§5), before any station
 
@@ -124,23 +126,15 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   `moonshot/validate/take.py` runs before a render; body vs. people is still the gates' only.
 - [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
   hand opening; matches its footage (cards with footage only)
-- [ ] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
-  2026-11-02: that take stopped being the bar on review (`docs/moonshot/physics.md`); the re-planned take, with the
-  wrist inside its ellipse and the crank gripped clear of the lever, meets every per-verb outcome (1.83 mm slip,
-  2.258 turns to 75.75 mm, 4,653 N clamp) and `test_planner_port.py` is retired. Its skin fails the depth check.
-  Stage 1 done (2026-11-01): at trainual's angles the body puts the elbow exactly and the wrist within 1.2 mm where
-  trainual did; driven through the whole 31.8 s take with gravity, it keeps the wrist within 0.1 mm of plan with no
-  motor at full strength (`moonshot/tests/gates/test_reference_take.py`, physics tier). Stage 2 (2026-11-01): with
-  the vise, blank and parallels, every verb reproduces on the full body (`moonshot/sim/vise_take.py`, gates in
-  `moonshot/tests/gates/test_vise_take.py`): lifted by friction with a 12.7 / 13.1 N grip, 1.85 mm slip, set down
-  within 0.7 mm and flat, seated on the fixed jaw, pushed at 30.0 N, cranked 2.256 turns to 75.76 mm, both parallels
-  found pinched. Still failing: free-motion wrist lag reaches 37 mm against 10 mm, for reasons that belong to the
-  new motion planner rather than the body: trainual's plan has near-misses (2.9 s of fingers grazing the table, jaws
-  and knob, reported as `stray_contacts`), it was planned without the arm's volume, and the held blank's inertia
-  isn't fed forward. Feeding the inertia forward trips a latent instability: the blank, resting on the parallels
-  against the fixed jaw, can be launched by a contact-solver spike during cranking. The take now runs inside the
-  VF-2 cell and all its gates still pass. Trainual's planner is ported (`moonshot/motion/`) and regenerates the take
-  (`test_planner_port.py`): exactly from trainual's grips, and with re-solved grips within 5% of their cost.
+- [x] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
+  Done 2026-11-02, on the take the ported planner (`moonshot/motion/`) writes, since trainual's stopped being the bar
+  on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 12.7 / 13.1 N grip, 1.83 mm
+  slip, set down within 0.9 mm and flat, seated on the fixed jaw, pushed at 30.0 N, cranked 2.258 turns to 75.75 mm
+  and clamped at 4,653 N, both parallels found pinched; the body alone follows the plan with no motor at full
+  strength (`test_vise_take.py`, `test_reference_take.py`, physics tier). Open elsewhere: the skin's depth (the
+  port-the-checks item) and free-motion wrist lag, 37 mm against 10 mm, which belongs to the planner: near-misses
+  (`stray_contacts`), no arm volume in planning, and the held blank's inertia not fed forward, which trips a latent
+  launch of the blank on the parallels during cranking.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
 - [ ] Timestep halving converges
 - [ ] The four known gaps in §5.5: three fixed by the new body model; trunk rotation given a standing-work range (§11)

@@ -27,11 +27,12 @@ def record() -> dict:
     return json.loads(RECORD.read_text(encoding="utf-8"))
 
 
-def _box(name, lo, hi, cls="steel", origin=(0, 0, 0)):
-    lo, hi, o = np.array(lo, float), np.array(hi, float), np.array(origin, float)
-    c, h = (lo + hi) / 2 - o, (hi - lo) / 2
+def _box(name, c_rec, cls="steel"):
+    lo, hi = np.array(c_rec["box_min_mm"], float), np.array(c_rec["box_max_mm"], float)
+    c, h = (lo + hi) / 2, (hi - lo) / 2
+    fr = f' friction="{c_rec["friction"]} 0.004 0.0001"' if "friction" in c_rec else ""
     return (f'<geom name="{name}" class="{cls}" type="box" size="{h[0] * M:.5f} {h[1] * M:.5f} {h[2] * M:.5f}" '
-            f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"/>')
+            f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"{fr}/>')
 
 
 def _site(name, at, origin=(0, 0, 0)):
@@ -39,9 +40,9 @@ def _site(name, at, origin=(0, 0, 0)):
     return f'<site name="{name}" pos="{p[0]:.5f} {p[1]:.5f} {p[2]:.5f}" size="0.006"/>'
 
 
-def worldbody() -> tuple[str, str]:
+def worldbody(on_table: str = "") -> tuple[str, str]:
     """(worldbody XML, actuator XML). Each moving body's origin is the world origin at joint zero, so the record's
-    world coordinates are used directly."""
+    world coordinates are used directly, and so are on_table's: XML for what is bolted to the table (a vise)."""
     r = record()
     J, C, A = r["joints"], r["colliders"], r["affordances"]
     L = r["links"]
@@ -54,14 +55,14 @@ def worldbody() -> tuple[str, str]:
       <body name="vf2_table" gravcomp="1">
         <joint name="vf2_x" type="slide" axis="{ax('x')}" range="{rng('x')}" damping="2000"/>
         <inertial pos="-0.381 -0.34 0.8" mass="{L['table']['mass_kg']}" diaginertia="15 15 15"/>
-        {_box("vf2_table_top", C["table_top"]["box_min_mm"], C["table_top"]["box_max_mm"])}
+        {_box("vf2_table_top", C["table_top"])}
         <site name="vf2_table_ref" pos="-0.3815 -0.3407 0.853" size="0.005"/>
-      </body>
+{on_table}      </body>
     </body>
     <body name="vf2_head" gravcomp="1">
       <joint name="vf2_z" type="slide" axis="{ax('z')}" range="{rng('z')}" damping="2000"/>
       <inertial pos="0 -0.13 1.8" mass="{L['head']['mass_kg']}" diaginertia="20 20 20"/>
-      {_box("vf2_spindle_nose", C["spindle_nose"]["box_min_mm"], C["spindle_nose"]["box_max_mm"])}
+      {_box("vf2_spindle_nose", C["spindle_nose"])}
       <body name="vf2_spindle" gravcomp="1" pos="{sp[0] * M:.4f} {sp[1] * M:.4f} {sp[2] * M:.4f}">
         <joint name="vf2_spindle" type="hinge" axis="0 0 1" limited="false" damping="0.05"/>
         <geom name="vf2_spindle_gauge" type="cylinder" size="0.022 0.005" contype="0" conaffinity="0" mass="5"/>
@@ -73,11 +74,11 @@ def worldbody() -> tuple[str, str]:
         body += f"""    <body name="vf2_{d}">
       <joint name="vf2_{d}" type="slide" axis="{ax(d)}" range="{rng(d)}" frictionloss="{J[d]['friction_n']}" damping="20"/>
       <inertial pos="0 -0.83 1.16" mass="{L[d]['mass_kg']}" diaginertia="2 2 2"/>
-      {_box(f"vf2_{d}_panel", C[d]["box_min_mm"], C[d]["box_max_mm"])}
+      {_box(f"vf2_{d}_panel", C[d])}
       {_site(f"vf2_{d}_handle", A[f"{d}_handle"]["at_mm"])}
     </body>
 """
-    body += "    " + _box("vf2_pendant_face", C["pendant_face"]["box_min_mm"], C["pendant_face"]["box_max_mm"]) + "\n"
+    body += "    " + _box("vf2_pendant_face", C["pendant_face"]) + "\n"
     for b in ("cycle_start", "feed_hold"):
         body += "    " + _site(f"vf2_{b}", A[b]["at_mm"]) + "\n"
     rapid = J["x"]["speed_mm_s"]
@@ -142,8 +143,19 @@ class Control:
             self.state = "feed_hold"
             self.events.append("feed_hold")
 
+    def open_doors(self) -> None:
+        """Both doors fully open, as an operator leaves them while loading."""
+        m, d = self.model, self.data
+        for k in ("door_left", "door_right"):
+            d.qpos[self.q[k]] = m.jnt_range[m.joint(f"vf2_{k}").id][1]
+
     def step(self) -> None:
-        """Apply the interlocks, then drive the axes toward the program's current move at no more than rapid speed."""
+        self.apply()
+        mujoco.mj_step(self.model, self.data)
+
+    def apply(self) -> None:
+        """Apply the interlocks, then set the axes' controls toward the program's current move at no more than rapid
+        speed. For a scene that steps the simulation itself (a take): call this before each mj_step."""
         d, dt = self.data, self.model.opt.timestep
         if self.state == "running" and not self.doors_closed():
             self.state = "feed_hold"
@@ -165,4 +177,3 @@ class Control:
         for i, a in enumerate(("x", "y", "z")):
             d.ctrl[self.act[a]] = self.setpoint[i]
         d.ctrl[self.act["spindle"]] = rpm * 2 * math.pi / 60 if self.state == "running" else 0.0
-        mujoco.mj_step(self.model, d)

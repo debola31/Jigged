@@ -27,8 +27,8 @@
                  "friction_n": 15, "source": "proposed", "reason": "As the left door"}
  },
  "colliders": {
-  "table_top": {"link": "table", "box_min_mm": [-838, -524, 823], "box_max_mm": [75, -157, 853],
-                "reason": "The CAD's shells aren't closed; trainual measured this box from the GLB"},
+  "table_top": {"link": "table", "box_min_mm": [-838, -524, 823], "box_max_mm": [75, -157, 853], "friction": 0.3,
+                "reason": "The CAD's shells aren't closed; trainual measured this box from the GLB, and gave the cast-iron top this friction"},
   "door_left": {"link": "door_left", "box_min_mm": [-661, -845, 616], "box_max_mm": [0, -825, 1710]},
   "door_right": {"link": "door_right", "box_min_mm": [-25, -825, 616], "box_max_mm": [636, -805, 1710],
                  "reason": "Sliding doors overlap at different depths: the right one runs 20 mm behind the left"},

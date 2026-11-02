@@ -31,6 +31,7 @@ import numpy as np
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
 from moonshot.sim.reference import ReferenceTake, take_dir
+from moonshot.world import cell
 from moonshot.world import vise as V
 
 SQUEEZE_DEG = 7.5
@@ -78,28 +79,25 @@ class ViseTake:
         self.body = build(pelvis_mm=tuple(self.tk["lumbar"]))
         parallels = {n: np.array(p) for n, p in self.tk["parallels"].items()}
         # the blank starts at STAGE; reference.npz frame 0 wrongly has it in the vise (frames 1+ and trainual's sim agree)
-        vbody, veq = V.worldbody(V.STAGE, parallels, "R_hand")
-        xml = self.body.xml
-        head, _, tail = xml.rpartition("\n  </default>")
-        xml = head + "\n" + V.STEEL_DEFAULT + "\n  </default>" + tail
-        xml = xml.replace("<worldbody>\n", "<worldbody>\n" + vbody, 1).replace("<equality>\n", "<equality>\n" + veq, 1)
-        self.xml = xml
-        m = self.model = mujoco.MjModel.from_xml_string(xml)
+        self.xml = cell.with_body(self.body.xml, V.STAGE, parallels, "R_hand")
+        m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
+        self.machine = cell.start(m, self.data)          # idle: holds the table, and the vise on it, where it is
         self.ref = ReferenceTake(self.body, m, folder)
         self.t = self.rd["t"]
         self.fps = int(self.rd["fps"])
-        # motors
-        self.acts = np.arange(m.nu)
-        jid = m.actuator_trnid[:, 0]
+        # the body's motors (the machine's are driven by its control)
+        body_joints = {m.joint(n).id for n in self.body.joints}
+        self.acts = np.array([a for a in range(m.nu) if m.actuator_trnid[a, 0] in body_joints])
+        jid = m.actuator_trnid[self.acts, 0]
         self.act_dof, self.act_q = m.jnt_dofadr[jid], m.jnt_qposadr[jid]
-        self.kp0 = m.actuator_gainprm[:, 0].copy()
-        self.kv = -m.actuator_biasprm[:, 2].copy()
-        names = [m.actuator(a).name[2:] for a in range(m.nu)]
+        self.kp0 = m.actuator_gainprm[self.acts, 0].copy()
+        self.kv = -m.actuator_biasprm[self.acts, 2].copy()
+        names = [m.actuator(a).name[2:] for a in self.acts]
         self.hand_acts = np.array([a for a, n in enumerate(names) if n.startswith("R_") and
                                    n[2:] not in ARM_JOINTS], dtype=int)
         self.arm_dofs = np.array([m.jnt_dofadr[m.joint(f"R_{j}").id] for j in ARM_JOINTS])
-        self.act_of_dof = {int(self.act_dof[a]): a for a in range(m.nu)}
+        self.act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.digit_dofs = {dg: [m.jnt_dofadr[m.joint(n).id] for n in (m.joint(i).name for i in range(m.njnt))
                                 if n.startswith(f"R_{dg}_") and int(m.jnt_dofadr[m.joint(n).id]) in self.act_of_dof]
                            for dg in PAD}
@@ -343,7 +341,7 @@ class ViseTake:
         planned forces, each trimmed by feedback (the integrals in `run`) and capped by the motors' strength."""
         m, d = self.model, self.data
         hand = self.body_id["R_hand"]
-        tau = np.zeros(m.nu)
+        tau = np.zeros(len(self.acts))
 
         def push(point, force, body=hand):
             jacp = np.zeros((3, m.nv))
@@ -429,11 +427,12 @@ class ViseTake:
                 dq += sq
         target[self.body_q] += dq[self.body_dof]
         precise = grip in PRECISION                    # accuracy demands raise co-contraction (Gribble et al. 2003)
-        k = np.full(m.nu, 1.0 + STIFFEN_ARM * (1.0 if precise and effort > 0 else effort))
+        k = np.full(len(self.acts), 1.0 + STIFFEN_ARM * (1.0 if precise and effort > 0 else effort))
         k[self.hand_acts] = 1.0 + STIFFEN * effort
-        m.actuator_gainprm[:, 0] = self.kp0 * k
-        m.actuator_biasprm[:, 1] = -self.kp0 * k
-        d.ctrl[:] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
+        m.actuator_gainprm[self.acts, 0] = self.kp0 * k
+        m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
+        d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
+        self.machine.apply()
         mujoco.mj_step(m, d)
 
     # --- measurement ---------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 """The Kurt D688 vise on the VF-2's table, with the 0.80 kg aluminium blank and two parallels: trainual's vise take
-scene (its motion/showcase_motion.py constants and sim/build_scene.py), as a MuJoCo fragment to set beside the body.
+scene (its motion/showcase_motion.py constants and sim/build_scene.py), as MuJoCo fragments for moonshot/world/cell.py.
 
 World millimetres in the VF-2 machine frame, +Z up. The lead screw is a joint equality between the crank and the
 jaw slide (two-way, so the crank has damping and friction); while the hand isn't driving it the screw self-locks
@@ -38,9 +38,12 @@ def knob_center(phi_deg: float) -> np.ndarray:
     return np.array([a[0] + VISE["lever"] * math.sin(p), a[1] - VISE["knob_grip"], a[2] + VISE["lever"] * math.cos(p)])
 
 
-def worldbody(blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str) -> tuple[str, str]:
-    """(worldbody XML, equality XML). parallels_mm: {name: base centre}; each is a free steel body held to the jaw
-    by a keeper weld until the take releases it. hand_body: the body the knob enclosure attaches to."""
+def worldbody(blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str, table_body: str) -> tuple[str, str, str]:
+    """(on-table XML, loose XML, equality XML). The on-table part is the vise, bolted to the machine's table: it goes
+    inside table_body, whose origin is the world origin when the take starts. The loose part is the free objects.
+    parallels_mm: {name: base centre}; each is a free steel body held to the table by a keeper weld until the take
+    releases it (its pose on the table is given, as the table isn't at its start in the model's zero pose).
+    hand_body: the body the knob enclosure attaches to."""
     V, fy, seat, top = VISE, VISE["fixed_face_y"], VISE["seat_z"], VISE["jaw_top_z"]
     ax = V["screw_axis"]
     phi0 = math.radians(CRANK0_DEG)
@@ -52,14 +55,11 @@ def worldbody(blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str) -> 
       <geom name="{n}" class="steel" type="box" size="0.0762 0.00155 0.0127" mass="0.094"/>
     </body>
 ''' for n, p in parallels_mm.items())
-    body = f"""    <geom name="floor" type="plane" size="3 3 0.1" contype="1" conaffinity="3" rgba="0.25 0.25 0.25 1"/>
-    <geom name="table" class="steel" type="box" size="0.46 0.184 0.05" pos="-0.381 -0.340 {(TABLE_Z - 50) * M:.4f}"
-          friction="0.3 0.004 0.0001"/>
-    <geom name="vise_seat" class="steel" type="box" size="0.10 {30 * M + OPENING0 / 2 * M:.4f} {(seat - TABLE_Z) / 2 * M:.4f}"
+    on_table = f"""    <geom name="vise_seat" class="steel" type="box" size="0.10 {30 * M + OPENING0 / 2 * M:.4f} {(seat - TABLE_Z) / 2 * M:.4f}"
           pos="{V['x'] * M:.4f} {(fy - OPENING0 / 2 - 30) * M:.4f} {(seat + TABLE_Z) / 2 * M:.4f}"/>
     <geom name="fixed_jaw" class="steel" type="box" size="{V['half_width'] * M:.4f} 0.02 {(top - TABLE_Z) / 2 * M:.4f}"
           pos="{V['x'] * M:.4f} {(fy + 20) * M:.4f} {(top + TABLE_Z) / 2 * M:.4f}"/>
-{paras}    <body name="moving_jaw" pos="{V['x'] * M:.4f} {(fy - OPENING0 - 20) * M:.4f} {(top + seat) / 2 * M:.4f}">
+    <body name="moving_jaw" pos="{V['x'] * M:.4f} {(fy - OPENING0 - 20) * M:.4f} {(top + seat) / 2 * M:.4f}">
       <joint name="jaw_slide" type="slide" axis="0 1 0" range="-0.002 {(OPENING0 - 50) * M:.4f}" damping="40" frictionloss="2"/>
       <joint name="jaw_drop" type="slide" axis="0 0 1" range="-0.0003 0.0001" stiffness="6e6" damping="3000"/>
       <geom name="moving_jaw" class="steel" type="box" size="{V['half_width'] * M:.4f} 0.02 {((top - seat) / 2 - 0.25) * M:.5f}"
@@ -76,17 +76,21 @@ def worldbody(blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str) -> 
               mass="0.04" rgba="0.05 0.05 0.05 1"/>
       </body>
     </body>
-    <body name="blank" pos="{f(blank_mm)}">
+"""
+    loose = paras + f"""    <body name="blank" pos="{f(blank_mm)}">
       <freejoint name="blank"/>
       <geom name="blank" type="box" size="{f(HALF)}" mass="{BLANK_KG:.4f}" contype="1" conaffinity="3" priority="1"
             friction="0.25 0.004 0.0001" solref="0.002 1" solimp="0.95 0.99 0.0005" rgba="0.8 0.8 0.82 1"/>
     </body>
 """
-    eq = "".join(f'    <weld name="keep_{n}" body1="{n}" solref="0.005 1"/>\n' for n in parallels_mm)
+    # anchored at the parallel itself: at the table's origin, a metre away, a slight twist became a large slide
+    eq = "".join(f'    <weld name="keep_{n}" body1="{n}" body2="{table_body}" '
+                 f'anchor="{f(p + np.array([0, 0, PARALLEL_H / 2]))}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
+                 for n, p in parallels_mm.items())
     eq += f"""    <connect name="enclose" body1="knob" body2="{hand_body}" anchor="0 -0.045 0" active="false" solref="0.02 1"
              solimp="0.9 0.95 0.002"/>
     <joint name="screw_lock" joint1="crank" polycoef="0 0 0 0 0" active="false" solref="0.002 1" solimp="0.9999 0.9999 0.0001"/>
     <joint name="lead_screw" joint1="jaw_slide" joint2="crank" polycoef="0 {V['lead'] * M / (2 * math.pi):.7f} 0 0 0"
            solref="0.002 1" solimp="0.9999 0.9999 0.0001"/>
 """
-    return body, eq
+    return on_table, loose, eq

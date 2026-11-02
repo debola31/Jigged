@@ -121,7 +121,9 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     </body>
     <body name="crank" pos="{f(ax)}">
       <joint name="crank" type="hinge" axis="0 1 0" limited="false" damping="0.05" frictionloss="0.6" armature="0.02"/>
-      <geom name="lever" class="steel" type="capsule" size="0.008" contype="0" conaffinity="0"
+      <!-- the lever collides with the hand only (conaffinity 2, the skin's contype): it turns 2 mm off the vise's
+           end, where steel-on-steel contact would be spurious -->
+      <geom name="lever" class="steel" type="capsule" size="0.008" contype="0" conaffinity="2"
             fromto="0 0.002 0 {lever[0] * M:.5f} 0.002 {lever[2] * M:.5f}" mass="0.08"/>
       <body name="knob" pos="{lever[0] * M:.5f} 0 {lever[2] * M:.5f}">
         <joint name="knob_spin" type="hinge" axis="0 1 0" limited="false" damping="0.0005"/>

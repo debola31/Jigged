@@ -218,7 +218,7 @@ class Take:
         specs["blank_press"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0,
                                     targets={"index": topf(-30, -12), "middle": topf(-8, 8), "ring": topf(12, 30)},
                                     starts=[S(24, 0, 8, 45, 45, -10, 75, p, 0, 0) for p in (40, 70)])
-        # 4. rotate: power grip on the crank knob, solved at the start angle
+        # 4. rotate: power grip on the crank knob, solved at the start angle and clear of the lever at every angle
         k = knob_center(CRANK0)
         a0 = k - KNOB_AXIS * VISE["knob_grip"]
         A, U, R = torch.as_tensor(a0), torch.as_tensor(KNOB_AXIS), VISE["knob_r"]
@@ -238,7 +238,9 @@ class Take:
         q0.update(thumb_cmc_abd=15.0, thumb_cmc_flex=10.0, thumb_mcp_flex=30.0, thumb_ip=25.0)
         specs["knob"] = dict(obj=k, q0=q0, colliders=[
             lambda p: G.sdf_cyl(p, a0, a0 + KNOB_AXIS * VISE["knob_len"], R),
-            lambda p: G.sdf_cyl(p, np.array([sc[0], a0[1] + 2, sc[2]]), a0 + np.array([0, 2, 0]), 8.0),
+            # the lever, swept: the fist keeps its orientation while cranking, so relative to it the lever turns a
+            # full circle round the knob's root, through anything near it (docs/moonshot/physics.md)
+            lambda p: G.sdf_cyl(p, a0 + np.array([0, -6.0, 0]), a0 + np.array([0, 10.0, 0]), VISE["lever"] + 8.0),
             box([VISE["x"], sc[1] + 120, 880], [110, 120, 30])],
             targets={"index": on_knob(28, 40), "middle": on_knob(46, 58), "ring": on_knob(62, 74), "little": on_knob(76, 88),
                      "thumb": on_knob(22, 44)},

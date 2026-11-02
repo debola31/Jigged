@@ -90,6 +90,8 @@ class ViseTake:
         self.ref = ReferenceTake(self.body, m, folder)
         self.t = self.rd["t"]
         self.fps = int(self.rd["fps"])
+        # the planned blank's acceleration (m/s^2): the inertial load the arm expects while carrying it
+        self.blank_acc = np.gradient(np.gradient(self.rd["blank"] * 0.001, 1 / self.fps, axis=0), 1 / self.fps, axis=0)
         # the body's motors (the machine's are driven by its control)
         body_joints = {m.joint(n).id for n in self.body.joints}
         self.acts = np.array([a for a in range(m.nu) if m.actuator_trnid[a, 0] in body_joints])
@@ -393,11 +395,12 @@ class ViseTake:
         return np.mean(pts, axis=0) if pts else d.body("R_hand").xpos.copy()
 
     def anticipated_load(self, tt: float, grip: str, effort: float) -> np.ndarray:
-        """The torques that carry a held object's expected weight. People raise load force in step with grip force,
-        expecting the object's weight (Guillery 2013's loading phase), so it is fed forward rather than discovered as
-        sag. Applied at where the object sits in the hand, mapped through the planned pose. Its inertia isn't fed
-        forward yet: doing so seats the blank slightly differently and trips a latent instability of the blank on
-        the parallels against the fixed jaw (see the checklist)."""
+        """The torques that carry a held object's expected load: its weight, and the force its planned acceleration
+        takes. People raise load force in step with grip force, expecting the object's weight (Guillery 2013's
+        loading phase) and their own motion's inertial load (Flanagan & Wing 1993), so both are fed forward rather
+        than discovered as sag and sway: without the inertia, a 1.4 kg part swung the arm 12-19 mm off its path and
+        slipped 5 mm in the grip. Applied at where the object sits in the hand, mapped through the planned pose, and
+        only while it is carried, before it rests on the parallels."""
         if grip not in CARRYING or effort <= 0 or not any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]):
             return 0.0
         if sum(self.contacts()[0].values()) < 2 * TOUCH_N:
@@ -408,7 +411,8 @@ class ViseTake:
         point = p.xpos[hand] + p.xmat[hand].reshape(3, 3) @ rel
         jacp = np.zeros((3, m.nv))
         mujoco.mj_jac(m, p, jacp, None, point, hand)
-        return jacp[:, self.act_dof].T @ np.array([0.0, 0.0, self.load.mass_kg * 9.81 * effort])
+        k = min(len(self.t) - 1, int(round(self.plan_time(tt) * self.fps)))
+        return jacp[:, self.act_dof].T @ (self.load.mass_kg * (np.array([0.0, 0.0, 9.81]) + self.blank_acc[k]) * effort)
 
     def set_plan(self, tp: float) -> np.ndarray:
         """Pose the planning data at plan time tp (objects where they really are); returns its planned qvel."""

@@ -383,7 +383,8 @@ class Take:
         R0, p0 = self.blank_at(t0)
         Rt = Rotation.from_euler("x", -tilt_deg, degrees=True).as_matrix()
         self.move_blank(t0, t0 + 0.9, np.eye(3), INSPECT)
-        self.move_blank(t0 + 0.9, t0 + 1.5, Rt, INSPECT + [0, 0, 10])
+        # the turn takes 0.75 s: stopping a 28 deg turn in trainual's 0.6 s slipped the blank 2.0 mm in the grip
+        self.move_blank(t0 + 0.9, t0 + 1.65, Rt, INSPECT + [0, 0, 10])
         self.move_blank(t0 + 2.0, t0 + dur, np.eye(3), INSPECT)
         self.look(t0 + 0.1, INSPECT)
         self.add(t0, t0 + dur, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])

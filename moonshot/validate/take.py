@@ -4,8 +4,9 @@ because a skipped check is how the skin-depth check went unrun.
 
     python -m moonshot.validate.take <take dir>      # prints each check; exits 1 unless every one passes
 
-The take directory holds the physics run (sim.npz and checks.json, written by moonshot/sim/vise_take.py) and the
-skin bake (bake.npz: each skin vertex's depth inside any solid, per frame, mm).
+The take directory holds the plan (take.json) and the physics run (sim.npz and checks.json, written by
+moonshot/sim/vise_take.py). The skin's depth is measured from them (moonshot/validate/skin.py), not read from the
+render's bake, so the checks need nothing the render makes.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from moonshot.validate.registry import Result, load_all
+from moonshot.validate.skin import depth_mm
 
 
 def inputs(take: Path) -> dict:
@@ -23,8 +25,7 @@ def inputs(take: Path) -> dict:
     out = {"wrist_deg": sim["theta"][:, 8:10].tolist()}           # the run's own wr_flex, wr_dev
     if (take / "checks.json").exists():
         out |= json.loads((take / "checks.json").read_text(encoding="utf-8"))
-    if (take / "bake.npz").exists():
-        out["depth_mm"] = np.load(take / "bake.npz")["depth"].max(1).tolist()
+    out["depth_mm"] = depth_mm(take)
     return out
 
 

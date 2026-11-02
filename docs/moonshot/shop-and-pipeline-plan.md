@@ -426,8 +426,10 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | Look and review | §5.3, then you | Drafts, then finals |
 
 **Each rule is enforced by a CI check:**
-1. **A change either moves the bar or meets it, never both.** Thresholds, reference outputs and the deliberately
-   bad takes live in protected files; a PR may touch those or the code, not both.
+1. **A change either moves the bar or meets it, never both.** Thresholds, gate tests, reference outputs and the
+   deliberately bad takes live in protected files. A PR that changes or deletes any of them may not change code.
+   Adding a new gate or threshold alongside the code it gates is allowed: that creates the bar rather than moving
+   it (`moonshot/tools/bar_check.py`).
 2. **Checks never use the code they check.** Penetration is measured on the rendered mesh, not from MuJoCo's own
    contact report; stock is compared to the STEP with OpenCASCADE.
 3. **No faked physics** in physics tests, and no flaky tests tolerated.

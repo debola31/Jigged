@@ -1,24 +1,27 @@
-"""The new core reproduces trainual's accepted vise take, verb by verb, on the full body (plan §5.4, step 1, stage 2).
-Physics tier: farm and hub only (`pytest moonshot -m farm`).
+"""The new core's vise take, verb by verb, on the full body (plan §5.4, step 1, stage 2), meets the outcomes trainual's
+accepted take met. That take itself stopped being the bar on 2026-11-01's review: it bends the wrist past its
+ellipse and grips the crank round the lever's joint (docs/moonshot/physics.md). The take run here is the one the
+ported planner writes to the data root (takes/setup-take). Physics tier: farm and hub only (`pytest moonshot -m farm`).
 
 Known gap, not asserted here: free-motion wrist lag still exceeds the tracking-lag threshold at a few moments
 (the fast lift to inspect, the departure from the crank); see the checklist.
 """
 import pytest
 
+from moonshot.config import data_root
 from moonshot.contracts.thresholds import threshold
-from moonshot.sim.reference import take_dir
 from moonshot.world import vise as V
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
+TAKE = data_root() / "takes" / "setup-take"
 
 
 @pytest.fixture(scope="module")
 def report():
-    if not (take_dir() / "reference.npz").exists():
-        pytest.skip(f"no reference take at {take_dir()}")
+    if not (TAKE / "reference.npz").exists():
+        pytest.skip(f"no planned take at {TAKE}")
     from moonshot.sim.vise_take import SKIN_MU, ViseTake
-    rep = ViseTake().run(log=lambda *a: None)
+    rep = ViseTake(TAKE).run(log=lambda *a: None)
     rep["_slip_force_per_side"] = V.BLANK_KG * 9.81 / (2 * SKIN_MU)
     return rep
 

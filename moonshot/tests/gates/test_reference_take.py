@@ -1,8 +1,7 @@
-"""The new core reproduces trainual's accepted vise take (plan §5.4, step 1). Physics tier: farm and hub only.
-
-First stage: the body alone, in free space, follows the take's whole planned motion (31.8 s, trunk, right arm and
-hand) within the tracking-lag threshold, with no motor past its strength. The vise, blank and parallels, and the
-per-verb outcomes (lift by friction, placement, slide, crank turns, clamp), are the next stage.
+"""The body alone, in free space, follows the vise take's whole planned motion (trunk, right arm and hand) within the
+tracking-lag threshold, with no motor past its strength (plan §5.4, step 1). The take is the one the ported planner
+writes to the data root (takes/setup-take); trainual's accepted take stopped being the bar on 2026-11-01's review
+(docs/moonshot/physics.md). The per-verb outcomes are test_vise_take.py's. Physics tier: farm and hub only.
 """
 import mujoco
 import numpy as np
@@ -10,21 +9,22 @@ import pytest
 
 from moonshot.body.controller import Controller
 from moonshot.body.skeleton import build
+from moonshot.config import data_root
 from moonshot.contracts.thresholds import threshold
-from moonshot.sim.reference import take_dir
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
+TAKE = data_root() / "takes" / "setup-take"
 
 
 @pytest.fixture(scope="module")
 def replay():
-    if not (take_dir() / "reference.npz").exists():
-        pytest.skip(f"no reference take at {take_dir()}")
+    if not (TAKE / "reference.npz").exists():
+        pytest.skip(f"no planned take at {TAKE}")
     from moonshot.sim.reference import ReferenceTake
     body = build()
     m = mujoco.MjModel.from_xml_string(body.xml)
     d = mujoco.MjData(m)
-    take = ReferenceTake(body, m)
+    take = ReferenceTake(body, m, TAKE)
     q, v, _ = take.at(0.0)
     d.qpos[:], d.qvel[:] = q, v
     mujoco.mj_forward(m, d)

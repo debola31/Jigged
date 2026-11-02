@@ -126,6 +126,12 @@ def test_a_cache_only_worker_takes_only_jobs_it_holds_inputs_for(q):
     assert [j["id"] for j in q.lease("m4", away, cached=["a" * 64], max_jobs=5)] == [have]
 
 
+def test_a_job_pinned_to_a_worker_runs_only_there(q):
+    jid = q.submit("render", {}, requires={"worker": "m1-pro"})
+    assert q.lease("m4-max", RENDER) == []
+    assert [j["id"] for j in q.lease("m1-pro", RENDER)] == [jid]
+
+
 def test_priority_then_age_decides_order(q, clock):
     late = q.submit("render", {}, priority=100)
     clock.t += 1

@@ -45,12 +45,15 @@ CREATE TABLE IF NOT EXISTS workers (
 """
 
 
-def eligible(job: dict, caps: dict, cached: set[str]) -> bool:
-    """Can a worker with these capabilities run this job?
+def eligible(job: dict, caps: dict, cached: set[str], worker: str | None = None) -> bool:
+    """Can this worker, with these capabilities, run this job?
 
     caps: kinds (job kinds it runs), gpu_mem_gb, cache_only (true while away from home: it may only take jobs
-    whose inputs it already holds, so it never pulls a scene pack over a hotspot).
+    whose inputs it already holds, so it never pulls a scene pack over a hotspot). A job whose requires names a
+    worker runs only there, as a per-machine benchmark must.
     """
+    if (pinned := job["requires"].get("worker")) and pinned != worker:
+        return False
     if job["kind"] not in caps.get("kinds", []):
         return False
     if job["requires"].get("gpu_mem_gb", 0) > caps.get("gpu_mem_gb", 0):
@@ -141,7 +144,7 @@ class Queue:
                     for row in self._db.execute(
                             "SELECT * FROM jobs WHERE state = 'queued' ORDER BY priority, created"):
                         job = self._job(row)
-                        if eligible(job, capabilities, cached):
+                        if eligible(job, capabilities, cached, worker):
                             picked.append(job)
                             if len(picked) == max_jobs:
                                 break

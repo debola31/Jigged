@@ -174,8 +174,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 
 ## 6. Milestones
 
-- [ ] Nov 1: vise compiles in the new core; benchmark sets the forecast
-- [ ] Nov 2: queue reliable; vise take reproduced in the new core
+- [x] Nov 1: vise compiles in the new core; benchmark sets the forecast (§1 above)
+- [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
 - [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
@@ -202,3 +202,4 @@ Each draft you reject gets a row, and the row closes only when its conversion la
 | Date | Part / step | What was wrong | Converted to (monitor, scenario, or "eye only") |
 |---|---|---|---|
 | 2026-11-01 | Vise take draft | The wrist past its ellipse at 4 s; the crank gripped round the lever's joint, which turns through the fist | Checks `wrist_ellipse` and `never_held_parts` (`moonshot/validate/`), gate `test_wrist_ellipse.py`; closed 2026-11-02 |
+| 2026-11-02 | Vise take draft 2 | After the pick-up the wrist reads as bent too far: 0.94 of its range for 2 s while the part is inspected, possible but not how people hold a part | The planner's wrist cap, 0.95 to 0.75 (`moonshot/motion/solver.py`); the body-vs-people check (§3b) to catch untypical postures |

@@ -69,7 +69,8 @@ def verdict(changes: list[tuple[str, str]], moved_thresholds: list[str] = ()) ->
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+    # utf-8 explicitly: on Windows the default codepage mangles the thresholds' § signs, which then read as changed
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True, encoding="utf-8").stdout
 
 
 def changes_since(base: str) -> list[tuple[str, str]]:

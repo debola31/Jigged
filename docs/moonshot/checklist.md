@@ -126,7 +126,11 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   the vise, blank and parallels, every verb reproduces on the full body (`moonshot/sim/vise_take.py`, gates in
   `moonshot/tests/gates/test_vise_take.py`): lifted by friction with a 12.7 / 13.1 N grip, 1.85 mm slip, set down
   within 0.7 mm and flat, seated on the fixed jaw, pushed at 30.0 N, cranked 2.256 turns to 75.76 mm, both parallels
-  found pinched. Still failing: free-motion wrist lag reaches 37 mm against 10 mm at a few moments.
+  found pinched. Still failing: free-motion wrist lag reaches 37 mm against 10 mm, for reasons that belong to the
+  new motion planner rather than the body: trainual's plan has near-misses (2.9 s of fingers grazing the table, jaws
+  and knob, reported as `stray_contacts`), it was planned without the arm's volume, and the held blank's inertia
+  isn't fed forward. Feeding the inertia forward trips a latent instability: the blank, resting on the parallels
+  against the fixed jaw, can be launched by a contact-solver spike during cranking.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
 - [ ] Timestep halving converges
 - [ ] The four known gaps in §5.5: three fixed by the new body model; trunk rotation given a standing-work range (§11)

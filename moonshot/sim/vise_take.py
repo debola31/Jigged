@@ -38,6 +38,7 @@ STIFFEN = 4.0
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
 VISUAL_MAX = 0.015        # ... by at most this much (m)
+TOUCH_RELEASE_S = 0.2     # after a press, its touch correction fades with this time constant (s)
 TOUCH_TAU = 0.07          # while pressing, sideways slip under the fingertip is felt and corrected this fast (s);
                           # tactile slip responses take ~70 ms (Johansson & Westling 1984)
 LEAD_MAX_DEG = 8.0
@@ -117,6 +118,7 @@ class ViseTake:
         self.squeeze, self.phi_hold, self.snug_lead, self.press_i, self.crank_f = {}, {}, {}, {}, {}
         self.grip_scale: dict[str, dict[str, float]] = {}
         self.visual = np.zeros(3)
+        self.touch = np.zeros(3)
         self.aim: dict[int, np.ndarray] = {}
         self.intended = np.zeros(3)
         self.contact_label: set[str] = set()
@@ -290,6 +292,21 @@ class ViseTake:
         dq[self.arm_dofs] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), dx)
         return dq
 
+    def stray_contacts(self, grip: str, tt: float) -> list[str]:
+        """The hand touching something it isn't working on: plan near-misses (a fingertip grazing the table). They
+        deflect a compliant arm, as they would a person's, so they are reported, not counted as tracking lag."""
+        m, d = self.model, self.data
+        allowed = {self.geom[GRIP_OBJECT[grip]]} if grip in GRIP_OBJECT else set()
+        allowed |= {self.geom[e["contact"]] for e in self.iv["press"] if e["t0"] - 0.05 <= tt < e["t1"] + 0.15}
+        allowed |= {self.geom["knob"]} if any(e["t0"] <= tt < e["t1"] for e in self.iv["enclose"]) else set()
+        out = []
+        for i in range(d.ncon):
+            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+            for a, b in ((g1, g2), (g2, g1)):
+                if m.geom(a).name.startswith("R_") and not m.geom(b).name.startswith("R_") and b not in allowed:
+                    out.append(f"{m.geom(a).name[2:]}/{m.geom(b).name}")
+        return out
+
     def hand_touching(self) -> bool:
         """Is any part of the hand or arm in contact with anything? (Then touch, not sight, guides it.)"""
         d, m = self.data, self.model
@@ -303,18 +320,22 @@ class ViseTake:
         """People correct a steady error in where their hand is by sight, slowly. While pressing, only sideways
         (force owns the press direction); paused while cranking or holding the knob, where being past the plan is
         the point, and while the hand otherwise touches anything, where it would wind up against the contact."""
+        dt = self.model.opt.timestep
         press = next((e for e in self.iv["press"] if e["t0"] - 0.05 <= tt < e["t1"] + 0.15), None)
         cranking = any(e["t0"] <= tt < e["t1"] for e in self.iv["enclose"]) or self.crank_at(tt)[1] is not None
         err = self.intended - self.data.body("R_hand").xpos
-        if press is not None:                  # pressing: hold position sideways; force owns the press direction
+        if press is not None:                  # pressing: hold position sideways by touch; force owns the normal
             n = np.asarray(press["normal"], float)
-            err = err - n * (n @ err)
-        if press is not None or (not cranking and not self.hand_touching()):
-            self.visual += err * self.model.opt.timestep / (TOUCH_TAU if press is not None else VISUAL_TAU)
-            n = np.linalg.norm(self.visual)
+            self.touch += (err - n * (n @ err)) * dt / TOUCH_TAU
+        else:                                  # the press is over: let go of its correction
+            self.touch *= 1 - dt / TOUCH_RELEASE_S
+        if press is None and not cranking and not self.hand_touching():
+            self.visual += err * dt / VISUAL_TAU
+        for v in (self.visual, self.touch):
+            n = np.linalg.norm(v)
             if n > VISUAL_MAX:
-                self.visual *= VISUAL_MAX / n
-        return self.visual
+                v *= VISUAL_MAX / n
+        return self.visual + self.touch
 
     def hand_forces(self, tt: float) -> np.ndarray:
         """The torques for forces the hand applies on purpose: a press along its normal, and the push that turns
@@ -359,7 +380,9 @@ class ViseTake:
     def anticipated_load(self, tt: float, grip: str, effort: float) -> np.ndarray:
         """The torques that carry a held object's expected weight. People raise load force in step with grip force,
         expecting the object's weight (Guillery 2013's loading phase), so it is fed forward rather than discovered as
-        sag. Applied at where the object sits in the hand, mapped through the planned pose."""
+        sag. Applied at where the object sits in the hand, mapped through the planned pose. Its inertia isn't fed
+        forward yet: doing so seats the blank slightly differently and trips a latent instability of the blank on
+        the parallels against the fixed jaw (see the checklist)."""
         if grip not in CARRYING or effort <= 0 or not any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]):
             return 0.0
         if sum(self.contacts()[0].values()) < 2 * TOUCH_N:
@@ -465,7 +488,7 @@ class ViseTake:
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing")}
+                               "slip", "lag", "pushing", "stray")}
         hold_rel, t0w = None, time.time()
         hold0 = self.iv["hold_object"][0]
         for k in range(n):
@@ -529,6 +552,7 @@ class ViseTake:
             rec["depth"].append(depth)
             rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
+            rec["stray"].append(self.stray_contacts(grip, tk))
             rec["pushing"].append(any(e["t0"] - 0.05 <= tk < e["t1"] + 0.15 for e in self.iv["press"]) or
                                   any(e["t0"] <= tk < e["t1"] for e in self.iv["enclose"]) or
                                   self.crank_at(tk)[1] is not None)
@@ -581,9 +605,12 @@ class ViseTake:
         lift = (t > self.t_lift + 0.15) & (t < self.t_down - 0.3)
         clips = {c["verb"]: c for c in self.tk["clips"]}
         lag, pushing = np.array(rec["lag"]), np.array(rec["pushing"], bool)
+        stray = np.array([bool(x) for x in rec["stray"]])
         settled = t > 0.5                                  # the first half second is the body settling into its start
+        pairs = sorted({p for x in rec["stray"] for p in x})
         out = {"frames": int(n), "seconds": round(float(t[-1]), 2),
-               "max_lag_free_motion_mm": round(float(lag[settled & ~pushing].max(initial=0)), 2),
+               "max_lag_free_motion_mm": round(float(lag[settled & ~pushing & ~stray].max(initial=0)), 2),
+               "stray_contact_s": round(float(stray.sum()) / fps, 2), "stray_contacts": pairs,
                "max_deviation_while_pushing_mm": round(float(lag[pushing].max(initial=0)), 2),
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():

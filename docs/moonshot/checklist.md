@@ -40,9 +40,12 @@ Machines, as of 2026-11-01:
 - [x] `moonshot/requirements.txt` installed in the `jigged` env on all three (2026-11-01): Python 3.12 (hub
   3.12.13, M1 Pro 3.12.16, M4 Max 3.12.12), MuJoCo 3.17.0, numpy 2.5.4, cadquery 2.8.0, MyoSuite 3.0.0. The M1
   Pro's env was a fresh 3.14 with only pip, so it was switched to 3.12 in place.
-- [x] No automatic restart after a reboot (your decision, 2026-11-01): the hub and workers run as plain background
-  processes. If a machine reboots, its worker (or the hub) is started again by hand; leased jobs simply lapse and
-  go to another worker meanwhile.
+- [x] The farm starts itself at login (your decision, 2026-11-02, replacing manual restarts after a reboot killed
+  a run): on the hub, `moonshot/tools/farm_hub.ps1` from the Windows Startup folder (`jigged-farm-hub.cmd`) starts
+  the hub and its worker unless running, and the PC doesn't sleep on mains power; each Mac's worker is the login
+  agent `com.jigged.farm-worker`, which restarts it if it dies and keeps the Mac awake. A rebooted machine rejoins
+  once someone logs in; leased jobs lapse and go to another worker meanwhile. Workers run the committed code in
+  `~/jigged-moonshot`.
 - [x] Benchmark (2026-11-01): one 1080p frame of the vise take (frame 480, 96 samples, untuned) on each machine,
   through the queue. Warm: **M4 Max 7.96 s, M1 Pro 39.65 s (0.20×), GTX 1070 42.43 s (0.19×)**. The M1 Pro's first
   run took 134 s compiling its Metal kernels; the M4 Max's had been compiled already.

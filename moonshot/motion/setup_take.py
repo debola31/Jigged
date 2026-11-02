@@ -239,8 +239,10 @@ class Take:
         specs["knob"] = dict(obj=k, q0=q0, colliders=[
             lambda p: G.sdf_cyl(p, a0, a0 + KNOB_AXIS * VISE["knob_len"], R),
             # the lever, swept: the fist keeps its orientation while cranking, so relative to it the lever turns a
-            # full circle round the knob's root, through anything near it (docs/moonshot/physics.md)
-            lambda p: G.sdf_cyl(p, a0 + np.array([0, -6.0, 0]), a0 + np.array([0, 10.0, 0]), VISE["lever"] + 8.0),
+            # full circle round the knob's root, through anything near it (docs/moonshot/physics.md). One-sided, from
+            # the lever's outer face back past the vise's end 2 mm behind it: a thin disc let the solver push the
+            # hand out through its back, between the lever and the vise
+            lambda p: G.sdf_cyl(p, a0 + np.array([0, -6.0, 0]), a0 + np.array([0, 150.0, 0]), VISE["lever"] + 8.0),
             box([VISE["x"], sc[1] + 120, 880], [110, 120, 30])],
             targets={"index": on_knob(28, 40), "middle": on_knob(46, 58), "ring": on_knob(62, 74), "little": on_knob(76, 88),
                      "thumb": on_knob(22, 44)},

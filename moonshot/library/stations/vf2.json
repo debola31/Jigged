@@ -1,0 +1,54 @@
+{
+ "schema": "jigged.station/1",
+ "id": "vf2",
+ "name": "Haas VF-2 vertical machining centre",
+ "about": "Links from Haas's VF-2 STEP (moonshot/library/stations/extract.py; bounds in vf2.links.json), in the world frame with the table top at z = 853 mm and the operator at -Y. Joint zero is the STEP's pose: table at the left end of X, saddle at the front of Y, head at the top of Z, doors closed.",
+ "links": {
+  "base": {"parent": null, "mass_kg": null}, "enclosure": {"parent": null}, "side_doors": {"parent": null},
+  "pendant": {"parent": null}, "conveyor": {"parent": null}, "exhaust": {"parent": null}, "pads": {"parent": null},
+  "coolant": {"parent": "head"}, "carousel": {"parent": null},
+  "saddle": {"parent": "base", "mass_kg": 400}, "table": {"parent": "saddle", "mass_kg": 300},
+  "head": {"parent": "base", "mass_kg": 400}, "door_left": {"parent": "enclosure", "mass_kg": 15},
+  "door_right": {"parent": "enclosure", "mass_kg": 15}
+ },
+ "masses_source": {"source": "proposed", "reason": "Haas publishes the machine's 3,400 kg total, not per-link masses; the servo axes are position-controlled, so these only set inertia"},
+ "joints": {
+  "y": {"link": "saddle", "type": "slide", "axis": [0, 1, 0], "range_mm": [0, 406.4], "speed_mm_s": 423.3,
+        "source": "spec", "reason": "Haas VF-2: 16 in Y travel, 1000 in/min rapids"},
+  "x": {"link": "table", "type": "slide", "axis": [1, 0, 0], "range_mm": [0, 762.0], "speed_mm_s": 423.3,
+        "source": "spec", "reason": "Haas VF-2: 30 in X travel, 1000 in/min rapids"},
+  "z": {"link": "head", "type": "slide", "axis": [0, 0, 1], "range_mm": [-508.0, 0], "speed_mm_s": 423.3,
+        "source": "spec", "reason": "Haas VF-2: 20 in Z travel (spindle nose 4-24 in above the table), 1000 in/min rapids"},
+  "spindle": {"link": "head", "type": "hinge", "axis": [0, 0, 1], "centre_mm": [0.0, -128.7, 1453.4],
+              "max_rpm": 8100, "source": "spec", "reason": "Haas VF-2: 8,100 rpm CAT40 spindle"},
+  "door_left": {"link": "door_left", "type": "slide", "axis": [-1, 0, 0], "range_mm": [0, 600], "passive": true,
+                "friction_n": 15, "source": "proposed", "reason": "The doors slide open by hand; about 600 mm each clears the opening"},
+  "door_right": {"link": "door_right", "type": "slide", "axis": [1, 0, 0], "range_mm": [0, 600], "passive": true,
+                 "friction_n": 15, "source": "proposed", "reason": "As the left door"}
+ },
+ "colliders": {
+  "table_top": {"link": "table", "box_min_mm": [-838, -524, 823], "box_max_mm": [75, -157, 853],
+                "reason": "The CAD's shells aren't closed; trainual measured this box from the GLB"},
+  "door_left": {"link": "door_left", "box_min_mm": [-661, -845, 616], "box_max_mm": [0, -825, 1710]},
+  "door_right": {"link": "door_right", "box_min_mm": [-25, -825, 616], "box_max_mm": [636, -805, 1710],
+                 "reason": "Sliding doors overlap at different depths: the right one runs 20 mm behind the left"},
+  "spindle_nose": {"link": "head", "box_min_mm": [-60, -189, 1453], "box_max_mm": [60, -69, 1590]},
+  "pendant_face": {"link": "pendant", "box_min_mm": [640, -1035, 1180], "box_max_mm": [1060, -1015, 1700]}
+ },
+ "affordances": {
+  "door_left_handle": {"link": "door_left", "at_mm": [-40, -850, 1160], "grip": "power", "pull": [-1, 0, 0]},
+  "door_right_handle": {"link": "door_right", "at_mm": [15, -850, 1160], "grip": "power", "pull": [1, 0, 0]},
+  "cycle_start": {"link": "pendant", "at_mm": [700, -1036, 1260], "grip": "fingertip_press", "force_n": 5},
+  "feed_hold": {"link": "pendant", "at_mm": [740, -1036, 1260], "grip": "fingertip_press", "force_n": 5}
+ },
+ "affordances_source": {"source": "proposed", "reason": "Placed on the CAD's door edges and pendant face; to be checked against the render"},
+ "logic": {
+  "states": ["idle", "running", "feed_hold", "alarm"],
+  "interlocks": [
+   "cycle_start runs a program only with both doors closed",
+   "opening a door while running puts the machine in feed_hold and stops the spindle",
+   "the spindle turns only while running"
+  ],
+  "door_closed_mm": 5.0
+ }
+}

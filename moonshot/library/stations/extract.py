@@ -12,6 +12,12 @@ world frame puts the floor at z = 0, the blade's cutting plane at y = 0 and the 
 (x, -z - 395, y + 406.8) mm. Its links.json also carries each link's CAD volume, centre of mass and inertia at
 1 g/cm3, for the record to price at a density.
 
+The inspection bench's height gauge and surface plate are one placeholder STEP (the hgauge asset), split so the plate
+stays on the bench while the gauge moves. Each is in its own frame rather than a world frame: the plate's with its
+underside centred at the origin, the gauge's the same frame lowered by the plate's 76.2 mm, so the gauge's underside
+is at z = 0 and it rests at any surface's height. The STEP's demonstration part is left out. Links go to
+<data root>/library/<category>/<asset>/links/, beside the STEP's own asset.
+
     python -m moonshot.library.stations.extract vf2
 """
 from __future__ import annotations
@@ -26,16 +32,21 @@ from moonshot.config import data_root
 
 STATIONS = Path(__file__).resolve().parent
 SOURCES = {"vf2": "machines/vf2/VF-2_STEP__1_2023.step",
-           "bandsaw": "machines/bandsaw/8962N13_Horizontal Band Saw for Metal.STEP"}
+           "bandsaw": "machines/bandsaw/8962N13_Horizontal Band Saw for Metal.STEP",
+           "inspection_bench": "inspection/hgauge/hgauge.step"}
 Y_UP = np.array([[1.0, 0, 0], [0, 0, -1.0], [0, 1.0, 0]])
 TO_WORLD = {"vf2": (Y_UP, np.array([0.0, 352.0, 505.0])),          # STEP (x, y, z) -> (x, 352 - z, y + 505) mm
-            "bandsaw": (Y_UP, np.array([0.0, -395.0, 406.8]))}     # STEP (x, y, z) -> (x, -z - 395, y + 406.8) mm
+            "bandsaw": (Y_UP, np.array([0.0, -395.0, 406.8])),     # STEP (x, y, z) -> (x, -z - 395, y + 406.8) mm
+            "inspection_bench": (np.eye(3), np.zeros(3))}             # already Z up, the plate's underside centred
+LINK_ORIGIN_MM = {"inspection_bench": {"height_gauge": [0.0, 0.0, 76.2]}}   # where a link's own frame sits
 LINKS = {   # STEP component -> link
     "vf2": {"BASE_VF-2_1_2023": "base", "SADDLE_VF-2_1_2023": "saddle", "TABLE_VF-2_1_2023": "table",
             "SPINDLE HEAD_VF-2_1_2023": "head", "ENCLOSURE_VF-2_1_2023": "enclosure",
             "SIDE DOORS_VF-2_1_2023": "side_doors", "PENDANT_VF-2_1_2023": "pendant",
             "20-PKT UTC_VF-2_1_2023": "carousel", "CONV PKG_VF-2_1_2023": "conveyor",
             "EES_VF-2_1_2023": "exhaust", "PADS_VF-2_1_2023": "pads", "HAAS P-COOL_VF-2_1_2023": "coolant"},
+    "inspection_bench": {"surface_plate": "plate", "base": "height_gauge", "column": "height_gauge",
+                         "slider_display": "height_gauge", "scriber": "height_gauge"},
 }
 SUBLINKS = {"vf2": {"37-0400-LEFT DOOR": "door_left", "37-0400-RIGHT DOOR": "door_right",
                     "40T Spindle_37-4212": "spindle"}}
@@ -103,14 +114,15 @@ def read_solids(step: Path):
         ex.Next()
 
 
-def to_world_mesh(shape, station: str, tolerance_mm: float = 0.8):
-    """Tessellate an OCC shape and map it into the world frame, in metres, as a trimesh."""
+def to_world_mesh(shape, station: str, link: str = "", tolerance_mm: float = 0.8):
+    """Tessellate an OCC shape and map it into the world frame (or the link's own), in metres, as a trimesh."""
     import cadquery as cq
     import trimesh
     verts, faces = cq.Shape.cast(shape).tessellate(tolerance_mm, 0.5)
     if not faces:
         return None
     R, t = TO_WORLD[station]
+    t = t - np.array(LINK_ORIGIN_MM.get(station, {}).get(link, [0.0, 0.0, 0.0]))
     v = (np.array([(p.x, p.y, p.z) for p in verts]) @ R.T + t) * 0.001
     return trimesh.Trimesh(v, np.array(faces), process=True)
 
@@ -134,7 +146,7 @@ def mass_properties(shapes, station: str) -> dict:
 
 
 def extract(station: str) -> dict:
-    out_dir = data_root() / "library" / "machines" / station / "links"
+    out_dir = data_root() / "library" / Path(SOURCES[station]).parent / "links"
     out_dir.mkdir(parents=True, exist_ok=True)
     step = data_root() / "originals" / SOURCES[station]
     meshes: dict[str, list] = {}
@@ -145,12 +157,12 @@ def extract(station: str) -> dict:
             shapes.setdefault(owner.get(i, "base"), []).append(solid)
     else:
         for comp_name, shape in read_components(step):
-            link = LINKS[station].get(comp_name) or SUBLINKS[station].get(comp_name)
+            link = LINKS[station].get(comp_name) or SUBLINKS.get(station, {}).get(comp_name)
             if link is not None:
                 shapes.setdefault(link, []).append(shape)
     for link, parts in shapes.items():
         for shape in parts:
-            mesh = to_world_mesh(shape, station)
+            mesh = to_world_mesh(shape, station, link)
             if mesh is not None:
                 meshes.setdefault(link, []).append(mesh)
     import trimesh

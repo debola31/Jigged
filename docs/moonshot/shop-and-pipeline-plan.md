@@ -358,7 +358,7 @@ mindmap
 | **Forces reach their targets** | Within 5% (*proposed*) | 29.7 N against 30 N | — |
 | **Mechanisms obey their ratios** | Jaw travel = turns × lead; clamp force plausible | 2.28 turns, 90 → 75.7 mm; clamp 7,333 N | Kurt spec |
 | **Body keeps up with its plan** | Lag under 10 mm (*proposed*); more means physics refused the motion | 6.77 mm | — |
-| **Nothing passes through solids** | Collision shapes under 2.5 mm (*proposed*); rendered skin under 1.0 mm | 2.03 mm; skin **1.52 mm into the table** (fails, §5.5) | trainual limit |
+| **Nothing passes through solids** | Collision shapes under 2.5 mm (*proposed*); rendered skin under 1.0 mm | 2.03 mm; skin **1.52 mm into the table, 8.27 mm into the knob** (fails, §5.5) | trainual limit |
 | **Nothing moves without a cause** | Every pose change explained by a contact, joint or motor; no velocity spikes or NaN | Not yet checked | New |
 | **Stable, not lucky** | Half the timestep changes no outcome past its threshold | Not yet checked | New |
 | **Machines stay in spec** | Every axis within the maker's travel, speed and acceleration | Not yet checked | Spec sheets |
@@ -409,9 +409,12 @@ Step 3 targets: nominal 100%, perturbed at least 95% (*proposed*).
 
 ### 5.5 Known gaps in the reference take
 
-It fails four checks. The new body model must fix them, or you consciously loosen the threshold:
+It fails six checks. The new body model must fix them, or you consciously loosen the threshold:
+- the wrist past its flexion-deviation ellipse (1.12 against 1.0) while the blank is held up, 3.8–5.0 s;
+- the crank gripped round the lever's joint, which sweeps through the fist each turn (found on review
+  2026-11-01; why neither was caught: [physics.md](physics.md));
 - finger spread up to 5.4° past range (435 frames);
-- skin 1.52 mm into the table;
+- skin 1.52 mm into the table, and 8.27 mm into the knob;
 - shoulder rotation at 154°/s against 150°/s;
 - trunk rotation outside the recorded-people range in 359 frames. That data is seated tabletop work, so a
   separate range for standing bench work may be the honest fix.

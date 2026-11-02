@@ -78,8 +78,11 @@ class ViseTake:
         self.rd = np.load(folder / "reference.npz")
         self.body = build(pelvis_mm=tuple(self.tk["lumbar"]))
         parallels = {n: np.array(p) for n, p in self.tk["parallels"].items()}
-        # the blank starts at STAGE; reference.npz frame 0 wrongly has it in the vise (frames 1+ and trainual's sim agree)
-        self.xml = cell.with_body(self.body.xml, V.STAGE, parallels, "R_hand")
+        # what is loaded; trainual's take.json predates the field, and its load is the reference
+        self.load = V.Load.from_json(self.tk["load"]) if "load" in self.tk else V.REFERENCE
+        # the blank starts at the load's stage; reference.npz frame 0 wrongly has it in the vise (frames 1+ and
+        # trainual's sim agree)
+        self.xml = cell.with_body(self.body.xml, self.load.stage, parallels, "R_hand", self.load)
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.machine = cell.start(m, self.data)          # idle: holds the table, and the vise on it, where it is
@@ -124,7 +127,7 @@ class ViseTake:
         self.offset, self.offset_t = None, 0.0
         z = self.rd["blank"][:, 2].copy()
         z[0] = z[1]                                        # frame 0's glitch (see above)
-        self.t_lift = float(self.t[np.argmax(z > V.STAGE[2] + 1.0)])
+        self.t_lift = float(self.t[np.argmax(z > self.load.stage[2] + 1.0)])
         top = int(np.argmax(z))
         self.t_down = float(self.t[top + np.argmax(z[top:] <= z[-1] + 0.5)])
 
@@ -253,7 +256,7 @@ class ViseTake:
         people use (thresholds physics.grip_safety_margin, Guillery 2013; Hiramatsu 2015), the thumb opposing the
         fingers, which share their side's force."""
         lo, hi = threshold("physics.grip_safety_margin").band
-        side = (lo + hi) / 2 * V.BLANK_KG * 9.81 / (2 * SKIN_MU)
+        side = (lo + hi) / 2 * self.load.mass_kg * 9.81 / (2 * SKIN_MU)
         fingers = [dg for dg in digits if dg != "thumb"]
         return {dg: side if dg == "thumb" else side / max(1, len(fingers)) for dg in digits}
 
@@ -391,7 +394,7 @@ class ViseTake:
         point = p.xpos[hand] + p.xmat[hand].reshape(3, 3) @ rel
         jacp = np.zeros((3, m.nv))
         mujoco.mj_jac(m, p, jacp, None, point, hand)
-        return jacp[:, self.act_dof].T @ np.array([0.0, 0.0, V.BLANK_KG * 9.81 * effort])
+        return jacp[:, self.act_dof].T @ np.array([0.0, 0.0, self.load.mass_kg * 9.81 * effort])
 
     def set_plan(self, tp: float) -> np.ndarray:
         """Pose the planning data at plan time tp (objects where they really are); returns its planned qvel."""
@@ -545,7 +548,7 @@ class ViseTake:
             rec["blank"].append(d.body("blank").xpos * 1000)
             rec["blank_R"].append(d.body("blank").xmat.reshape(3, 3).copy())
             rec["crank"].append(self.phi())
-            rec["opening"].append(V.OPENING0 - d.qpos[self.q_jaw] * 1000)
+            rec["opening"].append(self.load.opening0 - d.qpos[self.q_jaw] * 1000)
             rec["force"].append(f)
             rec["clamp"].append(clamp)
             rec["depth"].append(depth)
@@ -643,7 +646,7 @@ class ViseTake:
                "max_deviation_while_pushing_mm": round(float(lag[pushing].max(initial=0)), 2),
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():
-            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > V.STAGE[2] + 5)),
+            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > self.load.stage[2] + 5)),
                                 "grip_N_thumb_median": round(float(np.median(force[lift, 0])), 2),
                                 "grip_N_fingers_median": round(float(np.median(force[lift, 1:5].sum(1))), 2),
                                 "max_slip_mm": round(float(np.max(rec["slip"])), 2)}
@@ -655,7 +658,7 @@ class ViseTake:
         if int(sl["t1"] * fps) <= n:
             out["slide"] = {"moved_mm": round(float(B[int(sl["t1"] * fps) - 1][1] - B[int(sl["t0"] * fps)][1]), 2),
                             "gap_to_fixed_jaw_after_mm": round(float(V.VISE["fixed_face_y"] -
-                                                                     (B[int(sl["t1"] * fps) - 1][1] + V.HALF[1])), 2)}
+                                                                     (B[int(sl["t1"] * fps) - 1][1] + self.load.half[1])), 2)}
         press = [e for e in self.iv["press"] if e["contact"] == "blank"
                  and clips["push"]["t0"] <= e["t0"] < clips["push"]["t1"]][0]
         pm = (t >= press["t0"] + 0.3) & (t < press["t1"])

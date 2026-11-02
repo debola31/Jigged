@@ -45,22 +45,19 @@ from moonshot.motion import grasp as G
 from moonshot.motion import kinematics as BM
 from moonshot.motion import solver as BS
 from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_like, relaxed, tremor
-from moonshot.world.vise import (BLANK, CRANK0_DEG, HALF, OPENING0, STAGE, TABLE_Z, VISE, crank_for_opening,
+from moonshot.world.vise import (CRANK0_DEG, PARALLEL_L, PARALLEL_T, REFERENCE, TABLE_Z, VISE, Load, crank_for_opening,
                                  knob_center)
 
 MOONSHOT = Path(__file__).resolve().parents[1]
-OUT = data_root() / "takes" / "setup-take"
+TAKES = data_root() / "takes"
+OUT = TAKES / "setup-take"                                # the reference load's take
 LUMBAR = np.array([-415.0, -935.0, 955.0])                # standing a little further back than before: the crank
 REST_W = np.array([-205.0, -880.0, 850.0])                # hand hanging relaxed by the right thigh
 KNOB_AXIS = np.array([0.0, -1.0, 0.0])
 CRANK0 = CRANK0_DEG
 SEAT_Z = VISE["seat_z"]
-PAR_H, PAR_T, PAR_L = 25.4, 3.1, 152.4
-# parallels a little inboard of the blank's edges, so it sits on both whether set down short or slid home
-PARALLELS = {"para_a": np.array([VISE["x"], -244.0, SEAT_Z]), "para_b": np.array([VISE["x"], -296.0, SEAT_Z])}
+PAR_T, PAR_L = PARALLEL_T, PARALLEL_L
 PLACE_GAP = 6.0
-HOME = np.array([VISE["x"], VISE["fixed_face_y"] - HALF[1], SEAT_Z + PAR_H + HALF[2]])     # against the fixed jaw
-SET = HOME - np.array([0, PLACE_GAP, 0])                                                   # where it is set down
 INSPECT = np.array([-290.0, -640.0, 1160.0])              # held up in front, below the eyes, to look at it
 JAW_TOP = VISE["jaw_top_z"]
 
@@ -70,15 +67,15 @@ def box(c, h):
     return lambda p, c=np.asarray(c, float), h=np.asarray(h, float): G.sdf_box(p, c, np.eye(3), h)
 
 
-def vise_boxes(opening, include_table=True, margin=0.0):
-    """The vise's solids; margin (mm) keeps skin that far off the jaws and the body (a hand that must not lean on
-    them, e.g. when its force should go into a parallel)."""
+def vise_boxes(parallels, par_h, opening, include_table=True, margin=0.0):
+    """The vise's solids, with the parallels (base centres, height par_h); margin (mm) keeps skin that far off the
+    jaws and the body (a hand that must not lean on them, e.g. when its force should go into a parallel)."""
     fy, x, m = VISE["fixed_face_y"], VISE["x"], margin
     out = [box([x, fy + 20, (SEAT_Z + JAW_TOP) / 2], [76.2 + m, 20 + m, (JAW_TOP - SEAT_Z) / 2 + m]),            # fixed jaw
            box([x, fy - opening - 20, (SEAT_Z + JAW_TOP) / 2], [76.2 + m, 20 + m, (JAW_TOP - SEAT_Z) / 2 + m]),   # moving jaw
            box([x, fy - 160, (TABLE_Z + SEAT_Z) / 2], [100 + m, 160 + m, (SEAT_Z - TABLE_Z) / 2 + m])]            # vise body
-    for p in PARALLELS.values():
-        out.append(box(p + [0, 0, PAR_H / 2], [PAR_L / 2, PAR_T / 2, PAR_H / 2]))
+    for p in parallels.values():
+        out.append(box(p + [0, 0, par_h / 2], [PAR_L / 2, PAR_T / 2, par_h / 2]))
     if include_table:
         out.append(box([-381.0, -340.0, TABLE_Z - 50], [460, 184, 50]))
     return out
@@ -102,15 +99,27 @@ def plane(point, normal, comp=2.0, band=None):
 
 
 class Take:
-    def __init__(self, verbose=True):
+    def __init__(self, verbose=True, load: Load = REFERENCE, out=OUT, grips_from=None):
+        """load: what goes in the vise; out: the folder the take and its grip cache go to; grips_from: a grips.json
+        to use as solved instead of solving (to check the trajectory solver on its own against a known take)."""
         torch.set_num_threads(8)
         self.verbose = verbose
+        self.load, self.out = load, Path(out)
+        self.size, self.half, self.stage = load.size, load.half, load.stage
+        self.opening0, self.par_h = load.opening0, load.parallel_h
+        self.kg = round(load.mass_kg, 1)                 # the planner's effort estimate: the part's mass to 0.1 kg
+        self.grips_from = grips_from
+        # parallels a little inboard of the blank's edges, so it sits on both whether set down short or slid home
+        self.parallels = load.parallels()
+        # against the fixed jaw, and where it is set down
+        self.home = np.array([VISE["x"], VISE["fixed_face_y"] - self.half[1], SEAT_Z + self.par_h + self.half[2]])
+        self.set_down = self.home - np.array([0, PLACE_GAP, 0])
         self.hand = AnatomicalHand(Nimble(data_root() / "hand-model" / "nimble"))
         self.th = G.TorchHand(self.hand)
         self.prior = BS.ArmPrior()
-        OUT.mkdir(parents=True, exist_ok=True)
+        self.out.mkdir(parents=True, exist_ok=True)
         self.cons, self.fkeys, self.ekeys, self.gaze, self.events, self.clips = [], [], [], [], [], []
-        self.blank_keys = [(0.0, np.eye(3), STAGE.copy())]       # (t, R, p) the planned blank pose, piecewise min-jerk
+        self.blank_keys = [(0.0, np.eye(3), self.stage.copy())]       # (t, R, p) the planned blank pose, piecewise min-jerk
         self.crank_keys = [(0.0, CRANK0)]
         self.crank_plans = []
         self._knob_free_from = 0.0
@@ -124,13 +133,17 @@ class Take:
 
     # --- grips (affordances), solved with the body, cached ----------------------------------------------
     def _grips(self):
-        cache = OUT / "grips.json"
+        cache = self.out / "grips.json"
         src = ANATOMY.read_text(encoding="utf-8") + "".join(
             (MOONSHOT / f).read_text(encoding="utf-8") for f in ("motion/grasp.py", "body/hand.py", "motion/kinematics.py",
                                                                   "motion/solver.py"))
-        src += inspect.getsource(Take._grip_specs) + json.dumps(list(LUMBAR))
+        src += inspect.getsource(Take._grip_specs) + json.dumps(list(LUMBAR)) + json.dumps(self.load.to_json())
         key = hashlib.sha1(src.encode()).hexdigest()
-        data = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
+        if self.grips_from is not None:
+            data = json.loads(Path(self.grips_from).read_text(encoding="utf-8"))
+            data["key"] = key
+        else:
+            data = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
         if data.get("key") != key:
             data = {"key": key}
             for name, spec in self._grip_specs().items():
@@ -157,18 +170,18 @@ class Take:
                                 "H_rel": H, "W_rel": W - obj, "loss": g["loss"]}
 
     def _grip_specs(self):
-        hx, hy, hz = HALF
+        hx, hy, hz = self.half
         h = self.hand
         # starting postures for the body (12 angles: trunk 3, arm 7, girdle 2)
         S = lambda *a: list(a) + [0.0, 0.0]
         specs = {}
         # 1. blank by its near and far faces (grab, hold, place): solved at the staging spot, with the jaws where
         # they will be when it is set down, so the same grip clears them
-        c = STAGE.copy()
+        c = self.stage.copy()
         top = c[2] + hz
-        jaw_clear = JAW_TOP - (SET[2] + hz)
-        near_gap = OPENING0 - BLANK[1] - PLACE_GAP
-        cols = [box(c, HALF), box([c[0], c[1], TABLE_Z - 50], [400, 300, 50])]
+        jaw_clear = JAW_TOP - (self.set_down[2] + hz)
+        near_gap = self.opening0 - self.size[1] - PLACE_GAP
+        cols = [box(c, self.half), box([c[0], c[1], TABLE_Z - 50], [400, 300, 50])]
         for y0, y1 in ((hy + PLACE_GAP, hy + PLACE_GAP + 45), (-hy - near_gap - 45, -hy - near_gap)):
             cols.append(box([c[0], c[1] + (y0 + y1) / 2, top + jaw_clear - 40], [76.2, (y1 - y0) / 2, 40]))
         q0 = h.neutral()
@@ -176,32 +189,33 @@ class Take:
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 25.0, 40.0
         q0.update(thumb_cmc_abd=22.0, thumb_cmc_flex=-5.0, thumb_mcp_flex=30.0, thumb_ip=20.0)
         far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=(4, 10), x=(lo, hi)))
-        specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=0.8, targets={
+        specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets={
             "thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=(4, 10), x=(-14, 14))),
             "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)},
             starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 2. slide: the thumb pad on the near face (above the moving jaw) pushes the part toward the fixed jaw, index
         # and middle resting on the top to steady it: a finger pad can't face away from the operator without the
         # hand reaching over, the thumb's does
-        c = SET.copy()
+        c = self.set_down.copy()
         q0 = h.neutral()
         for n in ("index", "middle", "ring", "little"):
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 20.0, 25.0
         q0.update(ring_mcp_flex=45, ring_pip=60, little_mcp_flex=50, little_pip=65,
                   thumb_cmc_abd=22.0, thumb_cmc_flex=-5.0, thumb_mcp_flex=25.0, thumb_ip=15.0)
         topf = lambda lo, hi: plane(c + [0, 0, hz], [0, 0, 1], 2.0, bands(c, x=(lo, hi), y=(-15, 20)))
-        specs["blank_slide"] = dict(obj=c, colliders=[box(c, HALF)] + vise_boxes(OPENING0), q0=q0, iters=1000,
+        vise = vise_boxes(self.parallels, self.par_h, self.opening0)
+        specs["blank_slide"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0, iters=1000,
                                     targets={"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0,
                                                             bands(c + [0, 0, hz], depth=(3, 11), x=(-12, 12))),
                                              "index": topf(-30, -10), "middle": topf(-6, 14)},
                                     starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 3. push: index, middle and ring pads flat on the top, fingers forward, palm low over it
-        c = HOME.copy()
+        c = self.home.copy()
         q0 = h.neutral()
         for n in ("index", "middle", "ring", "little"):
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 15.0, 15.0
         topf = lambda lo, hi: plane(c + [0, 0, hz], [0, 0, 1], 2.0, bands(c, x=(lo, hi), y=(-10, 30)))
-        specs["blank_press"] = dict(obj=c, colliders=[box(c, HALF)] + vise_boxes(OPENING0), q0=q0,
+        specs["blank_press"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0,
                                     targets={"index": topf(-30, -12), "middle": topf(-8, 8), "ring": topf(12, 30)},
                                     starts=[S(24, 0, 8, 45, 45, -10, 75, p, 0, 0) for p in (40, 70)])
         # 4. rotate: power grip on the crank knob, solved at the start angle
@@ -234,11 +248,12 @@ class Take:
         q0 = h.neutral()
         q0.update(index_mcp_flex=20, index_pip=25, middle_mcp_flex=75, middle_pip=95, ring_mcp_flex=80, ring_pip=95,
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
-        x_end = VISE["x"] + HALF[0] + (PAR_L / 2 - HALF[0]) / 2                  # middle of the exposed end
+        x_end = VISE["x"] + self.half[0] + (PAR_L / 2 - self.half[0]) / 2                  # middle of the exposed end
         for name in ("para_b", "para_a"):
-            pc = PARALLELS[name] + np.array([0, 0, PAR_H])
-            specs[f"tip_{name}"] = dict(obj=PARALLELS[name].copy(), q0=q0,
-                                        colliders=[box(HOME, HALF + 4)] + vise_boxes(BLANK[1], margin=6.0),
+            pc = self.parallels[name] + np.array([0, 0, self.par_h])
+            specs[f"tip_{name}"] = dict(obj=self.parallels[name].copy(), q0=q0,
+                                        colliders=[box(self.home, self.half + 4)]
+                                        + vise_boxes(self.parallels, self.par_h, self.size[1], margin=6.0),
                                         targets={"index": plane([x_end, pc[1], pc[2]], [0, 0, 1], 1.5,
                                                                 bands([x_end, pc[1], pc[2]], x=(-6, 6), y=(-1.0, 1.0)))},
                                         iters=1200,
@@ -325,7 +340,7 @@ class Take:
         g = self.grips[grip]
         Hg, Wg = self.grip_pose(grip, t0)
         t_contact = t0 + 0.35 + reach
-        self.look(t0, STAGE + [0, 0, HALF[2]])
+        self.look(t0, self.stage + [0, 0, self.half[2]])
         self.transit(t0 + 0.35, t_contact, Wg, via=[self.wrist + [70, 40, 150], Wg + [0, -12, 62]], fade=(Hg, 1.0))
         t_peak = t0 + 0.35 + 0.74 * reach
         self.fingers(t0 + 0.35, self.q_relax)
@@ -365,14 +380,14 @@ class Take:
         """Carry over the moving jaw (20 mm clear) and set it down on the parallels, short of the fixed jaw; the
         grip eases once it is down and lets go by lifting off, not by opening into the jaws."""
         t0 = self.t
-        high = np.array([VISE["x"] + 70, VISE["fixed_face_y"] - OPENING0 - HALF[1] - 42, JAW_TOP + HALF[2] + 20])
-        over, above = SET + [0, -6, 58], SET + [0, -3, 12]
-        self.look(t0 - 0.6, SET + [0, 0, HALF[2]])
+        high = np.array([VISE["x"] + 70, VISE["fixed_face_y"] - self.opening0 - self.half[1] - 42, JAW_TOP + self.half[2] + 20])
+        over, above = self.set_down + [0, -6, 58], self.set_down + [0, -3, 12]
+        self.look(t0 - 0.6, self.set_down + [0, 0, self.half[2]])
         self.move_blank(t0, t0 + 0.9, np.eye(3), high)
         self.move_blank(t0 + 0.85, t0 + 1.6, np.eye(3), over)
         self.move_blank(t0 + 1.55, t0 + 2.05, np.eye(3), above)
         t_down = t0 + 2.55
-        self.move_blank(t0 + 2.05, t_down, np.eye(3), SET)
+        self.move_blank(t0 + 2.05, t_down, np.eye(3), self.set_down)
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.effort(t_down - 0.05, 1.0, grip)
         self.effort(t_down + 0.1, 0.0, grip)
@@ -404,13 +419,13 @@ class Take:
         decides)."""
         t0 = self.t
         g = self.grips[grip]
-        Hs, Ws = g["H_rel"], SET + g["W_rel"]
-        self.look(t0, SET + [0, HALF[1], HALF[2]])
+        Hs, Ws = g["H_rel"], self.set_down + g["W_rel"]
+        self.look(t0, self.set_down + [0, self.half[1], self.half[2]])
         self.transit(t0, t0 + approach, Ws, via=[Ws + [0, -25, 40]], fade=(Hs, 1.0))
         self.fingers(t0 + 0.2, open_like(self.hand, g["q"], 0.5))
         tc = t0 + approach
         self.fingers(tc, g["q"])
-        self.move_blank(tc + 0.15, tc + 0.15 + dur, np.eye(3), SET + [0, mm, 0])
+        self.move_blank(tc + 0.15, tc + 0.15 + dur, np.eye(3), self.set_down + [0, mm, 0])
         self.add(tc, tc + dur + 0.35, lambda t: [("pose", Hs, self.blank_at(t)[1] + g["W_rel"], 3.0)])
         self.effort(tc, 0.0, grip)
         self.effort(tc + 0.12, 0.6, grip)
@@ -422,7 +437,7 @@ class Take:
         self.event("press", tc + 0.1, tc + dur + 0.2, normal=[0, -1.0, 0], force=push_N, contact="blank")
         t1 = tc + dur + 0.35
         self.fingers(t1 - 0.1, g["q"])
-        W_end = HOME + g["W_rel"]
+        W_end = self.home + g["W_rel"]
         self.wrist = W_end
         self.fingers(t1 + 0.3, open_like(self.hand, g["q"], 0.5))
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
@@ -434,8 +449,8 @@ class Take:
         physics pushes the wrist until the contact force reaches it."""
         t0 = self.t
         g = self.grips[grip]
-        Hp, Wp = g["H_rel"], HOME + g["W_rel"]
-        self.look(t0, HOME + [0, 0, HALF[2]])
+        Hp, Wp = g["H_rel"], self.home + g["W_rel"]
+        self.look(t0, self.home + [0, 0, self.half[2]])
         self.transit(t0, t0 + approach, Wp, via=[Wp + [0, -20, 45]], fade=(Hp, 1.0))
         self.fingers(t0 + 0.2, open_like(self.hand, g["q"], 0.4))
         tc = t0 + approach
@@ -484,7 +499,7 @@ class Take:
             t_c1, t_t1 = t_c0, t_c0 + 0.75
             plan = dict(t0=t_c0, t1=t_c1, t2=t_t1, phi0=phi_g, phi_c=phi_g, phi_t=phi_g + tighten_deg)
         else:
-            phi_c = crank_for_opening(BLANK[1])
+            phi_c = crank_for_opening(self.size[1], self.opening0)
             turns = (phi_c - phi_g) / 360.0
             t_c1 = t_c0 + turns / rev_s
             t_t1 = t_c1 + 0.8
@@ -542,11 +557,11 @@ class Take:
         t0 = self.t
         for i, name in enumerate(parallels):
             g = self.grips[f"tip_{name}"]
-            Hm, Wm = g["H_rel"], PARALLELS[name] + g["W_rel"]
+            Hm, Wm = g["H_rel"], self.parallels[name] + g["W_rel"]
             ta = self.t
             # reach time grows with distance (Fitts-like): about 1 m/s peak for the long reach from the crank
             dur = float(np.clip(0.5 + np.linalg.norm(Wm - self.wrist) / 600.0, 0.9, 1.5))
-            self.look(ta - 0.3, PARALLELS[name] + [HALF[0] + 12, 0, PAR_H])
+            self.look(ta - 0.3, self.parallels[name] + [self.half[0] + 12, 0, self.par_h])
             self.transit(ta, ta + dur, Wm, via=[Wm + [10, -20, 50]], fade=(Hm, 1.0))
             self.fingers(ta + 0.3, open_like(self.hand, g["q"], 0.3))
             tc = ta + dur
@@ -634,7 +649,7 @@ class Take:
         holding = self.intervals("hold_object")
         for k in range(n):
             t = k / FPS
-            s.load[k] = 0.8 if any(e["t0"] + 0.4 <= t < e["t1"] - 0.1 for e in holding) else 0.0
+            s.load[k] = self.kg if any(e["t0"] + 0.4 <= t < e["t1"] - 0.1 for e in holding) else 0.0
         for c, h, a, b in self.hand_boxes + [(self.hand_boxes[-1][0], self.hand_boxes[-1][1], self._knob_free_from, 1e9)]:
             mask = torch.as_tensor([1.0 if a <= k / FPS < b else 0.0 for k in range(n)], dtype=torch.float64)
             s.hand_boxes.append((torch.as_tensor(c, dtype=torch.float64), torch.as_tensor(h, dtype=torch.float64), mask))
@@ -646,7 +661,7 @@ class Take:
         self._knob_tables()
 
     def load_solution(self, path=None):
-        d = np.load(path or OUT / "reference.npz")
+        d = np.load(path or self.out / "reference.npz")
         self.theta, self.dp = d["theta"], d["dp"]
         self.T = self.t + 0.3
         self.n = len(self.theta)
@@ -686,18 +701,19 @@ class Take:
         rows = [self.sample(k / FPS) for k in range(self.n)]
         eyes, looks, ups = head_camera(self, self.theta, self.dp)
         blank = [self.blank_at(r["t"]) for r in rows]
-        np.savez(OUT / "reference.npz", t=np.array([r["t"] for r in rows]), q=np.stack([r["q"] for r in rows]),
+        np.savez(self.out / "reference.npz", t=np.array([r["t"] for r in rows]), q=np.stack([r["q"] for r in rows]),
                  H=np.stack([r["H"] for r in rows]), W=np.stack([r["W"] for r in rows]), S=np.stack([r["S"] for r in rows]),
                  E=np.stack([r["E"] for r in rows]), forearm=np.stack([r["F"] for r in rows]), theta=self.theta, dp=self.dp,
                  blank=np.stack([b[1] for b in blank]), blank_R=np.stack([b[0] for b in blank]),
                  crank=np.array([self.crank_angle(r["t"]) for r in rows]),
                  effort=np.array([r["effort"] for r in rows]), grip=np.array([r["grip"] or "" for r in rows]),
                  eye=eyes, look=looks, up=ups, names=np.array(self.hand.names), fps=FPS)
-        (OUT / "take.json").write_text(json.dumps({
+        (self.out / "take.json").write_text(json.dumps({
             "events": [{k: (v if not isinstance(v, np.ndarray) else v.tolist()) for k, v in e.items()} for e in self.events],
             "clips": self.clips, "T": self.T, "lumbar": LUMBAR.tolist(),
-            "parallels": {k: v.tolist() for k, v in PARALLELS.items()}, "home": HOME.tolist(), "set": SET.tolist(),
-            "crank_plans": self.crank_plans, "knob_pt_hand": self.knob_pt_hand.tolist(), "opening0": OPENING0}, indent=1),
+            "parallels": {k: v.tolist() for k, v in self.parallels.items()}, "home": self.home.tolist(), "set": self.set_down.tolist(),
+            "crank_plans": self.crank_plans, "knob_pt_hand": self.knob_pt_hand.tolist(), "opening0": self.opening0,
+            "load": self.load.to_json()}, indent=1),
             encoding="utf-8")
 
 
@@ -735,9 +751,10 @@ def head_camera(take, theta, dp):
     return sm(np.array(eyes)), sm(np.array(looks)), np.array(ups)
 
 
-def build(verbose=True, solve=True):
-    """Compose the take; solve=False loads the body trajectory already in reference.npz (for the physics)."""
-    take = Take(verbose)
+def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=None):
+    """Compose the take for a load into out; solve=False loads the body trajectory already in reference.npz (for the
+    physics)."""
+    take = Take(verbose, load, out, grips_from)
     take.grab()
     take.hold()
     take.place()

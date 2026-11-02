@@ -131,7 +131,10 @@ jobs:
           cache-dependency-path: moonshot/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r moonshot/requirements.txt
+        # torch first from the CPU index: PyPI's Linux wheel pulls ~2 GB of CUDA libraries the tests never use
+        run: |
+          pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r moonshot/requirements.txt
 
       - name: Bar check — a PR moves the bar or meets it, never both (plan §6, rule 1)
         # Empty on a push (no pull_request payload): the check says so and passes. It is a PR-time control.

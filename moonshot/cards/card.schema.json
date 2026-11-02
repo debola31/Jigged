@@ -1,0 +1,73 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Usage card (plan §4): how a person uses one tool or machine control",
+ "type": "object",
+ "required": ["schema", "id", "name", "assets", "hands", "phases", "sources"],
+ "additionalProperties": false,
+ "properties": {
+  "schema": {"const": "jigged.card/1"},
+  "id": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+  "name": {"type": "string"},
+  "assets": {"type": "array", "minItems": 1, "items": {"type": "string"},
+             "description": "Asset or station record ids the card works with (moonshot/library/records, moonshot/library/stations)"},
+  "hands": {
+   "type": "object", "required": ["working"], "additionalProperties": false,
+   "properties": {"working": {"$ref": "#/$defs/hand"}, "steadying": {"$ref": "#/$defs/hand"}}
+  },
+  "phases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/phase"}},
+  "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}},
+  "motion": {"type": "string", "description": "The planner code that turns this card into a take, module:function"},
+  "notes": {"type": "string"}
+ },
+ "$defs": {
+  "grasp": {
+   "description": "A grasp from the 33-type GRASP taxonomy (Feix et al. 2016), or a non-prehensile contact",
+   "enum": ["large_diameter", "small_diameter", "medium_wrap", "adducted_thumb", "light_tool", "prismatic_4_finger",
+            "prismatic_3_finger", "prismatic_2_finger", "palmar_pinch", "power_disk", "power_sphere", "precision_disk",
+            "precision_sphere", "tripod", "fixed_hook", "lateral", "index_finger_extension", "extension_type",
+            "distal_type", "writing_tripod", "tripod_variation", "parallel_extension", "adduction_grip", "tip_pinch",
+            "lateral_tripod", "sphere_4_finger", "quadpod", "sphere_3_finger", "stick", "palmar", "ring", "ventral",
+            "inferior_pincer",
+            "fingertip_press", "flat_press", "thumb_push", "none"]
+  },
+  "hand": {
+   "type": "object", "required": ["side", "role"], "additionalProperties": false,
+   "properties": {
+    "side": {"enum": ["R", "L"]},
+    "role": {"type": "string", "description": "What this hand does, in a few words"},
+    "grasps": {"type": "object", "additionalProperties": {"$ref": "#/$defs/grasp"},
+               "description": "The grasp used on each thing it holds or touches, keyed by what it is"},
+    "contacts": {"type": "array", "items": {
+     "type": "object", "required": ["digit", "on"], "additionalProperties": false,
+     "properties": {"digit": {"enum": ["thumb", "index", "middle", "ring", "little", "palm"]},
+                    "on": {"type": "string"}}}}
+   }
+  },
+  "phase": {
+   "type": "object", "required": ["phase", "what"], "additionalProperties": false,
+   "properties": {
+    "phase": {"enum": ["reach", "preshape", "grasp", "adjust", "transport", "operate", "release", "check"]},
+    "what": {"type": "string"},
+    "action": {"enum": ["press", "pull", "push", "turn", "slide", "squeeze", "roll", "lift", "place", "wipe", "blow",
+                        "read", "feel"]},
+    "on": {"type": "string", "description": "The affordance acted on"},
+    "force_n": {"oneOf": [{"type": "number"}, {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}]},
+    "travel_mm": {"type": "number"},
+    "turns": {"type": "number"},
+    "duration_s": {"oneOf": [{"type": "number"}, {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}]},
+    "ends_on": {"type": "string", "description": "What tells the hand to stop: a force, a feel, a reading"},
+    "source": {"type": "integer", "minimum": 0, "description": "Index into sources for this phase's numbers"}
+   }
+  },
+  "source": {
+   "type": "object", "required": ["kind", "ref", "gives"], "additionalProperties": false,
+   "properties": {
+    "kind": {"enum": ["maker", "study", "footage", "dataset", "practice"]},
+    "ref": {"type": "string"},
+    "url": {"type": "string"},
+    "file": {"type": "string", "description": "A measurement file in the repo taken from it (footage stays in the data root)"},
+    "gives": {"type": "string"}
+   }
+  }
+ }
+}

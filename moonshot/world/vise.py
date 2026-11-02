@@ -24,6 +24,11 @@ OPENING0 = 90.0
 CRANK0_DEG = 55.0
 BLANK_KG = 2700 * float(np.prod(BLANK)) * 1e-9          # 6061 aluminium
 
+def crank_for_opening(opening: float) -> float:
+    """The crank angle (deg) at which the jaws stand this far apart (mm)."""
+    return CRANK0_DEG + (OPENING0 - opening) / VISE["lead"] * 360.0
+
+
 STEEL_DEFAULT = """    <default class="steel">
       <!-- metal on metal: as stiff as the 1 ms step allows (solref time constant = 2 steps) -->
       <geom contype="1" conaffinity="3" friction="0.25 0.004 0.0001" priority="1" solref="0.002 1"

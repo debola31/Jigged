@@ -11,7 +11,7 @@ from moonshot.validate.registry import Result, check
 
 @check("skin_penetration",
        good=["good/skin_penetration_load_blank.json"],
-       bad=["bad/skin_penetration_2mm_spike.json", "bad/skin_penetration_sustained.json"])
+       bad=["bad/skin_penetration_spike.json", "bad/skin_penetration_thin_fingers.json"])
 def skin_penetration(take: dict) -> Result:
     """take: {"depth_mm": [per-frame deepest skin vertex inside any solid]}."""
     limit = threshold("physics.skin_penetration_mm").value

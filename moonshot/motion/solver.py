@@ -36,7 +36,9 @@ from moonshot.config import data_root
 from moonshot.motion import kinematics as BM
 
 SPEC = json.loads(ANATOMY.read_text(encoding="utf-8"))
-WRIST_KNEE, WRIST_MAX = 0.8, 0.95      # ellipse units, 1.0 the edge
+# ellipse units, 1.0 the edge. A take planned to 0.95 held the wrist at 0.94 for two seconds while inspecting the part:
+# possible, but on review it read as bent too far (2026-11-02); people hold a part mid-range and turn the forearm
+WRIST_KNEE, WRIST_MAX = 0.55, 0.75
 
 
 def wrist_ellipse(fl, dv):

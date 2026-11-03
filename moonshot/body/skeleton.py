@@ -355,9 +355,11 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
   <!-- grasping settings from MuJoCo's own guidance, as trainual's accepted take used them: elliptic cones,
-       impratio 10, Newton, a tight tolerance, and noslip iterations so a held part doesn't creep out of the grip -->
+       impratio 10, Newton, a tight tolerance, and noslip iterations so a held part doesn't creep out of the grip.
+       Ten, not two: at two a parallel pinched under the clamped part by 20 N crept 1 mm sideways under a fingertip's
+       2 N, so whether it read as pinched depended on the run (0.07 mm at ten, 2026-11-03) -->
   <option timestep="0.001" integrator="implicitfast" solver="Newton" cone="elliptic" impratio="10"
-          tolerance="1e-10" iterations="60" ls_iterations="20" noslip_iterations="2" gravity="0 0 -9.81">
+          tolerance="1e-10" iterations="60" ls_iterations="20" noslip_iterations="10" gravity="0 0 -9.81">
     <flag multiccd="enable"/>
   </option>
   <default>

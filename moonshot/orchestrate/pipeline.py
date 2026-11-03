@@ -93,7 +93,15 @@ def main(argv: list[str]) -> int:
 
 def stored(path) -> str:
     """The file's sha256, put in the hub's blob store if it isn't there."""
-    digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    for attempt in range(20):
+        try:
+            data = open(path, "rb").read()
+            break
+        except PermissionError:          # Windows: another pipeline is replacing the same pack (pack.py _tar) this moment
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
+    digest = hashlib.sha256(data).hexdigest()
     if not (blob_dir(data_root()) / digest).exists():
         shutil.copyfile(path, blob_dir(data_root()) / digest)
     return digest

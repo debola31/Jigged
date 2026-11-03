@@ -202,18 +202,24 @@ class ViseTake:
         keep = np.concatenate([[True], np.diff(ang) > 1e-6])
         return float(np.interp(self.crank_cmd(tt, i, e), ang[keep], ts[keep]))
 
-    def aim_fingertip(self, parallel: str) -> np.ndarray:
-        """Aim the index pad onto the parallel's top face before a fingertip check, by sight: the sideways shift (m)
-        that brings the pad's nearest point onto the face's centre line, clear of the strip's ends."""
+    def aim_fingertip(self, parallel: str, normal) -> np.ndarray:
+        """Aim the index pad onto the face of the parallel a fingertip check presses: the shift (m) that brings the
+        pad's nearest point onto the face's centre line across the 3.1 mm strip, clear of the top's ends (pressing
+        down) or of the end face's edges (pushing along it). The press itself owns its own direction."""
         m, d, ft = self.model, self.data, np.zeros(6)
         mujoco.mj_geomDistance(m, d, m.geom("R_g_dis2").id, m.geom(parallel).id, 0.2, ft)
         R, c = d.body(parallel).xmat.reshape(3, 3), d.body(parallel).xpos
         local = R.T @ (ft[:3] - c)
-        half_len = m.geom(parallel).size[0]
-        goal = np.array([np.clip(local[0], -half_len + 0.015, half_len - 0.015), 0.0, local[2]])
+        half = m.geom(parallel).size
+        n = np.asarray(normal, float)
+        goal = local.copy()
+        goal[1] = 0.0
+        if abs(n[2]) > 0.5:                                # its top: clear of the strip's ends
+            goal[0] = np.clip(local[0], -half[0] + 0.015, half[0] - 0.015)
+        else:                                              # its end face: clear of the top and bottom edges
+            goal[2] = np.clip(local[2], -half[2] + 0.004, half[2] - 0.004)
         shift = R @ (goal - local)
-        shift[2] = 0.0                                     # the press itself owns the vertical
-        return shift
+        return shift - n * (n @ shift)
 
     def wrist_offset(self, tt) -> np.ndarray:
         """Wrist corrections in metres: visually guided placement, aiming a fingertip onto a parallel, and leaving /
@@ -228,7 +234,7 @@ class ViseTake:
         for i, e in enumerate(self.iv["press"]):
             if e["contact"] in ("para_a", "para_b") and e["t0"] - AIM_LEAD_S <= tt < e["t1"] + 0.3:
                 if i not in self.aim:
-                    self.aim[i] = self.aim_fingertip(e["contact"])
+                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"])
                 off += self.aim[i] * min_jerk((tt - (e["t0"] - AIM_LEAD_S)) / 0.25) * (1 - min_jerk((tt - e["t1"]) / 0.3))
         for j, e in enumerate(self.cranks):
             if tt >= e["t1"] and j in self.letgo:

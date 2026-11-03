@@ -1,5 +1,5 @@
 """Ported from trainual's motion/body_solver.py. Whole-motion body solver: trunk + arm joint angles for every frame at once, from task constraints, under a
-posture prior measured from people (GRAB, ARCTIC; the fitted mixture is in the data root, arm-prior/arm_prior.npz), joint ranges, gravity effort and smoothness.
+posture prior measured from people standing at work (AnDy; the fitted mixture is in the data root, arm-prior/standing_prior.npz), joint ranges, gravity effort and smoothness.
 
 Why a trajectory and not frame-by-frame IK: a person's arm doesn't pick the best posture for each instant;
 it moves economically (minimum effort and jerk) through postures that are typical for the task. The first
@@ -63,7 +63,8 @@ def wrist_inside(th):
 
 class ArmPrior:
     def __init__(self, path=None):
-        d = np.load(path or data_root() / "arm-prior" / "arm_prior.npz")
+        # people standing at work (moonshot/validate/standing_prior.py), as the posture checks hold a take to
+        d = np.load(path or data_root() / "arm-prior" / "standing_prior.npz")
         self.w = torch.as_tensor(d["weights"], dtype=torch.float64)
         self.mu = torch.as_tensor(d["means"], dtype=torch.float64)
         cov = torch.as_tensor(d["covs"], dtype=torch.float64)

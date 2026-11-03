@@ -13,7 +13,8 @@ the muscle check has nothing to read. The posture checks compare the run's angle
 from a prior only the data root holds. Those, and the cause, grasp timing, hand opening and footage checks, read the
 run's joint angles from sim.npz, which moonshot/sim/vise_take.py writes; a run that doesn't write it fails them.
 Machine axes, active constraints and applied forces, and the lifting force (checks.json machine_axes,
-active_constraints, applied_forces, load_N) are read as the run writes them, and the card a take plays from take.json's
+active_constraints, applied_forces, load_N) are read as the run writes them, a time-lapsed cycle take's machine clock
+and axes from its program.json (frame_machine_s, machine_axes), and the card a take plays from take.json's
 `card`; where the run or the plan doesn't write one yet, its check fails.
 """
 from __future__ import annotations
@@ -44,9 +45,13 @@ def wrists(rec) -> list[list[float]]:
 
 
 def inputs(take: Path) -> dict:
-    out = {"wrist_deg": wrists(np.load(take / "take.npz"))}
+    rec = np.load(take / "take.npz")
+    out = {"wrist_deg": wrists(rec), "fps": float(rec["fps"])}
     if (take / "checks.json").exists():
         out |= json.loads((take / "checks.json").read_text(encoding="utf-8"))
+    if (take / "program.json").exists():                # a time-lapsed cycle take: the machine's own clock and axes
+        program = json.loads((take / "program.json").read_text(encoding="utf-8"))
+        out |= {k: program[k] for k in ("frame_machine_s", "machine_axes") if k in program}
     out["depth_mm"] = depth_mm(take)
     if not (take / "sim.npz").exists():
         return out                                  # the checks below have nothing to read, so they fail

@@ -16,8 +16,9 @@
 Declared shortcut: `clamped`, the part welded to the table, standing in for the vise's clamp (the Seat step's take
 proves the clamp: moonshot/tests/gates/test_vise_take.py). Nothing in these steps pushes on the part.
 
-The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle and the
-right hand's wrench, and the never-held E-stop) and outcome.json (the machine at the end: its offsets, tool lengths
+The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle, the
+right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
+the never-held E-stop) and outcome.json (the machine at the end: its offsets, tool lengths
 and every key it registered). moonshot/tests/gates/test_setting_takes.py reads them.
 """
 from __future__ import annotations
@@ -99,7 +100,9 @@ class PendantRunner(TakeRunner):
         self.key_at = {k: d.site(f"vf2_key_{k}").xpos.copy() for k in self.key_names}
         self.key_at |= {b: d.site(f"vf2_{b}").xpos.copy() for b in ("cycle_start", "feed_hold")}
         self.index_pad = {s: m.geom(f"{s}_g_dis2").id for s in ("R", "L")}
-        self.rec = {"touching": [], "handle_deg": [], "hand_wrench": [], "machine_mm": [], "key_n": []}
+        self.rec = {"touching": [], "handle_deg": [], "hand_wrench": [], "machine_mm": [], "key_n": [],
+                    "active_constraints": [], "applied_forces": [], "machine_axes": {f"vf2_{a}": [] for a in
+                                                                                       ("x", "y", "z", "spindle")}}
         self._key_n: dict[str, float] = {}
         self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM]) for s in ("R", "L")}
         act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
@@ -277,6 +280,12 @@ class PendantRunner(TakeRunner):
         self.rec["hand_wrench"].append(self.hand_wrench())
         self.rec["machine_mm"].append(self.machine.machine_mm().round(4).tolist())
         self.rec["key_n"].append({k: round(v, 2) for k, v in self._key_n.items()})
+        self.rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
+        self.rec["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
+        for a in ("x", "y", "z"):
+            self.rec["machine_axes"][f"vf2_{a}"].append(round(float(d.qpos[self.machine.q[a]]) * 1000, 4))
+        sp = m.jnt_dofadr[m.joint("vf2_spindle").id]
+        self.rec["machine_axes"]["vf2_spindle"].append(round(float(d.qvel[sp]) * 60 / (2 * math.pi), 1))
 
     def outcome(self) -> dict:
         c = self.machine
@@ -295,6 +304,7 @@ class PendantRunner(TakeRunner):
     def export(self, folder: Path | None = None) -> None:
         folder = Path(folder or self.folder)
         super().export(folder)
-        checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench")} | {"never_held": NEVER_HELD}
+        checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
+                                           "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

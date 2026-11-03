@@ -101,9 +101,10 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 - [x] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
   strength and couplings (§3.1). `moonshot/body/skeleton.py`, 2026-11-01: 59 motors, 14 coupled joints, 42.7 kg
-  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Both arms are planned since
-  2026-11-02 (the solver and grips, `test_body_mirror.py`, `test_two_arms.py`); the physics run and the render are
-  still right-hand only. Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
+  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Both arms are planned, run and
+  rendered since 2026-11-02: the solver and grips (`test_body_mirror.py`, `test_two_arms.py`), the two-handed plan
+  and physics run (`moonshot/motion/step_take.py`, `moonshot/sim/runner.py`, `test_step_take.py`) and the take
+  record any renderer draws both hands from (`moonshot/contracts/take_record.py`). Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
   top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
 - [ ] Two-joint muscle couplings: wrist bend moves the fingers (§3.1)
@@ -168,9 +169,11 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 - [x] Queue on the hub: SQLite, HTTP API, leases, content-addressed inputs, token auth (2026-11-01)
 - [x] Workers on all three machines: `hub-gtx1070` (CUDA, GPU only), `m1-pro`, `m4-max` (Metal). Since
-  2026-11-02 they run the production jobs too, so the farm's work shows on the dashboard: `vise_take` on the M1
-  (plan, physics, every check) and `bake_render` on the M4, a take rendered only once its checks pass
-  (`moonshot/orchestrate/jobs.py`, `pipeline.py`); and they start themselves at login (§1).
+  2026-11-02 they run the production jobs too, so the farm's work shows on the dashboard: each Mac has a CPU worker
+  (`m1-pro-cpu`, `m4-max-cpu`: `vise_take`, the skin bakes) beside its GPU worker, and every GPU takes frame ranges
+  of one take at once (`render_frames`, and the ported renderer's `take_render`), joined on the hub
+  (`encode_frames`); a take renders only once its checks pass (`moonshot/orchestrate/jobs.py`, `pipeline.py`); and
+  they start themselves at login (§1).
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
@@ -188,16 +191,16 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 |---|---|---|---|
 | A. Core | [ ] | [ ] | [ ] |
 | B. Catalogue | [ ] | [ ] | [ ] |
-| C1 (VF-2, Hurco VM1, …) | [ ] | [ ] | [ ] |
+| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); no CI run |
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
 | C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
-| E. Parts and plans | [ ] | [ ] | [ ] |
-| F. Web | [ ] | [ ] | [ ] |
-| G. Render production | [ ] | [ ] | [ ] |
+| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session) | [x] 2026-11-02 | [ ] op10 passes every check and verb gate (2026-11-02); op20–op40 running |
+| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] |
+| G. Render production | [x] `test_render_take.py`, `test_vise_render.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands; merged 2026-11-02, Cycles tuning next |
 
 ## 6. Milestones
 
@@ -216,7 +219,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 ## 7. Cloud reserve (only if the forecast slips past Nov 11)
 
 Prepare before Nov 4, so it's ready in minutes:
-- [ ] A worker image with the pinned Blender and the queue worker
+- [ ] A worker image with the pinned Blender and the queue worker: written (`moonshot/tools/cloud/`), not built
 - [ ] A reusable ephemeral Tailscale auth key
 
 Only when triggered, and only with your approval:

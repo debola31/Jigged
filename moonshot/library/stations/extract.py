@@ -19,6 +19,9 @@ is at z = 0 and it rests at any surface's height. The STEP's demonstration part 
 <data root>/library/<category>/<asset>/links/, beside the STEP's own asset.
 
     python -m moonshot.library.stations.extract vf2
+
+The links come out as positions only. The VF-2's take their materials and normals from moonshot/render/dress.py,
+which rewrites them in place: after re-extracting the VF-2, run it again, or the render draws the machine unpainted.
 """
 from __future__ import annotations
 

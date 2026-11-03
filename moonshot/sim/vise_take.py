@@ -5,8 +5,8 @@ so every wrist correction trainual made becomes joint angles through the arm's J
 limits apply throughout. The phase logic is trainual's sim/run_take.py, per event kind:
 - grip: the touching fingers squeeze along their pads' into-surface directions, scaled by the take's effort, with
   finger stiffness rising with effort (co-contraction);
-- hold_object / place_correct: the blank is held by friction alone; once lifted, the hand corrects for where the
-  blank really sits in the grip (visually guided placement), eased out after letting go;
+- hold_object / place_correct: the blank is held by friction alone; once lifted, and again after the hold, the hand
+  corrects for where the blank really sits in the grip (visually guided placement), eased out after letting go;
 - press: force control, the wrist target driven along the press normal until the contact force reaches the
   verb's force (integral control);
 - enclose: the knob is kept in the closed hand by a declared soft constraint (capsule fingers can't conform
@@ -36,7 +36,7 @@ from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
 SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for capsules 4-5 mm inside them
-STIFFEN = 4.0
+STIFFEN = 4.0              # the hand's co-contraction at full effort, for the reference part; heavier parts brace more
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
 VISUAL_MAX = 0.015        # ... by at most this much (m)
@@ -82,6 +82,9 @@ class ViseTake:
         parallels = {n: np.array(p) for n, p in self.tk["parallels"].items()}
         # what is loaded; trainual's take.json predates the field, and its load is the reference
         self.load = V.Load.from_json(self.tk["load"]) if "load" in self.tk else V.REFERENCE
+        # people co-contract harder for a heavier part (grip force and stiffness rise with load): with the square root
+        # of its weight over the reference part's, so the reference take is unchanged
+        self.stiffen = STIFFEN * max(1.0, self.load.mass_kg / V.REFERENCE.mass_kg) ** 0.5
         # the blank starts at the load's stage; reference.npz frame 0 wrongly has it in the vise (frames 1+ and
         # trainual's sim agree)
         self.xml = cell.with_body(self.body.xml, self.load.stage, parallels, "R_hand", self.load)
@@ -128,7 +131,9 @@ class ViseTake:
         self.intended = np.zeros(3)
         self.contact_label: set[str] = set()
         self.letgo, self.reach_off = {}, {}
-        self.offset, self.offset_t = None, 0.0
+        self.offsets: list[tuple[float, np.ndarray]] = []   # (time, the wrist correction the part's place in the hand asks)
+        hold = [c for c in self.tk["clips"] if c["verb"] == "hold"]
+        self.resight_t = hold[0]["t1"] if hold else None    # looked at again before it is set down
         z = self.rd["blank"][:, 2].copy()
         z[0] = z[1]                                        # frame 0's glitch (see above)
         self.t_lift = float(self.t[np.argmax(z > self.load.stage[2] + 1.0)])
@@ -202,9 +207,12 @@ class ViseTake:
         """Wrist corrections in metres: visually guided placement, aiming a fingertip onto a parallel, and leaving /
         reaching the real knob."""
         off = np.zeros(3)
-        if self.offset is not None:
+        if self.offsets:
             end = self.iv["place_correct"][0]["t1"]
-            off += self.offset * min_jerk((tt - self.offset_t) / 0.4) * (1 - min_jerk((tt - end) / 0.5))
+            prev = np.zeros(3)
+            for t_m, o in self.offsets:                      # each sighting blends in over 0.4 s
+                off += (o - prev) * min_jerk((tt - t_m) / 0.4) * (1 - min_jerk((tt - end) / 0.5))
+                prev = o
         for i, e in enumerate(self.iv["press"]):
             if e["contact"] in ("para_a", "para_b") and e["t0"] - AIM_LEAD_S <= tt < e["t1"] + 0.3:
                 if i not in self.aim:
@@ -450,7 +458,7 @@ class ViseTake:
         target[self.body_q] += dq[self.body_dof]
         precise = grip in PRECISION                    # accuracy demands raise co-contraction (Gribble et al. 2003)
         k = np.full(len(self.acts), 1.0 + STIFFEN_ARM * (1.0 if precise and effort > 0 else effort))
-        k[self.hand_acts] = 1.0 + STIFFEN * effort
+        k[self.hand_acts] = 1.0 + self.stiffen * effort
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
         d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
@@ -543,8 +551,10 @@ class ViseTake:
                     kk = min(len(self.t) - 1, int(round(e["t1"] * fps)))
                     real = self.ref_wrist(self.plan_time_for_phi(e, self.phi_hold[j]))
                     self.letgo[j] = real - rd["W"][kk] * 0.001
-            if self.offset is None and self.iv["place_correct"] and tk >= self.iv["place_correct"][0]["t0"]:
-                self.offset, self.offset_t = self.measure_offset(k), tk
+            if not self.offsets and self.iv["place_correct"] and tk >= self.iv["place_correct"][0]["t0"]:
+                self.offsets.append((tk, self.measure_offset(k)))
+            elif len(self.offsets) == 1 and self.resight_t is not None and tk >= self.resight_t:
+                self.offsets.append((tk, self.measure_offset(k)))
             grip = str(rd["grip"][k])
             effort = float(rd["effort"][k])
             self.set_contact_coupling(grip)
@@ -635,8 +645,11 @@ class ViseTake:
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
         (Path(path).parent / "checks.json").write_text(
             json.dumps({"touching": rec["touching"], "never_held": NEVER_HELD}), encoding="utf-8")
+        glbs = glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        for body, entries in V.render_glbs().items():
+            glbs.setdefault(body, []).extend(entries)
         self.recorder.write(Path(path).parent, self.fps, self.tk["lumbar"][0], {"R": [str(x) for x in rd["names"]]},
-                            "vf2", glbs_in_bodies(self.model, "vf2", vf2.render_links()))
+                            "vf2", glbs, V.render_meshes(self.load, Path(path).parent))
 
     def plan_time_for_phi(self, e, phi):
         k0, k1 = (int(np.searchsorted(self.t, x)) for x in (e["t0"], e["t1"]))

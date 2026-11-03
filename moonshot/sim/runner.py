@@ -43,8 +43,10 @@ class TakeRunner:
     station = ""
     grip_geoms: dict[str, str] = {}
     # grips whose object the closed hand holds by a declared soft constraint, as the vise take does the crank's knob:
-    # the capsule fingers can't conform to it. grip -> the held body
+    # the capsule fingers can't conform to it. grip -> the held body; welded grips also hold its orientation (a tool
+    # held in the fist), the rest only its place (a knob spins in the fist; a door's bar turns with its door)
     encloses: dict[str, str] = {}
+    welded: set[str] = set()
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -54,8 +56,9 @@ class TakeRunner:
         self.body = build(pelvis_mm=tuple(self.lumbar))
         self.grip_events = [e for e in self.tk["events"] if e["kind"] == "grip" and e.get("grip") in self.encloses]
         xml = self.scene(self.body.xml)
-        eq = "".join(f'    <connect name="enclose_{e["grip"]}" body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" '
-                     f'anchor="0 0 0" active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+        eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="enclose_{e["grip"]}" '
+                     f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
+                     f'solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
                      for e in {e["grip"]: e for e in self.grip_events}.values())
         xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
         m = self.model = mujoco.MjModel.from_xml_string(xml)
@@ -111,6 +114,12 @@ class TakeRunner:
         """Bodies drawn from meshes the step writes into the take's folder (take_record.py "meshes")."""
         return {}
 
+    def planned_relpose(self, grip: str):
+        """For a welded grip: the hand body's pose in the object's frame as the grip plans it (metres, rotation),
+        so the weld holds the object where the grip puts it in the hand, not wherever the hand happens to be when the
+        fingers close, as the vise take holds the knob. None: hold it as it is."""
+        return None
+
     def hand_force(self, side: str, t: float) -> np.ndarray | None:
         """The force (N, world) the step expects this hand to exert on what it works at t: fed forward through the
         arm, as people anticipate a load they know (a door's friction and weight)."""
@@ -159,11 +168,36 @@ class TakeRunner:
                 hb, ob = m.body(f"{e['side']}_hand").id, m.body(self.encloses[e["grip"]]).id
                 Rh = d.xmat[hb].reshape(3, 3) @ H0
                 P = d.xpos[hb] + Rh @ FIST_MM * 0.001
-                m.eq_data[eq, 0:3] = d.xmat[ob].reshape(3, 3).T @ (P - d.xpos[ob])
-                m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (P - d.xpos[hb])
+                Ro, Rb = d.xmat[ob].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+                if e["grip"] in self.welded:            # the hand's pose in the object's frame: as planned, or as now
+                    rel = self.planned_relpose(e["grip"])
+                    p_rel, R_rel = rel if rel is not None else (Ro.T @ (d.xpos[hb] - d.xpos[ob]), Ro.T @ Rb)
+                    m.eq_data[eq, 0:3] = Rb.T @ (P - d.xpos[hb])
+                    m.eq_data[eq, 3:6] = p_rel
+                    qr = np.zeros(4)
+                    mujoco.mju_mat2Quat(qr, np.ascontiguousarray(R_rel).reshape(-1))
+                    m.eq_data[eq, 6:10] = qr
+                    self.hold_apart(ob, True)
+                else:
+                    m.eq_data[eq, 0:3] = Ro.T @ (P - d.xpos[ob])
+                    m.eq_data[eq, 3:6] = Rb.T @ (P - d.xpos[hb])
                 d.eq_active[eq] = 1
             elif not want and d.eq_active[eq]:
                 d.eq_active[eq] = 0
+                if e["grip"] in self.welded:
+                    self.hold_apart(m.body(self.encloses[e["grip"]]).id, False)
+
+    def hold_apart(self, body: int, held: bool) -> None:
+        """While a welded grip holds a tool, the hand's skin and the tool don't collide (the constraint stands for
+        their contact); the tool still collides with everything else."""
+        m = self.model
+        gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body]
+        if held:
+            self._apart = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
+            m.geom_contype[gs], m.geom_conaffinity[gs] = 4, 1          # skin is contype 2, conaffinity 1
+        else:
+            for g, (ct, ca) in self._apart.items():
+                m.geom_contype[g], m.geom_conaffinity[g] = ct, ca
 
     def step(self, t: float) -> None:
         m, d, p = self.model, self.data, self.plan

@@ -162,7 +162,7 @@ class CycleStart(StepTake):
     def __init__(self, out=TAKES / "cycle-start", verbose=True):
         super().__init__(out, START_LUMBAR, verbose)
         self.button = ORIGIN + np.array(vf2.record()["affordances"]["cycle_start"]["at_mm"], float)
-        self.solve_grips({"cycle_start": self.press_spec()})
+        self.solve_grips({"cycle_start": self.press_spec()}, source=self.press_spec)
 
     def press_spec(self) -> dict:
         h = self.hand

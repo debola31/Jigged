@@ -41,7 +41,9 @@ class Worker:
                  handlers: dict[str, Handler], lease_ahead: int = 2, options: dict | None = None):
         self.name, self.capabilities, self.token, self.hub = name, capabilities, token, hub.rstrip("/")
         self.handlers, self.lease_ahead, self.options = handlers, lease_ahead, options or {}
-        self.cache, self.outbox = home / "cache", home / "outbox"
+        # each worker's own outbox: two on one machine (a GPU and a CPU worker) sharing one, one sent and deleted a
+        # result the other was about to, and the other crashed on the missing file (the hub's GPU worker, 2026-11-03)
+        self.cache, self.outbox = home / "cache", home / "outbox" / name
         self.cache.mkdir(parents=True, exist_ok=True)
         self.outbox.mkdir(parents=True, exist_ok=True)
         self.held: list[dict] = []
@@ -111,14 +113,17 @@ class Worker:
     def flush(self) -> int:
         sent = 0
         for p in sorted(self.outbox.glob("*.json")):
-            msg = json.loads(p.read_text())
+            try:
+                msg = json.loads(p.read_text())
+            except FileNotFoundError:                     # already sent
+                continue
             try:
                 self._request("/complete" if msg["op"] == "complete" else "/fail",
                               {"worker": self.name, "job": msg["job"],
                                **({"result": msg["result"]} if msg["op"] == "complete" else {"error": msg["error"]})})
             except HubUnreachable:
                 break
-            p.unlink()
+            p.unlink(missing_ok=True)
             sent += 1
         return sent
 

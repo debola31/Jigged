@@ -138,6 +138,20 @@ def test_in_handle_jog_each_detent_moves_the_selected_axis_by_the_increment(vf2)
     assert ctl.machine_mm()[2] - x0[2] == pytest.approx(-4 * 0.1 * INCH, abs=0.002)
 
 
+def test_the_handle_jogs_no_axis_past_its_travel_and_turning_back_moves_it_at_once(vf2):
+    """As Haas's travel limits: clicks that would carry an axis past its end move nothing and aren't kept, so the
+    first click back moves the axis (here Z, at home at the top of its travel)."""
+    m, d = vf2
+    ctl = Control(m, d)
+    for k in ("handle_jog", "+z", "inc_0.1"):
+        _press(ctl, k)
+    assert ctl.machine_mm()[2] == pytest.approx(0.0, abs=0.002)
+    _turn(m, d, ctl, 5)
+    assert ctl.machine_mm()[2] == pytest.approx(0.0, abs=0.002)
+    _turn(m, d, ctl, -3)
+    assert ctl.machine_mm()[2] == pytest.approx(-3 * 0.1 * INCH, abs=0.002)
+
+
 def test_outside_handle_jog_the_handle_moves_nothing(vf2):
     m, d = vf2
     ctl = Control(m, d)

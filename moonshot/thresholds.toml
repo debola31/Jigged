@@ -166,3 +166,23 @@ value = 0.5
 unit = "mm"
 source = "proposed"
 reason = "Jaw travel matches crank turns x screw lead within this, the rest being contact compliance (the reference take: 0.5 mm)"
+
+# --- Setting a part up on the machine: work offsets and tool lengths (plan §4: vf2-controls, vf2-tool-setter) ---
+
+[setting.edge_finder_mm]
+value = 0.03
+unit = "mm"
+source = "proposed"
+reason = "The edge finder trips within one click at .001 in (0.0254 mm), the finest the vf2-controls card jogs it; the tip itself repeats to 0.0002 in"
+
+[setting.probe_mm]
+value = 0.01
+unit = "mm"
+source = "proposed"
+reason = "The OMP40-2 repeats to 1 um (Renishaw); the rest allows for the axes' servos settling as it touches"
+
+[setting.touch_off_mm]
+value = 0.13
+unit = "mm"
+source = "proposed"
+reason = "Touched off on paper about 0.1 mm thick, which neither of the vf2-controls card's sources subtracts, plus a click at .0001 in"

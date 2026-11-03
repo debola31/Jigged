@@ -14,6 +14,6 @@ function Start-Farm($module, $arguments, $log) {
 
 Start-Farm "moonshot.orchestrate.hub" "" "hub"
 Start-Sleep -Seconds 5
-Start-Farm "moonshot.orchestrate.worker" ("--name hub-gtx1070 --kinds noop,probe,blender_bench,render_frames,take_render," +
+Start-Farm "moonshot.orchestrate.worker" ("--name hub-gtx1070 --kinds noop,probe,blender_bench,take_render," +
     "encode_frames --gpu-mem 8 --device CUDA --blender C:\blender\blender-5.2.3-windows-x64\blender.exe " +
     "--trainual C:\jigged-data\renderer\trainual") "worker-hub"

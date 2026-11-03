@@ -70,11 +70,17 @@ def import_glb(path: Path, parent, local: Matrix, body: str, kind: str) -> list:
     bpy.ops.import_scene.gltf(filepath=str(path))
     new = [o for o in bpy.data.objects if o not in before]
     holder = link(bpy.data.objects.new(f"{kind}:{body}:{path.stem}", None), parent, local @ UNDO_Y_UP)
+    vf2 = "machines/vf2/" in path.as_posix()
     for o in new:
         if o.parent is None:
             o.parent = holder
         if o.type == "MESH":
             tag(o, body, kind)
+            if not o.data.materials:                    # unpainted CAD: bare steel, not Cycles' white
+                o.data.materials.append(look.bare_steel())
+            for m in o.data.materials:                  # a CAD export's mat_N is the VF-2's only on the VF-2
+                if m and m.name.startswith("mat_") and not vf2:
+                    m.name = f"{path.stem}_{m.name}"
     return [o for o in new if o.type == "MESH"]
 
 

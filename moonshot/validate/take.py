@@ -7,7 +7,14 @@ because a skipped check is how the skin-depth check went unrun.
 The take directory holds the physics run as a take record (take.npz and scene.json,
 moonshot/contracts/take_record.py), which any runner writes, and checks.json, what the checks read that the record
 doesn't carry. The wrists and the skin's depth are measured from the record (moonshot/validate/skin.py), not read
-from the render's bake, so the checks need nothing the render makes.
+from the render's bake, so the checks need nothing the render makes. The muscles' activations come from replaying the
+run in MyoSuite (moonshot/validate/muscle.py), which needs the load on the hand (checks.json hand_wrench): without it
+the muscle check has nothing to read. The posture checks compare the run's angles with people's (validate/posture.py),
+from a prior only the data root holds. Those, and the cause, grasp timing, hand opening and footage checks, read the
+run's joint angles from sim.npz, which moonshot/sim/vise_take.py writes; a run that doesn't write it fails them.
+Machine axes, active constraints and applied forces, and the lifting force (checks.json machine_axes,
+active_constraints, applied_forces, load_N) are read as the run writes them, and the card a take plays from take.json's
+`card`; where the run or the plan doesn't write one yet, its check fails.
 """
 from __future__ import annotations
 
@@ -17,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
+from moonshot.validate import cause, footage, grasp_timing, hand_opening, muscle, posture
 from moonshot.validate.registry import Result, load_all
 from moonshot.validate.skin import depth_mm
 
@@ -40,6 +48,14 @@ def inputs(take: Path) -> dict:
     if (take / "checks.json").exists():
         out |= json.loads((take / "checks.json").read_text(encoding="utf-8"))
     out["depth_mm"] = depth_mm(take)
+    if not (take / "sim.npz").exists():
+        return out                                  # the checks below have nothing to read, so they fail
+    if "hand_wrench" in out:
+        out |= muscle.measure(take)
+    if posture.PRIOR.exists():
+        out |= posture.measure(np.load(take / "sim.npz")["theta"][:, :10])
+    for check_inputs in (cause.measure, grasp_timing.measure, hand_opening.measure, footage.measure):
+        out |= check_inputs(take)
     return out
 
 

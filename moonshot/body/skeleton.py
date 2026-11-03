@@ -1,10 +1,11 @@
 """The body model in MuJoCo: trunk, shoulder girdles, both arms and both hands, every joint a motor (plan §3.1).
 
 Built like a robot arm. Every segment is a rigid body with its real length and mass; every joint is a position
-servo whose range, strength and top speed come from measurements of people (moonshot/body/data). Joints that move
-together in people are coupled by soft joint equalities, and the joint that follows a coupling has no motor of its
-own, so the coupling can't be fought. Nothing is animated: motion is the motors driving this skeleton, and objects
-move only through contact and friction.
+servo whose range, strength and top speed come from measurements of people (moonshot/body/data), its strength
+varying with angle and speed (`StrengthCurve`). Joints that move together in people are coupled by soft joint
+equalities, and the joint that follows a coupling has no motor of its own, so the coupling can't be fought. The
+two-joint finger muscles are the exception: a spring across the wrist and each finger joint, which effort overrides.
+Nothing is animated: motion is the motors driving this skeleton, and objects move only through contact and friction.
 
 Angles are anatomical (degrees, 0 = straight, + = flexion/abduction, as trainual's motion/body_model.py and
 motion/hand_model.py define them); MuJoCo's qpos is the angle minus the joint's rest angle, in radians. World
@@ -18,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -38,10 +40,73 @@ SHOULDER = [("sh_plane", (0, 0, 1)), ("sh_elev", (0, -1, 0)), ("sh_rot", (0, 0, 
 ELBOW = [("elbow", (1, 0, 0)), ("pron", (0, 0, 1))]
 WRIST = [("wr_flex", (0, 1, 0)), ("wr_dev", (1, 0, 0))]
 WRIST_FACETS = 32
+FINGERS = ("index", "middle", "ring", "little")
 
 
 def _load(name: str) -> dict:
     return json.loads((DATA / name).read_text(encoding="utf-8"))
+
+
+@dataclass(frozen=True)
+class StrengthCurve:
+    """A motor's strength in one direction as a fraction of its peak (strength.json curves): by the joint's own angle
+    (degrees) and shortening speed (deg/s), and for the long finger flexors by the wrist's flexion too. Off the
+    measured grid it holds the nearest edge; a motor being stretched keeps its isometric strength."""
+    angle_deg: tuple[float, ...] = (0.0,)
+    speed_deg_s: tuple[float, ...] = (0.0,)
+    scale: tuple[tuple[float, ...], ...] = ((1.0,),)       # [speed][angle]
+    wrist_deg: tuple[float, ...] = (0.0,)
+    wrist_scale: tuple[float, ...] = (1.0,)
+
+    def at(self, angle, speed, wrist=0.0) -> np.ndarray:
+        """Vectorised: speed is along the motor's push (negative: being stretched). Bilinear in angle and speed."""
+        a = np.atleast_1d(np.asarray(angle, float))
+        v = np.maximum(np.broadcast_to(np.asarray(speed, float), a.shape), 0.0)
+        angles, speeds, grid = self._arrays
+        ia, wa = self._cell(a, angles)
+        iv, wv = self._cell(v, speeds)
+        lo = grid[iv, ia] + (grid[iv, ia + 1] - grid[iv, ia]) * wa
+        hi = grid[iv + 1, ia] + (grid[iv + 1, ia + 1] - grid[iv + 1, ia]) * wa
+        s = lo + (hi - lo) * wv
+        return s * np.interp(wrist, self.wrist_deg, self.wrist_scale) if len(self.wrist_deg) > 1 else s
+
+    @cached_property
+    def _arrays(self):
+        """The grid padded by one repeated row and column, so a single-point axis interpolates like any other."""
+        g = np.array(self.scale, float)
+        return (np.array(self.angle_deg, float), np.array(self.speed_deg_s, float),
+                np.pad(g, ((0, 1), (0, 1)), mode="edge"))
+
+    @staticmethod
+    def _cell(x, grid):
+        """Each x's lower grid index and its fraction of the way to the next, held at the grid's ends."""
+        f = np.interp(x, grid, np.arange(len(grid), dtype=float))
+        i = np.floor(f).astype(int)
+        return i, f - i
+
+
+FLAT = StrengthCurve()
+
+
+def strength_curves(data: dict, key: str, kind: str) -> tuple[StrengthCurve, StrengthCurve]:
+    """The (against, along) curves for a strength key, from strength.json's `curves`. Slides have none."""
+    if kind != "hinge":
+        return FLAT, FLAT
+    C, out = data["curves"], []
+    for direction in ("against", "along"):
+        c = C.get(key, {}).get(direction)
+        if c:
+            T = np.array(c["torque_nm"], float)
+            curve = StrengthCurve(tuple(c["angle_deg"]), tuple(c["speed_deg_s"]), tuple(map(tuple, T / T[0].max())))
+        else:
+            curve = StrengthCurve(speed_deg_s=tuple(C["speed"]["speed_deg_s"]),
+                                  scale=tuple((x,) for x in C["speed"]["scale"]))
+        g = C["grip_by_wrist"]
+        if direction == "along" and key in g["applies_to"]:
+            curve = StrengthCurve(curve.angle_deg, curve.speed_deg_s, curve.scale, tuple(g["wrist_deg"]),
+                                  tuple(g["scale"]))
+        out.append(curve)
+    return out[0], out[1]
 
 
 @dataclass(frozen=True)
@@ -55,6 +120,7 @@ class Joint:
     speed: float | None             # top speed, deg/s or mm/s; None where no measurement is recorded (fingers)
     strength: tuple[float, float]   # peak effort against / along the positive direction, N m or N
     driven: bool                    # has its own motor; False for joints that follow a coupling
+    curves: tuple[StrengthCurve, StrengthCurve] = (FLAT, FLAT)     # strength by angle and speed: against, along
 
 
 @dataclass(frozen=True)
@@ -88,7 +154,7 @@ def hand_couplings(spec: dict) -> list[Coupling]:
     (Roda-Sales 2022), palm cupping CMC4 from ring MCP flexion and CMC5 from CMC4 (El-Shennawy 2001), thumb CMC
     roll into opposition from CMC flexion (Crisco 2015). Soft, so contact can bend them."""
     C = spec["coupling"]
-    out = [Coupling(f"{f}_dip", f"{f}_pip", C["dip_per_pip_free"][f]) for f in ("index", "middle", "ring", "little")]
+    out = [Coupling(f"{f}_dip", f"{f}_pip", C["dip_per_pip_free"][f]) for f in FINGERS]
     out += [Coupling("cmc4_flex", "ring_mcp_flex", C["cmc4_per_mcp"]),
             Coupling("cmc5_flex", "cmc4_flex", C["cmc5_per_cmc4"]),
             Coupling("thumb_cmc_roll", "thumb_cmc_flex", C["thumb_roll_per_cmc_flex"])]
@@ -133,6 +199,24 @@ def wrist_ellipse_tendons(body: BodyModel, side: str, wd: dict) -> list[str]:
     return out
 
 
+def tenodesis_tendons(body: BodyModel, side: str, td: dict) -> list[str]:
+    """Two-joint finger muscles (anatomy.json coupling.tenodesis): each finger's MCP and PIP pulled toward the angle
+    its long muscles leave it at for the wrist's flexion, a + b * wrist, by a spring along a fixed tendon of length
+    finger - b * wrist (qpos, radians), at rest length exactly there. A spring rather than an equality, so the finger's
+    motor overrides it as effort does, and the inverse dynamics the controller feeds forward includes its pull."""
+    w = body.joints[f"{side}_wr_flex"]
+    (w0, w1), out = td["wrist_deg"], []
+    for finger in FINGERS:
+        for joint in ("mcp_flex", "pip"):
+            f, (f0, f1) = body.joints[f"{side}_{finger}_{joint}"], td[joint]
+            b = (f1 - f0) / (w1 - w0)
+            rest = math.radians(f0 - b * w0 - f.rest + b * w.rest)
+            out.append(f'    <fixed name="{side}_tenodesis_{finger}_{joint}" stiffness="{td["stiffness_nm_per_rad"]}" '
+                       f'springlength="{rest:.6f} {rest:.6f}"><joint joint="{f.name}" coef="1"/>'
+                       f'<joint joint="{w.name}" coef="{-b:.6f}"/></fixed>')
+    return out
+
+
 def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = None) -> BodyModel:
     """The body model. load_kg > 0 puts a mass of that size rigidly in the right palm (a held object, for the
     strength tests). pelvis_mm places the lumbar pivot in the world (default: on the origin, at standing height)."""
@@ -151,7 +235,8 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     def add_joint(name, base, kind, axis, lo, hi, rest=0.0, speed=None) -> str:
         s = strength[strength_key(base)]["max"]
         body.joints[name] = Joint(name, base, kind, lo, hi, rest, speed, (float(s[0]), float(s[1])),
-                                  driven=base not in followers)
+                                  driven=base not in followers,
+                                  curves=strength_curves(strength_data, strength_key(base), kind))
         conv = (lambda x: math.radians(x - rest)) if kind == "hinge" else (lambda x: (x - rest) * M)
         heavy = base in speeds or base.startswith("pelvis")         # trunk, girdle, arm, pelvis vs the hand
         extra = ' damping="0.5" armature="0.01"' if heavy else ' damping="0.004" armature="0.00012"'
@@ -266,6 +351,7 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
         # ctrl is unlimited because it carries the controller's feedforward on top of the target; the controller
         # clamps targets to the joint's range, and forcerange is what caps the motor at the joint's strength
     tendons = [t for side in SIDES for t in wrist_ellipse_tendons(body, side, anatomy["wrist_deg"])]
+    tendons += [t for side in SIDES for t in tenodesis_tendons(body, side, anatomy["coupling"]["tenodesis"])]
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
   <!-- grasping settings from MuJoCo's own guidance, as trainual's accepted take used them: elliptic cones,

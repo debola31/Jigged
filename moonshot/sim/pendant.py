@@ -251,20 +251,24 @@ class PendantRunner(TakeRunner):
         m, d, dt = self.model, self.data, self.model.opt.timestep
         for s in ("R", "L"):
             # the next press within reach in time: the hand works toward it from the last one's end
-            near = [e for e in self.presses if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
+            near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
             if not near:
                 i *= 1 - dt / 0.2
                 continue
-            n = np.asarray(near[0]["normal"], float)
-            err = self.key_at[near[0]["key"]] - self.fingertip(s, n)
+            j, e = near[0]
+            n = np.asarray(e["normal"], float)
+            err = self.key_at[e["key"]] - self.fingertip(s, n)
             across = err - n * (err @ n)
             i += across * dt / AIM_TAU
             if np.linalg.norm(i) > AIM_MAX:
                 i *= AIM_MAX / np.linalg.norm(i)
             c = AIM_GAIN * across + i
-            if np.linalg.norm(across) > ALIGNED_MM / 1000 and self._key_n.get(near[0]["key"], 0.0) < TOUCH_N:
-                c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)      # off the face until over the key
+            # off the face until over the key; and once it has clicked, lifted off it: a finger left resting on the
+            # key, as the plan has it until the press ends, bounces about its release force and clicks it again
+            if j in self.press_done or (np.linalg.norm(across) > ALIGNED_MM / 1000 and
+                                        self._key_n.get(e["key"], 0.0) < TOUCH_N):
+                c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)
             g = self.index_pad[s]
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])

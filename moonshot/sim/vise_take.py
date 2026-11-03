@@ -121,7 +121,10 @@ class ViseTake:
         names = [m.actuator(a).name[2:] for a in self.acts]
         self.hand_acts = np.array([a for a, n in enumerate(names) if n.startswith("R_") and
                                    n[2:] not in ARM_JOINTS], dtype=int)
-        self.arm_dofs = np.array([m.jnt_dofadr[m.joint(f"R_{j}").id] for j in ARM_JOINTS])
+        # the corrections steer through the shoulder, elbow and wrist: the girdle's slides (sc_*), a few centimetres
+        # of travel, are the cheapest joints for a translation, took most of each correction and sat on their stops
+        # (the setting session's finding), and op30's hand stayed 28 mm off where the eye sent it
+        self.arm_dofs = np.array([m.jnt_dofadr[m.joint(f"R_{j}").id] for j in ARM_JOINTS if not j.startswith("sc_")])
         self.act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.digit_dofs = {dg: [m.jnt_dofadr[m.joint(n).id] for n in (m.joint(i).name for i in range(m.njnt))
                                 if n.startswith(f"R_{dg}_") and int(m.jnt_dofadr[m.joint(n).id]) in self.act_of_dof]

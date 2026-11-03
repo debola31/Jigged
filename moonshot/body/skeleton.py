@@ -45,6 +45,52 @@ def _load(name: str) -> dict:
 
 
 @dataclass(frozen=True)
+class StrengthCurve:
+    """A motor's strength in one direction as a fraction of its peak (strength.json curves): by the joint's own angle
+    (degrees) and shortening speed (deg/s), and for the long finger flexors by the wrist's flexion too. Off the
+    measured grid it holds the nearest edge; a motor being stretched keeps its isometric strength."""
+    angle_deg: tuple[float, ...] = (0.0,)
+    speed_deg_s: tuple[float, ...] = (0.0,)
+    scale: tuple[tuple[float, ...], ...] = ((1.0,),)       # [speed][angle]
+    wrist_deg: tuple[float, ...] = (0.0,)
+    wrist_scale: tuple[float, ...] = (1.0,)
+
+    def at(self, angle, speed, wrist=0.0) -> np.ndarray:
+        """Vectorised: speed is along the motor's push (negative: being stretched)."""
+        a = np.atleast_1d(np.asarray(angle, float))
+        v = np.maximum(np.broadcast_to(np.asarray(speed, float), a.shape), 0.0)
+        rows = np.array([np.interp(a, self.angle_deg, r) for r in self.scale])          # (speeds, n)
+        f = np.interp(v, self.speed_deg_s, np.arange(len(self.speed_deg_s), dtype=float))
+        i = np.floor(f).astype(int)
+        j, n = np.minimum(i + 1, len(self.speed_deg_s) - 1), np.arange(a.size)
+        return (rows[i, n] + (rows[j, n] - rows[i, n]) * (f - i)) * np.interp(wrist, self.wrist_deg, self.wrist_scale)
+
+
+FLAT = StrengthCurve()
+
+
+def strength_curves(data: dict, key: str, kind: str) -> tuple[StrengthCurve, StrengthCurve]:
+    """The (against, along) curves for a strength key, from strength.json's `curves`. Slides have none."""
+    if kind != "hinge":
+        return FLAT, FLAT
+    C, out = data["curves"], []
+    for direction in ("against", "along"):
+        c = C.get(key, {}).get(direction)
+        if c:
+            T = np.array(c["torque_nm"], float)
+            curve = StrengthCurve(tuple(c["angle_deg"]), tuple(c["speed_deg_s"]), tuple(map(tuple, T / T[0].max())))
+        else:
+            curve = StrengthCurve(speed_deg_s=tuple(C["speed"]["speed_deg_s"]),
+                                  scale=tuple((x,) for x in C["speed"]["scale"]))
+        g = C["grip_by_wrist"]
+        if direction == "along" and key in g["applies_to"]:
+            curve = StrengthCurve(curve.angle_deg, curve.speed_deg_s, curve.scale, tuple(g["wrist_deg"]),
+                                  tuple(g["scale"]))
+        out.append(curve)
+    return out[0], out[1]
+
+
+@dataclass(frozen=True)
 class Joint:
     name: str                       # e.g. "trunk_flex", "R_elbow", "L_index_pip"
     base: str                       # the anatomical name, without the side
@@ -55,6 +101,7 @@ class Joint:
     speed: float | None             # top speed, deg/s or mm/s; None where no measurement is recorded (fingers)
     strength: tuple[float, float]   # peak effort against / along the positive direction, N m or N
     driven: bool                    # has its own motor; False for joints that follow a coupling
+    curves: tuple[StrengthCurve, StrengthCurve] = (FLAT, FLAT)     # strength by angle and speed: against, along
 
 
 @dataclass(frozen=True)
@@ -151,7 +198,8 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     def add_joint(name, base, kind, axis, lo, hi, rest=0.0, speed=None) -> str:
         s = strength[strength_key(base)]["max"]
         body.joints[name] = Joint(name, base, kind, lo, hi, rest, speed, (float(s[0]), float(s[1])),
-                                  driven=base not in followers)
+                                  driven=base not in followers,
+                                  curves=strength_curves(strength_data, strength_key(base), kind))
         conv = (lambda x: math.radians(x - rest)) if kind == "hinge" else (lambda x: (x - rest) * M)
         heavy = base in speeds or base.startswith("pelvis")         # trunk, girdle, arm, pelvis vs the hand
         extra = ' damping="0.5" armature="0.01"' if heavy else ' damping="0.004" armature="0.00012"'

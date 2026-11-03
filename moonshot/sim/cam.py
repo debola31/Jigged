@@ -729,7 +729,10 @@ class Planner:
             for q in pts:
                 p.to(q, t.feed)
             p.to([*pts[-1][:2], top + CLEAR_MM])
-        gx, gz = np.linspace(xa, xb, int(round((xb - xa) / 0.5)) + 1), np.linspace(-gap, gap, int(round(2 * gap / 0.5)) + 1)
+        x0 = xa - R / 2                       # the first pass's balls reach back past it: the humps' last full-width
+                                              # pass before xa leaves a cusp there that only they cut
+        gx = np.linspace(x0, xb, int(round((xb - x0) / 0.5)) + 1)
+        gz = np.linspace(-gap, gap, int(round(2 * gap / 0.5)) + 1)
         S = np.full((len(gz), len(gx)), np.inf)
         for i, z in enumerate(st2):
             r2 = R * R - (gz[:, None, None] - z) ** 2 - (gx[None, :, None] - xs[None, None, :]) ** 2

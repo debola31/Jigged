@@ -245,7 +245,8 @@ def _production(name: str) -> Handler:
 
 
 HANDLERS: dict[str, Handler] = {"noop": noop, "probe": probe, "blender_bench": blender_bench,
-                                "vise_take": _production("vise_take"), "bake_render": _production("bake_render")}
+                                **{k: _production(k) for k in ("vise_take", "bake_render", "skin_bake", "render_frames",
+                                                               "encode_frames")}}
 
 
 def main() -> None:

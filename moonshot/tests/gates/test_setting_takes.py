@@ -7,6 +7,12 @@ on the takes the runners write to the data root (takes/nist-ftc-10/<step id>/).
 So does Check it's square, where a setup stands the part on the vise floor (op50): a test indicator in the spindle,
 its ball pressed against the part's side, swept up it by jogging Z with the handle; the needle stays put.
 
+And so does Load the tools, in every setup that brings new tools (its takes, cut together, under
+takes/nist-ftc-10/<step id>/, moonshot/planning/takes.py tool_takes): each holder taken off the tool cart and pushed
+up into the spindle while Tool Release is held ends seated on the spindle's gauge point, held by the drawbar alone
+with the hand off it; every key the plan presses registers; and the machine ends the step with each tool in the
+pocket its number names, the tools numbered in the order the plan first uses them (the vf2-tool-load card).
+
 What each take carries besides its record (take.npz, scene.json):
     take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
                   world point (mm, at frame 0) each axis's zero must pass through; for "z", "tool": {"length_mm"},
@@ -32,6 +38,7 @@ from moonshot.config import data_root
 from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 from moonshot.planning.steps import expand
+from moonshot.planning.takes import tool_takes
 from moonshot.planning.validate import load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
@@ -40,6 +47,9 @@ SETTING = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] in ("
 CHECKS = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Check it's square"]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
+TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
+TOOL_TAKES = [f"{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
+SEATS = [t for t in TOOL_TAKES if "-seat-" in t]
 
 
 def _folder(step):
@@ -145,3 +155,80 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
     sweep = (z > z[0] + 0.5) & (z < z[-1] - 0.5)                        # while the head rises, not the ball's way in or out
     spread = np.ptp(needle[on][sweep])
     assert spread <= threshold("setting.indicator_mm").value, f"the needle moved {spread:.4f} mm"
+
+
+# --- Load the tools ----------------------------------------------------------------------------------------------------
+@pytest.fixture(params=TOOL_TAKES)
+def tool_take(request):
+    return _folder(request.param)
+
+
+@pytest.fixture(params=SEATS)
+def seat(request):
+    return _folder(request.param)
+
+
+@pytest.fixture(params=[s["id"] for s in TOOL_STEPS])
+def tool_step(request):
+    step = next(s for s in TOOL_STEPS if s["id"] == request.param)
+    folders = [TAKES / step["id"] / t for t in tool_takes(step)]
+    missing = [f for f in folders if not (f / "take.npz").exists()]
+    if missing:
+        pytest.skip(f"no take at {missing[0]}")
+    return step, folders
+
+
+def test_a_tool_take_record_is_complete(tool_take):
+    assert check(tool_take) == []
+
+
+def test_every_per_frame_check_passes_on_a_tool_take(tool_take):
+    test_every_per_frame_check_passes(tool_take)
+
+
+def test_every_planned_key_press_registers_on_a_tool_take(tool_take):
+    test_every_planned_key_press_registers_and_no_other(tool_take)
+
+
+def test_the_holder_ends_seated_in_the_spindle_held_by_the_drawbar_alone(seat):
+    """From the record's own poses: the holder's gauge line on the spindle's gauge point and its axis on the spindle's,
+    within what a placement may miss by; lifted off the cart to get there; still, and the right hand off it, at the
+    end; and Tool Release held while it went up (the machine's own record of the button)."""
+    d, ck, out = np.load(seat / "take.npz"), _json(seat, "checks.json"), _json(seat, "outcome.json")
+    names = [str(b) for b in d["bodies"]]
+    h, sp = names.index("holder"), names.index("vf2_spindle")
+    rel = d["pos"][-1, h] - d["pos"][-1, sp]
+    w, x, y, z = d["quat"][-1, h]
+    tilt = np.degrees(np.arccos(np.clip(1 - 2 * (x * x + y * y), -1, 1)))     # its axis from vertical
+    mm, deg = threshold("physics.placement_mm").value, threshold("physics.placement_deg").value
+    assert abs(rel[2]) <= mm, f"the gauge line {rel[2]:+.2f} mm off the spindle's"
+    assert np.hypot(*rel[:2]) <= mm, f"the axis {np.hypot(*rel[:2]):.2f} mm off the spindle's"
+    assert tilt <= deg, f"tilted {tilt:.2f} deg"
+    assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 300, "the holder never came off the cart"
+    fps = float(d["fps"])
+    tail = d["pos"][-int(0.5 * fps):, h] - d["pos"][-int(0.5 * fps):, sp]
+    assert np.ptp(tail, axis=0).max() < 0.1, "the holder moves in the spindle at the end"
+    assert not any(n.startswith("holder") for t in ck["touching_R"][-int(0.5 * fps):] for n in t), "still held"
+    assert "tool_release_head" in [k for _, k in out["pressed"]]
+    assert out["tool_release_held_s"] is not None, "the drawbar never opened"
+
+
+def _numbers():
+    """The tools' numbers, the order the plan first uses them; the probe is the shop's tool 20."""
+    order = list(dict.fromkeys(op["tool"] for s in load_plan("nist-ftc-10")["setups"] for op in s["operations"]))
+    return {t: i + 1 for i, t in enumerate(order)}
+
+
+def test_the_step_ends_with_every_tool_in_its_pocket(tool_step):
+    step, folders = tool_step
+    num = _numbers()
+    last = _json(folders[-1], "outcome.json")
+    pockets = {int(p): t for p, t in last["pockets"].items()}
+    for t in step["facts"]["tool_ids"]:
+        assert pockets.get(num[t]) == t, f"{t} not in pocket {num[t]}: {pockets}"
+    assert pockets.get(20) == "probe" and last["spindle_tool"] is None
+    for f in folders:
+        out, tk = _json(f, "outcome.json"), _json(f, "take.json")
+        if tk["load"]["kind"] == "atc":
+            assert "atc_fwd" in [k for _, k in out["pressed"]], f.name
+            assert {int(p): t for p, t in out["pockets"].items()}.get(num[tk["load"]["tool"]]) == tk["load"]["tool"]

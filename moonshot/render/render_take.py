@@ -8,8 +8,9 @@ Blender:
         [--data <data root>] [--look <cc0 folder>] [--out <folder>] [--frames lo:hi] [--res 1920x1080]
         [--samples 64] [--device METAL] [--inspect <report.json>] [--save <scene.blend>]
 
-Frames are the bake's (24 fps), written as <out>/<k:05d>.png. A GLB's in_body places its raw stored coordinates
-(metres); Blender's glTF importer turns every file from Y up to Z up, so that turn is undone. Everything that moves is
+Frames are the bake's (24 fps), written as <out>/<k:05d>.png. A GLB's in_body places its raw stored coordinates, in
+metres; a changing body's meshes are in mm in its frame. Blender's glTF importer turns every file from Y up to Z up,
+so that turn is undone. Everything that moves is
 keyframed per frame, with a frame either side of the range, so Cycles' motion blur sees the real motion. --inspect
 writes what each frame would draw instead of rendering it (moonshot/tests/gates/test_render_take.py).
 """
@@ -212,7 +213,7 @@ class Take:
         self.empties[name] = e
         if "meshes" in body:
             folder = self.take / body["meshes"]["dir"]
-            self.versions[name] = {k: import_glb(folder / f"{k}.glb", e, Matrix.Identity(4), name, "mesh")
+            self.versions[name] = {k: import_glb(folder / f"{k}.glb", e, Matrix.Scale(MM, 4), name, "mesh")
                                    for k in body["meshes"]["frames"]}
             self.objects += [o for objs in self.versions[name].values() for o in objs]
         elif body.get("glbs"):

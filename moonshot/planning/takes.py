@@ -26,16 +26,21 @@ def spans(part: str, step: dict) -> list[Span]:
     kind = sid[len(setup) + 1:] if setup else sid
     if step["kind"] == "cycle":
         return [(f"{part}-{sid}", None, None)]              # the cycle session's take, one per operation
+    if "stop" in step.get("facts", {}).get("parallels", ""):     # on the vise floor against a stop (op50)
+        if kind == "clean":
+            return [("blow-off", None, None), ("set-stop", None, None)]
+        if kind == "check":                                  # squared by indicator: the setting session's take
+            return [(f"{part}/{sid}", None, None)]
     return {
         "clean": [("blow-off", None, None), ("set-parallels", None, None)],
         "load": [(vise, "grab", "slide")],
         "seat": [(vise, "rotate", "push")],
         "check": [(vise, "measure", "measure")],
-        "xy": [(f"{part}-{sid}", None, None)],               # the setting session's takes, per setup
-        "z": [(f"{part}-{sid}", None, None)],
-        "tools": [(f"{part}-{sid}", None, None)],
+        "xy": [(f"{part}/{sid}", None, None)],               # the setting session's takes, per setup, in takes/<part>/
+        "z": [(f"{part}/{sid}", None, None)],
+        "tools": [(f"{part}/{sid}", None, None)],
         "start": [("door-close", None, None), ("cycle-start", None, None)],
-        "unload": [("door-open", None, None), ("blow-off", None, None), ("unload", None, None)],
+        "unload": [("door-open", None, None), ("blow-off", None, None), ("loosen", None, None), (f"lift-out-{vise}", None, None)],
     }.get(kind, [(f"{part}-{sid}", None, None)])           # finishing: the inspection session's takes
 
 

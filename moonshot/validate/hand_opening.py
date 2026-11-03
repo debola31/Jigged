@@ -8,6 +8,7 @@ The aperture is the distance between the thumb's and the index's fingertips, pos
 """
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 
@@ -19,11 +20,16 @@ from moonshot.validate.grasp_timing import measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
-def aperture_mm(q: np.ndarray, names: list[str]) -> np.ndarray:
-    """Per frame, thumb tip to index tip (mm), from the right hand's anatomical angles."""
+@functools.cache
+def _body():
     from moonshot.body.skeleton import build
     body = build()
-    m = mujoco.MjModel.from_xml_string(body.xml)
+    return body, mujoco.MjModel.from_xml_string(body.xml)
+
+
+def aperture_mm(q: np.ndarray, names: list[str]) -> np.ndarray:
+    """Per frame, thumb tip to index tip (mm), from the right hand's anatomical angles."""
+    body, m = _body()
     d = mujoco.MjData(m)
     adr = [m.jnt_qposadr[m.joint(f"R_{n}").id] for n in names]
     rest = np.array([body.joints[f"R_{n}"].rest for n in names])

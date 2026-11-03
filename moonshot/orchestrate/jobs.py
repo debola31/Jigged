@@ -51,7 +51,8 @@ def vise_take(worker, job: dict, inputs: list[Path]) -> dict:
     load = vise_load(load_plan(p["part"]), p["setup"]) if p.get("part") else REFERENCE
     t0 = time.perf_counter()
     worker.report(job["id"], "plan")
-    ST.build(verbose=False, load=load, out=out)
+    build = ST.build_lift_out if p.get("start") == "vise" else ST.build      # a lift-out starts with the part in the vise
+    build(verbose=False, load=load, out=out)
     t1 = time.perf_counter()
     worker.report(job["id"], "physics")
     run = ViseTake(out)

@@ -30,6 +30,11 @@ INCH = 25.4
 FIXED_TO_A = VISE["fixed_face_y"] - REFERENCE.parallels_y["para_a"]
 NEAR_TO_B = REFERENCE.parallels_y["para_b"] - (VISE["fixed_face_y"] - REFERENCE.size_mm[1])
 OPENING_MARGIN = REFERENCE.opening0 - REFERENCE.size_mm[1]
+# a part standing taller than it is wide is opened for wider, as a machinist would: op30's 31 mm part, 75 tall, swung
+# 7-10 mm in the hand and was set down on the moving jaw's top with 7.8 mm to spare
+TALL_MARGIN, TALL_MARGIN_MAX = 0.4, 30.0
+# under a narrow part (op30's 31 mm, on its side) parallel a comes in closer to the jaw so the two keep this pitch
+MIN_PITCH = 6.8
 # the stock is centred on the part in its model's x and z; Op 10 faces this much off datum A [proposed]
 FACE_A_MM = {"nist-ftc-10": 0.5}
 # each later setup's part as its box in the model's frame (mm). nist-ftc-10 finishes 158 x 31 x 75 (x -79..79, y 0..31
@@ -84,6 +89,8 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     w = _setup(plan, setup_id)["workholding"]
     along, width, up = (float(v) for v in part_pose(plan, setup_id)["size_mm"])
     fy = VISE["fixed_face_y"]
-    paras = {"para_a": fy - FIXED_TO_A, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
+    to_a = min(FIXED_TO_A, width - NEAR_TO_B - MIN_PITCH)
+    paras = {"para_a": fy - to_a, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
-                opening0=width + OPENING_MARGIN)
+                opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
+                                  else OPENING_MARGIN))

@@ -173,6 +173,44 @@ unit = "mm"
 source = "proposed"
 reason = "Jaw travel matches crank turns x screw lead within this, the rest being contact compliance (the reference take: 0.5 mm)"
 
+# --- Machining (plan §5.1: machines stay in spec), checked on every cycle step's program ---
+
+[machining.vf2_cutting_feed_mm_min]
+value = 16510
+unit = "mm/min"
+source = "spec"
+reason = "Haas VF-2 with 1,000 in/min rapids (vf2.json): 650 in/min maximum cutting feed, as its spec sheet lists it for a 2015 VF-2"
+
+[machining.surface_speed_hss_m_min]
+value = 152
+unit = "m/min"
+source = "proposed"
+reason = "HSS and cobalt HSS in aluminium: 250 sfm (University of Florida design lab speeds and feeds, Table 1), times its own 2.0 high-speed toolpath factor, 500 sfm at most"
+
+[machining.surface_speed_carbide_m_min]
+value = 381
+unit = "m/min"
+source = "proposed"
+reason = "Carbide in aluminium: 625 sfm (the same table, HSS x 2.5), times its 2.0 high-speed factor, 1,250 sfm at most"
+
+[machining.mill_feed_per_tooth_mm]
+value = [0.10, 0.30]
+unit = "mm per tooth"
+source = "proposed"
+reason = "End mills and inserts in aluminium and its alloys: 0.004-0.012 in per tooth (the same table, Table 3)"
+
+[machining.drill_feed_per_rev_dia_frac]
+value = [0.008, 0.032]
+unit = "feed per rev / diameter"
+source = "proposed"
+reason = "2-flute drills: 0.002-0.004 in/rev at 1/8-1/4 in, 0.004-0.008 at 1/4-1/2 in (the same table, Table 2): 0.8-3.2% of the diameter across its bands"
+
+[machining.ream_speed_feed_factor]
+value = 2.0
+unit = "x"
+source = "proposed"
+reason = "The same page: run a reamer at half a drill's speed and twice its feed per rev; held to taps too, which the table omits"
+
 # --- Setting a part up on the machine: work offsets and tool lengths (plan §4: vf2-controls, vf2-tool-setter) ---
 
 [setting.edge_finder_mm]

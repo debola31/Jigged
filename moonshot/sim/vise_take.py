@@ -119,8 +119,10 @@ class ViseTake:
         self.digit_dofs = {dg: [m.jnt_dofadr[m.joint(n).id] for n in (m.joint(i).name for i in range(m.njnt))
                                 if n.startswith(f"R_{dg}_") and int(m.jnt_dofadr[m.joint(n).id]) in self.act_of_dof]
                            for dg in PAD}
-        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", "para_a", "para_b")}
-        self.body_id = {n: m.body(n).id for n in ("blank", "knob", "para_a", "para_b", "R_hand")}
+        # a part stood on the vise's floor (nist-ftc-10 op50, on its end against a stop) has no parallels under it
+        self.paras = [nm for nm in ("para_a", "para_b") if nm in self.load.parallels_y]
+        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", *self.paras)}
+        self.body_id = {n: m.body(n).id for n in ("blank", "knob", *self.paras, "R_hand")}
         self.geom_digit = {m.geom(f"R_g_{b}").id: dg for dg, bs in DIGITS.items() for b in bs}
         self.q_crank, self.q_jaw = m.jnt_qposadr[m.joint("crank").id], m.jnt_qposadr[m.joint("jaw_slide").id]
         # the body's joints in qpos and in qvel: the objects' free joints make the two index sets differ
@@ -151,6 +153,8 @@ class ViseTake:
         self.t_lift = float(self.t[np.argmax(z > self.start_p[2] + 1.0)])
         top = int(np.argmax(z))
         self.t_down = float(self.t[top + np.argmax(z[top:] <= z[-1] + 0.5)])
+        if self.in_vise:            # a lift-out's part is looked at again over the table, before it is set down: the
+            self.resight_t = self.t_down - 1.2      # first sighting is taken as it leaves the jaws (11 mm off without)
 
     @staticmethod
     def _intervals(events, kind):
@@ -202,18 +206,24 @@ class ViseTake:
         keep = np.concatenate([[True], np.diff(ang) > 1e-6])
         return float(np.interp(self.crank_cmd(tt, i, e), ang[keep], ts[keep]))
 
-    def aim_fingertip(self, parallel: str) -> np.ndarray:
-        """Aim the index pad onto the parallel's top face before a fingertip check, by sight: the sideways shift (m)
-        that brings the pad's nearest point onto the face's centre line, clear of the strip's ends."""
+    def aim_fingertip(self, parallel: str, normal) -> np.ndarray:
+        """Aim the index pad onto the face of the parallel a fingertip check presses: the shift (m) that brings the
+        pad's nearest point onto the face's centre line across the 3.1 mm strip, clear of the top's ends (pressing
+        down) or of the end face's edges (pushing along it). The press itself owns its own direction."""
         m, d, ft = self.model, self.data, np.zeros(6)
         mujoco.mj_geomDistance(m, d, m.geom("R_g_dis2").id, m.geom(parallel).id, 0.2, ft)
         R, c = d.body(parallel).xmat.reshape(3, 3), d.body(parallel).xpos
         local = R.T @ (ft[:3] - c)
-        half_len = m.geom(parallel).size[0]
-        goal = np.array([np.clip(local[0], -half_len + 0.015, half_len - 0.015), 0.0, local[2]])
+        half = m.geom(parallel).size
+        n = np.asarray(normal, float)
+        goal = local.copy()
+        goal[1] = 0.0
+        if abs(n[2]) > 0.5:                                # its top: clear of the strip's ends
+            goal[0] = np.clip(local[0], -half[0] + 0.015, half[0] - 0.015)
+        else:                                              # its end face: clear of the top and bottom edges
+            goal[2] = np.clip(local[2], -half[2] + 0.004, half[2] - 0.004)
         shift = R @ (goal - local)
-        shift[2] = 0.0                                     # the press itself owns the vertical
-        return shift
+        return shift - n * (n @ shift)
 
     def wrist_offset(self, tt) -> np.ndarray:
         """Wrist corrections in metres: visually guided placement, aiming a fingertip onto a parallel, and leaving /
@@ -228,7 +238,7 @@ class ViseTake:
         for i, e in enumerate(self.iv["press"]):
             if e["contact"] in ("para_a", "para_b") and e["t0"] - AIM_LEAD_S <= tt < e["t1"] + 0.3:
                 if i not in self.aim:
-                    self.aim[i] = self.aim_fingertip(e["contact"])
+                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"])
                 off += self.aim[i] * min_jerk((tt - (e["t0"] - AIM_LEAD_S)) / 0.25) * (1 - min_jerk((tt - e["t1"]) / 0.3))
         for j, e in enumerate(self.cranks):
             if tt >= e["t1"] and j in self.letgo:
@@ -482,7 +492,7 @@ class ViseTake:
         """(per-digit force on the objects, blank-to-moving-jaw clamp force, deepest digit contact in mm)."""
         m, d = self.model, self.data
         f, clamp, depth, c6 = {}, 0.0, 0.0, np.zeros(6)
-        objs = {self.geom[n] for n in ("blank", "knob", "para_a", "para_b")}
+        objs = {self.geom[n] for n in ("blank", "knob", *self.paras)}
         for i in range(d.ncon):
             c = d.contact[i]
             g1, g2 = c.geom1, c.geom2
@@ -527,7 +537,7 @@ class ViseTake:
         spf = int(round(1.0 / (fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
-        keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
+        keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
                                "slip", "lag", "pushing", "stray", "touching", "pose")}
         hold_rel, t0w = None, time.time()
@@ -598,7 +608,7 @@ class ViseTake:
             rec["force"].append(f)
             rec["clamp"].append(clamp)
             rec["depth"].append(depth)
-            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
+            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in self.paras]).reshape(-1, 3))
             rec["pose"].append(self.pose_record())
             self.recorder.frame(d, {"R": rec["pose"][-1]}, rd["eye"][k], rd["look"][k], rd["up"][k])
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
@@ -702,7 +712,15 @@ class ViseTake:
                "max_deviation_while_pushing_mm": round(float(lag[pushing].max(initial=0)), 2),
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():
-            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > self.start_p[2] + 5)),
+            # held up: over where it started; a lift-out's part ends on the table, below where it started in the vise,
+            # so it is held up if it rose clear of where it started and never fell far under its planned path (it
+            # starts up 20 mm behind the plan as the grip takes its weight, and rides ~11 mm low in the hand)
+            if self.in_vise:
+                held = (B[lift][:, 2].max() > self.start_p[2] + 5
+                        and np.all(B[lift][:, 2] > self.rd["blank"][:n, 2][lift] - 40))
+            else:
+                held = np.all(B[lift][:, 2] > self.start_p[2] + 5)
+            out["grab_hold"] = {"lifted_by_friction": bool(held),
                                 "grip_N_thumb_median": round(float(np.median(force[lift, 0])), 2),
                                 "grip_N_fingers_median": round(float(np.median(force[lift, 1:5].sum(1))), 2),
                                 "max_slip_mm": round(float(np.max(rec["slip"])), 2)}
@@ -732,8 +750,8 @@ class ViseTake:
             out["measure"] = [{"parallel": e["contact"],
                                "press_N_median": round(float(np.median(np.array(rec["press"])[(t >= e["t0"] + 0.2) & (t < e["t1"])])), 2),
                                "parallel_moved_mm": round(float(np.linalg.norm(
-                                   P[int(e["t1"] * fps), ["para_a", "para_b"].index(e["contact"])] -
-                                   P[int(e["t0"] * fps), ["para_a", "para_b"].index(e["contact"])])), 3)} for e in msr]
+                                   P[int(e["t1"] * fps), self.paras.index(e["contact"])] -
+                                   P[int(e["t0"] * fps), self.paras.index(e["contact"])])), 3)} for e in msr]
         return out
 
 

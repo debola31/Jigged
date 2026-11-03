@@ -41,9 +41,12 @@ SETTLE_STEPS = 300
 
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
 APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
+RELEASE_S = 1.2                            # ... and start again this long after it opens, once the hand is off it: at
+                                           # once, the fingers inside the handle threw the gun out of its holster;
+                                           # at 0.6 s the retreating fingers dragged it back out
 # people correct a steady error in where their hand is by sight, slowly (as the vise take, moonshot/sim/vise_take.py)
-VISUAL_TAU = 0.3                           # s
-VISUAL_MAX = np.array([0.04, 0.35])        # at most this far (m) and this much turn (rad)
+VISUAL_TAU = 0.25                          # s
+VISUAL_MAX = np.array([0.08, 0.5])         # at most this far (m) and this much turn (rad)
 DAMPING = 0.02                             # damped least squares for the arm's wrist corrections
 
 
@@ -65,9 +68,11 @@ class TakeRunner:
         self.body = build(pelvis_mm=tuple(self.lumbar))
         self.grip_events = [e for e in self.tk["events"] if e["kind"] == "grip" and e.get("grip") in self.encloses]
         xml = self.scene(self.body.xml)
+        # a held tool is stiff in the hand (4 ms, 4 steps): at 20 ms the index's push on the gun's trigger moved the gun
+        # 30 mm in the hand, enough to miss its holster's bore; a held mechanism's knob or bar stays soft
         eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="enclose_{e["grip"]}" '
                      f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
-                     f'solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                     f'solref="{0.004 if e["grip"] in self.welded else 0.02} 1" solimp="0.9 0.95 0.002"/>\n'
                      for e in {e["grip"]: e for e in self.grip_events}.values())
         xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
         m = self.model = mujoco.MjModel.from_xml_string(xml)
@@ -102,7 +107,8 @@ class TakeRunner:
         root = m.body_rootid[m.body("R_hand").id]
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root}
         self.squeeze: dict[tuple[str, str], dict] = {}
-        self._held_apart: dict[str, bool] = {}
+        self._held_apart: dict[str, int] = {}
+        self._apart: dict[int, dict] = {}
         self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{n}").id] for n in ARM]) for s in SIDES}
         self.side_bodies = {s: {b for b in range(m.nbody) if m.body(b).name.startswith(f"{s}_")} for s in SIDES}
         self.visual = {s: np.zeros(6) for s in SIDES}
@@ -177,11 +183,13 @@ class TakeRunner:
         m, d = self.model, self.data
         for e in self.grip_events:
             if e["grip"] in self.welded:                 # apart from the final approach on, so the hand reaches its grip
-                apart = e["t0"] - APPROACH_S <= t < e["t1"] - 0.05
+                # 1: held, the controls still touched; 2: letting go, the controls too (the index inside the trigger
+                # when the gun is let go fired it out of its holster at 1500 N)
+                mode = (2 if t >= e["t1"] - 0.05 else 1) if e["t0"] - APPROACH_S <= t < e["t1"] + RELEASE_S else 0
                 ob = m.body(self.encloses[e["grip"]]).id
-                if apart != self._held_apart.get(e["grip"], False):
-                    self.hold_apart(ob, apart)
-                    self._held_apart[e["grip"]] = apart
+                if mode != self._held_apart.get(e["grip"], 0):
+                    self.hold_apart(ob, mode)
+                    self._held_apart[e["grip"]] = mode
             eq = m.equality(f"enclose_{e['grip']}").id
             want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
             if want and not d.eq_active[eq]:
@@ -204,18 +212,18 @@ class TakeRunner:
             elif not want and d.eq_active[eq]:
                 d.eq_active[eq] = 0
 
-    def hold_apart(self, body: int, held: bool) -> None:
-        """While a welded grip holds a tool, the hand's skin and the tool don't collide (the constraint stands for
-        their contact), except the tool's controls (a trigger) the fingers work; the tool still collides with
-        everything else."""
+    def hold_apart(self, body: int, mode: int) -> None:
+        """While a welded grip holds a tool (mode 1), the hand's skin and the tool don't collide (the constraint stands
+        for their contact), except the tool's controls (a trigger) the fingers work; while the hand lets go (mode 2),
+        not the controls either; the tool still collides with everything else. Mode 0: as the scene has them."""
         m = self.model
-        gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body and m.geom(g).name not in self.controls]
-        if held:
-            self._apart = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
+        for g, (ct, ca) in self._apart.pop(body, {}).items():
+            m.geom_contype[g], m.geom_conaffinity[g] = ct, ca
+        if mode:
+            gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body
+                  and (mode == 2 or m.geom(g).name not in self.controls)]
+            self._apart[body] = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
             m.geom_contype[gs], m.geom_conaffinity[gs] = 4, 1          # skin is contype 2, conaffinity 1
-        else:
-            for g, (ct, ca) in self._apart.items():
-                m.geom_contype[g], m.geom_conaffinity[g] = ct, ca
 
     def step(self, t: float) -> None:
         m, d, p = self.model, self.data, self.plan
@@ -271,18 +279,32 @@ class TakeRunner:
                 return True
         return False
 
+    def held_error(self, side: str, t: float) -> np.ndarray | None:
+        """How far (m, and rad as a rotation vector, world) a tool the side holds is from where the step plans it, if
+        the step plans its path; None: correct the hand itself. The weld fixes the tool in the hand as the plan has it
+        at the grip, and the planned hand turns a little on the way, so on plan the hand can carry the tool 10 mm off
+        its path: people watch the tool's tip, not their hand."""
+        return None
+
     def correction(self, t: float) -> np.ndarray:
         """Joint offsets (nv) that move each hand toward where the plan has it, by the steady error seen so far, in
-        place and in turn; paused while the arm touches something, where it would wind up against the contact."""
+        place and in turn; paused while the arm touches something, where it would wind up against the contact, or
+        holds a mechanism. While it holds a tool whose path the step plans (held_error), the eye is on the tool."""
         m, d, p = self.model, self.data, self.plan
         dt, dq = m.opt.timestep, np.zeros(m.nv)
         for side in SIDES:
             hb = m.body(f"{side}_hand").id
             Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
-            err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+            err = self.held_error(side, t)
+            if err is None:
+                err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
             v = self.visual[side]
             if self._steps % 10 == 0:                            # contacts change slowly next to a 1 ms step
-                self._touch[side] = self.touching(side)
+                # paused too while the hand holds a mechanism (a door's bar, the crank's knob): there being past the
+                # plan is the point, as the vise take pauses while cranking; a welded tool is part of the hand
+                holding = any(e["side"] == side and e["grip"] not in self.welded
+                              and d.eq_active[m.equality(f"enclose_{e['grip']}").id] for e in self.grip_events)
+                self._touch[side] = holding or self.touching(side)
             if not self._touch[side]:
                 v += err * dt / VISUAL_TAU
             for i, cap in enumerate(VISUAL_MAX):

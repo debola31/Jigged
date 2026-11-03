@@ -13,8 +13,8 @@ import sys
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
-from moonshot.body.skeleton import H0
 from moonshot.motion import blow_off as BO
 from moonshot.sim.door_cycle import _Cell
 from moonshot.world import air_gun as AG
@@ -34,6 +34,8 @@ class BlowOff(_Cell):
     def __init__(self, folder=BO.TAKES / "blow-off"):
         super().__init__(folder)
         self.carry = next(e for e in self.tk["events"] if e["kind"] == "carry")
+        k = np.load(self.folder / "gun_keys.npz")
+        self.gun_keys = list(zip(k["t"], k["R"], k["p"]))
         self.gun_at, self.hand_at, self.trigger_N, self.tip = [], [], [], []
 
     def scene(self, body_xml: str) -> str:
@@ -41,10 +43,26 @@ class BlowOff(_Cell):
         return xml.replace("<worldbody>\n", "<worldbody>\n" + AG.holster_xml(BO.ORIGIN) + AG.gun_xml(BO.ORIGIN), 1)
 
     def planned_relpose(self, grip):
-        g = json.loads((self.folder / "grips.json").read_text(encoding="utf-8"))[grip]
+        """The hand body in the holstered gun's frame as the solved plan has it when the fingers close: the body solver
+        turns the hand up to 10 degrees off the grip's own frame, which put the gun 15-20 mm off its path from the
+        grip's frame, enough to miss the 24 mm bore."""
+        e = next(e for e in self.grip_events if e["grip"] == grip)
+        q, _, _ = self.at(e["t0"] + 0.1)
+        pl = mujoco.MjData(self.model)
+        pl.qpos[:] = q
+        mujoco.mj_kinematics(self.model, pl)
+        hb = self.model.body("R_hand").id
         R0, p0 = AG.holstered_pose(BO.ORIGIN)
-        hand = np.array(g["H"]) @ H0.T                       # the hand body's frame, from the grip's hand frame
-        return R0.T @ (np.array(g["W"]) - p0) * 0.001, R0.T @ hand
+        return R0.T @ (pl.xpos[hb] * 1000 - p0) * 0.001, R0.T @ pl.xmat[hb].reshape(3, 3)
+
+    def held_error(self, side, t):
+        """While the gun is in the hand, the eye is on the gun: its planned pose (gun_keys.npz) against where it is."""
+        m, d = self.model, self.data
+        if side != "R" or not d.eq_active[m.equality("enclose_gun").id]:
+            return None
+        R, p = BO.BlowOff.pose_at(None, t, self.gun_keys)
+        b = m.body("air_gun").id
+        return np.r_[(p * 0.001 - d.xpos[b]), Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
 
     def hand_force(self, side, t):
         """The gun's weight, carried."""

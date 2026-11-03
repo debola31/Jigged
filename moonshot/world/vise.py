@@ -36,7 +36,9 @@ class Load:
     from. The part starts on the table right of the vise."""
     size_mm: tuple[float, float, float] = (101.6, 76.2, 38.1)
     parallel_h: float = 25.4
-    parallels_y: dict[str, float] = field(default_factory=lambda: {"para_a": -244.0, "para_b": -296.0})
+    # parallel a 19 mm in from the fixed jaw (face at -230.8): at 13.2 the fingers setting it by its top edge (index
+    # and middle 13-14.5 mm thick) didn't fit in the 11.65 mm beside the jaw; a machinist leaves a finger's width
+    parallels_y: dict[str, float] = field(default_factory=lambda: {"para_a": -249.8, "para_b": -296.0})
     opening0: float = 90.0
     density: float = 2700.0                                  # 6061 aluminium (kg/m^3)
 

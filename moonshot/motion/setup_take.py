@@ -44,7 +44,7 @@ from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import kinematics as BM
 from moonshot.motion import solver as BS
-from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_like, relaxed, tremor
+from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_for, open_like, relaxed, tremor
 from moonshot.world.vise import (CRANK0_DEG, PARALLEL_L, PARALLEL_T, REFERENCE, TABLE_Z, VISE, Load, crank_for_opening,
                                  knob_center)
 
@@ -265,7 +265,7 @@ class Take:
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
         x_end = VISE["x"] + self.half[0] + (PAR_L / 2 - self.half[0]) / 2                  # middle of the exposed end
         covered = self.half[0] >= PAR_L / 2      # a part longer than the parallels hides their tops: push an end instead
-        for name in ("para_b", "para_a"):
+        for name in [n for n in ("para_b", "para_a") if n in self.parallels]:
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
             if covered:                          # the pad on the parallel's end face, under the part's overhang
                 end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
@@ -361,10 +361,18 @@ class Take:
         Hg, Wg = self.grip_pose(grip, t0)
         t_contact = t0 + 0.35 + reach
         self.look(t0, self.stage + [0, 0, self.half[2]])
-        self.transit(t0 + 0.35, t_contact, Wg, via=[self.wrist + [70, 40, 150], Wg + [0, -12, 62]], fade=(Hg, 1.0))
-        t_peak = t0 + 0.35 + 0.74 * reach
+        if self.start == "vise":       # high over the crank's disc (the knob up to z 1040), then down onto the part
+            via = [np.array([self.wrist[0] - 60, -760.0, 1160.0]), Wg + [0, -30, 120]]
+        else:
+            via = [self.wrist + [70, 40, 150], Wg + [0, -12, 62]]
+        self.transit(t0 + 0.35, t_contact, Wg, via=via, fade=(Hg, 1.0))
+        # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
+        # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
+        # the open fingers meeting the faces as they close), with the fingers ~0.1 s behind their keys: 0.50 of the
+        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.50 0.667)
+        t_peak = t0 + 0.35 + 0.53 * reach
         self.fingers(t0 + 0.35, self.q_relax)
-        self.fingers(t_peak, open_like(self.hand, g["q"], 0.85))
+        self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])
         t_load = t_contact + ga["preload_s"]
         t_lift = t_load + ga["loading_s"]
@@ -458,12 +466,18 @@ class Take:
         t_rel = t_down + 0.1
         self.fingers(t_rel, g["q"])
         self.fingers(t_rel + 0.3, open_like(self.hand, g["q"], 0.5))
+        self.wrist = W_set                                   # off the part from where it set it down
         self.transit(t_rel, t_rel + 0.7, W_set + [0, -35, 70], via=[W_set + [0, -4, 22]])
         self.event("hold_object", None, t_rel, obj="blank")
         self.event("place_correct", None, t_rel + 0.3)
         self.event("grip", None, t_rel + 0.1, grip=grip)
         self.wrist = W_set + [0, -35, 70]
         self.t = t_rel + 0.7
+        # back to the side round the crank (its knob sweeps x -515 to -247, y -636 to -726, z 760 to 1025), not
+        # through it: out to the right first, then back past the knob's end
+        self.transit(self.t, self.t + 1.3, REST_W, via=[np.array([-100.0, -800.0, 950.0])])
+        self.fingers(self.t + 1.3, self.q_relax)
+        self.t += 1.4
         self.clip("set_on_table", t0 - 0.3, self.t + 0.2, "SET DOWN  out of the vise and onto the table beside it")
         self.t_down = t_down
 
@@ -493,7 +507,8 @@ class Take:
         self.fingers(t1 - 0.1, g["q"])
         W_end = self.home + g["W_rel"]
         self.wrist = W_end
-        self.fingers(t1 + 0.3, open_like(self.hand, g["q"], 0.5))
+        # not opened as it comes off: the hand relaxes in the pause before the knob's reach, and a hand still open from
+        # here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
         self.t = t1 + 0.4
         self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  the thumb pushes the part along the parallels onto the fixed jaw")
@@ -518,11 +533,10 @@ class Take:
         # down, and a little toward the fixed jaw (10 deg), as machinists seat a part: it can't creep off the jaw
         self.event("press", tc + 0.05, tc + hold_s + 0.25, normal=[0, -0.174, 0.985], force=force_N, contact="blank")
         t1 = tc + hold_s + 0.4
-        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing,
-        self.fingers(t1 + 0.15, open_like(self.hand, g["q"], 0.3))   # and straighten a little as they come off
+        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing and coming
+        # off, and relax in the pause before the knob's reach (relaxing as they came off, they curled into the part)
         self.wrist = Wp
         self.transit(t1, t1 + 0.45, Wp + [0, -30, 50], via=[Wp + [0, 0, 22]])     # off the part straight up first
-        self.fingers(t1 + 0.4, self.q_relax)
         self.t = t1 + 0.45
         self.clip("push", t0 - 0.2, self.t + 0.2, f"PUSH  flat fingers press the part down onto the parallels ({force_N:.0f} N)")
 
@@ -533,7 +547,12 @@ class Take:
         As machinists do it: first crank the jaw onto the part and stop when it is snug (snug_N of clamp: the part
         is held but can still be pushed down onto the parallels); final=True is the last pull after seating, which
         ends on feel. Both are closed loops on the real knob in the physics."""
-        t0 = self.t
+        # a moment's pause off the part before reaching for the knob, the hand relaxing: run straight on from the
+        # part, the reach started with the hand still open from it and was widest at its start (the hand-opening check)
+        W_hold = self.wrist.copy()
+        self.add(self.t, self.t + 0.35, lambda t, W=W_hold: [("pos", W, 1.0)])
+        self.fingers(self.t + 0.3, self.q_relax)
+        t0 = self.t + 0.35
         g = self.grips[grip]
         Hk = g["H_rel"]
         pt = Hk.T @ (knob_center(CRANK0) - g["W"])                # knob middle in the hand
@@ -545,7 +564,10 @@ class Take:
         # from over the vise: out over the crank disc, then onto the knob from the operator's side
         self.transit(t0, t0 + 1.2, Wk, via=[over, Wk + Hk[:, 2] * 45 + [0, -10, 15]], fade=(Hk, 1.0))
         ko = open_like(self.hand, g["q"], 0.9)
-        self.fingers(t0 + 0.6, ko)
+        # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
+        # the knob (~0.35 s before tg), with the fingers ~0.1 s behind their keys
+        # the fingers, opening out of the fist's shape, reach 10 mm short of it before closing on the knob (67 of 77)
+        self.fingers(t0 + (0.63 if final else 0.7), open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=12.0))   # 0.7: 74%, 81% final
         tg = t0 + 1.2
         self.fingers(tg, g["q"])
         t_c0 = tg + 0.25
@@ -838,7 +860,10 @@ def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=
     take.push()                     # seat the part on the parallels while it can still move down
     t_final = take.t
     take.rotate(final=True)         # the last pull, ends on feel
-    take.measure(clip_from=t_final)
+    if take.parallels:
+        take.measure(clip_from=t_final)
+    else:                           # on the vise's floor: no parallels to try; it is checked square by indicator
+        take.clip("measure", t_final - 0.2, take.t + 0.2, "TIGHTEN  the last pull on the crank, ending on feel")
     take.grip_digits = {name: list(spec["targets"]) for name, spec in take._grip_specs().items()}
     if not solve:
         take.load_solution()

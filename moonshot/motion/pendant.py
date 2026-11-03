@@ -36,18 +36,23 @@ DIAL_C = np.array(DIAL["at_mm"], float) + OFFSET          # the dial's front fac
 DIAL_U = np.array(DIAL["axis"], float)                    # into the pendant: a + turn is clockwise from the operator
 DIAL_R = DIAL["radius_mm"]
 DETENT_DEG = 360.0 / DIAL["detents_per_turn"]
-STROKE_CLICKS = 30                                        # 108 deg a stroke: a comfortable turn of the forearm
+STROKE_CLICKS = 20                                        # 72 deg a stroke: wider, and the turned hand's fingers swing
+                                                          # down onto Cycle Start and Feed Hold below the handle
 LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pendant's left half, the machine at the left
 # a keypad grip per region of the keys, each solved at one key there: one hand pose can't reach every key without
 # pitching the curled fingers into the face
-KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi"}
+KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi",
+             "keypad_inc": "inc_0.01"}           # the increment row's own: the mode grip's thumb fell on 4 and 5
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
-OVERTURN = 1.25                                           # a stroke turns the hand this much farther than its clicks;
+OVERTURN = 1.15                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
+AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
 HOVER_MM = 40.0
-HOVER_RIGHT_MM = 15.0                                     # the right index ready over Feed Hold, not resting on it
+HOVER_RIGHT_MM = 40.0                                     # the right index ready over Feed Hold, not resting on it:
+                                                          # held 15 mm off, its hand's sway of 10 mm pressed it
+SETTLE_S = 0.3                                            # off the rim, before a jog's first stroke
 CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
 TOUCH_LIFT_MM = 1.0                                       # a press is planned to the pad touching the key, not in it:
                                                           # the push presses (moonshot/sim/pendant.py)
@@ -251,13 +256,18 @@ class PendantTake(StepTake):
         length = sum(np.linalg.norm(np.asarray(b, float) - np.asarray(a, float)) for a, b in zip(points, points[1:]))
         return float(np.clip(0.3 + length / 500.0, 0.45, 1.6))
 
-    def clear_of_face(self, to) -> list:
-        """A point to pass through between the keys and the dial, well out from the face, so the hand doesn't skim
-        the keys on the way; none for a reach from the side."""
-        if self.where not in ("keys", "dial"):
-            return []
-        mid = (np.asarray(self.side["R"]["wrist"], float) + np.asarray(to, float)) / 2
-        return [mid + [0, -CLEAR_MM, 0]]
+    def clear_of_face(self, to, to_dial: bool = False) -> list:
+        """Points to pass through between the keys and the dial: one well out from the face, so the hand doesn't skim
+        the keys on the way (none for a reach from the side); and off and onto the dial straight along its axis, so
+        a hand that lags or overshoots pushes on the rim's face, which can't turn it, rather than brushing across
+        the rim, which does."""
+        here = np.asarray(self.side["R"]["wrist"], float)
+        via = [here - DIAL_U * AXIAL_MM] if self.where == "dial" else []
+        if self.where in ("keys", "dial"):
+            via.append((here + np.asarray(to, float)) / 2 + [0, -CLEAR_MM, 0])
+        if to_dial:
+            via.append(np.asarray(to, float) - DIAL_U * AXIAL_MM)
+        return via
 
     def leave_keys(self, t: float) -> None:
         """The arm eases off as the hand leaves the keys."""
@@ -287,16 +297,21 @@ class PendantTake(StepTake):
         return R @ g["H"], DIAL_C + R @ (g["W"] - g["obj"]) - DIAL_U * off
 
     def turn(self, clicks: int, deg_s: float = 300.0) -> None:
-        """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS."""
+        """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS, and a spare one: the run
+        stops the hand once the machine reads where this jog takes it (`to_mm`, from where the take starts the axis:
+        moonshot/sim/pendant.py), so a stroke whose grip slipped is made up by the spare, and an unneeded spare is a
+        hand holding still."""
         if clicks == 0:
             return
         self.jogs += 1                            # the strokes of one jog: the run counts their clicks together
+        i = "xyz".index(self.jog_axis)
+        to = round(float(self.axis_mm[i] + clicks * self.inc_mm), 4)
         n = math.ceil(abs(clicks) / STROKE_CLICKS)
         per = [abs(clicks) // n + (1 if i < abs(clicks) % n else 0) for i in range(n)]
         sign = 1 if clicks > 0 else -1
         g = self.grips["dial"]
-        for c in per:
-            d = sign * c * DETENT_DEG * OVERTURN
+        for c in per + [0]:
+            d = sign * (c or per[-1]) * DETENT_DEG * OVERTURN
             a0, a1 = -d / 2, d / 2
             t0 = self.t
             H0_, W_off = self.dial_pose(a0, OFF_RIM_MM)
@@ -305,11 +320,14 @@ class PendantTake(StepTake):
                 if self.where == "keys":              # the last key let go before the hand leaves for the dial
                     self.wait(0.25)
                     t0 = self.t
-                via = self.clear_of_face(W_off)
+                via = self.clear_of_face(W_off, to_dial=True)
                 dur = self.travel_s([self.side["R"]["wrist"], *via, W_off])
                 self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
                 self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
                 t0 += dur
+                # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
+                self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
+                t0 += SETTLE_S
             else:                                     # turn back, off the rim, from the last stroke's end
                 back = self.dial_deg
                 self.add("R", t0, t0 + 0.22, lambda t, b=back, t0=t0, a0=a0: [
@@ -327,7 +345,7 @@ class PendantTake(StepTake):
             self.add("R", tc, ts + dur + 0.08, lambda t, ts=ts, dur=dur, a0=a0, a1=a1: [
                 ("pose", *self.dial_pose(a0 + (a1 - a0) * min_jerk((t - ts) / dur)), 3.0)])
             self.event("turn", round(ts, 3), round(ts + dur, 3), side="R", clicks=sign * c, axis=self.jog_axis,
-                       inc_mm=self.inc_mm, jog=self.jogs)
+                       inc_mm=self.inc_mm, jog=self.jogs, to_mm=to)
             self.event("grip", round(tc, 3), round(ts + dur + 0.1, 3), side="R", grip="dial")
             te = ts + dur + 0.08
             self.effort("R", te, 1.0, "dial")
@@ -338,7 +356,6 @@ class PendantTake(StepTake):
                 ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / 0.12)), 3.0)])
             self.dial_deg, self.t, self.where = a1, te + 0.12, "dial"
             self.side["R"]["wrist"] = self.dial_pose(a1, OFF_RIM_MM)[1]
-            i = "xyz".index(self.jog_axis)
             self.axis_mm[i] += sign * c * self.inc_mm
 
     def press_left(self, name: str, hover_right: str | None = None) -> None:
@@ -378,7 +395,7 @@ class PendantTake(StepTake):
         """The right hand back to the side."""
         self.leave_keys(self.t)
         self.fingers("R", self.t + 0.2, self.q_relax)
-        self.transit("R", self.t, self.t + dur, self.rest)
+        self.transit("R", self.t, self.t + dur, self.rest, via=self.clear_of_face(self.rest))
         self.t += dur
         self.where = "rest"
 

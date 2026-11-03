@@ -10,15 +10,20 @@
   put it a key away: sight steers the fingertip itself onto the key, across the key's face (in proportion to how far
   off it is, and slowly for what stays off). Until it is over its key it is held off the face, so a hand that arrives
   off its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
-- A jog of the handle ends when the dial has turned its clicks, as people stop turning when the machine is where they
-  want it: the plan's strokes turn the hand a quarter farther than the jog needs, and once the dial has turned the
-  jog's clicks the grip lets go, the fingers opening off the rim, for the rest of the jog.
+- A jog of the handle ends when the machine reads where the plan has it after the jog, as people stop turning when
+  the display reads right: the plan's strokes turn the hand a third farther than the jog needs, and once the machine
+  is there the dial is locked at that click and the right arm stops where it is, still gripping it, until the
+  jog's last stroke ends; then it comes round onto the plan, which leaves the dial along its axis. Each jog is counted from where the
+  machine is when it starts, so one that fell short or ran on is made up by the next on its axis.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
 
-Declared shortcut: `clamped`, the part welded to the table, standing in for the vise's clamp (the Seat step's take
-proves the clamp: moonshot/tests/gates/test_vise_take.py). Nothing in these steps pushes on the part.
+Declared shortcuts: `clamped`, the part welded to the table, standing in for the vise's clamp (the Seat step's take
+proves the clamp: moonshot/tests/gates/test_vise_take.py; nothing in these steps pushes on the part); and
+`dial_pinch`, the jog handle held to the hand while a stroke grips it and a finger touches its rim, standing in for
+fingertips on the knurled rim, which capsules on a smooth cylinder can't hold (a grip assist, as the vise take's
+`enclose`); and `dial_lock`, the handle held at its detent outside that grip, so only the grip turns it.
 
 The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle, the
 right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
@@ -35,6 +40,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.sim.runner import ARM, SETTLE_STEPS, TakeRunner
 from moonshot.world import cell, vf2
@@ -49,7 +55,7 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
-LET_GO_DEG = 12.0           # how far a done jog's fingers open off the rim
+FREEZE_EASE_S = 0.4         # a held hand, its jog's last stroke over, comes round onto the plan over this
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -57,17 +63,24 @@ NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
 
 def tool_xml(tool: dict) -> str:
     """A tool in its holder, hanging from the spindle's gauge line; it turns with the spindle. It doesn't collide:
-    an edge finder's or probe's touch is the machine's sensing, read from the geometry."""
+    an edge finder's, probe's or indicator's touch is the machine's sensing, or the needle's, read from the geometry.
+    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus."""
     hl, st, tip = tool["holder_mm"], tool["stickout_mm"], tool["tip_mm"]
     f = lambda v: f"{v / 1000:.5f}"                      # noqa: E731
-    return (f'\n        <body name="tool">'
+    body = (f'\n        <body name="tool">'
             f'<geom name="tool_holder" type="cylinder" size="{f(tool["holder_r"])} {f(hl / 2)}" pos="0 0 {f(-hl / 2)}" '
             f'contype="0" conaffinity="0" mass="1.1" rgba="0.6 0.6 0.62 1"/>'
             f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip) / 2)}" '
-            f'pos="0 0 {f(-hl - (st - tip) / 2)}" contype="0" conaffinity="0" mass="0.05" rgba="0.7 0.7 0.72 1"/>'
-            f'<geom name="tool_tip" type="cylinder" size="{f(tool["tip_r"])} {f(tip / 2)}" '
-            f'pos="0 0 {f(-tool["length_mm"] + tip / 2)}" contype="0" conaffinity="0" mass="0.005" rgba="0.75 0.75 0.78 1"/>'
-            f'</body>')
+            f'pos="0 0 {f(-hl - (st - tip) / 2)}" contype="0" conaffinity="0" mass="0.05" rgba="0.7 0.7 0.72 1"/>')
+    if "offset_mm" not in tool:
+        return (body + f'<geom name="tool_tip" type="cylinder" size="{f(tool["tip_r"])} {f(tip / 2)}" '
+                f'pos="0 0 {f(-tool["length_mm"] + tip / 2)}" contype="0" conaffinity="0" mass="0.005" '
+                f'rgba="0.75 0.75 0.78 1"/></body>')
+    (ox, oy), z = tool["offset_mm"], -tool["length_mm"] + tool["tip_r"]
+    return (body + f'<geom name="tool_stylus" type="capsule" fromto="0 0 {f(z)} {f(ox)} {f(oy)} {f(z)}" '
+            f'size="{f(tool["stylus_r"])}" contype="0" conaffinity="0" mass="0.002" rgba="0.75 0.75 0.78 1"/>'
+            f'<geom name="tool_tip" type="sphere" size="{f(tool["tip_r"])}" pos="{f(ox)} {f(oy)} {f(z)}" '
+            f'contype="0" conaffinity="0" mass="0.001" rgba="0.85 0.3 0.3 1"/></body>')
 
 
 class PendantRunner(TakeRunner):
@@ -78,6 +91,7 @@ class PendantRunner(TakeRunner):
         super().__init__(folder)
         m, d, s = self.model, self.data, self.tk["setup"]
         self.machine = cell.start(m, d)
+        self.machine0 = self.machine.machine_mm()  # the plan counts the axes from where the take starts them
         self.machine.setup_mode = bool(s.get("setup_mode"))
         self.machine.tool = int(s["tool"].get("number", 0))
         self.machine.tool_length = {int(k): v for k, v in s.get("tool_length", {}).items()}
@@ -113,25 +127,44 @@ class PendantRunner(TakeRunner):
                     "active_constraints": [], "applied_forces": [], "machine_axes": {f"vf2_{a}": [] for a in
                                                                                        ("x", "y", "z", "spindle")}}
         self._key_n: dict[str, float] = {}
-        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM]) for s in ("R", "L")}
+        # the corrections by sight and the press's aim steer through the shoulder, elbow and wrist, not the girdle: its
+        # few centimetres of slide took most of a least-squares correction and stopped at their ends, the hand 10 mm off
+        steer = [j for j in ARM if not j.startswith("sc_")]
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in steer]) for s in ("R", "L")}
         act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
-        self.jog_clicks: dict[int, int] = {}
-        for e in self.turns:
-            self.jog_clicks[e["jog"]] = self.jog_clicks.get(e["jog"], 0) + e["clicks"]
-        self.jog_from: dict[int, int] = {}
-        self.jog_done: set[int] = set()
+        self.jog_ev = {e["jog"]: e for e in self.turns}                  # its last stroke: the target, axis and step
+        self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
+        self.jog_t0 = {e["jog"]: e["t0"] - 0.25 for e in reversed(self.turns)}  # counted from its first stroke
+        self.jog_end = {j: e["t1"] + 0.2 for j, e in self.jog_ev.items()}       # to its last stroke's end
+        self.jog_done: dict[int, float] = {}        # jog -> when the machine read right
+        self.jog_hold: dict[int, np.ndarray] = {}   # jog -> the joints its hand is held at
+        self._corr = np.zeros(m.nv)                 # the sight correction the last step added
+        right = [n for n in self.body.joints if n.startswith("R_")]
+        arm = [n for n in right if n[2:] in ARM]
+        self.r_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in right])
+        self.r_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in right])
+        self.r_arm = np.isin(self.r_q, [m.jnt_qposadr[m.joint(n).id] for n in arm])     # arm, not fingers
+        self.pinch = m.equality("dial_pinch").id
+        self.lock = m.equality("dial_lock").id
+        self.dial_geom = m.geom("vf2_jog_handle").id
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
         paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
         xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
         c = " ".join(f"{v / 1000:.5f}" for v in s["centre_mm"])
+        h = vf2.record()["affordances"]["jog_handle"]
+        rim = f"0 {-h['depth_mm'] / 2000:.5f} {h['radius_mm'] / 1000:.5f}"
         xml = xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
-                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n', 1)
+                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
+                          f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
+                          'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                          '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '
+                          'solref="0.005 1"/>\n', 1)
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -238,30 +271,84 @@ class PendantRunner(TakeRunner):
             J = jacp[:, self.arm_dofs[s]]
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
-    def jog_now(self, t: float) -> int | None:
-        """The jog whose stroke the hand is in now, once the dial has turned all its clicks: else None."""
-        for ev in self.turns:
-            if ev["t0"] - 0.25 <= t <= ev["t1"] + 0.15:
-                j, c = ev["jog"], self.machine.clicks()
-                self.jog_from.setdefault(j, c)
-                if (c - self.jog_from[j]) * np.sign(self.jog_clicks[j]) >= abs(self.jog_clicks[j]):
-                    self.jog_done.add(j)
-                return j if j in self.jog_done else None
+    def correction(self, t: float) -> np.ndarray:
+        """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its
+        press, and resting at the side between it wound up a steady offset that put it 55 mm below the button."""
+        self.visual["L"][:] = 0.0
+        self._corr = super().correction(t)
+        return self._corr
+
+    def count_clicks(self, t: float) -> None:
+        """While a jog's strokes turn the dial: the moment the position display reads where the plan has the axis
+        after the jog (counting clicks would count those lost at a travel limit), and
+        the joints the hand stops at then: the arm where it is (what the servo aims at, less the sight correction it
+        adds), not where the plan had it, which the lagging hand would catch up to, turning the dial on; the fingers
+        as the plan has them, gripping."""
+        for j, t0 in self.jog_t0.items():
+            if t0 <= t <= self.jog_end[j] and j not in self.jog_done:
+                e = self.jog_ev[j]
+                i = "xyz".index(e["axis"])
+                at = self.machine.jog_goal_mm()[i] - self.machine0[i]
+                if (e["to_mm"] - at) * self.jog_dir[j] < e["inc_mm"] / 2:
+                    q, _, _ = super().at(t)
+                    arm_q, arm_dof = self.r_q[self.r_arm], self.r_dof[self.r_arm]
+                    q[arm_q] = self.data.qpos[arm_q] - self._corr[arm_dof]
+                    self.jog_done[j], self.jog_hold[j] = t, q
+                return
+
+    def frozen(self, t: float) -> tuple[int, float] | None:
+        """While a done jog's hand is held: (the jog, how far it has eased back onto the plan). Held, gripping, from the
+        moment the machine reads right to its last stroke's end; then it comes round onto the plan over FREEZE_EASE_S,
+        the plan leaving the dial along its axis. The dial is locked at its click meanwhile (dial_lock), so nothing of
+        the hand on its way off turns it."""
+        for j, td in self.jog_done.items():
+            end = self.jog_end[j]
+            if td <= t < end + FREEZE_EASE_S:
+                return j, min_jerk(max(0.0, t - end) / FREEZE_EASE_S)
         return None
 
-    def effort(self, side: str, t: float) -> tuple[float, str]:
-        """The plan's effort, but the grip lets go once the dial has turned the jog's clicks."""
-        e, grip = super().effort(side, t)
-        if side == "R" and grip == "dial" and self.jog_now(t) is not None:
-            return 0.0, grip
-        return e, grip
+    def at(self, t: float):
+        """The plan, but a done jog's right arm and hand stopped where the machine read right, gripping the dial, so
+        it stops with them, as people stop turning a handle: no coasting on past the jog's clicks."""
+        q, v, a = super().at(t)
+        self.count_clicks(t)
+        f = self.frozen(t)
+        if f is not None:
+            j, w = f
+            qf = self.jog_hold[j]
+            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * w
+            v[self.r_dof] *= w
+            a[self.r_dof] *= w
+        return q, v, a
 
-    def let_go(self, t: float) -> None:
-        """A done jog's fingers open off the rim: against the grip's squeeze, so the turning hand can't drag the dial."""
-        if self.jog_now(t) is None or ("R", "dial") not in self.squeeze:
-            return
-        dq = sum(self.squeeze[("R", "dial")].values(), np.zeros(self.model.nv)) * -np.radians(LET_GO_DEG)
-        self.data.ctrl[self.acts] += dq[self.act_dof]
+    def hold_dial(self, t: float) -> None:
+        """The dial_pinch shortcut: on while a stroke of a jog not yet done turns the dial (not while the grip closes
+        on it, while the hand still settles) and a finger touches its rim, its anchor set where the hand is then, so
+        switching it on moves nothing; and dial_lock whenever it is
+        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
+        m, d = self.model, self.data
+        e, grip = self.effort("R", t)
+        stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
+        want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
+        if want and not d.eq_active[self.pinch]:
+            touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
+                           for c in d.contact[:d.ncon])
+            if touching:
+                hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
+                p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
+                m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
+                d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
+        elif not want and d.eq_active[self.pinch]:
+            d.eq_active[self.pinch] = 0
+        if not d.eq_active[self.pinch] and not d.eq_active[self.lock]:
+            n = self.machine.detents
+            m.eq_data[self.lock, 0] = round(d.qpos[self.machine.q["jog"]] * n / (2 * math.pi)) * 2 * math.pi / n
+            d.eq_active[self.lock] = 1
+
+    def effort(self, side: str, t: float) -> tuple[float, str]:
+        """The plan's effort, but a held hand keeps the grip it had when the dial read right."""
+        f = self.frozen(t) if side == "R" else None
+        return super().effort(side, self.jog_done[f[0]] if f is not None and f[1] == 0.0 else t)
 
     def debounced(self, forces: dict[str, float]) -> dict[str, float]:
         now, on = float(self.data.time), self.machine.actuation
@@ -276,7 +363,7 @@ class PendantRunner(TakeRunner):
         self.machine.touch(self.debounced(self._key_n))
         self.push(t)
         self.aim(t)
-        self.let_go(t)
+        self.hold_dial(t)
         self.machine.apply()
 
     # --- each frame --------------------------------------------------------------------------------------

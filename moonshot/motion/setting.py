@@ -1,5 +1,6 @@
 """Setting a part up on the VF-2 (plan §4; the vf2-controls card): the motion of a setup's "Find X and Y" and "Set Z"
-steps at the pendant (moonshot/motion/pendant.py), and the datum each axis's zero must land on.
+steps at the pendant (moonshot/motion/pendant.py), and the datum each axis's zero must land on; and of "Check it's
+square", where a setup stands the part on the vise floor, the test indicator swept up its side.
 
     python -m moonshot.motion.setting nist-ftc-10 op10-xy      # plans <data root>/takes/nist-ftc-10/op10-xy
 
@@ -38,7 +39,16 @@ EDGE_FINDER["length_mm"] = EDGE_FINDER["holder_mm"] + EDGE_FINDER["stickout_mm"]
 PROBE = {"name": "spindle probe", "number": 20, "holder_mm": 85.0, "holder_r": 20.0, "shank_r": 2.0, "stickout_mm": 50.0,
          "tip_r": 1.0, "tip_mm": 2.0, "ball": True}
 PROBE["length_mm"] = PROBE["holder_mm"] + PROBE["stickout_mm"]
-STANDOFF_MM = 3.0           # how far off a face the coarse jog stops
+# the lever test indicator (library/records/assets/inspection/dti: Mitutoyo 513-404, its 8 mm stem, a 2 mm ball) in an
+# indicator holder in the spindle, as Haas mounts one (the dti-sweep-face card's footage): its ball on a level stylus
+# 35 mm off the spindle's axis, so the holder stands clear of the face it sweeps [proposed: the lengths, the reach]
+INDICATOR = {"name": "test indicator", "holder_mm": 60.0, "holder_r": 15.875, "shank_r": 4.0, "stickout_mm": 50.0,
+             "tip_r": 1.0, "tip_mm": 2.0, "stylus_r": 0.75, "offset_mm": [35.0, 0.0]}
+INDICATOR["length_mm"] = INDICATOR["holder_mm"] + INDICATOR["stickout_mm"]
+PRELOAD_MM = 0.2            # the dti-sweep-face card's: the needle about 20 divisions in
+SWEEP_MM = 75.0             # the card's sweep, about the side the part shows above the jaws
+STANDOFF_MM = 6.0           # how far off a face the coarse jog stops: a click at .1 short of it is 2.5 mm
+CLOSE_MM = 0.3              # and the .01 jog: a click at .01 short of it is 0.25 mm
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -97,7 +107,7 @@ class XYEdgeFinder:
         self.jog(axis, (face - r - STANDOFF_MM) - here, "inc_0.1")
         self.jog("z", (self.c[2] + self.h[2] - BELOW_TOP_MM) - z, "inc_0.1")
         gap = face - r - self.where()[i]
-        self.jog(axis, max(0.0, gap - 0.15), "inc_0.01")
+        self.jog(axis, max(0.0, gap - CLOSE_MM), "inc_0.01")
         gap = face - r - self.where()[i]
         n = math.ceil(gap / INC["inc_0.001"] - 1e-9)
         self.jog(axis, n * INC["inc_0.001"], "inc_0.001")      # the click at which it trips
@@ -198,7 +208,7 @@ class Probing:
         """A single-surface cycle on the face through `face` with outward `normal` (world, along axis), then the shift
         to the datum's coordinate on that axis."""
         i = "xyz".index(axis)
-        stand = face + normal * (PROBE["tip_r"] + 5.0)
+        stand = face + normal * (PROBE["tip_r"] + 2 * STANDOFF_MM)
         if axis != "z":
             stand[2] = z
         self.to(stand)
@@ -240,6 +250,47 @@ class Probing:
         k.rest_hand()
         k.wait(0.5)
         return sets
+
+
+class SquareCheck:
+    """Check it's square with the test indicator in the spindle (the dti-sweep-face card, phases 6-11): its ball
+    beside the part's left side just above the jaws, in at .001 to the card's preload, up the side by Z at .01 while
+    the eyes stay on the needle, a look at it at the top, then back off the side and up to home."""
+
+    def __init__(self, take: PendantTake, part: dict):
+        self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
+        self.ball0 = SPINDLE + [*INDICATOR["offset_mm"], -INDICATOR["length_mm"] + INDICATOR["tip_r"]]
+
+    def ball(self) -> np.ndarray:
+        """The ball's centre among the part's frame-0 positions, as machine X, Y and Z move it."""
+        return self.ball0 + self.k.axis_mm
+
+    def jog(self, axis: str, mm: float, inc: str, deg_s: float = 300.0) -> None:
+        k = self.k
+        k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
+        k.look(k.t, self.ball())
+        k.turn(clicks(mm, inc), deg_s)
+
+    def plan(self) -> dict:
+        k, r = self.k, INDICATOR["tip_r"]
+        face = self.c[0] - self.h[0]
+        k.look(0.0, key_at("handle_jog"))
+        k.wait(0.5)
+        k.keys(["handle_jog", "inc_0.1"])
+        k.inc_mm = INC["inc_0.1"]
+        self.jog("y", self.c[1] - self.ball()[1], "inc_0.1")
+        self.jog("x", face - r - STANDOFF_MM - self.ball()[0], "inc_0.1")
+        self.jog("z", JAW_TOP_MM + 6.0 - self.ball()[2], "inc_0.1")
+        self.jog("x", max(0.0, face - r - self.ball()[0] - CLOSE_MM), "inc_0.01")
+        self.jog("x", face - r - self.ball()[0] + PRELOAD_MM, "inc_0.001", 150.0)
+        self.jog("z", SWEEP_MM, "inc_0.01", 200.0)
+        k.look(k.t, self.ball())
+        k.wait(1.0)
+        self.jog("x", -2 * INC["inc_0.1"], "inc_0.1")
+        self.jog("z", -k.axis_mm[2], "inc_0.1")
+        k.rest_hand()
+        k.wait(0.5)
+        return {}
 
 
 def probe_features(plan: dict, setup_id: str) -> dict:
@@ -299,6 +350,9 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         tool = PROBE
         extra = {"vps": pr.vps, "bores": [f["bore"]] if "bore" in f else [],
                  "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}
+    elif step["title"] == "Check it's square":
+        sets = SquareCheck(take, p).plan()
+        tool = INDICATOR
     else:
         raise NotImplementedError(f"{step_id}: {step['title']} by {step['facts']} isn't planned yet")
     take.clip(step["title"], 0.0, take.t, step["caption"])

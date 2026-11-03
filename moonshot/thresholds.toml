@@ -231,6 +231,18 @@ unit = "mm"
 source = "proposed"
 reason = "Touched off on paper about 0.1 mm thick, which neither of the vf2-controls card's sources subtracts, plus a click at .0001 in"
 
+[setting.indicator_mm]
+value = 0.01
+unit = "mm"
+source = "proposed"
+reason = "A test indicator's graduation: the needle stays put if it stays within one; the clamped part stands square, so what moves it is the machine"
+
+[setting.sweep_mm]
+value = 50.0
+unit = "mm"
+source = "proposed"
+reason = "Swept this far up the side, a needle steady to 0.01 mm shows the part square to 0.2 mrad; a shorter sweep says little"
+
 # --- Nothing moves without a cause; machines inside spec (plan §5.1) ---
 
 [physics.still_mm_s]

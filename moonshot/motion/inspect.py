@@ -28,8 +28,8 @@ from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (LIFT_S, PART_AT, PRELOAD_S, REST, BenchPlan, bands, bench_box, box, mirror,
-                                   oriented_box, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, BenchPlan, bands, bench_box, box,
+                                   mirror, oriented_box, settle)
 from moonshot.motion.primitives import FPS, min_jerk, open_like
 from moonshot.world import bench_cell as BC
 
@@ -200,10 +200,11 @@ class InspectPlan(BenchPlan):
         self.effort(side, t_on, 0.0, grip)
         self.effort(side, t_on + 0.2, 0.3, grip)
 
-    def let_go(self, grip, t_on, t_off, **carry):
+    def let_go(self, grip, t_on, t_off, lifted=None, **carry):
         """A hand holding a grip from t_on lets go at t_off and goes back along its forearm, relaxing only as it goes:
         relaxed first, the arm sagged with the tool still in it, opening the calipers 1 mm, and let go, sank 5.8 mm
-        into their slider. Its carry and events."""
+        into their slider. Its carry and events: the carry from 0.1 s into the grip, or from when the hand lifted
+        the tool off the bench (lifted)."""
         g = self.grips[grip]
         side = g["side"]
         self.carry(grip, t_on, t_off, **carry)
@@ -211,7 +212,8 @@ class InspectPlan(BenchPlan):
         self.effort(side, t_off + 0.1, 0.3, grip)
         self.effort(side, t_off + 0.3, 0.0, grip)
         self.event("grip", t_on, t_off, side=side, grip=grip, on=g["of"])   # its squeeze ends with its hold: on after,
-        self.event("carry", t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side)   # it sank the fingers 6 mm in
+        self.event("carry", lifted or t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side,   # it sank the fingers 6 mm in
+                   **({"ease_in": CARRY_EASE_S} if lifted else {}))
         self.fingers(side, t_off, g["q"])
         self.fingers(side, t_off + 0.3, open_like(self.hand, g["q"], 0.5))
         self.transit(side, t_off + 0.02, t_off + 0.5, W + back * PRE_MM)
@@ -224,14 +226,13 @@ class InspectPlan(BenchPlan):
         _, Wg = self.grip_pose("cal", t0)
         self.look(t0, self.cal_point([-60.0, 10.0, 0.0]))
         # ready in front of the body, over the bench's edge toward them
-        # opened 0.14 s before contact, the hand was widest 82% of the way through the reach
-        tc = self.reach("R", "cal", t0, ready=Wg + [130, -120, 110], approach=Wg + [15, -10, 55], opened=0.7, lead=0.19)
-        self.effort("R", tc, 0.0, "cal")
-        self.effort("R", tc + 0.25, 0.3, "cal")
+        tg = self.reach("R", "cal", t0, ready=Wg + [130, -120, 110], approach=Wg + [15, -10, 55], opened=0.7)
+        self.effort("R", tg, 0.0, "cal")
+        self.effort("R", tg + 0.25, 0.3, "cal")
         p0, R0 = self.cal0
-        t_lift = tc + PRELOAD_S
-        self.move_cal(t_lift, t_lift + LIFT_S, R0, p0 + [0, 0, 30])
-        self.t_grab, self.t = tc, t_lift + LIFT_S
+        self.t_lift = tg + PRELOAD_S
+        self.move_cal(self.t_lift, self.t_lift + LIFT_S, R0, p0 + [0, 0, 30])
+        self.t_grab, self.t = tg, self.t_lift + LIFT_S
         self.clip("pick up", t0, self.t, "PICK UP  the calipers by the slider, as a phone is held")
 
     def present(self):
@@ -245,7 +246,8 @@ class InspectPlan(BenchPlan):
         self.take("beam", t0 + 0.6, tL, via=[REST + [0, 60, 160]])
         self.t_beam = tL
         t_off = tL + 0.1                     # as the left's hold starts: both holding, the right's slips slid the slider 3 mm
-        self.let_go("cal", self.t_grab, t_off, free=[(self.t_grab + 0.7, t_off)], point=SLIDER_GRIP)
+        self.let_go("cal", self.t_grab, t_off, lifted=self.t_lift, free=[(self.t_lift + LIFT_S, t_off)],
+                    point=SLIDER_GRIP)
         self.t = t_off + 0.25
         self.clip("present", t0, self.t, "HAND OVER  the calipers to the left hand, on the beam")
 

@@ -402,23 +402,25 @@ class BenchRun:
         rel_plan = (Rhp.T @ Rp, Rhp.T @ (po - p.xpos[hb]))
         # the hand's own correction C, in its frame, so that hand_plan * C * rel_act = hand_plan * rel_plan
         Rc = rel_plan[0] @ rel_act[0].T
-        self.correction[e["obj"]] = (side, Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"])
+        self.correction[e["obj"]] = (side, Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"], e.get("ease_in", 0.0))
 
     def carry_offset(self, tt: float) -> np.ndarray:
         """Joint offsets moving each hand from its planned pose by its carries' corrections, whole until the tool is
         let go and eased out over 0.4 s after: what the tool really sits like in the hand, fixed by sight. It starts
         whole, as it is where the hand already is when it closes; eased out while still held, it swung the tool off
-        its rest as it was set down. The right hand's touch guide adds to it. Through the arm's 9 joints at the planned
-        pose, position and turn together (damped least squares)."""
+        its rest as it was set down. A carry that lifts a tool off the bench eases it in over its `ease_in` (s): whole
+        at once, it let go of the press the plan's pads made into the tool, which sprang the deburring tool 1 mm up as
+        the carry closed. The right hand's touch guide adds to it. Through the arm's 9 joints at the planned pose,
+        position and turn together (damped least squares)."""
         m, p = self.model, self.plan
         dq = np.zeros(m.nv)
         for side in ("R", "L"):
             hb = m.body(f"{side}_hand").id
             err = np.r_[self.touch_guide(side, tt), self.turn_guide(side, tt)]
-            for s_, Rc, pc, t0, t1 in self.correction.values():
+            for s_, Rc, pc, t0, t1, ease in self.correction.values():
                 if s_ != side or not t0 <= tt < t1 + EASE_OUT_S:
                     continue
-                w = 1 - min_jerk((tt - t1) / EASE_OUT_S)
+                w = (1 - min_jerk((tt - t1) / EASE_OUT_S)) * (min_jerk((tt - t0) / ease) if ease else 1.0)
                 Rh = p.xmat[hb].reshape(3, 3)
                 rv = np.zeros(3)
                 q = np.zeros(4)

@@ -2,10 +2,11 @@
 the VF-2 cell with the part in the vise; the doors are passive slides with friction and damping, so only the hands
 move them, and Cycle Start registers from the index's force on the button (vf2.Control.touch).
 
-Closing, each palm pushes its door's bar along by contact alone. Opening, the fingers draw the bar out, and as capsule
-fingers can't conform to it the closed hand is held to the bar by a soft constraint, enclose_open_<side>
-(TakeRunner.encloses). The arm is fed what moving the door along its planned path takes: its friction, its track's
-damping and its inertia.
+Closing, each hand's hooked fingers push its door's bar along by contact alone. Opening, the fingers draw the bar out,
+and as capsule fingers can't conform to it the closed hand is held to the bar by a soft constraint,
+enclose_open_<side> (TakeRunner.encloses). The arm is fed what moving the door along its planned path takes (its
+friction, its track's damping and its inertia), and more as the door trails its path, as people lean into a door that
+is slow to move.
 
 The run writes, beside the take record, checks.json (per frame, what the arms touch, each hand's wrench, the active
 constraints and the bodies pushed from outside the physics, the VF-2's axes; the never-held E-stop) and the vise's
@@ -24,6 +25,7 @@ import mujoco
 import numpy as np
 
 from moonshot.motion import door_cycle as DC
+from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies, hand_wrench
 from moonshot.sim.runner import SIDES, TakeRunner
 from moonshot.world import cell, vf2
@@ -32,6 +34,7 @@ from moonshot.world import vise as V
 PROGRAM = [(cell.LOAD_X_MM, y, 0.0, 1000.0) for y in (60.0, 0.0) * 6]   # the first moves, slow to show it runs
 DOORS = ("door_left", "door_right")
 NEVER_HELD = ["vf2_estop"]      # pressing it would stop the machine (as moonshot/sim/pendant.py's)
+LAG_N_PER_MM, LAG_MAX_N = 0.5, 25.0     # a hand leans into a door trailing its path: this much more per mm, at most
 
 
 def clamped_home(load: V.Load) -> np.ndarray:
@@ -172,7 +175,8 @@ class DoorClose(_Cell):
     def hand_force(self, side, t):
         """What it takes to move the door along its planned path (minimum jerk): its friction, its track's damping at
         the planned speed and the force that accelerates it; once the path has run the door home, the friction's
-        worth into its stop. A door is slowed by its friction, so the hand never pulls it back."""
+        worth into its stop. And as the door trails its path, LAG_N_PER_MM more, up to LAG_MAX_N: a door is slowed by
+        its friction, so the hand never pulls it back."""
         e = self.pulls.get(side)
         if e is None or not e["t0"] <= t < e["t1"]:
             return None
@@ -182,6 +186,9 @@ class DoorClose(_Cell):
         v = L * (30 * x ** 2 - 60 * x ** 3 + 30 * x ** 4) / T
         acc = L * (60 * x - 180 * x ** 2 + 120 * x ** 3) / T ** 2
         f = self.door_friction[door] + self.door_damping[door] * v + self.door_kg[door] * acc
+        planned = e["from_mm"] + (e["to_mm"] - e["from_mm"]) * min_jerk(x)
+        lag = (planned - self.data.qpos[self.ctl.q[door]] * 1000) * np.sign(e["to_mm"] - e["from_mm"])
+        f += min(LAG_MAX_N, LAG_N_PER_MM * max(0.0, lag))
         return self.door_dir[door] * max(0.0, f)
 
     def force_along(self, door: str) -> dict[str, float]:

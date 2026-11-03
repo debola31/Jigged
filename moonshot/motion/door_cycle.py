@@ -31,10 +31,16 @@ SEAT_S = 0.25                                         # stop, and holds it there
 REACH_S = 1.1                                         # the hand out to a bar,
 SETTLE_S = 0.35                                       # settling in front of it,
 APPROACH_S = 0.4                                      # and onto it,
-APPROACH_OUT, APPROACH_BACK = 35.0, 75.0              # from this far outside the bar and in front of it (mm)
+APPROACH_OUT, APPROACH_BACK = 40.0, 35.0              # from this far outside the bar and in front of it (mm): the
+                                                      # skin 7 mm or more off the bar all the way in, the right forearm
+                                                      # kept back from the pendant
+APPROACH_OPEN = 0.3                                   # the hook a little open on the way in
 LEFT_AFTER_S = 0.5                                    # the left hand sets off this long after the right door starts
+# the hook's wrist from the bar's grip point: out from its outer face, in front of it; its long axis tilted up. Placed
+# by the skin's clearance (a search over shapes and places): the hooked fingers' backs on the outer face, within 1 mm,
+# 26 mm off the door, 110 mm off the other bar with the doors shut
+GRIP_OUT, GRIP_BACK, GRIP_TILT = 50.0, 110.0, 25.0
 BAR_W = 31.8                                          # the handle bar's width along the door (vf2.json door_*_pull)
-PALM_MM = 16.0                                        # the wrist's centre stands this far off the palm's skin
 CLOSE_LUMBAR = ORIGIN + np.array([0.0, -1100.0, 955.0])   # in the doorway, centred, the chest 130 mm off the bars
 START_LUMBAR = np.array([70.0, -1470.0, 955.0])           # in front of the pendant, the button by the right shoulder
 SCREEN = ORIGIN + np.array([850.0, -1030.0, 1550.0])      # the pendant's screen, where the program name shows
@@ -74,22 +80,31 @@ class _Doors(StepTake):
     in front of it, closing round it and running the door along its track to the stop; the other hand sets off while
     the first door slides, and the trunk turns from one door to the other."""
 
+    def __init__(self, out, verbose=True):
+        super().__init__(out, CLOSE_LUMBAR, verbose)
+        # the pendant hangs in front of the right door's bar near full open: the right arm reaches in under it
+        c = vf2.record()["colliders"]["pendant_face"]
+        lo, hi = np.array(c["box_min_mm"], float), np.array(c["box_max_mm"], float)
+        self.boxes = [(ORIGIN + (lo + hi) / 2, (hi - lo) / 2)]
+
     def bar_grip(self, door: str, side: str, open_mm: float) -> dict:
-        """A power grip round the handle bar from outside it, placed rather than solved: thumb up, the palm on the
-        bar's outer face, the fingers curled round its back (the bar stands 36 mm off the door). Closing, the palm
-        pushes the door along; opening, the fingers draw it, and as the capsule fingers can't conform to the bar the
-        physics holds the gripped hand to it by a soft constraint, as the vise take does the crank's knob
-        (moonshot/sim/runner.py, enclose). The two hands stay outside their bars, apart, even with the doors shut.
-        Given in the side's world."""
+        """A hook on the handle bar from outside it, placed rather than solved: the hand points into the machine,
+        tilted up GRIP_TILT, thumb up and laid along the index, the fingers hooked at their middle joints with their
+        backs on the bar's outer face. Placed so that the hand's skin (moonshot/body/hand.py) clears the bar, its door
+        and the other door's bar; the fingers can't go round the bar's back, which stands only 36 mm off the door, so
+        closing, the hooked fingers push the door along, and opening the physics holds the closed hand to the bar by a
+        soft constraint, as the vise take does the crank's knob (moonshot/sim/runner.py, enclose). Given in the side's
+        world."""
         face = self.at(side, handle(door, open_mm))
         out = np.sign(face[0] - self.lumbar[0])                          # the outer face's normal along x
         dorsal, long = np.array([out, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
-        H = np.stack([long, np.cross(dorsal, long), dorsal], 1)
-        W = face + dorsal * PALM_MM + np.array([0.0, -112.0, 0.0])
+        c, s = np.cos(np.radians(GRIP_TILT)), np.sin(np.radians(GRIP_TILT))
+        H = np.array([[1.0, 0, 0], [0, c, -s], [0, s, c]]) @ np.stack([long, np.cross(dorsal, long), dorsal], 1)
+        W = face + np.array([out * GRIP_OUT, -GRIP_BACK, 0.0])
         q = self.hand.neutral()
         for n in ("index", "middle", "ring", "little"):
-            q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = 65.0, 75.0, 35.0
-        q.update(thumb_cmc_abd=30.0, thumb_cmc_flex=5.0, thumb_mcp_flex=20.0, thumb_ip=15.0)
+            q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = 0.0, 95.0, 30.0
+        q.update(thumb_cmc_abd=0.0, thumb_cmc_flex=0.0, thumb_mcp_flex=10.0, thumb_ip=10.0)
         q = self.hand.clamp(q)
         return {"q": q, "H": H, "W": W, "obj": face, "side": side, "W_rel": W - face, "theta": np.array(THETA0)}
 
@@ -101,15 +116,17 @@ class _Doors(StepTake):
         g = self.grips[grip]
         H, W = self.grip_pose(grip)                                         # in the side's world
         out = np.sign(handle(door, from_mm)[0] - ORIGIN[0])
-        reach = self.at(side, W) + np.array([out * APPROACH_OUT, -APPROACH_BACK, 10.0])   # out and in front, world
+        reach = self.at(side, W) + np.array([out * APPROACH_OUT, -APPROACH_BACK, 0.0])   # out and in front, world
         A = self.at(side, reach)
+        # letting go, the hand comes straight back off the bar before it swings in, so the hook clears the bar
+        back = self.at(side, self.grip_pose(grip, handle(door, to_mm))[1]) + np.array([out * 15.0, -90.0, 0.0])
         t_on = t0 + REACH_S
         t_in = t_on + SETTLE_S                                              # the hand starts onto the bar
         t_grip = t_in + APPROACH_S
         t_pull = t_grip + 0.2
         t_end = t_pull + SLIDE_S + SEAT_S
         self.transit(side, t0, t_on, reach, fade=(H, 2.0))
-        opened = open_like(self.hand, g["q"], 0.9)
+        opened = open_like(self.hand, g["q"], APPROACH_OPEN)
         self.fingers(side, t0 + 0.25, opened)
         self.fingers(side, t_in, opened)
         self.add(side, t_on, t_pull, lambda t, H=H, W=W, A=A, t_in=t_in: [
@@ -125,18 +142,18 @@ class _Doors(StepTake):
         self.effort(side, t_end + 0.15, 0.0, None)
         self.fingers(side, t_end + 0.1, g["q"])
         self.fingers(side, t_end + 0.4, open_like(self.hand, g["q"], 0.5))
-        self.transit(side, t_end + 0.2, t_end + 1.2, self.rest_of(side))
-        self.fingers(side, t_end + 1.2, self.q_relax)
-        self.t = max(self.t, t_end + 1.4)
+        self.transit(side, t_end + 0.2, t_end + 1.3, self.rest_of(side), via=[back])
+        self.fingers(side, t_end + 1.3, self.q_relax)
+        self.t = max(self.t, t_end + 1.5)
         return t_pull
 
 
 class DoorClose(_Doors):
-    """Close the doors from fully open: the right one, then the left, each palm pushing its door's bar home along the
-    track, the fingers curled round it; the left hand reaches out while the right door slides."""
+    """Close the doors from fully open: the right one, then the left, each hand's hooked fingers pushing its door's
+    bar home along the track; the left hand reaches out while the right door slides."""
 
     def __init__(self, out=TAKES / "door-close", verbose=True):
-        super().__init__(out, CLOSE_LUMBAR, verbose)
+        super().__init__(out, verbose)
         self.grips = {"door_right": self.bar_grip("door_right", "R", OPEN_MM),
                       "door_left": self.bar_grip("door_left", "L", OPEN_MM)}
 
@@ -154,7 +171,7 @@ class DoorOpen(_Doors):
     gripping its bar from outside and drawing the door out along its track."""
 
     def __init__(self, out=TAKES / "door-open", verbose=True):
-        super().__init__(out, CLOSE_LUMBAR, verbose)
+        super().__init__(out, verbose)
         self.grips = {"open_right": self.bar_grip("door_right", "R", 0.0),
                       "open_left": self.bar_grip("door_left", "L", 0.0)}
 

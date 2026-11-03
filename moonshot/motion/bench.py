@@ -43,6 +43,19 @@ PART_AT = np.array([-80.0, -110.0, TOP + BC.MAT["size"][2] + 31.2])   # the fini
 STEADY_N = 5.0                                    # the steadying hand's push (the caliper card's, proposed): on the
                                                   # rubber mat it holds the part; at 10 N the loaded arm sagged and
                                                   # crept the part 6 mm
+RISE_S, STILL_S, REACH_S = 1.1, 0.25, 0.55        # a pickup: up from the thigh, still, then the reach to grasp. The
+                                                  # rise is the slower: a reach is timed from the last stop before
+                                                  # the fastest frame of the 2 s before contact, and risen in 0.7 s
+                                                  # (1,046 mm/s, the reach 757) the reach was timed from the thigh
+OPEN_LEAD_S = 0.14                                # its hand opened this long before contact (proposed)
+PRELOAD_S = 0.2                                   # a lift starts this long after the planned contact: the hand meets
+                                                  # the tool 0.07 s before it and its carry closes 0.1 s after, bearing
+                                                  # the load, so the grip rises for about people's 0.23 s (anatomy.json
+                                                  # grip preload_s) first. Lifting from 0.23 s the load took 0.27 s
+                                                  # to lift it; from 0.15 s, as the carry closed, 0.1 s
+LIFT_S = 0.8                                      # a lift's 30-35 mm, slowly at first: the load comes onto the tool
+                                                  # over people's loading time (anatomy.json grip loading_s) before it
+                                                  # leaves the bench
 
 
 def mirror(p) -> np.ndarray:
@@ -236,6 +249,26 @@ class BenchPlan:
     def hold(self, side, t0, t1, H, W, w=3.0):
         self.add(side, t0, t1, lambda t: [("pose", H, W, w)])
         self.wrist[side] = np.asarray(W, float)
+
+    def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S):
+        """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
+        down onto it from approach, the hand opening (opened of the way to open_like's widest) lead before contact and
+        closing on it. People's reaches to grasp last 0.32-0.67 s from the hand's onset
+        (person.reach_to_grasp_right_s) and open widest 71-77% of the way (person.peak_aperture_reach_frac): run as one
+        movement from the thigh, the calipers' reach measured 1.1 s, widest at 85% of it. Returns the planned
+        contact."""
+        g = self.grips[grip]
+        H, W = self.grip_pose(grip, t0)
+        t_ready = t0 + RISE_S
+        t_go = t_ready + STILL_S
+        tc = t_go + REACH_S
+        self.transit(side, t0, t_ready, ready)
+        self.transit(side, t_ready, t_go, ready)
+        self.transit(side, t_go, tc, W, via=[approach], fade=(H, 1.0))
+        self.fingers(side, t0 + 0.3, self.q_relax)
+        self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
+        self.fingers(side, tc, g["q"])
+        return tc
 
     def obj_at(self, name, t):
         """The planned pose (R, p) of a carried object at t: min-jerk between its keys, held between them."""

@@ -23,7 +23,8 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import PART_AT, REST, TOP, BenchPlan, bench_box, box, instrument_colliders, settle
+from moonshot.motion.bench import (LIFT_S, PART_AT, PRELOAD_S, REST, TOP, BenchPlan, bench_box, box,
+                                   instrument_colliders, settle)
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
@@ -100,7 +101,10 @@ class DeburrPlan(BenchPlan):
         left, up = R0[:, 1], R0[:, 2]
         upper_left, upper_right = (up + left) / math.sqrt(2), (up - left) / math.sqrt(2)
         on = lambda lo, hi, side: on_cylinder(p0, ax, D["handle_r"], lo, hi, side=side, side_w=10.0)  # noqa: E731
-        specs["tool"] = dict(of="deburr_tool", obj=p0, q0=q0, iters=1000, colliders=[hand_cyl, blade, box(bc, bh)],
+        # clear of the rough-surface block beside it: solved without it, the hand rested on the block, its fingers
+        # over the tool and never on it, and only the carry lifted it
+        specs["tool"] = dict(of="deburr_tool", obj=p0, q0=q0, iters=1000,
+                             colliders=[hand_cyl, blade, box(bc, bh)] + instrument_colliders(self.rests, ("rough",), 3.0),
                              targets={"thumb": on(70, 115, upper_left), "index": on(85, 125, up),
                                       "middle": on(80, 125, upper_right)},
                              starts=[S(20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (55, 75, 90) for r in (0, 15)])
@@ -130,23 +134,22 @@ class DeburrPlan(BenchPlan):
     def pick_up(self):
         t0 = self.t
         g = self.grips["tool"]
-        Hg, Wg = self.grip_pose("tool", t0)
-        tc = t0 + 1.3
+        _, Wg = self.grip_pose("tool", t0)
         self.look(t0, self.tool0[0] + self.tool0[1] @ [110, 0, 0])
-        self.transit("R", t0, tc, Wg, via=[self.wrist["R"] + [40, 60, 130], Wg + [0, -10, 55]], fade=(Hg, 1.0))
-        self.fingers("R", t0 + 0.3, self.q_relax)
-        self.fingers("R", t0 + 0.95, open_like(self.hand, g["q"], 0.8))
-        self.fingers("R", tc, g["q"])
+        # ready in front of the bench's edge and high enough that the hanging fingers clear its top: 4 mm in front and
+        # 110 mm up, they caught its edge and held the hand 115 mm off the tool as the carry closed
+        tc = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8)
         self.effort("R", tc, 0.0, "tool")
         self.effort("R", tc + 0.25, 0.3, "tool")
         self.t_grab = tc
         R0, p0 = self.tool0[1], self.tool0[0]
-        self.move("deburr_tool", tc + 0.3, tc + 0.7, R0, p0 + [0, 0, 35])
+        t_lift = tc + PRELOAD_S
+        self.move("deburr_tool", t_lift, t_lift + LIFT_S, R0, p0 + [0, 0, 35])
         # off the bench, the free ring and little fingers curl into the palm, out of the part's way (left out, the
         # little finger brushed the part's ear and pushed it 5 mm)
         self.fingers("R", tc + 0.5, g["q"])
         self.fingers("R", tc + 1.0, curled(g["q"]))
-        self.t = tc + 0.7
+        self.t = t_lift + LIFT_S
         self.clip("pick up", t0, self.t, "PICK UP  the deburring tool, held like a pen")
 
     def stroke(self, i, frm, to, approach=1.2):
@@ -201,7 +204,7 @@ class DeburrPlan(BenchPlan):
         self.effort("R", t_down - 0.1, 0.3, "tool")
         self.effort("R", t_down + 0.05, 0.0, "tool")
         self.event("grip", self.t_grab, t_down + 0.15, side="R", grip="tool", on="deburr_tool")
-        self.event("carry", self.t_grab + 0.15, t_down + 0.05, obj="deburr_tool", grip="tool")
+        self.event("carry", self.t_grab + 0.1, t_down + 0.05, obj="deburr_tool", grip="tool")
         self.fingers("R", t_down + 0.05, g["q"])
         self.fingers("R", t_down + 0.4, open_like(self.hand, g["q"], 0.5))
         self.wrist["R"] = W

@@ -2,8 +2,8 @@
 checks a vise take's run feeds from its own sim.npz keys (blank, para, opening), which no other run writes.
 
 The record has where each object is, frame by frame, and its colliders by name; checks.json's touching names the
-colliders the hands touch. What the record can't tell, the run writes into checks.json (moonshot/sim/bench.py): which
-objects ride on which (moves_with: the calipers' slider on their beam), and the right hand's own touches (touching_R).
+colliders the hands touch, themselves or through a tool they hold. What the record can't tell, the run writes into
+checks.json (moonshot/sim/bench.py): which objects ride on which (moves_with: the calipers' slider on their beam).
 """
 from __future__ import annotations
 

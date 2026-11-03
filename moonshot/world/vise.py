@@ -25,6 +25,13 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             lead=6.35)
 CRANK0_DEG = 55.0
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
+# the stop a part stood on the vise's floor is set against (nist-ftc-10 op50): a steel block (x along the jaws, y
+# across, z up; mm), tall enough to be pinched by its top over the jaws, narrower across than such a part, so the jaws
+# close on the part and not on it
+STOP_MM = (38.1, 19.05, 63.5)
+STOP_KG = 7850 * math.prod(STOP_MM) * 1e-9
+STOP_HOME = np.array([-600.0, -350.0, TABLE_Z])          # its base centre where it waits on the table, beyond the
+                                                         # parallels' rack (moonshot/world/parallel_rack.py)
 JAW_MIN_MM = 10.0          # the jaw closes down to this opening: a part on its side (nist-ftc-10 op30, 31 mm) needs it
 RENDER_DIR = "library/workholding/d688/links"            # under the data root
 
@@ -61,6 +68,14 @@ class Load:
     def parallels(self) -> dict[str, np.ndarray]:
         """Each parallel's base centre (mm), on the vise's seat."""
         return {n: np.array([VISE["x"], y, VISE["seat_z"]]) for n, y in self.parallels_y.items()}
+
+    def stop(self) -> np.ndarray | None:
+        """The stop's base centre (mm), on the vise's floor against the part's -x end, when the part stands on the floor
+        (no parallels); None otherwise. Centred across the part, so the fingers that set it fit beside it."""
+        if self.parallels_y:
+            return None
+        return np.array([VISE["x"] - self.size[0] / 2 - STOP_MM[0] / 2, VISE["fixed_face_y"] - self.size[1] / 2,
+                         VISE["seat_z"]])
 
     def to_json(self) -> dict:
         return {"size_mm": list(self.size_mm), "parallel_h": self.parallel_h, "parallels_y": dict(self.parallels_y),
@@ -106,6 +121,8 @@ def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
     boxes = {"blank": (load.size, "aluminium_6061", [0.8, 0.81, 0.82, 1.0], 0.33)}
     boxes |= {n: ([PARALLEL_L, PARALLEL_T, load.parallel_h], "hardened_steel", [0.62, 0.63, 0.65, 1.0], 0.22)
               for n in load.parallels_y}
+    if load.stop() is not None:
+        boxes["stop"] = (STOP_MM, "hardened_steel", [0.62, 0.63, 0.65, 1.0], 0.22)
     for body, (size, name, colour, rough) in boxes.items():
         box = trimesh.creation.box(extents=np.asarray(size, float))
         box.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
@@ -123,13 +140,14 @@ def knob_center(phi_deg: float) -> np.ndarray:
 
 
 def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str,
-              table_body: str) -> tuple[str, str, str]:
+              table_body: str, stop_mm=None) -> tuple[str, str, str]:
     """(on-table XML, loose XML, equality XML). The on-table part is the vise, bolted to the machine's table: it goes
     inside table_body, whose origin is the world origin when the take starts. The loose part is the free objects:
     the parallels and the part, which starts at blank_mm (centre).
     parallels_mm: {name: base centre}; each is a free steel body held to the table by a keeper weld until the take
     releases it (its pose on the table is given, as the table isn't at its start in the model's zero pose).
-    hand_body: the body the knob enclosure attaches to."""
+    hand_body: the body the knob enclosure attaches to. stop_mm: the stop's base centre, if the load has one (Load.stop),
+    a free steel body held by a keeper weld as the parallels are."""
     V, fy, seat, top = VISE, VISE["fixed_face_y"], VISE["seat_z"], VISE["jaw_top_z"]
     ax = V["screw_axis"]
     phi0 = math.radians(CRANK0_DEG)
@@ -144,6 +162,12 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
       <geom name="{n}" class="steel" type="box" size="{para_size}" mass="{para_kg:.4f}"/>
     </body>
 ''' for n, p in parallels_mm.items())
+    if stop_mm is not None:
+        paras += f'''    <body name="stop" pos="{f(np.asarray(stop_mm) + [0, 0, STOP_MM[2] / 2])}">
+      <freejoint name="stop"/>
+      <geom name="stop" class="steel" type="box" size="{f(np.array(STOP_MM) / 2)}" mass="{STOP_KG:.4f}"/>
+    </body>
+'''
     on_table = f"""    <geom name="vise_seat" class="steel" type="box" size="0.10 {30 * M + o0 / 2 * M:.4f} {(seat - TABLE_Z) / 2 * M:.4f}"
           pos="{V['x'] * M:.4f} {(fy - o0 / 2 - 30) * M:.4f} {(seat + TABLE_Z) / 2 * M:.4f}"/>
     <geom name="fixed_jaw" class="steel" type="box" size="{V['half_width'] * M:.4f} 0.02 {(top - TABLE_Z) / 2 * M:.4f}"
@@ -178,6 +202,9 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     eq = "".join(f'    <weld name="keep_{n}" body1="{n}" body2="{table_body}" '
                  f'anchor="{f(p + np.array([0, 0, ph / 2]))}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
                  for n, p in parallels_mm.items())
+    if stop_mm is not None:
+        eq += (f'    <weld name="keep_stop" body1="stop" body2="{table_body}" '
+               f'anchor="{f(np.asarray(stop_mm) + [0, 0, STOP_MM[2] / 2])}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n')
     eq += f"""    <connect name="enclose" body1="knob" body2="{hand_body}" anchor="0 -0.045 0" active="false" solref="0.02 1"
              solimp="0.9 0.95 0.002"/>
     <joint name="screw_lock" joint1="crank" polycoef="0 0 0 0 0" active="false" solref="0.002 1" solimp="0.9999 0.9999 0.0001"/>

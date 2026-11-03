@@ -52,11 +52,25 @@ POCKET_UP = (0.0, 0.0, 0.70710678, -0.70710678)    # w x y z: the STEP's -Y up, 
 
 # --- the bench mat (mm) -------------------------------------------------------------------------------------------
 MAT = {"size": (240.0, 140.0, 3.0), "friction": 0.9,     # rubber on aluminium and on maple, about 0.9 (proposed)
+       # and it gives: the part beds into it (0.25 mm under a hand's 5 N) and sits on its underside, where on a hard
+       # top it balanced on its 1 mm boss and one edge, tipped as it was pressed and spun 4 deg on the boss
+       "solref": (0.02, 1.0), "solimp": (0.9, 0.95, 0.002),
        "rgba": (0.08, 0.08, 0.09, 1.0)}
 
 # --- the deburring tool, in its own frame (mm): out of the kit's GLB ----------------------------------------------------
 DEBURR = {"handle_r": 7.62, "handle_len": 127.0, "blade_r": 1.52, "blade_len": 38.1, "kg": 0.05,
-          "in_kit": (-114.3, 79.4, 17.8)}     # the handle's back end, in the kit asset's frame (mm)
+          "in_kit": (-114.3, 79.4, 17.8),     # the handle's back end, in the kit asset's frame (mm)
+          # the swivel blade's hook, which the kit's placeholder lacks: two 3 mm arms at right angles from the blade's
+          # tip, so an edge sits in the corner between them. Each is the direction, in the tool's frame, of a face the
+          # stroke rides as moonshot/motion/deburr.py holds the tool (datum A, and the face below the edge); a round
+          # tip alone slid off one face or the other
+          "hook_r": 1.0, "hook_len": 3.0,
+          "hook": {"deburr_blade": (0.8138, 0.3827, 0.4373), "deburr_blade_hook": (0.4698, -0.8762, -0.1076)}}
+
+
+def deburr_tip() -> np.ndarray:
+    """Where the hook's arms meet, in the tool's frame (mm): the point a stroke puts on the edge's outside."""
+    return np.array([DEBURR["handle_len"] + DEBURR["blade_len"] - DEBURR["blade_r"], 0.0, 0.0])
 
 # --- the calipers, in the cal6 asset's frame (mm), lying flat, closed -------------------------------------------------
 CAL = {"beam": ((-116.6, 1.75, 2.5), (116.6, 17.75, 6.0)),       # 16 x 3.5 mm, as the model's end measures
@@ -108,22 +122,35 @@ def mat_body(centre_mm) -> str:
     at = [centre_mm[0], centre_mm[1], IB.tops_mm()["bench"] + sz / 2]
     return f"""    <body name="bench_mat" pos="{_f(at)}">
       <geom name="bench_mat" type="box" size="{_f([sx / 2, sy / 2, sz / 2])}" class="surface"
-            friction="{MAT['friction']} 0.004 0.0001" rgba="{_f(MAT['rgba'], 1)}"/>
+            friction="{MAT['friction']} 0.004 0.0001" solref="{_f(MAT['solref'], 1)}" solimp="{_f(MAT['solimp'], 1)}"
+            rgba="{_f(MAT['rgba'], 1)}"/>
     </body>
 """
 
 
 def deburr_body(at_mm, yaw_deg: float) -> str:
-    """The deburring tool lying on its handle: at_mm is its frame's origin, the handle's back end on its axis."""
+    """The deburring tool lying on its handle: at_mm is its frame's origin, the handle's back end on its axis. The
+    handle has a flat along its underside (-Z), opposite the index finger: round, it rolled as the fingers closed, and
+    the hook came up turned the wrong way."""
     D = DEBURR
-    r, L, br = D["handle_r"], D["handle_len"], D["blade_r"]
-    tip = L + D["blade_len"]
+    r, L, br, hr = D["handle_r"], D["handle_len"], D["blade_r"], D["hook_r"]
+    j = deburr_tip()
+    # the shank stops short of the hook's corner, its round end clear of the edge the arms straddle
+    shank_end = j - np.array([br + hr, 0.0, 0.0])
+    # the hook meets the part with the give of the hand that holds it, not steel on aluminium: rigid against the stiff
+    # edge, the welded tool chattered on it
+    arms = "".join(f"""
+      <geom name="{name}" class="tool" type="capsule" size="{hr * M:.5f}" fromto="{_f(j)} {_f(j + np.array(u) * D['hook_len'])}"
+            mass="0.0005" priority="2" solref="0.005 1" solimp="0.9 0.95 0.001" rgba="0.85 0.85 0.85 1"/>"""
+                   for name, u in D["hook"].items())
     return f"""    <body name="deburr_tool" pos="{_f(at_mm)}" euler="0 0 {np.radians(yaw_deg):.6f}">
       <freejoint name="deburr_tool"/>
       <geom name="deburr_handle" class="tool" type="capsule" size="{r * M:.5f}" fromto="{_f([r, 0, 0])} {_f([L - r, 0, 0])}"
             mass="{D['kg'] * 0.9:.4f}"/>
-      <geom name="deburr_blade" class="tool" type="capsule" size="{br * M:.5f}" fromto="{_f([L + br, 0, 0])} {_f([tip - br, 0, 0])}"
-            mass="{D['kg'] * 0.1:.4f}" rgba="0.85 0.85 0.85 1"/>
+      <geom name="deburr_flat" class="tool" type="box" size="{_f([L / 2 - r, 4.5, 0.4])}" pos="{_f([L / 2, 0, 0.4 - r])}"
+            mass="0.0005"/>
+      <geom name="deburr_shank" class="tool" type="capsule" size="{br * M:.5f}" fromto="{_f([L + br, 0, 0])} {_f(shank_end)}"
+            mass="{D['kg'] * 0.08:.4f}" rgba="0.85 0.85 0.85 1"/>{arms}
     </body>
 """
 
@@ -160,10 +187,19 @@ def caliper_body(at_mm, yaw_deg: float, face_down: bool = False) -> str:
 
 
 def _excludes(loose: str) -> str:
-    """The calipers' beam and slider don't collide: the slider rides round the beam."""
-    if "insp_cal6_slider" not in loose:
-        return ""
-    return '  <contact>\n    <exclude body1="insp_cal6" body2="insp_cal6_slider"/>\n  </contact>\n'
+    """The contacts the loose objects need set by hand: the calipers' beam and slider don't collide (the slider rides
+    round the beam); and the part meets the mat as one pair, soft along the normal (the part beds into the rubber) and
+    stiff along it, with some twist resisted (the rubber grips): MuJoCo gives an ordinary contact one softness for
+    both, and the soft mat let the part creep 2.7 mm and turn 1.2 deg under a steadying hand."""
+    rows = []
+    if "insp_cal6_slider" in loose:
+        rows.append('    <exclude body1="insp_cal6" body2="insp_cal6_slider"/>')
+    if 'name="bench_mat"' in loose and 'name="part"' in loose:
+        f, ref, imp = MAT["friction"], _f(MAT["solref"], 1), _f(MAT["solimp"], 1)
+        rows.append('    <exclude body1="part" body2="bench_mat"/>')
+        rows += [f'    <pair geom1="{g}" geom2="bench_mat" condim="4" friction="{f} {f} 0.005 0.0001 0.0001" '
+                 f'solref="{ref}" solimp="{imp}" solreffriction="0.002 1"/>' for g in ("part_slab", "part_boss")]
+    return "  <contact>\n" + "\n".join(rows) + "\n  </contact>\n" if rows else ""
 
 
 def with_body(body_xml: str, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = ()) -> str:

@@ -13,7 +13,7 @@ from moonshot.motion import deburr as plan
 from moonshot.sim.bench import BenchRun
 from moonshot.world import bench_cell as BC
 
-NEVER_HELD = ["deburr_blade"]          # the hand holds the handle; the blade cuts
+NEVER_HELD = ["deburr_shank", "deburr_blade", "deburr_blade_hook"]   # the hand holds the handle; the blade cuts
 SOLIDS = ["part", "deburr_tool"]       # what the skin is measured against
 
 

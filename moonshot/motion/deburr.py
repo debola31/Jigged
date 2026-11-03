@@ -4,12 +4,13 @@ The finished part lies pocket side up on the bench. The left hand comes onto its
 down; the right picks the swivel deburring tool off the bench, draws its blade along the outer near top edge and
 then the pocket's far edge, and puts it back. Two strokes stand for every edge: the caption says the rest.
 
-A stroke draws the blade's tip along the edge against the face below it, 0.6 mm down, the tool leaning in from the
-operator's side and trailing 20 deg behind the stroke, and presses it into that face (moonshot/sim/bench.py applies the
-press and keeps the tip on its path by touch). Both edges' faces face the operator: the part's near side, and the
-pocket's far wall. Pressed into the corner along its bisector, or down onto datum A, the round tip slid off one face
-or the other: the placeholder blade is straight, where a swivel blade's hook straddles the edge. The part's edges are
-named in its STEP's frame, which is its body's.
+A stroke draws the blade's hook along the edge, its two arms on the edge's two faces (moonshot/world/bench_cell.py
+DEBURR), the tool leaning in from the operator's side and trailing 20 deg behind the stroke, and presses it into the
+edge along the faces' bisector (moonshot/sim/bench.py applies the press and keeps the hook on its path by touch).
+Both edges' lower faces face the operator: the part's near side, and the pocket's far wall. The kit's placeholder blade
+is straight, and its round tip slid off one face or the other however it was pressed. The tool is held turned as the
+plan's body chose it when its turn was free (ROLL_DEG), so the hook is made for that; its turn is fixed only for the
+strokes. The part's edges are named in its STEP's frame, which is its body's.
 
     python -m moonshot.motion.deburr          # -> <data root>/takes/nist-ftc-10-deburr: reference.npz, take.json
 """
@@ -33,19 +34,18 @@ STROKE_N = 2.0              # into the edge: a swivel blade breaks an edge under
 TRAIL_DEG = 20.0            # the blade trails the hand along the stroke
 TILT_DEG = 30.0             # the tool leans down at this toward the edge: at 45 the near edge, close to the body, took
                             # more wrist than the plan allows
+ROLL_DEG = -83.0            # the tool's turn about its axis from datum A's up: the plan's body held it so at both
+                            # strokes when free to choose (81-84 deg), and the hook's arms are made for it
 BISECTOR = np.array([0.0, -1.0, 1.0]) / math.sqrt(2)      # both edges' outward bisector, the part's frame: up, toward +Z
-FACE_OUT, DOWN = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0]) # the part's frame: out of the face each edge's tip
-                                                                        # presses on (the operator's way), and down
-BELOW_MM = 0.6              # the tip rides the face this far below the edge: its collider 0.11 mm from the edge line;
-                            # at 0.2 the part's settling lifted the tip's centre above the edge, and it climbed over
-INTO_MM = 0.5               # and is aimed this far into it, the face stopping it, as the vise take's pushes are: aimed
-                            # at the face, a millimetre of lag left it short, the press unable to move the arm; 1.5 mm
-                            # into the stiff face, it bounced
+FACE_OUT, UP = np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])  # the part's frame: out of each edge's lower face
+                                                                        # (the operator's way), and datum A's normal
+INTO_MM = 0.5               # the hook is aimed this far into the corner, the faces stopping it, as the vise take's
+                            # pushes are: aimed at the faces, a millimetre of lag left it short
 STROKES = [                 # (from, to) in the part's frame (mm), datum A at Y = 0
     ((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),               # the outer near top edge, toward the right
     ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0)),             # the pocket's far edge, toward the right
 ]
-TIP = BC.DEBURR["handle_len"] + BC.DEBURR["blade_len"] - BC.DEBURR["blade_r"]   # the blade tip's centre, tool frame
+TIP = BC.deburr_tip()      # where the hook's arms meet, in the tool's frame
 
 
 def loose() -> str:
@@ -112,15 +112,17 @@ class DeburrPlan(BenchPlan):
         """The tool's pose (R, origin) with its blade tip on edge point e (world), the stroke going along s."""
         n = self.to_world(BISECTOR, vec=True)
         out = np.array([n[0], n[1], 0.0]) / np.linalg.norm(n[:2])          # the edge's outward side, level
-        tilt, b = math.radians(TILT_DEG), math.radians(TRAIL_DEG)
+        tilt, b, roll = math.radians(TILT_DEG), math.radians(TRAIL_DEG), math.radians(ROLL_DEG)
         a = (-out * math.cos(tilt) - np.array([0.0, 0.0, 1.0]) * math.sin(tilt)) * math.cos(b) - s * math.sin(b)
         a /= np.linalg.norm(a)
-        z = np.array([0.0, 0.0, 1.0]) - a * a[2]
-        z /= np.linalg.norm(z)
+        z0 = np.array([0.0, 0.0, 1.0]) - a * a[2]
+        z0 /= np.linalg.norm(z0)
+        z = math.cos(roll) * z0 + math.sin(roll) * np.cross(z0, a)
         R = np.stack([a, np.cross(z, a), z], 1)
-        tip = (e + self.to_world(FACE_OUT, vec=True) * (BC.DEBURR["blade_r"] - INTO_MM)
-               + self.to_world(DOWN, vec=True) * BELOW_MM)
-        return R, tip - a * TIP
+        # the arms' corner one arm's radius off each face, then INTO_MM into the corner
+        corner = (e + (self.to_world(FACE_OUT, vec=True) + self.to_world(UP, vec=True)) * BC.DEBURR["hook_r"]
+                  - n * INTO_MM)
+        return R, corner - R @ TIP
 
     def pick_up(self):
         t0 = self.t
@@ -152,20 +154,26 @@ class DeburrPlan(BenchPlan):
         R, p_a = self.stroke_pose(a, s)
         _, p_b = self.stroke_pose(b, s)
         t0 = self.t
-        out = self.to_world(FACE_OUT, vec=True)
+        up = self.to_world(UP, vec=True)
         self.look(t0, a)
-        self.move("deburr_tool", t0, t0 + approach, R, p_a + n * 25)
-        # off the landing spot, a moment to see the blade onto it, then in slowly
-        self.move("deburr_tool", t0 + approach, t0 + approach + 0.35, R, p_a + out * 6)
+        # high over the part first: carried straight in, the hand caught the part's ear and the tool hit it
+        self.move("deburr_tool", t0, t0 + approach * 0.65, R, p_a + n * 25 + up * 50)
+        self.move("deburr_tool", t0 + approach * 0.65, t0 + approach, R, p_a + n * 25)
+        # in front of the edge's lower face and above it, a moment to see the hook onto it, then in and down: coming in
+        # down the bisector a little low, the hook's top arm went in under datum A and threw the part; level with the
+        # edge, it hung below it on the face
+        out = self.to_world(FACE_OUT, vec=True)
+        self.move("deburr_tool", t0 + approach, t0 + approach + 0.35, R, p_a + out * 6 + up * 6)
         tc = t0 + approach + 0.35 + 0.4 + 0.35
         self.move("deburr_tool", tc - 0.35, tc, R, p_a)
         dur = np.linalg.norm(b - a) / 40.0                     # 40 mm/s along the edge
         self.move("deburr_tool", tc + 0.1, tc + 0.1 + dur, R, p_b)
         t1 = tc + 0.1 + dur
         self.look(tc, (a + b) / 2)
-        self.event("press", tc - 0.05, t1 + 0.05, side="R", normal=out.tolist(), force=STROKE_N,
-                   contact="part", at="deburr_blade", obj="deburr_tool", point=[TIP, 0.0, 0.0])
-        self.move("deburr_tool", t1 + 0.05, t1 + 0.4, R, p_b + n * 25)
+        self.event("press", tc - 0.05, t1 + 0.05, side="R", normal=n.tolist(), force=STROKE_N,
+                   contact="part", at="deburr_blade", obj="deburr_tool", point=TIP.tolist())
+        self.held.append((t0 + approach * 0.7, t1 + 0.4))             # the tool's turn fixed: the hook needs it
+        self.move("deburr_tool", t1 + 0.05, t1 + 0.4, R, p_b + n * 25 + up * 30)    # up clear of the walls
         self.strokes.append({"edge_mm": [list(frm), list(to)], "t0": tc, "t1": t1, "force_N": STROKE_N})
         self.t = t1 + 0.4
         self.clip(f"stroke {i + 1}", t0, self.t, "DEBURR  the blade drawn along the edge, light and even")
@@ -175,12 +183,17 @@ class DeburrPlan(BenchPlan):
         R0, p0 = self.tool0[1], self.tool0[0]
         g = self.grips["tool"]
         self.look(t0, p0)
-        self.move("deburr_tool", t0, t0 + 1.1, R0, p0 + [0, 0, 30])
+        self.move("deburr_tool", t0, t0 + 0.5, self.paths["deburr_tool"][-1][1],
+                  self.paths["deburr_tool"][-1][2] + [0, 0, 40])                  # up over the part first: carried
+        self.move("deburr_tool", t0 + 0.5, t0 + 1.1, R0, p0 + [0, 0, 30])        # straight home, the hook caught its wall
         t_down = t0 + 1.6
         self.move("deburr_tool", t0 + 1.1, t_down, R0, p0 + [0, 0, 0.3])
         self.fingers("R", t0 + 0.6, curled(g["q"]))
         self.fingers("R", t_down - 0.3, g["q"])                # uncurled again to set it down
-        self.carry("tool", self.t_grab, t_down + 0.05, free=(self.t_grab + 0.7, t_down - 0.6), point=(TIP, 0.0, 0.0))
+        # free to turn about its axis in transport (the body's choice), held to the plan's turn at the strokes
+        bounds = [self.t_grab + 0.7] + [t for w in self.held for t in w] + [t_down - 0.6]
+        free = list(zip(bounds[::2], bounds[1::2]))
+        self.carry("tool", self.t_grab, t_down + 0.05, free=free, point=TIP)
         _, W = self.grip_pose("tool", t_down)
         self.effort("R", t_down - 0.1, 0.3, "tool")
         self.effort("R", t_down + 0.05, 0.0, "tool")
@@ -197,7 +210,7 @@ class DeburrPlan(BenchPlan):
         return t_down
 
     def compose(self):
-        self.strokes = []
+        self.strokes, self.held = [], []
         self.t = 0.5
         self.pick_up()
         for i, (frm, to) in enumerate(STROKES):

@@ -3,7 +3,8 @@ Z up, written as moonshot/library/stations/extract.py writes a station's links (
 coordinates in its body's frame):
 - the finished nist-ftc-10 from its STEP, in the STEP's frame: <data root>/parts/nist-ftc-10/finished.glb
 - the swivel deburring tool out of the deburring kit's GLB (its handle and its blade, not the file, pad or mat), its
-  frame on the handle's axis at the back end: library/hand_tools/deburr/links/tool.glb
+  frame on the handle's axis at the back end, with the swivel blade's hook the kit's placeholder lacks (its collider's
+  two arms): library/hand_tools/deburr/links/tool.glb
 - the calipers split at the slider: library/inspection/cal6/links/beam.glb (the beam, its fixed jaws and its scale)
   and slider.glb (the slider and display, the moving jaw, the thumb roller and the locking screw, and the depth rod,
   which the GrabCAD model doesn't have: the collider's box). A part of the model is the slider's if it lies at the
@@ -26,6 +27,8 @@ DEBURR_IN_KIT = np.array([-114.3, 79.4, 17.8])                        # bench_ce
 BEAM_SECTION = {"y": (1.5, 18.0), "z": (2.4, 7.0)}                     # mm, the beam's section and its scale's print
 SLIDER_END_X = -28.0                                                  # the slider and all on it lie left of this
 ROD = ((-40.4, 8.75, 1.4), (116.6, 10.75, 2.4))                        # bench_cell.CAL["rod"]
+HOOK_AT, HOOK_R, HOOK_LEN = np.array([163.58, 0.0, 0.0]), 1.0, 3.0        # bench_cell.deburr_tip(), DEBURR's hook
+HOOK = ((0.8138, 0.3827, 0.4373), (0.4698, -0.8762, -0.1076))
 CT = {5120: np.int8, 5121: np.uint8, 5122: np.int16, 5123: np.uint16, 5125: np.uint32, 5126: np.float32}
 NORM = {5120: 127, 5121: 255, 5122: 32767, 5123: 65535}
 
@@ -110,6 +113,11 @@ def deburr_tool() -> dict:
             for c in trimesh.Trimesh(v, f, process=True).split(only_watertight=False):
                 if c.bounds[0][1] > 60.0:
                     pieces.append(trimesh.Trimesh(c.vertices - DEBURR_IN_KIT, c.faces))
+    for u in HOOK:
+        pieces.append(trimesh.creation.capsule(height=HOOK_LEN, radius=HOOK_R, count=[8, 8]))
+        pieces[-1].apply_translation([0, 0, HOOK_LEN / 2])                    # its axis from the origin along +Z ...
+        pieces[-1].apply_transform(trimesh.geometry.align_vectors([0, 0, 1], u))
+        pieces[-1].apply_translation(HOOK_AT)                                  # ... turned onto the arm, at the tip
     return write(trimesh.util.concatenate(pieces), kit / "links" / "tool.glb")
 
 

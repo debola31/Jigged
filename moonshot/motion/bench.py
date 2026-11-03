@@ -40,8 +40,9 @@ TOP = IB.tops_mm()["bench"]
 SIDES = ("R", "L")
 PART_AT = np.array([-80.0, -110.0, TOP + BC.MAT["size"][2] + 31.2])   # the finished part, pocket up, on the mat,
                                                                        # dropped 0.2 mm onto its boss and slab
-STEADY_N = 10.0                                   # the steadying hand's push (proposed): at the caliper card's 5 N
-                                                  # the bench held the 0.51 kg part against 4 N, and a stroke slid it
+STEADY_N = 5.0                                    # the steadying hand's push (the caliper card's, proposed): on the
+                                                  # rubber mat it holds the part; at 10 N the loaded arm sagged and
+                                                  # crept the part 6 mm
 
 
 def mirror(p) -> np.ndarray:
@@ -161,6 +162,9 @@ class BenchPlan:
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 15.0, 15.0
+        q0.update(thumb_cmc_abd=10.0, thumb_cmc_flex=0.0, thumb_mcp_flex=15.0, thumb_ip=10.0)   # the thumb along the
+        # index: tucked under the hand, it caught the part's edge as the hand lifted and raised it 2.4 mm; held out, it
+        # came to rest on the micrometer in front and held the hand off the part
         return dict(side="L", obj=c, q0=q0, iters=900, colliders=self.part_colliders() + [box(bc, bh)],
                     targets={"index": top(8, 20), "middle": top(-7, 5), "ring": top(-22, -10)},
                     starts=[S(20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (40, 70) for r in (0, -10)])
@@ -180,7 +184,9 @@ class BenchPlan:
         self.effort("L", t_off - 0.1, 0.4, "steady")
         self.effort("L", t_off, 0.0, "steady")
         self.event("grip", tc, t_off, side="L", grip="steady", on="part")
-        self.event("press", tc + 0.1, t_off - 0.1, side="L", normal=self.to_world([0, -1, 0], vec=True).tolist(),
+        # the push ends, and the hand is still a moment, before it lifts: lifting as it still pressed, its fingertips
+        # dragged the part 9 mm
+        self.event("press", tc + 0.3, t_off - 0.4, side="L", normal=self.to_world([0, -1, 0], vec=True).tolist(),
                    force=STEADY_N, contact="part")
         self.fingers("L", t_off + 0.3, open_like(self.hand, g["q"], 0.3))
         self.transit("L", t_off, t_off + 0.5, W + [0, -25, 45], via=[W + [0, 0, 18]])
@@ -244,8 +250,8 @@ class BenchPlan:
         return R @ g["H_rel"], p + R @ g["W_rel"]
 
     def carry(self, grip, t0, t1, w=3.0, free=None, point=(0.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0)):
-        """The right hand on a carried object over [t0, t1]. Within free=(ta, tb) only a point of the object and an
-        axis through it are held to their plan, its turn about that axis the body's choice: nobody minds how a pen is
+        """The right hand on a carried object over [t0, t1]. Within each of free's (ta, tb) only a point of the object
+        and an axis through it are held to their plan, its turn about that axis the body's choice: nobody minds how a pen is
         rolled, and a roll fixed by the plan took more wrist than the plan allows."""
         g = self.grips[grip]
         ph = g["H_rel"].T @ (np.asarray(point, float) - g["W_rel"])          # the point in the hand's frame
@@ -253,7 +259,7 @@ class BenchPlan:
 
         def fn(t):
             R, p = self.obj_at(g["of"], t)
-            if free and free[0] <= t < free[1]:
+            if any(a <= t < b for a, b in free or ()):
                 return [("tsr", ph, p + R @ np.asarray(point, float), ah, R @ np.asarray(axis, float), w)]
             return [("pose", *self.grip_pose(grip, t), w)]
         self.add("R", t0, t1, fn)

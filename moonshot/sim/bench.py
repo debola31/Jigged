@@ -32,6 +32,7 @@ SQUEEZE_DEG = 5.5         # as the vise take's, with capsules 2.5 mm inside the 
 STIFFEN = 4.0
 STIFFEN_ARM = 3.0
 PRESS_KI = 20.0           # the pushed force grows 20 N/s per newton it falls short
+PRESS_FELT_S = 0.02       # ... of the force felt over this long (s)
 NEAR_M = 0.02
 TOUCH_N = 0.2
 DAMPING = 0.02            # damped least squares for the hand's corrections (m)
@@ -43,6 +44,7 @@ SIGHT_LEAD_S = 0.6        # before a tool's point lands, it is guided by sight f
 SIGHT_TAU = 0.15          # ... correcting where it is going this fast (s)
 POINT_N_PER_M = 300.0     # and pushing it there: 3 N for a centimetre off (proposed); at 5 it added enough sideways
                           # push to the press to slide the steadied part
+POINT_N_MAX = 3.0         # ... at most this hard (proposed)
 GUIDE_MAX = 0.015         # ... by at most this much (m)
 DIGITS = {"thumb": ["met1", "pro1", "dis1"], "index": ["pro2", "int2", "dis2"], "middle": ["pro3", "int3", "dis3"],
           "ring": ["pro4", "int4", "dis4"], "little": ["pro5", "int5", "dis5"],
@@ -92,6 +94,7 @@ class BenchRun:
         self.carries = [e for e in ev if e["kind"] == "carry"]
         self.presses = [e for e in ev if e["kind"] == "press"]
         self.press_i: dict[int, float] = {}
+        self.press_felt: dict[int, float] = {}
         self.squeeze: dict[tuple, dict] = {}
         self.contact_label = {"R": set(), "L": set()}
         self.correction: dict[str, tuple] = {}
@@ -167,7 +170,7 @@ class BenchRun:
             self.contact_label[side] = near
 
     def press_point(self, e: dict) -> tuple[np.ndarray, int]:
-        """Where a press pushes: a carried tool's working geom's contact with the part, else the hand's contacts with
+        """Where a press pushes: a carried tool's working geoms' (named by prefix) contacts with the part, else the hand's contacts with
         it; else the tool's geom or the wrist. (world point, the hand body the force acts through)."""
         m, d = self.model, self.data
         hand = m.body(f"{e['side']}_hand").id
@@ -181,7 +184,7 @@ class BenchRun:
             other = (pair - targets).pop() if len(pair - targets) == 1 else None
             if other is None:
                 continue
-            if e.get("at") and m.geom(other).name == e["at"]:
+            if e.get("at") and m.geom(other).name.startswith(e["at"]):
                 pts.append(c.pos.copy())
             elif not e.get("at") and self.geom_digit.get(other, ("", ""))[0] == e["side"]:
                 pts.append(c.pos.copy())
@@ -203,7 +206,7 @@ class BenchRun:
             if not ({g1, g2} & targets) or ({g1, g2} <= targets):
                 continue
             other = g2 if g1 in targets else g1
-            mine = m.geom(other).name == e["at"] if e.get("at") else self.geom_digit.get(other, ("", ""))[0] == e["side"]
+            mine = m.geom(other).name.startswith(e["at"]) if e.get("at") else self.geom_digit.get(other, ("", ""))[0] == e["side"]
             if not mine:
                 continue
             mujoco.mj_contactForce(m, d, i, c6)
@@ -263,9 +266,13 @@ class BenchRun:
         if tt >= e["t0"]:
             n = np.asarray(e["normal"], float)
             err = err - n * (n @ err)
+        force = err * POINT_N_PER_M
+        size = np.linalg.norm(force)
+        if size > POINT_N_MAX:                       # a push, not a shove: far off its path, the tool flung the part
+            force *= POINT_N_MAX / size
         jacp = np.zeros((3, m.nv))
         mujoco.mj_jac(m, d, jacp, None, real, m.body(f"{e['side']}_hand").id)
-        return jacp[:, self.act_dof].T @ (err * POINT_N_PER_M)
+        return jacp[:, self.act_dof].T @ force
 
     def step(self, tt: float) -> None:
         m, d, p = self.model, self.data, self.plan
@@ -438,6 +445,7 @@ class BenchRun:
         self.rec = {"pose": [], "touching": [], "press": [], "lag": []}
         t0w = time.time()
         for k in range(n):
+            frame_f: dict[int, list[float]] = {}
             for s in range(spf):
                 tt = (k + s / spf) / self.fps
                 self.switch_carries(tt)
@@ -446,7 +454,12 @@ class BenchRun:
                         self.set_contact_coupling(side, self.grip_at(side, tt))
                 for i, e in enumerate(self.presses):
                     if e["t0"] <= tt < e["t1"]:
-                        F = self.press_force(e)
+                        # the force as felt: averaged over PRESS_FELT_S, as a rigid tool on a stiff edge chatters
+                        # between nothing and a spike within milliseconds
+                        F = self.press_felt.get(i, 0.0)
+                        F += (self.press_force(e) - F) * m.opt.timestep / PRESS_FELT_S
+                        self.press_felt[i] = F
+                        frame_f.setdefault(i, []).append(F)
                         err = e["force"] * min_jerk((tt - e["t0"]) / 0.25) - F
                         if F > TOUCH_N:                       # trim only while touching: no windup into empty space
                             self.press_i[i] = float(np.clip(self.press_i.get(i, 0.0) + PRESS_KI * err * m.opt.timestep,
@@ -458,8 +471,7 @@ class BenchRun:
                                 self.rd["up"][k])
             self.rec["touching"].append(sorted(set(self.touching("R")) | set(self.touching("L"))))
             tk = k / self.fps
-            self.rec["press"].append({i: self.press_force(e) for i, e in enumerate(self.presses)
-                                      if e["t0"] <= tk < e["t1"]})
+            self.rec["press"].append({i: float(np.mean(f)) for i, f in frame_f.items()})
             self.set_plan(tk)
             mujoco.mj_kinematics(m, self.plan)
             self.rec["lag"].append([float(np.linalg.norm(d.body(f"{s}_hand").xpos - self.plan.body(f"{s}_hand").xpos)

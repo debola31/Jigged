@@ -164,8 +164,11 @@ class PendantTake(StepTake):
         else:                                     # Fitts: farther keys take longer, about 0.6 m/s on average
             move_s = max(move_s, 0.12 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 600.0)
         start = self.side["R"]["wrist"]
-        move_s += 0.15                            # over the key, lined up by sight, before going in
-        path = PosePath(H, start).to(t0, move_s - 0.15, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
+        # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
+        # settle on its target
+        dwell = 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
+        move_s += dwell
+        path = PosePath(H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
             t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
         t1 = t0 + move_s + 0.37 + hold_s
         # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's

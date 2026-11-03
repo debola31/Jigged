@@ -92,7 +92,8 @@ def render(take: str, sim: str, final: bool, chunk: int = 48) -> int:
         print(f"[pipeline] {take}: the bake failed: {bake.get('error')}", flush=True)
         return 1
     import numpy as np
-    n = len(np.load(blob_dir(data_root()) / sim)["t"])
+    motion = np.load(blob_dir(data_root()) / sim)
+    n, fps = len(motion["t"]), int(motion["fps"])
     ids = [submit("render_frames", {"take": take, "frames": [lo, min(lo + chunk, n)]} | quality,
                   [sim, bake["result"]["bake"]], group=group) for lo in range(0, n, chunk)]
     print(f"[pipeline] {take}: baked; {n} frames in {len(ids)} ranges queued ({name})", flush=True)
@@ -100,7 +101,7 @@ def render(take: str, sim: str, final: bool, chunk: int = 48) -> int:
     if failed := [j for j in parts if j["state"] != "done"]:
         print(f"[pipeline] {take}: {len(failed)} ranges failed: {failed[0].get('error')}", flush=True)
         return 1
-    enc = wait(submit("encode_frames", {"take": take, "fps": 24, "name": name},
+    enc = wait(submit("encode_frames", {"take": take, "fps": fps, "name": name},
                       [j["result"]["png"] for j in parts], group=group))
     if enc["state"] != "done":
         print(f"[pipeline] {take}: the encode failed: {enc.get('error')}", flush=True)

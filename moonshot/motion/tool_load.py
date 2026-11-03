@@ -2,7 +2,7 @@
 carousel through the spindle, as Haas's manual has it for the umbrella changer. The step is a run of takes cut
 together, as the body model doesn't walk (the declared cut of moonshot/motion/door_cycle.py): at the pendant, MDI
 T<n> M06 and Cycle Start put the probe away and bring pocket n to the spindle, empty; then, for each tool, standing in
-the doorway the right hand takes its holder off the tool cart, carries it into the machine and pushes it up into the
+the doorway the right hand takes its holder off the tool stand on the table, carries it in under the spindle and pushes it up into the
 spindle while the left holds the head's Tool Release button, lets go of the button so the drawbar clamps, and lets
 go of the holder (`Seat`); and at the pendant ATC FWD puts it in its pocket and brings the next one (`ToolChange`).
 
@@ -12,7 +12,7 @@ The tools are numbered, and so pocketed, in the order the plan first uses them (
 moonshot/library/records/shop.json): op10's five are T1-T5, op20's four T6-T9, op30's drill T10, op50's T11.
 
 Each take's take.json gets, beside the events: "setup" (what its physics run builds: the part in the vise as the
-setting takes have it, the tool in the spindle, setup mode, and "tools": the cart's holders by fork, the carousel's by
+setting takes have it, the tool in the spindle, setup mode, and "tools": the stand's holders by fork, the carousel's by
 pocket, the pocket facing the spindle, and the holder this take carries), "card", and "load": what the take does
 (kind, tool, pocket), which moonshot/tests/gates/test_setting_takes.py holds the run to.
 """
@@ -44,15 +44,17 @@ REC = vf2.record()
 SPINDLE = np.array(REC["joints"]["spindle"]["centre_mm"], float) + OFFSET      # the gauge point, head at Z home
 BUTTON = np.array(REC["affordances"]["tool_release_head"]["at_mm"], float) + OFFSET
 DOOR_LUMBAR = np.array([-470.0, -935.0, 955.0])          # in the doorway, a little left of the spindle: the right
-                                                         # hand reaches it and the cart at its right, the left the button
+                                                         # hand reaches it and the stand right of the vise, the
+                                                         # left the button
 BELOW_MM = 80.0                                          # the holder carried in to this far below its seat, clear of
                                                          # the bore, and lined up there before it goes up
 SHORT_MM = 25.0                                          # pushed up to this far short before Tool Release opens the
                                                          # drawbar: the knob stops 10 mm under the closed fingers
 OVER_MM = 1.0                                            # and pushed this far past the seat, which stops it
 EASE_MM = 1.5                                            # the hand eases this far down once the drawbar holds it
-LIFT_MM = 1.5                                            # off the cart's tines, and slid out toward the operator
+LIFT_MM = 1.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
+CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
 
 
@@ -64,21 +66,23 @@ def pockets(plan: dict) -> dict[str, int]:
 
 def sequence(plan: dict, step: dict) -> list[dict]:
     """The step's takes in order, each with the state its run starts from: the carousel ({pocket: tool}), the pocket
-    facing the spindle, what is in the spindle, and the cart ({fork: tool})."""
+    facing the spindle, what is in the spindle, and the stand ({fork: tool}). The first tool waits in the rightmost
+    fork and is taken first, so the hand, which wraps a holder from its right, never has one beside it there."""
     num = pockets(plan)
     tools = step["facts"]["tool_ids"]
+    n = len(tools)
     earlier = {num[t]: t for s in expand(plan) if s["title"] == "Load the tools" and s["id"] != step["id"]
                for t in s["facts"]["tool_ids"] if num[t] < num[tools[0]]}
-    carousel, cart = dict(earlier), {k: t for k, t in enumerate(tools)}
-    state = lambda: {"pockets": dict(sorted(carousel.items())), "cart": dict(cart)}    # noqa: E731
+    carousel, stand = dict(earlier), {n - 1 - i: t for i, t in enumerate(tools)}
+    state = lambda: {"pockets": dict(sorted(carousel.items())), "stand": dict(sorted(stand.items()))}    # noqa: E731
     out = [{"name": "00-change", "kind": "change", "to": num[tools[0]], "spindle": "probe", "current": PROBE_POCKET}
            | state()]
     carousel[PROBE_POCKET] = "probe"
     for i, t in enumerate(tools):
         p = num[t]
-        out.append({"name": f"{2 * i + 1:02d}-seat-{t}", "kind": "seat", "tool": t, "fork": i, "pocket": p,
+        out.append({"name": f"{2 * i + 1:02d}-seat-{t}", "kind": "seat", "tool": t, "fork": n - 1 - i, "pocket": p,
                     "spindle": None, "current": p} | state())
-        cart.pop(i)
+        stand.pop(n - 1 - i)
         out.append({"name": f"{2 * i + 2:02d}-atc-{t}", "kind": "atc", "tool": t, "pocket": p, "spindle": t,
                     "current": p} | state())
         carousel[p] = t
@@ -87,6 +91,9 @@ def sequence(plan: dict, step: dict) -> list[dict]:
 
 
 # --- the grips ---------------------------------------------------------------------------------------------------------
+HOLDER_GRIP = Path(__file__).with_name("holder_grip.json")
+
+
 def cyl_target(axis_pt, r, z_band, phi_band, comp=2.0, w=1.0):
     """A pad on a vertical cylinder's side (axis through axis_pt, radius r) within a height band (mm from axis_pt)
     and an angle band (deg about the axis from +X, toward +Y), facing the axis."""
@@ -112,66 +119,86 @@ def holder_colliders(at, tool_id: str) -> list:
             cyl(t["r"], -t["length"], -TL.GAUGE_MM), cyl(TL.TAPER["r"], -4.5, 68.5)]
 
 
-def cart_colliders(k: int, n: int) -> list:
-    """The cart's tines and back stops round fork k, as boxes (world mm)."""
-    c, out = TL.CART, []
-    x0 = TL.GROOVE[0] + c["clear"] + c["tine_w"] / 2
-    for j in range(max(0, k - 1), min(n, k + 2)):
-        a = TL.cart_axis(j)
-        yc = a[1] + (c["tine_back"] - c["tine_front"]) / 2
-        hl = (c["tine_back"] + c["tine_front"]) / 2
-        for s in (-1, 1):
-            ctr, half = np.array([a[0] + s * x0, yc, a[2] - c["tine_t"] / 2]), np.array([c["tine_w"] / 2, hl, c["tine_t"] / 2])
-            out.append(lambda p, ctr=ctr, half=half: G.sdf_box(p, ctr, np.eye(3), half))
+def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
+    """A holder's grip, solved for the hand alone (moonshot/motion/grasp.py Problem.solve) and kept in
+    holder_grip.json by tool: a handshake, the hand's long axis along +Y into the machine, thumb up, the palm on the
+    holder's right side, the index under the flange and the fingers round its back, the thumb round its front; where
+    the tool is wider than the holder's body (the face mill), the middle finger on the tool's side. The same grip holds
+    it on the stand and in under the spindle; the body finds the arm for each (the planner). A tool with none of its
+    own takes the default's, when the skin doesn't sink into its tool by more than the checks allow."""
+    from moonshot.body.hand import AnatomicalHand
+    from moonshot.body.nimble import Nimble
+    hand = AnatomicalHand(Nimble(data_root() / "hand-model" / "nimble"))
+    th, at, r = G.TorchHand(hand), np.zeros(3), TL.BODY[0]
+    cols = holder_colliders(at, tool_id)
+    tool = TL.cutter(tool_id)
+    middle = (cyl_target(at, tool["r"], (-TL.GAUGE_MM - 22.0, -TL.GAUGE_MM - 8.0), (40.0, 175.0))
+              if tool["r"] > r else cyl_target(at, r, (-46.0, -32.0), (40.0, 175.0)))
+    targets = {"index": cyl_target(at, r, (-31.0, -23.0), (60.0, 175.0)), "middle": middle,
+               "thumb": cyl_target(at, r, (-34.0, -22.0), (-150.0, -50.0))}
+    long, radial, dorsal = np.array([0, 1.0, 0]), np.array([0, 0, 1.0]), np.array([1.0, 0, 0])
+    H0 = np.stack([long, radial, dorsal], 1)
+    best = None
+    for mcp, pip in ((55.0, 60.0), (70.0, 75.0)):
+        q = hand.neutral()
+        for n in ("index", "middle", "ring", "little"):
+            q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = mcp, pip, 30.0
+        q.update(thumb_cmc_abd=40.0, thumb_cmc_flex=20.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
+        for back in (70.0, 90.0):
+            g = G.Problem(th, cols, targets, hand.clamp(q)).solve(
+                H0, at + dorsal * (r + 10.0) - long * back + radial * -52.0, iters=iters, lr=0.05, rot_free_deg=25.0,
+                move_mm=40.0)
+            if best is None or g["loss"] < best["loss"]:
+                best = g
+    out = {"q": best["q"], "H": np.asarray(best["H"]).tolist(), "W_rel": np.asarray(best["W"]).tolist(),
+           "loss": round(best["loss"], 2), "terms": {k: round(v, 2) for k, v in best["terms"].items()}}
+    kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8")) if HOLDER_GRIP.exists() else {"default": tool_id}
+    kept.setdefault("grips", {})[tool_id] = out
+    HOLDER_GRIP.write_text(json.dumps(kept, indent=1), encoding="utf-8")
     return out
 
 
-class Seat(StepTake):
-    """One holder off the cart and into the spindle (the vf2-tool-load card's phases 4-11)."""
+def holder_grip(tool_id: str) -> dict:
+    """The grip a holder is carried in (holder_grip.json): its tool's own, else the default."""
+    kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8"))
+    return kept["grips"].get(tool_id, kept["grips"][kept["default"]])
 
-    REF_FORK = 2                                          # the grip is solved at this fork and carried to the others
+
+class Seat(StepTake):
+    """One holder off the stand and into the spindle (the vf2-tool-load card's phases 2-7)."""
 
     def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True):
         super().__init__(out, DOOR_LUMBAR, verbose)
         self.tool, self.fork, self.n = tool_id, fork, n_forks
-        lo, hi = (np.array(REC["colliders"]["table_top"][k], float) + OFFSET for k in ("box_min_mm", "box_max_mm"))
-        self.boxes = [((lo + hi) / 2, (hi - lo) / 2)]
-        self.solve_grips(self.grip_specs(), source=Seat.grip_specs, depends=(TL,))
+        boxes = []
+        for lo, hi in ((np.array(REC["colliders"]["table_top"]["box_min_mm"]) + OFFSET,
+                        np.array(REC["colliders"]["table_top"]["box_max_mm"]) + OFFSET),
+                       (TL.stand_axis(0) + [-40.0, TL.STAND["plate_y"], TL.STAND["table_z"] - TL.stand_axis(0)[2]],
+                        TL.stand_axis(n_forks - 1) + [40.0, TL.STAND["plate_y"] + 8.0, 12.0])):
+            boxes.append(((lo + hi) / 2, (hi - lo) / 2))
+        self.boxes = boxes
+        self.solve_grips({"release": self.release_spec()}, source=Seat.release_spec)
+        g = holder_grip(tool_id)
+        W_rel = np.array(g["W_rel"], float)
+        self.grips["holder"] = {"q": self.hand.clamp(g["q"]), "H": np.array(g["H"], float), "W": W_rel, "obj": np.zeros(3),
+                                "side": "R", "theta": np.zeros(12), "W_rel": W_rel, "loss": g["loss"]}
 
-    def grip_specs(self) -> dict:
-        h = self.hand
-        at = TL.on_cart(self.REF_FORK)
-        q = h.neutral()
-        for i, n in enumerate(("index", "middle", "ring", "little")):
-            q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = 45.0 + 8 * i, 60.0 + 6 * i, 30.0
-        q.update(thumb_cmc_abd=35.0, thumb_cmc_flex=20.0, thumb_mcp_flex=20.0, thumb_ip=15.0)
-        r = TL.BODY[0]
-        holder = dict(obj=at, q0=q, side="R", load=TL.holder_kg("em12"), iters=900,
-                      colliders=holder_colliders(at, "em12") + cart_colliders(self.REF_FORK, 5),
-                      # the palm on the holder's left, the fingers along +Y round its back, the thumb round its
-                      # front, the index under the flange: the hand the right arm reaches into the spindle with
-                      targets={"index": cyl_target(at, r, (-29.0, -22.0), (20.0, 100.0)),
-                               "middle": cyl_target(at, r, (-42.0, -32.0), (10.0, 100.0)),
-                               "thumb": cyl_target(at, r, (-32.0, -22.0), (-130.0, -60.0))},
-                      starts=[[t, 0, rot, pl, 25, 0, 85, p, 0, 0, 0, 0]
-                              for t in (10, 20) for rot in (10,) for pl in (70,) for p in (0, 30)])
+    def release_spec(self) -> dict:
+        """The left index on the head's Tool Release button, pressing it into the head."""
         b = BUTTON
-        qb = h.neutral()
+        qb = self.hand.neutral()
         qb.update(index_mcp_flex=15, index_pip=20, middle_mcp_flex=75, middle_pip=95, ring_mcp_flex=80, ring_pip=95,
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
         band = lambda p, b=b: 0.5 * ((p[0] - b[0]) ** 2 + (p[2] - b[2]) ** 2)              # noqa: E731
-        face = REC["colliders"]["tool_release_button"]["cylinder"]
         head = lambda p, c=b + [0, 15.0, 0]: G.sdf_box(p, c, np.eye(3), np.array([150.0, 10.0, 80.0]))  # noqa: E731
-        release = dict(obj=b, q0=qb, side="L", iters=900, colliders=[head],
-                       targets={"index": G.plane_target(b, [0, -1.0, 0], 1.0, band)},
-                       starts=[[t, 0, 0, pl, 95, 0, 45, p, -10, 0, 0, 0] for t in (25,) for pl in (70, 90)
-                               for p in (0, 40)])
-        _ = face
-        return {"holder": holder, "release": release}
+        return dict(obj=b, q0=qb, side="L", iters=900, colliders=[head],
+                    targets={"index": G.plane_target(b, [0, -1.0, 0], 1.0, band)},
+                    starts=[[t, 0, 0, pl, 95, 0, 45, p, -10, 0, 0, 0] for t in (25,) for pl in (70, 90)
+                            for p in (0, 40)])
 
     # --- the holder's path -----------------------------------------------------------------------------------------
     def plan(self) -> dict:
-        P0 = TL.on_cart(self.fork)
+        P0 = TL.on_stand(self.fork)
         g = self.grips["holder"]
         H, Wg = self.grip_pose("holder", P0)
         kg = TL.holder_kg(self.tool)
@@ -184,8 +211,8 @@ class Seat(StepTake):
                     p = a + (b - a) * min_jerk((t - t0) / max(t1 - t0, 1e-9))
             return p
 
-        t_on, t_near, t_c = 0.2, 0.58, 0.78                 # reach onset, at the pre-grasp, contact
-        pre = Wg + [-40.0, -10.0, -4.0]          # from the left, the open fingers past the holder's side
+        t_on, t_near, t_c = 0.2, 0.6, 0.82                 # reach onset, at the pre-grasp, contact
+        pre = Wg + [12.0, -60.0, -4.0]           # in front of the holder and right of it: the open fingers go past its side
         self.look(0.0, P0 + [0, 0, -30.0])
         self.transit("R", t_on, t_near, pre, fade=(H, 2.0))
         size = 2 * TL.BODY[0]
@@ -195,9 +222,10 @@ class Seat(StepTake):
         self.fingers("R", t_c + 0.12, g["q"])
         self.effort("R", t_c, 0.0, "holder")
         self.effort("R", t_c + 0.2, 0.6, "holder")
-        # off the tines, out of the fork, and in under the spindle
-        t1, t2, t3 = t_c + 0.42, t_c + 0.9, t_c + 2.35
-        keys += [(t_c + 0.12, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, P0 + [0, -SLIDE_MM, LIFT_MM]),
+        # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
+        t1, t2, t2b, t3 = t_c + 0.42, t_c + 0.85, t_c + 1.35, t_c + 2.45
+        slid = P0 + [0, -SLIDE_MM, LIFT_MM]
+        keys += [(t_c + 0.12, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, slid + [0, 0, CLEAR_UP_MM]),
                  (t3, SPINDLE - [0, 0, BELOW_MM])]
         self.look(t_c + 0.5, SPINDLE - [0, 0, 60.0])
         t4 = t3 + 0.35                                      # lined up under it
@@ -237,14 +265,14 @@ class Seat(StepTake):
         open_q = open_like(self.hand, g["q"], 0.6)
         self.fingers("R", t9 + 0.25, open_q)
         _, W9 = self.grip_pose("holder", SPINDLE - [0, 0, EASE_MM])
-        out = W9 + [0, -50.0, -30.0]
+        out = W9 + [30.0, -50.0, -30.0]                     # out to the right, back and down, off the holder
         self.add("R", t9, t9 + 0.4, lambda t: [("pose", H, W9 + (out - W9) * min_jerk((t - t9) / 0.4), 2.0)])
         self.side["R"]["wrist"] = out
         self.transit("R", t9 + 0.4, t9 + 1.4, self.rest)
         self.fingers("R", t9 + 1.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
         self.event("grip", round(t_c, 3), round(t9, 3), side="R", grip="holder", on="holder")
-        self.event("carry", round(t_c + 0.12, 3), round(t6, 3), side="R", kg=round(kg, 4))
+        self.event("carry", round(t_c + 0.12, 3), round(t8, 3), side="R", kg=round(kg, 4))
         self.event("seat", round(t5, 3), round(t8, 3), tool=self.tool)
         self.clip("Load the tools", 0.0, t9 + 1.4, f"Load {self.tool}")
         self.t = t9 + 1.6
@@ -312,7 +340,7 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
         if s["kind"] == "seat":
             own = out / "grips.json"
             out.mkdir(parents=True, exist_ok=True)
-            if shared["seat"].exists() and not own.exists():
+            if shared["seat"].exists():
                 own.write_bytes(shared["seat"].read_bytes())
             take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose)
             shared["seat"].write_bytes(own.read_bytes())
@@ -336,4 +364,7 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
 
 
 if __name__ == "__main__":
-    build(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
+    if sys.argv[1] == "--fit-grip":                      # python -m moonshot.motion.tool_load --fit-grip [tool]
+        print(fit_holder_grip(*sys.argv[2:3]))
+    else:
+        build(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)

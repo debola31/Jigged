@@ -1,13 +1,17 @@
 """Load the tools (moonshot/motion/tool_load.py) run in MuJoCo, on the pendant's runner (moonshot/sim/pendant.py): the
-part clamped in the vise as the setting takes have it, the tool cart beside the doorway, the carousel's holders in
+part clamped in the vise as the setting takes have it, the tool stand on the table, the carousel's holders in
 their pockets, and the VF-2's drawbar (moonshot/world/vf2.py SPINDLE_BORE) reading its Tool Release button.
 
-- A seat take: the holder a free body on its cart fork, held only by contact. The right hand closes on its body under
-  the flange, lifts it off the tines, slides it out and carries it in under the spindle, watching it (the hand's
-  correction by sight is on the holder's planned path, as the blow-off take's is on the gun's, until the push starts),
-  with its weight fed forward through the arm; then pushes it up into the bore while the left index holds the head's
-  button (a held press: it keeps pushing once the button clicks, sim/pendant.py), and the drawbar's fingers, open
-  while it is held, close under the knob when it is let go. No constraint holds the holder anywhere.
+- A seat take: the holder a free body in its fork on the stand. The right hand closes on its body under the flange,
+  and from then until the drawbar holds it the hand carries it by the declared grip assist `carry_holder`, a stiff weld
+  where the holder sits in the hand as the fingers close (as the inspection bench's tools, moonshot/world/bench_cell.py;
+  capsule fingers can't keep a 1.25 in body steady in a wrap), its skin and the holder not colliding meanwhile (the
+  weld stands for their contact); it lifts the holder off the tines, slides it out and carries it in under the
+  spindle, watching it (the hand's correction by sight is on the holder's planned path, as the blow-off take's is on
+  the gun's, until the push starts), with its weight fed forward through the arm; then pushes it up into the bore
+  while the left index holds the head's button (a held press: it keeps pushing once the button clicks, sim/pendant.py),
+  and the drawbar's fingers, open while it is held, close under the knob when it is let go. Then the weld lets go, and
+  only the drawbar holds the holder.
 - A tool change take (00-change, NN-atc): keys at the pendant, the holder in the spindle part of it (it is clamped
   there), nothing loose. The changer's own motion isn't simulated: the machine counts the change (world/vf2.py
   Control.tool_change) and the next take starts from the carousel it leaves, across the cut.
@@ -31,6 +35,7 @@ from scipy.spatial.transform import Rotation
 from moonshot.config import data_root
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.pendant import PendantRunner
+from moonshot.sim.runner import RELEASE_S
 from moonshot.world import tooling as TL
 from moonshot.world import vise as V
 from moonshot.world.vise import Load
@@ -62,20 +67,26 @@ class ToolLoadRun(PendantRunner):
         self.kg = TL.holder_kg(ld["tool"]) if self.kind == "seat" else 0.0
         self.rec |= {"holder": [], "holder_quat": [], "load_N": [], "touching_R": [], "fingers": [], "clamp_N": [],
                      "released": []}
+        self.weld = m.equality("carry_holder").id if self.loose is not None else None
+        self._apart_on = False
+        self.holder_kg_model = float(m.body_subtreemass[self.loose]) if self.loose is not None else 0.0
 
     # --- the scene --------------------------------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
         xml = super().scene(body_xml)
         ld = self.tk["load"]
         n = len(self.tk["step"]["facts"]["tool_ids"])
-        cart = {int(k): t for k, t in ld["cart"].items()}
+        stand = {int(k): t for k, t in ld["stand"].items()}
         add = ""
         if ld["kind"] == "seat":
-            add += TL.holder_body("holder", ld["tool"], TL.on_cart(ld["fork"]))
-            cart.pop(ld["fork"])
-        add += TL.cart_xml(n, cart)
+            add += TL.holder_body("holder", ld["tool"], TL.on_stand(ld["fork"]))
+            stand.pop(ld["fork"])
+        add += TL.stand_xml(n, stand)
         add += TL.carousel_xml({int(p): t for p, t in ld["pockets"].items() if t != "probe"}, int(ld["current"]))
         xml = xml.replace("<worldbody>\n", "<worldbody>\n" + add, 1)
+        if ld["kind"] == "seat":                   # the carry's grip assist, switched by before_step
+            xml = xml.replace("<equality>\n", '<equality>\n    <weld name="carry_holder" body1="holder" body2="R_hand" '
+                              'active="false" solref="0.004 1" solimp="0.9 0.95 0.002"/>\n', 1)
         if ld["kind"] == "atc":                    # the holder clamped in the spindle, part of it until the change
             gauge = '<geom name="vf2_spindle_gauge" type="cylinder" size="0.022 0.005" contype="0" conaffinity="0" mass="5"/>'
             assert gauge in xml
@@ -90,9 +101,9 @@ class ToolLoadRun(PendantRunner):
         ld = self.tk["load"]
         if ld["kind"] in ("seat", "atc"):
             out["holder"] = TL.render_glbs(ld["tool"])
-        for k, t in ld["cart"].items():
+        for k, t in ld["stand"].items():
             if not (ld["kind"] == "seat" and int(k) == ld["fork"]):
-                out[f"cart_holder_{k}"] = TL.render_glbs(t)
+                out[f"stand_holder_{k}"] = TL.render_glbs(t)
         for p, t in ld["pockets"].items():
             if t != "probe":
                 out[f"pocket_{p}"] = TL.render_glbs(t)
@@ -161,11 +172,43 @@ class ToolLoadRun(PendantRunner):
             F += sign * (c.frame.reshape(3, 3).T @ f6[:3])
         return F
 
+    def carry_weld(self, t: float) -> None:
+        """carry_holder on from just after the fingers close to when the drawbar has the holder, holding it where it
+        sits in the hand then, so switching it on moves nothing; the hand's skin and the holder apart while it's on and
+        until the hand is well off it (the runner's RELEASE_S)."""
+        m, d = self.model, self.data
+        want = self.carry["t0"] <= t < self.carry["t1"]
+        if want and not d.eq_active[self.weld]:
+            hb = m.body("R_hand").id
+            Ro, Rh = d.xmat[self.loose].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+            m.eq_data[self.weld, 0:3] = 0.0
+            m.eq_data[self.weld, 3:6] = Ro.T @ (d.xpos[hb] - d.xpos[self.loose])
+            qr = np.zeros(4)
+            mujoco.mju_mat2Quat(qr, np.ascontiguousarray(Ro.T @ Rh).reshape(-1))
+            m.eq_data[self.weld, 6:10] = qr
+            d.eq_active[self.weld] = 1
+        elif not want and d.eq_active[self.weld]:
+            d.eq_active[self.weld] = 0
+        apart = self.carry["t0"] <= t < self.carry["t1"] + RELEASE_S
+        if apart != self._apart_on:
+            self.hold_apart(self.loose, 1 if apart else 0)
+            self._apart_on = apart
+
     def before_step(self, t: float) -> None:
+        if self.loose is not None:
+            self.carry_weld(t)
         super().before_step(t)
         if (self.loose is not None and self.machine.spindle_tool is None and t >= self.seat_ev["t0"]
                 and self._steps % 10 == 0 and self.seated()["clamped"]):
             self.machine.spindle_tool = self.tk["load"]["tool"]      # the machine now holds what the hand put in
+
+    def lift_N(self) -> float:
+        """The upward force the hand puts on the holder (N): through its contacts and the carry weld alike, from the
+        holder's own motion, m (a + g), less what everything else (the stand, the bore, the drawbar) pushes on it."""
+        m, d = self.model, self.data
+        dof = m.jnt_dofadr[m.body_jntadr[self.loose]]
+        others = set(range(m.ngeom)) - self.hand_geoms - self.holder_geoms
+        return float(self.holder_kg_model * (d.qacc[dof + 2] + G) - self.forces_on(self.holder_geoms, others)[2])
 
     def seated(self) -> dict:
         """Where the loose holder is against the spindle's gauge point, and what holds it."""
@@ -192,7 +235,7 @@ class ToolLoadRun(PendantRunner):
         if self.loose is not None:
             self.rec["holder"].append((d.xpos[self.loose] * 1000).round(3).tolist())
             self.rec["holder_quat"].append(d.xquat[self.loose].round(6).tolist())
-            self.rec["load_N"].append(round(float(self.forces_on(self.holder_geoms, self.hand_geoms)[2]), 3))
+            self.rec["load_N"].append(round(self.lift_N(), 3))
             self.rec["clamp_N"].append(round(self.seated()["clamp_N"], 3))
 
     def outcome(self) -> dict:

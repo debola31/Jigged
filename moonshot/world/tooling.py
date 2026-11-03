@@ -1,4 +1,4 @@
-"""CAT40 tool holders as bodies, the tool cart they wait on, and where the VF-2's carousel keeps them (plan §3.2; the
+"""CAT40 tool holders as bodies, the stand they wait on, and where the VF-2's carousel keeps them (plan §3.2; the
 vf2-tool-load card). World millimetres; the VF-2 stands as moonshot/world/cell.py places it (station x - 381).
 
 A holder's frame is its gauge line's centre, +Z up its taper, as it hangs in the spindle: the spindle's gauge point
@@ -11,12 +11,15 @@ Its colliders, from the gauge line (mm):
 - the retention knob: a neck and a head the drawbar's fingers close under (moonshot/world/vf2.py);
 - the taper as a capsule: its round top finds the spindle's bore, and seats against the bore's shoulder ring, as a
   7/24 taper seats in its socket; the knob and the shoulder are the CAT40 standard's sizes rounded [proposed];
-- the V-flange: two discs and the groove between them, which the cart's and the carousel's forks hold;
+- the V-flange: two discs and the groove between them, which the stand's and the carousel's forks hold;
 - the body down to the nose, and the tool.
 
-The cart is a rack of forks at waist height beside the doorway, each holding a holder by its V-groove, tool down,
-taper up, as it goes into the spindle; a fork opens toward the operator, so a holder is lifted off its tines and slid
-out of the fork toward them [proposed: no source gives the shop's cart; hanging racks with V-flange forks are sold].
+The tools wait on a stand on the table, right of the vise: a row of forks, each holding a holder by its V-groove, tool
+down, taper up, as it goes into the spindle; a fork opens toward the operator, so a holder is lifted off its tines and
+slid out of the fork toward them [proposed: no source gives where the shop stages its tools; racks with V-flange forks
+are sold]. On the table, as a cart beside the doorway is out of a forward-reaching hand's reach: from where the
+operator stands to reach the spindle, every place in front of them is inside the machine. The stand is fixed in the
+world, which is the table's place while the takes don't move it.
 """
 from __future__ import annotations
 
@@ -115,49 +118,54 @@ def render_glbs(tool_id: str) -> list[dict]:
             {"path": f"library/tooling/{tool_id}/{tool_id}.glb", "in_body": [0, 0, -round(t["length"], 3), 1, 0, 0, 0]}]
 
 
-# --- the tool cart -------------------------------------------------------------------------------------------------
-CART = {"first_mm": (-260.0, -930.0, 1010.0),       # the first fork's holder axis at the tines' top (world): at the
-        "pitch_mm": (80.0, 0.0, 0.0),                # operator's right hip in the doorway, its forks in a row to the
-                                                     # right, in front of the open right door
-        "tine_t": 4.0, "tine_w": 6.0, "tine_back": 36.0, "tine_front": 34.0, "clear": 0.5}
-CART_LEGS_MM = 990.0                                 # the rack's frame down to the floor, drawn only
+# --- the tool stand ------------------------------------------------------------------------------------------------
+STAND = {"first_mm": (-190.0, -430.0, 1023.0),      # the first fork's holder axis at its tines' top (world): on the
+         "pitch_mm": (72.0, 0.0, 0.0),               # table right of the vise, the forks in a row along X, opening
+                                                     # toward the operator; the longest tool hangs 115 mm, clear of the
+                                                     # 853 mm table top
+         "tine_t": 4.0, "tine_w": 6.0, "tine_back": 36.0, "tine_front": 34.0, "clear": 0.5,
+         "plate_y": 60.0, "table_z": 853.0}
 
 
-def cart_axis(k: int) -> np.ndarray:
+def stand_axis(k: int) -> np.ndarray:
     """Fork k's holder axis at the height of its tines' top (world mm)."""
-    return np.asarray(CART["first_mm"], float) + k * np.asarray(CART["pitch_mm"], float)
+    return np.asarray(STAND["first_mm"], float) + k * np.asarray(STAND["pitch_mm"], float)
 
 
-def on_cart(k: int) -> np.ndarray:
+def on_stand(k: int) -> np.ndarray:
     """Where a holder in fork k has its gauge line: its upper flange disc's underside on the tines."""
-    return cart_axis(k) + [0.0, 0.0, -GROOVE[2]]
+    return stand_axis(k) + [0.0, 0.0, -GROOVE[2]]
 
 
-def cart_xml(n: int, waiting: dict[int, str]) -> str:
-    """The rack with n forks (a static body, steel), each two tines in a holder's V-groove and a back stop, opening
-    toward -Y; holders in forks `waiting` ({fork: tool}) are drawn on it, fixed, as nothing in the take moves them."""
-    c = CART
+def stand_xml(n: int, waiting: dict[int, str]) -> str:
+    """The stand with n forks (a static body, steel): each two tines in a holder's V-groove and a back stop, opening
+    toward -Y, on a back plate standing on the table; holders in forks `waiting` ({fork: tool}) are on it, fixed, as
+    nothing in the take moves them. The hand that wraps a holder's back passes under the back stop and in front of
+    the plate."""
+    c = STAND
     x0 = GROOVE[0] + c["clear"] + c["tine_w"] / 2
     geoms = []
     for k in range(n):
-        a = cart_axis(k) - cart_axis(0)
+        a = stand_axis(k) - stand_axis(0)
         zc = a[2] - c["tine_t"] / 2
         yc = a[1] + (c["tine_back"] - c["tine_front"]) / 2
         hl = (c["tine_back"] + c["tine_front"]) / 2
         for s in (-1, 1):
-            geoms.append(f'<geom name="cart_tine_{k}{"lr"[s > 0]}" class="steel" type="box" '
+            geoms.append(f'<geom name="stand_tine_{k}{"lr"[s > 0]}" class="steel" type="box" '
                          f'size="{_f([c["tine_w"] / 2, hl, c["tine_t"] / 2])}" pos="{_f([a[0] + s * x0, yc, zc])}"/>')
-        geoms.append(f'<geom name="cart_back_{k}" class="steel" type="box" size="{_f([x0 + c["tine_w"] / 2, 3, 10])}" '
-                     f'pos="{_f([a[0], a[1] + c["tine_back"] + 3, zc + 6])}"/>')
-    span = cart_axis(n - 1) - cart_axis(0)
-    rail = f'<geom name="cart_rail" class="steel" type="box" size="{_f([span[0] / 2 + 45, 6, 12])}" ' \
-           f'pos="{_f([span[0] / 2, c["tine_back"] + 12, -c["tine_t"] - 12])}"/>'
-    legs = "".join(f'<geom name="cart_leg_{i}" type="box" size="{_f([12, 12, CART_LEGS_MM / 2])}" contype="0" '
-                   f'conaffinity="0" pos="{_f([x, c["tine_back"] + 12, -CART_LEGS_MM / 2 - 24])}" rgba="0.2 0.22 0.25 1"/>'
-                   for i, x in enumerate((-45.0, span[0] + 45.0)))
-    held = "".join(f'<body name="cart_holder_{k}" pos="{_f(on_cart(k) - cart_axis(0))}">'
-                   f'{holder_geoms(f"cart_holder_{k}", t, collide=True)}</body>' for k, t in waiting.items())
-    return (f'    <body name="tool_cart" pos="{_f(cart_axis(0))}">{"".join(geoms)}{rail}{legs}{held}</body>\n')
+        geoms.append(f'<geom name="stand_back_{k}" class="steel" type="box" size="{_f([x0 + c["tine_w"] / 2, 3, 8])}" '
+                     f'pos="{_f([a[0], a[1] + c["tine_back"] + 3, zc + 4])}"/>')
+        geoms.append(f'<geom name="stand_arm_{k}" class="steel" type="box" size="{_f([6, (c["plate_y"] - c["tine_back"]) / 2, 8])}" '
+                     f'pos="{_f([a[0], a[1] + (c["plate_y"] + c["tine_back"]) / 2, zc + 4])}"/>')
+    span = stand_axis(n - 1) - stand_axis(0)
+    h = stand_axis(0)[2] + 12 - c["table_z"]
+    plate = (f'<geom name="stand_plate" class="steel" type="box" size="{_f([span[0] / 2 + 40, 4, h / 2])}" '
+             f'pos="{_f([span[0] / 2, c["plate_y"] + 4, 12 - h / 2])}"/>'
+             f'<geom name="stand_foot" class="steel" type="box" size="{_f([span[0] / 2 + 40, 30, 5])}" '
+             f'pos="{_f([span[0] / 2, c["plate_y"] - 22, 5 + c["table_z"] - stand_axis(0)[2]])}"/>')
+    held = "".join(f'<body name="stand_holder_{k}" pos="{_f(on_stand(k) - stand_axis(0))}">'
+                   f'{holder_geoms(f"stand_holder_{k}", t, collide=True)}</body>' for k, t in waiting.items())
+    return f'    <body name="tool_stand" pos="{_f(stand_axis(0))}">{"".join(geoms)}{plate}{held}</body>\n'
 
 
 # --- the carousel --------------------------------------------------------------------------------------------------

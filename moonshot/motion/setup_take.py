@@ -265,7 +265,7 @@ class Take:
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
         x_end = VISE["x"] + self.half[0] + (PAR_L / 2 - self.half[0]) / 2                  # middle of the exposed end
         covered = self.half[0] >= PAR_L / 2      # a part longer than the parallels hides their tops: push an end instead
-        for name in ("para_b", "para_a"):
+        for name in [n for n in ("para_b", "para_a") if n in self.parallels]:
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
             if covered:                          # the pad on the parallel's end face, under the part's overhang
                 end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
@@ -507,9 +507,8 @@ class Take:
         self.fingers(t1 - 0.1, g["q"])
         W_end = self.home + g["W_rel"]
         self.wrist = W_end
-        # relaxed as it comes off, not opened: the reach to the crank's knob follows straight on, and a hand still
-        # open from here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
-        self.fingers(t1 + 0.3, self.q_relax)
+        # not opened as it comes off: the hand relaxes in the pause before the knob's reach, and a hand still open from
+        # here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
         self.t = t1 + 0.4
         self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  the thumb pushes the part along the parallels onto the fixed jaw")
@@ -534,8 +533,8 @@ class Take:
         # down, and a little toward the fixed jaw (10 deg), as machinists seat a part: it can't creep off the jaw
         self.event("press", tc + 0.05, tc + hold_s + 0.25, normal=[0, -0.174, 0.985], force=force_N, contact="blank")
         t1 = tc + hold_s + 0.4
-        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing,
-        self.fingers(t1 + 0.3, self.q_relax)                 # and relax as they come off (the knob's reach follows)
+        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing and coming
+        # off, and relax in the pause before the knob's reach (relaxing as they came off, they curled into the part)
         self.wrist = Wp
         self.transit(t1, t1 + 0.45, Wp + [0, -30, 50], via=[Wp + [0, 0, 22]])     # off the part straight up first
         self.t = t1 + 0.45
@@ -861,7 +860,10 @@ def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=
     take.push()                     # seat the part on the parallels while it can still move down
     t_final = take.t
     take.rotate(final=True)         # the last pull, ends on feel
-    take.measure(clip_from=t_final)
+    if take.parallels:
+        take.measure(clip_from=t_final)
+    else:                           # on the vise's floor: no parallels to try; it is checked square by indicator
+        take.clip("measure", t_final - 0.2, take.t + 0.2, "TIGHTEN  the last pull on the crank, ending on feel")
     take.grip_digits = {name: list(spec["targets"]) for name, spec in take._grip_specs().items()}
     if not solve:
         take.load_solution()

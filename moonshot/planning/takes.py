@@ -26,6 +26,11 @@ def spans(part: str, step: dict) -> list[Span]:
     kind = sid[len(setup) + 1:] if setup else sid
     if step["kind"] == "cycle":
         return [(f"{part}-{sid}", None, None)]              # the cycle session's take, one per operation
+    if "stop" in step.get("facts", {}).get("parallels", ""):     # on the vise floor against a stop (op50)
+        if kind == "clean":
+            return [("blow-off", None, None), ("set-stop", None, None)]
+        if kind == "check":                                  # squared by indicator: the setting session's take
+            return [(f"{part}-{sid}", None, None)]
     return {
         "clean": [("blow-off", None, None), ("set-parallels", None, None)],
         "load": [(vise, "grab", "slide")],

@@ -119,8 +119,10 @@ class ViseTake:
         self.digit_dofs = {dg: [m.jnt_dofadr[m.joint(n).id] for n in (m.joint(i).name for i in range(m.njnt))
                                 if n.startswith(f"R_{dg}_") and int(m.jnt_dofadr[m.joint(n).id]) in self.act_of_dof]
                            for dg in PAD}
-        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", "para_a", "para_b")}
-        self.body_id = {n: m.body(n).id for n in ("blank", "knob", "para_a", "para_b", "R_hand")}
+        # a part stood on the vise's floor (nist-ftc-10 op50, on its end against a stop) has no parallels under it
+        self.paras = [nm for nm in ("para_a", "para_b") if nm in self.load.parallels_y]
+        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", *self.paras)}
+        self.body_id = {n: m.body(n).id for n in ("blank", "knob", *self.paras, "R_hand")}
         self.geom_digit = {m.geom(f"R_g_{b}").id: dg for dg, bs in DIGITS.items() for b in bs}
         self.q_crank, self.q_jaw = m.jnt_qposadr[m.joint("crank").id], m.jnt_qposadr[m.joint("jaw_slide").id]
         # the body's joints in qpos and in qvel: the objects' free joints make the two index sets differ
@@ -490,7 +492,7 @@ class ViseTake:
         """(per-digit force on the objects, blank-to-moving-jaw clamp force, deepest digit contact in mm)."""
         m, d = self.model, self.data
         f, clamp, depth, c6 = {}, 0.0, 0.0, np.zeros(6)
-        objs = {self.geom[n] for n in ("blank", "knob", "para_a", "para_b")}
+        objs = {self.geom[n] for n in ("blank", "knob", *self.paras)}
         for i in range(d.ncon):
             c = d.contact[i]
             g1, g2 = c.geom1, c.geom2
@@ -535,7 +537,7 @@ class ViseTake:
         spf = int(round(1.0 / (fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
-        keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
+        keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
                                "slip", "lag", "pushing", "stray", "touching", "pose")}
         hold_rel, t0w = None, time.time()
@@ -606,7 +608,7 @@ class ViseTake:
             rec["force"].append(f)
             rec["clamp"].append(clamp)
             rec["depth"].append(depth)
-            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
+            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in self.paras]).reshape(-1, 3))
             rec["pose"].append(self.pose_record())
             self.recorder.frame(d, {"R": rec["pose"][-1]}, rd["eye"][k], rd["look"][k], rd["up"][k])
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
@@ -748,8 +750,8 @@ class ViseTake:
             out["measure"] = [{"parallel": e["contact"],
                                "press_N_median": round(float(np.median(np.array(rec["press"])[(t >= e["t0"] + 0.2) & (t < e["t1"])])), 2),
                                "parallel_moved_mm": round(float(np.linalg.norm(
-                                   P[int(e["t1"] * fps), ["para_a", "para_b"].index(e["contact"])] -
-                                   P[int(e["t0"] * fps), ["para_a", "para_b"].index(e["contact"])])), 3)} for e in msr]
+                                   P[int(e["t1"] * fps), self.paras.index(e["contact"])] -
+                                   P[int(e["t0"] * fps), self.paras.index(e["contact"])])), 3)} for e in msr]
         return out
 
 

@@ -235,13 +235,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   01:00: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
   `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; as of 02:30, 20 of 61 with the cutting takes' drafts in,
   the last few still rendering; the rest wait on their takes (`python -m moonshot.planning.takes nist-ftc-10` lists
-  them). The plan is 61 steps since op60 was found to cut nothing. Passing their outcomes: the blow-off (the vise
-  blown 2.7 s, the gun back in its holster within 1.9 mm) and loosen (0.99 turns, 6.28 mm), drafts rendering. The
-  lift-out holds the part (0.9 mm slip) and sets it on the table 12 mm off plan. Set-parallels: the parallels
-  session has it; parallel a now stands 19 mm from the fixed jaw (was 13.2), where the fingers that set it fit. The
-  vise take passes the hand-opening check on the reference; op30/op40's tall parts get a wider jaw opening; op50
-  (on end, no parallels) runs, its check (an indicator swept up its side) asked of the setting session and its
-  set-stop take not yet made. **Waiting on you:** every vise take, approved draft 3 too, fails the posture checks
+  them). The plan is 61 steps since op60 was found to cut nothing. Passing their outcomes, with drafts: the blow-off
+  (the vise blown 2.7 s, the gun back in its holster within 1.9 mm) and loosen (0.99 turns, 6.28 mm); the door
+  takes' finals are done and the cutting takes' finals rendering. The lift-out holds the part (op20's: 0.7 mm slip,
+  upright) and sets it on the table about 11 mm off plan. Set-parallels, set-stop and op50's grasp: the parallels
+  session; parallel a now stands 19 mm from the fixed jaw (was 13.2), where the fingers that set it fit. The vise
+  take passes the hand-opening check on the reference, and op10 is physically sound on tonight's code (1.8 mm slip,
+  parallels pinched, 5,024 N). Open: op30/op40's tall part turns 27 degrees in the hand and lands across both jaws
+  (the eye squaring it up is in test), and op50's, standing on end, is knocked over by the reach; op50's check (an
+  indicator swept up its side) is the setting session's. **Waiting on you:** every vise take, approved draft 3 too, fails the posture checks
   that the body-checks merge put in front of rendering (53% of frames inside people's range against 95%; that data
   is seated work), so no vise-take draft renders until you choose how they gate. Three of the stock's plan gaps need
   a tool or a mask (the +Z side slot 2.64 mm, the boss's V flanks 2.31 mm, the pad grooves 1.50 mm). Within the

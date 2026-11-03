@@ -387,9 +387,9 @@ class Take:
         # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
         # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
         # the open fingers meeting the faces as they close), with the fingers ~0.1 s behind their keys: 0.50 of the
-        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.50 0.667)
-        # a lift-out's reach runs high over the crank first: 0.53 measured 0.571 there
-        t_peak = t0 + 0.35 + (0.70 if self.start == "vise" else 0.53) * reach
+        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.53 0.692-0.711, 0.50 0.667)
+        # a lift-out's reach runs high over the crank first: 0.53 measured 0.571 there, 0.70 0.844
+        t_peak = t0 + 0.35 + (0.63 if self.start == "vise" else 0.54) * reach
         self.fingers(t0 + 0.35, self.q_relax)
         self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])

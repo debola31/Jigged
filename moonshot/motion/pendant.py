@@ -289,11 +289,14 @@ class PendantTake(StepTake):
 
     def turn(self, clicks: int, deg_s: float = 300.0) -> None:
         """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS, and a spare one: the run
-        stops the hand once the dial reads right (moonshot/sim/pendant.py), so a stroke whose grip slipped is made up
-        by the spare, and an unneeded spare is a hand holding still."""
+        stops the hand once the machine reads where this jog takes it (`to_mm`, from where the take starts the axis:
+        moonshot/sim/pendant.py), so a stroke whose grip slipped is made up by the spare, and an unneeded spare is a
+        hand holding still."""
         if clicks == 0:
             return
         self.jogs += 1                            # the strokes of one jog: the run counts their clicks together
+        i = "xyz".index(self.jog_axis)
+        to = round(float(self.axis_mm[i] + clicks * self.inc_mm), 4)
         n = math.ceil(abs(clicks) / STROKE_CLICKS)
         per = [abs(clicks) // n + (1 if i < abs(clicks) % n else 0) for i in range(n)]
         sign = 1 if clicks > 0 else -1
@@ -333,7 +336,7 @@ class PendantTake(StepTake):
             self.add("R", tc, ts + dur + 0.08, lambda t, ts=ts, dur=dur, a0=a0, a1=a1: [
                 ("pose", *self.dial_pose(a0 + (a1 - a0) * min_jerk((t - ts) / dur)), 3.0)])
             self.event("turn", round(ts, 3), round(ts + dur, 3), side="R", clicks=sign * c, axis=self.jog_axis,
-                       inc_mm=self.inc_mm, jog=self.jogs)
+                       inc_mm=self.inc_mm, jog=self.jogs, to_mm=to)
             self.event("grip", round(tc, 3), round(ts + dur + 0.1, 3), side="R", grip="dial")
             te = ts + dur + 0.08
             self.effort("R", te, 1.0, "dial")
@@ -344,7 +347,6 @@ class PendantTake(StepTake):
                 ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / 0.12)), 3.0)])
             self.dial_deg, self.t, self.where = a1, te + 0.12, "dial"
             self.side["R"]["wrist"] = self.dial_pose(a1, OFF_RIM_MM)[1]
-            i = "xyz".index(self.jog_axis)
             self.axis_mm[i] += sign * c * self.inc_mm
 
     def press_left(self, name: str, hover_right: str | None = None) -> None:

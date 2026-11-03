@@ -8,6 +8,11 @@ and shows on the dashboard rather than being started by hand over SSH.
   with trainual's scripts (`--trainual` on the worker), reporting its frame time. inputs: [the take's sim.npz].
   payload: {"take": folder name, "res": "960x540", "samples": 32}.
 
+- `skin_bake`, `render_frames`, `encode_frames`: the same render split so every machine draws part of one take. A
+  Mac bakes the skin once (inputs: [sim.npz]; uploads the bake as a tar); each GPU renders a frame range
+  (inputs: [sim.npz, bake tar]; payload adds "frames": [lo, hi]; uploads its PNGs as a tar); the hub joins them
+  (inputs: the PNG tars; payload {"take", "fps"}) with Blender's FFmpeg (moonshot/render/encode.py).
+
 A render is only queued for a take whose checks all passed (moonshot/orchestrate/pipeline.py), so nothing renders
 before it is checked (docs/moonshot/physics.md).
 """
@@ -16,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from pathlib import Path
 
@@ -99,3 +105,87 @@ def bake_render(worker, job: dict, inputs: list[Path]) -> dict:
     return {"take": p["take"], "files": {"draft.mp4": worker.upload(video)}, "frames": frames,
             "bake_s": round(t1 - t0), "render_s": round(t2 - t1),
             "s_per_frame": round((t2 - t1) / max(frames, 1), 2)}
+
+
+def _renderer(worker) -> tuple[Path, str]:
+    trainual, blender = worker.options.get("trainual"), worker.options.get("blender")
+    if not trainual or not blender:
+        raise RuntimeError("this worker has no --trainual or no --blender")
+    return Path(trainual), blender
+
+
+def _fresh(folder: Path) -> Path:
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+    return folder
+
+
+def _tar(worker, folder: Path, names: list[str], out: Path) -> str:
+    with tarfile.open(out, "w") as t:
+        for n in names:
+            t.add(folder / n, arcname=n)
+    return worker.upload(out)
+
+
+def skin_bake(worker, job: dict, inputs: list[Path]) -> dict:
+    trainual, _ = _renderer(worker)
+    p = job["payload"]
+    rel = Path("renders") / p["take"]
+    folder = _fresh(trainual / rel)
+    shutil.copyfile(inputs[0], folder / "sim.npz")
+    t0 = time.perf_counter()
+    worker.report(job["id"], "bake")
+    r = subprocess.run([sys.executable, "-I", "motion/skin_bake.py", str(rel / "sim.npz")], cwd=trainual,
+                       capture_output=True, text=True, timeout=3600)
+    if r.returncode != 0:
+        raise RuntimeError(f"skin_bake exited {r.returncode}: {(r.stderr or r.stdout)[-1500:]}")
+    names = sorted(f.name for f in folder.iterdir() if f.name != "sim.npz")
+    return {"take": p["take"], "bake": _tar(worker, folder, names, folder.with_suffix(".bake.tar")),
+            "bake_s": round(time.perf_counter() - t0)}
+
+
+def render_frames(worker, job: dict, inputs: list[Path]) -> dict:
+    trainual, blender = _renderer(worker)
+    p = job["payload"]
+    lo, hi = p["frames"]
+    rel = Path("renders") / f"{p['take']}-{lo:05d}"
+    folder = _fresh(trainual / rel)
+    shutil.copyfile(inputs[0], folder / "sim.npz")
+    with tarfile.open(inputs[1]) as t:
+        t.extractall(folder, filter="data")
+    frames = folder / "frames"
+    cmd = [blender, "-b", "--python", "blender/showcase_physics.py", "--", "--dir", str(rel), "--out", str(frames),
+           "--res", p.get("res", "1920x1080"), "--samples", str(p.get("samples", 96)), "--frames", f"{lo}:{hi}",
+           "--device", worker.options.get("device", "METAL")]
+    t0 = time.perf_counter()
+    log = folder / "blender.log"                             # a file, not a pipe: a full pipe would stall Blender
+    with open(log, "w") as out, subprocess.Popen(cmd, cwd=trainual, stdout=out, stderr=subprocess.STDOUT) as proc:
+        while proc.poll() is None:
+            time.sleep(10)
+            worker.report(job["id"], "render", len(list(frames.glob("*.png"))), hi - lo)
+    pngs = sorted(f.name for f in frames.glob("*.png"))
+    if proc.returncode != 0 or len(pngs) != hi - lo:
+        raise RuntimeError(f"blender exited {proc.returncode} with {len(pngs)} of {hi - lo} frames: "
+                           f"{log.read_text(errors='replace')[-1500:]}")
+    render_s = time.perf_counter() - t0
+    return {"take": p["take"], "frames": [lo, hi], "png": _tar(worker, frames, pngs, folder.with_suffix(".png.tar")),
+            "render_s": round(render_s), "s_per_frame": round(render_s / (hi - lo), 2)}
+
+
+def encode_frames(worker, job: dict, inputs: list[Path]) -> dict:
+    blender = worker.options.get("blender")
+    p = job["payload"]
+    folder = _fresh(Path(worker.cache).parent / "encode" / p["take"])
+    for tar in inputs:
+        with tarfile.open(tar) as t:
+            t.extractall(folder / "frames", filter="data")
+    video = folder / f"{p.get('name', 'final')}.mp4"
+    script = Path(__file__).resolve().parents[1] / "render" / "encode.py"
+    r = subprocess.run([blender, "-b", "--python", str(script), "--", "--dir", str(folder / "frames"),
+                        "--out", str(video), "--fps", str(p.get("fps", 24))], capture_output=True, text=True,
+                       timeout=3600)
+    if r.returncode != 0 or not video.exists():
+        raise RuntimeError(f"encode exited {r.returncode}: {(r.stderr or r.stdout)[-1500:]}")
+    return {"take": p["take"], "files": {video.name: worker.upload(video)},
+            "frames": len(list((folder / "frames").glob("*.png")))}

@@ -4,7 +4,8 @@ hand squeezes what it grips. What every step's physics has in common; a step add
 Each motor gets the planned position, with the planned motion's own torques fed forward (rigid-body inverse
 dynamics, as moonshot/body/controller.py's `track`), so the body follows the plan within its strength. A hand with
 effort on a grip pushes its pads into the grip's object (the vise take's squeeze, per hand: each pad's joint
-direction from its Jacobian) and stiffens, as people co-contract while they work (Gribble et al. 2003).
+direction from its Jacobian) and stiffens, as people co-contract while they work (Gribble et al. 2003); a load the
+step knows its hand meets (`hand_force`) is fed forward through the arm.
 
 A step subclasses TakeRunner: `scene(body_xml)` returns the MJCF with its station and objects, `grip_geoms` names
 each grip's object geom, `before_step(t)` runs the machine's control and the step's own logic, and `station`,
@@ -35,9 +36,15 @@ STIFFEN_ARM = 3.0
 SETTLE_STEPS = 300
 
 
+FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
+
+
 class TakeRunner:
     station = ""
     grip_geoms: dict[str, str] = {}
+    # grips whose object the closed hand holds by a declared soft constraint, as the vise take does the crank's knob:
+    # the capsule fingers can't conform to it. grip -> the held body
+    encloses: dict[str, str] = {}
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -45,7 +52,13 @@ class TakeRunner:
         self.rd = np.load(self.folder / "reference.npz")
         self.lumbar = np.array(self.tk["lumbar"], float)
         self.body = build(pelvis_mm=tuple(self.lumbar))
-        m = self.model = mujoco.MjModel.from_xml_string(self.scene(self.body.xml))
+        self.grip_events = [e for e in self.tk["events"] if e["kind"] == "grip" and e.get("grip") in self.encloses]
+        xml = self.scene(self.body.xml)
+        eq = "".join(f'    <connect name="enclose_{e["grip"]}" body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" '
+                     f'anchor="0 0 0" active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                     for e in {e["grip"]: e for e in self.grip_events}.values())
+        xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
+        m = self.model = mujoco.MjModel.from_xml_string(xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.fps, self.t = int(self.rd["fps"]), self.rd["t"]
         self.names = [str(x) for x in self.rd["names"]]
@@ -94,6 +107,11 @@ class TakeRunner:
     def glbs(self) -> dict[str, list[dict]]:
         return {}
 
+    def hand_force(self, side: str, t: float) -> np.ndarray | None:
+        """The force (N, world) the step expects this hand to exert on what it works at t: fed forward through the
+        arm, as people anticipate a load they know (a door's friction and weight)."""
+        return None
+
     # --- the plan --------------------------------------------------------------------------------------
     def at(self, t: float):
         m = self.model
@@ -126,8 +144,27 @@ class TakeRunner:
                 out[dg] = v / np.linalg.norm(v)
         return out
 
+    def enclose(self, t: float) -> None:
+        """Hold each enclosing grip's object in the hand from just after the fingers close to just before they open,
+        where the fist is when it closes: no jump at the start."""
+        m, d = self.model, self.data
+        for e in self.grip_events:
+            eq = m.equality(f"enclose_{e['grip']}").id
+            want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
+            if want and not d.eq_active[eq]:
+                hb, ob = m.body(f"{e['side']}_hand").id, m.body(self.encloses[e["grip"]]).id
+                Rh = d.xmat[hb].reshape(3, 3) @ H0
+                P = d.xpos[hb] + Rh @ FIST_MM * 0.001
+                m.eq_data[eq, 0:3] = d.xmat[ob].reshape(3, 3).T @ (P - d.xpos[ob])
+                m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (P - d.xpos[hb])
+                d.eq_active[eq] = 1
+            elif not want and d.eq_active[eq]:
+                d.eq_active[eq] = 0
+
     def step(self, t: float) -> None:
         m, d, p = self.model, self.data, self.plan
+        if self.grip_events:
+            self.enclose(t)
         q, v, a = self.at(min(t, float(self.t[-1])))
         p.qpos[:] = d.qpos
         p.qpos[self.body_q] = q[self.body_q]
@@ -138,6 +175,12 @@ class TakeRunner:
         mujoco.mj_inverse(m, p)
         m.opt.disableflags = flags
         tau = p.qfrc_inverse[self.act_dof].copy()
+        for side in SIDES:
+            F = self.hand_force(side, t)
+            if F is not None:
+                jacp = np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, p, jacp, None, m.body(f"{side}_hand").id)
+                tau += (jacp.T @ F)[self.act_dof]
         target = p.qpos.copy()
         k = np.ones(len(self.acts))
         for side in SIDES:

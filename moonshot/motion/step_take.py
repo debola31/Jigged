@@ -87,12 +87,15 @@ class StepTake:
             self.grips[name] = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "obj": obj, "side": g["side"],
                                 "theta": np.array(g["theta"]), "W_rel": W - obj, "loss": g["loss"]}
 
-    def grip_pose(self, name: str, obj=None) -> tuple[np.ndarray, np.ndarray]:
+    def grip_pose(self, name: str, obj=None, R=None) -> tuple[np.ndarray, np.ndarray]:
         """The grip's hand frame and wrist (the side's world) with its object at obj (world; default where it was
-        solved). Objects here translate, they don't turn."""
+        solved), turned by R (world, from how it stood when the grip was solved)."""
         g = self.grips[name]
         p = g["obj"] if obj is None else self.at(g["side"], obj)
-        return g["H"], p + g["W_rel"]
+        if R is None:
+            return g["H"], p + g["W_rel"]
+        Rs = R if g["side"] == "R" else BM.mirror_frames(R)
+        return Rs @ g["H"], p + Rs @ g["W_rel"]
 
     # --- the plan's pieces -------------------------------------------------------------------------------
     def add(self, side, t0, t1, fn):
@@ -118,13 +121,16 @@ class StepTake:
         self.add(side, t0, t1, fn)
         s["wrist"] = pts[-1]
 
-    def follow(self, side, t0, t1, grip, obj_at):
-        """Hold a grip on an object while it moves: obj_at(t) is the object's world position."""
+    def follow(self, side, t0, t1, grip, obj_at, R_at=None):
+        """Hold a grip on an object while it moves: obj_at(t) is the object's world position, R_at(t) how it has
+        turned (world, from how it stood when the grip was solved)."""
+        R_at = R_at or (lambda t: None)
+
         def fn(t):
-            H, W = self.grip_pose(grip, obj_at(t))
+            H, W = self.grip_pose(grip, obj_at(t), R_at(t))
             return [("pose", H, W, 1.0)]
         self.add(side, t0, t1, fn)
-        self.side[side]["wrist"] = self.grip_pose(grip, obj_at(t1))[1]
+        self.side[side]["wrist"] = self.grip_pose(grip, obj_at(t1), R_at(t1))[1]
 
     def fingers(self, side, t, q):
         self.side[side]["fkeys"].append((t, q))

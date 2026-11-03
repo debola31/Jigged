@@ -50,7 +50,8 @@ OVERTURN = 1.15                                           # a stroke turns the h
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
 HOVER_MM = 40.0
-HOVER_RIGHT_MM = 15.0                                     # the right index ready over Feed Hold, not resting on it
+HOVER_RIGHT_MM = 40.0                                     # the right index ready over Feed Hold, not resting on it:
+                                                          # held 15 mm off, its hand's sway of 10 mm pressed it
 SETTLE_S = 0.3                                            # off the rim, before a jog's first stroke
 CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
 TOUCH_LIFT_MM = 1.0                                       # a press is planned to the pad touching the key, not in it:

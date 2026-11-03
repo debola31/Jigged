@@ -272,6 +272,9 @@ class PendantRunner(TakeRunner):
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
     def correction(self, t: float) -> np.ndarray:
+        """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its
+        press, and resting at the side between it wound up a steady offset that put it 55 mm below the button."""
+        self.visual["L"][:] = 0.0
         self._corr = super().correction(t)
         return self._corr
 

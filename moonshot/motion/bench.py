@@ -76,6 +76,18 @@ def bands(c, **lims):
     return f
 
 
+def instrument_colliders(rests: dict, names: tuple[str, ...], grow: float = 0.0) -> list:
+    """The station's instruments named, where they settled (settle's rests), as a grip's colliders grown grow mm: what
+    a hand coming onto the part beside them keeps off."""
+    out = []
+    for k in names:
+        p, R = rests[f"insp_{k}"]
+        for lo, hi in IB.record()["rests"][k]["boxes_mm"]:
+            lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+            out.append(oriented_box(p + R @ ((lo + hi) / 2), R, (hi - lo) / 2 + grow))
+    return out
+
+
 def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Each loose body's pose (mm, rotation) once it has come to rest on the bench, no body model: what the plan
     aims at is where the physics will find it."""
@@ -191,9 +203,11 @@ class BenchPlan:
         self.event("press", tc + 0.3, t_off - 0.4, side="L", normal=self.to_world([0, -1, 0], vec=True).tolist(),
                    force=STEADY_N, contact="part")
         self.fingers("L", t_off + 0.3, open_like(self.hand, g["q"], 0.3))
-        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 45], via=[W + [0, 0, 18]])
+        # well up before back past the bench's edge: the wrist rests over the calipers, and lifted 40 mm the relaxing
+        # fingers swept them 107 mm toward the operator and wedged them on the bench, which threw them
+        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 110], via=[W + [0, 0, 18]])
         self.fingers("L", t_off + 1.2, self.q_relax)
-        self.transit("L", t_off + 0.5, t_off + 1.6, REST, via=[W + [0, -230, 40]])     # back past the bench's edge first
+        self.transit("L", t_off + 0.5, t_off + 1.6, REST, via=[W + [0, -230, 110]])
         self.clip("steady", tc - 0.3, tc + 0.6, "STEADY  the left hand holds the part down on the bench")
 
     # --- building blocks ---------------------------------------------------------------------------------------

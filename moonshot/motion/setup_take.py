@@ -44,7 +44,7 @@ from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import kinematics as BM
 from moonshot.motion import solver as BS
-from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_like, relaxed, tremor
+from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_for, open_like, relaxed, tremor
 from moonshot.world.vise import (CRANK0_DEG, PARALLEL_L, PARALLEL_T, REFERENCE, TABLE_Z, VISE, Load, crank_for_opening,
                                  knob_center)
 
@@ -362,9 +362,12 @@ class Take:
         t_contact = t0 + 0.35 + reach
         self.look(t0, self.stage + [0, 0, self.half[2]])
         self.transit(t0 + 0.35, t_contact, Wg, via=[self.wrist + [70, 40, 150], Wg + [0, -12, 62]], fade=(Hg, 1.0))
-        t_peak = t0 + 0.35 + 0.74 * reach
+        # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
+        # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
+        # the open fingers meeting the faces as they close), which is 0.62 of the planned reach
+        t_peak = t0 + 0.35 + 0.62 * reach
         self.fingers(t0 + 0.35, self.q_relax)
-        self.fingers(t_peak, open_like(self.hand, g["q"], 0.85))
+        self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])
         t_load = t_contact + ga["preload_s"]
         t_lift = t_load + ga["loading_s"]
@@ -545,7 +548,7 @@ class Take:
         # from over the vise: out over the crank disc, then onto the knob from the operator's side
         self.transit(t0, t0 + 1.2, Wk, via=[over, Wk + Hk[:, 2] * 45 + [0, -10, 15]], fade=(Hk, 1.0))
         ko = open_like(self.hand, g["q"], 0.9)
-        self.fingers(t0 + 0.6, ko)
+        self.fingers(t0 + 0.5, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))   # widest at ~74% of the reach
         tg = t0 + 1.2
         self.fingers(tg, g["q"])
         t_c0 = tg + 0.25

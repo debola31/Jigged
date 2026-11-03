@@ -30,6 +30,27 @@ def open_like(hand: AnatomicalHand, q: dict, amount: float) -> dict:
     return hand.clamp({n: q[n] + amount * (ext[n] - q[n]) for n in q})
 
 
+PEAK_PER_MM, PEAK_PLUS_MM = 0.83, 40.0     # Bhatia 2022, Smeets 2020: the reach's widest is 0.74-0.92 mm per mm of size
+
+
+def open_for(hand: AnatomicalHand, q: dict, size_mm: float) -> dict:
+    """The grasp shape opened for the reach to an object size_mm across the grip: as wide as people open for it
+    (PEAK_PER_MM per mm plus PEAK_PLUS_MM, thumb tip to index tip, measured as the hand-opening check measures it),
+    or fully open (open_like 1.0) if the hand can't open that far."""
+    from moonshot.validate.hand_opening import aperture_mm
+    names = list(q)
+    want = PEAK_PER_MM * size_mm + PEAK_PLUS_MM
+    lo, hi = 0.0, 1.0
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        o = open_like(hand, q, mid)
+        if aperture_mm(np.array([[o[n] for n in names]]), names)[0] < want:
+            lo = mid
+        else:
+            hi = mid
+    return open_like(hand, q, hi)
+
+
 def blend_q(a: dict, b: dict, w: float) -> dict:
     return {n: a[n] + (b[n] - a[n]) * w for n in a}
 

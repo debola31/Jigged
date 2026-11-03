@@ -27,7 +27,7 @@ from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
 
 DRAFT = {"res": "960x540", "samples": 32}
-FINAL = {"res": "1920x1080", "samples": 64}
+FINAL = {"res": "1920x1080", "samples": 48}              # tuned: moonshot/render/render_take.py settings()
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:

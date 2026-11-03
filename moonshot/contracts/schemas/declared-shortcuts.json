@@ -6,6 +6,8 @@
   "screw_lock": {"stands_in_for": "The lead screw self-locking under clamp load", "grip_assist": false, "checked_by": []},
   "keep_para_*": {"stands_in_for": "Parallels resting under their own friction until checked", "grip_assist": false,
                   "checked_by": []},
+  "keep_stop": {"stands_in_for": "The stop held where it was set, as a vise stop's clamp holds it, for the part to be set against",
+                "grip_assist": false, "checked_by": []},
   "clamped": {"stands_in_for": "The vise's clamp on the part in the steps after it is tightened (Find X and Y, Set Z), where nothing pushes on the part; the Seat step's take proves the clamp itself", "grip_assist": false,
               "checked_by": []},
   "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping", "grip_assist": true,

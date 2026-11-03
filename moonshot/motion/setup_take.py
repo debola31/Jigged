@@ -725,7 +725,7 @@ class Take:
             encoding="utf-8")
 
 
-def head_camera(take, theta, dp):
+def head_camera(take, theta, dp, lumbar=LUMBAR):
     """Head-mounted camera from the gaze schedule (the verbs' look() calls): the head turns ~62% of the way to
     the eyes' target, ~30 ms behind them, smoothed like a neck (0.12 s); up from the head."""
     n = len(theta)
@@ -739,7 +739,7 @@ def head_camera(take, theta, dp):
         for t0, p in sched:
             if t >= t0:
                 tgt = p
-        f = BM.fk(theta[k], LUMBAR + dp[k])
+        f = BM.fk(theta[k], lumbar + dp[k])
         eye0 = f["neck"] + f["thorax"] @ np.array([0, 60.0, 175.0])
         fwd = f["thorax"] @ np.array([0, math.cos(math.radians(30)), -math.sin(math.radians(30))])
         g = tgt - eye0

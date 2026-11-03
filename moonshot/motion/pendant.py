@@ -326,7 +326,11 @@ class PendantTake(StepTake):
                 via = self.clear_of_face(W_off, to_dial=True)
                 dur = self.travel_s([self.side["R"]["wrist"], *via, W_off])
                 self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
-                self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
+                # the hand opens for the dial late in the reach, widest about 75% of the way, as people's do: opened
+                # at its start, over the keys, the middle finger reached 4.7 mm off them and pressed a digit
+                shape = max(self.side["R"]["fkeys"], key=lambda k: k[0])[1]
+                self.fingers("R", t0 + 0.4 * dur, shape)
+                self.fingers("R", t0 + 0.75 * dur, open_like(self.hand, g["q"], 0.5))
                 t0 += dur
                 # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
                 self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])

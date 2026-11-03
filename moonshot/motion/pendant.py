@@ -94,6 +94,20 @@ def colliders() -> list:
     return out
 
 
+def keep_out(key: np.ndarray, depth: float = 12.0, window: float = 16.0) -> list:
+    """Solids just in front of the pendant's face, but for a window round a key: the index goes in through the window,
+    and the rest of the hand stays `depth` mm off the face, so the curled fingers can't lean on the keys around it."""
+    lo, hi = (np.array(C["pendant_face"][k], float) + OFFSET for k in ("box_min_mm", "box_max_mm"))
+    y0, y1 = FACE_Y - depth, FACE_Y
+    x0, x1, z0, z1 = key[0] - window, key[0] + window, key[2] - window, key[2] + window
+    boxes = [((lo[0], x0), (lo[2], hi[2])), ((x1, hi[0]), (lo[2], hi[2])), ((x0, x1), (lo[2], z0)), ((x0, x1), (z1, hi[2]))]
+    out = []
+    for (a, b), (c, e) in boxes:
+        lo_b, hi_b = np.array([a, y0, c]), np.array([b, y1, e])
+        out.append(lambda p, c_=(lo_b + hi_b) / 2, h_=(hi_b - lo_b) / 2: G.sdf_box(p, c_, np.eye(3), h_))
+    return out
+
+
 def rim(lo_deg: float, hi_deg: float, comp: float = 1.5, depth=(1.0, 12.0), w: float = 1.0):
     """A pad on the dial's rim between two clock angles (0 at the top, + clockwise from the operator), within depth
     (mm) of the dial's front, facing its axis."""
@@ -144,7 +158,7 @@ class PendantTake(StepTake):
         q.update(index_mcp_flex=12, index_pip=12, middle_mcp_flex=70, middle_pip=90, ring_mcp_flex=80, ring_pip=95,
                  little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=10, thumb_mcp_flex=40, thumb_ip=30)
         band = lambda p: 0.5 * ((p[0] - k[0]) ** 2 + (p[2] - k[2]) ** 2)    # noqa: E731
-        key = dict(obj=k, q0=q, colliders=colliders(), iters=900, side="R",
+        key = dict(obj=k, q0=q, colliders=colliders() + keep_out(k), iters=900, side="R",
                    targets={"index": G.plane_target(k, [0, -1.0, 0], 1.0, band)},
                    starts=[S(8, 0, r, 75, 55, -10, 80, p, 0, 0) for p in (40, 75) for r in (0, 15)])
         q = h.neutral()
@@ -198,7 +212,7 @@ class PendantTake(StepTake):
         # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's
         # own orientation only as a preference, as one hand pose can't reach every key
         self.add("R", t0, t1, lambda t, path=path, H=H: [
-            ("pose", H, path.at(t)[1], 0.3), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 3.0)])
+            ("pose", H, path.at(t)[1], 1.0), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 3.0)])
         self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")

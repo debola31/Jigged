@@ -4,9 +4,11 @@
 
 - A press is force control at the index pad: the planned force pushed into the key along the plan's normal,
   trimmed by how hard the pad really presses (integral control), as the vise take presses (moonshot/sim/vise_take.py).
-  The plan aims the fingertip at the key; how far the hand trails the plan is the runner's sight-guided correction
-  (moonshot/sim/runner.py). Until the fingertip is over its key it is held off the face, so a hand that arrives off
-  its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
+  The plan aims the fingertip at the key, and the runner's sight-guided correction (moonshot/sim/runner.py) takes
+  up how far the hand trails it. The fingertip is a hand's length from the wrist, so a few degrees of the hand's turn
+  put it a key away: sight steers the fingertip itself onto the key, across the key's face (in proportion to how far
+  off it is, and slowly for what stays off). Until it is over its key it is held off the face, so a hand that arrives
+  off its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
 - A stroke of the handle ends when the dial has turned its clicks, as people stop turning when the dial reads right:
   the plan turns the hand a little farther, and the grip lets go there.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
@@ -39,6 +41,9 @@ from moonshot.world.vise import Load
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
 TOUCH_N = 0.2               # less than this on a key isn't touching it
 ALIGNED_MM = 6.0            # a press pushes only once the fingertip is this close to the key's centre (keys are 14 mm)
+AIM_GAIN = 0.6              # of the fingertip's error, steered out at once: under 1, so the arm's lag can't make it ring
+AIM_TAU = 0.5               # s: what stays off is taken up this slowly
+AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
@@ -108,6 +113,7 @@ class PendantRunner(TakeRunner):
         act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}
+        self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.turn_from: dict[int, int] = {}
         self.turn_done: set[int] = set()
@@ -199,20 +205,23 @@ class PendantRunner(TakeRunner):
 
     def aim(self, t: float) -> None:
         """Steer each index pad onto the key it is about to press, by sight, across the key's face."""
-        m, d = self.model, self.data
+        m, d, dt = self.model, self.data, self.model.opt.timestep
         for s in ("R", "L"):
             # the next press within reach in time: the hand works toward it from the last one's end
             near = [e for e in self.presses if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
+            i = self.aim_i[s]
             if not near:
+                i *= 1 - dt / 0.2
                 continue
             n = np.asarray(near[0]["normal"], float)
             err = self.key_at[near[0]["key"]] - self.fingertip(s, n)
             across = err - n * (err @ n)
-            if np.linalg.norm(across) <= ALIGNED_MM / 1000 or self._key_n.get(near[0]["key"], 0.0) >= TOUCH_N:
-                continue
-            c = n * min(0.0, err @ n - STANDOFF_MM / 1000)              # off the face until over the key
-            if not c.any():
-                continue
+            i += across * dt / AIM_TAU
+            if np.linalg.norm(i) > AIM_MAX:
+                i *= AIM_MAX / np.linalg.norm(i)
+            c = AIM_GAIN * across + i
+            if np.linalg.norm(across) > ALIGNED_MM / 1000 and self._key_n.get(near[0]["key"], 0.0) < TOUCH_N:
+                c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)      # off the face until over the key
             g = self.index_pad[s]
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])

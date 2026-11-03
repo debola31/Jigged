@@ -61,7 +61,7 @@ def test_a_surface_cycle_stops_at_the_touch_comes_back_and_sets_the_offset(ctl):
 
 def test_a_bore_cycle_sets_x_and_y_at_its_centre(ctl):
     start = ctl.machine_mm().copy()
-    centre, r = start[:2] + [1.2, -0.7], 3.5               # a 7 mm bore, the probe 1.4 mm off its centre
+    centre, r = start[:2] + [1.2, -0.7], 5.0               # a 10 mm bore (the ears' counterbores), the probe 1.4 mm off its centre
     ctl.sensor = lambda: np.linalg.norm(ctl.machine_mm()[:2] - centre) + BALL_R >= r
     ctl.vps("bore", ball_r=BALL_R)
     _run(ctl)

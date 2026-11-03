@@ -4,7 +4,8 @@ the way through (person.peak_aperture_reach_frac), and wider for a bigger object
 judged on timing alone.
 
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
-(sim.npz q) on the body model's hand. Reaches are grasp_timing's.
+(sim.npz q) on the body model's hand. Reaches are grasp_timing's. A take that isn't the vise's has each grasped
+object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm).
 """
 from __future__ import annotations
 
@@ -15,21 +16,26 @@ import numpy as np
 
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
+from moonshot.validate import objects
 from moonshot.validate.grasp_timing import measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
 def measure(take: Path) -> dict:
-    """What the check reads, from a vise take's physics run: the grasp-timing inputs, the aperture, and each grasped
-    object's size across the grip (the blank's near-to-far faces, the knob's diameter)."""
+    """What the check reads, from a physics run: the grasp-timing inputs, the aperture, and each grasped object's size
+    across the grip (a vise take's: the blank's near-to-far faces, the knob's diameter)."""
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
-    tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
-    load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     g = grasp_inputs(take)
+    if objects.is_vise(sim):
+        tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
+        load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
+        size = {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
+    else:
+        size = {o: objects.thinnest_mm(take, o) for o in g["grasping"]}
     return {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
             "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], [str(n) for n in sim["names"]]).tolist(),
-            "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}}
+            "size_mm": size}
 
 
 MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart or more: op30's 31 mm part and the 27 mm

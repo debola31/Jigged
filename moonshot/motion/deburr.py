@@ -23,7 +23,7 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import PART_AT, REST, TOP, BenchPlan, bench_box, box, settle
+from moonshot.motion.bench import PART_AT, REST, TOP, BenchPlan, bench_box, box, instrument_colliders, settle
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
@@ -74,7 +74,7 @@ def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
 class DeburrPlan(BenchPlan):
     def __init__(self, out=OUT, verbose=True):
         super().__init__(out, verbose)
-        rest = settle(loose())
+        rest = self.rests = settle(loose())
         self.part, self.tool0 = rest["part"], rest["deburr_tool"]
         self.paths["deburr_tool"] = [(0.0, self.tool0[1], self.tool0[0])]
         self.solve_grips(self.grip_specs(), rest)
@@ -105,6 +105,9 @@ class DeburrPlan(BenchPlan):
                                       "middle": on(80, 125, upper_right)},
                              starts=[S(20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (55, 75, 90) for r in (0, 15)])
         specs["steady"] = self.steady_spec()
+        # the left hand comes onto the rim beside the micrometer and over the calipers: kept off them, as its thumb
+        # pushed the micrometer 3.9 mm
+        specs["steady"]["colliders"] += instrument_colliders(self.rests, ("mic1", "cal6"), grow=5.0)
         return specs
 
     # --- the verbs ------------------------------------------------------------------------------------------------

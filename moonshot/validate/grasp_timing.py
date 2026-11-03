@@ -4,8 +4,14 @@ no load yet) and loading (load rising to the object's weight) last as long as Gu
 A reach is the hand's movement onset (its speed rising past person.movement_onset_frac of the reach's peak) to its
 first contact with the object a grasp closes on. A lift's phases start at that contact: loading starts when the
 hand's lifting force passes person.force_onset_frac of the object's weight, and ends at lift-off, the object
-person.lift_off_mm above where it sat. The lifting force comes from the physics run (checks.json load_N), which the
-vise take's doesn't record yet.
+person.lift_off_mm above where it sat. The lifting force comes from the physics run (checks.json load_N).
+
+A take that isn't the vise's is read from its record (moonshot/validate/objects.py): its right hand's grips, each on
+the object its grip event names, and only those on an object at rest: taking a tool from the other hand isn't a reach
+to grasp as people's were measured, nor a lift. Its contact is the first frame a hand touches the object or carries
+it (a carried tool leaves the skin, so the carry can close before a finger meets it), as the cause check reads
+touching: validate/take.py gives every check the one `touching`, and with right-hand touches alone the cause check
+found the left hand's work uncaused.
 """
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from moonshot.contracts.thresholds import threshold
+from moonshot.validate import objects
 from moonshot.validate.registry import Result, check
 
 # the grips that close the hand round an object, and that object; presses and fingertip touches aren't grasps
@@ -60,12 +67,36 @@ def intervals(events: list[dict], kind: str) -> list[dict]:
     return out + opened
 
 
+def _from_record(take: Path, tk: dict, ck: dict) -> dict:
+    rec = np.load(take / "take.npz")
+    fps, t, at = float(rec["fps"]), rec["t"], objects.positions(take)
+    lift = threshold("person.lift_off_mm").value
+    grasping: dict[str, np.ndarray] = {}
+    for e in intervals(tk["events"], "grip"):
+        obj = e.get("on")
+        if e.get("side") != "R" or obj not in at:
+            continue
+        k0 = min(len(t) - 1, int(round(e["t0"] * fps)))
+        if at[obj][k0, 2] > at[obj][0, 2] + lift:                   # already up: taken from the other hand
+            continue
+        t1 = e["t1"] if e["t1"] is not None else t[-1]
+        grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
+    lifted = [o for o in grasping if o in ck.get("load_N", {})]
+    return {"fps": fps, "hand_speed_mm_s": hand_speed(rec["R_W"], fps).tolist(),
+            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+            "grasping": {k: v.tolist() for k, v in grasping.items()},
+            "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
+            "load_N": ck.get("load_N", {})}
+
+
 def measure(take: Path) -> dict:
-    """What the check reads, from a vise take's physics run."""
+    """What the check reads, from a physics run: a vise take's own keys, or any other take's record."""
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
     tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
     ck = json.loads((take / "checks.json").read_text(encoding="utf-8"))
+    if not objects.is_vise(sim):
+        return _from_record(take, tk, ck)
     fps, t = float(sim["fps"]), sim["t"]
     grasping: dict[str, np.ndarray] = {}
     for e in intervals(tk["events"], "grip"):

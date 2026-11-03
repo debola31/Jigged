@@ -81,7 +81,9 @@ CAL = {"beam": ((-116.6, 1.75, 2.5), (116.6, 17.75, 6.0)),       # 16 x 3.5 mm, 
        "mjaw_out": ((-108.2, -38.2, 2.5), (-100.4, -17.8, 6.0)),    # the moving jaw
        "rod": ((-40.4, 8.75, 1.4), (116.6, 10.75, 2.4)),            # the depth rod, behind the beam's back face
        "roller": {"at": (-68.6, 24.25, 6.25), "r": 4.4, "half": 5.5},     # the thumb roller, axis along +Y
-       "beam_kg": 0.10, "slider_kg": 0.07, "travel": 150.0, "friction_N": 0.3}
+       # the slider's friction holds it on end, as a caliper's gib does, and the beam hanging from it (proposed): at 1 N
+       # the beam's own 0.98 N slid it open as the calipers were turned on end
+       "beam_kg": 0.10, "slider_kg": 0.07, "travel": 150.0, "friction_N": 2.0}
 
 
 def _f(v, scale=M) -> str:
@@ -202,14 +204,16 @@ def _excludes(loose: str) -> str:
     return "  <contact>\n" + "\n".join(rows) + "\n  </contact>\n" if rows else ""
 
 
-def with_body(body_xml: str, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = ()) -> str:
+def with_body(body_xml: str, loose: str, carried: tuple = (), skip: tuple[str, ...] = ()) -> str:
     """The body model's MJCF with the bench cell added: the station (less skip), the floor, the loose objects (XML from
-    part_body, deburr_body, caliper_body) and a carry weld from the right hand to each carried body."""
+    part_body, deburr_body, caliper_body) and a carry weld to each carried body from the hand that carries it: carried
+    names a body (the right hand's) or a (side, body) pair."""
     head, _, tail = body_xml.rpartition("\n  </default>")
     xml = head + "\n" + defaults() + "\n  </default>" + tail
     xml = xml.replace("<worldbody>\n", "<worldbody>\n" + FLOOR + STATIC + IB.worldbody(skip=skip) + loose, 1)
-    eq = "".join(f'    <weld name="carry_{b}" body1="R_hand" body2="{b}" active="false" solref="0.004 1" '
-                 f'solimp="0.95 0.99 0.001" torquescale="1"/>\n' for b in carried)
+    pairs = [c if isinstance(c, tuple) else ("R", c) for c in carried]
+    eq = "".join(f'    <weld name="carry_{b}" body1="{side}_hand" body2="{b}" active="false" solref="0.004 1" '
+                 f'solimp="0.95 0.99 0.001" torquescale="1"/>\n' for side, b in pairs)
     xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
     return xml.replace("  <equality>\n", _excludes(loose) + "  <equality>\n", 1)
 

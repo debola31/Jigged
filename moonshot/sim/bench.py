@@ -24,7 +24,7 @@ import numpy as np
 
 from moonshot.body.skeleton import H0, MIRROR, build, set_finger_contact
 from moonshot.motion import kinematics as BM
-from moonshot.sim.record import Recorder
+from moonshot.sim.record import Recorder, hand_wrench
 from moonshot.sim.reference import ARM, ReferenceTake
 from moonshot.world import bench_cell as BC
 
@@ -46,6 +46,11 @@ POINT_N_PER_M = 300.0     # and pushing it there: 3 N for a centimetre off (prop
                           # push to the press to slide the steadied part
 POINT_N_MAX = 3.0         # ... at most this hard (proposed)
 GUIDE_MAX = 0.015         # ... by at most this much (m)
+SKIN_BACK_S = 0.5         # a tool let go meets the skin again this long after, the hand opened off it: at once, the
+                          # fingers still in the calipers' slider kicked it 2.6 mm open
+EASE_OUT_S = 0.8          # a hand's carry correction eases out over this long after it lets go, as it draws back: over
+                          # 0.4 s it took the hand back to its plan before it was clear, 6 mm into the calipers' slider
+TURN_MAX = 0.1            # a pressed tool's turn is kept as planned by sight by at most this much (rad)
 DIGITS = {"thumb": ["met1", "pro1", "dis1"], "index": ["pro2", "int2", "dis2"], "middle": ["pro3", "int3", "dis3"],
           "ring": ["pro4", "int4", "dis4"], "little": ["pro5", "int5", "dis5"],
           "palm": ["palm", "met2", "met3", "met4", "met5"]}
@@ -89,20 +94,30 @@ class BenchRun:
         self.body_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in self.body.joints])
         self.body_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in self.body.joints])
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == m.body("pelvis").id}
+        self.lifted = sorted({c if isinstance(c, str) else c[1] for c in carried})      # what the hands pick up
+        trees: dict[int, list[str]] = {}
+        for b in range(1, m.nbody):
+            if m.body(b).name not in self.person:
+                trees.setdefault(int(m.body_rootid[b]), []).append(m.body(b).name)
+        # each object riding on another, or carrying one (the calipers' slider on their beam), and what moves with it
+        self.moves_with = {n: names for names in trees.values() if len(names) > 1 for n in names}
         ev = self.tk["events"]
         self.grips = [e for e in ev if e["kind"] == "grip"]
         self.carries = [e for e in ev if e["kind"] == "carry"]
+        self.looses = [e for e in ev if e["kind"] == "loose"]
         self.presses = [e for e in ev if e["kind"] == "press"]
         self.press_i: dict[int, float] = {}
         self.press_felt: dict[int, float] = {}
+        self.seated: set[int] = set()               # the `seat` presses felt touching down
         self.squeeze: dict[tuple, dict] = {}
         self.contact_label = {"R": set(), "L": set()}
         self.correction: dict[str, tuple] = {}
-        self.guide = np.zeros(3)
+        self.guide = {"R": np.zeros(3), "L": np.zeros(3)}
+        self.turn = {"R": np.zeros(3), "L": np.zeros(3)}
         self.anchors: dict[int, np.ndarray] = {}
+        self.released: dict[str, float] = {}
         self.contact_bits = {g: (int(m.geom_contype[g]), int(m.geom_conaffinity[g])) for g in range(m.ngeom)}
         self.side_arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM_JOINTS]) for s in ("R", "L")}
-        self.arm_dofs = self.side_arm_dofs["R"]
         self.dof_q = np.zeros(m.nv, dtype=int)                 # each hinge or slide dof's qpos address
         for j in range(m.njnt):
             if m.jnt_type[j] in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
@@ -253,17 +268,31 @@ class BenchRun:
         be, as seen and then felt: a spring of POINT_N_PER_M from SIGHT_LEAD_S before it lands, sideways to the press
         once it does (the press's force owns its direction). Joint positions alone left it 10-15 mm off: the arm's
         joints each track to a degree or two, which adds up over the arm."""
+        return sum((self.point_push_of(e, tt, i in self.seated) for i, e in enumerate(self.presses) if e.get("point")
+                    and e["t0"] - SIGHT_LEAD_S <= tt < e["t1"]), np.zeros(len(self.acts)))
+
+    def planned_point(self, e: dict, tt: float) -> np.ndarray:
+        """A press's point where the plan has it (m): with `square_to` (and `square_R`, `square_p`, that body's planned
+        pose), where the plan has it on that body as it now lies. Fixed in the world, the calipers' beam, seated on
+        the part, was nudged after the part's 0.3 mm on its mat until it stuck and slipped."""
         m, d = self.model, self.data
-        e = next((e for e in self.presses if e.get("point") and e["t0"] - SIGHT_LEAD_S <= tt < e["t1"]), None)
-        if e is None:
-            return np.zeros(len(self.acts))
         k = min(len(self.t) - 1, int(round(tt * self.fps)))
+        planned = (self.rd[f"obj_{e['obj']}"][k] * 0.001
+                   + self.rd[f"obj_{e['obj']}_R"][k] @ (np.asarray(e["point"], float) * 0.001))
+        if e.get("square_to"):
+            b = m.body(e["square_to"]).id
+            planned = d.xpos[b] + d.xmat[b].reshape(3, 3) @ np.asarray(e["square_R"]).T @ (
+                planned - np.asarray(e["square_p"]) * 0.001)
+        return planned
+
+    def point_push_of(self, e: dict, tt: float, seated: bool = False) -> np.ndarray:
+        m, d = self.model, self.data
         pt = np.asarray(e["point"], float) * 0.001
-        planned = self.rd[f"obj_{e['obj']}"][k] * 0.001 + self.rd[f"obj_{e['obj']}_R"][k] @ pt
+        planned = self.planned_point(e, tt)
         ob = m.body(e["obj"]).id
         real = d.xpos[ob] + d.xmat[ob].reshape(3, 3) @ pt
         err = planned - real
-        if tt >= e["t0"]:
+        if seated or (tt >= e["t0"] and not e.get("seat")):
             n = np.asarray(e["normal"], float)
             err = err - n * (n @ err)
         force = err * POINT_N_PER_M
@@ -293,7 +322,8 @@ class BenchRun:
             precise = any(e.get("point") and e["side"] == side and e["t0"] - SIGHT_LEAD_S <= tt < e["t1"]
                           for e in self.presses)
             k[arm], k[hand] = 1.0 + STIFFEN_ARM * (1.0 if precise else effort), 1.0 + STIFFEN * effort
-            if grip and effort > 0:
+            # no squeeze on a tool just let go: squeezed on, the fingers sank 6 mm into the calipers' slider
+            if grip and effort > 0 and not any(b in self.released for b in self.grip_objects.get(grip, ())):
                 key = (side, grip, self.grip_span(side, tt))
                 if key not in self.squeeze:
                     self.squeeze[key] = self.grip_squeeze(side, grip)
@@ -309,105 +339,191 @@ class BenchRun:
         return next((i for i, e in enumerate(self.grips) if e["side"] == side and e["t0"] <= tt < e["t1"] + 0.2), -1)
 
     def switch_carries(self, tt: float) -> None:
-        """A carry weld turns on holding the tool where it really is in the hand, and off when it is set down. Where
+        """A carry weld turns on holding the tool where it really is in its hand, and off when it is set down. Where
         that differs from the plan's grip is measured as it closes, for the hand to correct by sight (`carry_offset`),
-        as the vise take's hand does for the blank."""
-        m, d, p = self.model, self.data, self.plan
-        for e in self.carries:
-            eq = m.equality(f"carry_{e['obj']}").id
-            want = e["t0"] <= tt < e["t1"]
-            if want and not d.eq_active[eq]:
-                hb, ob = m.body("R_hand").id, m.body(e["obj"]).id
-                Rh, Ro = d.xmat[hb].reshape(3, 3), d.xmat[ob].reshape(3, 3)
-                rel_act = (Rh.T @ Ro, Rh.T @ (d.xpos[ob] - d.xpos[hb]))
-                qrel = np.zeros(4)
-                mujoco.mju_mat2Quat(qrel, rel_act[0].flatten())
-                m.eq_data[eq, 0:3] = 0.0                                  # the tool's origin, where it is in the hand
-                m.eq_data[eq, 3:6] = rel_act[1]
-                m.eq_data[eq, 6:10] = qrel
+        as the vise take's hand does for the blank. While a `loose` event lasts, the weld holds the tool's place but not
+        its turn (its torque scale 0): the other hand has it and sets its angle. When it ends, the weld takes the tool's
+        turn again where it then is, and the correction is measured afresh."""
+        m, d = self.model, self.data
+        for obj in dict.fromkeys(e["obj"] for e in self.carries):      # an object may be taken more than once
+            eq = m.equality(f"carry_{obj}").id
+            now = next((e for e in self.carries if e["obj"] == obj and e["t0"] <= tt < e["t1"]), None)
+            if now is not None and not d.eq_active[eq]:
+                self.anchor_weld(now, eq, tt)
                 d.eq_active[eq] = 1
+                self.released.pop(obj, None)
                 # held, the tool no longer collides with the skin: welded to the hand, the hand's own capsules pushing
                 # on it only twist it in the weld (10 deg at the tip of the deburring tool). It still meets the bench
                 # and the part; the skin's depth in it is checked (moonshot/validate/skin.py)
-                for g in self.body_geoms[e["obj"]]:
+                for g in self.body_geoms[obj]:
                     m.geom_contype[g], m.geom_conaffinity[g] = 0, 1
-                # where the plan has the tool in the hand: its planned pose in the planned hand
-                self.set_plan(tt)
-                mujoco.mj_kinematics(m, p)
-                k = min(len(self.t) - 1, int(round(tt * self.fps)))
-                po, Rp = self.rd[f"obj_{e['obj']}"][k] * 0.001, self.rd[f"obj_{e['obj']}_R"][k]
-                Rhp = p.xmat[hb].reshape(3, 3)
-                rel_plan = (Rhp.T @ Rp, Rhp.T @ (po - p.xpos[hb]))
-                # the hand's own correction C, in its frame, so that hand_plan * C * rel_act = hand_plan * rel_plan
-                Rc = rel_plan[0] @ rel_act[0].T
-                self.correction[e["obj"]] = (Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"])
-            elif not want and d.eq_active[eq]:
+            elif now is None and d.eq_active[eq]:
                 d.eq_active[eq] = 0
-                for g in self.body_geoms[e["obj"]]:
+                self.released[obj] = tt
+            if now is None and obj in self.released and tt >= self.released[obj] + SKIN_BACK_S:
+                del self.released[obj]
+                for g in self.body_geoms[obj]:
                     m.geom_contype[g], m.geom_conaffinity[g] = self.contact_bits[g]
+        for obj in dict.fromkeys(e["obj"] for e in self.looses):       # an object may be held loose more than once
+            eq = m.equality(f"carry_{obj}").id
+            loose = any(e["obj"] == obj and e["t0"] <= tt < e["t1"] for e in self.looses)
+            if loose and m.eq_data[eq, 10] != 0:
+                m.eq_data[eq, 10] = 0.0
+                self.correction.pop(obj, None)               # its turn is the other hand's now
+            elif not loose and m.eq_data[eq, 10] == 0:
+                carry = next((c for c in self.carries if c["obj"] == obj and c["t0"] <= tt < c["t1"]), None)
+                if carry is not None and d.eq_active[eq]:
+                    self.anchor_weld(carry, eq, tt)
+                m.eq_data[eq, 10] = 1.0
+
+    def anchor_weld(self, e: dict, eq: int, tt: float) -> None:
+        """Weld a carried tool to its hand where it is now, and measure the hand's correction from the plan's grip."""
+        m, d, p = self.model, self.data, self.plan
+        side = e.get("side", "R")
+        hb, ob = m.body(f"{side}_hand").id, m.body(e["obj"]).id
+        Rh, Ro = d.xmat[hb].reshape(3, 3), d.xmat[ob].reshape(3, 3)
+        rel_act = (Rh.T @ Ro, Rh.T @ (d.xpos[ob] - d.xpos[hb]))
+        qrel = np.zeros(4)
+        mujoco.mju_mat2Quat(qrel, rel_act[0].flatten())
+        # held at the pinch, between the thumb's, index's and middle's tips: a `loose` weld pivots there, as fingers
+        # holding a tool lightly let it turn. At the tool's origin, 60 mm off the right hand's grip on the calipers'
+        # slider, it dragged them 25 deg off the left hand's
+        pinch = np.mean([d.geom_xpos[m.geom(f"{side}_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
+        m.eq_data[eq, 0:3] = Ro.T @ (pinch - d.xpos[ob])
+        m.eq_data[eq, 3:6] = Rh.T @ (pinch - d.xpos[hb])
+        m.eq_data[eq, 6:10] = qrel
+        m.eq_data[eq, 10] = 1.0                                    # its turn too, unless a `loose` says otherwise
+        # where the plan has the tool in the hand: its planned pose in the planned hand
+        self.set_plan(tt)
+        mujoco.mj_kinematics(m, p)
+        k = min(len(self.t) - 1, int(round(tt * self.fps)))
+        po, Rp = self.rd[f"obj_{e['obj']}"][k] * 0.001, self.rd[f"obj_{e['obj']}_R"][k]
+        Rhp = p.xmat[hb].reshape(3, 3)
+        rel_plan = (Rhp.T @ Rp, Rhp.T @ (po - p.xpos[hb]))
+        # the hand's own correction C, in its frame, so that hand_plan * C * rel_act = hand_plan * rel_plan
+        Rc = rel_plan[0] @ rel_act[0].T
+        self.correction[e["obj"]] = (side, Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"])
 
     def carry_offset(self, tt: float) -> np.ndarray:
-        """Joint offsets moving the right hand from its planned pose by each active carry's correction, whole until the
-        tool is let go and eased out over 0.4 s after: what the tool really sits like in the hand, fixed by sight. It
-        starts whole, as it is where the hand already is when it closes; eased out while still held, it swung the tool
-        off its rest as it was set down. Through the arm's 9 joints at the planned pose, position and turn together
-        (damped least squares)."""
+        """Joint offsets moving each hand from its planned pose by its carries' corrections, whole until the tool is
+        let go and eased out over 0.4 s after: what the tool really sits like in the hand, fixed by sight. It starts
+        whole, as it is where the hand already is when it closes; eased out while still held, it swung the tool off
+        its rest as it was set down. The right hand's touch guide adds to it. Through the arm's 9 joints at the planned
+        pose, position and turn together (damped least squares)."""
         m, p = self.model, self.plan
-        hb = m.body("R_hand").id
         dq = np.zeros(m.nv)
-        err = np.r_[self.touch_guide(tt), np.zeros(3)]
-        for Rc, pc, t0, t1 in self.correction.values():
-            if not t0 <= tt < t1 + 0.4:
-                continue
-            w = 1 - min_jerk((tt - t1) / 0.4)
-            Rh = p.xmat[hb].reshape(3, 3)
-            rv = np.zeros(3)
-            q = np.zeros(4)
-            mujoco.mju_mat2Quat(q, Rc.flatten())
-            mujoco.mju_quat2Vel(rv, q, 1.0)
-            err += np.r_[Rh @ pc, Rh @ rv] * w
-        if err.any():
-            jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
-            mujoco.mj_jacBody(m, p, jacp, jacr, hb)
-            J = np.r_[jacp, jacr][:, self.arm_dofs]
-            dq[self.arm_dofs] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(6), err)
+        for side in ("R", "L"):
+            hb = m.body(f"{side}_hand").id
+            err = np.r_[self.touch_guide(side, tt), self.turn_guide(side, tt)]
+            for s_, Rc, pc, t0, t1 in self.correction.values():
+                if s_ != side or not t0 <= tt < t1 + EASE_OUT_S:
+                    continue
+                w = 1 - min_jerk((tt - t1) / EASE_OUT_S)
+                Rh = p.xmat[hb].reshape(3, 3)
+                rv = np.zeros(3)
+                q = np.zeros(4)
+                mujoco.mju_mat2Quat(q, Rc.flatten())
+                mujoco.mju_quat2Vel(rv, q, 1.0)
+                err += np.r_[Rh @ pc, Rh @ rv] * w
+            if err.any():
+                dofs = self.side_arm_dofs[side]
+                jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, p, jacp, jacr, hb)
+                J = np.r_[jacp, jacr][:, dofs]
+                dq[dofs] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(6), err)
         return dq
 
-    def touch_guide(self, tt: float) -> np.ndarray:
+    def touch_guide(self, side: str, tt: float) -> np.ndarray:
         """While a press works a carried tool's point along a path, the hand keeps that point on its planned path: by
         sight over the SIGHT_LEAD_S before it lands (within SIGHT_TAU), then by touch, sideways to the press (the
         force owns the press's direction), within TOUCH_TAU, as the vise take's fingertip is kept on a parallel. Let go
         of over TOUCH_RELEASE_S once the press is over."""
         m, d, dt = self.model, self.data, self.model.opt.timestep
-        e = next((e for e in self.presses if e.get("point") and e["t0"] - SIGHT_LEAD_S <= tt < e["t1"]), None)
+        i, e = next(((i, e) for i, e in enumerate(self.presses) if e.get("point") and e.get("side", "R") == side
+                     and e["t0"] - SIGHT_LEAD_S <= tt < e["t1"]), (None, None))
+        g = self.guide[side]
         if e is None:
-            self.guide *= 1 - dt / TOUCH_RELEASE_S
-            return self.guide
-        k = min(len(self.t) - 1, int(round(tt * self.fps)))
+            g *= 1 - dt / TOUCH_RELEASE_S
+            return g
+        if i in self.seated:                 # a seat, once felt down, is held where sight put it (and by the point's
+            return g                         # spring): nudged on by touch, the calipers' beam stuck and slipped on the rim
         pt = np.asarray(e["point"], float) * 0.001
-        planned = self.rd[f"obj_{e['obj']}"][k] * 0.001 + self.rd[f"obj_{e['obj']}_R"][k] @ pt
         ob = m.body(e["obj"]).id
-        err = planned - (d.xpos[ob] + d.xmat[ob].reshape(3, 3) @ pt)
-        if tt < e["t0"]:
-            self.guide += err * dt / SIGHT_TAU
+        err = self.planned_point(e, tt) - (d.xpos[ob] + d.xmat[ob].reshape(3, 3) @ pt)
+        if tt < e["t0"] or e.get("seat"):    # ... and guided by sight until then, however late: stopped where the plan
+            g += err * dt / SIGHT_TAU        # had it land, the beam came down unguided and off the rim into the pocket
         else:
             n = np.asarray(e["normal"], float)
-            self.guide += (err - n * (n @ err)) * dt / TOUCH_TAU
-        size = np.linalg.norm(self.guide)
+            g += (err - n * (n @ err)) * dt / TOUCH_TAU
+        size = np.linalg.norm(g)
         if size > GUIDE_MAX:
-            self.guide *= GUIDE_MAX / size
-        return self.guide
+            g *= GUIDE_MAX / size
+        return g
+
+    def turn_guide(self, side: str, tt: float) -> np.ndarray:
+        """While a hand presses a tool it holds (a press's `upright`: the tool), it keeps the tool turned as the plan
+        has it by sight, within SIGHT_TAU, and lets that go over TOUCH_RELEASE_S after: the calipers' beam held on the
+        face 3.4 deg off upright stood on one edge of its end and read 0.25 mm long. With `square_to` (a body, and
+        `square_R`, its turn as planned), as the plan has it to that body as it now lies: the part on its mat sat 0.5
+        deg off its planned rest, and the beam square to the plan read 0.03 mm short. A turn of the hand, world frame."""
+        m, d, dt = self.model, self.data, self.model.opt.timestep
+        e = next((e for e in self.presses if e.get("upright") and e.get("side", "R") == side
+                  and e["t0"] <= tt < e["t1"]), None)
+        g = self.turn[side]
+        if e is None:
+            g *= 1 - dt / TOUCH_RELEASE_S
+            return g
+        k = min(len(self.t) - 1, int(round(tt * self.fps)))
+        want = self.rd[f"obj_{e['upright']}_R"][k]
+        if e.get("square_to"):
+            want = d.xmat[m.body(e["square_to"]).id].reshape(3, 3) @ np.asarray(e["square_R"]).T @ want
+        off = want @ d.xmat[m.body(e["upright"]).id].reshape(3, 3).T
+        rv, q = np.zeros(3), np.zeros(4)
+        mujoco.mju_mat2Quat(q, off.flatten())
+        mujoco.mju_quat2Vel(rv, q, 1.0)
+        g += rv * dt / SIGHT_TAU
+        size = np.linalg.norm(g)
+        if size > TURN_MAX:
+            g *= TURN_MAX / size
+        return g
 
     # --- measurement ---------------------------------------------------------------------------------------------
-    def touching(self, side: str) -> list[str]:
+    def touching(self, side: str, tt: float) -> list[str]:
+        """The colliders a hand touches, itself or through a tool it carries: a carried tool's colliders leave the
+        skin, so the calipers seated on the part by both hands are the hands' only touch on it, and it gives a
+        little on its mat under them."""
         m, d = self.model, self.data
+        held = {b for e in self.carries if e.get("side", "R") == side and e["t0"] <= tt < e["t1"]
+                for b in self.tree(e["obj"])}
         out = set()
         for i in range(d.ncon):
             g1, g2 = d.contact[i].geom1, d.contact[i].geom2
             for a, b in ((g1, g2), (g2, g1)):
-                if m.geom(a).name.startswith(f"{side}_") and m.body(m.geom_bodyid[b]).name not in self.person:
+                mine = m.geom(a).name.startswith(f"{side}_") or m.geom_bodyid[a] in held
+                if mine and m.geom_bodyid[b] not in held and m.body(m.geom_bodyid[b]).name not in self.person:
                     out.add(m.geom(b).name)
         return sorted(out)
+
+    def tree(self, obj: str) -> set[int]:
+        """An object and everything it moves with: the tool it belongs to."""
+        m = self.model
+        return {b for b in range(m.nbody) if m.body_rootid[b] == m.body_rootid[m.body(obj).id]}
+
+    def lifting_force(self, obj: str) -> float:
+        """The hands' upward force on an object's tool (N, world z): everything from outside on it, its contacts and
+        carry welds, less what isn't the person's. After mj_rnePostConstraint (hand_wrench calls it)."""
+        m, d = self.model, self.data
+        tree = self.tree(obj)
+        up, c6 = sum(float(d.cfrc_ext[b][5]) for b in tree), np.zeros(6)
+        for i in range(d.ncon):
+            c = d.contact[i]
+            b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+            if (b1 in tree) == (b2 in tree) or m.body(b2 if b1 in tree else b1).name in self.person:
+                continue
+            mujoco.mj_contactForce(m, d, i, c6)
+            fw = c.frame.reshape(3, 3).T @ c6[:3]                  # on geom2, world
+            up -= float(fw[2] if b2 in tree else -fw[2])
+        return up
 
     def anat(self, name: str) -> float:
         m, d, j = self.model, self.data, self.body.joints[name]
@@ -442,10 +558,14 @@ class BenchRun:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, arms=("R", "L"))
-        self.rec = {"pose": [], "touching": [], "press": [], "lag": []}
+        self.rec = {"pose": [], "touching": [], "press": [], "lag": [], "hand_wrench": [],
+                    "active_constraints": [], "applied_forces": [], "load_N": {b: [] for b in self.lifted}}
         t0w = time.time()
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
+            # the lifting force over the frame, not at its end: a hand closing on a 170 g tool chatters +-2 N step to
+            # step, and one sample of that dated the load's onset by chance
+            load = dict.fromkeys(self.lifted, 0.0)
             for s in range(spf):
                 tt = (k + s / spf) / self.fps
                 self.switch_carries(tt)
@@ -460,16 +580,27 @@ class BenchRun:
                         F += (self.press_force(e) - F) * m.opt.timestep / PRESS_FELT_S
                         self.press_felt[i] = F
                         frame_f.setdefault(i, []).append(F)
+                        if e.get("seat") and F > TOUCH_N:
+                            self.seated.add(i)
                         err = e["force"] * min_jerk((tt - e["t0"]) / 0.25) - F
                         if F > TOUCH_N:                       # trim only while touching: no windup into empty space
                             self.press_i[i] = float(np.clip(self.press_i.get(i, 0.0) + PRESS_KI * err * m.opt.timestep,
                                                             -e["force"], 2 * e["force"]))
                 self.step(tt)
+                if self.lifted:
+                    mujoco.mj_rnePostConstraint(m, d)
+                    for b in self.lifted:
+                        load[b] += self.lifting_force(b) / spf
             pose = self.pose_record()
             self.rec["pose"].append(pose)
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
-            self.rec["touching"].append(sorted(set(self.touching("R")) | set(self.touching("L"))))
+            self.rec["touching"].append(sorted(set(self.touching("R", tt)) | set(self.touching("L", tt))))
+            self.rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))      # the muscle check replays the right arm
+            for b in self.lifted:
+                self.rec["load_N"][b].append(round(load[b], 3))
+            self.rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
+            self.rec["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
             tk = k / self.fps
             self.rec["press"].append({i: float(np.mean(f)) for i, f in frame_f.items()})
             self.set_plan(tk)
@@ -501,8 +632,12 @@ class BenchRun:
             pre = "" if s == "R" else "L_"
             arrays |= {pre + key: np.array([p[s][key] for p in P]) for key in ("q", "H", "W", "S", "E", "forearm")}
         np.savez(out / "sim.npz", **arrays)
-        (out / "checks.json").write_text(json.dumps({"touching": rec["touching"], "never_held": never_held,
-                                                     "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
+        m = self.model
+        weight = {b: round(float(sum(m.body_mass[i] for i in self.tree(b))) * 9.81, 4) for b in self.lifted}
+        (out / "checks.json").write_text(json.dumps(
+            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "load_N")} |
+            {"weight_N": weight, "moves_with": self.moves_with, "machine_axes": {}, "never_held": never_held,
+             "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
         self.recorder.write(out, self.fps, self.tk["lumbar"][0], {s: [str(x) for x in rd["names"]] for s in ("R", "L")},
                             station, glbs)
         lag = np.array(rec["lag"])

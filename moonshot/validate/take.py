@@ -62,8 +62,8 @@ def inputs(take: Path) -> dict:
     for check_inputs in (cause.measure, grasp_timing.measure, hand_opening.measure, footage.measure):
         try:
             out |= check_inputs(take)
-        except KeyError:
-            pass                                    # the run doesn't write what it reads: only its check fails
+        except KeyError:                    # the run doesn't record what this reads: its check has nothing to read
+            pass
     return out
 
 

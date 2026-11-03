@@ -1,5 +1,5 @@
 {
- "about": "Every constraint and applied force a take's physics may use, declared (plan 5.1, shortcuts are declared; docs/moonshot/physics.md, Declared shortcuts). moonshot/validate/shortcuts.py fails a take that uses anything not listed here by name or fnmatch pattern. `shortcuts` are non-physical assists, each standing in for something the scene can't model, reported with how long it was on; `grip_assist` ones count toward the deformable-pad trigger (plan 3.1). `mechanisms` are the model's own structure: the body's couplings and the vise's screw ratio. Protected (plan 6, rule 1): declaring a shortcut is moving the bar.",
+ "about": "Every constraint and applied force a take's physics may use, declared (plan 5.1, shortcuts are declared; docs/moonshot/physics.md, Declared shortcuts). moonshot/validate/shortcuts.py fails a take that uses anything not listed here by name or fnmatch pattern. `shortcuts` are non-physical assists, each standing in for something the scene can't model, reported with how long it was on; `grip_assist` ones count toward the deformable-pad trigger (plan 3.1). `mechanisms` are the model's own structure: the body's couplings, the vise's screw ratio and its AngLock; a force is named \"force on <body>\". Protected (plan 6, rule 1): declaring a shortcut is moving the bar.",
  "shortcuts": {
   "enclose": {"stands_in_for": "Flesh conforming round the crank's knob, which capsule fingers can't", "grip_assist": true,
               "checked_by": ["never_held_parts", "skin_penetration"]},
@@ -15,6 +15,7 @@
  },
  "mechanisms": {
   "couple_*": "The body's anatomical couplings (moonshot/body/skeleton.py hand_couplings)",
-  "lead_screw": "The vise's lead screw as an exact ratio (moonshot/world/vise.py)"
+  "lead_screw": "The vise's lead screw as an exact ratio (moonshot/world/vise.py)",
+  "force on moving_jaw": "Kurt's AngLock: the moving jaw's angled nut pushes it down as it clamps, modelled as a downward force of 5% of the clamp force on the jaw (moonshot/sim/vise_take.py ANGLOCK; declared a mechanism, your decision 2026-11-03)"
  }
 }

@@ -36,7 +36,11 @@ class ReferenceTake:
         self.duration = float(self.t[-1])
         self.lumbar_m = np.array(self.take["lumbar"]) / 1000
         cols = {(n if n.startswith("trunk") else f"R_{n}"): ref["theta"][:, i] for i, n in enumerate(ARM)}
+        if ref["theta"].shape[1] == 21:           # the left arm: its 9 angles, planned as the mirrored world's right
+            cols |= {f"L_{n}": ref["theta"][:, 12 + i] for i, n in enumerate(ARM[3:])}
         cols |= {f"R_{n}": ref["q"][:, i] for i, n in enumerate(map(str, ref["names"]))}
+        if "L_q" in ref:
+            cols |= {f"L_{n}": ref["L_q"][:, i] for i, n in enumerate(map(str, ref["names"]))}
         cols |= {f"pelvis_{a}": ref["dp"][:, i] for i, a in enumerate("xyz")}
         self.nq, self.nv = model.nq, model.nv
         self.splines = []
@@ -47,7 +51,8 @@ class ReferenceTake:
                                  CubicSpline(self.t, q)))
 
     def at(self, t: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Planned qpos, qvel, qacc at time t (seconds). Joints the take doesn't move (the left arm) stay at 0."""
+        """Planned qpos, qvel, qacc at time t (seconds). Joints the take doesn't move (a one-armed take's left arm)
+        stay at 0."""
         q, v, a = np.zeros(self.nq), np.zeros(self.nv), np.zeros(self.nv)
         for qadr, dof, s in self.splines:
             q[qadr], v[dof], a[dof] = s(t), s(t, 1), s(t, 2)

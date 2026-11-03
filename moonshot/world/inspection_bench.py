@@ -53,8 +53,9 @@ def defaults() -> str:
     </default>"""
 
 
-def worldbody(instruments: bool = True) -> str:
-    """The bench, the plate, a site at each instrument's rest and, unless left out, the instruments resting there."""
+def worldbody(instruments: bool = True, skip: tuple[str, ...] = ()) -> str:
+    """The bench, the plate, a site at each instrument's rest and, unless left out, the instruments resting there;
+    skip leaves out those a take brings its own model of (the calipers, with their slider)."""
     r = record()
     B, P = r["bench"], r["plate"]
     tops = tops_mm()
@@ -65,7 +66,7 @@ def worldbody(instruments: bool = True) -> str:
         x, y = rest["at_mm"]
         at = [x, y, tops[rest["on"]]]
         xml += f'    <site name="insp_rest_{k}" pos="{_xyz(at)}" size="0.005"/>\n'
-        if not instruments:
+        if not instruments or k in skip:
             continue
         boxes = [(np.array(lo), np.array(hi)) for lo, hi in rest["boxes_mm"]]
         density = rest["mass_kg"] / sum(np.prod(hi - lo) for lo, hi in boxes) / 1e-9       # kg/m^3, by volume

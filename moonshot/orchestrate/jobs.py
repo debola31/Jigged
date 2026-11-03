@@ -239,5 +239,5 @@ def take_render(worker, job: dict, inputs: list[Path]) -> dict:
     cmd = [blender, "-b", "--factory-startup", "--python", str(MOONSHOT / "render" / "render_take.py"), "--",
            "--take", str(take), "--bake", str(bake), "--data", str(take / "data"), "--look", str(look),
            "--out", str(folder / "frames"), "--frames", "{}:{}".format(*p["frames"]), "--res", p.get("res", "1920x1080"),
-           "--samples", str(p.get("samples", 64)), "--device", worker.options.get("device", "METAL")]
+           "--samples", str(p.get("samples", 48)), "--device", worker.options.get("device", "METAL")]
     return _render(worker, job, cmd, folder, folder)

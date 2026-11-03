@@ -200,7 +200,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
-- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Render jobs
+- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
+  2026-11-02 at draft size (960x540, 32 samples), the ported renderer: GTX 1070 and M1 Pro about 7 s a frame each,
+  with the range's start included. Render jobs
   report their frame time since 2026-11-02 (`bake_render`); the dashboard doesn't show it yet.
 - [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
   intact; the scene pack fetched by hash and verified on each worker
@@ -223,13 +225,16 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | D. Usage cards | [ ] | [ ] | [ ] |
 | E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session) | [x] 2026-11-02 | [ ] op10 passes every check and verb gate (2026-11-02); op20–op40 running |
 | F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] |
-| G. Render production | [x] `test_render_take.py`, `test_vise_render.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands; merged 2026-11-02, Cycles tuning next |
+| G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 8 of nist-ftc-10's 61 steps (2026-11-02) |
 
 ## 6. Milestones
 
 - [x] Nov 1: vise compiles in the new core; benchmark sets the forecast (§1 above)
 - [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
-- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you
+- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-02
+  23:45: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
+  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; the rest wait on their takes (`python -m
+  moonshot.planning.takes nist-ftc-10` lists them). The plan is 61 steps since op60 was found to cut nothing.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web

@@ -23,11 +23,14 @@ def spec() -> dict[str, dict]:
 
 
 @check("machines_inside_spec",
-       good=["good/machines_vf2_program.json"],
+       good=["good/machines_vf2_program.json", "good/machines_vf2_time_lapse.json"],
        bad=["bad/machines_vf2_past_travel.json", "bad/machines_vf2_too_fast.json"])
 def machines_inside_spec(take: dict) -> Result:
-    """take: {"fps", "machine_axes": {axis: per-frame position, mm (the spindle in rpm)}}. Axes with no record fail."""
+    """take: {"fps", "machine_axes": {axis: per-frame position, mm (the spindle in rpm)}} and, for a time-lapsed take,
+    "frame_machine_s": the machine's clock at each frame (a cycle take's program.json), which speeds are read
+    against instead of the video's frame rate. Axes with no record fail."""
     fps, axes, limits = float(take["fps"]), take["machine_axes"], spec()
+    clock = take.get("frame_machine_s")
     if not axes or not any(len(v) for v in axes.values()):
         raise ValueError("a take with no frames can't pass a per-frame check")
     travel_tol = threshold("physics.machine_travel_mm").value
@@ -42,7 +45,8 @@ def machines_inside_spec(take: dict) -> Result:
         past = float(max(lo - x.min(), x.max() - hi, 0.0))
         fast = 0.0
         if lim["speed"] is not None and len(x) > 1:
-            fast = float(np.abs(np.diff(x)).max() * fps / lim["speed"])
+            dt = np.diff(np.asarray(clock, float)) if clock is not None else np.full(len(x) - 1, 1.0 / fps)
+            fast = float((np.abs(np.diff(x)) / np.maximum(dt, 1e-9)).max() / lim["speed"])
         if past > travel_tol or fast > 1 + speed_tol:
             out[name] = {"past_travel": round(past, 2), "speed_of_rapid": round(fast, 3)}
         worst = max(worst, fast)

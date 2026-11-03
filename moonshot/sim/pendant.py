@@ -56,8 +56,9 @@ STANDOFF_MM = 8.0           # until then the fingertip is held this far off the 
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
 BACK_OFF_S = 0.5            # a held hand, its jog done, slides straight off the dial this long at least,
-BACK_OFF_MM = 25.0          # this far (the plan's own strokes come 15 mm off the rim),
-FREEZE_EASE_S = 0.6         # then, once nothing of it touches the dial, its arm comes round onto the plan over this
+BACK_OFF_MM = 40.0          # this far, past the rim's depth (as the plan leaves the dial),
+CLEAR_WAIT_S = 0.5          # and up to this much longer while anything of it still touches the dial;
+FREEZE_EASE_S = 0.6         # then its arm comes round onto the plan over this
 DIAL_AXIS = np.array(vf2.record()["affordances"]["jog_handle"]["axis"], float)     # into the pendant
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
@@ -293,16 +294,16 @@ class PendantRunner(TakeRunner):
         """While a done jog's hand is held: (the jog, how far its arm and its fingers have eased back onto the plan,
         how far it has backed off the dial). Held from the moment the machine reads right to its last
         stroke's end; then the hand, its grip eased but its fingers still shaped round the rim, slides straight off
-        the rim's front along the dial's axis (BACK_OFF_S), which can't turn it; only then do the fingers open and the
-        arm come round onto the plan (FREEZE_EASE_S), which by then is off the rim too. Fingers opening on the rim, or
-        a hand turning with them on it, drag the dial on."""
+        the rim's front along the dial's axis (BACK_OFF_S), which can't turn it; only once nothing of it touches the
+        dial (or CLEAR_WAIT_S on) do the fingers open and the arm come round onto the plan (FREEZE_EASE_S), which by
+        then is off the rim too. Fingers opening on the rim, or a hand turning with them on it, drag the dial on."""
         for j, td in self.jog_done.items():
             end = self.jog_end[j]
             if td <= t < end:
                 return j, 0.0, 0.0, 0.0
             clear = self.jog_clear.get(j)                     # when the backed-off hand was first clear of the dial
             if t >= end and clear is None:
-                if t >= end + BACK_OFF_S and not self.on_dial():
+                if t >= end + BACK_OFF_S + CLEAR_WAIT_S or t >= end + BACK_OFF_S and not self.on_dial():
                     self.jog_clear[j] = clear = t
                 else:
                     return j, 0.0, 0.0, min_jerk((t - end) / BACK_OFF_S)

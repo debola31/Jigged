@@ -1,9 +1,9 @@
 """Loosen the vise and lift the part out (every VF-2 setup's last step, "...loosen the vise and lift the part out"),
-on the full body: the right hand cranks the vise open a turn by its knob, then both hands press the part's ends and
-lift it out of the vise together, and set it down on the table beside it.
+on the full body: the right hand cranks the vise open a turn by its knob, then takes the part by its faces above the
+jaws, as it was set in, lifts it out and sets it down on the table beside the vise.
 
 In the physics run the jaw opens by the screw's lead for the turn cranked; the part rises clear of the jaws only
-while both hands hold it, moves with them (within the grip's slip limit) and is set down flat where planned; and the
+while the hand holds it, moves with it (within the grip's slip limit) and is set down flat where planned; and the
 take is a take record. Physics tier, on the take the planner writes to the data root (takes/unload).
 """
 import pytest
@@ -33,10 +33,10 @@ def test_the_crank_opens_the_jaw_by_the_screws_lead(run):
     assert o["turns"] < -0.8, "cranked back about a turn"
 
 
-def test_both_hands_lift_it_clear_and_hold_it(run):
+def test_the_hand_lifts_it_clear_and_holds_it(run):
     o = run.outcome()
     assert o["cleared_jaws_mm"] > 5, o
-    assert o["lifted_with_both_hands"], o
+    assert o["lifted_in_hand"], o
     assert o["max_slip_mm"] < threshold("physics.grip_slip_mm").value, o
 
 

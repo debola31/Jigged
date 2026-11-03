@@ -20,11 +20,21 @@ import mujoco
 import numpy as np
 
 RECORD = Path(__file__).resolve().parents[1] / "library" / "stations" / "vf2.json"
+LINKS = RECORD.with_name("vf2.links.json")
+MOVING = {"saddle", "table", "head", "spindle", "door_left", "door_right"}
 M = 0.001
 
 
 def record() -> dict:
     return json.loads(RECORD.read_text(encoding="utf-8"))
+
+
+def render_links(root: str = "vf2") -> dict[str, tuple[str, str]]:
+    """Each link's GLB (moonshot/library/stations/extract.py) and the body that carries it: a moving link its own, a
+    link on the head the head's, the rest the machine's `root`."""
+    parents = {k: v["parent"] for k, v in record()["links"].items()}
+    body = lambda k: f"vf2_{k}" if k in MOVING else body(parents[k]) if parents.get(k) else root     # noqa: E731
+    return {k: (body(k), f"library/machines/vf2/links/{k}.glb") for k in json.loads(LINKS.read_text(encoding="utf-8"))}
 
 
 def _box(name, c_rec, cls="steel"):

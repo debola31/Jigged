@@ -30,8 +30,9 @@ import numpy as np
 
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
+from moonshot.sim.record import Recorder, glbs_in_bodies
 from moonshot.sim.reference import ReferenceTake, take_dir
-from moonshot.world import cell
+from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
 SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for capsules 4-5 mm inside them
@@ -511,6 +512,8 @@ class ViseTake:
                                "slip", "lag", "pushing", "stray", "touching", "pose")}
         hold_rel, t0w = None, time.time()
         hold0 = self.iv["hold_object"][0]
+        root = m.body_rootid[m.body("R_hand").id]
+        self.recorder = Recorder(m, {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root})
         for k in range(n):
             tk = k / fps
             want_enc = any(e["t0"] <= tk < e["t1"] for e in self.iv["enclose"])
@@ -575,6 +578,7 @@ class ViseTake:
             rec["depth"].append(depth)
             rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
             rec["pose"].append(self.pose_record())
+            self.recorder.frame(d, {"R": rec["pose"][-1]}, rd["eye"][k], rd["look"][k], rd["up"][k])
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
             rec["touching"].append(self.touching())
@@ -631,6 +635,8 @@ class ViseTake:
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
         (Path(path).parent / "checks.json").write_text(
             json.dumps({"touching": rec["touching"], "never_held": NEVER_HELD}), encoding="utf-8")
+        self.recorder.write(Path(path).parent, self.fps, self.tk["lumbar"][0], {"R": [str(x) for x in rd["names"]]},
+                            "vf2", glbs_in_bodies(self.model, "vf2", vf2.render_links()))
 
     def plan_time_for_phi(self, e, phi):
         k0, k1 = (int(np.searchsorted(self.t, x)) for x in (e["t0"], e["t1"]))

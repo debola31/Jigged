@@ -19,7 +19,8 @@ import sys
 import time
 from pathlib import Path
 
-TAKE_FILES = ("reference.npz", "take.json", "grips.json", "sim.npz", "checks.json", "sim-report.json")
+TAKE_FILES = ("reference.npz", "take.json", "grips.json", "sim.npz", "checks.json", "sim-report.json", "take.npz",
+              "scene.json")
 
 
 def vise_take(worker, job: dict, inputs: list[Path]) -> dict:

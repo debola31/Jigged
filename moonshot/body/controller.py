@@ -46,15 +46,32 @@ class StrengthCaps:
         for i, j in enumerate(driven):
             for direction in (0, 1):
                 groups.setdefault((direction, j.curves[direction]), []).append(i)
-        self.groups = {k: np.array(v) for k, v in groups.items()}
+        # this runs before every step, so each group's curve is unpacked once here: most are flat in angle, one
+        # interpolation in speed; the rest (the elbow) evaluate their grid
+        self.groups = []
+        for (direction, c), i in groups.items():
+            flat = len(c.angle_deg) == 1
+            wrist = (np.array(c.wrist_deg), np.array(c.wrist_scale)) if len(c.wrist_deg) > 1 else None
+            self.groups.append((direction, np.array(i), c,
+                                (np.array(c.speed_deg_s), np.array([r[0] for r in c.scale])) if flat else None, wrist))
 
     def apply(self, data: mujoco.MjData) -> None:
-        angle = np.degrees(data.qpos[self.qadr]) + self.rest               # slides' curves are flat: units moot
         speed = np.degrees(data.qvel[self.dof])
-        wrist = np.degrees(data.qpos[self.wrist_q]) + self.wrist_rest
+        shortening = (np.maximum(-speed, 0.0), np.maximum(speed, 0.0))      # against, along
         scale = np.ones_like(self.peak)
-        for (direction, curve), i in self.groups.items():
-            scale[i, direction] = curve.at(angle[i], speed[i] if direction else -speed[i], wrist[i])
+        angle = wrist = None
+        for direction, i, curve, flat, by_wrist in self.groups:
+            if flat is not None:
+                s = np.interp(shortening[direction][i], *flat)
+            else:
+                if angle is None:
+                    angle = np.degrees(data.qpos[self.qadr]) + self.rest
+                s = curve.at(angle[i], shortening[direction][i])
+            if by_wrist is not None:
+                if wrist is None:
+                    wrist = np.degrees(data.qpos[self.wrist_q]) + self.wrist_rest
+                s = s * np.interp(wrist[i], *by_wrist)
+            scale[i, direction] = s
         fr = self.model.actuator_forcerange
         fr[self.acts, 0] = -self.peak[:, 0] * scale[:, 0]
         fr[self.acts, 1] = self.peak[:, 1] * scale[:, 1]

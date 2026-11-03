@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -58,14 +59,30 @@ class StrengthCurve:
     wrist_scale: tuple[float, ...] = (1.0,)
 
     def at(self, angle, speed, wrist=0.0) -> np.ndarray:
-        """Vectorised: speed is along the motor's push (negative: being stretched)."""
+        """Vectorised: speed is along the motor's push (negative: being stretched). Bilinear in angle and speed."""
         a = np.atleast_1d(np.asarray(angle, float))
         v = np.maximum(np.broadcast_to(np.asarray(speed, float), a.shape), 0.0)
-        rows = np.array([np.interp(a, self.angle_deg, r) for r in self.scale])          # (speeds, n)
-        f = np.interp(v, self.speed_deg_s, np.arange(len(self.speed_deg_s), dtype=float))
+        angles, speeds, grid = self._arrays
+        ia, wa = self._cell(a, angles)
+        iv, wv = self._cell(v, speeds)
+        lo = grid[iv, ia] + (grid[iv, ia + 1] - grid[iv, ia]) * wa
+        hi = grid[iv + 1, ia] + (grid[iv + 1, ia + 1] - grid[iv + 1, ia]) * wa
+        s = lo + (hi - lo) * wv
+        return s * np.interp(wrist, self.wrist_deg, self.wrist_scale) if len(self.wrist_deg) > 1 else s
+
+    @cached_property
+    def _arrays(self):
+        """The grid padded by one repeated row and column, so a single-point axis interpolates like any other."""
+        g = np.array(self.scale, float)
+        return (np.array(self.angle_deg, float), np.array(self.speed_deg_s, float),
+                np.pad(g, ((0, 1), (0, 1)), mode="edge"))
+
+    @staticmethod
+    def _cell(x, grid):
+        """Each x's lower grid index and its fraction of the way to the next, held at the grid's ends."""
+        f = np.interp(x, grid, np.arange(len(grid), dtype=float))
         i = np.floor(f).astype(int)
-        j, n = np.minimum(i + 1, len(self.speed_deg_s) - 1), np.arange(a.size)
-        return (rows[i, n] + (rows[j, n] - rows[i, n]) * (f - i)) * np.interp(wrist, self.wrist_deg, self.wrist_scale)
+        return i, f - i
 
 
 FLAT = StrengthCurve()

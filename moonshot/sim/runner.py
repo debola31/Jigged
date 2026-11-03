@@ -257,9 +257,13 @@ class TakeRunner:
             k[self.hand_acts[side]] = 1.0 + STIFFEN * effort
             k[self.arm_acts[side]] = 1.0 + STIFFEN_ARM * effort
         target[self.body_q] += self.correction(t)[self.body_dof]
+        # co-contraction stiffens a joint and damps it alike: damping grows with the stiffness's square root, so a
+        # braced arm keeps its damping ratio instead of ringing after each move
+        kv = self.kv * np.sqrt(k)
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
-        d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * p.qvel[self.act_dof]) / (self.kp0 * k)
+        m.actuator_biasprm[self.acts, 2] = -kv
+        d.ctrl[self.acts] = target[self.act_q] + (tau + kv * p.qvel[self.act_dof]) / (self.kp0 * k)
         self.before_step(t)
         mujoco.mj_step(m, d)
 

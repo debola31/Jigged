@@ -91,7 +91,8 @@ def make_handler(queue: Queue, root: Path, token: str):
 
         def do_GET(self):
             if self.path == "/":
-                return self._send(HTTPStatus.OK, render_dashboard(queue).encode(), "text/html; charset=utf-8")
+                return self._send(HTTPStatus.OK, render_dashboard(queue, root / "takes").encode(),
+                                  "text/html; charset=utf-8")
             if self.path == "/status":
                 return self._json(HTTPStatus.OK, {**queue.status(), "recent": queue.jobs(limit=50)})
             if self.path.startswith("/blobs/"):

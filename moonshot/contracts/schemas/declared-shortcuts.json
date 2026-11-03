@@ -8,7 +8,7 @@
                   "checked_by": []},
   "clamped": {"stands_in_for": "The vise's clamp on the part in the steps after it is tightened (Find X and Y, Set Z), where nothing pushes on the part; the Seat step's take proves the clamp itself", "grip_assist": false,
               "checked_by": []},
-  "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping", "grip_assist": true,
+  "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping; the rim is frictionless otherwise, so only that grip turns it, as a hand that places itself on the rim and comes off it doesn't, where capsule fingers lagging their plan by centimetres brush it round", "grip_assist": true,
                  "checked_by": ["skin_penetration"]}
  },
  "mechanisms": {

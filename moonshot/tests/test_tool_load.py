@@ -52,7 +52,7 @@ def _key(c, k, held=False):
 def test_the_control_changes_tools_as_haas_does():
     c, _, _ = _control()
     c.setup_mode, c.current, c.spindle_tool = True, 20, "probe"
-    for k in ["mdi", "t", "1", "space", "m", "0", "6", "enter", "cycle_start"]:
+    for k in ["mdi", "t", "1", "space", "m", "0", "6", "enter", "cycle_start"]:      # Tnn M6 in MDI
         _key(c, k)
     assert c.pockets == {20: "probe"} and c.current == 1 and c.spindle_tool is None
     c.spindle_tool = "facem"                       # seated by hand
@@ -61,6 +61,9 @@ def test_the_control_changes_tools_as_haas_does():
     c.current = 20
     _key(c, "atc_fwd")                             # 20 wraps to 1, which brings the face mill back
     assert c.current == 1 and c.spindle_tool == "facem" and 1 not in c.pockets
+    for k in ["t", "6", "atc_fwd"]:                # a number keyed first: that tool
+        _key(c, k)
+    assert c.current == 6 and c.pockets[1] == "facem" and c.spindle_tool is None
 
 
 def test_atc_fwd_needs_the_doors_shut_or_setup_mode():
@@ -146,7 +149,7 @@ def test_each_step_leaves_every_tool_in_its_numbered_pocket(step):
     c.setup_mode = True
     first = seq[0]
     c.pockets, c.current, c.spindle_tool = dict(first["pockets"]), first["current"], "probe"
-    for k in ["mdi", *f"t{first['to']}", "space", "m", "0", "6", "enter", "cycle_start"]:
+    for k in ["mdi", *f"t{first['to']}", "atc_fwd"]:
         _key(c, k)
     for s in seq[1:]:
         assert c.current == s["current"]

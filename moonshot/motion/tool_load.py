@@ -259,25 +259,30 @@ class ToolChange(PendantTake):
         super().__init__(out, PENDANT_LUMBAR, verbose, shared=shared or Path(out) / "grips.json",
                          grip_source=ToolChange._grip_specs)
 
+    USES = ("keypad_num", "keypad_inc")                  # the keypad regions these keys fall in: the numbers and
+                                                         # letters, and the mode and increment keys with ATC FWD
+
     def _grip_specs(self) -> dict:
         specs = PendantTake._grip_specs(self)
         specs.pop("dial")                                 # no jog in these takes, and no offset pages
         specs.pop("keypad")
         return specs
 
+    def solve_grips(self, specs, source=None, depends=()):
+        """Only the grips these takes press with: each takes the hub most of an hour to solve."""
+        super().solve_grips({k: v for k, v in specs.items() if k in self.USES}, source, depends)
+
     def plan_change(self, n: int) -> None:
+        """MDI, the tool's number, ATC FWD: the manual's way to call a tool to the spindle (vf2-tool-load phase 1)."""
         self.look(0.0, key_at("mdi"))
         self.wait(0.4)
         self.keys(["mdi"])
         self.look(self.t, SCREEN)
-        self.type(f"T{n} M06")
-        self.keys(["enter"])
-        self.press_left("cycle_start", hover_right="feed_hold")
+        self.type(f"T{n}")
+        self.keys(["atc_fwd"])
         self.look(self.t, CAROUSEL)
-        self.wait(1.2)
-        self.release_left()
         self.rest_hand()
-        self.wait(0.4)
+        self.wait(1.0)
 
     def plan_atc(self) -> None:
         self.look(0.0, key_at("atc_fwd"))

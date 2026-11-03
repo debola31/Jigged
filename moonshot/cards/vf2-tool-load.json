@@ -1,25 +1,25 @@
 {
  "schema": "jigged.card/1",
  "id": "vf2-tool-load",
- "name": "Load a tool into the VF-2's carousel through the spindle: Tnn M6 or ATC FWD for an empty pocket, the holder pushed up into the spindle while Tool Release is held, then ATC FWD",
+ "name": "Load a tool into the VF-2's carousel through the spindle: Tnn and ATC FWD for an empty pocket, the holder pushed up into the spindle while Tool Release is held, then ATC FWD",
  "assets": ["vf2", "cat40"],
  "motion": "moonshot.motion.tool_load:build",
  "hands": {
   "working": {
-   "side": "R", "role": "takes each holder off the tool cart, carries it in and pushes it up into the spindle; the pendant's keys, and Feed Hold while the steadying hand presses Cycle Start",
-   "grasps": {"holder": "medium_wrap", "keys": "fingertip_press", "feed_hold": "fingertip_press"},
+   "side": "R", "role": "takes each holder off the tool cart, carries it in and pushes it up into the spindle; the pendant's keys",
+   "grasps": {"holder": "medium_wrap", "keys": "fingertip_press"},
    "contacts": [{"digit": "thumb", "on": "holder"}, {"digit": "index", "on": "holder"}, {"digit": "middle", "on": "holder"},
-                {"digit": "index", "on": "keys"}, {"digit": "index", "on": "feed_hold"}]
+                {"digit": "index", "on": "keys"}]
   },
   "steadying": {
-   "side": "L", "role": "holds the Tool Release button on the front of the spindle while the working hand seats the holder; presses Cycle Start after Tnn M6; otherwise rests at the side",
-   "grasps": {"tool_release": "fingertip_press", "cycle_start": "fingertip_press"},
-   "contacts": [{"digit": "index", "on": "tool_release"}, {"digit": "index", "on": "cycle_start"}]
+   "side": "L", "role": "holds the Tool Release button on the front of the spindle while the working hand seats the holder; otherwise rests at the side",
+   "grasps": {"tool_release": "fingertip_press"},
+   "contacts": [{"digit": "index", "on": "tool_release"}]
   }
  },
  "phases": [
-  {"phase": "operate", "what": "At the pendant, MDI, type Tnn M6 for the first new tool's number and ENTER; the steadying hand presses Cycle Start, the working hand over Feed Hold (vf2-controls phases 18-19): the tool in the spindle goes back to its pocket and pocket nn comes to the spindle, empty [proposed: force_n, duration_s; run in setup mode with the doors open]",
-   "action": "press", "on": "keys", "force_n": 3, "duration_s": 8, "ends_on": "the spindle empty, its tool number nn", "source": 0},
+  {"phase": "operate", "what": "At the pendant, MDI, key in the first new tool's number (Tnn) and press ATC FWD: the tool in the spindle goes back to its pocket and pocket nn comes to the spindle, empty [proposed: force_n, duration_s; run in setup mode with the doors open]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 4, "ends_on": "the spindle empty, its tool number nn", "source": 0},
   {"phase": "reach", "what": "Standing in the doorway, the working hand to the holder on the tool cart at the right hip, opening round its 1.25 in body under the flange [proposed: duration_s]",
    "duration_s": [0.32, 0.67]},
   {"phase": "grasp", "what": "Close the hand round the body, the flange resting on the index and thumb, and lift it off the fork's tines [proposed: force_n, duration_s, travel_mm]",
@@ -40,5 +40,5 @@
    "url": "https://www.productivity.com/wp-content/uploads/2022/08/Haas-Mill-Operator-2022.pdf",
    "gives": "TOOL RELEASE releases the tool from the spindle in MDI, Zero Return or Handle mode, and a button on the front of the spindle does the same; ATC FWD rotates to the next tool and makes a tool change, or to a tool entered (T1) first; tool changes may be made by hand with the tool release button on the spindle housing and ATC FWD and ATC REV, or in MDI with Tnn M6; tools go to the tool change position in Z by themselves; tools should always be loaded through the spindle, never directly into the tool changer"}
  ],
- "notes": "The procedure for the VF-2's 20-pocket umbrella carousel. The pockets are the tools' numbers, given in the order the plan first uses them (moonshot/motion/tool_load.py: op10's five are T1-T5, op20's four T6-T9, op30's drill T10, op50's T11), the probe the shop's T20. The source gives the keys and the rule (load through the spindle with Tool Release, then ATC FWD); it gives no forces or times, and no hand for each job, so these are proposed, with reasons (phase numbers count from 1): which hand does what: the working hand carries the holder and seats it, as it is the hand the vf2-controls card gives the keys, so the steadying hand holds Tool Release, which the station has on the head's front left of the spindle (vf2.json tool_release_button); the tool cart at the operator's right hip, its forks holding the holders by the V-flange, tool down (world/tooling.py CART: no source gives the shop's cart); 3 N on the keys and 5 N on the buttons (#1, #6, #8), the station's affordance forces; #1 8 s for MDI, seven keys and Cycle Start; #2 0.32-0.67 s, the right hand's reach-to-grasp from the vise setup's footage (person.reach_to_grasp_right_s), borrowed as no footage of a tool load was found; #3 the holder's weight, about 11-15 N, lifted 1.5 mm off the tines in 0.4 s; #4 68 mm out of the fork and in under the spindle in 2.2 s; #5 0.8-1.0 s for the longer reach up to the head; #6 Tool Release held about 1 s while the holder goes up the last 26 mm; #7 1 s; #8 0.5 s. Tool Release only releases with the spindle stopped, in MDI or handle jog (the source's Zero Return mode isn't modelled). The changer's own cycle (the source's tool change position in Z, the carousel turning) isn't simulated: each change happens across the cut to the next take. Not done here, as the plan has no step for it: measuring each tool's length on the tool setter (vf2-tool-setter), which a shop would do once its tools are in."
+ "notes": "The procedure for the VF-2's 20-pocket umbrella carousel. The pockets are the tools' numbers, given in the order the plan first uses them (moonshot/motion/tool_load.py: op10's five are T1-T5, op20's four T6-T9, op30's drill T10, op50's T11), the probe the shop's T20. The source gives the keys and the rule (load through the spindle with Tool Release, then ATC FWD); it gives no forces or times, and no hand for each job, so these are proposed, with reasons (phase numbers count from 1): which hand does what: the working hand carries the holder and seats it, as it is the hand the vf2-controls card gives the keys, so the steadying hand holds Tool Release, which the station has on the head's front left of the spindle (vf2.json tool_release_button); the tool cart at the operator's right hip, its forks holding the holders by the V-flange, tool down (world/tooling.py CART: no source gives the shop's cart); 3 N on the keys and 5 N on the button (#1, #6, #8), the station's affordance forces; #1 4 s for MDI, the number's two or three keys and ATC FWD, done so rather than with an MDI Tnn M6 line and Cycle Start, which the source also gives; #2 0.32-0.67 s, the right hand's reach-to-grasp from the vise setup's footage (person.reach_to_grasp_right_s), borrowed as no footage of a tool load was found; #3 the holder's weight, about 11-15 N, lifted 1.5 mm off the tines in 0.4 s; #4 68 mm out of the fork and in under the spindle in 2.2 s; #5 0.8-1.0 s for the longer reach up to the head; #6 Tool Release held about 1 s while the holder goes up the last 26 mm; #7 1 s; #8 0.5 s. Tool Release only releases with the spindle stopped, in MDI or handle jog (the source's Zero Return mode isn't modelled). The changer's own cycle (the source's tool change position in Z, the carousel turning) isn't simulated: each change happens across the cut to the next take. Not done here, as the plan has no step for it: measuring each tool's length on the tool setter (vf2-tool-setter), which a shop would do once its tools are in."
 }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -375,7 +376,10 @@ class Control:
             self.typed = ""
         elif k == "atc_fwd" and self.mode in ("mdi", "handle_jog") and self.state == "idle" and \
                 (self.doors_closed() or self.setup_mode):
-            self.tool_change(self.current % POCKETS + 1)
+            typed = re.fullmatch(r"T(\d+)", self.typed)        # a tool number keyed first: that tool, else the next
+            n = int(typed.group(1)) if typed and 1 <= int(typed.group(1)) <= POCKETS else self.current % POCKETS + 1
+            self.typed = ""
+            self.tool_change(n)
         elif k == "cancel":
             self.typed = self.typed[:-1]
         elif k == "reset":

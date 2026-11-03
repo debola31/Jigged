@@ -32,17 +32,21 @@ def _finite(arrays, n: int) -> list[bool]:
 
 def measure(take: Path) -> dict:
     """What the check reads, from a physics run: a vise take's own keys, or any other take's record, where every object
-    is loose and its cause the hands touching or carrying it (there are no jaws)."""
+    is loose and its cause the hands touching or carrying it (there are no jaws). Unless the run says otherwise in
+    checks.json: `driven`, the bodies a machine moves (its table, head, doors), which aren't loose and are only held
+    to being finite and never launched; and `rides_on` ({object: what it rides on}), each such object judged by its
+    motion on that, so stock clamped to a table moves with a jog without a cause but not within the vise."""
     sim = np.load(take / "sim.npz")
     ck = json.loads((take / "checks.json").read_text(encoding="utf-8"))
     if not objects.is_vise(sim):
         rec = np.load(take / "take.npz")
-        at = objects.positions(take)
+        at = objects.positions(take) | {o: objects.riding(take, o, on) for o, on in ck.get("rides_on", {}).items()}
+        driven = set(ck.get("driven", ()))
         return {"fps": float(rec["fps"]), "finite": _finite(rec, len(rec["t"])), "opening_mm": [0.0] * len(rec["t"]),
                 "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
                 "bodies_mm": {k: v.tolist() for k, v in at.items()} | {"hand": rec["R_W"].tolist(),
                                                                        "hand_L": rec["L_W"].tolist()},
-                "loose": list(at)}
+                "loose": [o for o in at if o not in driven]}
     return {"fps": float(sim["fps"]), "touching": ck["touching"], "finite": _finite(sim, len(sim["t"])),
             "opening_mm": sim["opening"].tolist(),
             "bodies_mm": {"blank": sim["blank"].tolist(), "para_a": sim["para"][:, 0].tolist(),

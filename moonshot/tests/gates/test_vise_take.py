@@ -1,7 +1,8 @@
 """The new core's vise take, verb by verb, on the full body (plan §5.4, step 1, stage 2), meets the outcomes trainual's
 accepted take met. That take itself stopped being the bar on 2026-11-01's review: it bends the wrist past its
 ellipse and grips the crank round the lever's joint (docs/moonshot/physics.md). The take run here is the one the
-ported planner writes to the data root (takes/setup-take). Physics tier: farm and hub only (`pytest moonshot -m farm`).
+ported planner writes to the data root (takes/setup-take), and nist-ftc-10's first setup (takes/nist-ftc-10-op10).
+Physics tier: farm and hub only (`pytest moonshot -m farm`).
 
 Known gap, not asserted here: free-motion wrist lag still exceeds the tracking-lag threshold at a few moments
 (the fast lift to inspect, the departure from the crank); see the checklist.
@@ -13,16 +14,20 @@ from moonshot.contracts.thresholds import threshold
 from moonshot.world import vise as V
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKE = data_root() / "takes" / "setup-take"
+# the reference load, and nist-ftc-10's first setup: its stock, 1.4 kg and 165 mm long, on 1 in parallels
+TAKES = {"reference": data_root() / "takes" / "setup-take", "nist-ftc-10-op10": data_root() / "takes" / "nist-ftc-10-op10"}
 
 
-@pytest.fixture(scope="module")
-def report():
-    if not (TAKE / "reference.npz").exists():
-        pytest.skip(f"no planned take at {TAKE}")
+@pytest.fixture(scope="module", params=sorted(TAKES))
+def report(request):
+    take = TAKES[request.param]
+    if not (take / "reference.npz").exists():
+        pytest.skip(f"no planned take at {take}")
     from moonshot.sim.vise_take import SKIN_MU, ViseTake
-    rep = ViseTake(TAKE).run(log=lambda *a: None)
-    rep["_slip_force_per_side"] = V.BLANK_KG * 9.81 / (2 * SKIN_MU)
+    run = ViseTake(take)
+    rep = run.run(log=lambda *a: None)
+    rep["_slip_force_per_side"] = run.load.mass_kg * 9.81 / (2 * SKIN_MU)
+    rep["_load"] = run.load
     return rep
 
 
@@ -55,9 +60,10 @@ def test_push_reaches_its_force(report):
 
 def test_rotate_closes_the_vise_by_the_screws_ratio(report):
     r = report["rotate"]
+    load = report["_load"]
     travel = r["turns"] * V.VISE["lead"]
-    assert abs((V.OPENING0 - r["opening_final_mm"]) - travel) < threshold("physics.mechanism_ratio_mm").value
-    assert r["opening_final_mm"] < V.BLANK[1], "the jaw must close onto the 76.2 mm blank"
+    assert abs((load.opening0 - r["opening_final_mm"]) - travel) < threshold("physics.mechanism_ratio_mm").value
+    assert r["opening_final_mm"] < load.size_mm[1], "the jaw must close onto the part"
     assert r["clamp_N_final"] > 1000, "a final pull clamps the part firmly"
 
 

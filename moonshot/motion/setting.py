@@ -47,7 +47,8 @@ INDICATOR = {"name": "test indicator", "holder_mm": 60.0, "holder_r": 15.875, "s
 INDICATOR["length_mm"] = INDICATOR["holder_mm"] + INDICATOR["stickout_mm"]
 PRELOAD_MM = 0.2            # the dti-sweep-face card's: the needle about 20 divisions in
 SWEEP_MM = 75.0             # the card's sweep, about the side the part shows above the jaws
-STANDOFF_MM = 3.0           # how far off a face the coarse jog stops
+STANDOFF_MM = 6.0           # how far off a face the coarse jog stops: a click at .1 short of it is 2.5 mm
+CLOSE_MM = 0.3              # and the .01 jog: a click at .01 short of it is 0.25 mm
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -106,7 +107,7 @@ class XYEdgeFinder:
         self.jog(axis, (face - r - STANDOFF_MM) - here, "inc_0.1")
         self.jog("z", (self.c[2] + self.h[2] - BELOW_TOP_MM) - z, "inc_0.1")
         gap = face - r - self.where()[i]
-        self.jog(axis, max(0.0, gap - 0.15), "inc_0.01")
+        self.jog(axis, max(0.0, gap - CLOSE_MM), "inc_0.01")
         gap = face - r - self.where()[i]
         n = math.ceil(gap / INC["inc_0.001"] - 1e-9)
         self.jog(axis, n * INC["inc_0.001"], "inc_0.001")      # the click at which it trips
@@ -207,7 +208,7 @@ class Probing:
         """A single-surface cycle on the face through `face` with outward `normal` (world, along axis), then the shift
         to the datum's coordinate on that axis."""
         i = "xyz".index(axis)
-        stand = face + normal * (PROBE["tip_r"] + 5.0)
+        stand = face + normal * (PROBE["tip_r"] + 2 * STANDOFF_MM)
         if axis != "z":
             stand[2] = z
         self.to(stand)
@@ -280,7 +281,7 @@ class SquareCheck:
         self.jog("y", self.c[1] - self.ball()[1], "inc_0.1")
         self.jog("x", face - r - STANDOFF_MM - self.ball()[0], "inc_0.1")
         self.jog("z", JAW_TOP_MM + 6.0 - self.ball()[2], "inc_0.1")
-        self.jog("x", max(0.0, face - r - self.ball()[0] - 0.15), "inc_0.01")
+        self.jog("x", max(0.0, face - r - self.ball()[0] - CLOSE_MM), "inc_0.01")
         self.jog("x", face - r - self.ball()[0] + PRELOAD_MM, "inc_0.001", 150.0)
         self.jog("z", SWEEP_MM, "inc_0.01", 200.0)
         k.look(k.t, self.ball())

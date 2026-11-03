@@ -59,6 +59,8 @@ BACK_OFF_S = 0.5            # a held hand, its jog done, slides straight off the
 BACK_OFF_MM = 40.0          # this far, past the rim's depth (as the plan leaves the dial),
 CLEAR_WAIT_S = 0.5          # and up to this much longer while anything of it still touches the dial;
 FREEZE_EASE_S = 0.6         # then its arm comes round onto the plan over this
+STOP_S = 0.05               # a turning hand stops this long after it means to: the dial turns on meanwhile, so the
+                            # hand stops when the clicks in and those coming reach the jog's, as people slow to a number
 DIAL_AXIS = np.array(vf2.record()["affordances"]["jog_handle"]["axis"], float)     # into the pendant
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
@@ -155,6 +157,7 @@ class PendantRunner(TakeRunner):
         self.r_arm = np.isin(self.r_q, [m.jnt_qposadr[m.joint(n).id] for n in arm])     # arm, not fingers
         self.pinch = m.equality("dial_pinch").id
         self.dial_geom = m.geom("vf2_jog_handle").id
+        self.jog_dof = m.jnt_dofadr[m.joint("vf2_jog").id]
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -167,6 +170,7 @@ class PendantRunner(TakeRunner):
                           f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
                           f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n', 1)
+        xml = xml.replace('<geom name="vf2_jog_handle" ', '<geom name="vf2_jog_handle" condim="1" ', 1)   # dial_pinch
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -290,7 +294,8 @@ class PendantRunner(TakeRunner):
                     i = "xyz".index(e["axis"])
                     at = self.machine.machine_mm()[i] - self.machine0[i]
                     self.jog_need[j] = round((e["to_mm"] - at) / e["inc_mm"])
-                if (c - self.jog_from[j]) * self.jog_dir[j] >= self.jog_need[j] * self.jog_dir[j]:
+                coming = self.data.qvel[self.jog_dof] * self.machine.detents / (2 * math.pi) * STOP_S
+                if (c - self.jog_from[j] + coming) * self.jog_dir[j] >= self.jog_need[j] * self.jog_dir[j]:
                     q, _, _ = super().at(t)
                     arm_q, arm_dof = self.r_q[self.r_arm], self.r_dof[self.r_arm]
                     q[arm_q] = self.data.qpos[arm_q] - self._corr[arm_dof]

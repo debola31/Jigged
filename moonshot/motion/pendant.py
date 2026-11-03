@@ -43,11 +43,12 @@ LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pend
 KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi"}
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
-OVERTURN = 1.25                                           # a stroke turns the hand this much farther than its clicks;
+OVERTURN = 1.35                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 HOVER_MM = 40.0
 HOVER_RIGHT_MM = 15.0                                     # the right index ready over Feed Hold, not resting on it
+SETTLE_S = 0.3                                            # off the rim, before a jog's first stroke
 CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
 TOUCH_LIFT_MM = 1.0                                       # a press is planned to the pad touching the key, not in it:
                                                           # the push presses (moonshot/sim/pendant.py)
@@ -287,7 +288,9 @@ class PendantTake(StepTake):
         return R @ g["H"], DIAL_C + R @ (g["W"] - g["obj"]) - DIAL_U * off
 
     def turn(self, clicks: int, deg_s: float = 300.0) -> None:
-        """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS."""
+        """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS, and a spare one: the run
+        stops the hand once the dial reads right (moonshot/sim/pendant.py), so a stroke whose grip slipped is made up
+        by the spare, and an unneeded spare is a hand holding still."""
         if clicks == 0:
             return
         self.jogs += 1                            # the strokes of one jog: the run counts their clicks together
@@ -295,8 +298,8 @@ class PendantTake(StepTake):
         per = [abs(clicks) // n + (1 if i < abs(clicks) % n else 0) for i in range(n)]
         sign = 1 if clicks > 0 else -1
         g = self.grips["dial"]
-        for c in per:
-            d = sign * c * DETENT_DEG * OVERTURN
+        for c in per + [0]:
+            d = sign * (c or per[-1]) * DETENT_DEG * OVERTURN
             a0, a1 = -d / 2, d / 2
             t0 = self.t
             H0_, W_off = self.dial_pose(a0, OFF_RIM_MM)
@@ -310,6 +313,9 @@ class PendantTake(StepTake):
                 self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
                 self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
                 t0 += dur
+                # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
+                self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
+                t0 += SETTLE_S
             else:                                     # turn back, off the rim, from the last stroke's end
                 back = self.dial_deg
                 self.add("R", t0, t0 + 0.22, lambda t, b=back, t0=t0, a0=a0: [

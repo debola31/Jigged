@@ -3,14 +3,16 @@
 (moonshot/world/vf2.py) reading the hands.
 
 - A press is force control at the index pad: the planned force pushed into the key along the plan's normal,
-  trimmed by how hard the pad really presses (integral control), as the vise take presses (moonshot/sim/vise_take.py).
+  trimmed by how hard the pad really presses (integral control), as the vise take presses (moonshot/sim/vise_take.py),
+  until the key clicks.
   The plan aims the fingertip at the key, and the runner's sight-guided correction (moonshot/sim/runner.py) takes
   up how far the hand trails it. The fingertip is a hand's length from the wrist, so a few degrees of the hand's turn
   put it a key away: sight steers the fingertip itself onto the key, across the key's face (in proportion to how far
   off it is, and slowly for what stays off). Until it is over its key it is held off the face, so a hand that arrives
   off its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
-- A stroke of the handle ends when the dial has turned its clicks, as people stop turning when the dial reads right:
-  the plan turns the hand a little farther, and the grip lets go there.
+- A jog of the handle ends when the dial has turned its clicks, as people stop turning when the machine is where they
+  want it: the plan's strokes turn the hand a quarter farther than the jog needs, and once the dial has turned the
+  jog's clicks the grip lets go, the fingers opening off the rim, for the rest of the jog.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
@@ -47,6 +49,7 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
+LET_GO_DEG = 12.0           # how far a done jog's fingers open off the rim
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -95,6 +98,7 @@ class PendantRunner(TakeRunner):
         mujoco.mj_forward(m, d)
         self.presses = [e for e in self.tk["events"] if e["kind"] == "press"]
         self.press_i = [0.0] * len(self.presses)
+        self.press_done: set[int] = set()
         self.hand_geoms = {g for g in range(m.ngeom) if m.geom(g).name[:2] in ("R_", "L_")}
         self.face = m.geom("vf2_pendant_face").id
         self.buttons = {m.geom(f"vf2_{b}_button").id: b for b in ("cycle_start", "feed_hold")}
@@ -115,8 +119,11 @@ class PendantRunner(TakeRunner):
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
-        self.turn_from: dict[int, int] = {}
-        self.turn_done: set[int] = set()
+        self.jog_clicks: dict[int, int] = {}
+        for e in self.turns:
+            self.jog_clicks[e["jog"]] = self.jog_clicks.get(e["jog"], 0) + e["clicks"]
+        self.jog_from: dict[int, int] = {}
+        self.jog_done: set[int] = set()
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -174,7 +181,10 @@ class PendantRunner(TakeRunner):
         m, d = self.model, self.data
         dt = m.opt.timestep
         for i, e in enumerate(self.presses):
-            if not e["t0"] - 0.05 <= t < e["t1"] + 0.08:
+            if not e["t0"] - 0.05 <= t < e["t1"] + 0.08 or i in self.press_done:
+                continue
+            if e["key"] in self.machine._down:                 # it clicked: ease off, as people do
+                self.press_done.add(i)
                 continue
             F = self._key_n.get(e["key"], 0.0)
             n = np.asarray(e["normal"], float)
@@ -228,19 +238,30 @@ class PendantRunner(TakeRunner):
             J = jacp[:, self.arm_dofs[s]]
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
-    def effort(self, side: str, t: float) -> tuple[float, str]:
-        """The plan's effort, but a stroke's grip lets go once the dial has turned the stroke's clicks."""
-        e, grip = super().effort(side, t)
-        if side != "R" or grip != "dial":
-            return e, grip
-        for i, ev in enumerate(self.turns):
+    def jog_now(self, t: float) -> int | None:
+        """The jog whose stroke the hand is in now, once the dial has turned all its clicks: else None."""
+        for ev in self.turns:
             if ev["t0"] - 0.25 <= t <= ev["t1"] + 0.15:
-                c = self.machine.clicks()
-                self.turn_from.setdefault(i, c)
-                if (c - self.turn_from[i]) * np.sign(ev["clicks"]) >= abs(ev["clicks"]):
-                    self.turn_done.add(i)
-                return (0.0, grip) if i in self.turn_done else (e, grip)
+                j, c = ev["jog"], self.machine.clicks()
+                self.jog_from.setdefault(j, c)
+                if (c - self.jog_from[j]) * np.sign(self.jog_clicks[j]) >= abs(self.jog_clicks[j]):
+                    self.jog_done.add(j)
+                return j if j in self.jog_done else None
+        return None
+
+    def effort(self, side: str, t: float) -> tuple[float, str]:
+        """The plan's effort, but the grip lets go once the dial has turned the jog's clicks."""
+        e, grip = super().effort(side, t)
+        if side == "R" and grip == "dial" and self.jog_now(t) is not None:
+            return 0.0, grip
         return e, grip
+
+    def let_go(self, t: float) -> None:
+        """A done jog's fingers open off the rim: against the grip's squeeze, so the turning hand can't drag the dial."""
+        if self.jog_now(t) is None or ("R", "dial") not in self.squeeze:
+            return
+        dq = sum(self.squeeze[("R", "dial")].values(), np.zeros(self.model.nv)) * -np.radians(LET_GO_DEG)
+        self.data.ctrl[self.acts] += dq[self.act_dof]
 
     def debounced(self, forces: dict[str, float]) -> dict[str, float]:
         now, on = float(self.data.time), self.machine.actuation
@@ -255,6 +276,7 @@ class PendantRunner(TakeRunner):
         self.machine.touch(self.debounced(self._key_n))
         self.push(t)
         self.aim(t)
+        self.let_go(t)
         self.machine.apply()
 
     # --- each frame --------------------------------------------------------------------------------------

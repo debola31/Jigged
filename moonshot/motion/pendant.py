@@ -158,6 +158,7 @@ class PendantTake(StepTake):
         self.jog_axis, self.inc_mm = "x", 0.001 * vf2.INCH
         self.axis_mm = np.array(start_mm, float)
         self.dial_deg = 0.0                       # the planned dial angle, for the strokes' grip
+        self.jogs = 0
 
     def _grip_specs(self) -> dict:
         S = lambda *a: list(a) + [0.0, 0.0]      # noqa: E731  trunk 3, arm 7, girdle 2
@@ -289,6 +290,7 @@ class PendantTake(StepTake):
         """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS."""
         if clicks == 0:
             return
+        self.jogs += 1                            # the strokes of one jog: the run counts their clicks together
         n = math.ceil(abs(clicks) / STROKE_CLICKS)
         per = [abs(clicks) // n + (1 if i < abs(clicks) % n else 0) for i in range(n)]
         sign = 1 if clicks > 0 else -1
@@ -325,7 +327,7 @@ class PendantTake(StepTake):
             self.add("R", tc, ts + dur + 0.08, lambda t, ts=ts, dur=dur, a0=a0, a1=a1: [
                 ("pose", *self.dial_pose(a0 + (a1 - a0) * min_jerk((t - ts) / dur)), 3.0)])
             self.event("turn", round(ts, 3), round(ts + dur, 3), side="R", clicks=sign * c, axis=self.jog_axis,
-                       inc_mm=self.inc_mm)
+                       inc_mm=self.inc_mm, jog=self.jogs)
             self.event("grip", round(tc, 3), round(ts + dur + 0.1, 3), side="R", grip="dial")
             te = ts + dur + 0.08
             self.effort("R", te, 1.0, "dial")

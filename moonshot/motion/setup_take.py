@@ -368,8 +368,9 @@ class Take:
         self.transit(t0 + 0.35, t_contact, Wg, via=via, fade=(Hg, 1.0))
         # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
         # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
-        # the open fingers meeting the faces as they close), which is 0.62 of the planned reach
-        t_peak = t0 + 0.35 + 0.62 * reach
+        # the open fingers meeting the faces as they close), with the fingers ~0.1 s behind their keys: 0.50 of the
+        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.50 0.667)
+        t_peak = t0 + 0.35 + 0.53 * reach
         self.fingers(t0 + 0.35, self.q_relax)
         self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])
@@ -506,7 +507,9 @@ class Take:
         self.fingers(t1 - 0.1, g["q"])
         W_end = self.home + g["W_rel"]
         self.wrist = W_end
-        self.fingers(t1 + 0.3, open_like(self.hand, g["q"], 0.5))
+        # relaxed as it comes off, not opened: the reach to the crank's knob follows straight on, and a hand still
+        # open from here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
+        self.fingers(t1 + 0.3, self.q_relax)
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
         self.t = t1 + 0.4
         self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  the thumb pushes the part along the parallels onto the fixed jaw")
@@ -532,10 +535,9 @@ class Take:
         self.event("press", tc + 0.05, tc + hold_s + 0.25, normal=[0, -0.174, 0.985], force=force_N, contact="blank")
         t1 = tc + hold_s + 0.4
         self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing,
-        self.fingers(t1 + 0.15, open_like(self.hand, g["q"], 0.3))   # and straighten a little as they come off
+        self.fingers(t1 + 0.3, self.q_relax)                 # and relax as they come off (the knob's reach follows)
         self.wrist = Wp
         self.transit(t1, t1 + 0.45, Wp + [0, -30, 50], via=[Wp + [0, 0, 22]])     # off the part straight up first
-        self.fingers(t1 + 0.4, self.q_relax)
         self.t = t1 + 0.45
         self.clip("push", t0 - 0.2, self.t + 0.2, f"PUSH  flat fingers press the part down onto the parallels ({force_N:.0f} N)")
 
@@ -546,7 +548,12 @@ class Take:
         As machinists do it: first crank the jaw onto the part and stop when it is snug (snug_N of clamp: the part
         is held but can still be pushed down onto the parallels); final=True is the last pull after seating, which
         ends on feel. Both are closed loops on the real knob in the physics."""
-        t0 = self.t
+        # a moment's pause off the part before reaching for the knob, the hand relaxing: run straight on from the
+        # part, the reach started with the hand still open from it and was widest at its start (the hand-opening check)
+        W_hold = self.wrist.copy()
+        self.add(self.t, self.t + 0.35, lambda t, W=W_hold: [("pos", W, 1.0)])
+        self.fingers(self.t + 0.3, self.q_relax)
+        t0 = self.t + 0.35
         g = self.grips[grip]
         Hk = g["H_rel"]
         pt = Hk.T @ (knob_center(CRANK0) - g["W"])                # knob middle in the hand
@@ -558,7 +565,10 @@ class Take:
         # from over the vise: out over the crank disc, then onto the knob from the operator's side
         self.transit(t0, t0 + 1.2, Wk, via=[over, Wk + Hk[:, 2] * 45 + [0, -10, 15]], fade=(Hk, 1.0))
         ko = open_like(self.hand, g["q"], 0.9)
-        self.fingers(t0 + 0.5, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))   # widest at ~74% of the reach
+        # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
+        # the knob (~0.35 s before tg), with the fingers ~0.1 s behind their keys
+        # the fingers, opening out of the fist's shape, reach 10 mm short of it before closing on the knob (67 of 77)
+        self.fingers(t0 + (0.63 if final else 0.7), open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=12.0))   # 0.7: 74%, 81% final
         tg = t0 + 1.2
         self.fingers(tg, g["q"])
         t_c0 = tg + 0.25

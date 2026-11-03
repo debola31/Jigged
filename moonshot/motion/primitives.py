@@ -30,16 +30,19 @@ def open_like(hand: AnatomicalHand, q: dict, amount: float) -> dict:
     return hand.clamp({n: q[n] + amount * (ext[n] - q[n]) for n in q})
 
 
-PEAK_PER_MM, PEAK_PLUS_MM = 0.83, 40.0     # Bhatia 2022, Smeets 2020: the reach's widest is 0.74-0.92 mm per mm of size
+# Bhatia 2022, Smeets 2020: the reach's widest is 0.74-0.92 mm per mm of size, 6-8 cm for a 2-3 cm object; at 40 mm
+# over, the knob's 62 mm was barely wider than a relaxed hand's 57, so the reach had no clear widest point
+PEAK_PER_MM, PEAK_PLUS_MM = 0.83, 55.0
 
 
-def open_for(hand: AnatomicalHand, q: dict, size_mm: float) -> dict:
+def open_for(hand: AnatomicalHand, q: dict, size_mm: float, lag_mm: float = 0.0) -> dict:
     """The grasp shape opened for the reach to an object size_mm across the grip: as wide as people open for it
     (PEAK_PER_MM per mm plus PEAK_PLUS_MM, thumb tip to index tip, measured as the hand-opening check measures it),
-    or fully open (open_like 1.0) if the hand can't open that far."""
+    or fully open (open_like 1.0) if the hand can't open that far. lag_mm: planned this much wider where the fingers,
+    opening fast out of a closed grip, fall that far short of their shape before they close again."""
     from moonshot.validate.hand_opening import aperture_mm
     names = list(q)
-    want = PEAK_PER_MM * size_mm + PEAK_PLUS_MM
+    want = PEAK_PER_MM * size_mm + PEAK_PLUS_MM + lag_mm
     lo, hi = 0.0, 1.0
     for _ in range(14):
         mid = (lo + hi) / 2

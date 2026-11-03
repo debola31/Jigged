@@ -8,7 +8,7 @@
    "side": "R", "role": "works the saw: the feed selector and rate knob, the bow, the vise, Start and coolant",
    "grasps": {"feed_selector": "lateral", "feed_rate_knob": "precision_disk", "tension_handle": "medium_wrap",
               "rack_block": "fixed_hook", "floating_jaw": "flat_press", "vise_handwheel": "medium_wrap",
-              "start_button": "fingertip_press", "coolant_switch": "lateral", "bar": "flat_press"},
+              "start_button": "fingertip_press", "coolant_switch": "lateral"},
    "contacts": [{"digit": "thumb", "on": "feed_selector"}, {"digit": "index", "on": "feed_selector"},
                 {"digit": "index", "on": "start_button"}, {"digit": "palm", "on": "floating_jaw"}]
   },
@@ -29,12 +29,12 @@
    "action": "turn", "on": "feed_rate_knob", "force_n": 2, "turns": 0.25, "duration_s": 0.8, "ends_on": "the knob at the shop's mark for the material", "source": 0},
   {"phase": "operate", "what": "Fingers hooked under the rack block lift it, and the palm slides the floating jaw open past the bar's width [proposed: force_n, duration_s]",
    "action": "slide", "on": "floating_jaw", "force_n": 10, "duration_s": 1.0, "ends_on": "the jaw clear of the bar", "source": 0},
-  {"phase": "transport", "what": "Both hands slide the bar along the bed between the jaws, the cut-off length past the blade, until its end meets the work stop [proposed: force_n, duration_s]",
-   "action": "slide", "on": "bar", "force_n": 15, "duration_s": 2.0, "ends_on": "the bar's end touches the work stop", "source": 0},
+  {"phase": "transport", "what": "The steadying hand alone slides the bar along the bed between the jaws, the cut-off length past the blade, until its end meets the work stop [proposed: force_n]",
+   "action": "slide", "on": "bar", "force_n": 15, "duration_s": 4.5, "ends_on": "the bar's end touches the work stop", "source": 3},
   {"phase": "operate", "what": "The steadying hand holds the bar down on the bed and against the fixed jaw, about 20 N; the working hand slides the floating jaw up to the bar and lets the rack block drop back into the rack [proposed: force_n, the 20 N hold, duration_s]",
    "action": "push", "on": "floating_jaw", "force_n": 10, "duration_s": 1.0, "ends_on": "the jaw touches the bar and the block drops into the rack", "source": 0},
-  {"phase": "operate", "what": "Turn the vise handwheel to clamp; the steadying hand stays on the bar until the jaw bites [proposed: force_n, turns, duration_s, the end condition]",
-   "action": "turn", "on": "vise_handwheel", "force_n": 40, "turns": 0.5, "duration_s": 1.5, "ends_on": "snug: the steadying hand can no longer slide or roll the bar", "source": 0},
+  {"phase": "operate", "what": "Turn the vise handwheel to clamp; the steadying hand stays on the bar until the jaw bites [proposed: force_n, turns, the end condition]",
+   "action": "turn", "on": "vise_handwheel", "force_n": 40, "turns": 0.5, "duration_s": 2.5, "ends_on": "snug: the steadying hand can no longer slide or roll the bar", "source": 3},
   {"phase": "reach", "what": "Both hands off the bar: the working hand to Start, the steadying hand back to the side, clear of the blade", "duration_s": [0.32, 0.67], "source": 2},
   {"phase": "operate", "what": "Press Start with the bow still up: the blade must reach full speed before it meets the work [proposed: force_n, duration_s]",
    "action": "press", "on": "start_button", "force_n": 5, "duration_s": 0.3, "ends_on": "the blade running at full speed", "source": 0},
@@ -54,9 +54,12 @@
    "gives": "the order (feed off, raise the bow, set the rate, clamp, Start, coolant, feed on, the saw stops itself); the quick-release vise (lift the rack block, slide the jaw, drop the block, turn the handwheel); the bow weighs 18-20 lb at the tension handle; the blade at full speed before it touches the work; hands away from the blade, also when removing the cut piece; reading the chips"},
   {"kind": "maker", "ref": "McMaster-Carr 8962N13, 9 x 16 in horizontal band saw (asset record bandsaw)",
    "url": "https://www.mcmaster.com/8962N13/", "gives": "the saw modelled: quick-release vise, manual or automatic feed"},
-  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as no footage of this tool was tracked",
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as this tool's own footage is edited and tracks too few moves to time a reach",
    "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
-   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"},
+  {"kind": "footage", "ref": "Dake Corporation, 'Setting Up & Using the B:7X Metal-Cutting Bandsaw', 360p, measured locally with MediaPipe Hand Landmarker",
+   "url": "https://www.youtube.com/watch?v=cJQ-KRT1hWw", "file": "moonshot/cards/footage/dake-b7x-bandsaw.timing.json",
+   "gives": "one hand slides a rectangular tube along the rollers and bed into the vise in about 4.5 s; the vise handwheel turned for at least 2.5 s"}
  ],
- "notes": "Written from JET's HBS-916 manual. McMaster sells 8962N13 without naming its maker or publishing a manual, and its blade (131-1/2 in) and speeds (98-262 sfpm) match no 9 x 16 saw found, so the JET, a 9 x 16 saw with the same controls (hydraulic feed valve and on/off selector, quick-release vise, limit switch), stands in for the order of work and the bow's weight. The left blade guide bracket (JET §10, step 3) is set once per bar size, so it is left out. Grasps are this card's reading of the controls; the maker names none. Proposed, with reasons (phase numbers count from 1): #2, #11, #12 2 N and 0.5 s to turn a selector or switch, no source gives either; #3 the 80-89 N is the JET's bow, borrowed because McMaster gives no bow weight for 8962N13, and the 1.2 s lift and 25 mm clearance are guesses; #4 2 N, a quarter turn and 0.8 s on the rate knob, the setting depends on the material; #5 10 N and 1.0 s to slide the jaw, unmeasured; #6 15 N, about 0.2 friction on a 7 kg bar, and 2.0 s; #7 10 N on the jaw, 20 N holding the bar, 1.0 s; #8 40 N at the handwheel rim, half a turn and 1.5 s, and 'snug' as the end, none of which the manual states; #10 5 N, matching the VF-2 station's proposed button force, and 0.3 s; #13 1-3 minutes, which depends on the bar's section and material; #15 1.5 s."
+ "notes": "Written from JET's HBS-916 manual. Dake's footage is of a smaller, manual-feed saw (the B:7X lowers its bow by a handle with a trigger), so only its bar handling and vise times carry over: #6 from one uncut shot, and #8 a lower bound, as the shot cuts while the handwheel is still turning. McMaster sells 8962N13 without naming its maker or publishing a manual, and its blade (131-1/2 in) and speeds (98-262 sfpm) match no 9 x 16 saw found, so the JET, a 9 x 16 saw with the same controls (hydraulic feed valve and on/off selector, quick-release vise, limit switch), stands in for the order of work and the bow's weight. The left blade guide bracket (JET §10, step 3) is set once per bar size, so it is left out. Grasps are this card's reading of the controls; the maker names none. Proposed, with reasons (phase numbers count from 1): #2, #11, #12 2 N and 0.5 s to turn a selector or switch, no source gives either; #3 the 80-89 N is the JET's bow, borrowed because McMaster gives no bow weight for 8962N13, and the 1.2 s lift and 25 mm clearance are guesses; #4 2 N, a quarter turn and 0.8 s on the rate knob, the setting depends on the material; #5 10 N and 1.0 s to slide the jaw, unmeasured; #6 15 N, about 0.2 friction on a 7 kg bar; #7 10 N on the jaw, 20 N holding the bar, 1.0 s; #8 40 N at the handwheel rim, half a turn, and 'snug' as the end, none of which the manual states; #10 5 N, matching the VF-2 station's proposed button force, and 0.3 s; #13 1-3 minutes, which depends on the bar's section and material; #15 1.5 s."
 }

@@ -123,12 +123,16 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   `caliper-measure-bore`, `micrometer-measure-thickness`, `dti-sweep-face`. Open: your review of their proposed
   values (each phase tags them `[proposed: …]`, with the reason in the card's notes), then the physics tier,
   before a card counts as done (§6).
-- [ ] For each G1 card: the maker's instructions found; YouTube or research-dataset footage found, downloaded to
+- [x] For each G1 card: the maker's instructions found; YouTube or research-dataset footage found, downloaded to
   `C:\jigged-data\footage\` and hand-tracked (bonus, not required; videos never committed or published).
-  2026-11-02: maker's instructions found and cited for every card. The band saw's are JET's HBS-916 manual:
-  McMaster names no maker for 8962N13 and publishes no manual. MediaPipe 1.2.0 is in the hub's `jigged` env (it
-  changed no existing package) with its hand model in `C:\jigged-data\footage\`, and trainual's two tracking
-  scripts run on it. No footage downloaded yet: downr.org needs the browser, which wasn't connected.
+  2026-11-02: maker's instructions cited in every card; the band saw's are JET's HBS-916 manual, as McMaster names
+  no maker for 8962N13. Footage for each G1 tool (Haas, Mitutoyo and Dake's own videos, and a machinist's caliper
+  video), downloaded through downr.org and tracked with MediaPipe 1.2.0 (in the hub's `jigged` env; it changed no
+  existing package) by trainual's two scripts, the segmenting limited to the shots where hands work the tool.
+  Measurements in `moonshot/cards/footage/`. The videos are edited tutorials, so they gave grasps and practice more
+  than durations: the jog handle's grasp, the paper's pinch, the two-handed micrometer and its 6 s cleaning, the
+  4.5 s bar slide. Gaps: no footage of the OTS tool setter, and the caliper video measures a 6 in bore, not a
+  small one.
 - [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station
 
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into

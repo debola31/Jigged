@@ -1,0 +1,22 @@
+{
+ "source": "Mitutoyo America, 'Check Points for Measuring Instruments: Digimatic Outside Micrometer' (YouTube nESHNdtUI5A), 720p, downloaded through downr.org to C:\\jigged-data\\footage\\ and analysed locally with MediaPipe Hand Landmarker; the video is not in the repo",
+ "method": "trainual's motion/extract_hands.py, then its analyze_timing.py segmenting restricted to the windows where hands work the micrometer; the video is edited, so only uncut shots give durations",
+ "windows_s": [[12, 27.5], [34, 42], [44, 71], [96, 132]],
+ "twist_windows_s": [[12, 20], [60.5, 71]],
+ "measured": {
+  "Left": {"n": 12, "dur_median_s": 0.38, "dur_iqr": [0.29, 0.62], "peak_speed_frac_median": 0.5, "peak_aperture_frac_median": 0.61,
+           "twist_deg_s_median": 9.1, "twist_deg_s_p90": 33.6},
+  "Right": {"n": 37, "dur_median_s": 0.54, "dur_iqr": [0.33, 0.88], "peak_speed_frac_median": 0.41, "peak_aperture_frac_median": 0.5,
+            "twist_deg_s_median": 5.9, "twist_deg_s_p90": 37.3}
+ },
+ "observed": [
+  {"t_s": [12, 20], "what": "Both hands on the micrometer: the right at the thimble and ratchet, the left holding the frame."},
+  {"t_s": [34, 40], "what": "The faces cleaned on a slip of paper, in one uncut wide shot: about 6 s."},
+  {"t_s": [60.5, 71], "what": "Measuring: both hands again, the right turning at the thimble end, the left on the frame."},
+  {"t_s": [72, 85], "what": "The micrometer in a stand: the right hand at the thimble, and from 80 s the left at the anvil end, so both hands stay busy."}
+ ],
+ "used_for": [
+  "micrometer-measure-thickness: the two-handed hold, and #3, the cleaning, 6 s",
+  "the thimble is turned by the fingers while the hand barely rolls: knuckle-line twist median 6-9 deg/s in the turning shots"
+ ]
+}

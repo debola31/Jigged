@@ -20,8 +20,8 @@
   {"phase": "reach", "what": "Both hands to the micrometer on the bench", "duration_s": [0.32, 0.67], "source": 2},
   {"phase": "grasp", "what": "The steadying hand takes the frame; the working hand's thumb and fingertips go to the thimble [proposed: duration_s]",
    "action": "lift", "on": "frame", "duration_s": 0.6, "ends_on": "held clear of the bench", "source": 1},
-  {"phase": "operate", "what": "Clean the faces: close the spindle lightly on a slip of lint-free paper, then draw the paper out slowly [proposed: duration_s]",
-   "action": "pull", "on": "paper", "duration_s": 3.0, "ends_on": "the paper out, the faces wiped", "source": 0},
+  {"phase": "operate", "what": "Clean the faces: close the spindle lightly on a slip of lint-free paper, then draw the paper out slowly",
+   "action": "pull", "on": "paper", "duration_s": 6.0, "ends_on": "the paper out, the faces wiped", "source": 3},
   {"phase": "check", "what": "Zero: bring the spindle onto the anvil, turn the ratchet stop 1.5 to 2 turns, read zero [proposed: duration_s]",
    "action": "turn", "on": "ratchet_stop", "force_n": [5, 10], "turns": 2, "duration_s": 2.0, "ends_on": "0.000 on the scale, the ratchet clicking over", "source": 0},
   {"phase": "operate", "what": "Spin the thimble open a little wider than the thickness [proposed: duration_s]",
@@ -45,9 +45,12 @@
   {"kind": "maker", "ref": "Mitutoyo, Quick Guide to Precision Measuring Instruments, Catalog No. E11003(7): Micrometers",
    "url": "https://www.mitutoyo.com/webfoo/wp-content/uploads/E11003-Quick-Guide.pdf",
    "gives": "a ratchet stop is unsuitable for one-handed operation; wipe the faces and set zero before measuring; read square to the index line, as an angle causes parallax error"},
-  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as no footage of this tool was tracked",
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as this tool's own footage is edited and tracks too few moves to time a reach",
    "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
-   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"},
+  {"kind": "footage", "ref": "Mitutoyo America, 'Check Points for Measuring Instruments: Digimatic Outside Micrometer', measured locally with MediaPipe Hand Landmarker",
+   "url": "https://www.youtube.com/watch?v=nESHNdtUI5A", "file": "moonshot/cards/footage/mitutoyo-digimatic-micrometer-checkpoints.timing.json",
+   "gives": "both hands on the micrometer, the right at the thimble and the left holding the frame; the faces cleaned on paper in about 6 s"}
  ],
- "notes": "Both hands are on the micrometer because Mitutoyo rules out one-handed use of a ratchet stop; the part lies on the bench, so neither hand holds it. The 5-10 N is Mitutoyo's figure for ratchet micrometers, which a dealer listing also gives for the 103-177. mic1 reads 0-1 in, so nist-ftc-10's 31 mm height in its inspection step is beyond it: that needs a 1-2 in micrometer or the height gauge. Hold the frame no longer than needed, since body heat expands it (Mitutoyo). The grasps are this card's reading of Mitutoyo's words. Proposed, with reasons (phase numbers count from 1): every duration but the reach, since no source times them: #2 0.6 s, #3 3.0 s, #4 2.0 s, #5 2-4 s, #6 1.0 s, #7 1.5-3 s, #8 1.5 s, #9 2.0 s, #10 1.0 s, #11 0.6 s; #10 backing off one turn and lifting clear, and #11 setting it down, which no source describes, so neither has one."
+ "notes": "Both hands are on the micrometer because Mitutoyo rules out one-handed use of a ratchet stop, and Mitutoyo's own footage holds it that way, the right hand at the thimble and the left on the frame; the part lies on the bench, so neither hand holds it. In that footage the fingers turn the thimble while the hand barely rolls (median 6-9 deg/s), so the wrist should stay nearly still in #4, #5, #7 and #8. The 5-10 N is Mitutoyo's figure for ratchet micrometers, which a dealer listing also gives for the 103-177. mic1 reads 0-1 in, so nist-ftc-10's 31 mm height in its inspection step is beyond it: that needs a 1-2 in micrometer or the height gauge. Hold the frame no longer than needed, since body heat expands it (Mitutoyo). The grasps are this card's reading of Mitutoyo's words. Proposed, with reasons (phase numbers count from 1): every duration but the reach and the cleaning (#3, timed from Mitutoyo's footage), since no source times them: #2 0.6 s, #4 2.0 s, #5 2-4 s, #6 1.0 s, #7 1.5-3 s, #8 1.5 s, #9 2.0 s, #10 1.0 s, #11 0.6 s; #10 backing off one turn and lifting clear, and #11 setting it down, which no source describes, so neither has one."
 }

@@ -1,0 +1,16 @@
+{
+ "source": "'Measuring Inside Diameter With Various Tools - Calipers to Inside Mic' (YouTube X0CxB3U3_58), 720p, downloaded through downr.org to C:\\jigged-data\\footage\\ and analysed locally with MediaPipe Hand Landmarker; the video is not in the repo",
+ "method": "trainual's motion/extract_hands.py on the caliper section only (200-370 s, cut to its own clip), then its analyze_timing.py segmenting; times below are the video's",
+ "windows_s": [[200, 370]],
+ "measured": {
+  "Left": {"n": 19, "dur_median_s": 0.37, "dur_iqr": [0.25, 0.45], "peak_speed_frac_median": 0.57, "peak_aperture_frac_median": 0.4},
+  "Right": {"n": 21, "dur_median_s": 0.3, "dur_iqr": [0.23, 0.43], "peak_speed_frac_median": 0.56, "peak_aperture_frac_median": 0.75}
+ },
+ "observed": [
+  {"t_s": [204, 300], "what": "Digital calipers across a 6 in bore in a lathe chuck, both hands on them: one by the fixed jaw, one on the slider."},
+  {"t_s": [324, 366], "what": "The operator leans his head in close to read the display while both hands hold the jaws on the bore."}
+ ],
+ "used_for": [
+  "caliper-measure-bore: nothing numeric; a large bore takes both hands, unlike the card's 7 mm bore, where the second hand steadies the part"
+ ]
+}

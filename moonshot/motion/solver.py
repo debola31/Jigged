@@ -83,7 +83,7 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
-def posture_cost(th, prior=None, w_comfort=1.0, w_prior=5.0, trunk=True):
+def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
     people's prior. th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm
@@ -119,7 +119,8 @@ class BodySolver:
          "comfort": 1.0, "prior": 5.0, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
     # prior 5.0, not 0.3 (2026-11-03): at 0.3 the people's mixture barely moved a take (the vise take's median
-    # likelihood 35.1 against people's 24.2; 29.7 at 5); the grip solver weighs it the same (posture_cost)
+    # likelihood 35.1 against people's 24.2; 29.7 at 5). The grip solver keeps 0.3 (posture_cost's default): at 5 the
+    # posture outweighed the contact, and the deburr grip's pads came off its handle (thumb 47.7 mm, was 8.5)
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 

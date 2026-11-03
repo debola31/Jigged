@@ -3,7 +3,8 @@ trainual's rig, split into the bodies MuJoCo moves (moonshot/world/vise.py rende
 as boxes at the load's size (render_meshes), each with the material names the look knows (moonshot/render/look.py),
 and each drawn where the collider it stands for is.
 
-GLBs are read in their raw stored coordinates, as the renderer places them. Needs the data root. Protected (plan §6,
+GLBs are read in their raw stored coordinates, as the renderer places them: metres, and mm for the meshes. Needs the
+data root. Protected (plan §6,
 rule 1)."""
 import json
 import struct
@@ -18,10 +19,10 @@ pytestmark = pytest.mark.data_root
 LOOK = {"kurt_blue", "ground_steel", "handle_steel", "grip_black", "hardened_steel", "aluminium_6061"}
 
 
-def glb(path):
-    """(raw bounds in mm, material names) of a GLB."""
+def glb(path, mm=False):
+    """(raw bounds in mm, material names) of a GLB: stored in metres, or in mm for a changing body's meshes."""
     import trimesh
-    lo, hi = trimesh.load(path, force="mesh").bounds * 1000
+    lo, hi = trimesh.load(path, force="mesh").bounds * (1 if mm else 1000)
     raw = path.read_bytes()
     n = struct.unpack("<I", raw[12:16])[0]
     return lo, hi, {m.get("name") for m in json.loads(raw[20:20 + n]).get("materials", [])}
@@ -99,7 +100,7 @@ def test_the_part_and_parallels_are_boxes_at_the_loads_size(tmp_path):
     want["para_b"] = want["para_a"]
     for body, entry in meshes.items():
         assert entry["frames"] == [0]
-        lo, hi, mats = glb(tmp_path / entry["dir"] / "0.glb")
+        lo, hi, mats = glb(tmp_path / entry["dir"] / "0.glb", mm=True)
         size, mat = want[body]
         assert np.allclose(hi - lo, size, atol=0.01) and np.allclose((lo + hi) / 2, 0, atol=0.01), body
         assert mats == {mat}, body

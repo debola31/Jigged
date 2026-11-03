@@ -13,8 +13,8 @@
 - A jog of the handle ends when the machine reads where the plan has it after the jog, as people stop turning when
   the display reads right: the plan's strokes turn the hand a third farther than the jog needs, and once the machine
   is there the right arm stops where it is, still gripping, so the dial stops with it, until the jog's last stroke
-  ends; then the hand slides off the rim and comes round onto the plan. Each jog is counted from where the machine
-  is when it starts, so one that fell short or ran on is made up by the next on its axis.
+  ends; then it comes round onto the plan, which leaves the dial along its axis. Each jog is counted from where the
+  machine is when it starts, so one that fell short or ran on is made up by the next on its axis.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
@@ -23,7 +23,7 @@ Declared shortcuts: `clamped`, the part welded to the table, standing in for the
 proves the clamp: moonshot/tests/gates/test_vise_take.py; nothing in these steps pushes on the part); and
 `dial_pinch`, the jog handle held to the hand while a stroke grips it and a finger touches its rim, standing in for
 fingertips on the knurled rim, which capsules on a smooth cylinder can't hold (a grip assist, as the vise take's
-`enclose`).
+`enclose`); the rim is frictionless otherwise, so only that grip turns it.
 
 The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle, the
 right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
@@ -55,13 +55,9 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
-BACK_OFF_S = 0.5            # a held hand, its jog done, slides straight off the dial this long at least,
-BACK_OFF_MM = 40.0          # this far, past the rim's depth (as the plan leaves the dial),
-CLEAR_WAIT_S = 0.5          # and up to this much longer while anything of it still touches the dial;
-FREEZE_EASE_S = 0.6         # then its arm comes round onto the plan over this
-STOP_S = 0.05               # a turning hand stops this long after it means to: the dial turns on meanwhile, so the
+FREEZE_EASE_S = 0.4         # a held hand, its jog's last stroke over, comes round onto the plan over this
+STOP_S = 0.02               # a turning hand stops this long after it means to: the dial turns on meanwhile, so the
                             # hand stops when the clicks in and those coming reach the jog's, as people slow to a number
-DIAL_AXIS = np.array(vf2.record()["affordances"]["jog_handle"]["axis"], float)     # into the pendant
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -147,8 +143,6 @@ class PendantRunner(TakeRunner):
         self.jog_need: dict[int, int] = {}          # jog -> the clicks it needs, from where the machine is then
         self.jog_done: dict[int, float] = {}        # jog -> when the machine read right
         self.jog_hold: dict[int, np.ndarray] = {}   # jog -> the joints its hand is held at
-        self.jog_back: dict[int, np.ndarray] = {}   # jog -> the joints' change sliding its held hand off the dial
-        self.jog_clear: dict[int, float] = {}       # jog -> when its backed-off hand was clear of the dial
         self._corr = np.zeros(m.nv)                 # the sight correction the last step added
         right = [n for n in self.body.joints if n.startswith("R_")]
         arm = [n for n in right if n[2:] in ARM]
@@ -170,7 +164,8 @@ class PendantRunner(TakeRunner):
                           f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
                           f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n', 1)
-        xml = xml.replace('<geom name="vf2_jog_handle" ', '<geom name="vf2_jog_handle" condim="1" ', 1)   # dial_pinch
+        # dial_pinch: the rim frictionless but for the grip; priority, as a contact takes the higher condim of a pair
+        xml = xml.replace('<geom name="vf2_jog_handle" ', '<geom name="vf2_jog_handle" condim="1" priority="1" ', 1)
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -299,30 +294,18 @@ class PendantRunner(TakeRunner):
                     q, _, _ = super().at(t)
                     arm_q, arm_dof = self.r_q[self.r_arm], self.r_dof[self.r_arm]
                     q[arm_q] = self.data.qpos[arm_q] - self._corr[arm_dof]
-                    self.jog_done[j], self.jog_hold[j], self.jog_back[j] = t, q, self.back_off_dq(q)
+                    self.jog_done[j], self.jog_hold[j] = t, q
                 return
 
-    def frozen(self, t: float) -> tuple[int, float, float, float] | None:
-        """While a done jog's hand is held: (the jog, how far its arm and its fingers have eased back onto the plan,
-        how far it has backed off the dial). Held from the moment the machine reads right to its last
-        stroke's end; then the hand, its grip eased but its fingers still shaped round the rim, slides straight off
-        the rim's front along the dial's axis (BACK_OFF_S), which can't turn it; only once nothing of it touches the
-        dial (or CLEAR_WAIT_S on) do the fingers open and the arm come round onto the plan (FREEZE_EASE_S), which by
-        then is off the rim too. Fingers opening on the rim, or a hand turning with them on it, drag the dial on."""
+    def frozen(self, t: float) -> tuple[int, float] | None:
+        """While a done jog's hand is held: (the jog, how far it has eased back onto the plan). Held, gripping, from the
+        moment the machine reads right to its last stroke's end; then it comes round onto the plan over FREEZE_EASE_S,
+        the plan leaving the dial along its axis. Off the grip the rim is frictionless (dial_pinch), so nothing of the
+        hand on its way off turns it."""
         for j, td in self.jog_done.items():
             end = self.jog_end[j]
-            if td <= t < end:
-                return j, 0.0, 0.0, 0.0
-            clear = self.jog_clear.get(j)                     # when the backed-off hand was first clear of the dial
-            if t >= end and clear is None:
-                if t >= end + BACK_OFF_S + CLEAR_WAIT_S or t >= end + BACK_OFF_S and not self.on_dial():
-                    self.jog_clear[j] = clear = t
-                else:
-                    return j, 0.0, 0.0, min_jerk((t - end) / BACK_OFF_S)
-            if clear <= t < clear + FREEZE_EASE_S:
-                x = (t - clear) / FREEZE_EASE_S
-                w = min_jerk(x)
-                return j, w, w, 1.0 - min_jerk((x - 0.7) / 0.3)      # kept off the rim till the arm is nearly round
+            if td <= t < end + FREEZE_EASE_S:
+                return j, min_jerk(max(0.0, t - end) / FREEZE_EASE_S)
         return None
 
     def at(self, t: float):
@@ -332,13 +315,11 @@ class PendantRunner(TakeRunner):
         self.count_clicks(t)
         f = self.frozen(t)
         if f is not None:
-            j, w_arm, w_fingers, back = f
+            j, w = f
             qf = self.jog_hold[j]
-            wq = np.where(self.r_arm, w_arm, w_fingers)
-            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * wq
-            q += self.jog_back[j] * back
-            v[self.r_dof] *= wq
-            a[self.r_dof] *= wq
+            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * w
+            v[self.r_dof] *= w
+            a[self.r_dof] *= w
         return q, v, a
 
     def hold_dial(self, t: float) -> None:
@@ -361,30 +342,7 @@ class PendantRunner(TakeRunner):
     def effort(self, side: str, t: float) -> tuple[float, str]:
         """The plan's effort, but a held hand keeps the grip it had when the dial read right."""
         f = self.frozen(t) if side == "R" else None
-        return super().effort(side, self.jog_done[f[0]] if f is not None and f[3] == 0.0 else t)
-
-    def on_dial(self) -> bool:
-        """Is any part of the hand touching the jog handle?"""
-        return any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
-                   for c in self.data.contact[:self.data.ncon])
-
-    def back_off_dq(self, q: np.ndarray) -> np.ndarray:
-        """The arm's joint change (qpos) that slides the hand held at joints q straight off the dial, along its axis
-        toward the operator, by BACK_OFF_MM: part of the plan the runner tracks, so its correction agrees."""
-        m = self.model
-        scratch = mujoco.MjData(m)
-        scratch.qpos[:] = self.data.qpos
-        scratch.qpos[self.body_q] = q[self.body_q]
-        mujoco.mj_kinematics(m, scratch)
-        mujoco.mj_comPos(m, scratch)
-        jacp = np.zeros((3, m.nv))
-        mujoco.mj_jacBody(m, scratch, jacp, None, m.body("R_hand").id)
-        dofs = self.arm_dofs["R"]
-        J = jacp[:, dofs]
-        dq = np.zeros(m.nq)
-        qadr = [m.jnt_qposadr[m.joint(f"R_{j}").id] for j in ARM]
-        dq[qadr] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), -DIAL_AXIS * BACK_OFF_MM / 1000)
-        return dq
+        return super().effort(side, self.jog_done[f[0]] if f is not None and f[1] == 0.0 else t)
 
     def debounced(self, forces: dict[str, float]) -> dict[str, float]:
         now, on = float(self.data.time), self.machine.actuation

@@ -25,6 +25,9 @@ scene.json:
                        "geoms": [{"name", "type", "size", "pos", "quat", "rgba"}]}}}   mm: MuJoCo's colliders
   "body" bodies are the person, drawn as skin from the hands above, not from geoms; an "object" with no GLBs is drawn
   from its geoms. Geoms are also what the skin bake presses the skin onto.
+  A body whose shape changes (the stock as it's cut) also carries "meshes": {"dir": "<folder in the take>",
+  "frames": [k, ...]}, one <dir>/<k>.glb per listed frame in the body's frame (mm); each frame draws the latest
+  mesh at or before it, in place of the body's GLBs and geoms.
 """
 from __future__ import annotations
 
@@ -65,4 +68,9 @@ def check(folder: Path) -> list[str]:
     missing = set(scene.get("bodies", {})) - set(bodies)
     if missing:
         errors.append(f"scene.json names bodies the take doesn't move: {sorted(missing)[:5]}")
+    for name, b in scene.get("bodies", {}).items():
+        if "meshes" in b:
+            lost = [k for k in b["meshes"]["frames"] if not (folder / b["meshes"]["dir"] / f"{k}.glb").exists()]
+            if lost or not b["meshes"]["frames"] or b["meshes"]["frames"][0] != 0:
+                errors.append(f"{name}'s meshes need frame 0 and every listed frame's GLB; missing {lost[:5]}")
     return errors

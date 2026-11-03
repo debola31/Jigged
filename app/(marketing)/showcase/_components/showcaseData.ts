@@ -24,6 +24,8 @@ export interface Step {
   where: Where;
   /** Path under the media root. */
   video: string;
+  /** The video is in the bucket (moonshot/web/published.json). Until then the step shows as coming. */
+  published: boolean;
 }
 
 interface PartBase {
@@ -91,4 +93,12 @@ const MEDIA_ROOT =
 
 export function mediaUrl(path: string): string {
   return `${MEDIA_ROOT.replace(/\/$/, '')}/${path}`;
+}
+
+// Development only: with NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED=1 every step plays, so the player can
+// be worked on against the media server's drafts before the finals are published.
+const PREVIEW_UNPUBLISHED = process.env.NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED === '1';
+
+export function playable(step: Step): boolean {
+  return step.published || PREVIEW_UNPUBLISHED;
 }

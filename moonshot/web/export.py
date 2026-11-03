@@ -3,7 +3,8 @@
 The page reads only this file: the 20 parts in plan order, each live part's steps exactly as the plan expands them
 (title and caption included, so a caption can only name the plan's facts, plan §2 O8), and the shop as laid out by
 layout.json and shop.json. moonshot/ never reaches a Vercel build, so the data is copied out rather than imported.
-Videos and models aren't in it: it names their paths in Supabase Storage (`media.py`).
+Videos and models aren't in it: it names their paths in Supabase Storage (`media.py`), and marks a step `published`
+only once its video is in published.json, which the upload writes; the page shows the others as coming.
 
     python -m moonshot.web.export          # rewrites the file; the gate test_web_steps.py checks it
 """
@@ -18,6 +19,7 @@ from moonshot.planning.validate import load_plan
 REPO = Path(__file__).resolve().parents[2]
 RECORDS = REPO / "moonshot" / "library" / "records"
 OUT = REPO / "app" / "(marketing)" / "showcase" / "showcase.json"
+PUBLISHED = Path(__file__).resolve().parent / "published.json"
 
 # Plan §7, in order. A part is live once its steps are rendered, checked and published.
 PARTS = ["nist-ftc-10", "nist-ctc-01", "ll-1005337", "ct-slbeam", "ll-1007223", "ct-tpg322", "ll-1011439",
@@ -75,6 +77,7 @@ def where_zone(zone_id: str, layout: dict) -> dict:
 
 def live_part(part: str, layout: dict, shop_json: dict) -> dict:
     plan = load_plan(part)
+    published = set(_json(PUBLISHED)["videos"])
     machine = {s["id"]: s["machine"] for s in plan["setups"]}
     groups = [{"id": s["id"], "title": s["title"]} for s in plan["setups"]]
     if plan.get("finish"):
@@ -83,8 +86,10 @@ def live_part(part: str, layout: dict, shop_json: dict) -> dict:
     for s in expand(plan):
         where = (where_machine(machine[s["setup"]], layout, shop_json) if "setup" in s
                  else where_zone(STATION_ZONES[s["station"]], layout))
+        video = f"video/{part}/{s['id']}.mp4"
         steps.append({"id": s["id"], "title": s["title"], "caption": s["caption"], "kind": s["kind"],
-                      "group": s.get("setup", "finish"), "where": where, "video": f"video/{part}/{s['id']}.mp4"})
+                      "group": s.get("setup", "finish"), "where": where, "video": video,
+                      "published": video in published})
     return {"material": plan["stock"]["material"], "groups": groups, "steps": steps}
 
 

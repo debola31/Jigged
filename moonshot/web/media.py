@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import json
 import os
 import shutil
 import subprocess
@@ -29,7 +30,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from moonshot.config import data_root
-from moonshot.web.export import RECORDS, _json, asset_record, build, shop_assets
+from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, shop_assets
 
 GLTF_TRANSFORM = "@gltf-transform/cli@4.5.1"
 # Triangle budgets for the shop view, where a machine is a few hundred pixels across and a tool a few.
@@ -95,6 +96,12 @@ def upload(url: str) -> None:
             pass
         total += p.stat().st_size
     print(f"uploaded {len(files)} files, {total / 1e6:.1f} MB, to {url}/storage/v1/object/public/{BUCKET}/")
+    # Only now is a video the page's to play: record it, then re-export and commit the page's data.
+    record = _json(PUBLISHED)
+    videos = {p.relative_to(web_root()).as_posix() for p in files if p.suffix == ".mp4"}
+    record["videos"] = sorted(set(record["videos"]) | videos)
+    PUBLISHED.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"{PUBLISHED.name}: {len(record['videos'])} videos; now run python -m moonshot.web.export")
 
 
 class Handler(SimpleHTTPRequestHandler):

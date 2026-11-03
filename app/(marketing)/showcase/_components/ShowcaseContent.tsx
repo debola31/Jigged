@@ -67,7 +67,7 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
       </Section>
 
       <Section size="minor">
-        <SectionHeading index="01" eyebrow="Pick a part" heading="One part is ready to watch." subhead={`The other ${data.parts.length - live.length} follow as their videos are finished.`} />
+        <SectionHeading index="01" eyebrow="Pick a part" heading="Start with the first part." subhead={`The other ${data.parts.length - live.length} follow as their videos are finished.`} />
         <Box sx={{ mt: 4 }}>
           <PartPicker
             parts={data.parts}

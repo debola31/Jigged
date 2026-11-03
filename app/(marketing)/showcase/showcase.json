@@ -47,7 +47,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-clean.mp4"
+     "video": "video/nist-ftc-10/op10-clean.mp4",
+     "published": false
     },
     {
      "id": "op10-load",
@@ -61,7 +62,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-load.mp4"
+     "video": "video/nist-ftc-10/op10-load.mp4",
+     "published": false
     },
     {
      "id": "op10-seat",
@@ -75,7 +77,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-seat.mp4"
+     "video": "video/nist-ftc-10/op10-seat.mp4",
+     "published": false
     },
     {
      "id": "op10-check",
@@ -89,12 +92,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-check.mp4"
+     "video": "video/nist-ftc-10/op10-check.mp4",
+     "published": false
     },
     {
      "id": "op10-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at centre of stock length and Y at centre of stock width.",
+     "caption": "Set G54 X at the centre of the stock's length and Y at the centre of its width.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -103,7 +107,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-xy.mp4"
+     "video": "video/nist-ftc-10/op10-xy.mp4",
+     "published": false
     },
     {
      "id": "op10-z",
@@ -117,7 +122,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-z.mp4"
+     "video": "video/nist-ftc-10/op10-z.mp4",
+     "published": false
     },
     {
      "id": "op10-tools",
@@ -131,7 +137,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-tools.mp4"
+     "video": "video/nist-ftc-10/op10-tools.mp4",
+     "published": false
     },
     {
      "id": "op10-start",
@@ -145,7 +152,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-start.mp4"
+     "video": "video/nist-ftc-10/op10-start.mp4",
+     "published": false
     },
     {
      "id": "op10-face",
@@ -159,7 +167,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-face.mp4"
+     "video": "video/nist-ftc-10/op10-face.mp4",
+     "published": false
     },
     {
      "id": "op10-outline",
@@ -173,7 +182,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-outline.mp4"
+     "video": "video/nist-ftc-10/op10-outline.mp4",
+     "published": false
     },
     {
      "id": "op10-pocket",
@@ -187,7 +197,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-pocket.mp4"
+     "video": "video/nist-ftc-10/op10-pocket.mp4",
+     "published": false
     },
     {
      "id": "op10-cross_drill",
@@ -201,7 +212,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-cross_drill.mp4"
+     "video": "video/nist-ftc-10/op10-cross_drill.mp4",
+     "published": false
     },
     {
      "id": "op10-ears",
@@ -215,7 +227,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-ears.mp4"
+     "video": "video/nist-ftc-10/op10-ears.mp4",
+     "published": false
     },
     {
      "id": "op10-unload",
@@ -229,7 +242,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-unload.mp4"
+     "video": "video/nist-ftc-10/op10-unload.mp4",
+     "published": false
     },
     {
      "id": "op20-clean",
@@ -243,7 +257,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-clean.mp4"
+     "video": "video/nist-ftc-10/op20-clean.mp4",
+     "published": false
     },
     {
      "id": "op20-load",
@@ -257,7 +272,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-load.mp4"
+     "video": "video/nist-ftc-10/op20-load.mp4",
+     "published": false
     },
     {
      "id": "op20-seat",
@@ -271,7 +287,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-seat.mp4"
+     "video": "video/nist-ftc-10/op20-seat.mp4",
+     "published": false
     },
     {
      "id": "op20-check",
@@ -285,7 +302,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-check.mp4"
+     "video": "video/nist-ftc-10/op20-check.mp4",
+     "published": false
     },
     {
      "id": "op20-xy",
@@ -299,7 +317,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-xy.mp4"
+     "video": "video/nist-ftc-10/op20-xy.mp4",
+     "published": false
     },
     {
      "id": "op20-z",
@@ -313,7 +332,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-z.mp4"
+     "video": "video/nist-ftc-10/op20-z.mp4",
+     "published": false
     },
     {
      "id": "op20-tools",
@@ -327,7 +347,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-tools.mp4"
+     "video": "video/nist-ftc-10/op20-tools.mp4",
+     "published": false
     },
     {
      "id": "op20-start",
@@ -341,7 +362,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-start.mp4"
+     "video": "video/nist-ftc-10/op20-start.mp4",
+     "published": false
     },
     {
      "id": "op20-face",
@@ -355,7 +377,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-face.mp4"
+     "video": "video/nist-ftc-10/op20-face.mp4",
+     "published": false
     },
     {
      "id": "op20-scallops",
@@ -369,7 +392,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-scallops.mp4"
+     "video": "video/nist-ftc-10/op20-scallops.mp4",
+     "published": false
     },
     {
      "id": "op20-pads",
@@ -383,7 +407,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-pads.mp4"
+     "video": "video/nist-ftc-10/op20-pads.mp4",
+     "published": false
     },
     {
      "id": "op20-pins",
@@ -397,7 +422,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-pins.mp4"
+     "video": "video/nist-ftc-10/op20-pins.mp4",
+     "published": false
     },
     {
      "id": "op20-taps",
@@ -411,7 +437,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-taps.mp4"
+     "video": "video/nist-ftc-10/op20-taps.mp4",
+     "published": false
     },
     {
      "id": "op20-ear_cbores",
@@ -425,7 +452,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-ear_cbores.mp4"
+     "video": "video/nist-ftc-10/op20-ear_cbores.mp4",
+     "published": false
     },
     {
      "id": "op20-unload",
@@ -439,7 +467,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-unload.mp4"
+     "video": "video/nist-ftc-10/op20-unload.mp4",
+     "published": false
     },
     {
      "id": "op30-clean",
@@ -453,7 +482,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-clean.mp4"
+     "video": "video/nist-ftc-10/op30-clean.mp4",
+     "published": false
     },
     {
      "id": "op30-load",
@@ -467,7 +497,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-load.mp4"
+     "video": "video/nist-ftc-10/op30-load.mp4",
+     "published": false
     },
     {
      "id": "op30-seat",
@@ -481,7 +512,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-seat.mp4"
+     "video": "video/nist-ftc-10/op30-seat.mp4",
+     "published": false
     },
     {
      "id": "op30-check",
@@ -495,12 +527,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-check.mp4"
+     "video": "video/nist-ftc-10/op30-check.mp4",
+     "published": false
     },
     {
      "id": "op30-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at probe the left end and Y at probe datum A.",
+     "caption": "Set G54 X at the left end (probe) and Y at datum A (probe).",
      "kind": "human",
      "group": "op30",
      "where": {
@@ -509,7 +542,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-xy.mp4"
+     "video": "video/nist-ftc-10/op30-xy.mp4",
+     "published": false
     },
     {
      "id": "op30-z",
@@ -523,7 +557,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-z.mp4"
+     "video": "video/nist-ftc-10/op30-z.mp4",
+     "published": false
     },
     {
      "id": "op30-tools",
@@ -537,7 +572,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-tools.mp4"
+     "video": "video/nist-ftc-10/op30-tools.mp4",
+     "published": false
     },
     {
      "id": "op30-start",
@@ -551,7 +587,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-start.mp4"
+     "video": "video/nist-ftc-10/op30-start.mp4",
+     "published": false
     },
     {
      "id": "op30-bores",
@@ -565,7 +602,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-bores.mp4"
+     "video": "video/nist-ftc-10/op30-bores.mp4",
+     "published": false
     },
     {
      "id": "op30-cbores",
@@ -579,7 +617,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-cbores.mp4"
+     "video": "video/nist-ftc-10/op30-cbores.mp4",
+     "published": false
     },
     {
      "id": "op30-unload",
@@ -593,7 +632,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-unload.mp4"
+     "video": "video/nist-ftc-10/op30-unload.mp4",
+     "published": false
     },
     {
      "id": "op40-clean",
@@ -607,7 +647,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-clean.mp4"
+     "video": "video/nist-ftc-10/op40-clean.mp4",
+     "published": false
     },
     {
      "id": "op40-load",
@@ -621,7 +662,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-load.mp4"
+     "video": "video/nist-ftc-10/op40-load.mp4",
+     "published": false
     },
     {
      "id": "op40-seat",
@@ -635,7 +677,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-seat.mp4"
+     "video": "video/nist-ftc-10/op40-seat.mp4",
+     "published": false
     },
     {
      "id": "op40-check",
@@ -649,12 +692,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-check.mp4"
+     "video": "video/nist-ftc-10/op40-check.mp4",
+     "published": false
     },
     {
      "id": "op40-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at probe a Ø7 bore and Y at probe datum A.",
+     "caption": "Set G54 X at a Ø7 bore (probe) and Y at datum A (probe).",
      "kind": "human",
      "group": "op40",
      "where": {
@@ -663,7 +707,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-xy.mp4"
+     "video": "video/nist-ftc-10/op40-xy.mp4",
+     "published": false
     },
     {
      "id": "op40-z",
@@ -677,7 +722,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-z.mp4"
+     "video": "video/nist-ftc-10/op40-z.mp4",
+     "published": false
     },
     {
      "id": "op40-start",
@@ -691,7 +737,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-start.mp4"
+     "video": "video/nist-ftc-10/op40-start.mp4",
+     "published": false
     },
     {
      "id": "op40-cbores",
@@ -705,7 +752,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-cbores.mp4"
+     "video": "video/nist-ftc-10/op40-cbores.mp4",
+     "published": false
     },
     {
      "id": "op40-unload",
@@ -719,12 +767,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-unload.mp4"
+     "video": "video/nist-ftc-10/op40-unload.mp4",
+     "published": false
     },
     {
      "id": "op50-clean",
-     "title": "Clean the vise and set the parallels",
-     "caption": "Blow out the 6 in vise and wipe the jaws, then set the vise floor and a stop.",
+     "title": "Clean the vise and set the stop",
+     "caption": "Blow out the 6 in vise and wipe the jaws and its floor, then set the stop.",
      "kind": "human",
      "group": "op50",
      "where": {
@@ -733,7 +782,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-clean.mp4"
+     "video": "video/nist-ftc-10/op50-clean.mp4",
+     "published": false
     },
     {
      "id": "op50-load",
@@ -747,7 +797,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-load.mp4"
+     "video": "video/nist-ftc-10/op50-load.mp4",
+     "published": false
     },
     {
      "id": "op50-seat",
@@ -761,12 +812,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-seat.mp4"
+     "video": "video/nist-ftc-10/op50-seat.mp4",
+     "published": false
     },
     {
      "id": "op50-check",
-     "title": "Check the parallels are pinched",
-     "caption": "Try each parallel with a fingertip: neither should move.",
+     "title": "Check it's square",
+     "caption": "Sweep the indicator up its side: the needle should stay put.",
      "kind": "human",
      "group": "op50",
      "where": {
@@ -775,12 +827,13 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-check.mp4"
+     "video": "video/nist-ftc-10/op50-check.mp4",
+     "published": false
     },
     {
      "id": "op50-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at probe the side and Y at probe datum A.",
+     "caption": "Set G54 X at the side (probe) and Y at datum A (probe).",
      "kind": "human",
      "group": "op50",
      "where": {
@@ -789,7 +842,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-xy.mp4"
+     "video": "video/nist-ftc-10/op50-xy.mp4",
+     "published": false
     },
     {
      "id": "op50-z",
@@ -803,7 +857,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-z.mp4"
+     "video": "video/nist-ftc-10/op50-z.mp4",
+     "published": false
     },
     {
      "id": "op50-tools",
@@ -817,7 +872,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-tools.mp4"
+     "video": "video/nist-ftc-10/op50-tools.mp4",
+     "published": false
     },
     {
      "id": "op50-start",
@@ -831,7 +887,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-start.mp4"
+     "video": "video/nist-ftc-10/op50-start.mp4",
+     "published": false
     },
     {
      "id": "op50-deep",
@@ -845,7 +902,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-deep.mp4"
+     "video": "video/nist-ftc-10/op50-deep.mp4",
+     "published": false
     },
     {
      "id": "op50-unload",
@@ -859,7 +917,8 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-unload.mp4"
+     "video": "video/nist-ftc-10/op50-unload.mp4",
+     "published": false
     },
     {
      "id": "deburr",
@@ -872,7 +931,8 @@
       "x": 27750.0,
       "y": 4500.0
      },
-     "video": "video/nist-ftc-10/deburr.mp4"
+     "video": "video/nist-ftc-10/deburr.mp4",
+     "published": false
     },
     {
      "id": "inspect",
@@ -885,7 +945,8 @@
       "x": 50250.0,
       "y": 15500.0
      },
-     "video": "video/nist-ftc-10/inspect.mp4"
+     "video": "video/nist-ftc-10/inspect.mp4",
+     "published": false
     }
    ]
   },

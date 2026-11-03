@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Typography from '@mui/material/Typography';
 import { BRAND } from '@/components/marketing/marketingStyles';
-import type { Part } from './showcaseData';
+import { playable, type Part } from './showcaseData';
 
 const cardSx = {
   flex: '0 0 auto',
@@ -20,6 +20,12 @@ const cardSx = {
   bgcolor: 'rgba(17, 20, 57, 0.55)',
   border: '1px solid rgba(255, 255, 255, 0.1)',
 } as const;
+
+function status(p: Part): string {
+  if (p.status === 'coming') return 'Coming soon';
+  const ready = p.steps.filter(playable).length;
+  return ready === p.steps.length ? 'Ready to watch' : `Steps ready, videos coming (${ready} of ${p.steps.length})`;
+}
 
 /**
  * All 20 parts. A live part is a button; the others stay visible and say they're coming rather
@@ -58,7 +64,7 @@ export default function PartPicker({
                 component="span"
                 sx={{ fontSize: '0.8rem', fontWeight: 600, color: p.status === 'live' ? BRAND.teal : 'text.secondary' }}
               >
-                {p.status === 'live' ? 'Ready to watch' : 'Coming soon'}
+                {status(p)}
               </Typography>
               <Typography component="span" sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
                 {p.size}

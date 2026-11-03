@@ -11,7 +11,7 @@ import ListItemText from '@mui/material/ListItemText';
 import ListSubheader from '@mui/material/ListSubheader';
 import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
-import { mediaUrl, type LivePart } from './showcaseData';
+import { mediaUrl, playable, type LivePart, type Step } from './showcaseData';
 
 /**
  * One step at a time: its video, the plan's title and caption, and previous / next. The video
@@ -37,25 +37,35 @@ export function StepPlayer({
   return (
     <Box>
       <Box sx={{ position: 'relative', aspectRatio: '16 / 9', borderRadius: 2, overflow: 'hidden', bgcolor: 'common.black' }}>
-        <Box
-          component="video"
-          key={step.id}
-          src={mediaUrl(step.video)}
-          controls
-          muted
-          playsInline
-          preload="metadata"
-          autoPlay={autoPlay}
-          aria-label={`Video: ${step.title}`}
-          onError={() => {
-            setFailed(step.id);
-            if (!reported.current) {
-              reported.current = true;
-              Sentry.captureException(new Error(`Showcase: the video for ${part.id} ${step.id} failed to load`));
-            }
-          }}
-          sx={{ width: '100%', height: '100%', display: 'block' }}
-        />
+        {playable(step) ? (
+          <Box
+            component="video"
+            key={step.id}
+            src={mediaUrl(step.video)}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            autoPlay={autoPlay}
+            aria-label={`Video: ${step.title}`}
+            onError={() => {
+              // A published video that won't load is a fault; an unpublished one never gets here.
+              setFailed(step.id);
+              if (!reported.current) {
+                reported.current = true;
+                Sentry.captureException(new Error(`Showcase: the video for ${part.id} ${step.id} failed to load`));
+              }
+            }}
+            sx={{ width: '100%', height: '100%', display: 'block' }}
+          />
+        ) : (
+          <Typography
+            role="status"
+            sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 3, textAlign: 'center', color: 'text.secondary' }}
+          >
+            This step&apos;s video is still being made. Its title and caption are below.
+          </Typography>
+        )}
         {failed === step.id && (
           <Typography
             role="status"
@@ -92,6 +102,11 @@ export function StepPlayer({
       </Box>
     </Box>
   );
+}
+
+function stepNote(s: Step): string | undefined {
+  const notes = [s.kind === 'cycle' && 'Machine cycle', !playable(s) && 'Video coming'].filter(Boolean);
+  return notes.length ? notes.join(' · ') : undefined;
 }
 
 /** Every step of the part, grouped by setup, in a box that scrolls on its own. */
@@ -145,7 +160,7 @@ export function StepList({ part, index, onSelect }: { part: LivePart; index: num
               >
                 <ListItemText
                   primary={`${i + 1}. ${s.title}`}
-                  secondary={s.kind === 'cycle' ? 'Machine cycle' : undefined}
+                  secondary={stepNote(s)}
                   slotProps={{ primary: { sx: { fontSize: '0.98rem' } } }}
                 />
               </ListItemButton>

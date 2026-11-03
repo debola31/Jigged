@@ -138,9 +138,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   micrometer, indicator. The format is done (2026-11-01, `moonshot/cards/card.schema.json`), with the card behind
   the reference take (`kurt-vise-load-and-clamp`). The G1 cards are written and pass `test_cards.py`
   (2026-11-02, merged): `bandsaw-cut-to-length`, `vf2-controls`, `vf2-tool-setter`,
-  `caliper-measure-bore`, `micrometer-measure-thickness`, `dti-sweep-face`. Open: your review of their proposed
-  values (each phase tags them `[proposed: …]`, with the reason in the card's notes), then the physics tier,
-  before a card counts as done (§6).
+  `caliper-measure-bore`, `micrometer-measure-thickness`, `dti-sweep-face`. Their 67 proposed values (each phase
+  tags them `[proposed: …]`, with the reason in the card's notes) approved as written (your decision, 2026-11-03);
+  the tags stay as their record. Open: the physics tier, before a card counts as done (§6).
 - [x] For each G1 card: the maker's instructions found; YouTube or research-dataset footage found, downloaded to
   `C:\jigged-data\footage\` and hand-tracked (bonus, not required; videos never committed or published).
   2026-11-02: maker's instructions cited in every card; the band saw's are JET's HBS-916 manual, as McMaster names
@@ -161,8 +161,12 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   3.45 mm against the pads' 3.5 mm, decided 2026-11-02). Body vs. people is per-frame since 2026-11-02
   (`moonshot/validate/posture.py`), reproducing trainual's report on its reference take (`test_posture_port.py`);
   the re-planned vise take fails it: 53% of frames inside people's range against 95%, likelihood median 25.6
-  against 25, and so does every vise take since (2026-11-03: op20 passes the likelihood, not the range), **your call
-  on how it gates** (§6, Nov 3). Since the body-checks merge every check runs before a render, so no vise take
+  against 25, and so does every vise take since (2026-11-03: op20 passes the likelihood, not the range). Your
+  decision (2026-11-03): posture gates against a standing-work range, from standing-work data if a dataset has it,
+  otherwise the seated range widened with a written reason for your review. The seated range's misses are more
+  than the trunk: freed, the takes still sit 64-73% inside, the arm hanging at the side (shoulder elevation 14 deg
+  against the seated 22), turned out cranking (+50 deg against 13.5) and the wrist back pushing (+40 against 20).
+  Since the body-checks merge every check runs before a render, so no vise take
   renders on its own; their review drafts render regardless (`pipeline --render-only`). The reference's skin is
   3.57 mm for one frame at the end of the 30 N push, against 3.5. Open: joint ranges and the per-verb physics are
   gates only.
@@ -189,9 +193,10 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle.
   `test_counterfactuals.py`, 2026-11-02: each alters the model or plan in the test; the open door in the fast tier,
   the other two on the hub's vise take (physics tier).
-- [ ] Timestep halving converges. Gate `test_timestep.py` (2026-11-02): the grab, place, slide, push, crank and
+- [x] Timestep halving converges. Gate `test_timestep.py` (2026-11-02): the grab, place, slide, push, crank and
   finger depth agree at 0.5 ms; the parallels didn't: para_b moved 1.07 mm under the 3 N check at 1 ms and 0.11 mm
-  at 0.5 ms. Noslip at 10 iterations (2026-11-03) holds it at 0.07 mm at 1 ms; the gate is to re-run.
+  at 0.5 ms. Noslip at 10 iterations (2026-11-03) holds it at 0.07 mm at 1 ms, and the gate passes (6 of 6,
+  2026-11-03).
 - [ ] The six known gaps in §5.5, on the re-planned vise take (2026-11-02). Fixed: the wrist's ellipse (0.80 at
   most), the crank grip (the lever never touched), the skin (3.45 mm, within the pads' 3.5), finger spread (0.11
   deg past range at worst, inside the 1 deg tolerance). Open: shoulder rotation at 151.5 deg/s against 150, and
@@ -261,11 +266,11 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   grasp: the parallels session; parallel a now stands 19 mm from the fixed jaw (was 13.2), where the fingers that
   set it fit. Open: op30/op40's tall part arrives over the vise about 25 mm off and lands on a jaw (the arm at full
   reach); op50's, standing on end, is knocked over by the reach; op10's lift-out puts the thumb on the part's top;
-  op50's check (an indicator swept up its side) is the setting session's. **Waiting on you:** every vise take,
-  approved draft 3 too, fails the posture checks that the body-checks merge put in front of rendering (53% of
-  frames inside people's range against 95%; that data is seated work), so no vise-take draft renders on its own
-  until you choose how they gate. Three of the stock's plan gaps need a tool or a mask (the +Z side slot 2.64 mm,
-  the boss's V flanks 2.31 mm, the pad grooves 1.50 mm). Within the unload step the doors jump from door-open's 300
+  op50's check (an indicator swept up its side) is the setting session's. Your decisions (2026-11-03): posture
+  gates against a standing-work range (§3b); the G1 cards' proposed values approved; the AngLock's push on the
+  moving jaw declared a vise mechanism; the stock's three plan gaps (the +Z side slot 2.64 mm, the boss's V flanks
+  2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The stock gate then still fails on
+  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**

@@ -30,6 +30,7 @@ LUMBAR = np.array([-300.0, -935.0, 955.0])              # in the doorway, a litt
 LIFT_MM = 170.0                                          # clears the 115 mm nozzle out of the 125 mm holster
 TIP_OVER_VISE = np.array([VISE["x"], VISE["fixed_face_y"] - 50.0, VISE["jaw_top_z"] + 110.0])
 SWEEP_MM = 55.0                                          # along the jaws, either side of the middle
+DOORWAY = np.array([ORIGIN[0], -900.0, 0.0])             # in front of the door opening's middle
 # blowing: the nozzle pointing forward and down into the vise, the handle up and back toward the operator
 AIM = np.stack([[0.0, 0.6, -0.8], [-1.0, 0.0, 0.0], [0.0, 0.8, 0.6]], 1)
 
@@ -109,9 +110,14 @@ class BlowOff(StepTake):
         tip = AG.NOZZLE_TO
         aim_p = lambda dx: TIP_OVER_VISE + np.array([dx, 0.0, 0.0]) - AIM @ tip                          # noqa: E731
         t_on, t_lift = 1.75, 2.2                                 # closes on the handle, settles, then lifts
-        keys = [(t_lift, self.R0, self.p0), (t_lift + 0.8, self.R0, lifted), (t_lift + 2.0, AIM, aim_p(-SWEEP_MM)),
-                (t_lift + 2.7, AIM, aim_p(SWEEP_MM)), (t_lift + 3.4, AIM, aim_p(-SWEEP_MM)),
-                (t_lift + 3.9, AIM, aim_p(0.0)), (t_lift + 5.1, self.R0, lifted), (t_lift + 5.9, self.R0, self.p0)]
+        # in and out through the middle of the door opening: a straight line from the holster crosses the open
+        # right door's panel
+        gate = DOORWAY + np.array([0.0, 0.0, lifted[2] - DOORWAY[2]])
+        mid = Rotation.from_matrix(np.stack([self.R0, AIM])).mean().as_matrix()
+        keys = [(t_lift, self.R0, self.p0), (t_lift + 0.8, self.R0, lifted), (t_lift + 1.6, mid, gate),
+                (t_lift + 2.5, AIM, aim_p(-SWEEP_MM)), (t_lift + 3.2, AIM, aim_p(SWEEP_MM)),
+                (t_lift + 3.9, AIM, aim_p(-SWEEP_MM)), (t_lift + 4.4, AIM, aim_p(0.0)), (t_lift + 5.3, mid, gate),
+                (t_lift + 6.1, self.R0, lifted), (t_lift + 6.9, self.R0, self.p0)]
         self.keys = keys
         t_down = keys[-1][0]
         self.look(0.0, self.p0)
@@ -127,13 +133,13 @@ class BlowOff(StepTake):
         rel = lambda t: self.pose_at(t, keys)[0] @ self.R0.T                                           # noqa: E731
         self.follow("R", t_lift, t_down + 0.25, "gun", lambda t: self.pose_at(t, keys)[1], rel)
         self.event("carry", t_lift, t_down, side="R", object="air_gun")
-        self.event("blow", keys[2][0], keys[5][0], side="R")
-        self.effort("R", keys[2][0] - 0.1, 0.5, "gun")
-        self.effort("R", keys[2][0], 0.6, "gun_fire")              # the index squeezes the trigger while aiming
-        self.effort("R", keys[5][0], 0.6, "gun_fire")
-        self.effort("R", keys[5][0] + 0.1, 0.5, "gun")
+        self.event("blow", keys[3][0], keys[6][0], side="R")
+        self.effort("R", keys[3][0] - 0.1, 0.5, "gun")
+        self.effort("R", keys[3][0], 0.6, "gun_fire")              # the index squeezes the trigger while aiming
+        self.effort("R", keys[6][0], 0.6, "gun_fire")
+        self.effort("R", keys[6][0] + 0.1, 0.5, "gun")
         self.look(keys[1][0], TIP_OVER_VISE)
-        self.look(keys[5][0] + 0.4, ORIGIN + AG.HOLSTER_TOP)
+        self.look(keys[6][0] + 0.4, ORIGIN + AG.HOLSTER_TOP)
         self.effort("R", t_down, 0.5, "gun")
         self.effort("R", t_down + 0.2, 0.0, None)
         self.fingers("R", t_down + 0.2, g["q"])

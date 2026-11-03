@@ -37,6 +37,7 @@ SETTLE_STEPS = 300
 
 
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
+APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
 
 
 class TakeRunner:
@@ -47,6 +48,7 @@ class TakeRunner:
     # held in the fist), the rest only its place (a knob spins in the fist; a door's bar turns with its door)
     encloses: dict[str, str] = {}
     welded: set[str] = set()
+    controls: set[str] = set()               # a welded tool's geoms the fingers still touch (its trigger)
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -93,6 +95,7 @@ class TakeRunner:
         root = m.body_rootid[m.body("R_hand").id]
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root}
         self.squeeze: dict[tuple[str, str], dict] = {}
+        self._held_apart: dict[str, bool] = {}
 
     # --- for a step to fill in ---------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
@@ -162,6 +165,12 @@ class TakeRunner:
         where the fist is when it closes: no jump at the start."""
         m, d = self.model, self.data
         for e in self.grip_events:
+            if e["grip"] in self.welded:                 # apart from the final approach on, so the hand reaches its grip
+                apart = e["t0"] - APPROACH_S <= t < e["t1"] - 0.05
+                ob = m.body(self.encloses[e["grip"]]).id
+                if apart != self._held_apart.get(e["grip"], False):
+                    self.hold_apart(ob, apart)
+                    self._held_apart[e["grip"]] = apart
             eq = m.equality(f"enclose_{e['grip']}").id
             want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
             if want and not d.eq_active[eq]:
@@ -172,26 +181,24 @@ class TakeRunner:
                 if e["grip"] in self.welded:            # the hand's pose in the object's frame: as planned, or as now
                     rel = self.planned_relpose(e["grip"])
                     p_rel, R_rel = rel if rel is not None else (Ro.T @ (d.xpos[hb] - d.xpos[ob]), Ro.T @ Rb)
-                    m.eq_data[eq, 0:3] = Rb.T @ (P - d.xpos[hb])
+                    m.eq_data[eq, 0:3] = 0.0                # at the hand's origin: then relpose is the hand's pose
                     m.eq_data[eq, 3:6] = p_rel
                     qr = np.zeros(4)
                     mujoco.mju_mat2Quat(qr, np.ascontiguousarray(R_rel).reshape(-1))
                     m.eq_data[eq, 6:10] = qr
-                    self.hold_apart(ob, True)
                 else:
                     m.eq_data[eq, 0:3] = Ro.T @ (P - d.xpos[ob])
                     m.eq_data[eq, 3:6] = Rb.T @ (P - d.xpos[hb])
                 d.eq_active[eq] = 1
             elif not want and d.eq_active[eq]:
                 d.eq_active[eq] = 0
-                if e["grip"] in self.welded:
-                    self.hold_apart(m.body(self.encloses[e["grip"]]).id, False)
 
     def hold_apart(self, body: int, held: bool) -> None:
         """While a welded grip holds a tool, the hand's skin and the tool don't collide (the constraint stands for
-        their contact); the tool still collides with everything else."""
+        their contact), except the tool's controls (a trigger) the fingers work; the tool still collides with
+        everything else."""
         m = self.model
-        gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body]
+        gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body and m.geom(g).name not in self.controls]
         if held:
             self._apart = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
             m.geom_contype[gs], m.geom_conaffinity[gs] = 4, 1          # skin is contype 2, conaffinity 1

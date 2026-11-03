@@ -30,6 +30,7 @@ class BlowOff(_Cell):
     grip_geoms = {"gun": "air_gun_handle", "gun_fire": "air_gun_trigger"}
     encloses = {"gun": "air_gun"}
     welded = {"gun"}
+    controls = {"air_gun_trigger"}
 
     def __init__(self, folder=BO.TAKES / "blow-off"):
         super().__init__(folder)

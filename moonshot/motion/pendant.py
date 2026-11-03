@@ -151,6 +151,7 @@ class PendantTake(StepTake):
             ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
             self.pad_in_hand[name] = (fingertip_in_hand(g["q"], ax), ax)
         self.key_H = self.grips["keypad"]["H"]    # the keypad grip's hand frame the hand last pressed with
+        self.key_grip_last = ""                   # ... and its name
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
         self.cursor = 0                           # the work offsets page's cursor: x, y or z
@@ -210,8 +211,9 @@ class PendantTake(StepTake):
         reached = self.where != "keys"
         if reached:
             self.look(t0, key_at(name))
-            dur = float(np.clip(0.35 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
-            self.transit("R", t0, t0 + dur, hover, via=self.clear_of_face(hover), fade=(H, 1.0))
+            via = self.clear_of_face(hover)
+            dur = self.travel_s([self.side["R"]["wrist"], *via, hover])
+            self.transit("R", t0, t0 + dur, hover, via=via, fade=(H, 1.0))
             self.effort("R", t0, 0.0, "keypad")
             self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
             self.fingers("R", t0 + 0.1, q)
@@ -224,6 +226,8 @@ class PendantTake(StepTake):
         # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
         # settle on its target
         dwell = 0.6 if reached else 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
+        if grip != self.key_grip_last:            # a new region's grip: the hand turns to it before it presses
+            dwell += 0.4
         move_s += dwell
         path = PosePath(self.key_H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
             t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
@@ -231,13 +235,20 @@ class PendantTake(StepTake):
         # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's
         # own orientation only as a preference, as one hand pose can't reach every key
         self.add("R", t0, t1, lambda t, path=path, H=H: [
-            ("pose", H, path.at(t)[1], 1.0), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 3.0)])
+            ("pose", H, path.at(t)[1], 1.0), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 6.0)])
         self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")
-        self.key_H = H
+        self.fingers("R", t1, q)                  # the press's shape held to its end: what comes next changes it after
+        self.key_H, self.key_grip_last = H, grip
         self.side["R"]["wrist"], self.t, self.where = hover, t1, "keys"
         self._follow(name)
+
+    @staticmethod
+    def travel_s(points) -> float:
+        """How long a reach along these points takes: about 0.5 m/s on average, from 0.45 s (Fitts-like)."""
+        length = sum(np.linalg.norm(np.asarray(b, float) - np.asarray(a, float)) for a, b in zip(points, points[1:]))
+        return float(np.clip(0.3 + length / 500.0, 0.45, 1.6))
 
     def clear_of_face(self, to) -> list:
         """A point to pass through between the keys and the dial, well out from the face, so the hand doesn't skim
@@ -289,8 +300,12 @@ class PendantTake(StepTake):
             H0_, W_off = self.dial_pose(a0, OFF_RIM_MM)
             self.leave_keys(t0)
             if self.where != "dial":
-                dur = float(np.clip(0.35 + np.linalg.norm(W_off - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
-                self.transit("R", t0, t0 + dur, W_off, via=self.clear_of_face(W_off), fade=(H0_, 1.0))
+                if self.where == "keys":              # the last key let go before the hand leaves for the dial
+                    self.wait(0.25)
+                    t0 = self.t
+                via = self.clear_of_face(W_off)
+                dur = self.travel_s([self.side["R"]["wrist"], *via, W_off])
+                self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
                 self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
                 t0 += dur
             else:                                     # turn back, off the rim, from the last stroke's end

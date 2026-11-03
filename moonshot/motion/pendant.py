@@ -38,7 +38,9 @@ DIAL_R = DIAL["radius_mm"]
 DETENT_DEG = 360.0 / DIAL["detents_per_turn"]
 STROKE_CLICKS = 30                                        # 108 deg a stroke: a comfortable turn of the forearm
 LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pendant's left half, the machine at the left
-REF_KEY = "offset"
+# a keypad grip per region of the keys, each solved at one key there: one hand pose can't reach every key without
+# pitching the curled fingers into the face
+KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi"}
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
 OVERTURN = 1.25                                           # a stroke turns the hand this much farther than its clicks;
@@ -139,10 +141,14 @@ class PendantTake(StepTake):
         self.solve_grips(self._grip_specs())
         SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(own, SHARED_GRIPS)
-        g = self.grips["keypad"]
-        # where the index meets the face, in the hand's frame (fingertip_in_hand), and the press direction
-        ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
-        self.pad_in_hand = (fingertip_in_hand(g["q"], ax), ax)
+        # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
+        # direction
+        self.pad_in_hand = {}
+        for name in KEY_GRIPS:
+            g = self.grips[name]
+            ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
+            self.pad_in_hand[name] = (fingertip_in_hand(g["q"], ax), ax)
+        self.key_H = self.grips["keypad"]["H"]    # the keypad grip's hand frame the hand last pressed with
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
         self.cursor = 0                           # the work offsets page's cursor: x, y or z
@@ -153,14 +159,16 @@ class PendantTake(StepTake):
     def _grip_specs(self) -> dict:
         S = lambda *a: list(a) + [0.0, 0.0]      # noqa: E731  trunk 3, arm 7, girdle 2
         h = self.hand
-        k = key_at(REF_KEY)
         q = h.neutral()
         q.update(index_mcp_flex=12, index_pip=12, middle_mcp_flex=70, middle_pip=90, ring_mcp_flex=80, ring_pip=95,
                  little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=10, thumb_mcp_flex=40, thumb_ip=30)
-        band = lambda p: 0.5 * ((p[0] - k[0]) ** 2 + (p[2] - k[2]) ** 2)    # noqa: E731
-        key = dict(obj=k, q0=q, colliders=colliders() + keep_out(k), iters=900, side="R",
-                   targets={"index": G.plane_target(k, [0, -1.0, 0], 1.0, band)},
-                   starts=[S(8, 0, r, 75, 55, -10, 80, p, 0, 0) for p in (40, 75) for r in (0, 15)])
+        specs = {}
+        for name, ref in KEY_GRIPS.items():
+            k = key_at(ref)
+            band = lambda p, k=k: 0.5 * ((p[0] - k[0]) ** 2 + (p[2] - k[2]) ** 2)    # noqa: E731
+            specs[name] = dict(obj=k, q0=q, colliders=colliders() + keep_out(k), iters=900, side="R",
+                               targets={"index": G.plane_target(k, [0, -1.0, 0], 1.0, band)},
+                               starts=[S(8, 0, r, 75, 55, -10, 80, p, 0, 0) for p in (40, 75) for r in (0, 15)])
         q = h.neutral()
         for n in ("index", "middle"):
             q[f"{n}_mcp_flex"], q[f"{n}_pip"] = 45.0, 45.0
@@ -170,23 +178,31 @@ class PendantTake(StepTake):
                     targets={"thumb": rim(150, 215), "index": rim(-40, 5), "middle": rim(0, 45)},
                     starts=[S(8, 0, r, 75, 50, -10, 85, p, 0, 0) for p in (0, 30, 60) for r in (0, 15)])
         c = key_at("cycle_start")
-        button_l = dict(obj=c, q0=key["q0"], colliders=colliders(), iters=900, side="L",
+        button_l = dict(obj=c, q0=q, colliders=colliders(), iters=900, side="L",
                         targets={"index": G.plane_target(c, [0, -1.0, 0], 1.0,
                                                          lambda p: 0.5 * ((p[0] - c[0]) ** 2 + (p[2] - c[2]) ** 2))},
                         starts=[S(8, 0, r, 75, 50, -10, 80, p, 0, 0) for p in (40, 75) for r in (-15, 0)])
-        return {"keypad": key, "dial": dial, "button_L": button_l}
+        return specs | {"dial": dial, "button_L": button_l}
 
     # --- the keys ----------------------------------------------------------------------------------------
+    def key_grip(self, name: str) -> str:
+        """The keypad grip solved nearest a key."""
+        k = key_at(name)
+        return min(KEY_GRIPS, key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
+
     def key_pose(self, name: str, lift: float = 0.0):
-        g = self.grips["keypad"]
-        return g["H"], key_at(name) + g["W_rel"] + np.array([0, -lift, 0])
+        """The hand frame and wrist with the fingertip `lift` mm off a key, in its region's grip."""
+        g = self.key_grip(name)
+        H, (pt, _) = self.grips[g]["H"], self.pad_in_hand[g]
+        return H, key_at(name) - [0, lift, 0] - H @ pt
 
     def press(self, name: str, force: float | None = None, move_s: float = 0.2, hold_s: float = 0.2) -> None:
         """Move the index over a key (from the keys, or reaching from elsewhere), press it, and lift off."""
         force = force or (A[name]["force_n"] if name in ("cycle_start", "feed_hold") else A["keys"]["force_n"])
-        H = self.grips["keypad"]["H"]
-        pt, ax = self.pad_in_hand
-        W_on = key_at(name) - [0, TOUCH_LIFT_MM, 0] - H @ pt      # the wrist with the fingertip just off the key
+        grip = self.key_grip(name)
+        q = self.grips[grip]["q"]
+        pt, ax = self.pad_in_hand[grip]
+        H, W_on = self.key_pose(name, TOUCH_LIFT_MM)              # the wrist with the fingertip just off the key
         hover = W_on + [0, -HOVER_MM, 0]
         t0 = self.t
         reached = self.where != "keys"
@@ -196,17 +212,18 @@ class PendantTake(StepTake):
             self.transit("R", t0, t0 + dur, hover, fade=(H, 1.0))
             self.effort("R", t0, 0.0, "keypad")
             self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
-            self.fingers("R", t0 + 0.1, self.grips["keypad"]["q"])
+            self.fingers("R", t0 + 0.1, q)
             t0 += dur
             move_s = 0.05
         else:                                     # Fitts: farther keys take longer, about 0.6 m/s on average
             move_s = max(move_s, 0.12 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 600.0)
         start = self.side["R"]["wrist"]
+        self.fingers("R", t0 + move_s * 0.5, q)
         # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
         # settle on its target
         dwell = 0.6 if reached else 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
         move_s += dwell
-        path = PosePath(H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
+        path = PosePath(self.key_H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
             t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
         t1 = t0 + move_s + 0.37 + hold_s
         # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's
@@ -216,6 +233,7 @@ class PendantTake(StepTake):
         self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")
+        self.key_H = H
         self.side["R"]["wrist"], self.t, self.where = hover, t1, "keys"
         self._follow(name)
 
@@ -349,7 +367,7 @@ class PendantTake(StepTake):
             self.t += dur
             return
         if self.where == "keys":
-            H = self.grips["keypad"]["H"]
+            H = self.key_H
         elif self.where == "dial":
             H = self.dial_pose(self.dial_deg, OFF_RIM_MM)[0]
         else:

@@ -245,8 +245,8 @@ class Probing:
 def probe_features(plan: dict, setup_id: str) -> dict:
     """What each setup of nist-ftc-10 probes, and where its zero is (world mm, frame 0), from the plan's wcs.
 
-    The plan's X and Y are the machine's. Op 50 and 60 stand the part on end with datum A facing along X, so datum A
-    can't give Y as their wcs says: there it gives X, and the front face Y."""
+    The plan's X and Y are the machine's. Op 50 stands the part on end with datum A facing along X, so datum A
+    can't give Y as its wcs says: there it gives X, and the front face Y."""
     pose = part_pose(plan, setup_id)
     R, O, c, h = pose["R"], pose["origin_mm"], pose["centre_mm"], pose["size_mm"] / 2
     world = lambda p: O + R @ np.asarray(p, float)           # noqa: E731  a point of the part's model
@@ -271,7 +271,7 @@ def probe_features(plan: dict, setup_id: str) -> dict:
             x = faces["-x"][0][0]
         out["y"] = surface(datum_a, side_z)
         xy = [x, faces[datum_a][0][1]]
-    elif setup_id in ("op50", "op60"):
+    elif setup_id == "op50":
         out["x"] = surface(datum_a, float(top - 10.0))
         out["y"] = surface("-y", side_z)
         xy = [faces[datum_a][0][0], faces["-y"][0][1]]

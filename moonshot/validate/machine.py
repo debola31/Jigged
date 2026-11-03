@@ -2,8 +2,8 @@
 the spindle within its top speed, from the station's record (moonshot/library/stations/vf2.json). The record gives
 no acceleration, so none is judged.
 
-The vise take's physics run doesn't record the VF-2's axes yet (checks.json machine_axes), so on it the check has
-nothing to read.
+A take at a station with no machine (the inspection bench) records machine_axes as {}, and passes: it has nothing to
+keep in spec. A run that records nothing at all has nothing to read, and fails.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def spec() -> dict[str, dict]:
 
 
 @check("machines_inside_spec",
-       good=["good/machines_vf2_program.json", "good/machines_vf2_time_lapse.json"],
+       good=["good/machines_vf2_program.json", "good/machines_vf2_time_lapse.json", "good/machines_none.json"],
        bad=["bad/machines_vf2_past_travel.json", "bad/machines_vf2_too_fast.json"])
 def machines_inside_spec(take: dict) -> Result:
     """take: {"fps", "machine_axes": {axis: per-frame position, mm (the spindle in rpm)}} and, for a time-lapsed take,
@@ -31,7 +31,9 @@ def machines_inside_spec(take: dict) -> Result:
     against instead of the video's frame rate. Axes with no record fail."""
     fps, axes, limits = float(take["fps"]), take["machine_axes"], spec()
     clock = take.get("frame_machine_s")
-    if not axes or not any(len(v) for v in axes.values()):
+    if axes == {}:                                  # the take's station has no machine
+        return Result(passed=True, worst=0.0, detail={"out_of_spec": {}, "machines": "none at this station"})
+    if not any(len(v) for v in axes.values()):
         raise ValueError("a take with no frames can't pass a per-frame check")
     travel_tol = threshold("physics.machine_travel_mm").value
     speed_tol = threshold("physics.machine_speed_frac").value

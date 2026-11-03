@@ -30,10 +30,6 @@
      "title": "Op 50: first end"
     },
     {
-     "id": "op60",
-     "title": "Op 60: second end"
-    },
-    {
      "id": "finish",
      "title": "Finishing"
     }
@@ -839,8 +835,8 @@
     },
     {
      "id": "op50-deep",
-     "title": "Peck-drill Ø5.5 ±0.2, 35 ±1 deep",
-     "caption": "Peck-drill Ø5.5 ±0.2, 35 ±1 deep, with the 5.5 mm drill.",
+     "title": "Peck-drill both Ø5.5 ±0.2 holes from this end, 35 ±1 and 27.5 ±1 deep",
+     "caption": "Peck-drill both Ø5.5 ±0.2 holes from this end, 35 ±1 and 27.5 ±1 deep, with the 5.5 mm drill.",
      "kind": "cycle",
      "group": "op50",
      "where": {
@@ -864,132 +860,6 @@
       "y": 6975.3
      },
      "video": "video/nist-ftc-10/op50-unload.mp4"
-    },
-    {
-     "id": "op60-clean",
-     "title": "Clean the vise and set the parallels",
-     "caption": "Blow out the 6 in vise and wipe the jaws, then set the vise floor and a stop.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-clean.mp4"
-    },
-    {
-     "id": "op60-load",
-     "title": "Load the part",
-     "caption": "Set the part in the 6 in vise, standing on the other end, on the vise floor and a stop.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-load.mp4"
-    },
-    {
-     "id": "op60-seat",
-     "title": "Seat it and tighten the vise",
-     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-seat.mp4"
-    },
-    {
-     "id": "op60-check",
-     "title": "Check the parallels are pinched",
-     "caption": "Try each parallel with a fingertip: neither should move.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-check.mp4"
-    },
-    {
-     "id": "op60-xy",
-     "title": "Find X and Y",
-     "caption": "Set G54 X at probe the side and Y at probe datum A.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-xy.mp4"
-    },
-    {
-     "id": "op60-z",
-     "title": "Set Z",
-     "caption": "Set G54 Z at top of the end.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-z.mp4"
-    },
-    {
-     "id": "op60-start",
-     "title": "Close the door and start the cycle",
-     "caption": "Close the door, check the program is Op 60: second end, and press Cycle Start.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-start.mp4"
-    },
-    {
-     "id": "op60-deep",
-     "title": "Peck-drill Ø5.5 ±0.2, 27.5 ±1 deep",
-     "caption": "Peck-drill Ø5.5 ±0.2, 27.5 ±1 deep, with the 5.5 mm drill.",
-     "kind": "cycle",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-deep.mp4"
-    },
-    {
-     "id": "op60-unload",
-     "title": "Blow off the chips and unload",
-     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
-     "kind": "human",
-     "group": "op60",
-     "where": {
-      "name": "Haas VF-2 (bay 1)",
-      "item": "vf2-1",
-      "x": 11557.7,
-      "y": 6975.3
-     },
-     "video": "video/nist-ftc-10/op60-unload.mp4"
     },
     {
      "id": "deburr",

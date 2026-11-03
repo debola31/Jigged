@@ -4,7 +4,7 @@ The finished part lies pocket side up on the bench. The left hand comes onto its
 down; the right picks the swivel deburring tool off the bench, draws its blade along the outer near top edge and
 then the pocket's far edge, and puts it back. Two strokes stand for every edge: the caption says the rest.
 
-A stroke draws the blade's tip along the edge against the face below it, 0.2 mm down, the tool leaning in from the
+A stroke draws the blade's tip along the edge against the face below it, 0.6 mm down, the tool leaning in from the
 operator's side and trailing 20 deg behind the stroke, and presses it into that face (moonshot/sim/bench.py applies the
 press and keeps the tip on its path by touch). Both edges' faces face the operator: the part's near side, and the
 pocket's far wall. Pressed into the corner along its bisector, or down onto datum A, the round tip slid off one face
@@ -36,7 +36,8 @@ TILT_DEG = 30.0             # the tool leans down at this toward the edge: at 45
 BISECTOR = np.array([0.0, -1.0, 1.0]) / math.sqrt(2)      # both edges' outward bisector, the part's frame: up, toward +Z
 FACE_OUT, DOWN = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0]) # the part's frame: out of the face each edge's tip
                                                                         # presses on (the operator's way), and down
-BELOW_MM = 0.2              # the tip rides the face this far below the edge: its collider 0.01 mm from the edge line
+BELOW_MM = 0.6              # the tip rides the face this far below the edge: its collider 0.11 mm from the edge line;
+                            # at 0.2 the part's settling lifted the tip's centre above the edge, and it climbed over
 INTO_MM = 0.5               # and is aimed this far into it, the face stopping it, as the vise take's pushes are: aimed
                             # at the face, a millimetre of lag left it short, the press unable to move the arm; 1.5 mm
                             # into the stiff face, it bounced

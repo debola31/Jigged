@@ -28,8 +28,11 @@ OUT = data_root() / "takes" / "nist-ftc-10-inspect"
 CAL_YAW = 0.0               # the station's: beam along X, jaws to the left; face down, the roller faces the operator
 SEAT_N = 2.0                 # the push that seats the rod on the floor (proposed: light, as the manual asks)
 OVERTRAVEL = 0.3             # the slider is planned this far past the floor; the rod stops it
-ROD_FROM_WALL = 2.1          # the rod's near face this far past the pocket's near wall (mm): clear of the floor's
+ROD_FROM_WALL = 2.6          # the rod's near face this far past the pocket's near wall (mm): clear of the floor's
                              # 2 mm fillet, which would read short
+STAND_YAW_DEG = 30.0         # on end, the display turned this far from facing the operator, toward their right: facing
+                             # them, the hand on the back took the wrist to its cap and still left the beam 20 deg off
+                             # upright (the plan of 2026-11-02)
 BEAM_END = BC.CAL["beam"][1][0]
 
 
@@ -78,15 +81,19 @@ class InspectPlan(BenchPlan):
 
     # --- the calipers on end beside the pocket ---------------------------------------------------------------------
     def standing(self):
-        """The beam's pose standing on the near rim: its end down on datum A, the display toward the operator, the
-        rod's near face ROD_FROM_WALL past the pocket's near wall, halfway along the pocket."""
+        """The beam's pose standing on the near rim: its end down on datum A, the display toward the operator turned
+        STAND_YAW_DEG about the rod, the rod's near face ROD_FROM_WALL past the pocket's near wall, halfway along it."""
         R = np.stack([[0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0]], 1)   # asset x down, y right, z toward the eyes
         wall = self.to_world([np.mean(BC.POCKET["x"]), 0.0, BC.POCKET["z"][1]])  # datum A at the near wall's top
         rod_z_face = BC.CAL["rod"][1][2]                                         # the rod's face nearest the wall
         rod_y_mid = np.mean([BC.CAL["rod"][0][1], BC.CAL["rod"][1][1]])
+        rod_mid = np.mean(BC.CAL["rod"], axis=0)
         p = wall - R @ np.array([BEAM_END, rod_y_mid, rod_z_face])              # rod centred on the wall's middle, at A
         p = p + np.array([0.0, ROD_FROM_WALL, 0.0])                             # its face that far into the pocket
-        return R, p
+        a = np.radians(STAND_YAW_DEG)
+        Rz = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]])
+        pivot = p + R @ np.array([BEAM_END, rod_mid[1], rod_mid[2]])             # the rod's end: it stays put
+        return Rz @ R, pivot + Rz @ (p - pivot)
 
     # --- the verbs ------------------------------------------------------------------------------------------------
     def pick_up(self):

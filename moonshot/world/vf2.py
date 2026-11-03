@@ -436,7 +436,7 @@ class Control:
 
     def _handle(self, dt: float) -> None:
         """The jog handle: its detents, and in handle jog each click moves the selected axis by the increment, no
-        faster than rapid."""
+        faster than rapid and no farther than its travel: clicks past an end are lost, as at Haas's travel limits."""
         d = self.data
         d.ctrl[self.act["jog_detent"]] = -self.detent_nm * math.sin(self.detents * d.qpos[self.q["jog"]])
         if self.mode != "handle_jog" or self.state == "running":
@@ -444,7 +444,9 @@ class Control:
             return
         c = self.clicks()
         i = "xyz".index(self.jog_axis)
-        self._jog_goal[i] += (1.0 if i == 2 else -1.0) * (c - self._jog_clicks) * self.increment_mm * M
+        lo, hi = self.model.jnt_range[self.model.joint(f"vf2_{self.jog_axis}").id]
+        goal = self._jog_goal[i] + (1.0 if i == 2 else -1.0) * (c - self._jog_clicks) * self.increment_mm * M
+        self._jog_goal[i] = min(max(goal, lo), hi)
         self._jog_clicks = c
         delta = self._jog_goal - self.setpoint
         dist, stepmax = np.linalg.norm(delta), self.rapid * M * dt

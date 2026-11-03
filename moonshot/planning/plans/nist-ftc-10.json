@@ -19,7 +19,7 @@
      "features": [{"type": "hole", "dia_mm": 6.0, "axis": "Y", "count": 4}]}
    ]},
   {"id": "op20", "title": "Op 20: scalloped side", "machine": "vf2", "face_up": "+Y",
-   "workholding": {"vise": "vise6", "parallels_in": 0.5, "jaw_on": "Z faces", "note": "Flipped onto datum A; clamp on the finished sides"},
+   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Flipped onto datum A; clamp on the finished sides; 1 in parallels, so the finished 31 mm part stands 12.3 mm proud of the jaws and every op20 tool clears them"},
    "wcs": {"code": "G54", "x": "the ear holes (probe)", "y": "the ear holes (probe)", "z": "datum A on the parallels, plus 31 mm"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face to the 31 mm overall height"},

@@ -219,10 +219,12 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
-- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
+- [x] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
   2026-11-02 at draft size (960x540, 32 samples), the ported renderer: GTX 1070 and M1 Pro about 7 s a frame each,
-  with the range's start included. Render jobs
-  report their frame time since 2026-11-02 (`bake_render`); the dashboard doesn't show it yet.
+  with the range's start included. Its Production panel since 2026-11-03 (`moonshot/orchestrate/dashboard.py`): on
+  its first morning, 11.1 h of drafts and 6.1 h of finals rendered, 1,446 of the forecast's 145,000 final frames, the
+  rest 603 machine-hours at the finals' rate (about 4.5 days on all three machines rendering without a break), and
+  41 drafts awaiting review.
 - [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
   intact; the scene pack fetched by hash and verified on each worker
 - [x] **Keep our own queue** rather than switching to Flamenco (§8), on the tests and the live run (2026-11-01)
@@ -270,7 +272,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   gates against a standing-work range (§3b); the G1 cards' proposed values approved; the AngLock's push on the
   moving jaw declared a vise mechanism; the stock's three plan gaps (the +Z side slot 2.64 mm, the boss's V flanks
   2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The stock gate then still fails on
-  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. Within the unload step the doors jump from door-open's 300
+  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. The bench's carry welds
+  declared a grip assist; Load the tools shows every tool loaded in full. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**

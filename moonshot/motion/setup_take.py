@@ -67,9 +67,10 @@ JAW_TOP = VISE["jaw_top_z"]
 
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
-REACH_S, REACH_PEAK = 0.6, 0.5
-KNOB_REACH_S, KNOB_PEAK, KNOB_PEAK_FINAL = 0.75, 0.583, 0.525
-TOUCH_LEAD_S = 0.1          # the fingers meet the blank's faces this long before the grip's planned close
+REACH_S, REACH_PEAK = 0.66, 0.65
+KNOB_REACH_S, KNOB_PEAK, KNOB_PEAK_FINAL = 0.72, 0.627, 0.613
+READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
+TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
 
 
@@ -409,16 +410,19 @@ class Take:
             # from the thigh the whole 0.53 m in people's 0.32-0.67 s, the hand would peak near the nothing-moves check's
             # 20 m/s^2 (5.77 d / T^2 per leg): it comes up beside the table first, slower than the reach (so the reach
             # is the fastest move before the grasp, which is how the grasp-timing check finds its start), and the
-            # reach starts from there, still
+            # reach starts from there, still. Its two legs share the time, so the final approach from above is slow:
+            # paced, it touched the part at 0.3-0.5 m/s, and the knock read as the load's onset 67 ms in. The ready
+            # point is set from the grip, so the reach is the same length whatever the load and wherever the operator
+            # stands
             reach = REACH_S if reach is None else reach
-            ready = self.wrist + [70, 40, 150]
+            ready = Wg + READY_FROM_GRIP
             t_ready = t0 + 0.35 + raise_s
             self.transit(t0 + 0.35, t_ready, ready)
             self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
             t_reach = t_ready + settle_s
-            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, 62]], fade=(Hg, 1.0), paced=True)
-            # widest at ~74% of the reach as the hand-opening check measures it, with the fingers ~0.1 s behind
-            # their keys
+            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, 62]], fade=(Hg, 1.0))
+            # widest at ~74% of the reach as the hand-opening check measures it, from the pause to the first touch; the
+            # physics hand is widest ~0.03 s before the key
             t_peak = t_reach + REACH_PEAK * reach
         t_contact = t_reach + reach
         self.fingers(t_reach, self.q_relax)

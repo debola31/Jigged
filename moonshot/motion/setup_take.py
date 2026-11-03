@@ -59,6 +59,9 @@ SEAT_Z = VISE["seat_z"]
 PAR_T, PAR_L = PARALLEL_T, PARALLEL_L
 PLACE_GAP = 6.0
 TALL_PLACE_GAP = 15.0
+# the usage card a take plays (moonshot/cards), whose footage the take is held to: loading is the Kurt card's; no card
+# covers lifting a part out yet
+CARD = {"stage": {"card": "kurt-vise-load-and-clamp"}}
 INSPECT = np.array([-290.0, -640.0, 1160.0])              # held up in front, below the eyes, to look at it
 JAW_TOP = VISE["jaw_top_z"]
 
@@ -620,16 +623,18 @@ class Take:
         self.event("crank", t_c0, t_t1 + 0.35, plan=dict(plan))
         tl = t_t1 + 0.35
         self.fingers(tl, g["q"])
-        self.fingers(tl + 0.3, ko)
+        self.fingers(tl + 0.12, open_like(self.hand, g["q"], 0.25))      # eased, so the hand slides off the knob
+        self.fingers(tl + 0.35, ko)
         Wend = knob_center(plan["phi_t"]) - Hk @ pt
         self.wrist = Wend
         box_c, box_h = np.array([sc[0], sc[1] - VISE["knob_grip"], sc[2]]), np.array([140.0, 55.0, 140.0])
         self.hand_boxes.append((box_c, box_h, self._knob_free_from, tg - 0.7))
         self._knob_free_from = tl + 0.35
-        if final:
-            self.transit(tl, tl + 0.9, np.array([sc[0] + 175, -820, 990]), via=[Wend + [60, -15, 45]])
-        else:
-            self.transit(tl, tl + 0.9, over, via=[Wend + [60, -15, 45]])
+        # off the knob's end along its axis first, then away: let go and moved off it out to the right and up, the
+        # fingers swept across the lever wherever the crank stopped with the lever that way (op30's and op40's turns)
+        off = Wend + [0, -60, 10]
+        away = np.array([sc[0] + 175, -820, 990]) if final else over
+        self.transit(tl, tl + 0.9, away, via=[off, off + [60, -10, 40]])
         self.fingers(tl + 0.9, self.q_relax)
         self.t = tl + 0.9
         if not final:
@@ -824,7 +829,7 @@ class Take:
             "parallels": {k: v.tolist() for k, v in self.parallels.items()}, "home": self.home.tolist(), "set": self.set_down.tolist(),
             "crank_plans": self.crank_plans, "knob_pt_hand": getattr(self, "knob_pt_hand", np.zeros(3)).tolist(),
             "opening0": self.opening0, "start": self.start,
-            "load": self.load.to_json()}, indent=1),
+            "load": self.load.to_json()} | CARD.get(self.start, {}), indent=1),
             encoding="utf-8")
 
 

@@ -4,7 +4,7 @@ each shortcut is reported with how long it was on. A grip assist's seconds count
 (plan §3.1).
 
 Reads, per frame, the equality constraints active and the bodies with a force applied from outside the physics
-(checks.json active_constraints and applied_forces), which the vise take's physics run doesn't record yet.
+(checks.json active_constraints and applied_forces); a force is declared by name as "force on <body>".
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def shortcuts_declared(take: dict) -> Result:
     on: dict[str, int] = {}
     undeclared: dict[str, int] = {}
     for k, (constraints, forces) in enumerate(frames):
-        for name in constraints:
+        for name in [*constraints, *(f"force on {body}" for body in forces)]:
             if any(fnmatch(name, p) for p in d["mechanisms"]):
                 continue
             match = next((p for p in d["shortcuts"] if fnmatch(name, p)), None)
@@ -43,8 +43,6 @@ def shortcuts_declared(take: dict) -> Result:
                 undeclared.setdefault(name, k)
             else:
                 on[match] = on.get(match, 0) + 1
-        for body in forces:
-            undeclared.setdefault(f"force on {body}", k)
     seconds = {s: round(n / fps, 2) for s, n in on.items()}
     assist = round(sum(n for s, n in on.items() if d["shortcuts"][s]["grip_assist"]) / fps, 2)
     return Result(passed=not undeclared, worst=float(len(undeclared)),

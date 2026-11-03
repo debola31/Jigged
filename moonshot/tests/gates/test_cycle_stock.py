@@ -94,7 +94,8 @@ def concave(face) -> bool:
 
 
 def exemption(face, fx: dict) -> str | None:
-    """The fixture's reason a face isn't gated ("blend", "drill point"), or None for a machined face."""
+    """The fixture's reason a face isn't gated ("blend", "drill point", "plan gap"), or None for a machined face. An
+    exemption with within_mm ([lo, hi] corners, the part's frame) takes only the faces whose centre lies in that box."""
     t = face.geomType()
     for e in fx["exempt"]:
         if t not in e["types"]:
@@ -105,6 +106,9 @@ def exemption(face, fx: dict) -> str | None:
             u0, u1, _, _ = face._uvBounds()
             if r > e["radius_max_mm"] + 1e-6 or math.degrees(u1 - u0) > e["arc_max_deg"]:
                 continue
+        if "within_mm" in e and not all(lo <= x <= hi for lo, x, hi in zip(*e["within_mm"][:1], face.Center().toTuple(),
+                                                                              *e["within_mm"][1:])):
+            continue
         return e["what"]
     return None
 

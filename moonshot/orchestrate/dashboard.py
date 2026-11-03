@@ -3,6 +3,10 @@
 Shows what each running job is doing and when it should finish, each worker (last seen, jobs held), the queue by
 part group, failures with their errors, and recent results. A running job's ETA comes from the rate it reports (frames
 drawn so far), or, for a stage it can't count, from how long that kind of job took before.
+
+Production: the render hours spent so far, drafts and finals, against the forecast (checklist §1: 145,000 frames of
+finals for the 20 parts), the hours its remaining frames take at the finals' measured rate, the cloud credit spent
+(none: the cloud reserve isn't used, checklist §7), and the drafts awaiting review (a take with a draft and no final).
 """
 from __future__ import annotations
 
@@ -10,10 +14,12 @@ import html
 import json
 import statistics
 import time
+from pathlib import Path
 
 from moonshot.orchestrate.queue import Queue
 
 STALE_S = 300
+FORECAST_FRAMES = 145_000          # finals for all 20 parts (checklist §1's forecast)
 
 
 def _ago(t: float | None, now: float) -> str:
@@ -49,7 +55,26 @@ def eta_s(job: dict, now: float, typical: dict[str, float]) -> float | None:
     return None
 
 
-def render_dashboard(queue: Queue) -> str:
+def production(done: list[dict], takes: Path | None) -> dict:
+    """Render hours so far by quality, the finals' frames against the forecast and the hours the rest take at their
+    measured rate, and the drafts with no final (awaiting review)."""
+    hours = {"draft": 0.0, "final": 0.0}
+    frames_final = 0
+    for j in done:
+        r, p = j.get("result") or {}, j.get("payload") or {}
+        if j["kind"] != "take_render" or "render_s" not in r:
+            continue
+        q = "final" if str(p.get("res", "")).startswith("1920") else "draft"
+        hours[q] += r["render_s"] / 3600
+        if q == "final" and p.get("frames"):
+            frames_final += p["frames"][1] - p["frames"][0]
+    rate = hours["final"] / frames_final if frames_final else None
+    awaiting = sorted(d.parent.name for d in takes.glob("*/draft.mp4") if not (d.parent / "final.mp4").exists())         if takes and takes.exists() else []
+    return {"hours": hours, "frames_final": frames_final,
+            "hours_left": rate * max(FORECAST_FRAMES - frames_final, 0) if rate else None, "awaiting": awaiting}
+
+
+def render_dashboard(queue: Queue, takes: Path | None = None) -> str:
     st, now = queue.status(), time.time()
     esc = html.escape
     typical = typical_s(queue.jobs("done", limit=200))
@@ -80,6 +105,15 @@ def render_dashboard(queue: Queue) -> str:
     failed = queue.jobs("failed", limit=20)
     rows_f = "".join(f"<tr><td>{esc(j['id'][:12])}</td><td>{esc(j['kind'])}</td><td>{esc(j['error'] or '')}</td></tr>"
                      for j in failed) or "<tr><td colspan=3>none</td></tr>"
+    pr = production(queue.jobs("done", limit=100_000), takes)
+    left = f"{pr['hours_left']:.0f} h" if pr["hours_left"] is not None else "- (no final rendered yet)"
+    rows_p = (f"<tr><td>Render hours so far</td><td>{pr['hours']['draft']:.1f} h drafts, "
+              f"{pr['hours']['final']:.1f} h finals</td></tr>"
+              f"<tr><td>Finals against the forecast</td><td>{pr['frames_final']:,} of {FORECAST_FRAMES:,} frames; "
+              f"the rest {left} at the finals' rate</td></tr>"
+              "<tr><td>Cloud credit</td><td>none spent (the cloud reserve isn't in use)</td></tr>"
+              f"<tr><td>Drafts awaiting review ({len(pr['awaiting'])})</td>"
+              f"<td>{esc(', '.join(pr['awaiting'])) or 'none'}</td></tr>")
     done = queue.jobs("done", limit=20)
     rows_d = "".join(f"<tr><td>{esc(j['id'][:12])}</td><td>{esc(j['kind'])}</td><td>{esc(j['worker'] or '')}</td>"
                      f"<td><code>{esc(json.dumps(j['result'])[:160])}</code></td></tr>"
@@ -90,6 +124,7 @@ def render_dashboard(queue: Queue) -> str:
 table{{border-collapse:collapse;margin:0 0 20px;width:100%}}td,th{{border-bottom:1px solid #333;padding:4px 8px;
 text-align:left}}.ok{{color:#7c7}}.stale{{color:#e77}}code{{font-size:12px}}</style></head><body>
 <h1>Moonshot farm</h1>
+<h2>Production</h2><table>{rows_p}</table>
 <h2>Running</h2><table><tr><th>Job</th><th>Take</th><th>Worker</th><th>Stage</th><th>Progress</th><th>Elapsed</th>
 <th>ETA</th></tr>{rows_r}</table>
 <h2>Waiting</h2><table><tr><th>Job</th><th>Take</th><th>Queued</th><th>Typical run</th></tr>{rows_q}</table>

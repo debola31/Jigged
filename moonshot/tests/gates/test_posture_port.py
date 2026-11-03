@@ -1,5 +1,5 @@
 """The body-vs-people checks (moonshot/validate/posture.py) are trainual's, ported: on trainual's reference take they
-give exactly what trainual's validator wrote in its report.md (§2b), from the same posture prior (plan §5.2).
+give exactly what trainual's validator wrote in its report.md (§2b), from the same posture prior, the seated one (plan §5.2).
 
 Needs the data root: the prior is derived from non-commercial data and the reference take is too big for git.
 Protected (plan §6, rule 1)."""
@@ -18,10 +18,10 @@ REPORTED_NLL = {"median": 24.9, "max": 76.7}
 
 @pytest.fixture(scope="module")
 def measured():
-    from moonshot.validate.posture import PRIOR, measure
-    if not (PRIOR.exists() and REFERENCE.exists()):
-        pytest.skip(f"no posture prior at {PRIOR} or no reference take at {REFERENCE}")
-    return measure(np.load(REFERENCE)["theta"][:, :10])
+    from moonshot.validate.posture import SEATED, Prior, measure
+    if not (SEATED.exists() and REFERENCE.exists()):
+        pytest.skip(f"no posture prior at {SEATED} or no reference take at {REFERENCE}")
+    return measure(np.load(REFERENCE)["theta"][:, :10], Prior.load(SEATED))
 
 
 def test_frames_outside_peoples_range_match_trainuals_report(measured):

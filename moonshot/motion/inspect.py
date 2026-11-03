@@ -52,6 +52,7 @@ SLIDER_GRIP = np.array([-60.0, 5.0, 6.0])   # the right hand's grip on the slide
 BEAM_GRIP = np.array([80.0, 9.75, 4.25])     # the left hand's pinch across the beam, in the calipers' frame (mm): 36 mm
                                              # above its end, clear of the part
 GRIP_AT = {"cal": SLIDER_GRIP, "slider": SLIDER_GRIP, "beam": BEAM_GRIP}
+CARD = "caliper-measure-bore"                # the usage card the take plays (moonshot/cards), whose footage it is held to
 
 
 def loose() -> str:
@@ -348,7 +349,7 @@ def build(solve=True, verbose=True) -> InspectPlan:
     plan.compose(pocket_depth_mm())
     if solve:
         plan.solve()
-        plan.save({"read": plan.read, "part_at": PART_AT.tolist(), "cal_yaw": CAL_YAW, "loose": loose()})
+        plan.save({"read": plan.read, "part_at": PART_AT.tolist(), "cal_yaw": CAL_YAW, "loose": loose(), "card": CARD})
     return plan
 
 

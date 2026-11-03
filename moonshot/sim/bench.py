@@ -24,7 +24,7 @@ import numpy as np
 
 from moonshot.body.skeleton import H0, MIRROR, build, set_finger_contact
 from moonshot.motion import kinematics as BM
-from moonshot.sim.record import Recorder
+from moonshot.sim.record import Recorder, hand_wrench
 from moonshot.sim.reference import ARM, ReferenceTake
 from moonshot.world import bench_cell as BC
 
@@ -94,6 +94,13 @@ class BenchRun:
         self.body_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in self.body.joints])
         self.body_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in self.body.joints])
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == m.body("pelvis").id}
+        self.lifted = sorted({c if isinstance(c, str) else c[1] for c in carried})      # what the hands pick up
+        trees: dict[int, list[str]] = {}
+        for b in range(1, m.nbody):
+            if m.body(b).name not in self.person:
+                trees.setdefault(int(m.body_rootid[b]), []).append(m.body(b).name)
+        # each object riding on another, or carrying one (the calipers' slider on their beam), and what moves with it
+        self.moves_with = {n: names for names in trees.values() if len(names) > 1 for n in names}
         ev = self.tk["events"]
         self.grips = [e for e in ev if e["kind"] == "grip"]
         self.carries = [e for e in ev if e["kind"] == "carry"]
@@ -491,6 +498,27 @@ class BenchRun:
                     out.add(m.geom(b).name)
         return sorted(out)
 
+    def tree(self, obj: str) -> set[int]:
+        """An object and everything it moves with: the tool it belongs to."""
+        m = self.model
+        return {b for b in range(m.nbody) if m.body_rootid[b] == m.body_rootid[m.body(obj).id]}
+
+    def lifting_force(self, obj: str) -> float:
+        """The hands' upward force on an object's tool (N, world z): everything from outside on it, its contacts and
+        carry welds, less what isn't the person's. After mj_rnePostConstraint (hand_wrench calls it)."""
+        m, d = self.model, self.data
+        tree = self.tree(obj)
+        up, c6 = sum(float(d.cfrc_ext[b][5]) for b in tree), np.zeros(6)
+        for i in range(d.ncon):
+            c = d.contact[i]
+            b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
+            if (b1 in tree) == (b2 in tree) or m.body(b2 if b1 in tree else b1).name in self.person:
+                continue
+            mujoco.mj_contactForce(m, d, i, c6)
+            fw = c.frame.reshape(3, 3).T @ c6[:3]                  # on geom2, world
+            up -= float(fw[2] if b2 in tree else -fw[2])
+        return up
+
     def anat(self, name: str) -> float:
         m, d, j = self.model, self.data, self.body.joints[name]
         q = d.qpos[m.jnt_qposadr[m.joint(name).id]]
@@ -524,7 +552,8 @@ class BenchRun:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, arms=("R", "L"))
-        self.rec = {"pose": [], "touching": [], "press": [], "lag": []}
+        self.rec = {"pose": [], "touching": [], "touching_R": [], "press": [], "lag": [], "hand_wrench": [],
+                    "active_constraints": [], "applied_forces": [], "load_N": {b: [] for b in self.lifted}}
         t0w = time.time()
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
@@ -553,7 +582,14 @@ class BenchRun:
             self.rec["pose"].append(pose)
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
-            self.rec["touching"].append(sorted(set(self.touching("R")) | set(self.touching("L"))))
+            right = self.touching("R")
+            self.rec["touching"].append(sorted(set(right) | set(self.touching("L"))))
+            self.rec["touching_R"].append(right)
+            self.rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))      # the muscle check replays the right arm
+            for b in self.lifted:
+                self.rec["load_N"][b].append(round(self.lifting_force(b), 3))
+            self.rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
+            self.rec["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
             tk = k / self.fps
             self.rec["press"].append({i: float(np.mean(f)) for i, f in frame_f.items()})
             self.set_plan(tk)
@@ -585,8 +621,13 @@ class BenchRun:
             pre = "" if s == "R" else "L_"
             arrays |= {pre + key: np.array([p[s][key] for p in P]) for key in ("q", "H", "W", "S", "E", "forearm")}
         np.savez(out / "sim.npz", **arrays)
-        (out / "checks.json").write_text(json.dumps({"touching": rec["touching"], "never_held": never_held,
-                                                     "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
+        m = self.model
+        weight = {b: round(float(sum(m.body_mass[i] for i in self.tree(b))) * 9.81, 4) for b in self.lifted}
+        (out / "checks.json").write_text(json.dumps(
+            {k: rec[k] for k in ("touching", "touching_R", "hand_wrench", "active_constraints", "applied_forces",
+                                 "load_N")} |
+            {"weight_N": weight, "moves_with": self.moves_with, "machine_axes": {}, "never_held": never_held,
+             "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
         self.recorder.write(out, self.fps, self.tk["lumbar"][0], {s: [str(x) for x in rd["names"]] for s in ("R", "L")},
                             station, glbs)
         lag = np.array(rec["lag"])

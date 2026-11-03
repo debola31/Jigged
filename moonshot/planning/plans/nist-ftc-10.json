@@ -53,14 +53,8 @@
    "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "Standing on end against a stop; check it's square with the indicator"},
    "wcs": {"code": "G54", "x": "probe the side", "y": "probe datum A", "z": "top of the end"},
    "operations": [
-    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill Ø5.5 ±0.2, 35 ±1 deep",
+    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill both Ø5.5 ±0.2 holes from this end, 35 ±1 and 27.5 ±1 deep",
      "features": [{"type": "hole", "dia_mm": 5.5, "axis": "X", "count": 2}]}
-   ]},
-  {"id": "op60", "title": "Op 60: second end", "machine": "vf2", "face_up": "-X",
-   "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "As Op 50, the other way up"},
-   "wcs": {"code": "G54", "x": "probe the side", "y": "probe datum A", "z": "top of the end"},
-   "operations": [
-    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill Ø5.5 ±0.2, 27.5 ±1 deep"}
    ]}
  ],
  "finish": [

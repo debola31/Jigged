@@ -278,16 +278,23 @@ class PendantRunner(TakeRunner):
             if np.linalg.norm(i) > AIM_MAX:
                 i *= AIM_MAX / np.linalg.norm(i)
             c = AIM_GAIN * across + i
-            # off the face until over the key; and once it has clicked, lifted off it: a finger left resting on the
-            # key, as the plan has it until the press ends, bounces about its release force and clicks it again
-            if self.lifting[s] or (np.linalg.norm(across) > ALIGNED_MM / 1000 and
-                                   self._key_n.get(e["key"], 0.0) < TOUCH_N):
-                c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)
             g = self.index_pad[s]
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])
             J = jacp[:, self.arm_dofs[s]]
-            d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+            dq = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+            # off the face until over the key; and once it has clicked, lifted off it: a finger left resting on the
+            # key, as the plan has it until the press ends, bounces about its release force and clicks it again. The
+            # whole hand moves straight back, its turn held: moved back by the index's tip alone, the arm pitched the
+            # hand about it, and as the index lifted off Offset the thumb pressed J (op10-xy)
+            if self.lifting[s] or (np.linalg.norm(across) > ALIGNED_MM / 1000 and
+                                   self._key_n.get(e["key"], 0.0) < TOUCH_N):
+                back = n * min(0.0, err @ n - STANDOFF_MM / 1000)
+                jp, jr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, d, jp, jr, m.body(f"{s}_hand").id)
+                J6 = np.vstack([jp, jr])[:, self.arm_dofs[s]]
+                dq += J6.T @ np.linalg.solve(J6 @ J6.T + DAMPING ** 2 * np.eye(6), np.r_[back, 0.0, 0.0, 0.0])
+            d.ctrl[self.acts[self.arm_act[s]]] += dq
 
     def held_error(self, side: str, t: float) -> np.ndarray | None:
         """While a press is under way, sight corrects the hand across the key's face only: how deep the index stands

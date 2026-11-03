@@ -138,24 +138,29 @@ class PendantTake(StepTake):
     """A step at the pendant. The machine's handle state is followed as the step presses keys, so a stroke knows the
     axis and increment it jogs: `axis_mm` is where the plan expects the machine (Haas's machine mm) after it."""
 
-    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0)):
+    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0), shared=SHARED_GRIPS,
+                 grip_source=None):
+        """shared: the grips file pendant takes share (they stand and grip alike); grip_source: what the grips'
+        cache is keyed on (default: the take's class, moonshot/motion/step_take.py solve_grips)."""
         super().__init__(out, lumbar, verbose)
         lo, hi = (np.array(C["pendant_face"][k], float) + OFFSET for k in ("box_min_mm", "box_max_mm"))
         self.boxes = [((lo + hi) / 2, (hi - lo) / 2)]
         own = self.out / "grips.json"
-        if SHARED_GRIPS.exists() and not own.exists():
-            shutil.copy(SHARED_GRIPS, own)
-        self.solve_grips(self._grip_specs())
-        SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(own, SHARED_GRIPS)
+        if shared.exists() and not own.exists():
+            shutil.copy(shared, own)
+        self.solve_grips(self._grip_specs(), source=grip_source)
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        if shared.resolve() != own.resolve():
+            shutil.copy(own, shared)
         # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
         # direction
         self.pad_in_hand = {}
-        for name in KEY_GRIPS:
+        for name in (n for n in KEY_GRIPS if n in self.grips):      # a take may solve only the regions it uses
             g = self.grips[name]
             ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
             self.pad_in_hand[name] = (fingertip_in_hand(g["q"], ax), ax)
-        self.key_H = self.grips["keypad"]["H"]    # the keypad grip's hand frame the hand last pressed with
+        self.key_H = self.grips[next(iter(self.pad_in_hand))]["H"]    # the keypad grip's hand frame the hand last
+                                                                      # pressed with
         self.key_grip_last = ""                   # ... and its name
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
@@ -197,7 +202,8 @@ class PendantTake(StepTake):
     def key_grip(self, name: str) -> str:
         """The keypad grip solved nearest a key."""
         k = key_at(name)
-        return min(KEY_GRIPS, key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
+        return min((g for g in KEY_GRIPS if g in self.pad_in_hand),
+                   key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
 
     def key_pose(self, name: str, lift: float = 0.0):
         """The hand frame and wrist with the fingertip `lift` mm off a key, in its region's grip."""

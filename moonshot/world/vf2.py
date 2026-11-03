@@ -28,7 +28,87 @@ M = 0.001
 # everything else (a hand, the machine) but not with a door
 DOOR = ' conaffinity="2"'
 INCH = 25.4
+POCKETS = 20                      # the umbrella carousel's (vf2.json tool_changer)
 PROBE_FAST_MM_S, PROBE_SLOW_MM_S, PROBE_BACK_MM = 8.0, 0.5, 1.0   # Renishaw's cycles find fast, back off, measure slow [proposed]
+
+
+# The spindle's bore and drawbar, in the spindle's frame (mm: its gauge point, +Z up the axis), for a CAT40 holder
+# as moonshot/world/tooling.py builds it [proposed: sized to that holder, not measured]. A ring of 12 boxes round the
+# taper's capsule centres it (0.4 mm clear); a shoulder ring of 8 above stops the taper's round top where the holder's
+# gauge line meets the gauge point, as a 7/24 taper seats; the knob's head passes up through it into the drawbar's
+# three fingers. Each finger hangs from a pivot on a hinge and is held by its own servo: open while Tool Release is
+# held, closed otherwise, when its tip swings in under the knob's head and lifts it 1 mm against the shoulder. A
+# finger only turns about its pivot, the drawbar's stroke left out: the hand seats the holder, the fingers hold it.
+# The fingers are hardened and greased: on the knob they slide (friction 0.02), so their push lifts the knob rather
+# than wedging it at 0.25, where three fingers held a holder 0.4 mm short of its seat.
+SPINDLE_BORE = {"ring_r": 16.9, "ring_depth": 6.0, "ring_z": (2.0, 60.0), "ring_n": 12,
+                "seat_r": 11.0, "seat_depth": 5.0, "seat_z": 64.30, "seat_n": 8,
+                "finger_pivot": (16.0, 100.0), "finger_tip": (8.3, 78.8), "finger_r": 1.5, "finger_n": 3,
+                "open_rad": -0.20, "closed_rad": 0.05, "kp": 5.0, "torque_nm": 0.4}
+
+
+def _ring(name: str, n: int, r_in: float, depth: float, z0: float, z1: float) -> str:
+    """n boxes round the Z axis, their inner faces r_in from it, from z0 to z1 (mm), in the enclosing body's frame."""
+    out = []
+    half_w = r_in * math.tan(math.pi / n) * 0.97
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        c = (r_in + depth / 2) * np.array([math.cos(a), math.sin(a)])
+        out.append(f'<geom name="{name}_{i}" class="steel" type="box" size="{depth / 2 * M:.5f} {half_w * M:.5f} '
+                   f'{(z1 - z0) / 2 * M:.5f}" pos="{c[0] * M:.5f} {c[1] * M:.5f} {(z0 + z1) / 2 * M:.5f}" '
+                   f'quat="{math.cos(a / 2):.7f} 0 0 {math.sin(a / 2):.7f}"/>')
+    return "".join(out)
+
+
+def _lead_in(name: str, n: int, r_top: float, z0: float, z1: float, deg: float, depth: float = 6.0) -> str:
+    """n boxes whose inner faces lean out by deg below z1, a funnel into a bore r_top across at z1, from z0."""
+    b, out = math.radians(deg), []
+    h = (z1 - z0) / math.cos(b)
+    r_face = r_top + (z1 - z0) / 2 * math.tan(b)
+    half_w = (r_top + (z1 - z0) * math.tan(b)) * math.tan(math.pi / n) * 0.97
+    qy = (math.cos(-b / 2), math.sin(-b / 2))
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        rc, zc = r_face + depth / 2 * math.cos(b), (z0 + z1) / 2 + depth / 2 * math.sin(b)
+        qz = (math.cos(a / 2), math.sin(a / 2))
+        q = (qz[0] * qy[0], -qz[1] * qy[1], qz[0] * qy[1], qz[1] * qy[0])     # q_z(a) * q_y(-b)
+        out.append(f'<geom name="{name}_{i}" class="steel" type="box" size="{depth / 2 * M:.5f} {half_w * M:.5f} '
+                   f'{h / 2 * M:.5f}" pos="{rc * math.cos(a) * M:.5f} {rc * math.sin(a) * M:.5f} {zc * M:.5f}" '
+                   f'quat="{q[0]:.7f} {q[1]:.7f} {q[2]:.7f} {q[3]:.7f}"/>')
+    return "".join(out)
+
+
+def _spindle_inside() -> tuple[str, str]:
+    """(XML inside the spindle's body, actuator XML): the bore's rings and the drawbar's fingers."""
+    b = SPINDLE_BORE
+    xml = _ring("vf2_bore", b["ring_n"], b["ring_r"], b["ring_depth"], b["ring_z"][0] + 10.0, b["ring_z"][1])
+    xml += _lead_in("vf2_lead", b["ring_n"], b["ring_r"], -0.4, b["ring_z"][0] + 10.0, 20.0)
+    xml += _ring("vf2_seat", b["seat_n"], b["seat_r"], b["seat_depth"], b["seat_z"], b["seat_z"] + 5.0)
+    (rp, zp), (rt, zt) = b["finger_pivot"], b["finger_tip"]
+    acts = ""
+    for k in range(b["finger_n"]):
+        a = 2 * math.pi * k / b["finger_n"] + math.pi / 2
+        p = rp * np.array([math.cos(a), math.sin(a)])
+        xml += (f'<body name="vf2_finger_{k}" pos="{p[0] * M:.5f} {p[1] * M:.5f} {zp * M:.5f}" '
+                f'quat="{math.cos(a / 2):.7f} 0 0 {math.sin(a / 2):.7f}">'
+                f'<joint name="vf2_finger_{k}" type="hinge" axis="0 1 0" range="-0.3 0.12" damping="0.03" '
+                f'armature="0.0001"/>'
+                f'<geom name="vf2_finger_{k}" class="steel" type="capsule" size="{b["finger_r"] * M:.5f}" '
+                f'fromto="0 0 0 {(rt - rp) * M:.5f} 0 {(zt - zp) * M:.5f}" mass="0.01" priority="3" '
+                f'friction="0.02 0.0001 0.0001"/></body>')
+        acts += (f'    <position name="a_vf2_finger_{k}" joint="vf2_finger_{k}" kp="{b["kp"]}" ctrllimited="true" '
+                 f'ctrlrange="-0.3 0.12" forcelimited="true" forcerange="{-b["torque_nm"]} {b["torque_nm"]}"/>\n')
+    return xml, acts
+
+
+def _hollow_nose(c_rec: dict, axis_xy) -> str:
+    """The spindle nose as four boxes round its square bore, centred on the spindle's axis."""
+    lo, hi = np.array(c_rec["box_min_mm"], float), np.array(c_rec["box_max_mm"], float)
+    h, (ax, ay) = c_rec["bore_half_mm"], axis_xy
+    parts = {"l": ([lo[0], lo[1]], [ax - h, hi[1]]), "r": ([ax + h, lo[1]], [hi[0], hi[1]]),
+             "f": ([ax - h, lo[1]], [ax + h, ay - h]), "b": ([ax - h, ay + h], [ax + h, hi[1]])}
+    return "".join(_box(f"vf2_spindle_nose_{k}", {"box_min_mm": [a[0], a[1], lo[2]], "box_max_mm": [b[0], b[1], hi[2]]})
+                   for k, (a, b) in parts.items())
 
 
 def record() -> dict:
@@ -65,6 +145,11 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
     rng = lambda j: f'{J[j]["range_mm"][0] * M:.4f} {J[j]["range_mm"][1] * M:.4f}'      # noqa: E731
     ax = lambda j: " ".join(str(v) for v in J[j]["axis"])                               # noqa: E731
     sp = J["spindle"]["centre_mm"]
+    inside, finger_acts = _spindle_inside()
+    tr = C["tool_release_button"]["cylinder"]
+    button = (f'<body name="vf2_tool_release" pos="{tr["centre_mm"][0] * M:.5f} {tr["centre_mm"][1] * M:.5f} '
+              f'{tr["centre_mm"][2] * M:.5f}">{_cylinder_y("vf2_tool_release_button", {**tr, "centre_mm": [0, 0, 0]})}'
+              f'{_site("vf2_tool_release", A["tool_release_head"]["at_mm"], tr["centre_mm"])}</body>')
     body = f"""    <body name="vf2_saddle" gravcomp="1">
       <joint name="vf2_y" type="slide" axis="{ax('y')}" range="{rng('y')}" damping="2000"/>
       <inertial pos="-0.381 -0.34 0.6" mass="{L['saddle']['mass_kg']}" diaginertia="20 20 20"/>
@@ -78,10 +163,12 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
     <body name="vf2_head" gravcomp="1">
       <joint name="vf2_z" type="slide" axis="{ax('z')}" range="{rng('z')}" damping="2000"/>
       <inertial pos="0 -0.13 1.8" mass="{L['head']['mass_kg']}" diaginertia="20 20 20"/>
-      {_box("vf2_spindle_nose", C["spindle_nose"])}
+      {_hollow_nose(C["spindle_nose"], sp[:2])}
+      {button}
       <body name="vf2_spindle" gravcomp="1" pos="{sp[0] * M:.4f} {sp[1] * M:.4f} {sp[2] * M:.4f}">
         <joint name="vf2_spindle" type="hinge" axis="0 0 1" limited="false" damping="0.05"/>
         <geom name="vf2_spindle_gauge" type="cylinder" size="0.022 0.005" contype="0" conaffinity="0" mass="5"/>
+        {inside}
       </body>
     </body>
 """
@@ -104,6 +191,7 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
             f'ctrlrange="0 {J["spindle"]["max_rpm"] * 2 * math.pi / 60:.2f}"/>\n'
     det = A["jog_handle"]["detent_torque_nm"]
     acts += f'    <motor name="a_vf2_jog_detent" joint="vf2_jog" ctrllimited="true" ctrlrange="{-det} {det}"/>\n'
+    acts += finger_acts
     _ = rapid
     return body, acts
 
@@ -173,6 +261,11 @@ class Control:
     tool_length: dict[int, float] = field(default_factory=dict)       # mm, by tool number
     sensor: Callable[[], bool] | None = None                           # the probe or tool setter touching, now
     vps_queue: list[dict] = field(default_factory=list)                # the cycles chosen in VPS, in order, output by F4
+    # the tool changer: what each pocket holds, the pocket facing the spindle (the tool number the spindle stands for),
+    # and the holder in the spindle, which the take tells it (the machine counts pockets, it doesn't see tools)
+    pockets: dict[int, str] = field(default_factory=dict)
+    current: int = 0
+    spindle_tool: str | None = None
 
     def __post_init__(self):
         r = record()
@@ -198,6 +291,8 @@ class Control:
         self._down: set[str] = set()
         self._jog_clicks = self.clicks()
         self._jog_goal = self.setpoint.copy()
+        self.fingers = [a for a in range(m.nu) if m.actuator(a).name.startswith("a_vf2_finger_")]
+        self.changes: list[dict] = []     # each tool change: the pocket it put the spindle's holder in, and its number
 
     def doors_closed(self) -> bool:
         d = self.data
@@ -278,6 +373,9 @@ class Control:
             elif self.page == "program":
                 self.mdi_line = self.typed
             self.typed = ""
+        elif k == "atc_fwd" and self.mode in ("mdi", "handle_jog") and self.state == "idle" and \
+                (self.doors_closed() or self.setup_mode):
+            self.tool_change(self.current % POCKETS + 1)
         elif k == "cancel":
             self.typed = self.typed[:-1]
         elif k == "reset":
@@ -299,8 +397,29 @@ class Control:
             self.spindle_rpm = s
         if "M05" in words:
             self.spindle_rpm = 0.0
+        t = next((w for w in words if w.startswith("T") and w[1:].isdigit()), None)
+        if "M06" in words and t is not None and 1 <= int(t[1:]) <= POCKETS:
+            self.tool_change(int(t[1:]))
         self.mdi_line = ""
         self.events.append(f"mdi {line}")
+
+    # --- the tool changer (the vf2-tool-load card) -------------------------------------------------------------------
+    def tool_change(self, n: int) -> None:
+        """A tool change to tool n: the holder in the spindle goes into the current pocket, the carousel turns pocket n
+        to the spindle, and its holder (if any) comes into the spindle. The changer's own motion isn't simulated: the
+        take ends as it starts, and the next take starts where it leaves the carousel (moonshot/sim/tool_load.py)."""
+        if self.spindle_tool is not None and self.current:
+            self.pockets[self.current] = self.spindle_tool
+        self.current, self.tool = n, n
+        self.spindle_tool = self.pockets.pop(n, None)
+        self.changes.append({"to": n, "pockets": dict(sorted(self.pockets.items())), "spindle": self.spindle_tool})
+        self.events.append(f"tool_change T{n}")
+
+    def tool_release_held(self) -> bool:
+        """Is Tool Release held, on the head or the pendant, where Haas lets it release: in MDI or handle jog, the
+        spindle stopped?"""
+        return (bool({"tool_release", "tool_release_head"} & self._down) and self.mode in ("mdi", "handle_jog")
+                and self.state != "running" and self.spindle_rpm == 0.0)
 
     def open_doors(self) -> None:
         """Both doors fully open, as an operator leaves them while loading."""
@@ -349,6 +468,8 @@ class Control:
         if not self.doors_closed():
             rpm = min(rpm, self.setup_rpm) if self.setup_mode else 0.0
         d.ctrl[self.act["spindle"]] = rpm * 2 * math.pi / 60
+        if self.fingers:                          # the drawbar: open while Tool Release is held, clamped otherwise
+            d.ctrl[self.fingers] = SPINDLE_BORE["open_rad" if self.tool_release_held() else "closed_rad"]
 
     # --- probing (the vf2-tool-setter card, and the spindle probe) -------------------------------------------
     def _joint(self, machine_mm) -> np.ndarray:

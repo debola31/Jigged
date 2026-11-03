@@ -19,6 +19,16 @@ from moonshot.planning.validate import load_plan
 Span = tuple[str, str | None, str | None]           # (take, first clip, last clip); None: from the start / to the end
 
 
+def tool_takes(step: dict) -> list[str]:
+    """A Load the tools step's takes, in order, by their folders under the step's own (moonshot/motion/tool_load.py):
+    the change at the pendant that empties the spindle, then for each tool its seat in the doorway and its ATC FWD at
+    the pendant, cut together as the body doesn't walk."""
+    out = ["00-change"]
+    for i, t in enumerate(step["facts"]["tool_ids"]):
+        out += [f"{2 * i + 1:02d}-seat-{t}", f"{2 * i + 2:02d}-atc-{t}"]
+    return out
+
+
 def spans(part: str, step: dict) -> list[Span]:
     """The takes, in order, that make one step of a part's plan."""
     sid, setup = step["id"], step.get("setup")
@@ -38,7 +48,7 @@ def spans(part: str, step: dict) -> list[Span]:
         "check": [(vise, "measure", "measure")],
         "xy": [(f"{part}/{sid}", None, None)],               # the setting session's takes, per setup, in takes/<part>/
         "z": [(f"{part}/{sid}", None, None)],
-        "tools": [(f"{part}/{sid}", None, None)],
+        "tools": [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else [],
         "start": [("door-close", None, None), ("cycle-start", None, None)],
         "unload": [("door-open", None, None), ("blow-off", None, None), ("loosen", None, None), (f"lift-out-{vise}", None, None)],
     }.get(kind, [(f"{part}-{sid}", None, None)])           # finishing: the inspection session's takes

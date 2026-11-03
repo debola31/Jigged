@@ -534,12 +534,18 @@ class Planner:
             loc = cyl.Axis().Location()
             key = (round(loc.X(), 2), round(loc.Y(), 2))
             b = f.BoundingBox()
-            lo, hi = out.get(key, (np.inf, -np.inf))
-            out[key] = (min(lo, b.zmin), max(hi, b.zmax))
+            out.setdefault(key, []).append((b.zmin, b.zmax))
         ring = [(math.cos(a), math.sin(a)) for a in np.linspace(0, 2 * math.pi, 8, endpoint=False)]
         cone = dia / 2 / math.tan(math.radians(59.0))          # the STEP's own 118 deg points
+        spans = []                                             # an axis's walls, joined where they meet: two holes
+        for key, walls in sorted(out.items()):                 # on one axis (a counterbore from each side) stay two
+            for lo, hi in sorted(walls):
+                if spans and spans[-1][0] == key and lo <= spans[-1][2] + 1e-3:
+                    spans[-1][2] = max(spans[-1][2], hi)
+                else:
+                    spans.append([key, lo, hi])
         holes = []
-        for (x, y), (lo, hi) in sorted(out.items()):
+        for (x, y), lo, hi in spans:
             pts = [(x, y)] + [(x + (dia / 2 - 0.05) * c, y + (dia / 2 - 0.05) * s) for c, s in ring]
             if any(ps.solid_at(px, py, hi + 0.5) for px, py in pts):
                 continue                                       # covered above: it opens the other way

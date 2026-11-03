@@ -23,13 +23,16 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, TAKE_MM, TAKE_S, TOP, BenchPlan,
-                                   bench_box, box, instrument_colliders, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, TAKE_MM, TAKE_S, TOP, BenchPlan, bench_box,
+                                   box, instrument_colliders, settle)
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
 OUT = data_root() / "takes" / "nist-ftc-10-deburr"
 TOOL_AT, TOOL_YAW = np.array([190.0, -230.0, TOP + BC.DEBURR["handle_r"] + 0.1]), 90.0
+                            # straight away: turned 20 deg to the right, along the forearm reaching for it, the grip
+                            # took the forearm to 71 deg of pronation (people's 61) and the take was 0.73 in their
+                            # range, 0.91 at 90
 STROKE_N = 2.0              # into the edge: a swivel blade breaks an edge under light pressure (proposed); at 4 N
                             # the part slid away from the steadying hand: the bench holds 0.4 x (5 + 5) N
 TRAIL_DEG = 20.0            # the blade trails the hand along the stroke
@@ -73,6 +76,10 @@ def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
 
 
 class DeburrPlan(BenchPlan):
+    # its grips weigh people's posture at 3, not the shared 0.3, and their pads x3 to keep contact: the pen grip took
+    # the shoulder to 53 deg of rotation (people's 31); at 5 alone the pads came off the tool
+    grip_weights = (3.0, 3.0)
+
     def __init__(self, out=OUT, verbose=True):
         super().__init__(out, verbose)
         rest = self.rests = settle(loose())
@@ -213,7 +220,7 @@ class DeburrPlan(BenchPlan):
         self.wrist["R"] = W
         self.transit("R", t_down + 0.1, t_down + 0.6, W + [0, -25, 55], via=[W + [0, 0, 20]])
         self.fingers("R", t_down + 1.3, self.q_relax)
-        self.transit("R", t_down + 0.6, t_down + 1.7, REST, via=[W + [0, -230, 60]])   # back past the bench's edge first
+        self.transit("R", t_down + 0.6, t_down + 1.7, self.rest, via=[W + [0, -230, 60]])   # back past the bench's edge first
         self.t = t_down + 1.7
         self.clip("put back", t0, self.t, "PUT BACK  the tool where it was")
         return t_down

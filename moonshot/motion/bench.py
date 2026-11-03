@@ -8,6 +8,9 @@ here is in that world. What the right hand carries is planned as the object's ow
 the grip, solved once at the object's rest.
 
     plan = BenchPlan(out)                 # then a step's verbs, then plan.solve(); plan.save()
+
+A step may stand elsewhere at the bench (`lumbar`), and solve its grips weighing people's posture more than the
+shared solver does (`grip_weights`).
 """
 from __future__ import annotations
 
@@ -35,7 +38,8 @@ from moonshot.world import inspection_bench as IB
 
 MOONSHOT = Path(__file__).resolve().parents[1]
 LUMBAR = np.array([-60.0, -650.0, 955.0])          # standing at the bench's front, the part in front of the belly
-REST = LUMBAR + np.array([210.0, 55.0, -105.0])   # a hand hanging relaxed by its thigh (the left's, mirrored)
+REST_OFFSET = np.array([210.0, 55.0, -105.0])     # a hand hanging relaxed by its thigh, from where the body stands (the
+                                                  # left's, mirrored)
 TOP = IB.tops_mm()["bench"]
 SIDES = ("R", "L")
 PART_AT = np.array([-80.0, -110.0, TOP + BC.MAT["size"][2] + 31.2])   # the finished part, pocket up, on the mat,
@@ -53,22 +57,18 @@ OPEN_LEAD_S = 0.12                                # its hand widest this long be
 CLOSE_S = 0.1                                     # ... then closing on the tool over this long (proposed)
 PRELOAD_S = 0.07                                  # a lift, and the carry bearing it, start this long after the grip
                                                   # has closed, so the grip rises for about people's 0.23 s
-                                                  # (anatomy.json grip preload_s) before the load: from 0.15 s, 0.27
-                                                  # and 0.33 s; from 0.1 s, 0.27 and 0.33 s. Carried from 0.1 s after contact, the carry's closing
-                                                  # pressed the calipers 3.4 N into the bench and loaded the deburring
-                                                  # tool at once
+                                                  # (anatomy.json grip preload_s) before the load. Carried from 0.1 s
+                                                  # after contact, the carry's closing pressed the calipers 3.4 N into
+                                                  # the bench and loaded the deburring tool at once
 CARRY_EASE_S = 0.3                                # ... the carry's correction of the hand easing in over this long
                                                   # (moonshot/sim/bench.py carry_offset)
-TAKE_MM, TAKE_S = 2.0, 0.45                       # a lift first takes the tool's weight, 2 mm up over 0.45 s, so the
-                                                  # load comes on over people's loading time (anatomy.json grip
-                                                  # loading_s) before it leaves the bench: lifted straight off, the
-                                                  # load took 33 and 100 ms
+TAKE_MM, TAKE_S = 1.5, 0.6                        # a lift first takes the tool's weight, slowly, so the load comes on
+                                                  # over people's loading time (anatomy.json grip loading_s) before it
+                                                  # leaves the bench: lifted straight off, the load took 33 and 100 ms
+                                                  # to lift the tools; the deburring tool's 2 mm over 0.45 s, 100 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
-
-
-def mirror(p) -> np.ndarray:
-    """A world point as the left hand's planner sees it, and back."""
-    return BM.mirror_points(p, LUMBAR)
+HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]   # an arm hanging relaxed, the body solve's start where
+                                                                 # it has no task: sh_plane .. wr_dev, the girdle
 
 
 def box(c, h):
@@ -123,6 +123,9 @@ def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict
 class BenchPlan:
     """A take's plan, verb by verb, for both hands: wrist tasks, finger keys, grip effort, gaze, objects' paths and the
     physics events (moonshot/sim/bench.py)."""
+    lumbar = LUMBAR                 # where the body stands
+    grip_weights: tuple[float, float] | None = None   # (people's posture, the pads' contact) for its grip solves, or
+                                                      # the shared solver's (posture_cost's, 1)
 
     def __init__(self, out: Path, verbose: bool = True):
         torch.set_num_threads(8)
@@ -135,7 +138,8 @@ class BenchPlan:
         self.cons = {s: [] for s in SIDES}
         self.fkeys = {s: [(0.0, self.q_relax)] for s in SIDES}
         self.ekeys = {s: [(0.0, 0.0, None)] for s in SIDES}
-        self.wrist = {s: REST.copy() for s in SIDES}
+        self.rest = self.lumbar + REST_OFFSET
+        self.wrist = {s: self.rest.copy() for s in SIDES}
         self.gaze, self.events, self.clips = [], [], []
         self.paths: dict[str, list] = {}           # object -> [(t, R, p)], planned while carried
         self.grips: dict[str, dict] = {}
@@ -150,7 +154,7 @@ class BenchPlan:
             (MOONSHOT / f).read_text(encoding="utf-8") for f in ("motion/grasp.py", "body/hand.py", "motion/kinematics.py",
                                                                   "motion/solver.py"))
         src += inspect.getsource(type(self).grip_specs) + inspect.getsource(BenchPlan.steady_spec)
-        src += json.dumps(LUMBAR.tolist())
+        src += json.dumps(np.asarray(self.lumbar).tolist() + list(self.grip_weights or ()))
         src += json.dumps({k: [np.round(p, 2).tolist(), np.round(R, 4).tolist()] for k, (p, R) in sorted(rests.items())})
         src += json.dumps({k: [np.round(s["at"][0], 2).tolist(), np.round(s["at"][1], 4).tolist()]
                            for k, s in sorted(specs.items()) if s.get("at") is not None})
@@ -160,7 +164,12 @@ class BenchPlan:
             data = {"key": key}
             for name, spec in specs.items():
                 t0 = time.time()
-                best = G.solve_spec(self.th, {k: v for k, v in spec.items() if k != "of"}, LUMBAR, self.prior)
+                spec = {k: v for k, v in spec.items() if k != "of"}
+                if self.grip_weights:
+                    w_prior, w_pad = self.grip_weights
+                    spec |= {"w_prior": w_prior,
+                             "targets": {d: (lambda c, n, f=f: w_pad * f(c, n)) for d, f in spec["targets"].items()}}
+                best = G.solve_spec(self.th, spec, self.lumbar, self.prior)
                 data[name] = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in best.items()}
                 if self.verbose:
                     print(f"grip {name}: loss {best['loss']:.1f} ({time.time() - t0:.0f} s) "
@@ -177,6 +186,10 @@ class BenchPlan:
             self.grips[name] = entry
 
     # --- the part, and the left hand holding it still -----------------------------------------------------------
+    def mirror(self, p) -> np.ndarray:
+        """A world point as the left hand's planner sees it, and back."""
+        return BM.mirror_points(p, self.lumbar)
+
     def to_world(self, p_part, vec=False):
         """A point (or, vec, a direction) in the part's frame, its STEP's, in the world, where the part rests."""
         p, R = self.part
@@ -210,7 +223,7 @@ class BenchPlan:
         H, W = g["H"], g["W"]                              # the mirrored world
         tc = t_reach + 1.1
         # up out of the bench's way first: from the thigh, the knuckles catch its front edge
-        self.transit("L", t_reach, tc, W, via=[REST + [0, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
+        self.transit("L", t_reach, tc, W, via=[self.rest + [0, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
         self.fingers("L", t_reach + 0.3, open_like(self.hand, g["q"], 0.4))
         self.fingers("L", tc, g["q"])
         self.hold("L", tc, t_off, H, W)
@@ -228,7 +241,7 @@ class BenchPlan:
         # fingers swept them 107 mm toward the operator and wedged them on the bench, which threw them
         self.transit("L", t_off, t_off + 0.5, W + [0, -25, 110], via=[W + [0, 0, 18]])
         self.fingers("L", t_off + 1.2, self.q_relax)
-        self.transit("L", t_off + 0.5, t_off + 1.6, REST, via=[W + [0, -230, 110]])
+        self.transit("L", t_off + 0.5, t_off + 1.6, self.rest, via=[W + [0, -230, 110]])
         self.clip("steady", tc - 0.3, tc + 0.6, "STEADY  the left hand holds the part down on the bench")
 
     # --- building blocks ---------------------------------------------------------------------------------------
@@ -312,7 +325,7 @@ class BenchPlan:
             return R @ g["H_rel"], p + R @ g["W_rel"]
         p0, R0 = g["at"]
         D = R @ R0.T                                       # the object's turn since the grip was solved
-        return BM.mirror_frames(D) @ g["H"], mirror(p + D @ (mirror(g["W"]) - p0))
+        return BM.mirror_frames(D) @ g["H"], self.mirror(p + D @ (self.mirror(g["W"]) - p0))
 
     def carry(self, grip, t0, t1, w=3.0, free=None, point=(0.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0)):
         """A hand on a carried object over [t0, t1]. Within each of free's (ta, tb) (the right hand's) only a point of
@@ -368,7 +381,7 @@ class BenchPlan:
         self.T = self.t + 0.3
         n = self.n = int(self.T * FPS) + 1
         c, h = bench_box()
-        s = BS.BodySolver(n, FPS, LUMBAR, self.prior, boxes=[(c, h)], arms=SIDES)
+        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)
             last = max((x[1] for x in self.cons[side]), default=0.0)
@@ -376,7 +389,7 @@ class BenchPlan:
                 t = k / FPS
                 active = [x for x in self.cons[side] if x[0] <= t < x[1]]
                 if not active and (t < first or t >= last):
-                    s.pos(k, REST, 0.6, side=side)
+                    s.pos(k, self.rest, 0.6, side=side)
                 for _, _, fn in active:
                     for con in fn(t):
                         if con[0] == "pos":
@@ -393,16 +406,25 @@ class BenchPlan:
                   flush=True)
 
     def theta0(self, n) -> np.ndarray:
-        """The body solve's start, per frame (n, 21, deg): each arm as its first grip holds it."""
+        """The body solve's start, per frame (n, 21, deg): each arm as its first grip holds it while it has a task,
+        hanging relaxed (HANGING) before and after. Started all from its grip, the hand at rest by the thigh kept the
+        grip's turn, its shoulder rotated 32-40 deg (people's at most 31)."""
         r = next(g for g in self.grips.values() if g["side"] == "R")["theta"]
         lt = next(g for g in self.grips.values() if g["side"] == "L")["theta"]
-        return np.tile(np.r_[r[:12], lt[3:12]], (n, 1))
+        th = np.tile(np.r_[r[:12], lt[3:12]], (n, 1))
+        for side, cols in (("R", slice(3, 12)), ("L", slice(12, 21))):
+            first = min((x[0] for x in self.cons[side]), default=0.0)
+            last = max((x[1] for x in self.cons[side]), default=0.0)
+            for k in range(n):
+                if not first <= k / FPS < last:
+                    th[k, cols] = HANGING
+        return th
 
     def body_at(self, k):
         """Frame k's right arm (world) and left arm (mirrored world) frames."""
         th, dp = self.theta[k], self.dp[k]
-        right = BM.fk(th[:12], LUMBAR + dp)
-        left = BM.fk(BM.mirror_trunk(np.r_[th[:3], th[12:21]]), LUMBAR + dp * np.array([-1.0, 1.0, 1.0]))
+        right = BM.fk(th[:12], self.lumbar + dp)
+        left = BM.fk(BM.mirror_trunk(np.r_[th[:3], th[12:21]]), self.lumbar + dp * np.array([-1.0, 1.0, 1.0]))
         return right, left
 
     def save(self, extra: dict) -> None:
@@ -430,10 +452,10 @@ class BenchPlan:
             out[f"obj_{name}"] = np.stack([p for _, p in poses])
             out[f"obj_{name}_R"] = np.stack([R for R, _ in poses])
         self.theta12 = self.theta[:, :12]
-        eyes, looks, ups = head_camera(self, self.theta12, self.dp, lumbar=LUMBAR)
+        eyes, looks, ups = head_camera(self, self.theta12, self.dp, lumbar=self.lumbar)
         out |= {"eye": eyes, "look": looks, "up": ups}
         np.savez(self.out / "reference.npz", **out)
         jsonable = lambda v: v.tolist() if isinstance(v, np.ndarray) else v        # noqa: E731
         (self.out / "take.json").write_text(json.dumps({
             "events": [{k: jsonable(v) for k, v in e.items()} for e in self.events], "clips": self.clips,
-            "T": self.T, "lumbar": LUMBAR.tolist(), "arms": list(SIDES)} | extra, indent=1), encoding="utf-8")
+            "T": self.T, "lumbar": np.asarray(self.lumbar).tolist(), "arms": list(SIDES)} | extra, indent=1), encoding="utf-8")

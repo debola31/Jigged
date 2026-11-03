@@ -210,7 +210,7 @@ def encode_frames(worker, job: dict, inputs: list[Path]) -> dict:
 
 def _unpacked(worker, tar: Path) -> Path:
     from moonshot.render.pack import unpack
-    return unpack(tar, Path(worker.cache).parent / "unpacked" / tar.name)
+    return unpack(tar, Path(worker.cache).parent / "unpacked" / tar.name[:16])     # short: Windows caps paths at 260
 
 
 def take_bake(worker, job: dict, inputs: list[Path]) -> dict:

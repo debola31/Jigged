@@ -238,13 +238,22 @@ class PendantTake(StepTake):
         if grip != self.key_grip_last:            # a new region's grip: the hand turns to it before it presses
             dwell += 0.4
         move_s += dwell
-        path = PosePath(self.key_H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
+        # from the keys, the hand turns from the last key's grip to this one's on the way (a reach from elsewhere has
+        # turned already), its pad blending from where it sat in the last grip: the new grip's frame and pad held from
+        # the move's start jumped the fingertip's target, 16 mm in a frame from op30-z's Edit to Down
+        H0 = H if reached else self.key_H
+        pt0 = pt if reached or not self.key_grip_last else self.pad_in_hand[self.key_grip_last][0]
+        path = PosePath(H0, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
             t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
         t1 = t0 + move_s + 0.37 + hold_s
-        # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's
-        # own orientation only as a preference, as one hand pose can't reach every key
-        self.add("R", t0, t1, lambda t, path=path, H=H: [
-            ("pose", H, path.at(t)[1], 1.0), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 6.0)])
+
+        def cons(t, path=path, pt0=pt0, pt=pt, ax=ax, t0=t0, turn_s=move_s - dwell):
+            # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the
+            # grip's own orientation only as a preference, as one hand pose can't reach every key
+            Ht, Wt = path.at(t)
+            p = pt0 + (pt - pt0) * min_jerk((t - t0) / turn_s)
+            return [("pose", Ht, Wt, 1.0), ("tsr", p, Wt + Ht @ p, ax, [0.0, 1.0, 0.0], 6.0)]
+        self.add("R", t0, t1, cons)
         self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")

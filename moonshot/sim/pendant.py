@@ -12,7 +12,8 @@
   off its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
 - A jog of the handle ends when the dial has turned its clicks, as people stop turning when the machine is where they
   want it: the plan's strokes turn the hand a quarter farther than the jog needs, and once the dial has turned the
-  jog's clicks the grip lets go, the fingers opening off the rim, for the rest of the jog.
+  jog's clicks the right arm and hand stop there, still gripping, so the dial stops with them, until the jog's last
+  stroke ends; then they ease back onto the plan.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
@@ -35,6 +36,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.sim.runner import ARM, SETTLE_STEPS, TakeRunner
 from moonshot.world import cell, vf2
@@ -49,7 +51,7 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
-LET_GO_DEG = 12.0           # how far a done jog's fingers open off the rim
+FREEZE_EASE_S = 0.3         # a held hand eases back onto the plan this long after its jog's last stroke
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -123,7 +125,10 @@ class PendantRunner(TakeRunner):
         for e in self.turns:
             self.jog_clicks[e["jog"]] = self.jog_clicks.get(e["jog"], 0) + e["clicks"]
         self.jog_from: dict[int, int] = {}
-        self.jog_done: set[int] = set()
+        self.jog_done: dict[int, float] = {}        # jog -> when its clicks were all in
+        self.jog_end = {e["jog"]: e["t1"] + 0.2 for e in self.turns}     # its last stroke's end
+        self.r_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in self.body.joints if n.startswith("R_")])
+        self.r_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in self.body.joints if n.startswith("R_")])
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -238,30 +243,46 @@ class PendantRunner(TakeRunner):
             J = jacp[:, self.arm_dofs[s]]
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
-    def jog_now(self, t: float) -> int | None:
-        """The jog whose stroke the hand is in now, once the dial has turned all its clicks: else None."""
+    def count_clicks(self, t: float) -> None:
+        """While a jog's strokes turn the dial: the moment its clicks are all in."""
         for ev in self.turns:
-            if ev["t0"] - 0.25 <= t <= ev["t1"] + 0.15:
-                j, c = ev["jog"], self.machine.clicks()
+            j = ev["jog"]
+            if ev["t0"] - 0.25 <= t <= ev["t1"] + 0.15 and j not in self.jog_done:
+                c = self.machine.clicks()
                 self.jog_from.setdefault(j, c)
                 if (c - self.jog_from[j]) * np.sign(self.jog_clicks[j]) >= abs(self.jog_clicks[j]):
-                    self.jog_done.add(j)
-                return j if j in self.jog_done else None
+                    self.jog_done[j] = t
+                return
+
+    def frozen(self, t: float) -> tuple[float, float] | None:
+        """(the plan time the right hand holds, how far it has eased back onto the plan), while a done jog's hand is
+        held: from the moment its clicks are in to its last stroke's end, then eased back over FREEZE_EASE_S."""
+        for j, td in self.jog_done.items():
+            end = self.jog_end[j]
+            if td <= t < end:
+                return td, 0.0
+            if end <= t < end + FREEZE_EASE_S:
+                return td, min_jerk((t - end) / FREEZE_EASE_S)
         return None
 
-    def effort(self, side: str, t: float) -> tuple[float, str]:
-        """The plan's effort, but the grip lets go once the dial has turned the jog's clicks."""
-        e, grip = super().effort(side, t)
-        if side == "R" and grip == "dial" and self.jog_now(t) is not None:
-            return 0.0, grip
-        return e, grip
+    def at(self, t: float):
+        """The plan, but a done jog's right arm and hand stopped where the dial read right, gripping it, so the dial
+        stops with them, as people stop turning a handle: no coasting on past the jog's clicks."""
+        q, v, a = super().at(t)
+        self.count_clicks(t)
+        f = self.frozen(t)
+        if f is not None:
+            td, w = f
+            qf, _, _ = super().at(td)
+            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * w
+            v[self.r_dof] *= w
+            a[self.r_dof] *= w
+        return q, v, a
 
-    def let_go(self, t: float) -> None:
-        """A done jog's fingers open off the rim: against the grip's squeeze, so the turning hand can't drag the dial."""
-        if self.jog_now(t) is None or ("R", "dial") not in self.squeeze:
-            return
-        dq = sum(self.squeeze[("R", "dial")].values(), np.zeros(self.model.nv)) * -np.radians(LET_GO_DEG)
-        self.data.ctrl[self.acts] += dq[self.act_dof]
+    def effort(self, side: str, t: float) -> tuple[float, str]:
+        """The plan's effort, but a held hand keeps the grip it had when the dial read right."""
+        f = self.frozen(t) if side == "R" else None
+        return super().effort(side, f[0] if f is not None and f[1] == 0.0 else t)
 
     def debounced(self, forces: dict[str, float]) -> dict[str, float]:
         now, on = float(self.data.time), self.machine.actuation
@@ -276,7 +297,6 @@ class PendantRunner(TakeRunner):
         self.machine.touch(self.debounced(self._key_n))
         self.push(t)
         self.aim(t)
-        self.let_go(t)
         self.machine.apply()
 
     # --- each frame --------------------------------------------------------------------------------------

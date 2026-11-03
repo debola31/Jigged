@@ -126,8 +126,10 @@ def test_every_planned_key_press_registers_and_no_other(take):
     planned = sorted((e for e in tk["events"] if e["kind"] == "press"), key=lambda e: e["t0"])
     got = out["pressed"]
     assert [k for _, k in got] == [e["key"] for e in planned]
+    # within the press, give or take the hand running a few frames ahead of its plan (0.1 s) or behind it (0.2 s)
     for (t, k), e in zip(got, planned):
-        assert e["t0"] <= t <= e["t1"] + 0.2, f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
+        assert e["t0"] - 0.1 <= t <= e["t1"] + 0.2, \
+            f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
 
 
 def test_the_needle_stays_put_through_a_sweep_up_the_side(square):

@@ -154,7 +154,7 @@ class Seat(StepTake):
                                "middle": cyl_target(at, r, (-42.0, -32.0), (10.0, 100.0)),
                                "thumb": cyl_target(at, r, (-32.0, -22.0), (-130.0, -60.0))},
                       starts=[[t, 0, rot, pl, 25, 0, 85, p, 0, 0, 0, 0]
-                              for t in (10, 20) for rot in (10,) for pl in (60, 80) for p in (0, 30)])
+                              for t in (10, 20) for rot in (10,) for pl in (70,) for p in (0, 30)])
         b = BUTTON
         qb = h.neutral()
         qb.update(index_mcp_flex=15, index_pip=20, middle_mcp_flex=75, middle_pip=95, ring_mcp_flex=80, ring_pip=95,
@@ -164,7 +164,7 @@ class Seat(StepTake):
         head = lambda p, c=b + [0, 15.0, 0]: G.sdf_box(p, c, np.eye(3), np.array([150.0, 10.0, 80.0]))  # noqa: E731
         release = dict(obj=b, q0=qb, side="L", iters=900, colliders=[head],
                        targets={"index": G.plane_target(b, [0, -1.0, 0], 1.0, band)},
-                       starts=[[t, 0, 0, pl, 95, 0, 45, p, -10, 0, 0, 0] for t in (25, 35) for pl in (70, 90)
+                       starts=[[t, 0, 0, pl, 95, 0, 45, p, -10, 0, 0, 0] for t in (25,) for pl in (70, 90)
                                for p in (0, 40)])
         _ = face
         return {"holder": holder, "release": release}

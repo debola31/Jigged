@@ -248,7 +248,7 @@
     {
      "id": "op20-clean",
      "title": "Clean the vise and set the parallels",
-     "caption": "Blow out the 6 in vise and wipe the jaws, then set 0.5 in parallels.",
+     "caption": "Blow out the 6 in vise and wipe the jaws, then set 1 in parallels.",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -263,7 +263,7 @@
     {
      "id": "op20-load",
      "title": "Load the part",
-     "caption": "Set the part in the 6 in vise, scalloped side up, on 0.5 in parallels.",
+     "caption": "Set the part in the 6 in vise, scalloped side up, on 1 in parallels.",
      "kind": "human",
      "group": "op20",
      "where": {

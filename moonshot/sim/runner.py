@@ -107,6 +107,10 @@ class TakeRunner:
     def glbs(self) -> dict[str, list[dict]]:
         return {}
 
+    def meshes(self, folder: Path) -> dict[str, dict]:
+        """Bodies drawn from meshes the step writes into the take's folder (take_record.py "meshes")."""
+        return {}
+
     def hand_force(self, side: str, t: float) -> np.ndarray | None:
         """The force (N, world) the step expects this hand to exert on what it works at t: fed forward through the
         arm, as people anticipate a load they know (a door's friction and weight)."""
@@ -234,5 +238,6 @@ class TakeRunner:
         return n
 
     def export(self, folder: Path | None = None) -> None:
-        self.recorder.write(folder or self.folder, self.fps, self.lumbar[0], {s: self.names for s in SIDES},
-                            self.station, self.glbs())
+        folder = Path(folder or self.folder)
+        self.recorder.write(folder, self.fps, self.lumbar[0], {s: self.names for s in SIDES}, self.station,
+                            self.glbs(), self.meshes(folder))

@@ -55,7 +55,13 @@ class _Cell(TakeRunner):
         self.ctl.apply()
 
     def glbs(self):
-        return glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        out = glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        for body, entries in V.render_glbs().items():
+            out.setdefault(body, []).extend(entries)
+        return out
+
+    def meshes(self, folder):
+        return V.render_meshes(V.REFERENCE, folder)
 
     def force_on(self, geom: str) -> dict[str, float]:
         """Each hand's normal force on a geom now (N)."""

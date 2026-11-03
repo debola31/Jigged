@@ -234,7 +234,7 @@ class Seat(StepTake):
         keys += [(t_c + 0.12, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, slid + [0, 0, CLEAR_UP_MM]),
                  (t3, SPINDLE - [0, 0, BELOW_MM])]
         self.look(t_c + 0.5, SPINDLE - [0, 0, 60.0])
-        t4 = t3 + 0.35                                      # lined up under it
+        t4 = t3 + 0.6                                       # lined up under it, by eye
         t5 = t4 + 0.4
         keys += [(t4, SPINDLE - [0, 0, BELOW_MM]), (t5, SPINDLE - [0, 0, SHORT_MM])]
         # the left hand to the button, pressed and held while the right pushes the holder home

@@ -129,13 +129,16 @@ class ToolLoadRun(PendantRunner):
         return self.carry is not None and self.carry["t0"] <= t < self.carry["t1"]
 
     def held_error(self, side: str, t: float) -> np.ndarray | None:
-        """While the right hand carries the holder in, before the push: the eye on the holder's planned path."""
-        if side != "R" or self.loose is None or not (self.carry["t0"] <= t < self.seat_ev["t0"]):
+        """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder, on its planned
+        path and standing upright, its taper over the bore. The hand's own turn isn't the target: the carry weld keeps
+        the holder where it sat in the hand as the fingers closed, which a hand turned off its grip (30 deg, in a run)
+        would carry tilted into the bore."""
+        if side != "R" or self.loose is None or not (self.carry["t0"] <= t < self.carry["t1"]):
             return None
-        m, d, p = self.model, self.data, self.plan
-        hb = m.body("R_hand").id
-        Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
-        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+        d = self.data
+        Rh = d.xmat[self.loose].reshape(3, 3)
+        upright = Rotation.from_euler("z", np.arctan2(Rh[1, 0], Rh[0, 0])).as_matrix()      # its yaw kept
+        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(upright @ Rh.T).as_rotvec()]
 
     def touching(self, side: str) -> bool:
         """As the runner's, but the holder the right hand reaches for and carries in isn't a contact to stop

@@ -41,6 +41,8 @@ SETTLE_STEPS = 300
 
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
 APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
+RELEASE_S = 0.6                            # ... and start again this long after it opens, once the fingers are off it:
+                                           # at once, the fingers inside the handle threw the gun out of its holster
 # people correct a steady error in where their hand is by sight, slowly (as the vise take, moonshot/sim/vise_take.py)
 VISUAL_TAU = 0.25                          # s
 VISUAL_MAX = np.array([0.08, 0.5])         # at most this far (m) and this much turn (rad)
@@ -65,9 +67,11 @@ class TakeRunner:
         self.body = build(pelvis_mm=tuple(self.lumbar))
         self.grip_events = [e for e in self.tk["events"] if e["kind"] == "grip" and e.get("grip") in self.encloses]
         xml = self.scene(self.body.xml)
+        # a held tool is stiff in the hand (4 ms, 4 steps): at 20 ms the index's push on the gun's trigger moved the gun
+        # 30 mm in the hand, enough to miss its holster's bore; a held mechanism's knob or bar stays soft
         eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="enclose_{e["grip"]}" '
                      f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
-                     f'solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                     f'solref="{0.004 if e["grip"] in self.welded else 0.02} 1" solimp="0.9 0.95 0.002"/>\n'
                      for e in {e["grip"]: e for e in self.grip_events}.values())
         xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
         m = self.model = mujoco.MjModel.from_xml_string(xml)
@@ -177,7 +181,7 @@ class TakeRunner:
         m, d = self.model, self.data
         for e in self.grip_events:
             if e["grip"] in self.welded:                 # apart from the final approach on, so the hand reaches its grip
-                apart = e["t0"] - APPROACH_S <= t < e["t1"] - 0.05
+                apart = e["t0"] - APPROACH_S <= t < e["t1"] + RELEASE_S
                 ob = m.body(self.encloses[e["grip"]]).id
                 if apart != self._held_apart.get(e["grip"], False):
                     self.hold_apart(ob, apart)

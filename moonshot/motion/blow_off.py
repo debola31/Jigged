@@ -30,10 +30,13 @@ LUMBAR = np.array([-300.0, -935.0, 955.0])              # in the doorway, a litt
 LIFT_MM = 170.0                                          # clears the 115 mm nozzle out of the 125 mm holster
 TIP_OVER_VISE = np.array([VISE["x"], VISE["fixed_face_y"] - 50.0, VISE["jaw_top_z"] + 110.0])
 SWEEP_MM = 55.0                                          # along the jaws, either side of the middle
-DOORWAY = np.array([ORIGIN[0], -900.0, 0.0])             # in front of the door opening's middle
-# the doors stand open wider than for loading: at 300 mm the right forearm, reaching in from where the gun is in
-# reach, meets the right door's edge; past 430 the door's bar would sweep into the holster
-DOORS_OPEN_MM = 420.0
+# in through the opening right of the operator's chest and well inside the open right door's edge (x 575 at 600 mm
+# open): a gate at the operator's own y (-900) took the gun through the chest, and one 35 mm inside the edge of a door
+# open 400 mm caught the gun's body on it
+GATE_IN = ORIGIN + np.array([411.0, -690.0, 0.0])
+# the doors stand fully open, as the vise take loads with them: at 300 mm the right forearm, reaching in from where
+# the gun is in reach, meets the right door's edge
+DOORS_OPEN_MM = 600.0
 # blowing: the nozzle pointing forward and down into the vise, the handle up and back toward the operator
 AIM = np.stack([[0.0, 0.6, -0.8], [-1.0, 0.0, 0.0], [0.0, 0.8, 0.6]], 1)
 
@@ -62,7 +65,7 @@ class BlowOff(StepTake):
     def __init__(self, out=TAKES / "blow-off", verbose=True):
         super().__init__(out, LUMBAR, verbose)
         self.R0, self.p0 = AG.holstered_pose(ORIGIN)            # the gun as it stands in its holster
-        self.solve_grips({"gun": self.pistol_spec()}, source=self.pistol_spec)
+        self.solve_grips({"gun": self.pistol_spec()}, source=self.pistol_spec, depends=(AG,))
 
     def gun_point(self, v, R=None, p=None):
         """A point of the gun (its own frame, mm) in the world, with the gun at (R, p); default holstered."""
@@ -113,14 +116,18 @@ class BlowOff(StepTake):
         tip = AG.NOZZLE_TO
         aim_p = lambda dx: TIP_OVER_VISE + np.array([dx, 0.0, 0.0]) - AIM @ tip                          # noqa: E731
         t_on, t_lift = 1.75, 2.2                                 # closes on the handle, settles, then lifts
-        # in and out through the middle of the door opening: a straight line from the holster crosses the open
-        # right door's panel
-        gate = DOORWAY + np.array([0.0, 0.0, lifted[2] - DOORWAY[2]])
+        # out past the right door's edge and in through the opening, in front of the chest: a straight line from the
+        # holster crosses the open right door's panel
+        inside = GATE_IN + np.array([0.0, 0.0, lifted[2] - GATE_IN[2]])
         mid = Rotation.from_matrix(np.stack([self.R0, AIM])).mean().as_matrix()
         # unhurried: a 460 mm move across the body in 0.8 s left the arm 350 mm behind
-        dt = np.cumsum([0.0, 1.0, 1.3, 1.2, 0.7, 0.7, 0.5, 1.2, 1.4, 1.1])
-        poses = [(self.R0, self.p0), (self.R0, lifted), (mid, gate), (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(SWEEP_MM)),
-                 (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(0.0)), (mid, gate), (self.R0, lifted), (self.R0, self.p0)]
+        # back in: over the bore with the nozzle's tip at its mouth, a pause while the hand settles (the bore is 24 mm
+        # and the nozzle 8, so 10 mm off catches the rim), then slowly down, and held there a moment before letting go
+        mouth = self.p0 + np.array([0.0, 0.0, 120.0])        # the 115 mm nozzle's tip 5 mm over the rim
+        dt = np.cumsum([0.0, 1.0, 1.2, 1.1, 0.7, 0.7, 0.5, 1.1, 1.2, 0.8, 0.5, 1.2, 0.3])
+        poses = [(self.R0, self.p0), (self.R0, lifted), (mid, inside), (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(SWEEP_MM)),
+                 (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(0.0)), (mid, inside), (self.R0, lifted), (self.R0, mouth),
+                 (self.R0, mouth), (self.R0, self.p0), (self.R0, self.p0)]
         keys = [(t_lift + d, R, p) for d, (R, p) in zip(dt, poses)]
         self.keys = keys
         t_down = keys[-1][0]

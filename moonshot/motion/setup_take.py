@@ -361,7 +361,11 @@ class Take:
         Hg, Wg = self.grip_pose(grip, t0)
         t_contact = t0 + 0.35 + reach
         self.look(t0, self.stage + [0, 0, self.half[2]])
-        self.transit(t0 + 0.35, t_contact, Wg, via=[self.wrist + [70, 40, 150], Wg + [0, -12, 62]], fade=(Hg, 1.0))
+        if self.start == "vise":       # high over the crank's disc (the knob up to z 1040), then down onto the part
+            via = [np.array([self.wrist[0] - 60, -760.0, 1160.0]), Wg + [0, -30, 120]]
+        else:
+            via = [self.wrist + [70, 40, 150], Wg + [0, -12, 62]]
+        self.transit(t0 + 0.35, t_contact, Wg, via=via, fade=(Hg, 1.0))
         # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
         # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
         # the open fingers meeting the faces as they close), which is 0.62 of the planned reach
@@ -461,12 +465,18 @@ class Take:
         t_rel = t_down + 0.1
         self.fingers(t_rel, g["q"])
         self.fingers(t_rel + 0.3, open_like(self.hand, g["q"], 0.5))
+        self.wrist = W_set                                   # off the part from where it set it down
         self.transit(t_rel, t_rel + 0.7, W_set + [0, -35, 70], via=[W_set + [0, -4, 22]])
         self.event("hold_object", None, t_rel, obj="blank")
         self.event("place_correct", None, t_rel + 0.3)
         self.event("grip", None, t_rel + 0.1, grip=grip)
         self.wrist = W_set + [0, -35, 70]
         self.t = t_rel + 0.7
+        # back to the side round the crank (its knob sweeps x -515 to -247, y -636 to -726, z 760 to 1025), not
+        # through it: out to the right first, then back past the knob's end
+        self.transit(self.t, self.t + 1.3, REST_W, via=[np.array([-100.0, -800.0, 950.0])])
+        self.fingers(self.t + 1.3, self.q_relax)
+        self.t += 1.4
         self.clip("set_on_table", t0 - 0.3, self.t + 0.2, "SET DOWN  out of the vise and onto the table beside it")
         self.t_down = t_down
 

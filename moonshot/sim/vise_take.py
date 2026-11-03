@@ -708,7 +708,10 @@ class ViseTake:
                "max_deviation_while_pushing_mm": round(float(lag[pushing].max(initial=0)), 2),
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():
-            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > self.start_p[2] + 5)),
+            # held up: over where it started; a lift-out's part ends on the table, below where it started in the vise,
+            # so it is held up while it stays near its planned path instead (the grip holds it ~11 mm low in the hand)
+            floor = self.rd["blank"][:n, 2] - 20 if self.in_vise else np.full(n, self.start_p[2] + 5)
+            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > floor[lift])),
                                 "grip_N_thumb_median": round(float(np.median(force[lift, 0])), 2),
                                 "grip_N_fingers_median": round(float(np.median(force[lift, 1:5].sum(1))), 2),
                                 "max_slip_mm": round(float(np.max(rec["slip"])), 2)}

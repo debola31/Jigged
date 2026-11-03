@@ -1,7 +1,7 @@
 """A take, end to end, through the queue: planned, simulated and checked by one job; rendered by another only if every
 check passed. Runs on the hub; the jobs show on the dashboard like any other.
 
-    python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--no-render]
+    python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--lift-out] [--no-render]
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
     python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
 
@@ -73,6 +73,8 @@ def main(argv: list[str]) -> int:
               flush=True)
         return 0
     payload = {"take": take} | ({"part": opt("--part"), "setup": opt("--setup")} if opt("--part") else {})
+    if "--lift-out" in argv:                      # the unload's last take: the part lifted out of the loosened vise
+        payload["start"] = "vise"
     jid = submit("vise_take", payload, [], group=take)
     print(f"[pipeline] {take}: vise_take job {jid[:12]} queued", flush=True)
     job = wait(jid)

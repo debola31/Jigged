@@ -14,7 +14,6 @@ import sys
 import mujoco
 import numpy as np
 
-from moonshot.body.skeleton import H0
 from moonshot.motion import blow_off as BO
 from moonshot.sim.door_cycle import _Cell
 from moonshot.world import air_gun as AG
@@ -41,10 +40,17 @@ class BlowOff(_Cell):
         return xml.replace("<worldbody>\n", "<worldbody>\n" + AG.holster_xml(BO.ORIGIN) + AG.gun_xml(BO.ORIGIN), 1)
 
     def planned_relpose(self, grip):
-        g = json.loads((self.folder / "grips.json").read_text(encoding="utf-8"))[grip]
+        """The hand body in the holstered gun's frame as the solved plan has it when the fingers close: the body solver
+        turns the hand up to 10 degrees off the grip's own frame, which put the gun 15-20 mm off its path from the
+        grip's frame, enough to miss the 24 mm bore."""
+        e = next(e for e in self.grip_events if e["grip"] == grip)
+        q, _, _ = self.at(e["t0"] + 0.1)
+        pl = mujoco.MjData(self.model)
+        pl.qpos[:] = q
+        mujoco.mj_kinematics(self.model, pl)
+        hb = self.model.body("R_hand").id
         R0, p0 = AG.holstered_pose(BO.ORIGIN)
-        hand = np.array(g["H"]) @ H0.T                       # the hand body's frame, from the grip's hand frame
-        return R0.T @ (np.array(g["W"]) - p0) * 0.001, R0.T @ hand
+        return R0.T @ (pl.xpos[hb] * 1000 - p0) * 0.001, R0.T @ pl.xmat[hb].reshape(3, 3)
 
     def hand_force(self, side, t):
         """The gun's weight, carried."""

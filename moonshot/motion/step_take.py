@@ -63,13 +63,14 @@ class StepTake:
         """Where the side's hand hangs relaxed, in the world."""
         return self.at(side, self.rest)
 
-    def solve_grips(self, specs: dict[str, dict], source=None) -> None:
+    def solve_grips(self, specs: dict[str, dict], source=None, depends=()) -> None:
         """Grips by name from grasp.solve_spec specs (each with its "side"), cached in the take's grips.json and
         solved again only when the code or the specs' source change: source is what builds the specs (a method, or
-        the step's whole class by default). obj is given in the world."""
+        the step's whole class by default), depends the modules whose constants place what is gripped (a holster's
+        position isn't in the method that builds the spec). obj is given in the world."""
         src = "".join((MOONSHOT / f).read_text(encoding="utf-8") for f in (
             "motion/grasp.py", "body/hand.py", "motion/kinematics.py", "motion/solver.py", "body/data/anatomy.json"))
-        src += inspect.getsource(source or type(self))
+        src += inspect.getsource(source or type(self)) + "".join(inspect.getsource(m) for m in depends)
         key = hashlib.sha1((src + json.dumps(self.lumbar.tolist())).encode()).hexdigest()
         cache = self.out / "grips.json"
         data = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}

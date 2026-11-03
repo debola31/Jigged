@@ -7,7 +7,7 @@ plan. So each motor's command also carries the torque the motion is expected to 
 strength, so feedforward can never make the body stronger than a person:
 
 - `set` + `step`: a new target per joint, approached no faster than the joint's measured top speed
-  (anatomy.json body speed_max_deg_s), with gravity and velocity forces fed forward.
+  (anatomy.json body speed_max_deg_s), with gravity, velocity forces and the tendons' springs fed forward.
 - `track`: a planned trajectory (position, velocity, acceleration per joint), with full inverse dynamics fed
   forward. On the reference take this keeps the wrist within 0.1 mm of plan. A plan's speeds are not capped
   here; the production speed check judges them (plan §5.2).
@@ -88,10 +88,11 @@ class Controller:
             self.target[i] = float(np.clip(self.unit[i](value - self.rest[i]), *self.range[i]))
 
     def step(self) -> None:
-        """Move each setpoint one timestep toward its target at the joint's top speed, feed gravity forward, step."""
+        """Move each setpoint one timestep toward its target at the joint's top speed, feed gravity and the two-joint
+        muscles' passive pull (skeleton.tenodesis_tendons) forward, step."""
         self.setpoint += np.clip(self.target - self.setpoint, -self.max_step, self.max_step)
         d = self.data
-        d.ctrl[self.acts] = self.setpoint + d.qfrc_bias[self.dof] / self.kp
+        d.ctrl[self.acts] = self.setpoint + (d.qfrc_bias[self.dof] - d.qfrc_spring[self.dof]) / self.kp
         self.caps.apply(d)
         mujoco.mj_step(self.model, d)
 

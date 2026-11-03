@@ -1,10 +1,11 @@
 """The body model in MuJoCo: trunk, shoulder girdles, both arms and both hands, every joint a motor (plan §3.1).
 
 Built like a robot arm. Every segment is a rigid body with its real length and mass; every joint is a position
-servo whose range, strength and top speed come from measurements of people (moonshot/body/data). Joints that move
-together in people are coupled by soft joint equalities, and the joint that follows a coupling has no motor of its
-own, so the coupling can't be fought. Nothing is animated: motion is the motors driving this skeleton, and objects
-move only through contact and friction.
+servo whose range, strength and top speed come from measurements of people (moonshot/body/data), its strength
+varying with angle and speed (`StrengthCurve`). Joints that move together in people are coupled by soft joint
+equalities, and the joint that follows a coupling has no motor of its own, so the coupling can't be fought. The
+two-joint finger muscles are the exception: a spring across the wrist and each finger joint, which effort overrides.
+Nothing is animated: motion is the motors driving this skeleton, and objects move only through contact and friction.
 
 Angles are anatomical (degrees, 0 = straight, + = flexion/abduction, as trainual's motion/body_model.py and
 motion/hand_model.py define them); MuJoCo's qpos is the angle minus the joint's rest angle, in radians. World
@@ -38,6 +39,7 @@ SHOULDER = [("sh_plane", (0, 0, 1)), ("sh_elev", (0, -1, 0)), ("sh_rot", (0, 0, 
 ELBOW = [("elbow", (1, 0, 0)), ("pron", (0, 0, 1))]
 WRIST = [("wr_flex", (0, 1, 0)), ("wr_dev", (1, 0, 0))]
 WRIST_FACETS = 32
+FINGERS = ("index", "middle", "ring", "little")
 
 
 def _load(name: str) -> dict:
@@ -135,7 +137,7 @@ def hand_couplings(spec: dict) -> list[Coupling]:
     (Roda-Sales 2022), palm cupping CMC4 from ring MCP flexion and CMC5 from CMC4 (El-Shennawy 2001), thumb CMC
     roll into opposition from CMC flexion (Crisco 2015). Soft, so contact can bend them."""
     C = spec["coupling"]
-    out = [Coupling(f"{f}_dip", f"{f}_pip", C["dip_per_pip_free"][f]) for f in ("index", "middle", "ring", "little")]
+    out = [Coupling(f"{f}_dip", f"{f}_pip", C["dip_per_pip_free"][f]) for f in FINGERS]
     out += [Coupling("cmc4_flex", "ring_mcp_flex", C["cmc4_per_mcp"]),
             Coupling("cmc5_flex", "cmc4_flex", C["cmc5_per_cmc4"]),
             Coupling("thumb_cmc_roll", "thumb_cmc_flex", C["thumb_roll_per_cmc_flex"])]
@@ -177,6 +179,24 @@ def wrist_ellipse_tendons(body: BodyModel, side: str, wd: dict) -> list[str]:
                         for j, x in ((fl, kf), (dv, kd)) if abs(x) > 1e-9)
         out.append(f'    <fixed name="{side}_wrist_ellipse_{k}" range="-100 {hi:.6f}" solreflimit="0.004 1" '
                    f'solimplimit="0.95 0.99 0.001">{terms}</fixed>')
+    return out
+
+
+def tenodesis_tendons(body: BodyModel, side: str, td: dict) -> list[str]:
+    """Two-joint finger muscles (anatomy.json coupling.tenodesis): each finger's MCP and PIP pulled toward the angle
+    its long muscles leave it at for the wrist's flexion, a + b * wrist, by a spring along a fixed tendon of length
+    finger - b * wrist (qpos, radians), at rest length exactly there. A spring rather than an equality, so the finger's
+    motor overrides it as effort does, and the inverse dynamics the controller feeds forward includes its pull."""
+    w = body.joints[f"{side}_wr_flex"]
+    (w0, w1), out = td["wrist_deg"], []
+    for finger in FINGERS:
+        for joint in ("mcp_flex", "pip"):
+            f, (f0, f1) = body.joints[f"{side}_{finger}_{joint}"], td[joint]
+            b = (f1 - f0) / (w1 - w0)
+            rest = math.radians(f0 - b * w0 - f.rest + b * w.rest)
+            out.append(f'    <fixed name="{side}_tenodesis_{finger}_{joint}" stiffness="{td["stiffness_nm_per_rad"]}" '
+                       f'springlength="{rest:.6f} {rest:.6f}"><joint joint="{f.name}" coef="1"/>'
+                       f'<joint joint="{w.name}" coef="{-b:.6f}"/></fixed>')
     return out
 
 
@@ -314,6 +334,7 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
         # ctrl is unlimited because it carries the controller's feedforward on top of the target; the controller
         # clamps targets to the joint's range, and forcerange is what caps the motor at the joint's strength
     tendons = [t for side in SIDES for t in wrist_ellipse_tendons(body, side, anatomy["wrist_deg"])]
+    tendons += [t for side in SIDES for t in tenodesis_tendons(body, side, anatomy["coupling"]["tenodesis"])]
     body.xml = f"""<mujoco model="moonshot-body">
   <compiler angle="radian" autolimits="true"/>
   <!-- grasping settings from MuJoCo's own guidance, as trainual's accepted take used them: elliptic cones,

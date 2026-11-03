@@ -117,11 +117,11 @@ def ranges():
 
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
-         "comfort": 1.0, "prior": 5.0, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
+         "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
-    # prior 5.0, not 0.3 (2026-11-03): at 0.3 the people's mixture barely moved a take (the vise take's median
-    # likelihood 35.1 against people's 24.2; 29.7 at 5). The grip solver keeps 0.3 (posture_cost's default): at 5 the
-    # posture outweighed the contact, and the deburr grip's pads came off its handle (thumb 47.7 mm, was 8.5)
+    # prior 0.3 (2026-11-03): against people seated or standing, the vise take plans inside their range (0.936) and
+    # likelihood (24.6) at 0.3, and 1.5 adds little (0.941, 23.6) while its hands miss more; at 5 the bench takes'
+    # hands missed by up to 118 mm and their caliper and deburr gates failed, and the grip solver's pads came off
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 

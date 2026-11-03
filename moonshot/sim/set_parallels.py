@@ -14,6 +14,7 @@ import sys
 import numpy as np
 
 from moonshot.motion import set_parallels as SP
+from moonshot.motion.primitives import min_jerk
 from moonshot.sim.door_cycle import _Cell
 from moonshot.world import cell
 from moonshot.world import parallel_rack as RACK
@@ -33,6 +34,50 @@ class SetParallels(_Cell):
         self.tilt = {n: [] for n in SP.ORDER}
         self.in_hand = {n: [] for n in SP.ORDER}
         self.carry = {e["object"]: e for e in self.tk["events"] if e["kind"] == "carry"}
+        keys = np.load(self.folder / "parallel_keys.npz")
+        self.keys = {n: (keys[f"{n}_t"], keys[f"{n}_p"]) for n in SP.ORDER}
+        grips = {e["grip"]: e for e in self.grip_events}
+        # the eye leaves the hand be while the parallel is in its slot, where pulling the hand onto its plan drags it
+        # into the slot's walls, and from letting go until the hand is up off it, where pulling the hand back onto its
+        # plan (15 mm off it, as the eye steered the parallel) would sweep the open fingers into it. Out of the slot it
+        # steers the parallel (held_error), down onto the seat and on it until it is let go: left be once it touched,
+        # it was dragged 3 mm across the seat by the planned hand's last slight turning
+        self.steer = {n: (self.keys[n][0][1], grips[SP.GRIP[n]]["t1"]) for n in SP.ORDER}
+        self.still = [(grips[SP.GRIP[n]]["t0"], self.keys[n][0][1]) for n in SP.ORDER]
+        self.still += [(grips[SP.GRIP[n]]["t1"], grips[SP.GRIP[n]]["t1"] + 0.8) for n in SP.ORDER]
+        self._now = 0.0
+
+    def planned_centre(self, name: str, t: float) -> np.ndarray:
+        """Where the plan has the parallel's middle (mm) at t (motion/set_parallels.py, its keys)."""
+        ts, ps = self.keys[name]
+        if t <= ts[0]:
+            return ps[0]
+        for a, b, pa, pb in zip(ts, ts[1:], ps, ps[1:]):
+            if a <= t < b:
+                return pa + (pb - pa) * min_jerk((t - a) / (b - a))
+        return ps[-1]
+
+    def held_error(self, side: str, t: float) -> np.ndarray | None:
+        """In free air the eye is on the parallel: where its middle is, and whether it stands upright, against the plan,
+        so a grip closed a few mm off doesn't set it down that far off, and the planned hand's own slight turning on the
+        way (7 deg) doesn't set it down leaning. Its turn about the vertical is left to the hand: the arm can't turn the
+        hand that way much here, and asking it to wound the correction up to its limit, the fingers into the jaw."""
+        self._now = t
+        m, d = self.model, self.data
+        held = next((n for n in SP.ORDER if self.steer[n][0] <= t < self.steer[n][1]), None)
+        if side != "R" or held is None:
+            return None
+        b = m.body(held).id
+        z = d.xmat[b].reshape(3, 3)[:, 2]
+        axis = np.cross(z, [0.0, 0.0, 1.0])
+        s = np.linalg.norm(axis)
+        upright = axis / s * np.arctan2(s, z[2]) if s > 1e-9 else np.zeros(3)
+        return np.r_[self.planned_centre(held, t) * 0.001 - d.xpos[b], upright]
+
+    def touching(self, side: str) -> bool:
+        if side == "R" and any(a <= self._now < b for a, b in self.still):
+            return True
+        return super().touching(side)
 
     def scene(self, body_xml: str) -> str:
         load = V.REFERENCE
@@ -50,11 +95,23 @@ class SetParallels(_Cell):
         d.eq_active[lock] = 1
         for n in SP.ORDER:                  # free in their rack: the vise scene's keeper clips hold them for the load take
             d.eq_active[m.equality(f"keep_{n}").id] = 0
+            a = m.jnt_qposadr[m.joint(n).id]
+            d.qpos[a + 3:a + 7] = [np.cos(RACK.YAW / 2), 0.0, 0.0, np.sin(RACK.YAW / 2)]   # turned with the rack
 
     def planned_relpose(self, grip):
-        """None: the pinch holds the parallel where the fingers close on it. The planned pose would pull it sideways by
-        the hand's few mm of error into its slot's walls (0.9 mm play), and the hand jams."""
-        return None
+        """The pinch squares the parallel to the pads, as two flat faces pressed between fingertips do: the hand holds
+        it at the grip's planned turn, about where its base stands when the fingers close. Its base stays put, so it
+        only stands up in its slot, not dragged sideways by the hand's few mm of error (the whole planned pose jammed it
+        in the slot; turned about its middle, its foot swung into the slot's wall); as closed, it was carried leaning
+        10-18 deg and set down on an edge."""
+        m, d, p = self.model, self.data, self.plan
+        hb, ob = m.body("R_hand").id, m.body(self.encloses[grip]).id
+        R_rel = SP.turned(RACK.YAW).T @ p.xmat[hb].reshape(3, 3)   # the hand in the parallel's frame, as planned: it
+                                                                    # stands upright, turned with the rack
+        R_obj = d.xmat[hb].reshape(3, 3) @ R_rel.T
+        half = np.array([0.0, 0.0, self.load.parallel_h / 2 * 0.001])
+        base = d.xpos[ob] - d.xmat[ob].reshape(3, 3) @ half
+        return R_obj.T @ (d.xpos[hb] - (base + R_obj @ half)), R_rel
 
     def hand_force(self, side, t):
         """The parallel's weight, carried."""

@@ -5,11 +5,16 @@ loaded is a `Load`; REFERENCE is trainual's accepted take (a 0.80 kg aluminium b
 World millimetres in the VF-2 machine frame, +Z up. The lead screw is a joint equality between the crank and the
 jaw slide (two-way, so the crank has damping and friction); while the hand isn't driving it the screw self-locks
 (`screw_lock`, switched by the take runner), because MuJoCo's constant friction can't grow with clamping load.
+
+What the render draws (moonshot/contracts/take_record.py): the D688's parts from trainual's rig, one GLB per body,
+each authored in its body's own frame (moonshot/render/dress.py writes them), and the part and parallels as boxes at
+the load's size, written into each take.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -20,6 +25,7 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             lead=6.35)
 CRANK0_DEG = 55.0
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
+RENDER_DIR = "library/workholding/d688/links"            # under the data root
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,32 @@ STEEL_DEFAULT = """    <default class="steel">
       <geom contype="1" conaffinity="3" friction="0.25 0.004 0.0001" priority="1" solref="0.002 1"
             solimp="0.95 0.99 0.0005" rgba="0.3 0.35 0.6 1"/>
     </default>"""
+
+
+def render_glbs(table_body: str = "vf2_table") -> dict[str, list[dict]]:
+    """The D688's GLBs for a take record, by the body that carries each. Each is authored in its body's own frame,
+    so it stays right whatever opening a load starts the jaw at."""
+    bodies = {"base": table_body, "jaw": "moving_jaw", "handle": "crank", "knob": "knob"}
+    return {body: [{"path": f"{RENDER_DIR}/{link}.glb", "in_body": [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], "link": link}]
+            for link, body in bodies.items()}
+
+
+def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
+    """The part and the parallels as boxes at the load's size, written into a take's folder for its record's "meshes"
+    (one each, at frame 0, centred on its body): trainual's rig drew them as plain boxes too, and their sizes change
+    with the load."""
+    import trimesh
+    from trimesh.visual.material import PBRMaterial
+    boxes = {"blank": (load.size, "aluminium_6061", [0.8, 0.81, 0.82, 1.0], 0.33)}
+    boxes |= {n: ([PARALLEL_L, PARALLEL_T, load.parallel_h], "hardened_steel", [0.62, 0.63, 0.65, 1.0], 0.22)
+              for n in load.parallels_y}
+    for body, (size, name, colour, rough) in boxes.items():
+        box = trimesh.creation.box(extents=np.asarray(size, float) * M)
+        box.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
+            name=name, baseColorFactor=colour, metallicFactor=1.0, roughnessFactor=rough))
+        (Path(folder) / body).mkdir(parents=True, exist_ok=True)
+        box.export(Path(folder) / body / "0.glb")
+    return {body: {"dir": body, "frames": [0]} for body in boxes}
 
 
 def knob_center(phi_deg: float) -> np.ndarray:

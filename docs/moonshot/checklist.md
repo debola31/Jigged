@@ -101,29 +101,33 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 - [x] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
   strength and couplings (§3.1). `moonshot/body/skeleton.py`, 2026-11-01: 59 motors, 14 coupled joints, 42.7 kg
-  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Known gaps: the scapula
-  doesn't yet follow shoulder elevation; fingers have no recorded top speed; 14 of 23 strengths are *proposed*
-  (`moonshot/body/data/strength.json`).
+  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Both arms are planned since
+  2026-11-02 (the solver and grips, `test_body_mirror.py`, `test_two_arms.py`); the physics run and the render are
+  still right-hand only. Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
+  top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
 - [ ] Two-joint muscle couplings: wrist bend moves the fingers (§3.1)
 - [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1)
 - [ ] Body conformance tests pass: range, speed, strength, strength curves, couplings, muscle check agrees,
   proportions, gravity (§3.1). Range, speed, strength, couplings, proportions, gravity and left-right mirroring
-  pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-01); strength curves and the muscle check wait on
-  their own items.
+  pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-01), as do the wrist's ellipse
+  (`test_wrist_ellipse.py`) and the left arm as the right mirrored under any trunk (`test_body_mirror.py`,
+  2026-11-02); strength curves and the muscle check wait on their own items.
 - [ ] Watch the deformable-pad trigger: count grip assists and grip complaints per station (§3.1). Only if it
   fires: MuJoCo deformable fingertip and palm pads.
 - [ ] Record conformance tests for every machine and tool as it lands (§3.2). So far (2026-11-01): the VF-2
   station (`test_vf2_conformance.py`) and the VF-2 cell, with the vise riding the table at the loading position
   (`test_cell_conformance.py`); the generated tools pass their record tests. 2026-11-02: the band saw
   (`test_bandsaw_conformance.py`, 11 tests) and the inspection bench (`test_inspection_bench_conformance.py`, 5),
-  each gate committed before its station on `feature/moonshot-stations`; both pass locally, no CI run yet.
+  each gate committed before its station, merged 2026-11-02; both pass locally, no CI run yet.
 - [ ] The usage-card format (§4), with the first cards for the G1 tools: band saw, VMC controls, calipers,
   micrometer, indicator. The format is done (2026-11-01, `moonshot/cards/card.schema.json`), with the card behind
-  the reference take (`kurt-vise-load-and-clamp`); the G1 cards aren't written yet.
+  the reference take (`kurt-vise-load-and-clamp`). The G1 cards are being written on `feature/moonshot-cards`, not
+  merged yet: band saw, VF-2 controls, calipers, micrometer, dial test indicator, and the VF-2's tool setter.
 - [ ] For each G1 card: the maker's instructions found; YouTube or research-dataset footage found, downloaded to
   `C:\jigged-data\footage\` and hand-tracked (bonus, not required; videos never committed or published)
-- [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station
+- [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station: waits on your review of
+  the vise take's draft (the VF-2), rendering 2026-11-02
 
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into
   the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
@@ -143,17 +147,24 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   launch of the blank on the parallels during cranking.
 - [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
 - [ ] Timestep halving converges
-- [ ] The four known gaps in §5.5: three fixed by the new body model; trunk rotation given a standing-work range (§11)
+- [ ] The six known gaps in §5.5, on the re-planned vise take (2026-11-02). Fixed: the wrist's ellipse (0.80 at
+  most), the crank grip (the lever never touched), the skin (3.45 mm, within the pads' 3.5), finger spread (0.11
+  deg past range at worst, inside the 1 deg tolerance). Open: shoulder rotation at 151.5 deg/s against 150, and
+  trunk rotation against recorded people, unchecked until body vs. people is ported (a standing-work range may be
+  the fix, §11).
 
 ## 4. Job queue (timeboxed Nov 1–2)
 
 - [x] Queue on the hub: SQLite, HTTP API, leases, content-addressed inputs, token auth (2026-11-01)
-- [x] Workers on all three machines: `hub-gtx1070` (CUDA, GPU only), `m1-pro`, `m4-max` (Metal)
+- [x] Workers on all three machines: `hub-gtx1070` (CUDA, GPU only), `m1-pro`, `m4-max` (Metal). Since
+  2026-11-02 they run the production jobs too, so the farm's work shows on the dashboard: `vise_take` on the M1
+  (plan, physics, every check) and `bake_render` on the M4, a take rendered only once its checks pass
+  (`moonshot/orchestrate/jobs.py`, `pipeline.py`); and they start themselves at login (§1).
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
-- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review, once render jobs report
-  frame times (track G)
+- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Render jobs
+  report their frame time since 2026-11-02 (`bake_render`); the dashboard doesn't show it yet.
 - [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
   intact; the scene pack fetched by hash and verified on each worker
 - [x] **Keep our own queue** rather than switching to Flamenco (§8), on the tests and the live run (2026-11-01)

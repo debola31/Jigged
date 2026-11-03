@@ -33,6 +33,7 @@ COPY moonshot/orchestrate /opt/jigged/moonshot/orchestrate
 COPY moonshot/render /opt/jigged/moonshot/render
 COPY renderer /opt/renderer
 COPY moonshot/tools/cloud/start.sh /opt/jigged/start.sh
+RUN sed -i 's/\r$//' /opt/jigged/start.sh
 
 WORKDIR /opt/jigged
 ENTRYPOINT ["sh", "/opt/jigged/start.sh"]

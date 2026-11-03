@@ -47,6 +47,8 @@ OVERTURN = 1.25                                           # a stroke turns the h
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 HOVER_MM = 40.0
+HOVER_RIGHT_MM = 15.0                                     # the right index ready over Feed Hold, not resting on it
+CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
 TOUCH_LIFT_MM = 1.0                                       # a press is planned to the pad touching the key, not in it:
                                                           # the push presses (moonshot/sim/pendant.py)
 SHARED_GRIPS = data_root() / "takes" / "pendant" / "grips.json"   # every pendant take stands and grips alike
@@ -209,7 +211,7 @@ class PendantTake(StepTake):
         if reached:
             self.look(t0, key_at(name))
             dur = float(np.clip(0.35 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
-            self.transit("R", t0, t0 + dur, hover, fade=(H, 1.0))
+            self.transit("R", t0, t0 + dur, hover, via=self.clear_of_face(hover), fade=(H, 1.0))
             self.effort("R", t0, 0.0, "keypad")
             self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
             self.fingers("R", t0 + 0.1, q)
@@ -236,6 +238,14 @@ class PendantTake(StepTake):
         self.key_H = H
         self.side["R"]["wrist"], self.t, self.where = hover, t1, "keys"
         self._follow(name)
+
+    def clear_of_face(self, to) -> list:
+        """A point to pass through between the keys and the dial, well out from the face, so the hand doesn't skim
+        the keys on the way; none for a reach from the side."""
+        if self.where not in ("keys", "dial"):
+            return []
+        mid = (np.asarray(self.side["R"]["wrist"], float) + np.asarray(to, float)) / 2
+        return [mid + [0, -CLEAR_MM, 0]]
 
     def leave_keys(self, t: float) -> None:
         """The arm eases off as the hand leaves the keys."""
@@ -280,7 +290,7 @@ class PendantTake(StepTake):
             self.leave_keys(t0)
             if self.where != "dial":
                 dur = float(np.clip(0.35 + np.linalg.norm(W_off - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
-                self.transit("R", t0, t0 + dur, W_off, fade=(H0_, 1.0))
+                self.transit("R", t0, t0 + dur, W_off, via=self.clear_of_face(W_off), fade=(H0_, 1.0))
                 self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
                 t0 += dur
             else:                                     # turn back, off the rim, from the last stroke's end
@@ -319,7 +329,7 @@ class PendantTake(StepTake):
         the card has one hand ready on Feed Hold whenever the other starts the machine."""
         t0 = self.t
         if hover_right:
-            H, W = self.key_pose(hover_right, lift=3.0)
+            H, W = self.key_pose(hover_right, lift=HOVER_RIGHT_MM)
             start = self.side["R"]["wrist"]
             path = PosePath(H, start).to(t0, 0.5, H, W)
             self.add("R", t0, t0 + 0.5, lambda t, path=path: [("pose", *path.at(t), 3.0)])

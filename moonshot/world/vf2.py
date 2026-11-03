@@ -263,8 +263,13 @@ class Control:
             self.tool_length[self.tool] = float(self.machine_mm()[2])
         elif k in ("enter", "f1"):
             if self.page == "work" and self.typed:
-                v = float(self.typed)
-                self.work["G54"][self.cursor] = v if k == "f1" else self.work["G54"][self.cursor] + v
+                try:
+                    v = float(self.typed)
+                except ValueError:                # not a number: the control alarms and changes nothing
+                    self.events.append(f"input_alarm {self.typed}")
+                    v = None
+                if v is not None:
+                    self.work["G54"][self.cursor] = v if k == "f1" else self.work["G54"][self.cursor] + v
             elif self.page == "program":
                 self.mdi_line = self.typed
             self.typed = ""

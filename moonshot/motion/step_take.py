@@ -35,6 +35,7 @@ MOONSHOT = Path(__file__).resolve().parents[1]
 SIDES = ("R", "L")
 REST_OFFSET = np.array([210.0, 55.0, -105.0])      # a hand hanging relaxed by the thigh, from the lumbar pivot
 THETA0 = [8.0, 0, 0, 40, 40, 0, 60, 20, 0, 0, 0, 0]
+KEY = "__source_hash__"
 
 
 class StepTake:
@@ -70,8 +71,8 @@ class StepTake:
         key = hashlib.sha1((src + inspect.getsource(type(self)) + json.dumps(self.lumbar.tolist())).encode()).hexdigest()
         cache = self.out / "grips.json"
         data = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
-        if data.get("key") != key:
-            data = {"key": key}
+        if data.get(KEY) != key:                         # a field no grip can be named, so no grip overwrites it
+            data = {KEY: key}
         for name, spec in specs.items():
             if name not in data:
                 t0 = time.time()

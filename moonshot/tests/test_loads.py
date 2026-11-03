@@ -1,8 +1,9 @@
 """A plan's setups become vise loads the take can run: the stock, or a machined part as its bounding box, as it sits
 in the vise, on both parallels whether set down short or slid home."""
+import numpy as np
 import pytest
 
-from moonshot.motion.loads import vise_load
+from moonshot.motion.loads import part_pose, vise_load
 from moonshot.motion.setup_take import PLACE_GAP
 from moonshot.planning.validate import load_plan
 from moonshot.world.vise import PARALLEL_T, REFERENCE, VISE
@@ -31,7 +32,7 @@ def test_nist_ftc_10_op10_loads_the_stock_on_one_inch_parallels():
     assert load.opening0 > load.size_mm[1]
 
 
-@pytest.mark.parametrize("setup, size", [("op20", (158.0, 75.0, 36.1)), ("op30", (158.0, 31.0, 75.0)),
+@pytest.mark.parametrize("setup, size", [("op20", (158.0, 75.0, 37.6)), ("op30", (158.0, 31.0, 75.0)),
                                          ("op40", (158.0, 31.0, 75.0))])
 def test_later_setups_load_the_machined_part_as_its_box(setup, size):
     load = vise_load(load_plan("nist-ftc-10"), setup)
@@ -39,6 +40,31 @@ def test_later_setups_load_the_machined_part_as_its_box(setup, size):
     assert on_both(load, 0.0) and on_both(load, PLACE_GAP)
 
 
-def test_a_part_standing_on_end_waits_for_a_stop():
-    with pytest.raises(NotImplementedError):
-        vise_load(load_plan("nist-ftc-10"), "op50")
+@pytest.mark.parametrize("setup", ["op50", "op60"])
+def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
+    load = vise_load(load_plan("nist-ftc-10"), setup)
+    assert load.size_mm == pytest.approx((31.0, 75.0, 158.0))
+    assert load.parallel_h == 0 and not load.parallels_y
+    assert part_pose(load_plan("nist-ftc-10"), setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + 79.0)
+
+
+@pytest.mark.parametrize("setup", ["op10", "op20", "op30", "op40", "op50", "op60"])
+def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(setup):
+    plan = load_plan("nist-ftc-10")
+    s = next(x for x in plan["setups"] if x["id"] == setup)
+    p = part_pose(plan, setup)
+    R = p["R"]
+    assert R @ R.T == pytest.approx(np.eye(3)) and np.linalg.det(R) == pytest.approx(1.0)
+    up = np.eye(3)["XYZ".index(s["face_up"][1])] * (1 if s["face_up"][0] == "+" else -1)
+    assert R @ up == pytest.approx([0, 0, 1])
+    # the model's box, placed by the pose, is the box the vise holds
+    corners = np.array(np.meshgrid(*p["envelope_mm"])).reshape(3, -1).T
+    world = p["origin_mm"] + corners @ R.T
+    assert world.min(0) == pytest.approx(p["centre_mm"] - p["size_mm"] / 2)
+    assert world.max(0)[1] == pytest.approx(VISE["fixed_face_y"]), "against the fixed jaw"
+
+
+@pytest.mark.parametrize("setup", ["op30", "op40"])
+def test_datum_a_sits_against_the_fixed_jaw_when_the_jaws_close_on_it(setup):
+    R = part_pose(load_plan("nist-ftc-10"), setup)["R"]
+    assert R @ [0, -1.0, 0] == pytest.approx([0, 1.0, 0])

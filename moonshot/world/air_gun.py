@@ -1,6 +1,6 @@
 """The shop air gun and its holster on the VF-2's front panel (plan §3.2): the blow gun a machinist clears chips with.
-A generic pistol-grip blow gun, built from the common form (no maker's CAD): a 90 mm handle, a valve body on top, a
-115 mm nozzle and a trigger under the body; its 0.18 kg is proposed.
+A generic pistol-grip blow gun, built from the common form (no maker's CAD): a 90 mm handle, a neck and a valve body
+on top, a 115 mm nozzle and a trigger under the body; its 0.18 kg is proposed.
 
 The holster is an open-topped box on a bracket off the enclosure's front panel right of the door opening (the
 panel's face is at y = -794.5 there, in the enclosure's GLB). The gun stands in it nozzle down, resting on the rim
@@ -18,11 +18,14 @@ from scipy.spatial.transform import Rotation
 M = 0.001
 GUN_KG = 0.18
 HANDLE_R, HANDLE_HALF = 13.0, 45.0                  # mm
-BODY_C, BODY_HALF = np.array([25.0, 0.0, 58.0]), np.array([35.0, 12.0, 13.0])
-NOZZLE_R, NOZZLE_FROM, NOZZLE_TO = 4.0, np.array([60.0, 0.0, 58.0]), np.array([175.0, 0.0, 58.0])
+BODY_C, BODY_HALF = np.array([25.0, 0.0, 75.0]), np.array([35.0, 16.0, 16.0])
+NOZZLE_R, NOZZLE_FROM, NOZZLE_TO = 4.0, np.array([60.0, 0.0, 75.0]), np.array([175.0, 0.0, 75.0])
 TRIGGER_C, TRIGGER_HALF = np.array([20.0, 0.0, 30.0]), np.array([5.0, 4.0, 12.0])
-HOLSTER_TOP = np.array([520.0, -812.0, 1120.0])     # station frame: the middle of the holster's open top, on a bracket
-HOLSTER_IN, HOLSTER_DEPTH, WALL = 14.0, 125.0, 3.0  # a 14 mm square bore: the nozzle drops in, the body can't
+HOLSTER_TOP = np.array([520.0, -870.0, 1120.0])     # station frame: the middle of the holster's open top, on a bracket
+# standing 95 mm proud of the right door, so the door's pull bar (out to y -845) passes behind the holstered gun as
+# the door slides; at -812 the pull swept into the gun, and the fingers round its handle met the door's panel
+HOLSTER_IN, HOLSTER_DEPTH, WALL = 14.0, 125.0, 3.0  # a 14 mm square bore: the 8 mm nozzle drops in, the 32 mm body can't;
+# at 24 the hung gun leant 8 degrees under its handle's weight, one way or the other
 # holstered: the nozzle points down and the handle out to the left
 HOLSTERED = Rotation.from_euler("y", 90, degrees=True).as_matrix()
 
@@ -57,6 +60,8 @@ def gun_xml(origin_mm) -> str:
     q = Rotation.from_matrix(R).as_quat()                   # x y z w
     return f"""    <body name="air_gun" pos="{_f(p)}" quat="{q[3]:.6f} {q[0]:.6f} {q[1]:.6f} {q[2]:.6f}">
       <freejoint name="air_gun"/>
+      <geom name="air_gun_neck" type="capsule" size="0.0100" fromto="0 0 {HANDLE_HALF * M:.4f} 0 0 {(BODY_C[2] - BODY_HALF[2]) * M:.4f}"
+            mass="{GUN_KG * 0.05:.4f}" contype="1" conaffinity="3" rgba="0.6 0.6 0.62 1"/>
       <geom name="air_gun_handle" type="capsule" size="{HANDLE_R * M:.4f}" fromto="0 0 {-HANDLE_HALF * M:.4f} 0 0 {HANDLE_HALF * M:.4f}"
             mass="{GUN_KG * 0.45:.4f}" friction="0.8 0.004 0.0001" contype="1" conaffinity="3" rgba="0.75 0.1 0.08 1"/>
       <geom name="air_gun_body" type="box" size="{_f(BODY_HALF)}" pos="{_f(BODY_C)}" mass="{GUN_KG * 0.35:.4f}"

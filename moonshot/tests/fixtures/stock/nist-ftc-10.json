@@ -1,0 +1,14 @@
+{
+ "part": "nist-ftc-10",
+ "about": "What O2 (plan §2) holds the finished stock to on nist-ftc-10: every face of the STEP within physics.stock_deviation_mm, except the faces below, whose deviation is reported, not gated. Read by moonshot/tests/gates/test_cycle_stock.py. Protected (plan §6, rule 1): an exemption added here is a decision, made visibly.",
+ "exempt": [
+  {"what": "blend", "types": ["TORUS", "SPHERE", "BSPLINE"],
+   "why": "Fillets, rounds and the ridge's blend. The plan's milling tools are 3.175 mm in radius at the smallest, so none forms a 1-2 mm inside radius; the convex rounds are edge breaks, made by the bench deburr after the cycle (plan finish). The drawing holds untoleranced surfaces to a 1.5 mm profile (note 5)."},
+  {"what": "blend", "types": ["CYLINDER"], "radius_max_mm": 2.0, "arc_max_deg": 91.0,
+   "why": "The same blends as cylinders: a quarter-turn or less of radius 2 mm or under (the pocket's corners and floor fillets, the r 1 fillets and rounds). A hole is never one: OCC splits a hole's wall into half-turns."},
+  {"what": "drill point", "types": ["CONE"],
+   "why": "The STEP draws its blind holes' points at 118 deg (a 59 deg semi-angle); the shop's drills are 135 deg (their records). The hole's full-diameter depth is gated on its wall."}
+ ],
+ "band_mm": 6.35,
+ "band_why": "On a face that meets a concave blend, the band within this distance of the blend is exempt too: a tool can't reach into an inside radius smaller than its own, and leaves material on both faces out to its radius. 6.35 mm is the plan's largest end mill's radius (em12, 1/2 in)."
+}

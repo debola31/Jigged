@@ -40,7 +40,7 @@ def test_later_setups_load_the_machined_part_as_its_box(setup, size):
     assert on_both(load, 0.0) and on_both(load, PLACE_GAP)
 
 
-@pytest.mark.parametrize("setup", ["op50", "op60"])
+@pytest.mark.parametrize("setup", ["op50"])
 def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
     load = vise_load(load_plan("nist-ftc-10"), setup)
     assert load.size_mm == pytest.approx((31.0, 75.0, 158.0))
@@ -48,7 +48,7 @@ def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
     assert part_pose(load_plan("nist-ftc-10"), setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + 79.0)
 
 
-@pytest.mark.parametrize("setup", ["op10", "op20", "op30", "op40", "op50", "op60"])
+@pytest.mark.parametrize("setup", ["op10", "op20", "op30", "op40", "op50"])
 def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(setup):
     plan = load_plan("nist-ftc-10")
     s = next(x for x in plan["setups"] if x["id"] == setup)

@@ -34,13 +34,16 @@ def expand(plan: dict) -> list[dict]:
         f = {"setup": s["title"], "vise": VISE_NAMES[w["vise"]], "up": FACE_UP[s["face_up"]],
              "parallels": f"{w['parallels_in']:g} in parallels" if w["parallels_in"] else "the vise floor and a stop"}
         p = s["id"]
+        stop = not w["parallels_in"]               # standing on the vise floor against a stop: no parallels to set or check
         out += [
-            step(f"{p}-clean", "Clean the vise and set the parallels",
+            step(f"{p}-clean", "Clean the vise and set the stop" if stop else "Clean the vise and set the parallels",
+                 "Blow out {vise} and wipe the jaws and its floor, then set the stop." if stop else
                  "Blow out {vise} and wipe the jaws, then set {parallels}.", f, setup=p),
             step(f"{p}-load", "Load the part", "Set the part in {vise}, {up}, on {parallels}.", f, setup=p),
             step(f"{p}-seat", "Seat it and tighten the vise",
                  "Close the jaw until it touches, tap the part down, then tighten the handle.", f, setup=p),
-            step(f"{p}-check", "Check the parallels are pinched",
+            step(f"{p}-check", "Check it's square" if stop else "Check the parallels are pinched",
+                 "Sweep the indicator up its side: the needle should stay put." if stop else
                  "Try each parallel with a fingertip: neither should move.", f, setup=p),
             step(f"{p}-xy", "Find X and Y", "Set {wcs} X at {x} and Y at {y}.",
                  f | {"wcs": s["wcs"]["code"], "x": s["wcs"]["x"], "y": s["wcs"]["y"]}, setup=p),

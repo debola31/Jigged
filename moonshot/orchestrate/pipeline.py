@@ -1,13 +1,17 @@
 """A take, end to end, through the queue: planned, simulated and checked by one job; rendered by another only if every
 check passed. Runs on the hub; the jobs show on the dashboard like any other.
 
-    python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--no-render]
+    python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--lift-out] [--no-render]
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
+    python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
 
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
 baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
 draws the take record at 24 fps with moonshot's renderer (moonshot/render/), or with --trainual the sim.npz at the
 take's own rate with trainual's scripts. --final renders at 1080p instead of the draft's 960x540.
+
+--assemble makes each step's video of a part, from its takes' videos, for every step whose takes all have one
+(moonshot/render/step_video.py): drafts, or finals with --final.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
 
 DRAFT = {"res": "960x540", "samples": 32}
-FINAL = {"res": "1920x1080", "samples": 64}
+FINAL = {"res": "1920x1080", "samples": 48}              # tuned: moonshot/render/render_take.py settings()
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:
@@ -60,7 +64,17 @@ def main(argv: list[str]) -> int:
     opt = lambda flag: argv[argv.index(flag) + 1] if flag in argv else None   # noqa: E731
     if "--render-only" in argv:
         return render(take, final="--final" in argv, trainual="--trainual" in argv)
+    if "--assemble" in argv:
+        from moonshot.render.step_video import assemble
+        state = assemble(take, "final" if "--final" in argv else "draft")
+        for sid, s in state.items():
+            print(f"[pipeline] {take}-{sid}: {s}", flush=True)
+        print(f"[pipeline] {take}: {sum(s != 'waiting' for s in state.values())} of {len(state)} steps have videos",
+              flush=True)
+        return 0
     payload = {"take": take} | ({"part": opt("--part"), "setup": opt("--setup")} if opt("--part") else {})
+    if "--lift-out" in argv:                      # the unload's last take: the part lifted out of the loosened vise
+        payload["start"] = "vise"
     jid = submit("vise_take", payload, [], group=take)
     print(f"[pipeline] {take}: vise_take job {jid[:12]} queued", flush=True)
     job = wait(jid)
@@ -81,7 +95,15 @@ def main(argv: list[str]) -> int:
 
 def stored(path) -> str:
     """The file's sha256, put in the hub's blob store if it isn't there."""
-    digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    for attempt in range(20):
+        try:
+            data = open(path, "rb").read()
+            break
+        except PermissionError:          # Windows: another pipeline is replacing the same pack (pack.py _tar) this moment
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
+    digest = hashlib.sha256(data).hexdigest()
     if not (blob_dir(data_root()) / digest).exists():
         shutil.copyfile(path, blob_dir(data_root()) / digest)
     return digest

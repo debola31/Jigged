@@ -6,10 +6,11 @@ Blender:
 
     blender -b --factory-startup --python moonshot/render/render_take.py -- --take <folder> --bake <folder>
         [--data <data root>] [--look <cc0 folder>] [--out <folder>] [--frames lo:hi] [--res 1920x1080]
-        [--samples 64] [--device METAL] [--inspect <report.json>] [--save <scene.blend>]
+        [--samples 48] [--device METAL] [--inspect <report.json>] [--save <scene.blend>]
 
-Frames are the bake's (24 fps), written as <out>/<k:05d>.png. A GLB's in_body places its raw stored coordinates
-(metres); Blender's glTF importer turns every file from Y up to Z up, so that turn is undone. Everything that moves is
+Frames are the bake's (24 fps), written as <out>/<k:05d>.png. A GLB's in_body places its raw stored coordinates, in
+metres; a changing body's meshes are in mm in its frame. Blender's glTF importer turns every file from Y up to Z up,
+so that turn is undone. Everything that moves is
 keyframed per frame, with a frame either side of the range, so Cycles' motion blur sees the real motion. --inspect
 writes what each frame would draw instead of rendering it (moonshot/tests/gates/test_render_take.py).
 """
@@ -69,11 +70,17 @@ def import_glb(path: Path, parent, local: Matrix, body: str, kind: str) -> list:
     bpy.ops.import_scene.gltf(filepath=str(path))
     new = [o for o in bpy.data.objects if o not in before]
     holder = link(bpy.data.objects.new(f"{kind}:{body}:{path.stem}", None), parent, local @ UNDO_Y_UP)
+    vf2 = "machines/vf2/" in path.as_posix()
     for o in new:
         if o.parent is None:
             o.parent = holder
         if o.type == "MESH":
             tag(o, body, kind)
+            if not o.data.materials:                    # unpainted CAD: bare steel, not Cycles' white
+                o.data.materials.append(look.bare_steel())
+            for m in o.data.materials:                  # a CAD export's mat_N is the VF-2's only on the VF-2
+                if m and m.name.startswith("mat_") and not vf2:
+                    m.name = f"{path.stem}_{m.name}"
     return [o for o in new if o.type == "MESH"]
 
 
@@ -212,7 +219,7 @@ class Take:
         self.empties[name] = e
         if "meshes" in body:
             folder = self.take / body["meshes"]["dir"]
-            self.versions[name] = {k: import_glb(folder / f"{k}.glb", e, Matrix.Identity(4), name, "mesh")
+            self.versions[name] = {k: import_glb(folder / f"{k}.glb", e, Matrix.Scale(MM, 4), name, "mesh")
                                    for k in body["meshes"]["frames"]}
             self.objects += [o for objs in self.versions[name].values() for o in objs]
         elif body.get("glbs"):
@@ -299,8 +306,13 @@ def gpu(kind: str) -> list[str]:
 
 
 def settings(sc, w: int, h: int, fps: int, n: int, samples: int):
+    """Tuned on the M4 Max at 1080p, 2026-11-02: 48 samples with adaptive sampling stopping at 0.03, and persistent
+    data, render the vise take in 4.5-4.8 s a frame against 8.8-9.1 s untuned (96 samples, 0.01, rebuilt each frame),
+    within about 1 dB of the 96-sample image. At 32 the denoiser smooths the skin's veins; capping bounces was slower
+    and changed the image."""
     sc.render.engine = "CYCLES"
     sc.cycles.samples = samples
+    sc.cycles.use_adaptive_sampling, sc.cycles.adaptive_threshold = True, 0.03
     sc.cycles.use_denoising = True
     sc.render.use_persistent_data = True                    # the static scene stays built from frame to frame
     sc.render.use_motion_blur = True
@@ -353,7 +365,7 @@ def main():
     cam.data.angle_y = math.radians(50)
     cam.data.dof.use_dof = True
     cam.data.dof.aperture_fstop = 4.0
-    settings(sc, w, h, take.fps, take.n, int(arg("--samples", "64")))
+    settings(sc, w, h, take.fps, take.n, int(arg("--samples", "48")))
     report = arg("--inspect")
     take.keyframe(cam, range(lo, hi) if report else range(max(0, lo - 1), min(take.n, hi + 1)))
     if report:
@@ -379,4 +391,5 @@ def main():
         log(f"frame {k}: {time.perf_counter() - t1:.2f} s")
 
 
-main()
+if __name__ == "__main__":
+    main()

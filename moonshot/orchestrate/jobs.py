@@ -51,7 +51,8 @@ def vise_take(worker, job: dict, inputs: list[Path]) -> dict:
     load = vise_load(load_plan(p["part"]), p["setup"]) if p.get("part") else REFERENCE
     t0 = time.perf_counter()
     worker.report(job["id"], "plan")
-    ST.build(verbose=False, load=load, out=out)
+    build = ST.build_lift_out if p.get("start") == "vise" else ST.build      # a lift-out starts with the part in the vise
+    build(verbose=False, load=load, out=out)
     t1 = time.perf_counter()
     worker.report(job["id"], "physics")
     run = ViseTake(out)
@@ -239,5 +240,5 @@ def take_render(worker, job: dict, inputs: list[Path]) -> dict:
     cmd = [blender, "-b", "--factory-startup", "--python", str(MOONSHOT / "render" / "render_take.py"), "--",
            "--take", str(take), "--bake", str(bake), "--data", str(take / "data"), "--look", str(look),
            "--out", str(folder / "frames"), "--frames", "{}:{}".format(*p["frames"]), "--res", p.get("res", "1920x1080"),
-           "--samples", str(p.get("samples", 64)), "--device", worker.options.get("device", "METAL")]
+           "--samples", str(p.get("samples", 48)), "--device", worker.options.get("device", "METAL")]
     return _render(worker, job, cmd, folder, folder)

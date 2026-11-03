@@ -5,7 +5,8 @@ Each motor gets the planned position, with the planned motion's own torques fed 
 dynamics, as moonshot/body/controller.py's `track`), so the body follows the plan within its strength. A hand with
 effort on a grip pushes its pads into the grip's object (the vise take's squeeze, per hand: each pad's joint
 direction from its Jacobian) and stiffens, as people co-contract while they work (Gribble et al. 2003); a load the
-step knows its hand meets (`hand_force`) is fed forward through the arm.
+step knows its hand meets (`hand_force`) is fed forward through the arm; and a steady error in where a hand is, in
+place and turn, is corrected slowly, as by sight (`correction`, as the vise take's).
 
 A step subclasses TakeRunner: `scene(body_xml)` returns the MJCF with its station and objects, `grip_geoms` names
 each grip's object geom, `before_step(t)` runs the machine's control and the step's own logic, and `station`,
@@ -21,10 +22,12 @@ from pathlib import Path
 import mujoco
 import numpy as np
 from scipy.interpolate import CubicSpline
+from scipy.spatial.transform import Rotation
 
 from moonshot.body.skeleton import H0, build
 from moonshot.motion import kinematics as BM
 from moonshot.sim.record import Recorder
+from moonshot.sim.reference import ARM as REF_ARM
 
 SIDES = ("R", "L")
 ARM = ["sh_plane", "sh_elev", "sh_rot", "elbow", "pron", "wr_flex", "wr_dev", "sc_prot", "sc_elev"]
@@ -37,6 +40,14 @@ SETTLE_STEPS = 300
 
 
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
+APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
+RELEASE_S = 1.2                            # ... and start again this long after it opens, once the hand is off it: at
+                                           # once, the fingers inside the handle threw the gun out of its holster;
+                                           # at 0.6 s the retreating fingers dragged it back out
+# people correct a steady error in where their hand is by sight, slowly (as the vise take, moonshot/sim/vise_take.py)
+VISUAL_TAU = 0.25                          # s
+VISUAL_MAX = np.array([0.08, 0.5])         # at most this far (m) and this much turn (rad)
+DAMPING = 0.02                             # damped least squares for the arm's wrist corrections
 
 
 class TakeRunner:
@@ -47,6 +58,7 @@ class TakeRunner:
     # held in the fist), the rest only its place (a knob spins in the fist; a door's bar turns with its door)
     encloses: dict[str, str] = {}
     welded: set[str] = set()
+    controls: set[str] = set()               # a welded tool's geoms the fingers still touch (its trigger)
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -56,9 +68,11 @@ class TakeRunner:
         self.body = build(pelvis_mm=tuple(self.lumbar))
         self.grip_events = [e for e in self.tk["events"] if e["kind"] == "grip" and e.get("grip") in self.encloses]
         xml = self.scene(self.body.xml)
+        # a held tool is stiff in the hand (4 ms, 4 steps): at 20 ms the index's push on the gun's trigger moved the gun
+        # 30 mm in the hand, enough to miss its holster's bore; a held mechanism's knob or bar stays soft
         eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="enclose_{e["grip"]}" '
                      f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
-                     f'solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                     f'solref="{0.004 if e["grip"] in self.welded else 0.02} 1" solimp="0.9 0.95 0.002"/>\n'
                      for e in {e["grip"]: e for e in self.grip_events}.values())
         xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
         m = self.model = mujoco.MjModel.from_xml_string(xml)
@@ -93,6 +107,12 @@ class TakeRunner:
         root = m.body_rootid[m.body("R_hand").id]
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root}
         self.squeeze: dict[tuple[str, str], dict] = {}
+        self._held_apart: dict[str, int] = {}
+        self._apart: dict[int, dict] = {}
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{n}").id] for n in ARM]) for s in SIDES}
+        self.side_bodies = {s: {b for b in range(m.nbody) if m.body(b).name.startswith(f"{s}_")} for s in SIDES}
+        self.visual = {s: np.zeros(6) for s in SIDES}
+        self._touch, self._steps = {s: False for s in SIDES}, 0
 
     # --- for a step to fill in ---------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
@@ -162,6 +182,14 @@ class TakeRunner:
         where the fist is when it closes: no jump at the start."""
         m, d = self.model, self.data
         for e in self.grip_events:
+            if e["grip"] in self.welded:                 # apart from the final approach on, so the hand reaches its grip
+                # 1: held, the controls still touched; 2: letting go, the controls too (the index inside the trigger
+                # when the gun is let go fired it out of its holster at 1500 N)
+                mode = (2 if t >= e["t1"] - 0.05 else 1) if e["t0"] - APPROACH_S <= t < e["t1"] + RELEASE_S else 0
+                ob = m.body(self.encloses[e["grip"]]).id
+                if mode != self._held_apart.get(e["grip"], 0):
+                    self.hold_apart(ob, mode)
+                    self._held_apart[e["grip"]] = mode
             eq = m.equality(f"enclose_{e['grip']}").id
             want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
             if want and not d.eq_active[eq]:
@@ -172,32 +200,30 @@ class TakeRunner:
                 if e["grip"] in self.welded:            # the hand's pose in the object's frame: as planned, or as now
                     rel = self.planned_relpose(e["grip"])
                     p_rel, R_rel = rel if rel is not None else (Ro.T @ (d.xpos[hb] - d.xpos[ob]), Ro.T @ Rb)
-                    m.eq_data[eq, 0:3] = Rb.T @ (P - d.xpos[hb])
+                    m.eq_data[eq, 0:3] = 0.0                # at the hand's origin: then relpose is the hand's pose
                     m.eq_data[eq, 3:6] = p_rel
                     qr = np.zeros(4)
                     mujoco.mju_mat2Quat(qr, np.ascontiguousarray(R_rel).reshape(-1))
                     m.eq_data[eq, 6:10] = qr
-                    self.hold_apart(ob, True)
                 else:
                     m.eq_data[eq, 0:3] = Ro.T @ (P - d.xpos[ob])
                     m.eq_data[eq, 3:6] = Rb.T @ (P - d.xpos[hb])
                 d.eq_active[eq] = 1
             elif not want and d.eq_active[eq]:
                 d.eq_active[eq] = 0
-                if e["grip"] in self.welded:
-                    self.hold_apart(m.body(self.encloses[e["grip"]]).id, False)
 
-    def hold_apart(self, body: int, held: bool) -> None:
-        """While a welded grip holds a tool, the hand's skin and the tool don't collide (the constraint stands for
-        their contact); the tool still collides with everything else."""
+    def hold_apart(self, body: int, mode: int) -> None:
+        """While a welded grip holds a tool (mode 1), the hand's skin and the tool don't collide (the constraint stands
+        for their contact), except the tool's controls (a trigger) the fingers work; while the hand lets go (mode 2),
+        not the controls either; the tool still collides with everything else. Mode 0: as the scene has them."""
         m = self.model
-        gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body]
-        if held:
-            self._apart = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
+        for g, (ct, ca) in self._apart.pop(body, {}).items():
+            m.geom_contype[g], m.geom_conaffinity[g] = ct, ca
+        if mode:
+            gs = [g for g in range(m.ngeom) if m.geom_bodyid[g] == body
+                  and (mode == 2 or m.geom(g).name not in self.controls)]
+            self._apart[body] = {g: (m.geom_contype[g], m.geom_conaffinity[g]) for g in gs}
             m.geom_contype[gs], m.geom_conaffinity[gs] = 4, 1          # skin is contype 2, conaffinity 1
-        else:
-            for g, (ct, ca) in self._apart.items():
-                m.geom_contype[g], m.geom_conaffinity[g] = ct, ca
 
     def step(self, t: float) -> None:
         m, d, p = self.model, self.data, self.plan
@@ -230,11 +256,70 @@ class TakeRunner:
                 target[self.body_q] += dq[self.body_dof]
             k[self.hand_acts[side]] = 1.0 + STIFFEN * effort
             k[self.arm_acts[side]] = 1.0 + STIFFEN_ARM * effort
+        target[self.body_q] += self.correction(t)[self.body_dof]
+        # co-contraction stiffens a joint and damps it alike: damping grows with the stiffness's square root, so a
+        # braced arm keeps its damping ratio instead of ringing after each move
+        kv = self.kv * np.sqrt(k)
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
-        d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * p.qvel[self.act_dof]) / (self.kp0 * k)
+        m.actuator_biasprm[self.acts, 2] = -kv
+        d.ctrl[self.acts] = target[self.act_q] + (tau + kv * p.qvel[self.act_dof]) / (self.kp0 * k)
         self.before_step(t)
         mujoco.mj_step(m, d)
+
+    def touching(self, side: str) -> bool:
+        """Does the side's arm touch anything but the person and what it holds by a constraint?"""
+        m, d = self.model, self.data
+        held = {m.body(self.encloses[e["grip"]]).id for e in self.grip_events
+                if e["side"] == side and d.eq_active[m.equality(f"enclose_{e['grip']}").id]}
+        mine = self.side_bodies[side]
+        for i in range(d.ncon):
+            b1, b2 = m.geom_bodyid[d.contact[i].geom1], m.geom_bodyid[d.contact[i].geom2]
+            if (b1 in mine) != (b2 in mine) and (b2 if b1 in mine else b1) not in held:
+                return True
+        return False
+
+    def held_error(self, side: str, t: float) -> np.ndarray | None:
+        """How far (m, and rad as a rotation vector, world) a tool the side holds is from where the step plans it, if
+        the step plans its path; None: correct the hand itself. The weld fixes the tool in the hand as the plan has it
+        at the grip, and the planned hand turns a little on the way, so on plan the hand can carry the tool 10 mm off
+        its path: people watch the tool's tip, not their hand."""
+        return None
+
+    def correction(self, t: float) -> np.ndarray:
+        """Joint offsets (nv) that move each hand toward where the plan has it, by the steady error seen so far, in
+        place and in turn; paused while the arm touches something, where it would wind up against the contact, or
+        holds a mechanism. While it holds a tool whose path the step plans (held_error), the eye is on the tool."""
+        m, d, p = self.model, self.data, self.plan
+        dt, dq = m.opt.timestep, np.zeros(m.nv)
+        for side in SIDES:
+            hb = m.body(f"{side}_hand").id
+            Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+            err = self.held_error(side, t)
+            if err is None:
+                err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+            v = self.visual[side]
+            if self._steps % 10 == 0:                            # contacts change slowly next to a 1 ms step
+                # paused too while the hand holds a mechanism (a door's bar, the crank's knob): there being past the
+                # plan is the point, as the vise take pauses while cranking; a welded tool is part of the hand
+                holding = any(e["side"] == side and e["grip"] not in self.welded
+                              and d.eq_active[m.equality(f"enclose_{e['grip']}").id] for e in self.grip_events)
+                self._touch[side] = holding or self.touching(side)
+            if not self._touch[side]:
+                v += err * dt / VISUAL_TAU
+            for i, cap in enumerate(VISUAL_MAX):
+                n = np.linalg.norm(v[3 * i:3 * i + 3])
+                if n > cap:
+                    v[3 * i:3 * i + 3] *= cap / n
+            if not v.any():
+                continue
+            jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+            mujoco.mj_jacBody(m, p, jacp, jacr, hb)
+            idx = self.arm_dofs[side]
+            J = np.vstack([jacp[:, idx], jacr[:, idx] * 0.1])            # a radian weighs like 100 mm
+            dq[idx] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(6), np.r_[v[:3], v[3:] * 0.1])
+        self._steps += 1
+        return dq
 
     # --- the run ---------------------------------------------------------------------------------------
     def hands(self) -> dict[str, dict]:
@@ -251,6 +336,12 @@ class TakeRunner:
                       "S": fr["S"][1], "E": fr["forearm"][1], "forearm": fr["forearm"][0] @ H0}
         return out
 
+    def anatomical(self, name: str) -> float:
+        """A joint's angle now as the body model names it: degrees for a hinge, mm for the girdle's slides."""
+        m, j = self.model, self.body.joints[name]
+        q = self.data.qpos[m.jnt_qposadr[m.joint(name).id]]
+        return j.rest + (math.degrees(q) if j.kind == "hinge" else q * 1000)
+
     def run(self, seconds: float | None = None, log=print) -> int:
         m, d = self.model, self.data
         for qadr, dof, s in self.splines:
@@ -262,16 +353,29 @@ class TakeRunner:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, SIDES)
+        self.theta = {s: [] for s in SIDES}
         for k in range(n):
             for s in range(spf):
                 self.step((k + s / spf) / self.fps)
             self.recorder.frame(d, self.hands(), self.rd["eye"][k], self.rd["look"][k], self.rd["up"][k])
+            self.theta["R"].append([self.anatomical(a if a.startswith("trunk") else f"R_{a}") for a in REF_ARM])
+            self.theta["L"].append([self.anatomical(f"L_{a}") for a in REF_ARM[3:]])
             self.on_frame(k)
             if log and k % (5 * self.fps) == 0:
                 log(f"frame {k}/{n}")
         return n
 
     def export(self, folder: Path | None = None) -> None:
+        """The take record, and beside it sim.npz in the vise runner's keys (moonshot/sim/vise_take.py export_sim) for
+        the checks that read one: the right arm under the plain keys, the left with an _L suffix, in the mirrored
+        world as in the take record."""
         folder = Path(folder or self.folder)
         self.recorder.write(folder, self.fps, self.lumbar[0], {s: self.names for s in SIDES}, self.station,
                             self.glbs(), self.meshes(folder))
+        hands, n = self.recorder.hands, len(self.theta["R"])
+        sim = {"t": np.arange(n) / self.fps, "fps": self.fps, "names": np.array(self.names),
+               "theta": np.array(self.theta["R"]), "theta_L": np.array(self.theta["L"]),
+               "eye": self.rd["eye"][:n], "look": self.rd["look"][:n], "up": self.rd["up"][:n]}
+        for s, suffix in (("R", ""), ("L", "_L")):
+            sim |= {f"{k}{suffix}": np.array(hands[s][k]) for k in ("q", "H", "W", "S", "E", "forearm")}
+        np.savez(folder / "sim.npz", **sim)

@@ -1,0 +1,20 @@
+{
+ "about": "Every constraint and applied force a take's physics may use, declared (plan 5.1, shortcuts are declared; docs/moonshot/physics.md, Declared shortcuts). moonshot/validate/shortcuts.py fails a take that uses anything not listed here by name or fnmatch pattern. `shortcuts` are non-physical assists, each standing in for something the scene can't model, reported with how long it was on; `grip_assist` ones count toward the deformable-pad trigger (plan 3.1). `mechanisms` are the model's own structure: the body's couplings and the vise's screw ratio. Protected (plan 6, rule 1): declaring a shortcut is moving the bar.",
+ "shortcuts": {
+  "enclose": {"stands_in_for": "Flesh conforming round the crank's knob, which capsule fingers can't", "grip_assist": true,
+              "checked_by": ["never_held_parts", "skin_penetration"]},
+  "screw_lock": {"stands_in_for": "The lead screw self-locking under clamp load", "grip_assist": false, "checked_by": []},
+  "keep_para_*": {"stands_in_for": "Parallels resting under their own friction until checked", "grip_assist": false,
+                  "checked_by": []},
+  "clamped": {"stands_in_for": "The vise's clamp on the part in the steps after it is tightened (Find X and Y, Set Z), where nothing pushes on the part; the Seat step's take proves the clamp itself", "grip_assist": false,
+              "checked_by": []},
+  "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping", "grip_assist": true,
+                 "checked_by": ["skin_penetration"]},
+  "dial_lock": {"stands_in_for": "The jog handle's detent holding it where the hand left it: outside a stroke's grip the handle is locked at its detent, as a hand placing itself on the rim, regripping it and coming off it doesn't turn it, where capsule fingers lagging their plan by centimetres brush it round; and the click that brings the machine to a jog's number locks it, as the hand stops on the number", "grip_assist": false,
+                "checked_by": []}
+ },
+ "mechanisms": {
+  "couple_*": "The body's anatomical couplings (moonshot/body/skeleton.py hand_couplings)",
+  "lead_screw": "The vise's lead screw as an exact ratio (moonshot/world/vise.py)"
+ }
+}

@@ -101,18 +101,32 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 
 - [x] The body model in MuJoCo: trunk to fingertip, 73 joints for two arms, each a motor with its range, speed,
   strength and couplings (§3.1). `moonshot/body/skeleton.py`, 2026-11-01: 59 motors, 14 coupled joints, 42.7 kg
-  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Both arms are planned since
-  2026-11-02 (the solver and grips, `test_body_mirror.py`, `test_two_arms.py`); the physics run and the render are
-  still right-hand only. Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
+  above the hips. The wrist's ellipse is 32 tendon limits per wrist (2026-11-02). Both arms are planned, run and
+  rendered since 2026-11-02: the solver and grips (`test_body_mirror.py`, `test_two_arms.py`), the two-handed plan
+  and physics run (`moonshot/motion/step_take.py`, `moonshot/sim/runner.py`, `test_step_take.py`) and the take
+  record any renderer draws both hands from (`moonshot/contracts/take_record.py`). Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
   top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
-- [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
-- [ ] Two-joint muscle couplings: wrist bend moves the fingers (§3.1)
-- [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1)
+- [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1).
+  Built 2026-11-02 (`moonshot/body/data/strength.json` curves, `test_strength_curves.py`): the elbow from Frey-Law
+  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011);
+  every other hinge has no angle curve and the elbow's mid-range speed decay, *proposed*. The controller caps each
+  motor at its curve every step; the vise take's physics run (`moonshot/sim/vise_take.py`) doesn't call it yet:
+  handed to the body-model session with the checks' other hooks (2026-11-03, the body-checks session done).
+- [x] Two-joint muscle couplings: wrist bend moves the fingers (§3.1). A spring across the wrist and each finger's
+  MCP and PIP: at full wrist extension a relaxed hand flexes them 35 and 50 deg (Neumann 2009), effort overrides
+  it (`test_tenodesis.py`, 2026-11-02). Proposed: straight fingers at full flexion, the spring's stiffness.
+- [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1).
+  Built 2026-11-02 (`moonshot/validate/muscle.py`, registered as `muscle_activation`): MyoArm posed by the run's
+  angles, least-effort activations for the torque the motion and the hand's load need. Waits on the physics run
+  recording the load on the hand (`checks.json` `hand_wrench`, being added 2026-11-03); without it the vise take's
+  motion alone peaks at 38%.
 - [ ] Body conformance tests pass: range, speed, strength, strength curves, couplings, muscle check agrees,
   proportions, gravity (§3.1). Range, speed, strength, couplings, proportions, gravity and left-right mirroring
   pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-01), as do the wrist's ellipse
   (`test_wrist_ellipse.py`) and the left arm as the right mirrored under any trunk (`test_body_mirror.py`,
-  2026-11-02); strength curves and the muscle check wait on their own items.
+  2026-11-02). Since 2026-11-02 strength curves (`test_strength_curves.py`), the wrist moving the fingers
+  (`test_tenodesis.py`) and the muscle check agreeing (`test_muscle_check.py`: easy motions and 5 kg held out
+  pass, 25 kg held out and a 0.1 s elbow flexion fail) pass too. Open: the scapula following shoulder elevation.
 - [ ] Watch the deformable-pad trigger: count grip assists and grip complaints per station (§3.1). Only if it
   fires: MuJoCo deformable fingertip and palm pads.
 - [ ] Record conformance tests for every machine and tool as it lands (§3.2). So far (2026-11-01): the VF-2
@@ -144,37 +158,65 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
   (measured on NIMBLE's skin from the physics run, agreeing with the bake) and the lever are per-frame checks that
   `moonshot/validate/take.py` runs before a render, and the re-planned vise take passes all three (the skin at
-  3.45 mm against the pads' 3.5 mm, decided 2026-11-02); body vs. people is still the gates' only.
-- [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
-  hand opening; matches its footage (cards with footage only)
+  3.45 mm against the pads' 3.5 mm, decided 2026-11-02). Body vs. people is per-frame since 2026-11-02
+  (`moonshot/validate/posture.py`), reproducing trainual's report on its reference take (`test_posture_port.py`);
+  the re-planned vise take fails it: 53% of frames inside people's range against 95%, likelihood median 25.6
+  against 25, and so does every vise take since (2026-11-03: op20 passes the likelihood, not the range), **your call
+  on how it gates** (§6, Nov 3). Since the body-checks merge every check runs before a render, so no vise take
+  renders on its own; their review drafts render regardless (`pipeline --render-only`). The reference's skin is
+  3.57 mm for one frame at the end of the 30 N push, against 3.5. Open: joint ranges and the per-verb physics are
+  gates only.
+- [x] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
+  hand opening; matches its footage (cards with footage only). Each registered with its good and bad takes
+  (`moonshot/validate/`, `test_checks_prove_themselves.py`, 2026-11-02). On the re-planned vise take nothing moves
+  without a cause. Hand opening passes on the reference since 2026-11-03 (widest at 72%, 74% and 72% of its three
+  reaches, 0.81 mm wider per mm), the hand opened for the object (`motion/primitives.py` `open_for`) and pausing
+  before the knob; op10 and op20 miss it by a hair (78% against 77%, 69% against 71%). The other four have nothing
+  to read, which fails them, until the physics run records machine axes, active constraints and applied forces,
+  and the lifting force, and `take.json` names its card: being added (2026-11-03, handed over from the body-checks
+  session).
 - [x] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
   Done 2026-11-02, on the take the ported planner (`moonshot/motion/`) writes, since trainual's stopped being the bar
   on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 13.0 / 14.0 N grip, 1.76 mm
   slip, set down within 1.53 mm and flat, seated on the fixed jaw, pushed at 29.9 N, cranked 2.259 turns to 75.75 mm
-  and clamped at 4,759 N, both parallels found pinched; the body alone follows the plan with no motor at full
+  and clamped at 4,759 N, both parallels found pinched (after a run where para_b crept 0.7-1.0 mm under the
+  fingertip, held at 0.02-0.07 mm since noslip_iterations went 2 to 10, 2026-11-03); the body alone follows the plan
+  with no motor at full
   strength (`test_vise_take.py`, `test_reference_take.py`, physics tier). Open elsewhere: free-motion wrist lag,
   39 mm against 10 mm, which belongs to the planner: near-misses
   (`stray_contacts`), no arm volume in planning, and the held blank's inertia not fed forward, which trips a latent
   launch of the blank on the parallels during cranking.
-- [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
-- [ ] Timestep halving converges
+- [x] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle.
+  `test_counterfactuals.py`, 2026-11-02: each alters the model or plan in the test; the open door in the fast tier,
+  the other two on the hub's vise take (physics tier).
+- [ ] Timestep halving converges. Gate `test_timestep.py` (2026-11-02): the grab, place, slide, push, crank and
+  finger depth agree at 0.5 ms; the parallels didn't: para_b moved 1.07 mm under the 3 N check at 1 ms and 0.11 mm
+  at 0.5 ms. Noslip at 10 iterations (2026-11-03) holds it at 0.07 mm at 1 ms; the gate is to re-run.
 - [ ] The six known gaps in §5.5, on the re-planned vise take (2026-11-02). Fixed: the wrist's ellipse (0.80 at
   most), the crank grip (the lever never touched), the skin (3.45 mm, within the pads' 3.5), finger spread (0.11
   deg past range at worst, inside the 1 deg tolerance). Open: shoulder rotation at 151.5 deg/s against 150, and
-  trunk rotation against recorded people, unchecked until body vs. people is ported (a standing-work range may be
-  the fix, §11).
+  trunk rotation past recorded people's 99th percentile (13.3 deg) in 435 of 955 frames, up to 23.9 deg; trainual's
+  take, 359 (`posture_like_people`, 2026-11-02). A standing-work range may be the fix (§11).
 
 ## 4. Job queue (timeboxed Nov 1–2)
 
 - [x] Queue on the hub: SQLite, HTTP API, leases, content-addressed inputs, token auth (2026-11-01)
 - [x] Workers on all three machines: `hub-gtx1070` (CUDA, GPU only), `m1-pro`, `m4-max` (Metal). Since
-  2026-11-02 they run the production jobs too, so the farm's work shows on the dashboard: `vise_take` on the M1
-  (plan, physics, every check) and `bake_render` on the M4, a take rendered only once its checks pass
-  (`moonshot/orchestrate/jobs.py`, `pipeline.py`); and they start themselves at login (§1).
+  2026-11-02 they run the production jobs too, so the farm's work shows on the dashboard: each Mac has a CPU worker
+  (`m1-pro-cpu`, `m4-max-cpu`: `vise_take`, the skin bakes) beside its GPU worker, and every GPU takes frame ranges
+  of one take at once (`render_frames`, and the ported renderer's `take_render`), joined on the hub
+  (`encode_frames`); a take renders only once its checks pass (`moonshot/orchestrate/jobs.py`, `pipeline.py`); and
+  they start themselves at login (§1). 2026-11-03: the hub has a CPU worker too (`hub-cpu`: the encodes and the
+  takes' bakes, which waited behind the GPU's ranges and the Macs' vise takes; `farm_hub.ps1`), and a vise-take
+  worker started by hand for the night (`hub-vise`); each worker has its own outbox, after the hub's GPU worker
+  crashed on a result its neighbour had sent and was down five hours. Queued finals run behind drafts (priority
+  200).
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
-- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Render jobs
+- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
+  2026-11-02 at draft size (960x540, 32 samples), the ported renderer: GTX 1070 and M1 Pro about 7 s a frame each,
+  with the range's start included. Render jobs
   report their frame time since 2026-11-02 (`bake_render`); the dashboard doesn't show it yet.
 - [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
   intact; the scene pack fetched by hash and verified on each worker
@@ -188,22 +230,43 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 |---|---|---|---|
 | A. Core | [ ] | [ ] | [ ] |
 | B. Catalogue | [ ] | [ ] | [ ] |
-| C1 (VF-2, Hurco VM1, …) | [ ] | [ ] | [ ] |
+| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); the pendant's conformance passes and is merged (setting session, 2026-11-03); its 15 takes (Find X and Y, Set Z, tool lengths, op50's square check) aren't made yet, so their gate skips; no CI run |
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
-| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); no CI run |
+| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and is merged (2026-11-03); the pocket-depth inspect take in progress (inspect session); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
-| E. Parts and plans | [ ] | [ ] | [ ] |
-| F. Web | [ ] | [ ] | [ ] |
-| G. Render production | [ ] | [ ] | [ ] |
+| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session, `test_cycle_takes.py`, `test_cycle_stock.py`) | [x] 2026-11-02 | [ ] its 15 cutting takes pass their gate (26 of 26) and are merged (2026-11-03); the finished stock is within 0.03 mm except three plan gaps no tool in the plan reaches (§6). Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session) |
+| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; publishing waits on the finals and your approval |
+| G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 34 of nist-ftc-10's 61 steps (2026-11-03): the five Cycle Start steps, the cutting steps, op10's and op20's load, seat and check, op20's and op40's unload, every setup's clean, and deburr; finals of the door and cycle-start takes and 6 cutting takes, the other 9 queued behind the drafts |
 
 ## 6. Milestones
 
 - [x] Nov 1: vise compiles in the new core; benchmark sets the forecast (§1 above)
 - [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
-- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you
+- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-03
+  01:00: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
+  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; as of 02:30, 20 of 61 with the cutting takes' drafts in,
+  the last few still rendering; the rest wait on their takes (`python -m moonshot.planning.takes nist-ftc-10` lists
+  them). The plan is 61 steps since op60 was found to cut nothing. Passing their outcomes, with drafts: the blow-off
+  (the vise blown 2.7 s, the gun back in its holster within 1.9 mm) and loosen (0.99 turns, 6.28 mm); the door
+  takes' finals are done and the cutting takes' finals rendering; the deburr take (inspection session) has a draft
+  rendering. The vise take on tonight's code (552ceb67), the hand squaring the part up and following it by eye: the
+  reference, op10 and op20 are physically sound (set down within 1.4, 1.5 and 1.9 mm; slip 2.0, 1.7, 2.8 mm; both
+  parallels pinched; 4,778-5,032 N), and their per-frame checks pass but for posture and, by a hair, hand opening
+  (op10's part widest at 77.8% against 77%; op20's last knob reach at 69% against 71%) or skin (the reference's
+  pads 3.57 mm deep for one frame at the end of the 30 N push, against 3.5). Their drafts render for your review
+  regardless (`--render-only`), as does the op40 lift-out's (posture only). Set-parallels, set-stop and op50's
+  grasp: the parallels session; parallel a now stands 19 mm from the fixed jaw (was 13.2), where the fingers that
+  set it fit. Open: op30/op40's tall part arrives over the vise about 25 mm off and lands on a jaw (the arm at full
+  reach); op50's, standing on end, is knocked over by the reach; op10's lift-out puts the thumb on the part's top;
+  op50's check (an indicator swept up its side) is the setting session's. **Waiting on you:** every vise take,
+  approved draft 3 too, fails the posture checks that the body-checks merge put in front of rendering (53% of
+  frames inside people's range against 95%; that data is seated work), so no vise-take draft renders on its own
+  until you choose how they gate. Three of the stock's plan gaps need a tool or a mask (the +Z side slot 2.64 mm,
+  the boss's V flanks 2.31 mm, the pad grooves 1.50 mm). Within the unload step the doors jump from door-open's 300
+  mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
@@ -216,7 +279,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 ## 7. Cloud reserve (only if the forecast slips past Nov 11)
 
 Prepare before Nov 4, so it's ready in minutes:
-- [ ] A worker image with the pinned Blender and the queue worker
+- [ ] A worker image with the pinned Blender and the queue worker: written (`moonshot/tools/cloud/`), not built
 - [ ] A reusable ephemeral Tailscale auth key
 
 Only when triggered, and only with your approval:

@@ -37,7 +37,7 @@ def start():
 
 def test_both_doors_start_open_and_end_closed(close):
     o = close.outcome()
-    assert min(o["door_open_mm_start"].values()) > 300
+    assert min(o["door_open_mm_start"].values()) >= 299.0, "opened as far as the take opens them (door_cycle.OPEN_MM)"
     assert max(o["door_open_mm_end"].values()) < 5.0, o
 
 

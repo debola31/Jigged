@@ -369,8 +369,13 @@ class Take:
         self.clip("grab", t0, self.t + 0.3, "GRAB  reach, open wider than the part, close, preload, load, lift")
         self.t_lift = t_lift
 
-    def hold(self, grip="blank_faces", dur=2.6, tilt_deg=28.0):
-        """Hold the part up in front and turn it to look at a face, steady (tremor only), and back."""
+    def hold(self, grip="blank_faces", dur=2.6, tilt_deg=None):
+        """Hold the part up in front and turn it to look at a face, steady (tremor only), and back. The reference
+        part turns 28 deg; a heavier or longer one turns less, no further than the wrist torque that took (its
+        weight times its length), as a part held one-handed is turned only so far."""
+        if tilt_deg is None:
+            torque, ref = self.load.mass_kg * self.size[0], REFERENCE.mass_kg * REFERENCE.size[0]
+            tilt_deg = 28.0 * min(1.0, ref / torque)
         t0 = self.t
         R0, p0 = self.blank_at(t0)
         Rt = Rotation.from_euler("x", -tilt_deg, degrees=True).as_matrix()

@@ -13,6 +13,12 @@ and shows on the dashboard rather than being started by hand over SSH.
   (inputs: [sim.npz, bake tar]; payload adds "frames": [lo, hi]; uploads its PNGs as a tar); the hub joins them
   (inputs: the PNG tars; payload {"take", "fps"}) with Blender's FFmpeg (moonshot/render/encode.py).
 
+- `take_bake`, `take_render`: the same split for moonshot's own renderer (moonshot/render/), which draws any take
+  record at 24 fps and needs no data root, so any worker can take either. take_bake (a worker with the hand model)
+  bakes the skin; inputs: [the take's pack (moonshot/render/pack.py)]; uploads the bake as a tar. take_render (any
+  GPU) renders a frame range; inputs: [take pack, bake tar, look pack]; payload {"take", "frames": [lo, hi], "res",
+  "samples"}; its result is render_frames', so encode_frames joins them.
+
 A render is only queued for a take whose checks all passed (moonshot/orchestrate/pipeline.py), so nothing renders
 before it is checked (docs/moonshot/physics.md).
 """
@@ -25,6 +31,7 @@ import tarfile
 import time
 from pathlib import Path
 
+MOONSHOT = Path(__file__).resolve().parents[1]
 TAKE_FILES = ("reference.npz", "take.json", "grips.json", "sim.npz", "checks.json", "sim-report.json", "take.npz",
               "scene.json")
 
@@ -57,8 +64,10 @@ def vise_take(worker, job: dict, inputs: list[Path]) -> dict:
               for k, v in run_checks(out).items()}
     t3 = time.perf_counter()
     passed = all(isinstance(c, dict) and c["passed"] for c in checks.values())
+    from moonshot.contracts.take_record import files
+    names = list(TAKE_FILES) + [f for f in files(out) if f not in TAKE_FILES]      # the record's meshes too
     return {"take": p["take"], "passed": passed, "checks": checks,
-            "files": {f: worker.upload(out / f) for f in TAKE_FILES},
+            "files": {f: worker.upload(out / f) for f in names},
             "outcomes": {k: report.get(k) for k in ("grab_hold", "place", "slide", "push", "rotate")},
             "plan_s": round(t1 - t0), "physics_s": round(t2 - t1), "checks_s": round(t3 - t2)}
 
@@ -154,13 +163,21 @@ def render_frames(worker, job: dict, inputs: list[Path]) -> dict:
     shutil.copyfile(inputs[0], folder / "sim.npz")
     with tarfile.open(inputs[1]) as t:
         t.extractall(folder, filter="data")
+    cmd = [blender, "-b", "--python", "blender/showcase_physics.py", "--", "--dir", str(rel), "--out",
+           str(folder / "frames"), "--res", p.get("res", "1920x1080"), "--samples", str(p.get("samples", 96)),
+           "--frames", f"{lo}:{hi}", "--device", worker.options.get("device", "METAL")]
+    return _render(worker, job, cmd, trainual, folder)
+
+
+def _render(worker, job: dict, cmd: list[str], cwd: Path, folder: Path) -> dict:
+    """Run a Blender render of the payload's frame range into folder/frames, reporting frames drawn as it goes, and
+    upload them as a tar."""
+    p = job["payload"]
+    lo, hi = p["frames"]
     frames = folder / "frames"
-    cmd = [blender, "-b", "--python", "blender/showcase_physics.py", "--", "--dir", str(rel), "--out", str(frames),
-           "--res", p.get("res", "1920x1080"), "--samples", str(p.get("samples", 96)), "--frames", f"{lo}:{hi}",
-           "--device", worker.options.get("device", "METAL")]
     t0 = time.perf_counter()
     log = folder / "blender.log"                             # a file, not a pipe: a full pipe would stall Blender
-    with open(log, "w") as out, subprocess.Popen(cmd, cwd=trainual, stdout=out, stderr=subprocess.STDOUT) as proc:
+    with open(log, "w") as out, subprocess.Popen(cmd, cwd=cwd, stdout=out, stderr=subprocess.STDOUT) as proc:
         while proc.poll() is None:
             time.sleep(10)
             worker.report(job["id"], "render", len(list(frames.glob("*.png"))), hi - lo)
@@ -189,3 +206,38 @@ def encode_frames(worker, job: dict, inputs: list[Path]) -> dict:
         raise RuntimeError(f"encode exited {r.returncode}: {(r.stderr or r.stdout)[-1500:]}")
     return {"take": p["take"], "files": {video.name: worker.upload(video)},
             "frames": len(list((folder / "frames").glob("*.png")))}
+
+
+def _unpacked(worker, tar: Path) -> Path:
+    from moonshot.render.pack import unpack
+    return unpack(tar, Path(worker.cache).parent / "unpacked" / tar.name[:16])     # short: Windows caps paths at 260
+
+
+def take_bake(worker, job: dict, inputs: list[Path]) -> dict:
+    p = job["payload"]
+    take = _unpacked(worker, inputs[0])
+    folder = _fresh(Path(worker.cache).parent / "bake" / p["take"])
+    t0 = time.perf_counter()
+    worker.report(job["id"], "bake")
+    r = subprocess.run([sys.executable, "-m", "moonshot.render.bake", str(take), "--out", str(folder)],
+                       cwd=MOONSHOT.parent, capture_output=True, text=True, timeout=7200)
+    if r.returncode != 0:
+        raise RuntimeError(f"the bake exited {r.returncode}: {(r.stderr or r.stdout)[-1500:]}")
+    import numpy as np
+    names = sorted(f.name for f in folder.iterdir())
+    return {"take": p["take"], "bake": _tar(worker, folder, names, folder.with_suffix(".bake.tar")),
+            "frames": int(np.load(folder / "bake.npz")["n"]), "bake_s": round(time.perf_counter() - t0)}
+
+
+def take_render(worker, job: dict, inputs: list[Path]) -> dict:
+    blender = worker.options.get("blender")
+    if not blender:
+        raise RuntimeError("this worker has no --blender")
+    p = job["payload"]
+    take, bake, look = (_unpacked(worker, x) for x in inputs)
+    folder = _fresh(Path(worker.cache).parent / "render" / f"{p['take']}-{p['frames'][0]:05d}")
+    cmd = [blender, "-b", "--factory-startup", "--python", str(MOONSHOT / "render" / "render_take.py"), "--",
+           "--take", str(take), "--bake", str(bake), "--data", str(take / "data"), "--look", str(look),
+           "--out", str(folder / "frames"), "--frames", "{}:{}".format(*p["frames"]), "--res", p.get("res", "1920x1080"),
+           "--samples", str(p.get("samples", 64)), "--device", worker.options.get("device", "METAL")]
+    return _render(worker, job, cmd, folder, folder)

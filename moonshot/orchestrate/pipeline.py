@@ -2,11 +2,12 @@
 check passed. Runs on the hub; the jobs show on the dashboard like any other.
 
     python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--no-render]
-    python -m moonshot.orchestrate.pipeline <take> --render-only [--final]
+    python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
 
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
-baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take.
---final renders at 1080p and 96 samples instead of the draft's 960x540 and 32.
+baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
+draws the take record at 24 fps with moonshot's renderer (moonshot/render/), or with --trainual the sim.npz at the
+take's own rate with trainual's scripts. --final renders at 1080p instead of the draft's 960x540.
 """
 from __future__ import annotations
 
@@ -20,6 +21,9 @@ import urllib.request
 from moonshot.config import data_root, hub_url
 from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
+
+DRAFT = {"res": "960x540", "samples": 32}
+FINAL = {"res": "1920x1080", "samples": 64}
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:
@@ -47,6 +51,7 @@ def collect(files: dict[str, str], take: str) -> None:
     dest = data_root() / "takes" / take
     dest.mkdir(parents=True, exist_ok=True)
     for name, digest in files.items():
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(blob_dir(data_root()) / digest, dest / name)
 
 
@@ -54,7 +59,7 @@ def main(argv: list[str]) -> int:
     take = argv[0]
     opt = lambda flag: argv[argv.index(flag) + 1] if flag in argv else None   # noqa: E731
     if "--render-only" in argv:
-        return render(take, stored(data_root() / "takes" / take / "sim.npz"), final="--final" in argv)
+        return render(take, final="--final" in argv, trainual="--trainual" in argv)
     payload = {"take": take} | ({"part": opt("--part"), "setup": opt("--setup")} if opt("--part") else {})
     jid = submit("vise_take", payload, [], group=take)
     print(f"[pipeline] {take}: vise_take job {jid[:12]} queued", flush=True)
@@ -71,7 +76,7 @@ def main(argv: list[str]) -> int:
         return 1
     if "--no-render" in argv:
         return 0
-    return render(take, res["files"]["sim.npz"], final=False)
+    return render(take, final=False)
 
 
 def stored(path) -> str:
@@ -82,20 +87,37 @@ def stored(path) -> str:
     return digest
 
 
-def render(take: str, sim: str, final: bool, chunk: int = 48) -> int:
-    quality = {"res": "1920x1080", "samples": 96} if final else {"res": "960x540", "samples": 32}
+def render(take: str, final: bool, trainual: bool = False, chunk: int = 48) -> int:
+    folder = data_root() / "takes" / take
+    if trainual:
+        quality = {"res": "1920x1080", "samples": 96} if final else {"res": "960x540", "samples": 32}
+    else:
+        quality = FINAL if final else DRAFT
     name = "final" if final else "draft"
     group = f"{take}-{name}"
     t0 = time.time()
-    bake = wait(submit("skin_bake", {"take": take}, [sim], group=group))
+    if trainual:
+        sim = stored(folder / "sim.npz")
+        bake = wait(submit("skin_bake", {"take": take}, [sim], group=group))
+    else:
+        from moonshot.render.pack import look_pack, take_pack
+        packs = data_root() / "packs" / "render"
+        pack = stored(take_pack(folder, packs / f"{take}.tar"))
+        look = stored(look_pack(packs / "look.tar"))
+        bake = wait(submit("take_bake", {"take": take}, [pack], group=group))
     if bake["state"] != "done":
         print(f"[pipeline] {take}: the bake failed: {bake.get('error')}", flush=True)
         return 1
-    import numpy as np
-    motion = np.load(blob_dir(data_root()) / sim)
-    n, fps = len(motion["t"]), int(motion["fps"])
-    ids = [submit("render_frames", {"take": take, "frames": [lo, min(lo + chunk, n)]} | quality,
-                  [sim, bake["result"]["bake"]], group=group) for lo in range(0, n, chunk)]
+    if trainual:
+        import numpy as np
+        motion = np.load(blob_dir(data_root()) / sim)
+        n, fps = len(motion["t"]), int(motion["fps"])
+        kind, inputs = "render_frames", [sim, bake["result"]["bake"]]
+    else:
+        n, fps = bake["result"]["frames"], 24
+        kind, inputs = "take_render", [pack, bake["result"]["bake"], look]
+    ids = [submit(kind, {"take": take, "frames": [lo, min(lo + chunk, n)]} | quality, inputs, group=group)
+           for lo in range(0, n, chunk)]
     print(f"[pipeline] {take}: baked; {n} frames in {len(ids)} ranges queued ({name})", flush=True)
     parts = [wait(j) for j in ids]
     if failed := [j for j in parts if j["state"] != "done"]:

@@ -23,6 +23,9 @@ RECORD = Path(__file__).resolve().parents[1] / "library" / "stations" / "vf2.jso
 LINKS = RECORD.with_name("vf2.links.json")
 MOVING = {"saddle", "table", "head", "spindle", "door_left", "door_right"}
 M = 0.001
+# the doors run on their own tracks, one behind the other, so they never touch each other: their geoms collide with
+# everything else (a hand, the machine) but not with a door
+DOOR = ' conaffinity="2"'
 INCH = 25.4
 
 
@@ -38,12 +41,12 @@ def render_links(root: str = "vf2") -> dict[str, tuple[str, str]]:
     return {k: (body(k), f"library/machines/vf2/links/{k}.glb") for k in json.loads(LINKS.read_text(encoding="utf-8"))}
 
 
-def _box(name, c_rec, cls="steel"):
+def _box(name, c_rec, cls="steel", extra=""):
     lo, hi = np.array(c_rec["box_min_mm"], float), np.array(c_rec["box_max_mm"], float)
     c, h = (lo + hi) / 2, (hi - lo) / 2
     fr = f' friction="{c_rec["friction"]} 0.004 0.0001"' if "friction" in c_rec else ""
     return (f'<geom name="{name}" class="{cls}" type="box" size="{h[0] * M:.5f} {h[1] * M:.5f} {h[2] * M:.5f}" '
-            f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"{fr}/>')
+            f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"{fr}{extra}/>')
 
 
 def _site(name, at, origin=(0, 0, 0)):
@@ -85,8 +88,8 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
         body += f"""    <body name="vf2_{d}">
       <joint name="vf2_{d}" type="slide" axis="{ax(d)}" range="{rng(d)}" frictionloss="{J[d]['friction_n']}" damping="20"/>
       <inertial pos="0 -0.83 1.16" mass="{L[d]['mass_kg']}" diaginertia="2 2 2"/>
-      {_box(f"vf2_{d}_panel", C[d])}
-      {_box(f"vf2_{d}_pull", C[f"{d}_pull"])}
+      {_box(f"vf2_{d}_panel", C[d], extra=DOOR)}
+      {_box(f"vf2_{d}_pull", C[f"{d}_pull"], extra=DOOR)}
       {_site(f"vf2_{d}_handle", A[f"{d}_handle"]["at_mm"])}
     </body>
 """

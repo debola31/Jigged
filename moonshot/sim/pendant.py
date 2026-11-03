@@ -137,7 +137,8 @@ class PendantRunner(TakeRunner):
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
-        self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
+        self.lifting = {s: False for s in ("R", "L")}
+        self.turns =sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.jog_ev = {e["jog"]: e for e in self.turns}                  # its last stroke: the target, axis and step
         self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
         self.jog_t0 = {e["jog"]: e["t0"] - 0.25 for e in reversed(self.turns)}  # counted from its first stroke
@@ -255,6 +256,7 @@ class PendantRunner(TakeRunner):
             # the next press within reach in time: the hand works toward it from the last one's end
             near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
+            self.lifting[s] = bool(near) and near[0][0] in self.press_done
             if not near:
                 i *= 1 - dt / 0.2
                 continue
@@ -268,14 +270,19 @@ class PendantRunner(TakeRunner):
             c = AIM_GAIN * across + i
             # off the face until over the key; and once it has clicked, lifted off it: a finger left resting on the
             # key, as the plan has it until the press ends, bounces about its release force and clicks it again
-            if j in self.press_done or (np.linalg.norm(across) > ALIGNED_MM / 1000 and
-                                        self._key_n.get(e["key"], 0.0) < TOUCH_N):
+            if self.lifting[s] or (np.linalg.norm(across) > ALIGNED_MM / 1000 and
+                                   self._key_n.get(e["key"], 0.0) < TOUCH_N):
                 c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)
             g = self.index_pad[s]
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])
             J = jacp[:, self.arm_dofs[s]]
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+
+    def touching(self, side: str) -> bool:
+        """As the runner's, and a hand lifting off a key it pressed counts as on it: the lift is meant to leave the
+        plan, and sight, correcting it, wound up a push back at the keypad that pressed a digit as the hand left."""
+        return self.lifting[side] or super().touching(side)
 
     def correction(self, t: float) -> np.ndarray:
         """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its

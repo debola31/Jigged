@@ -169,6 +169,7 @@ class Control:
     setup_mode: bool = False          # the pendant's setup key switch
     tool_length: dict[int, float] = field(default_factory=dict)       # mm, by tool number
     sensor: Callable[[], bool] | None = None                           # the probe or tool setter touching, now
+    vps_queue: list[dict] = field(default_factory=list)                # the cycles chosen in VPS, in order, output by F4
 
     def __post_init__(self):
         r = record()
@@ -247,6 +248,10 @@ class Control:
             self.jog_axis = k[1]
         elif k == "offset":
             self.page = "tool" if self.page == "work" else "work"
+        elif k == "edit":
+            self.page = "vps"
+        elif k == "f4" and self.page == "vps" and self.vps_queue:
+            self.vps(**self.vps_queue.pop(0))
         elif k in ("left", "right") and self.page == "work":
             self.cursor = int(np.clip(self.cursor + (1 if k == "right" else -1), 0, 2))
         elif k == "part_zero_set" and self.page == "work":

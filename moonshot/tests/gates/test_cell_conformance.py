@@ -1,6 +1,7 @@
 """The VF-2 cell holds together before anything is filmed in it (plan §3.2): the vise sits where the takes expect it
 with the operator clear of the machine, and the vise rides the table when the machine moves. Protected (plan §6,
-rule 1)."""
+rule 1). The machine runs with the operator stepped back: at the loading stance the closed doors' handle bars would
+stand in their chest."""
 import mujoco
 import numpy as np
 import pytest
@@ -10,12 +11,22 @@ from moonshot.world import cell
 from moonshot.world import vise as V
 
 LUMBAR_MM = (-415.0, -935.0, 955.0)          # where trainual's vise take stands the operator
+RUNNING_MM = (-381.0, -1230.0, 955.0)        # where the operator stands while the machine runs: back from the doors
 PARALLELS_MM = {"para_a": np.array([-381.5, -244.0, 926.2]), "para_b": np.array([-381.5, -296.0, 926.2])}  # the take's
 
 
 @pytest.fixture(scope="module")
 def scene():
-    xml = cell.with_body(build(pelvis_mm=LUMBAR_MM).xml, V.STAGE, PARALLELS_MM, "R_hand")
+    return _scene(LUMBAR_MM)
+
+
+@pytest.fixture(scope="module")
+def running():
+    return _scene(RUNNING_MM)
+
+
+def _scene(lumbar):
+    xml = cell.with_body(build(pelvis_mm=lumbar).xml, V.STAGE, PARALLELS_MM, "R_hand")
     m = mujoco.MjModel.from_xml_string(xml)
     d = mujoco.MjData(m)
     return m, d, cell.start(m, d)
@@ -37,8 +48,8 @@ def test_the_operator_stands_clear_of_the_machine(scene):
     assert not touching
 
 
-def test_the_vise_and_parallels_ride_the_table(scene):
-    m, d, ctl = scene
+def test_the_vise_and_parallels_ride_the_table(running):
+    m, d, ctl = running
     x0 = d.geom("fixed_jaw").xpos.copy()
     p0 = d.body("para_a").xpos.copy()
     ctl.program = [(cell.LOAD_X_MM + 100.0, 0.0, 0.0, 0.0)]

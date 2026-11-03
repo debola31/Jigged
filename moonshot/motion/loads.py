@@ -1,10 +1,24 @@
-"""What a process plan's vise setup loads (plan §7): the part as it sits in the vise, the parallels under it and the
-jaw opening to start from, placed as in the reference take (moonshot/world/vise.py REFERENCE).
+"""What a process plan's vise setup loads (plan §7), and how it sits: the one definition every take and the stock's
+meshes use for a setup's part in the vise.
 
-Only a setup that loads the raw stock can be sized yet: later setups load a machined part, whose size needs the
-stock-removal model.
+`part_pose` gives the part's frame in the vise: which way each axis of the part's model (its STEP's frame) points in
+the world, and where the part's box stands, with the table at its loading position. `vise_load` gives what the vise
+take reads: the part's size along the jaws, across them and up, the parallels under it, and the jaw opening to
+start from, placed as in the reference take (moonshot/world/vise.py REFERENCE).
+
+The pose, by rule:
+- up is the plan's face_up, and across the jaws its jaw_on axis; along the jaws is the third, pointing +;
+- where the jaws close on datum A's axis (datum A is the model's y = 0 face), datum A sits against the fixed jaw,
+  and along takes the sign that keeps the frame a rotation;
+- a setup with no parallels stands on the vise's floor.
+
+A later setup loads a machined part as its bounding box (ENVELOPE_MM), until the stock-removal model hands each setup
+its part: a declared shortcut, sound where the vise touches it, since every face it rests or clamps on is machined
+flat by then; the render draws its real shape.
 """
 from __future__ import annotations
+
+import numpy as np
 
 from moonshot.world.vise import REFERENCE, VISE, Load
 
@@ -16,21 +30,60 @@ INCH = 25.4
 FIXED_TO_A = VISE["fixed_face_y"] - REFERENCE.parallels_y["para_a"]
 NEAR_TO_B = REFERENCE.parallels_y["para_b"] - (VISE["fixed_face_y"] - REFERENCE.size_mm[1])
 OPENING_MARGIN = REFERENCE.opening0 - REFERENCE.size_mm[1]
+# the stock is centred on the part in its model's x and z; Op 10 faces this much off datum A [proposed]
+FACE_A_MM = {"nist-ftc-10": 0.5}
+# each later setup's part as its box in the model's frame (mm). nist-ftc-10 finishes 158 x 31 x 75 (x -79..79, y 0..31
+# from datum A, z -37.5..37.5): Op 10 profiles the outline and faces datum A, Op 20 faces the top to 31
+ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.5))}
+ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50", "op60")}
+
+
+def _setup(plan: dict, setup_id: str) -> dict:
+    return next(x for x in plan["setups"] if x["id"] == setup_id)
+
+
+def envelope(plan: dict, setup_id: str) -> np.ndarray:
+    """The setup's part as a box in its model's frame: [[xmin, xmax], [ymin, ymax], [zmin, zmax]] mm."""
+    if _setup(plan, setup_id) is plan["setups"][0]:
+        sx, sy, sz = plan["stock"]["size_mm"]
+        a = FACE_A_MM.get(plan.get("part"), 0.0)
+        return np.array([[-sx / 2, sx / 2], [-a, sy - a], [-sz / 2, sz / 2]])
+    return np.array(ENVELOPE_MM[(plan["part"], setup_id)], float)
+
+
+def rotation(face_up: str, jaw_on: str) -> np.ndarray:
+    """R, the model's axes in the world: a model vector v points along R @ v, with world x along the jaws, y across
+    them toward the fixed jaw, and z up."""
+    up, across = AXIS[face_up[-1]], AXIS[jaw_on[0]]
+    along = ({0, 1, 2} - {up, across}).pop()
+    e = np.eye(3)
+    z = e[up] * (1.0 if face_up[0] == "+" else -1.0)
+    if across == AXIS["Y"]:                       # datum A (y = 0, facing -y) against the fixed jaw (world +y)
+        y = -e[across]
+        x = np.cross(y, z)
+    else:
+        x = e[along]
+        y = np.cross(z, x)
+    return np.stack([x, y, z])
+
+
+def part_pose(plan: dict, setup_id: str) -> dict:
+    """The part in the vise (world mm, the table at its loading position): R, the box's centre and size (along,
+    across, up), and the model's origin, so a model point p stands at origin_mm + R @ p."""
+    w = _setup(plan, setup_id)["workholding"]
+    s = _setup(plan, setup_id)
+    R = rotation(s["face_up"], w["jaw_on"])
+    env = envelope(plan, setup_id)
+    size = np.abs(R) @ (env[:, 1] - env[:, 0])
+    centre = np.array([VISE["x"], VISE["fixed_face_y"] - size[1] / 2,
+                       VISE["seat_z"] + w["parallels_in"] * INCH + size[2] / 2])
+    return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
 
 
 def vise_load(plan: dict, setup_id: str) -> Load:
-    setups = plan["setups"]
-    s = next(x for x in setups if x["id"] == setup_id)
-    if s is not setups[0]:
-        raise NotImplementedError(f"{setup_id} loads a machined part; sizing it needs stock removal")
-    w = s["workholding"]
-    if not w["parallels_in"]:
-        raise NotImplementedError(f"{setup_id} stands on the vise floor against a stop; the take has no such load yet")
-    size = plan["stock"]["size_mm"]
-    up, across = AXIS[s["face_up"][-1]], AXIS[w["jaw_on"][0]]
-    along = ({0, 1, 2} - {up, across}).pop()
-    width = float(size[across])
+    w = _setup(plan, setup_id)["workholding"]
+    along, width, up = (float(v) for v in part_pose(plan, setup_id)["size_mm"])
     fy = VISE["fixed_face_y"]
-    return Load(size_mm=(float(size[along]), width, float(size[up])), parallel_h=w["parallels_in"] * INCH,
-                parallels_y={"para_a": fy - FIXED_TO_A, "para_b": fy - width + NEAR_TO_B},
+    paras = {"para_a": fy - FIXED_TO_A, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
+    return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=width + OPENING_MARGIN)

@@ -24,8 +24,12 @@ INCH = 25.4
 
 @pytest.fixture
 def vf2():
+    """The table mid-travel in X and Y (at home, X and Y are at the end of their travel), the head at home."""
     m = mujoco.MjModel.from_xml_string(standalone_xml())
     d = mujoco.MjData(m)
+    for a in ("x", "y"):
+        lo, hi = m.jnt_range[m.joint(f"vf2_{a}").id]
+        d.qpos[m.jnt_qposadr[m.joint(f"vf2_{a}").id]] = (lo + hi) / 2
     mujoco.mj_forward(m, d)
     return m, d
 

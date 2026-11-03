@@ -42,7 +42,9 @@ STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulati
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
 VISUAL_MAX = 0.04         # ... by at most this much (m): at 15 mm op30's tall part arrived over the vise 28 mm off
                           # and was set down on the moving jaw
-SQUARE_TAU = 0.3          # a held part's turn about the vertical, seen against its plan, is squared up this fast (s),
+CARRY_TAU = 0.8           # ... and a carried part's place, seen against its plan, this slowly (s): at 0.3, through the arm's
+                          # lag and the grip's give, op20's 1.2 kg part swung 15 mm either side of its path
+SQUARE_TAU = 0.6          # a held part's turn about the vertical, seen against its plan, is squared up this fast (s),
 SQUARE_MAX = 0.6          # by turning the hand about the part, by at most this much (rad): op30's tall part turned 27
                           # degrees in the hand and landed across both jaws
 TOUCH_RELEASE_S = 0.2     # after a press, its touch correction fades with this time constant (s)
@@ -411,7 +413,7 @@ class ViseTake:
                     and any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]))
         if carrying:                           # carrying the part: the eye is on the part, where it goes, not the hand
             k = min(len(self.rd["blank"]) - 1, int(round(self.plan_time(tt) * self.fps)))
-            self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / VISUAL_TAU
+            self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / CARRY_TAU
         elif press is None and not cranking and not self.hand_touching():
             self.visual += err * dt / VISUAL_TAU
         for v in (self.visual, self.touch):

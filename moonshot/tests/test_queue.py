@@ -152,3 +152,18 @@ def test_status_counts_jobs_by_group_and_lists_held_leases(q):
     st = q.status()
     assert st["by_group"]["G1"] == {"leased": 1, "queued": 1}
     assert st["workers"][0]["leased"] == [jid]
+
+
+def test_a_running_job_reports_its_progress_and_the_dashboard_gives_its_eta(q, clock):
+    from moonshot.orchestrate.dashboard import eta_s, render_dashboard
+    jid = q.submit("bake_render", {"take": "vise"})
+    q.lease("m4", {"kinds": ["bake_render"]})
+    q.heartbeat("m4", [jid], {jid: {"stage": "render", "done": 100, "total": 400, "since": clock.t}})
+    job = q.get(jid)
+    assert job["progress"]["done"] == 100 and job["started"] == clock.t
+    since = clock.t
+    clock.t += 30                                       # 100 frames in 30 s: 300 left take 90 s
+    q.heartbeat("m4", [jid], {jid: {"stage": "render", "done": 100, "total": 400, "since": since}})
+    assert eta_s(q.get(jid), clock.t, {}) == 90
+    page = render_dashboard(q)
+    assert "25% (100/400)" in page and "vise" in page

@@ -130,7 +130,8 @@ def make_handler(queue: Queue, root: Path, token: str):
                                        body.get("max_jobs", 1))
                     return self._json(HTTPStatus.OK, {"jobs": jobs, "lease_s": queue.lease_s})
                 if self.path == "/heartbeat":
-                    return self._json(HTTPStatus.OK, {"lost": queue.heartbeat(body["worker"], body.get("jobs", []))})
+                    return self._json(HTTPStatus.OK, {"lost": queue.heartbeat(body["worker"], body.get("jobs", []),
+                                                                              body.get("progress"))})
                 if self.path == "/complete":
                     return self._json(HTTPStatus.OK, {"accepted": queue.complete(body["worker"], body["job"],
                                                                                  body.get("result", {}))})

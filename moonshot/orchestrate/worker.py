@@ -45,6 +45,7 @@ class Worker:
         self.cache.mkdir(parents=True, exist_ok=True)
         self.outbox.mkdir(parents=True, exist_ok=True)
         self.held: list[dict] = []
+        self.progress: dict[str, dict] = {}              # job id -> what it last reported (report)
         self.lease_s = 120.0
         self._lock = threading.Lock()
 
@@ -123,15 +124,29 @@ class Worker:
 
     # --- the loop ---
 
+    def report(self, job_id: str, stage: str, done: float | None = None, total: float | None = None) -> None:
+        """A running job's progress, for the dashboard's ETA: its stage and, where it can count, how far through.
+        Sent with the next heartbeat, and at once when the stage changes."""
+        with self._lock:
+            prev = self.progress.get(job_id, {})
+            since = prev["since"] if prev.get("stage") == stage else time.time()
+            self.progress[job_id] = {"stage": stage, "done": done, "total": total, "since": since}
+        if prev.get("stage") != stage:
+            self._beat()
+
+    def _beat(self) -> None:
+        with self._lock:
+            ids = [j["id"] for j in self.held]
+            progress = {j: p for j, p in self.progress.items() if j in ids}
+        if ids:
+            try:
+                self._request("/heartbeat", {"worker": self.name, "jobs": ids, "progress": progress})
+            except HubUnreachable:
+                pass
+
     def _heartbeat_loop(self, stop: threading.Event) -> None:
-        while not stop.wait(max(5.0, self.lease_s / 3)):
-            with self._lock:
-                ids = [j["id"] for j in self.held]
-            if ids:
-                try:
-                    self._request("/heartbeat", {"worker": self.name, "jobs": ids})
-                except HubUnreachable:
-                    pass
+        while not stop.wait(max(5.0, self.lease_s / 6)):
+            self._beat()
 
     def lease(self) -> None:
         want = self.lease_ahead - len(self.held)
@@ -151,6 +166,7 @@ class Worker:
             job = self.held[0]
         try:
             handler = self.handlers[job["kind"]]
+            self.report(job["id"], "starting")
             inputs = [self.fetch(d) for d in job["inputs"]]
             msg = {"op": "complete", "job": job["id"], "result": handler(self, job, inputs)}
         except HubUnreachable:
@@ -159,6 +175,7 @@ class Worker:
             msg = {"op": "fail", "job": job["id"], "error": f"{type(e).__name__}: {e}"[:2000]}
         with self._lock:
             self.held.remove(job)
+            self.progress.pop(job["id"], None)
         self._post_result(msg)
         return msg
 

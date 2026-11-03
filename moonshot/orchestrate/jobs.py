@@ -36,13 +36,16 @@ def vise_take(worker, job: dict, inputs: list[Path]) -> dict:
     out = ST.TAKES / p["take"]
     load = vise_load(load_plan(p["part"]), p["setup"]) if p.get("part") else REFERENCE
     t0 = time.perf_counter()
+    worker.report(job["id"], "plan")
     ST.build(verbose=False, load=load, out=out)
     t1 = time.perf_counter()
+    worker.report(job["id"], "physics")
     run = ViseTake(out)
     report = run.run(log=lambda *a: None)
     run.export_sim(out / "sim.npz")
     (out / "sim-report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     t2 = time.perf_counter()
+    worker.report(job["id"], "checks")
     checks = {k: v if isinstance(v, str) else {"passed": v.passed, "worst": round(v.worst, 3), "detail": v.detail}
               for k, v in run_checks(out).items()}
     t3 = time.perf_counter()
@@ -71,11 +74,22 @@ def bake_render(worker, job: dict, inputs: list[Path]) -> dict:
             raise RuntimeError(f"{cmd[0]} exited {r.returncode}: {(r.stderr or r.stdout)[-1500:]}")
         return r
 
+    import numpy as np
+    total = len(np.load(folder / "sim.npz")["t"])
     t0 = time.perf_counter()
+    worker.report(job["id"], "bake")
     run([sys.executable, "-I", "motion/skin_bake.py", str(rel / "sim.npz")], 3600)
     t1 = time.perf_counter()
-    run([blender, "-b", "--python", "blender/showcase_physics.py", "--", "--dir", str(rel), "--out", str(rel / "draft"),
-         "--res", p.get("res", "960x540"), "--samples", str(p.get("samples", 32))], 6 * 3600)
+    worker.report(job["id"], "render", 0, total)
+    cmd = [blender, "-b", "--python", "blender/showcase_physics.py", "--", "--dir", str(rel), "--out", str(rel / "draft"),
+           "--res", p.get("res", "960x540"), "--samples", str(p.get("samples", 32))]
+    log = folder / "blender.log"                             # a file, not a pipe: a full pipe would stall Blender
+    with open(log, "w") as out, subprocess.Popen(cmd, cwd=trainual, stdout=out, stderr=subprocess.STDOUT) as proc:
+        while proc.poll() is None:                          # report frames drawn while it renders
+            time.sleep(10)
+            worker.report(job["id"], "render", len(list((folder / "draft").glob("*.png"))), total)
+    if proc.returncode != 0:
+        raise RuntimeError(f"blender exited {proc.returncode}: {log.read_text(errors='replace')[-1500:]}")
     t2 = time.perf_counter()
     video = folder / "draft.mp4"
     if not video.exists():

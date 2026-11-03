@@ -58,6 +58,7 @@ CRANK0 = CRANK0_DEG
 SEAT_Z = VISE["seat_z"]
 PAR_T, PAR_L = PARALLEL_T, PARALLEL_L
 PLACE_GAP = 6.0
+TALL_PLACE_GAP = 15.0
 INSPECT = np.array([-290.0, -640.0, 1160.0])              # held up in front, below the eyes, to look at it
 JAW_TOP = VISE["jaw_top_z"]
 
@@ -114,7 +115,10 @@ class Take:
         self.parallels = load.parallels()
         # against the fixed jaw, and where it is set down
         self.home = np.array([VISE["x"], VISE["fixed_face_y"] - self.half[1], SEAT_Z + self.par_h + self.half[2]])
-        self.set_down = self.home - np.array([0, PLACE_GAP, 0])
+        # a part standing taller than it is wide swings in the hand (op30's 8 mm), so it is set down further off the
+        # fixed jaw, with the jaws opened wider for it (loads.vise_load): at 6 mm it landed on the jaw's top
+        self.place_gap = TALL_PLACE_GAP if self.size[2] > self.size[1] else PLACE_GAP
+        self.set_down = self.home - np.array([0, self.place_gap, 0])
         self.hand = AnatomicalHand(Nimble(data_root() / "hand-model" / "nimble"))
         self.th = G.TorchHand(self.hand)
         self.prior = BS.ArmPrior()
@@ -176,11 +180,11 @@ class Take:
         c = self.stage.copy()
         top = c[2] + hz
         jaw_clear = JAW_TOP - (self.set_down[2] + hz)
-        near_gap = self.opening0 - self.size[1] - PLACE_GAP
+        near_gap = self.opening0 - self.size[1] - self.place_gap
         cols = [box(c, self.half), box([c[0], c[1], TABLE_Z - 50], [400, 300, 50])]
         # the jaws where it is set down, 2.5 mm bigger: the physics fingers reach up to 2 mm past the skin at their
         # backs and sides, and a thumb on the moving jaw nudges the part as it goes down
-        for y0, y1 in ((hy + PLACE_GAP - 2.5, hy + PLACE_GAP + 45), (-hy - near_gap - 45, -hy - near_gap + 2.5)):
+        for y0, y1 in ((hy + self.place_gap - 2.5, hy + self.place_gap + 45), (-hy - near_gap - 45, -hy - near_gap + 2.5)):
             cols.append(box([c[0], c[1] + (y0 + y1) / 2, top + jaw_clear - 40 + 1.25], [76.2, (y1 - y0) / 2, 41.25]))
         q0 = h.neutral()
         for n in ("index", "middle", "ring", "little"):
@@ -191,11 +195,23 @@ class Take:
         # or it swings in the hand
         proud = -jaw_clear
         depth = (4, 10) if proud < 30 else (proud / 2 - 3, proud / 2 + 3)
-        far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(lo, hi)))  # noqa: E731
-        specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets={
-            "thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(-14, 14))),
-            "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)},
-            starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
+        if hx >= 30:            # straddling it from above across its width: thumb on the near face, fingers on the far
+            far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(lo, hi)))  # noqa: E731
+            # the thumb opposite where the fingers' push lands: pinched halfway down a tall part, the index and middle
+            # press harder than the ring and little, 15 mm toward the index, and centred the thumb's push turned the part
+            # 27 degrees in the hand (op30)
+            tx = (-14, 14) if proud < 30 else (-24, -6)
+            targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=tx)),
+                       "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)}
+        else:                   # too short along the jaws for four fingers side by side (op50's 31 mm, standing on
+            # end): straddled across that, the hand turned in so the fingers point left and curl over its left end, 75
+            # mm wide, the thumb hooked on its right end; the near and far faces' four bands ran off a 31 mm face and the
+            # fingers knocked the part over
+            left = lambda lo, hi: plane(c + [-hx, 0, 0], [-1, 0, 0], 2.0, bands(c + [0, 0, hz], depth=depth, y=(lo, hi)))  # noqa: E731
+            targets = {"thumb": plane(c + [hx, 0, 0], [1, 0, 0], 2.0, bands(c + [0, 0, hz], depth=depth, y=(-14, 14))),
+                       "index": left(-34, -24), "middle": left(-16, -2), "ring": left(2, 16), "little": left(20, 34)}
+        specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets=targets,
+                                    starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 2. slide: the thumb pad on the near face (above the moving jaw) pushes the part toward the fixed jaw, index
         # and middle resting on the top to steady it: a finger pad can't face away from the operator without the
         # hand reaching over, the thumb's does
@@ -210,7 +226,8 @@ class Take:
         specs["blank_slide"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0, iters=1000,
                                     targets={"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0,
                                                             bands(c + [0, 0, hz], depth=(3, 11), x=(-12, 12))),
-                                             "index": topf(-30, -10), "middle": topf(-6, 14)},
+                                             "index": topf(*((-30, -10) if hx >= 30 else (-hx + 2, -1))),
+                                             "middle": topf(*((-6, 14) if hx >= 30 else (1, hx - 2)))},
                                     starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 3. push: index, middle and ring pads flat on the top, fingers forward, palm low over it
         c = self.home.copy()
@@ -219,7 +236,8 @@ class Take:
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 15.0, 15.0
         topf = lambda lo, hi: plane(c + [0, 0, hz], [0, 0, 1], 2.0, bands(c, x=(lo, hi), y=(-10, 30)))
         specs["blank_press"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0,
-                                    targets={"index": topf(-30, -12), "middle": topf(-8, 8), "ring": topf(12, 30)},
+                                    targets={"index": topf(-30, -12), "middle": topf(-8, 8), "ring": topf(12, 30)}
+                                    if hx >= 30 else {"index": topf(-hx + 2, -1), "middle": topf(1, hx - 2)},   # a narrow top
                                     starts=[S(24, 0, 8, 45, 45, -10, 75, p, 0, 0) for p in (40, 70)])
         # 4. rotate: power grip on the crank knob, solved at the start angle and clear of the lever at every angle
         k = knob_center(CRANK0)
@@ -265,7 +283,7 @@ class Take:
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
         x_end = VISE["x"] + self.half[0] + (PAR_L / 2 - self.half[0]) / 2                  # middle of the exposed end
         covered = self.half[0] >= PAR_L / 2      # a part longer than the parallels hides their tops: push an end instead
-        for name in ("para_b", "para_a"):
+        for name in [n for n in ("para_b", "para_a") if n in self.parallels]:
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
             if covered:                          # the pad on the parallel's end face, under the part's overhang
                 end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
@@ -369,8 +387,9 @@ class Take:
         # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
         # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
         # the open fingers meeting the faces as they close), with the fingers ~0.1 s behind their keys: 0.50 of the
-        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.50 0.667)
-        t_peak = t0 + 0.35 + 0.53 * reach
+        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.53 0.692-0.711, 0.50 0.667)
+        # a lift-out's reach runs high over the crank first: 0.53 measured 0.571 there, 0.70 0.844
+        t_peak = t0 + 0.35 + (0.63 if self.start == "vise" else 0.54) * reach
         self.fingers(t0 + 0.35, self.q_relax)
         self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])
@@ -454,10 +473,15 @@ class Take:
         R, p = self.blank_at(t0)
         high = np.array([self.stage[0], self.stage[1], JAW_TOP + self.half[2] + 30])
         self.look(t0 - 0.4, self.stage)
+        # a part heavier than the reference, pinched near its top (all that stands above the jaws), is carried over
+        # more slowly: op20's 1.2 kg swung out of the pinch as the 1.25 s carry slowed over the table
+        slow = max(1.0, self.kg / REFERENCE.mass_kg)
+        t_high = t0 + 0.55 + 1.25 * slow
+        dur = dur + 1.25 * (slow - 1.0)
         self.move_blank(t0, t0 + 0.6, R, p + [0, 0, 45])
-        self.move_blank(t0 + 0.55, t0 + 1.8, np.eye(3), high)
+        self.move_blank(t0 + 0.55, t_high, np.eye(3), high)
         t_down = t0 + dur - 0.2
-        self.move_blank(t0 + 1.75, t_down, np.eye(3), self.stage)
+        self.move_blank(t_high - 0.05, t_down, np.eye(3), self.stage)
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.effort(t_down - 0.05, 1.0, grip)
         self.effort(t_down + 0.1, 0.0, grip)
@@ -481,10 +505,11 @@ class Take:
         self.clip("set_on_table", t0 - 0.3, self.t + 0.2, "SET DOWN  out of the vise and onto the table beside it")
         self.t_down = t_down
 
-    def slide(self, grip="blank_slide", mm=PLACE_GAP, approach=0.9, dur=0.8, push_N=9.0):
+    def slide(self, grip="blank_slide", mm=None, approach=0.9, dur=0.8, push_N=9.0):
         """The thumb pad comes down onto the near face above the moving jaw (index and middle on the top) and pushes
         the part along the parallels until it meets the fixed jaw (friction on the parallels resists; the physics
         decides)."""
+        mm = self.place_gap if mm is None else mm
         t0 = self.t
         g = self.grips[grip]
         Hs, Ws = g["H_rel"], self.set_down + g["W_rel"]
@@ -507,9 +532,8 @@ class Take:
         self.fingers(t1 - 0.1, g["q"])
         W_end = self.home + g["W_rel"]
         self.wrist = W_end
-        # relaxed as it comes off, not opened: the reach to the crank's knob follows straight on, and a hand still
-        # open from here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
-        self.fingers(t1 + 0.3, self.q_relax)
+        # not opened as it comes off: the hand relaxes in the pause before the knob's reach, and a hand still open from
+        # here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
         self.t = t1 + 0.4
         self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  the thumb pushes the part along the parallels onto the fixed jaw")
@@ -534,8 +558,8 @@ class Take:
         # down, and a little toward the fixed jaw (10 deg), as machinists seat a part: it can't creep off the jaw
         self.event("press", tc + 0.05, tc + hold_s + 0.25, normal=[0, -0.174, 0.985], force=force_N, contact="blank")
         t1 = tc + hold_s + 0.4
-        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing,
-        self.fingers(t1 + 0.3, self.q_relax)                 # and relax as they come off (the knob's reach follows)
+        self.fingers(t1 - 0.1, g["q"])                       # the fingers hold their shape while pressing and coming
+        # off, and relax in the pause before the knob's reach (relaxing as they came off, they curled into the part)
         self.wrist = Wp
         self.transit(t1, t1 + 0.45, Wp + [0, -30, 50], via=[Wp + [0, 0, 22]])     # off the part straight up first
         self.t = t1 + 0.45
@@ -567,8 +591,9 @@ class Take:
         ko = open_like(self.hand, g["q"], 0.9)
         # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
         # the knob (~0.35 s before tg), with the fingers ~0.1 s behind their keys
-        # the fingers, opening out of the fist's shape, reach 10 mm short of it before closing on the knob (67 of 77)
-        self.fingers(t0 + (0.63 if final else 0.7), open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=12.0))   # 0.7: 74%, 81% final
+        # the fingers, opening out of the fist's shape, reach ~10 mm short of it before closing on the knob (67 of 77);
+        # at 12 op10's part and the knob opened only 0.73 mm apart per mm
+        self.fingers(t0 + (0.63 if final else 0.7), open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=10.0))   # 0.7: 74%, 81% final
         tg = t0 + 1.2
         self.fingers(tg, g["q"])
         t_c0 = tg + 0.25
@@ -803,7 +828,7 @@ class Take:
             encoding="utf-8")
 
 
-def head_camera(take, theta, dp):
+def head_camera(take, theta, dp, lumbar=LUMBAR):
     """Head-mounted camera from the gaze schedule (the verbs' look() calls): the head turns ~62% of the way to
     the eyes' target, ~30 ms behind them, smoothed like a neck (0.12 s); up from the head."""
     n = len(theta)
@@ -817,7 +842,7 @@ def head_camera(take, theta, dp):
         for t0, p in sched:
             if t >= t0:
                 tgt = p
-        f = BM.fk(theta[k], LUMBAR + dp[k])
+        f = BM.fk(theta[k], lumbar + dp[k])
         eye0 = f["neck"] + f["thorax"] @ np.array([0, 60.0, 175.0])
         fwd = f["thorax"] @ np.array([0, math.cos(math.radians(30)), -math.sin(math.radians(30))])
         g = tgt - eye0
@@ -861,7 +886,10 @@ def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=
     take.push()                     # seat the part on the parallels while it can still move down
     t_final = take.t
     take.rotate(final=True)         # the last pull, ends on feel
-    take.measure(clip_from=t_final)
+    if take.parallels:
+        take.measure(clip_from=t_final)
+    else:                           # on the vise's floor: no parallels to try; it is checked square by indicator
+        take.clip("measure", t_final - 0.2, take.t + 0.2, "TIGHTEN  the last pull on the crank, ending on feel")
     take.grip_digits = {name: list(spec["targets"]) for name, spec in take._grip_specs().items()}
     if not solve:
         take.load_solution()

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
@@ -39,7 +40,13 @@ SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for cap
 STIFFEN = 4.0              # the hand's co-contraction at full effort, for the reference part; heavier parts brace more
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
-VISUAL_MAX = 0.015        # ... by at most this much (m)
+VISUAL_MAX = 0.04         # ... by at most this much (m): at 15 mm op30's tall part arrived over the vise 28 mm off
+                          # and was set down on the moving jaw
+CARRY_TAU = 0.8           # ... and a carried part's place, seen against its plan, this slowly (s): at 0.3, through the arm's
+                          # lag and the grip's give, op20's 1.2 kg part swung 15 mm either side of its path
+SQUARE_TAU = 0.6          # a held part's turn about the vertical, seen against its plan, is squared up this fast (s),
+SQUARE_MAX = 0.6          # by turning the hand about the part, by at most this much (rad): op30's tall part turned 27
+                          # degrees in the hand and landed across both jaws
 TOUCH_RELEASE_S = 0.2     # after a press, its touch correction fades with this time constant (s)
 TOUCH_TAU = 0.07          # while pressing, sideways slip under the fingertip is felt and corrected this fast (s);
                           # tactile slip responses take ~70 ms (Johansson & Westling 1984)
@@ -119,8 +126,10 @@ class ViseTake:
         self.digit_dofs = {dg: [m.jnt_dofadr[m.joint(n).id] for n in (m.joint(i).name for i in range(m.njnt))
                                 if n.startswith(f"R_{dg}_") and int(m.jnt_dofadr[m.joint(n).id]) in self.act_of_dof]
                            for dg in PAD}
-        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", "para_a", "para_b")}
-        self.body_id = {n: m.body(n).id for n in ("blank", "knob", "para_a", "para_b", "R_hand")}
+        # a part stood on the vise's floor (nist-ftc-10 op50, on its end against a stop) has no parallels under it
+        self.paras = [nm for nm in ("para_a", "para_b") if nm in self.load.parallels_y]
+        self.geom = {n: m.geom(n).id for n in ("blank", "knob", "moving_jaw", *self.paras)}
+        self.body_id = {n: m.body(n).id for n in ("blank", "knob", *self.paras, "R_hand")}
         self.geom_digit = {m.geom(f"R_g_{b}").id: dg for dg, bs in DIGITS.items() for b in bs}
         self.q_crank, self.q_jaw = m.jnt_qposadr[m.joint("crank").id], m.jnt_qposadr[m.joint("jaw_slide").id]
         # the body's joints in qpos and in qvel: the objects' free joints make the two index sets differ
@@ -135,6 +144,7 @@ class ViseTake:
         self.grip_scale: dict[str, dict[str, float]] = {}
         self.visual = np.zeros(3)
         self.touch = np.zeros(3)
+        self.square = 0.0                                  # the hand's turn about the vertical squaring up the held part
         self.aim: dict[int, np.ndarray] = {}
         self.intended = np.zeros(3)
         self.contact_label: set[str] = set()
@@ -317,15 +327,38 @@ class ViseTake:
             out += dirs[dg] * max(scale.get(dg, 0.0), base)
         return out
 
-    def arm_ik(self, dx: np.ndarray) -> np.ndarray:
-        """Joint offsets moving the wrist by dx (m), through the right arm, at the planned pose."""
+    def arm_ik(self, dx: np.ndarray, turn: float = 0.0) -> np.ndarray:
+        """Joint offsets moving the wrist by dx (m), and turning the hand by turn (rad) about the vertical, through the
+        right arm, at the planned pose."""
         m, p = self.model, self.plan
-        jacp = np.zeros((3, m.nv))
-        mujoco.mj_jacBody(m, p, jacp, None, self.body_id["R_hand"])
-        J = jacp[:, self.arm_dofs]
+        jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+        mujoco.mj_jacBody(m, p, jacp, jacr if turn else None, self.body_id["R_hand"])
         dq = np.zeros(m.nv)
-        dq[self.arm_dofs] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), dx)
+        if not turn:
+            J = jacp[:, self.arm_dofs]
+            dq[self.arm_dofs] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), dx)
+            return dq
+        J = np.vstack([jacp[:, self.arm_dofs], jacr[:, self.arm_dofs] * 0.1])     # a radian weighs like 100 mm
+        e = np.r_[dx, np.array([0.0, 0.0, turn]) * 0.1]
+        dq[self.arm_dofs] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(6), e)
         return dq
+
+    def squaring(self, tt: float) -> float:
+        """While the hand carries the part (lifted, until it is set down), its turn about the vertical against the plan
+        is seen and the hand turned to square it up, slowly, as the eye corrects the hand's place (visual_correction);
+        let go of after the set-down."""
+        dt = self.model.opt.timestep
+        held = any(e["t0"] + 0.3 <= tt < e["t1"] + 0.3 for e in self.iv["hold_object"])
+        if held and tt >= self.t_down:                     # set down, still in the hand: held as squared until it is let
+            return self.square                             # go (let go of sooner, the hand turned it back 20 degrees)
+        if held:
+            k = min(len(self.rd["blank_R"]) - 1, int(round(self.plan_time(tt) * self.fps)))
+            Rp, Ra = self.rd["blank_R"][k], self.data.body("blank").xmat.reshape(3, 3)
+            err = Rotation.from_matrix(Rp @ Ra.T).as_rotvec()[2]
+            self.square = float(np.clip(self.square + err * dt / SQUARE_TAU, -SQUARE_MAX, SQUARE_MAX))
+        else:
+            self.square *= 1 - dt / TOUCH_RELEASE_S
+        return self.square if abs(self.square) > 1e-6 else 0.0
 
     def stray_contacts(self, grip: str, tt: float) -> list[str]:
         """The hand touching something it isn't working on: plan near-misses (a fingertip grazing the table). They
@@ -365,7 +398,8 @@ class ViseTake:
     def visual_correction(self, tt: float) -> np.ndarray:
         """People correct a steady error in where their hand is by sight, slowly. While pressing, only sideways
         (force owns the press direction); paused while cranking or holding the knob, where being past the plan is
-        the point, and while the hand otherwise touches anything, where it would wind up against the contact."""
+        the point, and while the hand otherwise touches anything, where it would wind up against the contact. While
+        it carries the part the eye is on the part: the hand touches it throughout, and op30's arrived 28 mm off."""
         dt = self.model.opt.timestep
         press = next((e for e in self.iv["press"] if e["t0"] - 0.05 <= tt < e["t1"] + 0.15), None)
         cranking = any(e["t0"] <= tt < e["t1"] for e in self.iv["enclose"]) or self.crank_at(tt)[1] is not None
@@ -375,7 +409,12 @@ class ViseTake:
             self.touch += (err - n * (n @ err)) * dt / TOUCH_TAU
         else:                                  # the press is over: let go of its correction
             self.touch *= 1 - dt / TOUCH_RELEASE_S
-        if press is None and not cranking and not self.hand_touching():
+        carrying = (self.t_lift + 0.2 <= tt < self.t_down - 0.2
+                    and any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]))
+        if carrying:                           # carrying the part: the eye is on the part, where it goes, not the hand
+            k = min(len(self.rd["blank"]) - 1, int(round(self.plan_time(tt) * self.fps)))
+            self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / CARRY_TAU
+        elif press is None and not cranking and not self.hand_touching():
             self.visual += err * dt / VISUAL_TAU
         for v in (self.visual, self.touch):
             n = np.linalg.norm(v)
@@ -467,10 +506,16 @@ class ViseTake:
         target = p.qpos.copy()
         dq = np.zeros(m.nv)
         intended = self.wrist_offset(tt)
+        turn = self.squaring(tt)
+        if turn:                                           # turned about the part, so it stays where it is: the
+            k = min(len(self.rd["blank"]) - 1, int(round(self.plan_time(tt) * self.fps)))   # planned hand round the
+            r = p.body("R_hand").xpos - self.rd["blank"][k] * 0.001                          # planned part (the actual
+            intended = intended + (np.array([[np.cos(turn), -np.sin(turn), 0], [np.sin(turn), np.cos(turn), 0],
+                                             [0, 0, 1]]) @ r - r)                            # is turned already)
         self.intended = p.body("R_hand").xpos + intended          # the plan plus the deliberate corrections
         off = intended + self.visual_correction(tt)
-        if off.any():
-            dq += self.arm_ik(off)
+        if off.any() or turn:
+            dq += self.arm_ik(off, turn)
         if grip and effort > 0:
             sq = self.squeeze_offset(grip, effort, m.opt.timestep)
             if isinstance(sq, np.ndarray):
@@ -490,7 +535,7 @@ class ViseTake:
         """(per-digit force on the objects, blank-to-moving-jaw clamp force, deepest digit contact in mm)."""
         m, d = self.model, self.data
         f, clamp, depth, c6 = {}, 0.0, 0.0, np.zeros(6)
-        objs = {self.geom[n] for n in ("blank", "knob", "para_a", "para_b")}
+        objs = {self.geom[n] for n in ("blank", "knob", *self.paras)}
         for i in range(d.ncon):
             c = d.contact[i]
             g1, g2 = c.geom1, c.geom2
@@ -535,7 +580,7 @@ class ViseTake:
         spf = int(round(1.0 / (fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
-        keep = {nm: m.equality(f"keep_{nm}").id for nm in ("para_a", "para_b")}
+        keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
                                "slip", "lag", "pushing", "stray", "touching", "pose")}
         hold_rel, t0w = None, time.time()
@@ -606,7 +651,7 @@ class ViseTake:
             rec["force"].append(f)
             rec["clamp"].append(clamp)
             rec["depth"].append(depth)
-            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in ("para_a", "para_b")]))
+            rec["para"].append(np.array([d.body(nm).xpos * 1000 for nm in self.paras]).reshape(-1, 3))
             rec["pose"].append(self.pose_record())
             self.recorder.frame(d, {"R": rec["pose"][-1]}, rd["eye"][k], rd["look"][k], rd["up"][k])
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
@@ -691,7 +736,9 @@ class ViseTake:
         p_plan = Hp.T @ (self.rd["blank"][k] - Wp)
         H, W = self.hand_frame()
         p_act = H.T @ (self.data.body("blank").xpos * 1000 - W)
-        return Hp @ (p_plan - p_act) * 0.001
+        # into the world by the hand as it is: turned to square the part up (squaring), the planned frame put the
+        # correction 27 mm across the jaws
+        return H @ (p_plan - p_act) * 0.001
 
     def report(self, n) -> dict:
         rec, t, fps = self.rec, self.t[:n], self.fps
@@ -748,8 +795,8 @@ class ViseTake:
             out["measure"] = [{"parallel": e["contact"],
                                "press_N_median": round(float(np.median(np.array(rec["press"])[(t >= e["t0"] + 0.2) & (t < e["t1"])])), 2),
                                "parallel_moved_mm": round(float(np.linalg.norm(
-                                   P[int(e["t1"] * fps), ["para_a", "para_b"].index(e["contact"])] -
-                                   P[int(e["t0"] * fps), ["para_a", "para_b"].index(e["contact"])])), 3)} for e in msr]
+                                   P[int(e["t1"] * fps), self.paras.index(e["contact"])] -
+                                   P[int(e["t0"] * fps), self.paras.index(e["contact"])])), 3)} for e in msr]
         return out
 
 

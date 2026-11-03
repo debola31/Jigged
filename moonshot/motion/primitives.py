@@ -40,7 +40,7 @@ def open_for(hand: AnatomicalHand, q: dict, size_mm: float, lag_mm: float = 0.0)
     (PEAK_PER_MM per mm plus PEAK_PLUS_MM, thumb tip to index tip, measured as the hand-opening check measures it),
     or fully open (open_like 1.0) if the hand can't open that far. lag_mm: planned this much wider where the fingers,
     opening fast out of a closed grip, fall that far short of their shape before they close again."""
-    from moonshot.validate.hand_opening import aperture_mm
+    from moonshot.body.aperture import aperture_mm
     names = list(q)
     want = PEAK_PER_MM * size_mm + PEAK_PLUS_MM + lag_mm
     lo, hi = 0.0, 1.0

@@ -1,6 +1,6 @@
 """Hand opening (plan §5.2; Bhatia 2022, Smeets 2020): on each reach to grasp the thumb and index open widest 71-77% of
 the way through (person.peak_aperture_reach_frac), and wider for a bigger object, 0.74-0.92 mm per mm of its size
-(person.aperture_per_object_mm). The size rule needs grasps of two sizes or more; a take that grasps one size is
+(person.aperture_per_object_mm). The size rule needs grasps of sizes 20 mm apart or more; a take that grasps one size is
 judged on timing alone.
 
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
@@ -8,43 +8,15 @@ The aperture is the distance between the thumb's and the index's fingertips, pos
 """
 from __future__ import annotations
 
-import functools
 import json
 from pathlib import Path
 
-import mujoco
 import numpy as np
 
+from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate.grasp_timing import measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
-
-
-@functools.cache
-def _body():
-    from moonshot.body.skeleton import build
-    body = build()
-    return body, mujoco.MjModel.from_xml_string(body.xml)
-
-
-def aperture_mm(q: np.ndarray, names: list[str]) -> np.ndarray:
-    """Per frame, thumb tip to index tip (mm), from the right hand's anatomical angles."""
-    body, m = _body()
-    d = mujoco.MjData(m)
-    adr = [m.jnt_qposadr[m.joint(f"R_{n}").id] for n in names]
-    rest = np.array([body.joints[f"R_{n}"].rest for n in names])
-    tips = [m.geom(f"R_g_{s}").id for s in ("dis1", "dis2")]
-    out = []
-    for row in q:
-        d.qpos[adr] = np.radians(row - rest)
-        mujoco.mj_kinematics(m, d)
-        ends = []
-        for g in tips:                                   # the capsule's end farther from its joint
-            c, ax, half = d.geom_xpos[g], d.geom_xmat[g].reshape(3, 3)[:, 2], m.geom_size[g, 1]
-            joint = d.xpos[m.geom_bodyid[g]]
-            ends.append(max((c + ax * half, c - ax * half), key=lambda p: np.linalg.norm(p - joint)))
-        out.append(np.linalg.norm(ends[0] - ends[1]) * 1000)
-    return np.array(out)
 
 
 def measure(take: Path) -> dict:
@@ -58,6 +30,10 @@ def measure(take: Path) -> dict:
     return {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
             "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], [str(n) for n in sim["names"]]).tolist(),
             "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}}
+
+
+MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart or more: op30's 31 mm part and the 27 mm
+                       # knob gave a slope of noise (-1.16 mm per mm), as the studies' objects span 2-8 cm
 
 
 @check("hand_opening",
@@ -85,7 +61,7 @@ def hand_opening(take: dict) -> Result:
         raise ValueError("no reach to grasp: the hand never closed on what the take grasps")
     per_mm = None
     sizes = {o: take["size_mm"][o] for o in peaks}
-    if len(set(sizes.values())) > 1:
+    if max(sizes.values()) - min(sizes.values()) >= MIN_SPREAD_MM:
         x = np.array([sizes[o] for o in peaks for _ in peaks[o]])
         y = np.array([p for o in peaks for p in peaks[o]])
         per_mm = float(np.polyfit(x, y, 1)[0])

@@ -154,6 +154,9 @@ class DoorClose(_Cell):
     grip_geoms = {"door_left": "vf2_door_left_pull", "door_right": "vf2_door_right_pull",
                   "open_left": "vf2_door_left_pull", "open_right": "vf2_door_right_pull"}
     encloses: dict[str, str] = {}
+    # the door's load acts where the hook meets the bar's outer face, not at the wrist: the wrist is fed its torque
+    # too, where unfed it gave 18 deg under the pull and the replayed arm's ECU went past its maximum
+    HAND_FORCE_AT = np.array([DC.GRIP_BACK * math.cos(math.radians(DC.GRIP_TILT)), 0.0, -DC.GRIP_OUT])
 
     def __init__(self, folder=DC.TAKES / "door-close"):
         super().__init__(folder)

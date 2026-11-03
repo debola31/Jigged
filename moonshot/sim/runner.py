@@ -59,6 +59,9 @@ class TakeRunner:
     encloses: dict[str, str] = {}
     welded: set[str] = set()
     controls: set[str] = set()               # a welded tool's geoms the fingers still touch (its trigger)
+    # where hand_force acts, in the hand frame (long, radial, dorsal; mm from the wrist): None, at the wrist, so the
+    # arm is fed it but the wrist isn't; a point on the hand, so the wrist is fed the torque the force makes about it
+    HAND_FORCE_AT: np.ndarray | None = None
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -242,8 +245,12 @@ class TakeRunner:
         for side in SIDES:
             F = self.hand_force(side, t)
             if F is not None:
-                jacp = np.zeros((3, m.nv))
-                mujoco.mj_jacBody(m, p, jacp, None, m.body(f"{side}_hand").id)
+                jacp, hb = np.zeros((3, m.nv)), m.body(f"{side}_hand").id
+                if self.HAND_FORCE_AT is None:
+                    mujoco.mj_jacBody(m, p, jacp, None, hb)
+                else:                                       # where the hand meets what it works: the wrist's load too
+                    at = p.xpos[hb] + p.xmat[hb].reshape(3, 3) @ H0 @ self.HAND_FORCE_AT * 0.001
+                    mujoco.mj_jac(m, p, jacp, None, at, hb)
                 tau += (jacp.T @ F)[self.act_dof]
         target = p.qpos.copy()
         k = np.ones(len(self.acts))

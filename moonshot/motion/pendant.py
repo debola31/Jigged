@@ -50,7 +50,10 @@ OVERTURN = 1.15                                           # a stroke turns the h
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
 HOVER_MM = 40.0
-HOVER_RIGHT_MM = 40.0                                     # the right index ready over Feed Hold, not resting on it:
+HOVER_DWELL_S = 0.4                                       # the left index waits over Cycle Start before pressing it:
+                                                          # pressed on arrival from the side, it was 45 mm short and
+                                                          # 17 mm across at the press, and slid past (op20-z, op30-xy)
+HOVER_RIGHT_MM = 40.0                                    # the right index ready over Feed Hold, not resting on it:
                                                           # held 15 mm off, its hand's sway of 10 mm pressed it
 SETTLE_S = 0.3                                            # off the rim, before a jog's first stroke
 CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
@@ -374,9 +377,9 @@ class PendantTake(StepTake):
         hover = W_on + [0, -HOVER_MM, 0]
         self.transit("L", t0, t0 + 0.7, self.at("L", hover), fade=(H, 1.0))   # transit takes world points
         self.fingers("L", t0 + 0.1, g["q"])
-        tp = t0 + 0.7
+        tp = t0 + 0.7 + HOVER_DWELL_S
         path = PosePath(H, hover).to(tp, 0.08, H, W_on).to(tp + 0.2, 0.08, H, hover)
-        self.add("L", tp, tp + 0.28, lambda t, path=path: [("pose", *path.at(t), 3.0)])
+        self.add("L", t0 + 0.7, tp + 0.28, lambda t, path=path: [("pose", *path.at(t), 3.0)])
         self.event("press", round(tp + 0.04, 3), round(tp + 0.2, 3), side="L", key=name, force=A[name]["force_n"],
                    normal=[0.0, 1.0, 0.0])
         self.look(t0, key_at(name))

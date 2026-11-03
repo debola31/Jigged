@@ -127,7 +127,10 @@ class PendantRunner(TakeRunner):
                     "active_constraints": [], "applied_forces": [], "machine_axes": {f"vf2_{a}": [] for a in
                                                                                        ("x", "y", "z", "spindle")}}
         self._key_n: dict[str, float] = {}
-        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM]) for s in ("R", "L")}
+        # the corrections by sight and the press's aim steer through the shoulder, elbow and wrist, not the girdle: its
+        # few centimetres of slide took most of a least-squares correction and stopped at their ends, the hand 10 mm off
+        steer = [j for j in ARM if not j.startswith("sc_")]
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in steer]) for s in ("R", "L")}
         act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}

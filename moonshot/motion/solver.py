@@ -1,5 +1,5 @@
 """Ported from trainual's motion/body_solver.py. Whole-motion body solver: trunk + arm joint angles for every frame at once, from task constraints, under a
-posture prior measured from people standing at work (AnDy; the fitted mixture is in the data root, arm-prior/standing_prior.npz), joint ranges, gravity effort and smoothness.
+posture prior measured from people manipulating objects seated or standing (GRAB, ARCTIC, AnDy; the fitted mixture is in the data root, arm-prior/people_prior.npz), joint ranges, gravity effort and smoothness.
 
 Why a trajectory and not frame-by-frame IK: a person's arm doesn't pick the best posture for each instant;
 it moves economically (minimum effort and jerk) through postures that are typical for the task. The first
@@ -63,8 +63,9 @@ def wrist_inside(th):
 
 class ArmPrior:
     def __init__(self, path=None):
-        # people standing at work (moonshot/validate/standing_prior.py), as the posture checks hold a take to
-        d = np.load(path or data_root() / "arm-prior" / "standing_prior.npz")
+        # people manipulating objects seated or standing (moonshot/validate/people_prior.py), as the posture checks hold
+        # a take to
+        d = np.load(path or data_root() / "arm-prior" / "people_prior.npz")
         self.w = torch.as_tensor(d["weights"], dtype=torch.float64)
         self.mu = torch.as_tensor(d["means"], dtype=torch.float64)
         cov = torch.as_tensor(d["covs"], dtype=torch.float64)
@@ -116,8 +117,11 @@ def ranges():
 
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
-         "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
+         "comfort": 1.0, "prior": 5.0, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
+    # prior 5.0, not 0.3 (2026-11-03): at 0.3 the people's mixture barely moved a take (the vise take's median
+    # likelihood 35.1 against people's 24.2; 29.7 at 5). The grip solver keeps 0.3 (posture_cost's default): at 5 the
+    # posture outweighed the contact, and the deburr grip's pads came off its handle (thumb 47.7 mm, was 8.5)
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 

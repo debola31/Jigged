@@ -1,0 +1,18 @@
+{
+ "source": "Dake, 'Setting Up & Using the B:7X Metal-Cutting Bandsaw' (YouTube cJQ-KRT1hWw), 360p (the 720p stream refused the download), downloaded through downr.org to C:\\jigged-data\\footage\\ and analysed locally with MediaPipe Hand Landmarker; the video is not in the repo",
+ "method": "trainual's motion/extract_hands.py, then its analyze_timing.py segmenting restricted to the windows where the saw is used; the video is edited, so only uncut shots give durations",
+ "windows_s": [[559.5, 567.5], [568, 580], [640, 652]],
+ "measured": {
+  "Left": {"n": 4, "dur_median_s": 0.5, "dur_iqr": [0.22, 0.9], "peak_speed_frac_median": 0.27, "peak_aperture_frac_median": 0.77},
+  "Right": {"n": 17, "dur_median_s": 0.63, "dur_iqr": [0.43, 1.07], "peak_speed_frac_median": 0.32, "peak_aperture_frac_median": 0.59}
+ },
+ "observed": [
+  {"t_s": [559.5, 564.0], "what": "One hand slides a rectangular tube along the infeed rollers and the bed into the vise: about 4.5 s, the shot ending as it arrives."},
+  {"t_s": [564.5, 567.0], "what": "A hand turns the vise handwheel; the shot cuts while it is still turning, so at least 2.5 s."},
+  {"t_s": [576, 579], "what": "The bow is lowered by its handle, which carries the trigger switch: the B:7X is a manual-feed saw, unlike a hydraulic-feed 9 x 16."},
+  {"t_s": [645, 651], "what": "The cut piece picked up off the bed by hand after the cut."}
+ ],
+ "used_for": [
+  "bandsaw-cut-to-length: #6 the bar slide (4.5 s, one hand) and #8 the vise handwheel (2.5 s, a lower bound)"
+ ]
+}

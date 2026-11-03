@@ -1,0 +1,62 @@
+{
+ "schema": "jigged.card/1",
+ "id": "dti-sweep-face",
+ "name": "Sweep a face with the dial test indicator on its magnetic base, the VF-2's jog handle moving the machine",
+ "assets": ["dti", "vf2"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "carries and sets the base, switches the magnet, clamps the arm, then turns the jog handle for the sweep",
+   "grasps": {"base": "prismatic_4_finger", "magnet_switch": "lateral", "arm_clamp_knob": "precision_disk", "jog_handle": "precision_disk"},
+   "contacts": [{"digit": "thumb", "on": "base"}, {"digit": "index", "on": "base"}, {"digit": "middle", "on": "base"},
+                {"digit": "ring", "on": "base"}, {"digit": "thumb", "on": "jog_handle"}, {"digit": "index", "on": "jog_handle"}]
+  },
+  "steadying": {
+   "side": "L", "role": "holds the arm and indicator still while the magnet goes on and the clamp is tightened; turns the bezel to zero; rests at the side during the sweep",
+   "grasps": {"indicator_body": "palmar_pinch", "bezel": "precision_disk"},
+   "contacts": [{"digit": "thumb", "on": "bezel"}, {"digit": "index", "on": "bezel"}, {"digit": "middle", "on": "bezel"}]
+  }
+ },
+ "phases": [
+  {"phase": "reach", "what": "The working hand to the indicator's base on the bench", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "grasp", "what": "Take the base, magnet off, and lift it [proposed: duration_s]", "action": "lift", "on": "base", "duration_s": 0.5, "ends_on": "the stand clear of the bench"},
+  {"phase": "transport", "what": "Carry it to the VF-2 and set the base on a flat of the spindle head, so it rides with Z; the steadying hand takes the arm [proposed: duration_s, the place on the head]",
+   "action": "place", "on": "base", "duration_s": [1.5, 3], "ends_on": "the base flat on the head", "source": 0},
+  {"phase": "operate", "what": "Turn the base's switch to ON while the steadying hand holds the arm [proposed: force_n, duration_s]",
+   "action": "turn", "on": "magnet_switch", "force_n": 5, "duration_s": 0.6, "ends_on": "the base locked to the head"},
+  {"phase": "adjust", "what": "Swing the arm until the stylus reaches the face lying nearly parallel to it, under 10 deg between them; the working hand tightens the arm clamp while the steadying hand holds the indicator [proposed: duration_s]",
+   "action": "turn", "on": "arm_clamp_knob", "duration_s": [3, 6], "ends_on": "the clamp tight, the stylus a few mm off the face", "source": 0},
+  {"phase": "reach", "what": "The working hand to the jog handle", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "operate", "what": "Jog toward the face at .001 until the stylus touches and the needle swings about 20 divisions, a 0.2 mm preload, a quarter of the 0.8 mm range [proposed: force_n, duration_s, the preload]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "duration_s": [3, 6], "ends_on": "the needle about 20 divisions in", "source": 2},
+  {"phase": "adjust", "what": "The steadying hand turns the bezel to put zero under the needle [proposed: force_n, duration_s]",
+   "action": "turn", "on": "bezel", "force_n": 1, "duration_s": 1.5, "ends_on": "the needle on zero"},
+  {"phase": "operate", "what": "Select the sweep axis (Z for Op 50's squareness check, X along a vise jaw) and turn at .01 along the face, the face moving away from the stylus tip, never into it [proposed: force_n, travel_mm, duration_s]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "travel_mm": 75, "duration_s": [5, 10], "ends_on": "the stylus at the far end of the face", "source": 0},
+  {"phase": "check", "what": "Watch the needle through the sweep; its change from end to end is the face's error over that length, the stylus pressing at most 0.5 N [proposed: duration_s]",
+   "action": "read", "on": "dial", "duration_s": 1.0, "ends_on": "the reading at the far end taken", "source": 1},
+  {"phase": "operate", "what": "Jog back off the face to unload the stylus [proposed: force_n, duration_s]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "duration_s": 1.5, "ends_on": "the needle at rest, the stylus off the face", "source": 2},
+  {"phase": "operate", "what": "Switch the base OFF, the steadying hand on the arm [proposed: force_n, duration_s]",
+   "action": "turn", "on": "magnet_switch", "force_n": 5, "duration_s": 0.6, "ends_on": "the base free of the head"},
+  {"phase": "transport", "what": "Lift the stand off and set it down on the bench [proposed: duration_s]",
+   "action": "place", "on": "base", "duration_s": [1.5, 3], "ends_on": "the stand on the bench"}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Mitutoyo Europe, 'Handheld Measuring Instruments: a guide to proper use, maintenance and care' (PRE1436), Dial Test Indicators",
+   "url": "https://www.mitutoyo.ca/webfoo/wp-content/uploads/Handheld-Measuring-Instruments_GB_SMALL.pdf",
+   "gives": "a holding fixture that won't deflect; under 10 deg between stylus and workpiece movement, the cosine effect can be ignored; when the work or the indicator moves, it moves away from the contact point"},
+  {"kind": "maker", "ref": "Mitutoyo, Quick Guide to Precision Measuring Instruments, Catalog No. E11003(7): Dial Test Indicators and the Cosine Effect",
+   "url": "https://www.mitutoyo.com/webfoo/wp-content/uploads/E11003-Quick-Guide.pdf",
+   "gives": "lever-type indicators measure at no more than 0.5 N (JIS B 7533); the cosine correction, 0.98 at 10 deg"},
+  {"kind": "practice", "ref": "Virasak and Kepka, Manufacturing Processes 4-5, Unit 6: Haas Control (Open Oregon Educational Resources, CC BY 4.0)",
+   "url": "https://openoregon.pressbooks.pub/manufacturingprocesses45/chapter/unit-6-hass-control/",
+   "gives": "each click of the jog handle moves the axis the selected increment, .0001 to .1 in"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as this tool's own footage is edited and tracks too few moves to time a reach",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"},
+  {"kind": "footage", "ref": "Haas Automation, 'How to: Set a work offset with an edge finder and indicator' (Haas Tip of the Day), measured locally with MediaPipe Hand Landmarker",
+   "url": "https://www.youtube.com/watch?v=-ZuRBppxRwU", "file": "moonshot/cards/footage/haas-edge-finder-indicator.timing.json",
+   "gives": "Haas mounts the test indicator in the spindle with an indicator holder and swings it by turning the spindle nose by hand; it indicates at the .0001 increment"}
+ ],
+ "notes": "For nist-ftc-10's Op 50 note, 'check it's square with the indicator': the part stands on end in the vise and the stylus sweeps its side in Z. The same card sweeps a vise jaw in X. The jog handle is the one in vf2-controls. The magnetic base has no maker (the dti record), so its switch and placement have no source. Haas's own footage mounts the indicator differently, in an indicator holder in the spindle, which also rides with Z; this card keeps the base because the dti asset is a base and stand, but that mounting is the alternative to weigh against #3. The grasps are this card's choice; Mitutoyo names none. Proposed, with reasons (phase numbers count from 1): #3 a flat of the spindle head as the base's seat, because it must ride with Z for Op 50 and the station has no place for it yet; #4 and #12 5 N and 0.6 s to turn the magnet switch, no maker; #7 the 0.2 mm preload, a common starting load that keeps the needle mid-range, from no source read; #7, #9 and #11 1 N on the jog handle; #8 1 N to turn the bezel; #9 a 75 mm sweep, about the face of the part standing above the vise jaws, to be set from the step; every duration but the reaches, since no source times them: #2 0.5 s, #3 1.5-3 s, #4 0.6 s, #5 3-6 s, #7 3-6 s, #8 1.5 s, #9 5-10 s, #10 1.0 s, #11 1.5 s, #12 0.6 s, #13 1.5-3 s; #2, #4, #8, #12 and #13 have no source at all."
+}

@@ -1,0 +1,57 @@
+{
+ "schema": "jigged.card/1",
+ "id": "caliper-measure-bore",
+ "name": "Measure a bore with 6 in digital calipers",
+ "assets": ["cal6"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "holds the calipers lightly by the beam and works the slider with the thumb",
+   "grasps": {"beam": "light_tool", "thumb_roller": "thumb_push"},
+   "contacts": [{"digit": "thumb", "on": "thumb_roller"}, {"digit": "index", "on": "beam_underside"},
+                {"digit": "middle", "on": "beam_underside"}, {"digit": "ring", "on": "beam"}, {"digit": "little", "on": "beam"}]
+  },
+  "steadying": {
+   "side": "L", "role": "holds the part still on the bench, flat fingers on its top",
+   "grasps": {"part_top": "flat_press"},
+   "contacts": [{"digit": "index", "on": "part_top"}, {"digit": "middle", "on": "part_top"}, {"digit": "ring", "on": "part_top"}]
+  }
+ },
+ "phases": [
+  {"phase": "reach", "what": "The working hand to the calipers on the bench", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "grasp", "what": "Pick them up by the beam, lightly: thumb on the slider's finger rest by the thumb roller, fingers round the beam [proposed: duration_s]",
+   "action": "lift", "on": "beam", "duration_s": 0.5, "ends_on": "held clear of the bench", "source": 0},
+  {"phase": "check", "what": "Close the jaws and read zero [proposed: force_n, duration_s]",
+   "action": "read", "on": "display", "force_n": [1, 2], "duration_s": 1.0, "ends_on": "0.00 on the display", "source": 0},
+  {"phase": "transport", "what": "Carry them to the part, inside jaws toward the bore; the steadying hand presses the part down on the bench [proposed: the steadying hand's 5 N, duration_s]",
+   "duration_s": [0.5, 1.0], "ends_on": "the jaw tips at the bore's mouth", "source": 2},
+  {"phase": "operate", "what": "Put the inside jaws into the 7 mm bore as deep as they go; their knife edges suit any hole over about 3 mm [proposed: duration_s]",
+   "action": "place", "on": "bore", "duration_s": 0.8, "ends_on": "the jaw tips as deep as they go", "source": 0},
+  {"phase": "operate", "what": "The thumb rolls the roller to open the jaws onto the wall, evenly and lightly: the roller is a fine feed, not a constant-force device, and pushes harder than it feels [proposed: force_n, duration_s]",
+   "action": "roll", "on": "thumb_roller", "force_n": [1, 2], "travel_mm": 7, "duration_s": [1, 2], "ends_on": "both jaws on the wall", "source": 0},
+  {"phase": "adjust", "what": "Rock the calipers a few degrees about the bore's axis, jaws kept on the wall [proposed: duration_s]",
+   "action": "turn", "on": "beam", "duration_s": [1, 2], "ends_on": "the reading at its largest: the jaws lie across the bore's centre", "source": 0},
+  {"phase": "check", "what": "Read the display with the jaws still on the wall [proposed: duration_s]",
+   "action": "read", "on": "display", "duration_s": 1.0, "ends_on": "the reading taken", "source": 0},
+  {"phase": "operate", "what": "Roll the jaws closed off the wall and draw them out [proposed: duration_s]",
+   "action": "roll", "on": "thumb_roller", "travel_mm": 7, "duration_s": 1.0, "ends_on": "the jaws out of the bore", "source": 2},
+  {"phase": "release", "what": "Set them down on the bench; the steadying hand lets the part go [proposed: duration_s]",
+   "action": "place", "on": "beam", "duration_s": [0.5, 1.0], "ends_on": "the calipers on the bench", "source": 2}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Mitutoyo, ABS Digimatic Caliper User's Manual No. 99MAD027A (2021), which covers 500-196-30: §5 basic usage, §10 measurement method",
+   "url": "https://shop.mitutoyo.eu/media/mitutoyoData/DO/base/99MAD027A,%20User%20manual%20(ENG),%20ABS%20Digimatic%20Caliper.pdf",
+   "gives": "grasp the beam lightly in the right hand, right thumb on the slider's finger rest; the thumb roller is a fine feed, not a constant-force device, and its force tends to be large; no excessive force; inside jaws inserted as deep as possible; a bore read at its maximum, with the jaws still in contact"},
+  {"kind": "maker", "ref": "Mitutoyo Europe, 'Handheld Measuring Instruments: a guide to proper use, maintenance and care' (PRE1436), Calipers and All Instruments",
+   "url": "https://www.mitutoyo.ca/webfoo/wp-content/uploads/Handheld-Measuring-Instruments_GB_SMALL.pdf",
+   "gives": "constant force; the inside knife edges not for holes under about 3 mm; measure in a stable position"},
+  {"kind": "practice", "ref": "The worked caliper card in docs/moonshot/shop-and-pipeline-plan.md §4, signed off 2026-11-01",
+   "gives": "the other hand steadies the part; close the jaws and withdraw; set them down; its 1-2 N and 3-5 s carry no source of their own"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as this tool's own footage is edited and tracks too few moves to time a reach",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"},
+  {"kind": "footage", "ref": "'Measuring Inside Diameter With Various Tools - Calipers to Inside Mic' (YouTube), 200-370 s, measured locally with MediaPipe Hand Landmarker",
+   "url": "https://www.youtube.com/watch?v=X0CxB3U3_58", "file": "moonshot/cards/footage/caliper-inside-diameter-tools.timing.json",
+   "gives": "a 6 in bore measured with both hands on the calipers, the operator leaning in to read; a different case from this card's, so no numbers come from it"}
+ ],
+ "notes": "The Ø7 bores of nist-ftc-10's inspection step. Its pocket depth, also a caliper check there, uses the depth bar and is not in this card. Mitutoyo gives the grip in words, which this card reads as the GRASP light tool with the thumb on the roller. The only bore footage found measures a 6 in bore, which takes both hands on the calipers; a 7 mm bore leaves the second hand free to steady the part, so that footage changes nothing here. Proposed, with reasons (phase numbers count from 1): #3 and #6 1-2 N jaw force, the plan §4 value: Mitutoyo gives no figure for the 500 series beyond 'appropriate and uniform', so 1-2 N is held to the light end because the roller pushes harder than it feels; #4 5 N from the steadying hand, enough to keep a 0.5 kg part from sliding, unmeasured; every duration but the reach, since no source times them: #2 0.5 s, #3 1.0 s, #4 0.5-1.0 s, #5 0.8 s, #6 1-2 s, #7 1-2 s, #8 1.0 s, #9 1.0 s, #10 0.5-1.0 s. Phases #5 to #8 total about 4-6 s, against the plan's unsourced 3-5 s for the measurement itself."
+}

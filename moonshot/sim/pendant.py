@@ -54,8 +54,10 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
-FREEZE_EASE_S = 0.4         # a held hand eases back onto the plan this long after its jog's last stroke,
-FINGERS_EASE_S = 0.08       # its fingers opening this fast
+BACK_OFF_S = 0.5            # a held hand, its jog done, slides straight off the dial this long at least,
+BACK_OFF_MM = 25.0          # this far (the plan's own strokes come 15 mm off the rim),
+FREEZE_EASE_S = 0.6         # then, once nothing of it touches the dial, its arm comes round onto the plan over this
+DIAL_AXIS = np.array(vf2.record()["affordances"]["jog_handle"]["axis"], float)     # into the pendant
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -130,6 +132,8 @@ class PendantRunner(TakeRunner):
             self.jog_clicks[e["jog"]] = self.jog_clicks.get(e["jog"], 0) + e["clicks"]
         self.jog_from: dict[int, int] = {}
         self.jog_done: dict[int, float] = {}        # jog -> when its clicks were all in
+        self.jog_back: dict[int, np.ndarray] = {}   # jog -> the joints' change sliding its held hand off the dial
+        self.jog_clear: dict[int, float] = {}       # jog -> when its backed-off hand was clear of the dial
         self.jog_end = {e["jog"]: e["t1"] + 0.2 for e in self.turns}     # its last stroke's end
         right = [n for n in self.body.joints if n.startswith("R_")]
         arm = [n for n in right if n[2:] in ARM]
@@ -265,17 +269,30 @@ class PendantRunner(TakeRunner):
                 self.jog_from.setdefault(j, c)
                 if (c - self.jog_from[j]) * np.sign(self.jog_clicks[j]) >= abs(self.jog_clicks[j]):
                     self.jog_done[j] = t
+                    self.jog_back[j] = self.back_off_dq(t)
                 return
 
-    def frozen(self, t: float) -> tuple[float, float] | None:
-        """(the plan time the right hand holds, how far it has eased back onto the plan), while a done jog's hand is
-        held: from the moment its clicks are in to its last stroke's end, then eased back over FREEZE_EASE_S."""
+    def frozen(self, t: float) -> tuple[float, float, float, float] | None:
+        """While a done jog's hand is held: (the plan time it holds, how far its arm and its fingers have eased back
+        onto the plan, how far it has backed off the dial). Held from the moment the jog's clicks are in to its last
+        stroke's end; then the hand, its grip eased but its fingers still shaped round the rim, slides straight off
+        the rim's front along the dial's axis (BACK_OFF_S), which can't turn it; only then do the fingers open and the
+        arm come round onto the plan (FREEZE_EASE_S), which by then is off the rim too. Fingers opening on the rim, or
+        a hand turning with them on it, drag the dial on."""
         for j, td in self.jog_done.items():
             end = self.jog_end[j]
             if td <= t < end:
-                return td, 0.0
-            if end <= t < end + FREEZE_EASE_S:
-                return td, min_jerk((t - end) / FREEZE_EASE_S)
+                return td, 0.0, 0.0, 0.0
+            clear = self.jog_clear.get(j)                     # when the backed-off hand was first clear of the dial
+            if t >= end and clear is None:
+                if t >= end + BACK_OFF_S and not self.on_dial():
+                    self.jog_clear[j] = clear = t
+                else:
+                    return td, 0.0, 0.0, min_jerk((t - end) / BACK_OFF_S)
+            if clear <= t < clear + FREEZE_EASE_S:
+                x = (t - clear) / FREEZE_EASE_S
+                w = min_jerk(x)
+                return td, w, w, 1.0 - min_jerk((x - 0.7) / 0.3)     # kept off the rim till the arm is nearly round
         return None
 
     def at(self, t: float):
@@ -285,11 +302,12 @@ class PendantRunner(TakeRunner):
         self.count_clicks(t)
         f = self.frozen(t)
         if f is not None:
-            td, w = f
+            td, w_arm, w_fingers, _ = f
             qf, _, _ = super().at(td)
-            # easing back, the fingers open first, then the arm comes round: an opened hand doesn't drag the dial
-            wq = np.where(self.r_arm, w, min(1.0, w * FREEZE_EASE_S / FINGERS_EASE_S))
+            wq = np.where(self.r_arm, w_arm, w_fingers)
             q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * wq
+            j = next(j for j, x in self.jog_done.items() if x == td)
+            q += self.jog_back[j] * f[3]
             v[self.r_dof] *= wq
             a[self.r_dof] *= wq
         return q, v, a
@@ -314,7 +332,31 @@ class PendantRunner(TakeRunner):
     def effort(self, side: str, t: float) -> tuple[float, str]:
         """The plan's effort, but a held hand keeps the grip it had when the dial read right."""
         f = self.frozen(t) if side == "R" else None
-        return super().effort(side, f[0] if f is not None and f[1] == 0.0 else t)
+        return super().effort(side, f[0] if f is not None and f[3] == 0.0 else t)
+
+    def on_dial(self) -> bool:
+        """Is any part of the hand touching the jog handle?"""
+        return any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
+                   for c in self.data.contact[:self.data.ncon])
+
+    def back_off_dq(self, td: float) -> np.ndarray:
+        """The arm's joint change (qpos) that slides the hand held at plan time td straight off the dial, along its
+        axis toward the operator, by BACK_OFF_MM: part of the plan the runner tracks, so its correction agrees."""
+        m = self.model
+        q, _, _ = super().at(td)
+        scratch = mujoco.MjData(m)
+        scratch.qpos[:] = self.data.qpos
+        scratch.qpos[self.body_q] = q[self.body_q]
+        mujoco.mj_kinematics(m, scratch)
+        mujoco.mj_comPos(m, scratch)
+        jacp = np.zeros((3, m.nv))
+        mujoco.mj_jacBody(m, scratch, jacp, None, m.body("R_hand").id)
+        dofs = self.arm_dofs["R"]
+        J = jacp[:, dofs]
+        dq = np.zeros(m.nq)
+        qadr = [m.jnt_qposadr[m.joint(f"R_{j}").id] for j in ARM]
+        dq[qadr] = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), -DIAL_AXIS * BACK_OFF_MM / 1000)
+        return dq
 
     def debounced(self, forces: dict[str, float]) -> dict[str, float]:
         now, on = float(self.data.time), self.machine.actuation

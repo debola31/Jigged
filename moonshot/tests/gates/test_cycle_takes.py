@@ -4,8 +4,9 @@ runs (plan §5.1): every axis inside its travel, the spindle under its top speed
 its tool's limits in aluminium and the VF-2's. Protected (plan §6, rule 1).
 
 What a cycle step hands this gate, in the data root's takes/<part>-<step id>/ (moonshot/sim/cycle_take.py writes it):
-- take.npz and scene.json, the take record (moonshot/contracts/take_record.py). The stock is the body whose scene
-  entry carries "meshes", one GLB per keyframe in the part's model frame (mm).
+- take.npz and scene.json, the take record (moonshot/contracts/take_record.py). The stock is the body named
+  "blank", as the part is in every take; its scene entry carries "meshes", one GLB per keyframe in the part's model
+  frame (mm). Other bodies may carry meshes too (the parallels, drawn as the vise takes draw them).
 - stock-end.brep, the stock after the operation, in the part's model frame (mm).
 - program.json, what the VF-2 ran:
     {"schema": "jigged.cycle-program/1", "part": ..., "step": ..., "setup": ...,
@@ -175,9 +176,8 @@ def test_a_cycle_take_shows_the_machine_cutting_in_spec(step):
     for door in ("door_left", "door_right"):
         assert np.abs(ax[door]).max() < r["logic"]["door_closed_mm"], f"the {door} opened during the cycle"
 
-    stock = [n for n, b in scene["bodies"].items() if "meshes" in b]
-    assert len(stock) == 1, "exactly one body, the stock, changes shape"
-    meshes = scene["bodies"][stock[0]]["meshes"]
+    assert "meshes" in scene["bodies"].get("blank", {}), "the stock, the body named blank, has no meshes"
+    meshes = scene["bodies"]["blank"]["meshes"]
     before, after = program["stock_mm3"]
     assert after < before, "the operation removed nothing"
     first = glb_volume(folder / meshes["dir"] / f"{meshes['frames'][0]}.glb")

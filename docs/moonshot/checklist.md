@@ -115,7 +115,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   fires: MuJoCo deformable fingertip and palm pads.
 - [ ] Record conformance tests for every machine and tool as it lands (§3.2). So far (2026-11-01): the VF-2
   station (`test_vf2_conformance.py`) and the VF-2 cell, with the vise riding the table at the loading position
-  (`test_cell_conformance.py`); the generated tools pass their record tests.
+  (`test_cell_conformance.py`); the generated tools pass their record tests. 2026-11-02: the band saw
+  (`test_bandsaw_conformance.py`, 11 tests) and the inspection bench (`test_inspection_bench_conformance.py`, 5),
+  each gate committed before its station on `feature/moonshot-stations`; both pass locally, no CI run yet.
 - [ ] The usage-card format (§4), with the first cards for the G1 tools: band saw, VMC controls, calipers,
   micrometer, indicator. The format is done (2026-11-01, `moonshot/cards/card.schema.json`), with the card behind
   the reference take (`kurt-vise-load-and-clamp`); the G1 cards aren't written yet.
@@ -168,8 +170,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
-| C5 (saw, weld, braze, …) | [ ] | [ ] | [ ] |
-| C6 (inspection, …) | [ ] | [ ] | [ ] |
+| C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
+| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
 | E. Parts and plans | [ ] | [ ] | [ ] |
 | F. Web | [ ] | [ ] | [ ] |

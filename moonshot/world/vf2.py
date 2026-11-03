@@ -15,6 +15,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import mujoco
 import numpy as np
@@ -24,6 +25,7 @@ LINKS = RECORD.with_name("vf2.links.json")
 MOVING = {"saddle", "table", "head", "spindle", "door_left", "door_right"}
 M = 0.001
 INCH = 25.4
+PROBE_FAST_MM_S, PROBE_SLOW_MM_S, PROBE_BACK_MM = 8.0, 0.5, 1.0   # Renishaw's cycles find fast, back off, measure slow [proposed]
 
 
 def record() -> dict:
@@ -165,6 +167,8 @@ class Control:
     events: list[str] = field(default_factory=list)
     tool: int = 0                     # the tool in the spindle
     setup_mode: bool = False          # the pendant's setup key switch
+    tool_length: dict[int, float] = field(default_factory=dict)       # mm, by tool number
+    sensor: Callable[[], bool] | None = None                           # the probe or tool setter touching, now
 
     def __post_init__(self):
         r = record()
@@ -182,7 +186,8 @@ class Control:
         self.mode, self.jog_axis, self.increment_mm = "", "x", 0.001 * INCH
         self.page, self.cursor, self.typed, self.mdi_line = "", 0, "", ""
         self.work = {"G54": np.zeros(3)}
-        self.tool_length: dict[int, float] = {}
+        self.cycle: list = []             # a probing cycle from VPS, run by Cycle Start
+        self._cycle_ready, self._touches, self._done = False, [], None
         self.spindle_rpm = 0.0            # turning after M03 from MDI
         self.pressed: list[tuple[float, str]] = []
         self._force: dict[str, float] = {}
@@ -213,7 +218,10 @@ class Control:
         self.pressed.append((round(float(self.data.time), 4), button))
         doors_ok = self.doors_closed() or self.setup_mode
         if button == "cycle_start":
-            if self.mode == "mdi" and self.mdi_line and doors_ok:
+            if self._cycle_ready and self.state in ("idle", "feed_hold") and doors_ok:
+                self.state, self._cycle_ready = "running", False
+                self.events.append("cycle_start")
+            elif self.mode == "mdi" and self.mdi_line and doors_ok:
                 self._mdi(self.mdi_line)
             elif self.state in ("idle", "feed_hold") and doors_ok and self.program:
                 self.state = "running"
@@ -296,7 +304,9 @@ class Control:
             self.spindle_rpm = 0.0
         self._handle(dt)
         rpm = 0.0
-        if self.state == "running" and self.step_index < len(self.program):
+        if self.state == "running" and self.cycle:
+            self._run_cycle(dt)
+        elif self.state == "running" and self.step_index < len(self.program):
             x, y, z, rpm = self.program[self.step_index]
             goal = np.array([x, y, z]) * M
             delta = goal - self.setpoint
@@ -315,6 +325,95 @@ class Control:
         if not self.doors_closed():
             rpm = min(rpm, self.setup_rpm) if self.setup_mode else 0.0
         d.ctrl[self.act["spindle"]] = rpm * 2 * math.pi / 60
+
+    # --- probing (the vf2-tool-setter card, and the spindle probe) -------------------------------------------
+    def _joint(self, machine_mm) -> np.ndarray:
+        x, y, z = machine_mm
+        return np.array([-x, -y, z]) * M
+
+    def vps(self, template: str, **v) -> None:
+        """A probing cycle output from VPS to MDI, to run on Cycle Start: "surface" (axis, sign: one touch, its offset
+        the ball's radius beyond the ball's centre; in Z the probe's length below its gauge line), "bore" (four
+        touches, the centre in X and Y), or "tool_length" (the tool in the spindle down onto the tool setter, whose top
+        is setter_z; gauge_length is the operator's approximate length, to come down to it at rapid)."""
+        s, r = self.machine_mm().copy(), v.get("ball_r", 0.0)
+        G = self.work["G54"]
+        if template == "surface":
+            i, sign = "xyz".index(v["axis"]), v["sign"]
+            u = np.zeros(3)
+            u[i] = sign
+            self.cycle = [("probe", u, v.get("max_mm", 50.0)), ("move", s)]
+
+            def done(t):
+                G[i] = t[0][i] - self.tool_length.get(self.tool, 0.0) if i == 2 else t[0][i] + sign * r
+        elif template == "bore":
+            ex = np.array([1.0, 0, 0])
+            ey = np.array([0, 1.0, 0])
+            mid = lambda: np.r_[(self._touches[0][0] + self._touches[1][0]) / 2, s[1], s[2]]     # noqa: E731
+            self.cycle = [("probe", ex, 20.0), ("move", s), ("probe", -ex, 20.0), ("move", mid),
+                          ("probe", ey, 20.0), ("move", mid), ("probe", -ey, 20.0), ("move", mid)]
+
+            def done(t):
+                G[0], G[1] = (t[0][0] + t[1][0]) / 2, (t[2][1] + t[3][1]) / 2
+        elif template == "tool_length":
+            above = np.r_[s[:2], v["setter_z"] + v["gauge_length"] + 10.0]
+            self.cycle = [("move", above), ("probe", np.array([0, 0, -1.0]), 30.0), ("move", np.r_[s[:2], 0.0])]
+
+            def done(t):
+                self.tool_length[self.tool] = float(t[0][2] - v["setter_z"])
+        else:
+            raise ValueError(f"no VPS template {template!r}")
+        self._touches, self._done, self._cycle_ready = [], done, True
+        self.events.append(f"vps {template}")
+
+    def _toward(self, goal, speed, dt) -> bool:
+        """Move the setpoint toward a joint-space goal at speed (mm/s); True once the axes are there."""
+        delta = goal - self.setpoint
+        dist, stepmax = np.linalg.norm(delta), speed * M * dt
+        self.setpoint = goal.copy() if dist <= stepmax else self.setpoint + delta / dist * stepmax
+        pos = np.array([self.data.qpos[self.q[a]] for a in ("x", "y", "z")])
+        return dist <= stepmax and np.linalg.norm(goal - pos) < 5e-6
+
+    def _run_cycle(self, dt: float) -> None:
+        seg = self.cycle[0]
+        if seg[0] == "move":
+            goal = seg[1]() if callable(seg[1]) else seg[1]
+            if self._toward(self._joint(goal), self.rapid, dt):
+                self.cycle.pop(0)
+        else:                                         # probe: fast to the touch, back off, slow to it again
+            _, u, travel = seg[:3]
+            stage = seg[3] if len(seg) > 3 else "fast"
+            if self.sensor is not None and self.sensor():
+                if stage == "fast":
+                    back = self.machine_mm() - u * PROBE_BACK_MM
+                    self.setpoint = self._joint(self.machine_mm())
+                    self.cycle[0] = ("probe", u, travel, "back", back)
+                    return
+                if stage == "slow":
+                    self._touches.append(self.machine_mm().copy())
+                    self.setpoint = self._joint(self.machine_mm())
+                    self.cycle.pop(0)
+                    self._end_if_done()
+                    return
+            if stage == "back":
+                if self._toward(self._joint(seg[4]), PROBE_FAST_MM_S, dt):
+                    self.cycle[0] = ("probe", u, travel, "slow", seg[4])
+                return
+            speed = PROBE_FAST_MM_S if stage == "fast" else PROBE_SLOW_MM_S
+            if not hasattr(self, "_probe_from") or self._probe_from[0] is not seg[1]:
+                self._probe_from = (seg[1], self.machine_mm().copy())
+            if np.linalg.norm(self.machine_mm() - self._probe_from[1]) > travel:
+                self.state, self.cycle = "alarm", []
+                self.events.append("probe_missed")
+                return
+            self.setpoint = self.setpoint + self._joint(u) * speed * dt
+        self._end_if_done()
+
+    def _end_if_done(self) -> None:
+        if not self.cycle and self.state == "running":
+            self._done(self._touches)
+            self.state = "idle"
+            self.events.append("cycle_end")
 
     def _handle(self, dt: float) -> None:
         """The jog handle: its detents, and in handle jog each click moves the selected axis by the increment, no

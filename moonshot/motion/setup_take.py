@@ -51,8 +51,10 @@ from moonshot.world.vise import (CRANK0_DEG, PARALLEL_L, PARALLEL_T, REFERENCE, 
 MOONSHOT = Path(__file__).resolve().parents[1]
 TAKES = data_root() / "takes"
 OUT = TAKES / "setup-take"                                # the reference load's take
-LUMBAR = np.array([-415.0, -935.0, 955.0])                # standing a little further back than before: the crank
-REST_W = np.array([-205.0, -880.0, 850.0])                # hand hanging relaxed by the right thigh
+# standing 120 mm further back than at first (2026-11-03): at -935 the elbow sat bent 70 deg at the median, where
+# people standing at work keep it nearer 20 (AnDy), and the take's posture was unlike theirs
+LUMBAR = np.array([-415.0, -1055.0, 955.0])
+REST_W = np.array([-205.0, -1000.0, 850.0])               # hand hanging relaxed by the right thigh
 KNOB_AXIS = np.array([0.0, -1.0, 0.0])
 CRANK0 = CRANK0_DEG
 SEAT_Z = VISE["seat_z"]
@@ -62,7 +64,8 @@ TALL_PLACE_GAP = 15.0
 # the usage card a take plays (moonshot/cards), whose footage the take is held to: loading is the Kurt card's; no card
 # covers lifting a part out yet
 CARD = {"stage": {"card": "kurt-vise-load-and-clamp"}}
-INSPECT = np.array([-290.0, -640.0, 1160.0])              # held up in front, below the eyes, to look at it
+INSPECT = np.array([-290.0, -640.0, 1080.0])              # held up in front, below the eyes, to look at it: at 1160 the
+                                                          # elbow bent 93 deg to hold it there
 JAW_TOP = VISE["jaw_top_z"]
 
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the

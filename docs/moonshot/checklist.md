@@ -166,6 +166,15 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   otherwise the seated range widened with a written reason for your review. The seated range's misses are more
   than the trunk: freed, the takes still sit 64-73% inside, the arm hanging at the side (shoulder elevation 14 deg
   against the seated 22), turned out cranking (+50 deg against 13.5) and the wrist back pushing (+40 against 20).
+  Done the same day from data: the AnDy dataset (Maurice et al. 2019, CC BY 4.0, which allows this use with
+  credit), 13 people standing at industry-like manual work, 512,480 frames (`moonshot/validate/standing_prior.py`),
+  and the planner plans with it too. Held to the other people, people themselves sit a median 82.9% inside (5th
+  percentile 50.3%: nobody meets the proposed 95%), so the bar is their median, 0.83, your decision; the likelihood
+  limit, people's own 95th percentile, 24.2. The vise takes, on today's plans: 51-65% inside, likelihood 34-38,
+  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg);
+  the planner's prior weight is being raised to pull it toward people's. Which checks a take is held to, your
+  decision: the pendant takes are exempt from grasp timing, hand opening and footage (no reach to lift a part),
+  not from nothing moving without a cause; a take at a station with no machine passes machines inside spec.
   Since the body-checks merge every check runs before a render, so no vise take
   renders on its own; their review drafts render regardless (`pipeline --render-only`). The reference's skin is
   3.57 mm for one frame at the end of the 30 N push, against 3.5. Open: joint ranges and the per-verb physics are

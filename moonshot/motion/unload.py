@@ -17,11 +17,11 @@ import numpy as np
 
 from moonshot.config import data_root
 from moonshot.motion.primitives import min_jerk, open_like
+from moonshot.motion.setup_take import LUMBAR                 # where the vise take stands the operator
 from moonshot.motion.step_take import StepTake
 from moonshot.world import vise as V
 
 TAKES = data_root() / "takes"
-LUMBAR = np.array([-415.0, -935.0, 955.0])               # where the vise take stands the operator
 JAW_GAP_MM = 0.1                                          # the physics starts the jaw this far off the part (sim/door_cycle.py)
 TURN_S = 2.3                                              # one turn back, a little slower than cranking it shut
 

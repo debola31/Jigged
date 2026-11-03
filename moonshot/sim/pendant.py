@@ -12,8 +12,8 @@
   off its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
 - A jog of the handle ends when the machine reads where the plan has it after the jog, as people stop turning when
   the display reads right: the plan's strokes turn the hand a third farther than the jog needs, and once the machine
-  is there the right arm stops where it is, still gripping, so the dial stops with it, until the jog's last stroke
-  ends; then it comes round onto the plan, which leaves the dial along its axis. Each jog is counted from where the
+  is there the dial is locked at that click and the right arm stops where it is, still gripping it, until the
+  jog's last stroke ends; then it comes round onto the plan, which leaves the dial along its axis. Each jog is counted from where the
   machine is when it starts, so one that fell short or ran on is made up by the next on its axis.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
@@ -23,7 +23,7 @@ Declared shortcuts: `clamped`, the part welded to the table, standing in for the
 proves the clamp: moonshot/tests/gates/test_vise_take.py; nothing in these steps pushes on the part); and
 `dial_pinch`, the jog handle held to the hand while a stroke grips it and a finger touches its rim, standing in for
 fingertips on the knurled rim, which capsules on a smooth cylinder can't hold (a grip assist, as the vise take's
-`enclose`); the rim is frictionless otherwise, so only that grip turns it.
+`enclose`); and `dial_lock`, the handle held at its detent outside that grip, so only the grip turns it.
 
 The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle, the
 right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
@@ -56,8 +56,6 @@ STANDOFF_MM = 8.0           # until then the fingertip is held this far off the 
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
 FREEZE_EASE_S = 0.4         # a held hand, its jog's last stroke over, comes round onto the plan over this
-STOP_S = 0.02               # a turning hand stops this long after it means to: the dial turns on meanwhile, so the
-                            # hand stops when the clicks in and those coming reach the jog's, as people slow to a number
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -150,8 +148,8 @@ class PendantRunner(TakeRunner):
         self.r_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in right])
         self.r_arm = np.isin(self.r_q, [m.jnt_qposadr[m.joint(n).id] for n in arm])     # arm, not fingers
         self.pinch = m.equality("dial_pinch").id
+        self.lock = m.equality("dial_lock").id
         self.dial_geom = m.geom("vf2_jog_handle").id
-        self.jog_dof = m.jnt_dofadr[m.joint("vf2_jog").id]
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -163,9 +161,9 @@ class PendantRunner(TakeRunner):
         xml = xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
                           f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
                           f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
-                          'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n', 1)
-        # dial_pinch: the rim frictionless but for the grip; priority, as a contact takes the higher condim of a pair
-        xml = xml.replace('<geom name="vf2_jog_handle" ', '<geom name="vf2_jog_handle" condim="1" priority="1" ', 1)
+                          'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
+                          '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '
+                          'solref="0.005 1"/>\n', 1)
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -289,8 +287,7 @@ class PendantRunner(TakeRunner):
                     i = "xyz".index(e["axis"])
                     at = self.machine.machine_mm()[i] - self.machine0[i]
                     self.jog_need[j] = round((e["to_mm"] - at) / e["inc_mm"])
-                coming = self.data.qvel[self.jog_dof] * self.machine.detents / (2 * math.pi) * STOP_S
-                if (c - self.jog_from[j] + coming) * self.jog_dir[j] >= self.jog_need[j] * self.jog_dir[j]:
+                if (c - self.jog_from[j]) * self.jog_dir[j] >= self.jog_need[j] * self.jog_dir[j]:
                     q, _, _ = super().at(t)
                     arm_q, arm_dof = self.r_q[self.r_arm], self.r_dof[self.r_arm]
                     q[arm_q] = self.data.qpos[arm_q] - self._corr[arm_dof]
@@ -300,8 +297,8 @@ class PendantRunner(TakeRunner):
     def frozen(self, t: float) -> tuple[int, float] | None:
         """While a done jog's hand is held: (the jog, how far it has eased back onto the plan). Held, gripping, from the
         moment the machine reads right to its last stroke's end; then it comes round onto the plan over FREEZE_EASE_S,
-        the plan leaving the dial along its axis. Off the grip the rim is frictionless (dial_pinch), so nothing of the
-        hand on its way off turns it."""
+        the plan leaving the dial along its axis. The dial is locked at its click meanwhile (dial_lock), so nothing of
+        the hand on its way off turns it."""
         for j, td in self.jog_done.items():
             end = self.jog_end[j]
             if td <= t < end + FREEZE_EASE_S:
@@ -323,11 +320,12 @@ class PendantRunner(TakeRunner):
         return q, v, a
 
     def hold_dial(self, t: float) -> None:
-        """The dial_pinch shortcut: on while the stroke grips (or the hand holds it still) and a finger touches the
-        rim, its anchor set where the hand is then, so switching it on moves nothing."""
+        """The dial_pinch shortcut: on while a stroke of a jog not yet done grips the dial and a finger touches its
+        rim, its anchor set where the hand is then, so switching it on moves nothing; and dial_lock whenever it is
+        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
         m, d = self.model, self.data
         e, grip = self.effort("R", t)
-        want = grip == "dial" and e >= 0.5
+        want = grip == "dial" and e >= 0.5 and self.frozen(t) is None
         if want and not d.eq_active[self.pinch]:
             touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
                            for c in d.contact[:d.ncon])
@@ -335,9 +333,13 @@ class PendantRunner(TakeRunner):
                 hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
                 p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
                 m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
-                d.eq_active[self.pinch] = 1
+                d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
         elif not want and d.eq_active[self.pinch]:
             d.eq_active[self.pinch] = 0
+        if not d.eq_active[self.pinch] and not d.eq_active[self.lock]:
+            n = self.machine.detents
+            m.eq_data[self.lock, 0] = round(d.qpos[self.machine.q["jog"]] * n / (2 * math.pi)) * 2 * math.pi / n
+            d.eq_active[self.lock] = 1
 
     def effort(self, side: str, t: float) -> tuple[float, str]:
         """The plan's effort, but a held hand keeps the grip it had when the dial read right."""

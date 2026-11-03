@@ -18,8 +18,11 @@
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
 
-Declared shortcut: `clamped`, the part welded to the table, standing in for the vise's clamp (the Seat step's take
-proves the clamp: moonshot/tests/gates/test_vise_take.py). Nothing in these steps pushes on the part.
+Declared shortcuts: `clamped`, the part welded to the table, standing in for the vise's clamp (the Seat step's take
+proves the clamp: moonshot/tests/gates/test_vise_take.py; nothing in these steps pushes on the part); and
+`dial_pinch`, the jog handle held to the hand while a stroke grips it and a finger touches its rim, standing in for
+fingertips on the knurled rim, which capsules on a smooth cylinder can't hold (a grip assist, as the vise take's
+`enclose`).
 
 The run writes, beside the take record: checks.json (per frame, what the hands touch, the handle's angle, the
 right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
@@ -51,7 +54,8 @@ AIM_MAX = 0.03              # m
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
 DAMPING = 0.02              # m: damped least squares for the corrections
-FREEZE_EASE_S = 0.3         # a held hand eases back onto the plan this long after its jog's last stroke
+FREEZE_EASE_S = 0.4         # a held hand eases back onto the plan this long after its jog's last stroke,
+FINGERS_EASE_S = 0.08       # its fingers opening this fast
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
@@ -127,16 +131,25 @@ class PendantRunner(TakeRunner):
         self.jog_from: dict[int, int] = {}
         self.jog_done: dict[int, float] = {}        # jog -> when its clicks were all in
         self.jog_end = {e["jog"]: e["t1"] + 0.2 for e in self.turns}     # its last stroke's end
-        self.r_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in self.body.joints if n.startswith("R_")])
-        self.r_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in self.body.joints if n.startswith("R_")])
+        right = [n for n in self.body.joints if n.startswith("R_")]
+        arm = [n for n in right if n[2:] in ARM]
+        self.r_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in right])
+        self.r_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in right])
+        self.r_arm = np.isin(self.r_q, [m.jnt_qposadr[m.joint(n).id] for n in arm])     # arm, not fingers
+        self.pinch = m.equality("dial_pinch").id
+        self.dial_geom = m.geom("vf2_jog_handle").id
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
         paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
         xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
         c = " ".join(f"{v / 1000:.5f}" for v in s["centre_mm"])
+        h = vf2.record()["affordances"]["jog_handle"]
+        rim = f"0 {-h['depth_mm'] / 2000:.5f} {h['radius_mm'] / 1000:.5f}"
         xml = xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
-                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n', 1)
+                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
+                          f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
+                          'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n', 1)
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -274,10 +287,29 @@ class PendantRunner(TakeRunner):
         if f is not None:
             td, w = f
             qf, _, _ = super().at(td)
-            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * w
-            v[self.r_dof] *= w
-            a[self.r_dof] *= w
+            # easing back, the fingers open first, then the arm comes round: an opened hand doesn't drag the dial
+            wq = np.where(self.r_arm, w, min(1.0, w * FREEZE_EASE_S / FINGERS_EASE_S))
+            q[self.r_q] = qf[self.r_q] + (q[self.r_q] - qf[self.r_q]) * wq
+            v[self.r_dof] *= wq
+            a[self.r_dof] *= wq
         return q, v, a
+
+    def hold_dial(self, t: float) -> None:
+        """The dial_pinch shortcut: on while the stroke grips (or the hand holds it still) and a finger touches the
+        rim, its anchor set where the hand is then, so switching it on moves nothing."""
+        m, d = self.model, self.data
+        e, grip = self.effort("R", t)
+        want = grip == "dial" and e >= 0.5
+        if want and not d.eq_active[self.pinch]:
+            touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
+                           for c in d.contact[:d.ncon])
+            if touching:
+                hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
+                p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
+                m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
+                d.eq_active[self.pinch] = 1
+        elif not want and d.eq_active[self.pinch]:
+            d.eq_active[self.pinch] = 0
 
     def effort(self, side: str, t: float) -> tuple[float, str]:
         """The plan's effort, but a held hand keeps the grip it had when the dial read right."""
@@ -297,6 +329,7 @@ class PendantRunner(TakeRunner):
         self.machine.touch(self.debounced(self._key_n))
         self.push(t)
         self.aim(t)
+        self.hold_dial(t)
         self.machine.apply()
 
     # --- each frame --------------------------------------------------------------------------------------

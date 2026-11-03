@@ -37,8 +37,9 @@ APPROACH_OUT, APPROACH_BACK = 40.0, 35.0              # from this far outside th
 APPROACH_OPEN = 0.3                                   # the hook a little open on the way in
 LEFT_AFTER_S = 0.5                                    # the left hand sets off this long after the right door starts
 # the hook's wrist from the bar's grip point: out from its outer face, in front of it; its long axis tilted up. Placed
-# by the skin's clearance (a search over shapes and places): the hooked fingers' backs on the outer face, within 1 mm,
-# 26 mm off the door, 110 mm off the other bar with the doors shut
+# by the skin's clearance (a search over shapes and places): the hooked fingers' backs and the thumb on the outer face,
+# within 1 mm, 26 mm off the door, 110 mm off the other bar with the doors shut. Rolled palm-down 15 or 30 deg, which
+# takes the thumb off the bar, the push slid off the bar's front edge and the right door stopped 90 mm closed
 GRIP_OUT, GRIP_BACK, GRIP_TILT = 50.0, 110.0, 25.0
 BAR_W = 31.8                                          # the handle bar's width along the door (vf2.json door_*_pull)
 CLOSE_LUMBAR = ORIGIN + np.array([0.0, -1100.0, 955.0])   # in the doorway, centred, the chest 130 mm off the bars

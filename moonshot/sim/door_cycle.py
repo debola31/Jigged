@@ -175,8 +175,9 @@ class DoorClose(_Cell):
     def hand_force(self, side, t):
         """What it takes to move the door along its planned path (minimum jerk): its friction, its track's damping at
         the planned speed and the force that accelerates it; once the path has run the door home, the friction's
-        worth into its stop. And as the door trails its path, LAG_N_PER_MM more, up to LAG_MAX_N: a door is slowed by
-        its friction, so the hand never pulls it back."""
+        worth into its stop. And as the door trails its path, LAG_N_PER_MM more, up to LAG_MAX_N, while the hand is on
+        it (a hand that has come off the bar doesn't lean on air). A door is slowed by its friction, so the hand never
+        pulls it back."""
         e = self.pulls.get(side)
         if e is None or not e["t0"] <= t < e["t1"]:
             return None
@@ -186,10 +187,24 @@ class DoorClose(_Cell):
         v = L * (30 * x ** 2 - 60 * x ** 3 + 30 * x ** 4) / T
         acc = L * (60 * x - 180 * x ** 2 + 120 * x ** 3) / T ** 2
         f = self.door_friction[door] + self.door_damping[door] * v + self.door_kg[door] * acc
-        planned = e["from_mm"] + (e["to_mm"] - e["from_mm"]) * min_jerk(x)
-        lag = (planned - self.data.qpos[self.ctl.q[door]] * 1000) * np.sign(e["to_mm"] - e["from_mm"])
-        f += min(LAG_MAX_N, LAG_N_PER_MM * max(0.0, lag))
+        if self.on_door(side, door):
+            planned = e["from_mm"] + (e["to_mm"] - e["from_mm"]) * min_jerk(x)
+            lag = (planned - self.data.qpos[self.ctl.q[door]] * 1000) * np.sign(e["to_mm"] - e["from_mm"])
+            f += min(LAG_MAX_N, LAG_N_PER_MM * max(0.0, lag))
         return self.door_dir[door] * max(0.0, f)
+
+    def on_door(self, side: str, door: str) -> bool:
+        """Is the side's hand on the door now: touching it, or held to its bar by the grip's constraint?"""
+        m, d, body = self.model, self.data, self.door_body[door]
+        held = (e for e in self.grip_events if e["side"] == side and self.encloses[e["grip"]] == f"vf2_{door}")
+        if any(d.eq_active[self.enclose_eq[e["grip"]]] for e in held):
+            return True
+        mine = self.side_bodies[side]
+        for i in range(d.ncon):
+            b1, b2 = m.geom_bodyid[d.contact[i].geom1], m.geom_bodyid[d.contact[i].geom2]
+            if (b1 == body and b2 in mine) or (b2 == body and b1 in mine):
+                return True
+        return False
 
     def force_along(self, door: str) -> dict[str, float]:
         """Each side's force on the door now along the way the take moves it (N): its contacts with the door's panel

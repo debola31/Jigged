@@ -6,6 +6,7 @@ them.
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 from pathlib import Path
 
@@ -18,11 +19,14 @@ def _tar(out: Path, members: list[tuple[Path, str]]) -> Path:
         ti.mtime, ti.uid, ti.gid, ti.uname, ti.gname = 0, 0, 0, "", ""
         return ti
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(out.name + ".part")
+    tmp = out.with_name(f"{out.name}.{os.getpid()}.part")   # its own: two pipelines may pack the same look at once
     with tarfile.open(tmp, "w", format=tarfile.PAX_FORMAT) as t:
         for path, name in sorted(members, key=lambda m: m[1]):
             t.add(path, arcname=name, filter=plain)
-    tmp.replace(out)
+    try:
+        tmp.replace(out)
+    except PermissionError:                                     # Windows: the other one is replacing it now
+        tmp.unlink()
     return out
 
 

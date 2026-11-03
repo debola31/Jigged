@@ -25,6 +25,7 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             lead=6.35)
 CRANK0_DEG = 55.0
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
+JAW_MIN_MM = 10.0          # the jaw closes down to this opening: a part on its side (nist-ftc-10 op30, 31 mm) needs it
 RENDER_DIR = "library/workholding/d688/links"            # under the data root
 
 
@@ -146,7 +147,7 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     <geom name="fixed_jaw" class="steel" type="box" size="{V['half_width'] * M:.4f} 0.02 {(top - TABLE_Z) / 2 * M:.4f}"
           pos="{V['x'] * M:.4f} {(fy + 20) * M:.4f} {(top + TABLE_Z) / 2 * M:.4f}"/>
     <body name="moving_jaw" pos="{V['x'] * M:.4f} {(fy - o0 - 20) * M:.4f} {(top + seat) / 2 * M:.4f}">
-      <joint name="jaw_slide" type="slide" axis="0 1 0" range="-0.002 {(o0 - 50) * M:.4f}" damping="40" frictionloss="2"/>
+      <joint name="jaw_slide" type="slide" axis="0 1 0" range="-0.002 {(o0 - JAW_MIN_MM) * M:.4f}" damping="40" frictionloss="2"/>
       <joint name="jaw_drop" type="slide" axis="0 0 1" range="-0.0003 0.0001" stiffness="6e6" damping="3000"/>
       <geom name="moving_jaw" class="steel" type="box" size="{V['half_width'] * M:.4f} 0.02 {((top - seat) / 2 - 0.25) * M:.5f}"
             pos="0 0 {0.25 * M:.5f}" mass="4"/>

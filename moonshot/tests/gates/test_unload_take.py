@@ -29,7 +29,7 @@ def run():
 
 def test_the_crank_opens_the_jaw_by_the_screws_lead(run):
     o = run.outcome()
-    assert abs(o["opened_mm"] - o["turns"] * VISE["lead"]) < threshold("physics.mechanism_ratio_mm").value, o
+    assert abs(o["opened_mm"] + o["turns"] * VISE["lead"]) < threshold("physics.mechanism_ratio_mm").value, o
     assert o["turns"] < -0.8, "cranked back about a turn"
 
 

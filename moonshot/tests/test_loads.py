@@ -1,5 +1,5 @@
-"""A plan's first setup becomes a vise load the take can run: the stock as it sits in the vise, on both parallels
-whether set down short or slid home."""
+"""A plan's setups become vise loads the take can run: the stock, or a machined part as its bounding box, as it sits
+in the vise, on both parallels whether set down short or slid home."""
 import pytest
 
 from moonshot.motion.loads import vise_load
@@ -31,6 +31,14 @@ def test_nist_ftc_10_op10_loads_the_stock_on_one_inch_parallels():
     assert load.opening0 > load.size_mm[1]
 
 
-def test_later_setups_wait_for_stock_removal():
+@pytest.mark.parametrize("setup, size", [("op20", (158.0, 75.0, 36.1)), ("op30", (158.0, 31.0, 75.0)),
+                                         ("op40", (158.0, 31.0, 75.0))])
+def test_later_setups_load_the_machined_part_as_its_box(setup, size):
+    load = vise_load(load_plan("nist-ftc-10"), setup)
+    assert load.size_mm == pytest.approx(size)
+    assert on_both(load, 0.0) and on_both(load, PLACE_GAP)
+
+
+def test_a_part_standing_on_end_waits_for_a_stop():
     with pytest.raises(NotImplementedError):
-        vise_load(load_plan("nist-ftc-10"), "op20")
+        vise_load(load_plan("nist-ftc-10"), "op50")

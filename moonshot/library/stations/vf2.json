@@ -29,15 +29,22 @@
  "colliders": {
   "table_top": {"link": "table", "box_min_mm": [-838, -524, 823], "box_max_mm": [75, -157, 853], "friction": 0.3,
                 "reason": "The CAD's shells aren't closed; trainual measured this box from the GLB, and gave the cast-iron top this friction"},
-  "door_left": {"link": "door_left", "box_min_mm": [-661, -845, 616], "box_max_mm": [0, -825, 1710]},
-  "door_right": {"link": "door_right", "box_min_mm": [-25, -825, 616], "box_max_mm": [636, -805, 1710],
+  "door_left": {"link": "door_left", "box_min_mm": [-661, -775, 616], "box_max_mm": [0, -755, 1710],
+                "reason": "The panel's front is at y = -775 in its link GLB; the handle bar stands in front of it"},
+  "door_right": {"link": "door_right", "box_min_mm": [-25, -755, 616], "box_max_mm": [636, -735, 1710],
                  "reason": "Sliding doors overlap at different depths: the right one runs 20 mm behind the left"},
   "spindle_nose": {"link": "head", "box_min_mm": [-60, -189, 1453], "box_max_mm": [60, -69, 1590]},
-  "pendant_face": {"link": "pendant", "box_min_mm": [640, -1035, 1180], "box_max_mm": [1060, -1015, 1700]}
+  "pendant_face": {"link": "pendant", "box_min_mm": [640, -1035, 1180], "box_max_mm": [1060, -1015, 1700]},
+  "door_left_pull": {"link": "door_left", "box_min_mm": [-58.8, -845, 680], "box_max_mm": [-27.0, -811, 1160],
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; the fingers hook round it from outside"},
+  "door_right_pull": {"link": "door_right", "box_min_mm": [27.0, -845, 680], "box_max_mm": [58.8, -811, 1160],
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; the fingers hook round it from outside"}
  },
  "affordances": {
-  "door_left_handle": {"link": "door_left", "at_mm": [-40, -850, 1160], "grip": "power", "pull": [-1, 0, 0]},
-  "door_right_handle": {"link": "door_right", "at_mm": [15, -850, 1160], "grip": "power", "pull": [1, 0, 0]},
+  "door_left_handle": {"link": "door_left", "at_mm": [-58.8, -828, 950], "grip": "hook", "pull": [-1, 0, 0],
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; the fingers hook round it from outside"},
+  "door_right_handle": {"link": "door_right", "at_mm": [58.8, -828, 950], "grip": "hook", "pull": [1, 0, 0],
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; the fingers hook round it from outside"},
   "cycle_start": {"link": "pendant", "at_mm": [700, -1036, 1260], "grip": "fingertip_press", "force_n": 5},
   "feed_hold": {"link": "pendant", "at_mm": [740, -1036, 1260], "grip": "fingertip_press", "force_n": 5}
  },

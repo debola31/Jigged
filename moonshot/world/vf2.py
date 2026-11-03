@@ -85,6 +85,7 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
       <joint name="vf2_{d}" type="slide" axis="{ax(d)}" range="{rng(d)}" frictionloss="{J[d]['friction_n']}" damping="20"/>
       <inertial pos="0 -0.83 1.16" mass="{L[d]['mass_kg']}" diaginertia="2 2 2"/>
       {_box(f"vf2_{d}_panel", C[d])}
+      {_box(f"vf2_{d}_pull", C[f"{d}_pull"])}
       {_site(f"vf2_{d}_handle", A[f"{d}_handle"]["at_mm"])}
     </body>
 """

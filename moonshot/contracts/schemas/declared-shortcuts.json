@@ -10,6 +10,8 @@
               "checked_by": []},
   "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping", "grip_assist": true,
                  "checked_by": ["skin_penetration"]},
+  "carry_*": {"stands_in_for": "Fingers' hold on a hand tool while it is carried and used at the inspection bench (the deburr blade, the caliper), which capsule fingers can't keep steady: the tool welded to the hand for the carry (your decision 2026-11-03)", "grip_assist": true,
+              "checked_by": ["skin_penetration", "never_held_parts"]},
   "dial_lock": {"stands_in_for": "The jog handle's detent holding it where the hand left it: outside a stroke's grip the handle is locked at its detent, as a hand placing itself on the rim, regripping it and coming off it doesn't turn it, where capsule fingers lagging their plan by centimetres brush it round; and the click that brings the machine to a jog's number locks it, as the hand stops on the number", "grip_assist": false,
                 "checked_by": []}
  },

@@ -233,8 +233,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 - [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
 - [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-02
   23:45: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
-  `C:\jigged-data	akes
-ist-ftc-10-<step>\draft.mp4`; the rest wait on their takes (`python -m
+  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; the rest wait on their takes (`python -m
   moonshot.planning.takes nist-ftc-10` lists them). The plan is 61 steps since op60 was found to cut nothing.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**

@@ -138,6 +138,7 @@ class PendantRunner(TakeRunner):
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.lifting = {s: False for s in ("R", "L")}
+        self.pressing = {s: False for s in ("R", "L")}
         self.turns =sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.jog_ev = {e["jog"]: e for e in self.turns}                  # its last stroke: the target, axis and step
         self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
@@ -256,6 +257,7 @@ class PendantRunner(TakeRunner):
             # the next press within reach in time: the hand works toward it from the last one's end
             near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
+            self.pressing[s] = bool(near)
             self.lifting[s] = bool(near) and near[0][0] in self.press_done
             if not near:
                 i *= 1 - dt / 0.2
@@ -280,9 +282,11 @@ class PendantRunner(TakeRunner):
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
     def touching(self, side: str) -> bool:
-        """As the runner's, and a hand lifting off a key it pressed counts as on it: the lift is meant to leave the
-        plan, and sight, correcting it, wound up a push back at the keypad that pressed a digit as the hand left."""
-        return self.lifting[side] or super().touching(side)
+        """As the runner's, and a hand working a press counts as on its key: there the press's aim steers the index,
+        and holds it off the face until it's over the key, and off it once it has clicked, both meant to leave the
+        plan. Sight, correcting them, wound up a push into the keypad, 10 mm by op20-xy's 11th second, that pressed
+        a digit with the middle finger as the hand left for the dial."""
+        return self.pressing[side] or super().touching(side)
 
     def correction(self, t: float) -> np.ndarray:
         """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its

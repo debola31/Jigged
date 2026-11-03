@@ -7,17 +7,24 @@ serve it (plan §1: "videos and published models in Supabase Storage, never the 
     python -m moonshot.web.media models            # decimate every asset the layout places (gltf-transform, via npx)
     python -m moonshot.web.media videos            # copy each live step's takes/<part>-<step>/final.mp4; lists the missing
     python -m moonshot.web.media serve [--draft takes/setup-take/draft.mp4]
+    SUPABASE_SECRET_KEY=... python -m moonshot.web.media upload --url https://<ref>.supabase.co
 
 `serve` is for development only: it serves the folder on http://localhost:8787 with CORS, so `pnpm dev` can run with
 NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787. With --draft, a step video not staged yet is answered with that
-draft, so the player can be built before the finals exist. Nothing here uploads: publishing is a separate decision.
+draft, so the player can be built before the finals exist; drafts are never staged, so never uploaded.
+
+`upload` publishes everything staged to the public `showcase` bucket (supabase/migrations/*_showcase_storage_bucket.sql):
+anyone can then fetch it. It takes the project's URL explicitly and the secret key only from the environment, so it
+can't publish to a project by accident through .env.local.
 """
 from __future__ import annotations
 
 import argparse
 import functools
+import os
 import shutil
 import subprocess
+import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -30,6 +37,8 @@ BUDGET = {"machines": 15_000, "support": 4_000}
 BUDGET_DEFAULT = 1_500
 SIMPLIFY_ERROR = 0.02                      # a fraction of the mesh's extent; invisible at shop scale
 PORT = 8787
+BUCKET = "showcase"
+CONTENT_TYPES = {".glb": "model/gltf-binary", ".mp4": "video/mp4"}
 
 
 def web_root() -> Path:
@@ -72,6 +81,22 @@ def stage_videos() -> None:
     print(f"videos: {'all staged' if not missing else f'{len(missing)} steps have no final yet: ' + ', '.join(missing)}")
 
 
+def upload(url: str) -> None:
+    key = os.environ["SUPABASE_SECRET_KEY"]
+    files = sorted(p for p in web_root().rglob("*") if p.is_file() and p.suffix in CONTENT_TYPES)
+    total = 0
+    for p in files:
+        path = p.relative_to(web_root()).as_posix()
+        req = urllib.request.Request(
+            f"{url.rstrip('/')}/storage/v1/object/{BUCKET}/{path}", data=p.read_bytes(), method="POST",
+            headers={"Authorization": f"Bearer {key}", "apikey": key, "Content-Type": CONTENT_TYPES[p.suffix],
+                     "x-upsert": "true", "Cache-Control": "max-age=3600"})
+        with urllib.request.urlopen(req, timeout=300):
+            pass
+        total += p.stat().st_size
+    print(f"uploaded {len(files)} files, {total / 1e6:.1f} MB, to {url}/storage/v1/object/public/{BUCKET}/")
+
+
 class Handler(SimpleHTTPRequestHandler):
     draft: Path | None = None
 
@@ -96,14 +121,19 @@ def serve(draft: Path | None) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["models", "videos", "serve"])
+    ap.add_argument("command", choices=["models", "videos", "serve", "upload"])
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--draft", type=Path, help="serve: a video for every step not staged yet (relative to the data root)")
+    ap.add_argument("--url", help="upload: the Supabase project, https://<ref>.supabase.co")
     a = ap.parse_args()
     if a.command == "models":
         build_models(a.force)
     elif a.command == "videos":
         stage_videos()
+    elif a.command == "upload":
+        if not a.url:
+            ap.error("upload needs --url")
+        upload(a.url)
     else:
         serve(data_root() / a.draft if a.draft else None)
 

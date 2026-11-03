@@ -137,8 +137,8 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   than durations: the jog handle's grasp, the paper's pinch, the two-handed micrometer and its 6 s cleaning, the
   4.5 s bar slide. Gaps: no footage of the OTS tool setter, and the caliper video measures a 6 in bore, not a
   small one.
-- [ ] Claude's look rubric (§5.3) calibrated against your judgement on the first station: waits on your review of
-  the vise take's draft (the VF-2), rendered 2026-11-02
+- [x] Claude's look rubric (§5.3) calibrated against your judgement on the first station: you approved the vise
+  take's third draft (the VF-2, wrist capped at 0.75 of its range) on 2026-11-02
 
 - [ ] Port trainual's checks (joint ranges, wrist ellipse, body vs. people, skin penetration, per-verb physics) into
   the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
@@ -229,4 +229,4 @@ Each draft you reject gets a row, and the row closes only when its conversion la
 | Date | Part / step | What was wrong | Converted to (monitor, scenario, or "eye only") |
 |---|---|---|---|
 | 2026-11-01 | Vise take draft | The wrist past its ellipse at 4 s; the crank gripped round the lever's joint, which turns through the fist | Checks `wrist_ellipse` and `never_held_parts` (`moonshot/validate/`), gate `test_wrist_ellipse.py`; closed 2026-11-02 |
-| 2026-11-02 | Vise take draft 2 | After the pick-up the wrist reads as bent too far: 0.94 of its range for 2 s while the part is inspected, possible but not how people hold a part | The planner's wrist cap, 0.95 to 0.75 (`moonshot/motion/solver.py`); the body-vs-people check (§3b) to catch untypical postures |
+| 2026-11-02 | Vise take draft 2 | After the pick-up the wrist reads as bent too far: 0.94 of its range for 2 s while the part is inspected, possible but not how people hold a part | The planner's wrist cap, 0.95 to 0.75 (`moonshot/motion/solver.py`), approved on draft 3 (2026-11-02); the body-vs-people check (§3b) to catch untypical postures |

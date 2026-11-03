@@ -369,7 +369,8 @@ class PendantRunner(TakeRunner):
         hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
         e, grip = self.effort("R", t)
         stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
-        want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
+        # the grip closed: half the plan's light grip on the handle (motion/pendant.py DIAL_EFFORT)
+        want = grip == "dial" and e >= 0.25 and stroke and self.frozen(t) is None
         touching = want and any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
                                 for c in d.contact[:d.ncon])
         if touching and not d.eq_active[self.pinch]:

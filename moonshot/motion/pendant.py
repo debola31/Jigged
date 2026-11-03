@@ -45,6 +45,10 @@ KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad
              "keypad_inc": "inc_0.01"}           # the increment row's own: the mode grip's thumb fell on 4 and 5
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
+DIAL_EFFORT = 0.5                                         # a light grip on the jog handle, the least the run's pinch
+                                                          # takes: at full effort the squeeze pressed the thumb into
+                                                          # the handle's face, 8-16 N along its axis, and op30-z's
+                                                          # muscles overloaded
 OVERTURN = 1.15                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
@@ -356,7 +360,7 @@ class PendantTake(StepTake):
             self.fingers("R", t0, open_like(self.hand, g["q"], 0.5))
             self.fingers("R", tc + 0.08, g["q"])
             self.effort("R", tc, 0.0, "dial")
-            self.effort("R", tc + 0.1, 1.0, "dial")
+            self.effort("R", tc + 0.1, DIAL_EFFORT, "dial")
             ts = tc + 0.12
             self.add("R", tc, ts + dur + 0.08, lambda t, ts=ts, dur=dur, a0=a0, a1=a1: [
                 ("pose", *self.dial_pose(a0 + (a1 - a0) * min_jerk((t - ts) / dur)), 3.0)])
@@ -364,7 +368,7 @@ class PendantTake(StepTake):
                        inc_mm=self.inc_mm, jog=self.jogs, to_mm=to)
             self.event("grip", round(tc, 3), round(ts + dur + 0.1, 3), side="R", grip="dial")
             te = ts + dur + 0.08
-            self.effort("R", te, 1.0, "dial")
+            self.effort("R", te, DIAL_EFFORT, "dial")
             self.effort("R", te + 0.06, 0.0, "dial")
             self.fingers("R", te, g["q"])
             self.fingers("R", te + 0.12, open_like(self.hand, g["q"], 0.5))

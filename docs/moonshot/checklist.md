@@ -166,6 +166,21 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   otherwise the seated range widened with a written reason for your review. The seated range's misses are more
   than the trunk: freed, the takes still sit 64-73% inside, the arm hanging at the side (shoulder elevation 14 deg
   against the seated 22), turned out cranking (+50 deg against 13.5) and the wrist back pushing (+40 against 20).
+  Done the same day from data: the AnDy dataset (Maurice et al. 2019, CC BY 4.0, which allows this use with
+  credit), 13 people standing at industry-like manual work, 512,480 frames (`moonshot/validate/standing_prior.py`),
+  and the planner plans with it too. Held to the other people, people themselves sit a median 82.9% inside (5th
+  percentile 50.3%: nobody meets the proposed 95%), so the bar is their median, 0.83, your decision; the likelihood
+  limit, people's own 95th percentile, 24.2. The vise takes, on today's plans: 51-65% inside, likelihood 34-38,
+  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg). AnDy's
+  people never hold a part up close, grasp palm down or crank, so posture is held to people seated or standing
+  together (your decision; `moonshot/validate/people_prior.py`, GRAB/ARCTIC and AnDy evenly, 694 trials): range 0.93
+  (people's median), likelihood 28.7 (their 95th percentile). The vise operator stands 120 mm further back and holds
+  the part 80 mm lower to look at it; the planner's prior weight stays 0.3 (at 5 the bench takes' hands missed their
+  targets and their caliper and deburr gates failed). op10 and op20 on it: likelihood 25.6 and 24.9, pass; in range
+  92.8% and 92.9%, shoulder rotation the only joint out; but the new stance presses the fingers into the crank's knob
+  (skin 7.3-7.6 mm), with the vise-timing agent. Which checks a take is held to, your
+  decision: the pendant takes are exempt from grasp timing, hand opening and footage (no reach to lift a part),
+  not from nothing moving without a cause; a take at a station with no machine passes machines inside spec.
   Since the body-checks merge every check runs before a render, so no vise take
   renders on its own; their review drafts render regardless (`pipeline --render-only`). The reference's skin is
   3.57 mm for one frame at the end of the 30 N push, against 3.5. Open: joint ranges and the per-verb physics are
@@ -219,10 +234,12 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
 - [x] Tests: lease expiry, reassignment, worker killed mid-job, hub restart, dropped network; plus a live hub
   restart with jobs intact
 - [x] Dashboard at http://desktop-4hvjqis:8765/: workers, queue by group, failures, recent results
-- [ ] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
+- [x] Dashboard: render hours against forecast, cloud credit and drafts awaiting review (track G). Measured
   2026-11-02 at draft size (960x540, 32 samples), the ported renderer: GTX 1070 and M1 Pro about 7 s a frame each,
-  with the range's start included. Render jobs
-  report their frame time since 2026-11-02 (`bake_render`); the dashboard doesn't show it yet.
+  with the range's start included. Its Production panel since 2026-11-03 (`moonshot/orchestrate/dashboard.py`): on
+  its first morning, 11.1 h of drafts and 6.1 h of finals rendered, 1,446 of the forecast's 145,000 final frames, the
+  rest 603 machine-hours at the finals' rate (about 4.5 days on all three machines rendering without a break), and
+  41 drafts awaiting review.
 - [x] Live on the farm (2026-11-01): 9 jobs across all three machines, no failures; a real hub restart with jobs
   intact; the scene pack fetched by hash and verified on each worker
 - [x] **Keep our own queue** rather than switching to Flamenco (§8), on the tests and the live run (2026-11-01)
@@ -270,7 +287,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   gates against a standing-work range (§3b); the G1 cards' proposed values approved; the AngLock's push on the
   moving jaw declared a vise mechanism; the stock's three plan gaps (the +Z side slot 2.64 mm, the boss's V flanks
   2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The stock gate then still fails on
-  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. Within the unload step the doors jump from door-open's 300
+  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. The bench's carry welds
+  declared a grip assist; Load the tools shows every tool loaded in full. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**

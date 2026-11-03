@@ -18,16 +18,16 @@ source = "measured"
 reason = "MuJoCo's soft joint limits overshoot by up to 0.9 deg on the reference take"
 
 [body.posture_frames_in_range_frac]
-value = 0.95
+value = 0.93
 unit = "fraction of frames"
-source = "proposed"
-reason = "Trunk-to-wrist angles inside the 1st-99th percentile of GRAB and ARCTIC; standing work differs from their seated data"
+source = "measured"
+reason = "People's own median: each trial's frames with every trunk-to-wrist angle inside the range, held out of their own dataset's, median 0.932 of 694 trials, seated (GRAB, ARCTIC) and standing (AnDy) (validate/people_prior.py; your decisions 2026-11-03: people seated or standing, held to their median; was a proposed 0.95 against seated data alone)"
 
 [body.posture_nll_median_max]
-value = 25.0
+value = 28.7
 unit = "negative log-likelihood"
 source = "measured"
-reason = "People's own 95th percentile under the posture prior (ARCTIC sample); the reference take's median is 24.9"
+reason = "People's own 95th percentile: each trial's median under the even seated-and-standing mixture with their own dataset's fitted without them, 28.69 over 694 trials (validate/people_prior.py, 2026-11-03; was 25.0 under the seated mixture alone)"
 
 [body.muscle_activation_max]
 value = 1.0

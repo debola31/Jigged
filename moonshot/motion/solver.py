@@ -1,5 +1,5 @@
 """Ported from trainual's motion/body_solver.py. Whole-motion body solver: trunk + arm joint angles for every frame at once, from task constraints, under a
-posture prior measured from people (GRAB, ARCTIC; the fitted mixture is in the data root, arm-prior/arm_prior.npz), joint ranges, gravity effort and smoothness.
+posture prior measured from people manipulating objects seated or standing (GRAB, ARCTIC, AnDy; the fitted mixture is in the data root, arm-prior/people_prior.npz), joint ranges, gravity effort and smoothness.
 
 Why a trajectory and not frame-by-frame IK: a person's arm doesn't pick the best posture for each instant;
 it moves economically (minimum effort and jerk) through postures that are typical for the task. The first
@@ -63,7 +63,9 @@ def wrist_inside(th):
 
 class ArmPrior:
     def __init__(self, path=None):
-        d = np.load(path or data_root() / "arm-prior" / "arm_prior.npz")
+        # people manipulating objects seated or standing (moonshot/validate/people_prior.py), as the posture checks hold
+        # a take to
+        d = np.load(path or data_root() / "arm-prior" / "people_prior.npz")
         self.w = torch.as_tensor(d["weights"], dtype=torch.float64)
         self.mu = torch.as_tensor(d["means"], dtype=torch.float64)
         cov = torch.as_tensor(d["covs"], dtype=torch.float64)
@@ -117,6 +119,9 @@ class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
          "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
+    # prior 0.3 (2026-11-03): against people seated or standing, the vise take plans inside their range (0.936) and
+    # likelihood (24.6) at 0.3, and 1.5 adds little (0.941, 23.6) while its hands miss more; at 5 the bench takes'
+    # hands missed by up to 118 mm and their caliper and deburr gates failed, and the grip solver's pads came off
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 

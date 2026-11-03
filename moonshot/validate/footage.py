@@ -66,14 +66,14 @@ def hand_length_mm() -> float:
 
 def measure(take: Path) -> dict:
     """What the check reads, from a physics run: the right wrist's path and the aperture (validate/hand_opening.py),
-    and the footage of the card take.json names."""
+    and the footage of the card take.json names, None when it names none or the card has no footage."""
     from moonshot.validate.hand_opening import aperture_mm
     sim = np.load(take / "sim.npz")
     tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
     out = {"fps": float(sim["fps"]), "wrist_mm": sim["W"].tolist(), "hand_length_mm": hand_length_mm(),
            "aperture_mm": aperture_mm(sim["q"], [str(n) for n in sim["names"]]).tolist()}
-    if "card" in tk:
-        out["footage"] = card_footage(tk["card"])
+    # held to its card's footage only (plan §5): a take that plays no card (a lift-out, the deburr) has none to match
+    out["footage"] = card_footage(tk["card"]) if "card" in tk else None
     return out
 
 
@@ -85,7 +85,7 @@ def matches_its_footage(take: dict) -> Result:
     right hand (dur_iqr, peak_speed_frac_median, peak_aperture_frac_median), or null for a card with none}."""
     footage = take["footage"]
     if footage is None:
-        return Result(passed=True, worst=0.0, detail={"footage": "the card has none"})
+        return Result(passed=True, worst=0.0, detail={"footage": "no card footage to match"})
     wrist = np.asarray(take["wrist_mm"], float)
     if not len(wrist):
         raise ValueError("a take with no frames can't pass a per-frame check")

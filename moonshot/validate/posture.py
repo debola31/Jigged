@@ -1,11 +1,12 @@
-"""Posture like people's: a run's trunk-to-wrist angles against people manipulating objects (plan §5.2). Ported from
-trainual's sim/validate.py §2b, reproducing its numbers on its reference take (test_posture_port.py).
+"""Posture like people's: a run's trunk-to-wrist angles against people's (plan §5.2). Ported from trainual's
+sim/validate.py §2b, reproducing its numbers on its reference take from its own prior (test_posture_port.py).
 
-The posture prior is 268,845 frames of hand-object manipulation in GRAB and ARCTIC (trainual's motion/human_data.py):
-each joint's 1st to 99th percentile, and an 8-component Gaussian mixture over the seven arm angles. It is derived
-from non-commercial research data, so it lives in the data root (arm-prior/arm_prior.npz), never in git; the checks
-read what `measure` takes from it. Both datasets are seated tabletop work, which a standing machinist isn't: the
-known gap is trunk rotation (plan §5.5).
+A prior is each joint's 1st to 99th percentile and a Gaussian mixture over the seven arm angles. The checks hold a
+take to people manipulating objects seated or standing (your decision, 2026-11-03; PEOPLE,
+moonshot/validate/people_prior.py): trainual's seated tabletop manipulation, GRAB and ARCTIC (SEATED), and AnDy's
+people standing at industry-like work (STANDING, moonshot/validate/standing_prior.py), evenly. Against standing work
+alone a machinist's holding a part up to look at it, palm-down grasps and cranking had no people to match. All live in
+the data root (arm-prior/), never in git: the seated data is non-commercial research data.
 
     python -m moonshot.validate.posture <take dir>     # frames outside, per joint, and the likelihood
 """
@@ -23,7 +24,10 @@ from moonshot.config import data_root
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate.registry import Result, check
 
-PRIOR = data_root() / "arm-prior" / "arm_prior.npz"
+SEATED = data_root() / "arm-prior" / "arm_prior.npz"
+STANDING = data_root() / "arm-prior" / "standing_prior.npz"
+PEOPLE = data_root() / "arm-prior" / "people_prior.npz"
+PRIOR = PEOPLE                                      # what the checks hold a take to
 ARM = slice(3, 10)          # the mixture's seven: sh_plane, sh_elev, sh_rot, elbow, pron, wr_flex, wr_dev
 
 
@@ -83,8 +87,8 @@ def posture_like_people(take: dict) -> Result:
 
 
 @check("posture_likelihood",
-       good=["good/posture_likelihood_reference.json"],
-       bad=["bad/posture_likelihood_rotated.json", "bad/posture_likelihood_replanned.json"])
+       good=["good/posture_likelihood_person.json"],
+       bad=["bad/posture_likelihood_rotated.json"])
 def posture_likelihood(take: dict) -> Result:
     """take: {"posture_nll": per-frame negative log-likelihood under people's posture mixture}. The median is no
     more unlikely than people's own 95th percentile (body.posture_nll_median_max)."""

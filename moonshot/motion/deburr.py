@@ -23,8 +23,8 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, TOP, BenchPlan, bench_box, box,
-                                   instrument_colliders, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, TAKE_MM, TAKE_S, TOP, BenchPlan,
+                                   bench_box, box, instrument_colliders, settle)
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
@@ -138,13 +138,16 @@ class DeburrPlan(BenchPlan):
         self.look(t0, self.tool0[0] + self.tool0[1] @ [110, 0, 0])
         # ready in front of the bench's edge and high enough that the hanging fingers clear its top: 4 mm in front and
         # 110 mm up, they caught its edge and held the hand 115 mm off the tool as the carry closed
-        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8)
+        # widest 0.12 s before the hand came to rest, it was widest 70% of the way through its 0.67 s reach: the
+        # fingers meet the handle later than the calipers' slider
+        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8, lead=0.08)
         self.effort("R", tg, 0.0, "tool")
         self.effort("R", tg + 0.25, 0.3, "tool")
         self.t_grab = tg
         R0, p0 = self.tool0[1], self.tool0[0]
         self.t_lift = tg + PRELOAD_S
-        self.move("deburr_tool", self.t_lift, self.t_lift + LIFT_S, R0, p0 + [0, 0, 35])
+        self.move("deburr_tool", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
+        self.move("deburr_tool", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + [0, 0, 35])
         # off the bench, the free ring and little fingers curl into the palm, out of the part's way (left out, the
         # little finger brushed the part's ear and pushed it 5 mm)
         self.fingers("R", tg + 0.5, g["q"])

@@ -28,8 +28,8 @@ from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, BenchPlan, bands, bench_box, box,
-                                   mirror, oriented_box, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, REST, TAKE_MM, TAKE_S, BenchPlan, bands,
+                                   bench_box, box, mirror, oriented_box, settle)
 from moonshot.motion.primitives import FPS, min_jerk, open_like
 from moonshot.world import bench_cell as BC
 
@@ -226,12 +226,15 @@ class InspectPlan(BenchPlan):
         _, Wg = self.grip_pose("cal", t0)
         self.look(t0, self.cal_point([-60.0, 10.0, 0.0]))
         # ready in front of the body, over the bench's edge toward them
-        tg = self.reach("R", "cal", t0, ready=Wg + [130, -120, 110], approach=Wg + [15, -10, 55], opened=0.7)
+        # widest 0.12 s before the hand came to rest, it was widest 78% of the way through its 0.6 s reach
+        tg = self.reach("R", "cal", t0, ready=Wg + [130, -120, 110], approach=Wg + [15, -10, 55], opened=0.7,
+                        lead=0.13)
         self.effort("R", tg, 0.0, "cal")
         self.effort("R", tg + 0.25, 0.3, "cal")
         p0, R0 = self.cal0
         self.t_lift = tg + PRELOAD_S
-        self.move_cal(self.t_lift, self.t_lift + LIFT_S, R0, p0 + [0, 0, 30])
+        self.move_cal(self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
+        self.move_cal(self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + [0, 0, 30])
         self.t_grab, self.t = tg, self.t_lift + LIFT_S
         self.clip("pick up", t0, self.t, "PICK UP  the calipers by the slider, as a phone is held")
 

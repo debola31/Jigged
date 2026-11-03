@@ -138,10 +138,12 @@ class ToolLoadRun(PendantRunner):
         return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
 
     def touching(self, side: str) -> bool:
-        """As the runner's, but the holder the right hand carries in isn't a contact to stop correcting at: it is what
-        the hand is steered by, until the push starts and the bore takes it."""
+        """As the runner's, but the holder the right hand reaches for and carries in isn't a contact to stop
+        correcting at: the hand closes on it where the plan has it (else the carry weld locks in a hand 30 mm off its
+        grip, which then wedges the holder in its fork), and it is what the hand is steered by, until the push starts
+        and the bore takes it."""
         t = getattr(self, "_t", 0.0)
-        if side == "R" and self.loose is not None and self.grip and self.grip["t0"] <= t < self.seat_ev["t0"]:
+        if side == "R" and self.loose is not None and self.grip and self.grip["t0"] - 0.6 <= t < self.seat_ev["t0"]:
             m, d = self.model, self.data
             mine = self.side_bodies[side]
             for i in range(d.ncon):

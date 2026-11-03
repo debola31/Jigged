@@ -123,7 +123,9 @@ STAND = {"first_mm": (-190.0, -430.0, 1023.0),      # the first fork's holder ax
          "pitch_mm": (72.0, 0.0, 0.0),               # table right of the vise, the forks in a row along X, opening
                                                      # toward the operator; the longest tool hangs 115 mm, clear of the
                                                      # 853 mm table top
-         "tine_t": 4.0, "tine_w": 6.0, "tine_back": 36.0, "tine_front": 34.0, "clear": 0.5,
+         # 3 mm tines, 2.5 mm clear of the groove each side, so a hand a little off its line slides the holder
+         # out rather than wedging its flanges on a tine (0.5 mm did, at 200 N)
+         "tine_t": 3.0, "tine_w": 6.0, "tine_back": 36.0, "tine_front": 34.0, "clear": 2.5,
          "plate_y": 60.0, "table_z": 853.0}
 
 

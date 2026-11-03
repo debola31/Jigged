@@ -52,7 +52,7 @@ SHORT_MM = 25.0                                          # pushed up to this far
                                                          # drawbar: the knob stops 10 mm under the closed fingers
 OVER_MM = 1.0                                            # and pushed this far past the seat, which stops it
 EASE_MM = 1.5                                            # the hand eases this far down once the drawbar holds it
-LIFT_MM = 1.5                                            # off the stand's tines, and slid out toward the operator
+LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
@@ -132,27 +132,33 @@ def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
     th, at, r = G.TorchHand(hand), np.zeros(3), TL.BODY[0]
     cols = holder_colliders(at, tool_id)
     tool = TL.cutter(tool_id)
-    middle = (cyl_target(at, tool["r"], (-TL.GAUGE_MM - 22.0, -TL.GAUGE_MM - 8.0), (40.0, 175.0))
-              if tool["r"] > r else cyl_target(at, r, (-46.0, -32.0), (40.0, 175.0)))
-    targets = {"index": cyl_target(at, r, (-31.0, -23.0), (60.0, 175.0)), "middle": middle,
+    targets = {"index": cyl_target(at, r, (-31.0, -23.0), (60.0, 175.0)),
                "thumb": cyl_target(at, r, (-34.0, -22.0), (-150.0, -50.0))}
+    if tool["r"] <= r:                       # a tool wider than the body (the face mill): the middle rests on its top
+        targets["middle"] = cyl_target(at, r, (-46.0, -32.0), (40.0, 175.0))
     long, radial, dorsal = np.array([0, 1.0, 0]), np.array([0, 0, 1.0]), np.array([1.0, 0, 0])
-    H0 = np.stack([long, radial, dorsal], 1)
+    starts = []
+    kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8")) if HOLDER_GRIP.exists() else None
+    if kept and tool_id != kept["default"]:  # from the default tool's grip, moved off this tool
+        d = kept["grips"][kept["default"]]
+        starts.append((d["q"], np.array(d["H"]), np.array(d["W_rel"])))
+    else:
+        for mcp, pip in ((55.0, 60.0), (70.0, 75.0)):
+            q = hand.neutral()
+            for n in ("index", "middle", "ring", "little"):
+                q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = mcp, pip, 30.0
+            q.update(thumb_cmc_abd=40.0, thumb_cmc_flex=20.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
+            for back in (70.0, 90.0):
+                starts.append((q, np.stack([long, radial, dorsal], 1), at + dorsal * (r + 10.0) - long * back + radial * -52.0))
     best = None
-    for mcp, pip in ((55.0, 60.0), (70.0, 75.0)):
-        q = hand.neutral()
-        for n in ("index", "middle", "ring", "little"):
-            q[f"{n}_mcp_flex"], q[f"{n}_pip"], q[f"{n}_dip"] = mcp, pip, 30.0
-        q.update(thumb_cmc_abd=40.0, thumb_cmc_flex=20.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
-        for back in (70.0, 90.0):
-            g = G.Problem(th, cols, targets, hand.clamp(q)).solve(
-                H0, at + dorsal * (r + 10.0) - long * back + radial * -52.0, iters=iters, lr=0.05, rot_free_deg=25.0,
-                move_mm=40.0)
-            if best is None or g["loss"] < best["loss"]:
-                best = g
+    for q, H0, W0 in starts:
+        g = G.Problem(th, cols, targets, hand.clamp(q)).solve(H0, W0, iters=iters, lr=0.05, rot_free_deg=25.0,
+                                                              move_mm=40.0)
+        if best is None or g["loss"] < best["loss"]:
+            best = g
     out = {"q": best["q"], "H": np.asarray(best["H"]).tolist(), "W_rel": np.asarray(best["W"]).tolist(),
            "loss": round(best["loss"], 2), "terms": {k: round(v, 2) for k, v in best["terms"].items()}}
-    kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8")) if HOLDER_GRIP.exists() else {"default": tool_id}
+    kept = kept or {"default": tool_id}
     kept.setdefault("grips", {})[tool_id] = out
     HOLDER_GRIP.write_text(json.dumps(kept, indent=1), encoding="utf-8")
     return out

@@ -564,8 +564,10 @@ class BenchRun:
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
             # the lifting force over the frame, not at its end: a hand closing on a 170 g tool chatters +-2 N step to
-            # step, and one sample of that dated the load's onset by chance
+            # step, and one sample of that dated the load's onset by chance. And what was touched during it: the
+            # calipers set down brushed the part within a frame and were off it at its end
             load = dict.fromkeys(self.lifted, 0.0)
+            touched: set[str] = set()
             for s in range(spf):
                 tt = (k + s / spf) / self.fps
                 self.switch_carries(tt)
@@ -587,6 +589,7 @@ class BenchRun:
                             self.press_i[i] = float(np.clip(self.press_i.get(i, 0.0) + PRESS_KI * err * m.opt.timestep,
                                                             -e["force"], 2 * e["force"]))
                 self.step(tt)
+                touched |= set(self.touching("R", tt)) | set(self.touching("L", tt))
                 if self.lifted:
                     mujoco.mj_rnePostConstraint(m, d)
                     for b in self.lifted:
@@ -595,7 +598,7 @@ class BenchRun:
             self.rec["pose"].append(pose)
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
-            self.rec["touching"].append(sorted(set(self.touching("R", tt)) | set(self.touching("L", tt))))
+            self.rec["touching"].append(sorted(touched))
             self.rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))      # the muscle check replays the right arm
             for b in self.lifted:
                 self.rec["load_N"][b].append(round(load[b], 3))

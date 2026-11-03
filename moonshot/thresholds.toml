@@ -172,3 +172,67 @@ value = 0.5
 unit = "mm"
 source = "proposed"
 reason = "Jaw travel matches crank turns x screw lead within this, the rest being contact compliance (the reference take: 0.5 mm)"
+
+# --- Nothing moves without a cause; machines inside spec (plan §5.1) ---
+
+[physics.still_mm_s]
+value = 2.0
+unit = "mm/s"
+source = "proposed"
+reason = "A body slower than this is at rest; untouched, the re-planned vise take's parallels creep 0.4 mm/s at most"
+
+[physics.settle_s]
+value = 0.5
+unit = "s"
+source = "proposed"
+reason = "A body may keep moving this long after its cause ends, coming to rest: the vise take's blank, set down, settles within a frame"
+
+[physics.acceleration_spike_m_s2]
+value = 20.0
+unit = "m/s^2"
+source = "proposed"
+reason = "No recorded body accelerates faster: the re-planned vise take's hand reaches 6.3, its blank 2.7; a solver launching a part shows as a jump of a metre a second within a frame (30)"
+
+[physics.free_fall_frac]
+value = 0.3
+unit = "fraction of g"
+source = "proposed"
+reason = "An untouched body accelerating downward at g within this, and sideways under it, is falling: gravity is its cause"
+
+[physics.machine_travel_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "A machine axis's soft limit may overshoot its travel by this, as joint limits do"
+
+[physics.machine_speed_frac]
+value = 0.02
+unit = "fraction of rapid"
+source = "proposed"
+reason = "Frame-to-frame speed may read this far over the rapid rate from sampling at 30 fps"
+
+# --- Grasp timing, hand opening, footage (plan §5.2) ---
+
+[person.movement_onset_frac]
+value = 0.05
+unit = "fraction of peak speed"
+source = "proposed"
+reason = "A reach starts when the hand's speed passes this fraction of its peak, the usual onset criterion in reach-to-grasp kinematics"
+
+[person.force_onset_frac]
+value = 0.05
+unit = "fraction of the object's weight"
+source = "proposed"
+reason = "Loading starts when the hand's lifting force passes this fraction of the object's weight, ending the preload"
+
+[person.lift_off_mm]
+value = 1.0
+unit = "mm"
+source = "proposed"
+reason = "An object this far above where it sat at contact has lifted off"
+
+[person.footage_frac_band]
+value = 0.15
+unit = "fraction of a movement"
+source = "proposed"
+reason = "A take's median peak speed and widest opening come within this of its footage's, as far through each movement"

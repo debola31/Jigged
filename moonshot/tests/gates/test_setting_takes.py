@@ -11,9 +11,10 @@ What each take carries besides its record (take.npz, scene.json):
     take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
                   world point (mm, at frame 0) each axis's zero must pass through; for "z", "tool": {"length_mm"},
                   the gauge line to the tip of the tool the zero is set with; "events": the plan's key presses
-                  ({"kind": "press", "key", "t0", "t1"}); for the check, "setup": {"tool": {"length_mm", "tip_r"}
-                  (the gauge line to the bottom of the indicator's ball, and its radius), "centre_mm", "half_mm"
-                  (the part's box at frame 0, world, which it stands square to)}
+                  ({"kind": "press", "key", "t0", "t1"}); for the check, "setup": {"tool": {"length_mm", "tip_r",
+                  "offset_mm"} (the gauge line to the bottom of the indicator's ball, its radius, and how far its
+                  centre stands off the spindle's axis, [x, y] in the tool's frame), "centre_mm", "half_mm" (the
+                  part's box at frame 0, world, which it stands square to)}
     outcome.json  the machine at the end: "work": {"G54": [X, Y, Z]}, "tool_length": {n: Z}, "tool": n (machine
                   mm, Haas's signs), and "pressed": [[t, key], ...] as the machine registered them
     checks.json   per frame, "touching": what the hands touch, and "handle_deg": the jog handle's angle
@@ -128,7 +129,7 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
     tool, blank, head = (names.index(b) for b in ("tool", "blank", "vf2_head"))
     r = s["tool"]["tip_r"]
     w, v = d["quat"][:, tool, :1], d["quat"][:, tool, 1:]
-    down = np.array([0.0, 0.0, -(s["tool"]["length_mm"] - r)])         # the ball's centre in the tool's frame
+    down = np.array([*s["tool"].get("offset_mm", (0.0, 0.0)), -(s["tool"]["length_mm"] - r)])   # the ball, tool frame
     t = 2 * np.cross(v, down)
     ball = d["pos"][:, tool] + down + w * t + np.cross(v, t)            # rotated by the tool's quaternion
     p = ball - (np.array(s["centre_mm"], float) + d["pos"][:, blank] - d["pos"][0, blank])   # the part moves with the table

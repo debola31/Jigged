@@ -237,7 +237,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
         "time_lapse": round(stamps[-1] / (len(stamps) / FPS), 2)}, indent=1), encoding="utf-8")
     log(f"[cycle] {c.step}: {len(stamps)} frames for {stamps[-1]:.0f} s of machining, {len(cuts)} cuts, "
         f"{v0 - stock.Volume():.0f} mm3 removed, {time.perf_counter() - t0:.0f} s")
-    return stock
+    return cq.Shape.importBrep(str(out / "stock-end.brep"))      # the next step starts from the file, as a resumed run
 
 
 def cycle_steps(plan: dict) -> list[tuple[dict, dict]]:

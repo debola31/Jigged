@@ -233,15 +233,19 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 - [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
 - [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-03
   01:00: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
-  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`, and of its 15 cutting takes, rendering (8 done); the rest
-  wait on their takes (`python -m moonshot.planning.takes nist-ftc-10` lists them). The plan is 61 steps since op60
-  was found to cut nothing. Loosen passes (0.99 turns, 6.28 mm); the lift-out holds the part (0.9 mm slip) and sets
-  it on the table 12 mm off plan; the blow-off blows the vise 2.4 s with 0.45 mm slip, but the gun doesn't yet sit
-  back in its holster; set-parallels carries both parallels, but one falls over (the cycle session has it).
-  **Waiting on you:** every vise take, approved draft 3 too, fails the posture checks that the body-checks merge
-  put in front of rendering (53% of frames inside people's range against 95%; that data is seated work), so no
-  vise-take draft renders until you choose how they gate. Three of the stock's plan gaps need a tool or a mask (the
-  +Z side slot 2.64 mm, the boss's V flanks 2.31 mm, the pad grooves 1.50 mm).
+  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; as of 02:30, 20 of 61 with the cutting takes' drafts in,
+  the last few still rendering; the rest wait on their takes (`python -m moonshot.planning.takes nist-ftc-10` lists
+  them). The plan is 61 steps since op60 was found to cut nothing. Passing their outcomes: the blow-off (the vise
+  blown 2.7 s, the gun back in its holster within 1.9 mm) and loosen (0.99 turns, 6.28 mm), drafts rendering. The
+  lift-out holds the part (0.9 mm slip) and sets it on the table 12 mm off plan. Set-parallels: the parallels
+  session has it; parallel a now stands 19 mm from the fixed jaw (was 13.2), where the fingers that set it fit. The
+  vise take passes the hand-opening check on the reference; op30/op40's tall parts get a wider jaw opening; op50
+  (on end, no parallels) runs, its check (an indicator swept up its side) asked of the setting session and its
+  set-stop take not yet made. **Waiting on you:** every vise take, approved draft 3 too, fails the posture checks
+  that the body-checks merge put in front of rendering (53% of frames inside people's range against 95%; that data
+  is seated work), so no vise-take draft renders until you choose how they gate. Three of the stock's plan gaps need
+  a tool or a mask (the +Z side slot 2.64 mm, the boss's V flanks 2.31 mm, the pad grooves 1.50 mm). Within the
+  unload step the doors jump from door-open's 300 mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web

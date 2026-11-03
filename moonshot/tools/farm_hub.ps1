@@ -18,4 +18,5 @@ Start-Farm "moonshot.orchestrate.worker" ("--name hub-gtx1070 --kinds noop,probe
     "encode_frames --gpu-mem 8 --device CUDA --blender C:\blender\blender-5.2.3-windows-x64\blender.exe " +
     "--trainual C:\jigged-data\renderer\trainual") "worker-hub" "--name hub-gtx1070"
 # the joins on their own worker too: behind the GPU's frame ranges, a finished take's encode waited for every range
-Start-Farm "moonshot.orchestrate.worker" "--name hub-cpu --kinds encode_frames" "worker-hub-cpu" "--name hub-cpu"
+Start-Farm "moonshot.orchestrate.worker" ("--name hub-cpu --kinds encode_frames " +
+    "--blender C:\blender\blender-5.2.3-windows-x64\blender.exe") "worker-hub-cpu" "--name hub-cpu"    # Blender encodes

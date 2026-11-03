@@ -379,4 +379,5 @@ def main():
         log(f"frame {k}: {time.perf_counter() - t1:.2f} s")
 
 
-main()
+if __name__ == "__main__":
+    main()

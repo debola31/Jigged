@@ -28,10 +28,11 @@ def measure(take: Path) -> dict:
     for k in sim.files:
         if sim[k].dtype.kind == "f" and sim[k].ndim and len(sim[k]) == len(finite):
             finite &= np.isfinite(sim[k].reshape(len(finite), -1)).all(1)
+    paras = ("para_a", "para_b")[:sim["para"].shape[1]]      # none for a part stood on the vise's floor (op50)
     return {"fps": float(sim["fps"]), "touching": touching, "finite": finite.tolist(),
             "opening_mm": sim["opening"].tolist(),
-            "bodies_mm": {"blank": sim["blank"].tolist(), "para_a": sim["para"][:, 0].tolist(),
-                          "para_b": sim["para"][:, 1].tolist(), "hand": sim["W"].tolist()}}
+            "bodies_mm": {"blank": sim["blank"].tolist(), **{n: sim["para"][:, i].tolist() for i, n in enumerate(paras)},
+                          "hand": sim["W"].tolist()}}
 
 
 def _between_the_jaws(p: np.ndarray, opening: np.ndarray) -> np.ndarray:

@@ -98,7 +98,7 @@ class ViseTake:
         # a lift-out take starts with the part in the vise, the jaw a turn open (moonshot/motion/setup_take.py start)
         self.in_vise = self.tk.get("start") == "vise"
         self.start_p = np.array(self.tk["home"]) if self.in_vise else self.load.stage
-        self.xml = cell.with_body(self.body.xml, self.start_p, parallels, "R_hand", self.load)
+        self.xml = cell.with_body(self.body.xml, self.start_p, parallels, "R_hand", self.load, self.load.stop())
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.machine = cell.start(m, self.data)          # idle: holds the table, and the vise on it, where it is
@@ -417,8 +417,15 @@ class ViseTake:
         carrying = (self.t_lift + 0.2 <= tt < self.t_down - 0.2
                     and any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]))
         if carrying:                           # carrying the part: the eye is on the part, where it goes, not the hand
+            # on the vise's floor, on its foot, where it will stand: a part leaning in the hand lands on its foot and
+            # stands up about it (op50's, 158 mm tall, leaned 1.5 deg, and aimed by its middle stood up 3 mm off where
+            # it was set down); on parallels, by its middle, as it lands across them (aimed by its foot, op10's landed
+            # 2.1 mm off, not 1.4)
             k = min(len(self.rd["blank"]) - 1, int(round(self.plan_time(tt) * self.fps)))
-            self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / CARRY_TAU
+            down = np.array([0.0, 0.0, 0.0 if self.paras else self.load.half[2] * 0.001])
+            b = self.data.body("blank")
+            foot, planned = b.xpos - b.xmat.reshape(3, 3) @ down, self.rd["blank"][k] * 0.001 - self.rd["blank_R"][k] @ down
+            self.visual += (planned - foot) * dt / CARRY_TAU
         elif press is None and not cranking and not self.hand_touching():
             self.visual += err * dt / VISUAL_TAU
         for v in (self.visual, self.touch):
@@ -811,6 +818,9 @@ class ViseTake:
             out["slide"] = {"moved_mm": round(float(B[int(sl["t1"] * fps) - 1][1] - B[int(sl["t0"] * fps)][1]), 2),
                             "gap_to_fixed_jaw_after_mm": round(float(V.VISE["fixed_face_y"] -
                                                                      (B[int(sl["t1"] * fps) - 1][1] + self.load.half[1])), 2)}
+            if self.load.stop() is not None:              # the part's -x end to the stop's face
+                out["slide"]["gap_to_stop_after_mm"] = round(float(B[int(sl["t1"] * fps) - 1][0] - self.load.half[0] -
+                                                                   (self.load.stop()[0] + V.STOP_MM[0] / 2)), 2)
         press = [e for e in self.iv["press"] if e["contact"] == "blank"
                  and clips["push"]["t0"] <= e["t0"] < clips["push"]["t1"]][0]
         pm = (t >= press["t0"] + 0.3) & (t < press["t1"])

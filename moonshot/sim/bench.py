@@ -488,13 +488,19 @@ class BenchRun:
         return g
 
     # --- measurement ---------------------------------------------------------------------------------------------
-    def touching(self, side: str) -> list[str]:
+    def touching(self, side: str, tt: float) -> list[str]:
+        """The colliders a hand touches, itself or through a tool it carries: a carried tool's colliders leave the
+        skin, so the calipers seated on the part by both hands are the hands' only touch on it, and it gives a
+        little on its mat under them."""
         m, d = self.model, self.data
+        held = {b for e in self.carries if e.get("side", "R") == side and e["t0"] <= tt < e["t1"]
+                for b in self.tree(e["obj"])}
         out = set()
         for i in range(d.ncon):
             g1, g2 = d.contact[i].geom1, d.contact[i].geom2
             for a, b in ((g1, g2), (g2, g1)):
-                if m.geom(a).name.startswith(f"{side}_") and m.body(m.geom_bodyid[b]).name not in self.person:
+                mine = m.geom(a).name.startswith(f"{side}_") or m.geom_bodyid[a] in held
+                if mine and m.geom_bodyid[b] not in held and m.body(m.geom_bodyid[b]).name not in self.person:
                     out.add(m.geom(b).name)
         return sorted(out)
 
@@ -552,11 +558,14 @@ class BenchRun:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, arms=("R", "L"))
-        self.rec = {"pose": [], "touching": [], "touching_R": [], "press": [], "lag": [], "hand_wrench": [],
+        self.rec = {"pose": [], "touching": [], "press": [], "lag": [], "hand_wrench": [],
                     "active_constraints": [], "applied_forces": [], "load_N": {b: [] for b in self.lifted}}
         t0w = time.time()
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
+            # the lifting force over the frame, not at its end: a hand closing on a 170 g tool chatters +-2 N step to
+            # step, and one sample of that dated the load's onset by chance
+            load = dict.fromkeys(self.lifted, 0.0)
             for s in range(spf):
                 tt = (k + s / spf) / self.fps
                 self.switch_carries(tt)
@@ -578,16 +587,18 @@ class BenchRun:
                             self.press_i[i] = float(np.clip(self.press_i.get(i, 0.0) + PRESS_KI * err * m.opt.timestep,
                                                             -e["force"], 2 * e["force"]))
                 self.step(tt)
+                if self.lifted:
+                    mujoco.mj_rnePostConstraint(m, d)
+                    for b in self.lifted:
+                        load[b] += self.lifting_force(b) / spf
             pose = self.pose_record()
             self.rec["pose"].append(pose)
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
-            right = self.touching("R")
-            self.rec["touching"].append(sorted(set(right) | set(self.touching("L"))))
-            self.rec["touching_R"].append(right)
+            self.rec["touching"].append(sorted(set(self.touching("R", tt)) | set(self.touching("L", tt))))
             self.rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))      # the muscle check replays the right arm
             for b in self.lifted:
-                self.rec["load_N"][b].append(round(self.lifting_force(b), 3))
+                self.rec["load_N"][b].append(round(load[b], 3))
             self.rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
             self.rec["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
             tk = k / self.fps
@@ -624,8 +635,7 @@ class BenchRun:
         m = self.model
         weight = {b: round(float(sum(m.body_mass[i] for i in self.tree(b))) * 9.81, 4) for b in self.lifted}
         (out / "checks.json").write_text(json.dumps(
-            {k: rec[k] for k in ("touching", "touching_R", "hand_wrench", "active_constraints", "applied_forces",
-                                 "load_N")} |
+            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "load_N")} |
             {"weight_N": weight, "moves_with": self.moves_with, "machine_axes": {}, "never_held": never_held,
              "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
         self.recorder.write(out, self.fps, self.tk["lumbar"][0], {s: [str(x) for x in rd["names"]] for s in ("R", "L")},

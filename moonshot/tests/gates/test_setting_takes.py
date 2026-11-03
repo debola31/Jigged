@@ -83,7 +83,7 @@ def test_every_per_frame_check_passes(take):
     assert set(NOT_APPLICABLE) <= set(load_all()), "a check named not applicable no longer exists"
     failed = {k: v for k, v in run(take).items()
               if k not in NOT_APPLICABLE and (isinstance(v, str) or not v.passed)}
-    assert not failed, failed
+    assert not failed, "\n".join(f"{k}: {v}" for k, v in failed.items())        # each in full: pytest cuts a dict
 
 
 def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):

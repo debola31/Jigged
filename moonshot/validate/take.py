@@ -6,7 +6,9 @@ because a skipped check is how the skin-depth check went unrun.
 
 The take directory holds the plan (take.json) and the physics run (sim.npz and checks.json, written by
 moonshot/sim/vise_take.py). The skin's depth is measured from them (moonshot/validate/skin.py), not read from the
-render's bake, so the checks need nothing the render makes.
+render's bake, so the checks need nothing the render makes. The muscles' activations come from replaying the run in
+MyoSuite (moonshot/validate/muscle.py), which needs the load on the hand (checks.json hand_wrench): without it the
+muscle check has nothing to read.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from moonshot.validate import muscle
 from moonshot.validate.registry import Result, load_all
 from moonshot.validate.skin import depth_mm
 
@@ -26,6 +29,8 @@ def inputs(take: Path) -> dict:
     if (take / "checks.json").exists():
         out |= json.loads((take / "checks.json").read_text(encoding="utf-8"))
     out["depth_mm"] = depth_mm(take)
+    if "hand_wrench" in out:
+        out |= muscle.measure(take)
     return out
 
 

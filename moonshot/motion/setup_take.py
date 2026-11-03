@@ -148,18 +148,7 @@ class Take:
             data = {"key": key}
             for name, spec in self._grip_specs().items():
                 t0 = time.time()
-                P = G.Problem(self.th, spec["colliders"], spec["targets"], spec["q0"],
-                              body=dict(lumbar=LUMBAR, prior=self.prior, load_kg=spec.get("load", 0.0)))
-                best = None
-                for th0 in spec["starts"]:
-                    g = P.solve_body(th0, iters=spec.get("iters", 700))
-                    if best is None or g["loss"] < best["loss"]:
-                        best = g
-                if "refine" in spec:                         # a second stage from the best, with more targets
-                    P = G.Problem(self.th, spec["colliders"], spec["refine"], best["q"],
-                                  body=dict(lumbar=LUMBAR, prior=self.prior, load_kg=spec.get("load", 0.0)))
-                    best = P.solve_body(best["theta"], iters=800, lr=0.01)
-                best["obj"] = spec["obj"].tolist()
+                best = G.solve_spec(self.th, spec, LUMBAR, self.prior)
                 data[name] = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in best.items()}
                 if self.verbose:
                     print(f"grip {name}: loss {best['loss']:.1f} ({time.time() - t0:.0f} s) body "

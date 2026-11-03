@@ -420,6 +420,46 @@ class Problem:
         return c
 
 
+def mirrored(colliders, targets, lumbar):
+    """A left hand's grip problem as the right hand's in the mirrored world (moonshot/motion/kinematics.py): every
+    collider and target sees points and normals reflected through the body's mid-plane, so the right-hand solver
+    finds the left hand's grip as its mirror image (H, W and the arm's angles in the mirrored world; the finger angles
+    as they are)."""
+    x2 = 2.0 * float(np.asarray(lumbar, float)[0])
+
+    def flip_p(p):
+        return torch.stack([x2 - p[..., 0], p[..., 1], p[..., 2]], -1)
+
+    def flip_n(n):
+        return torch.stack([-n[..., 0], n[..., 1], n[..., 2]], -1)
+
+    cols = [(lambda p, c=c: c(flip_p(p))) for c in colliders]
+    tgts = {d: (lambda cc, n, t=t: t(flip_p(cc), flip_n(n))) for d, t in targets.items()}
+    return cols, tgts
+
+
+def solve_spec(th: "TorchHand", spec: dict, lumbar, prior) -> dict:
+    """A grip from its spec: colliders, targets, q0, obj and body starts, and optionally iters, load (kg), refine (a
+    second stage's targets, solved from the first's best) and side. A left grip (side "L") is solved mirrored and
+    stays in the mirrored world, H, W, theta and obj alike, as the body solver takes a left hand's tasks."""
+    cols, tgts, ref = spec["colliders"], spec["targets"], spec.get("refine")
+    obj = np.asarray(spec["obj"], float)
+    if spec.get("side") == "L":
+        cols, tgts = mirrored(cols, tgts, lumbar)
+        ref = mirrored([], ref, lumbar)[1] if ref else None
+        obj = np.r_[2 * float(np.asarray(lumbar, float)[0]) - obj[0], obj[1:]]
+    body = dict(lumbar=lumbar, prior=prior, load_kg=spec.get("load", 0.0))
+    P = Problem(th, cols, tgts, spec["q0"], body=body)
+    best = None
+    for th0 in spec["starts"]:
+        g = P.solve_body(th0, iters=spec.get("iters", 700))
+        if best is None or g["loss"] < best["loss"]:
+            best = g
+    if ref:
+        best = Problem(th, cols, ref, best["q"], body=body).solve_body(best["theta"], iters=800, lr=0.01)
+    return best | {"obj": obj, "side": spec.get("side", "R")}
+
+
 def plane_target(point, normal, comp_mm=2.0, band=None):
     """Pad on a plane (point, outward normal): the pad centre sits comp_mm inside it and the pad faces
     into it. band: optional callable(pad centre) -> extra penalty (where on the face)."""

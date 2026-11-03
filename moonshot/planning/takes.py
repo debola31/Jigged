@@ -35,7 +35,7 @@ def spans(part: str, step: dict) -> list[Span]:
         "z": [(f"{part}-{sid}", None, None)],
         "tools": [(f"{part}-{sid}", None, None)],
         "start": [("door-close", None, None), ("cycle-start", None, None)],
-        "unload": [("door-open", None, None), ("blow-off", None, None), ("unload", None, None)],
+        "unload": [("door-open", None, None), ("blow-off", None, None), ("loosen", None, None), (f"lift-out-{vise}", None, None)],
     }.get(kind, [(f"{part}-{sid}", None, None)])           # finishing: the inspection session's takes
 
 

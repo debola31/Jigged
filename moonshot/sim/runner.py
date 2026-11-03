@@ -42,8 +42,8 @@ SETTLE_STEPS = 300
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
 APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
 # people correct a steady error in where their hand is by sight, slowly (as the vise take, moonshot/sim/vise_take.py)
-VISUAL_TAU = 0.3                           # s
-VISUAL_MAX = np.array([0.04, 0.35])        # at most this far (m) and this much turn (rad)
+VISUAL_TAU = 0.25                          # s
+VISUAL_MAX = np.array([0.08, 0.5])         # at most this far (m) and this much turn (rad)
 DAMPING = 0.02                             # damped least squares for the arm's wrist corrections
 
 
@@ -269,7 +269,8 @@ class TakeRunner:
 
     def correction(self, t: float) -> np.ndarray:
         """Joint offsets (nv) that move each hand toward where the plan has it, by the steady error seen so far, in
-        place and in turn; paused while the arm touches something, where it would wind up against the contact."""
+        place and in turn; paused while the arm touches something, where it would wind up against the contact, or
+        holds a mechanism."""
         m, d, p = self.model, self.data, self.plan
         dt, dq = m.opt.timestep, np.zeros(m.nv)
         for side in SIDES:
@@ -278,7 +279,11 @@ class TakeRunner:
             err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
             v = self.visual[side]
             if self._steps % 10 == 0:                            # contacts change slowly next to a 1 ms step
-                self._touch[side] = self.touching(side)
+                # paused too while the hand holds a mechanism (a door's bar, the crank's knob): there being past the
+                # plan is the point, as the vise take pauses while cranking; a welded tool is part of the hand
+                holding = any(e["side"] == side and e["grip"] not in self.welded
+                              and d.eq_active[m.equality(f"enclose_{e['grip']}").id] for e in self.grip_events)
+                self._touch[side] = holding or self.touching(side)
             if not self._touch[side]:
                 v += err * dt / VISUAL_TAU
             for i, cap in enumerate(VISUAL_MAX):

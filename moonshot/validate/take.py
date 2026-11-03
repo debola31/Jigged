@@ -6,7 +6,12 @@ because a skipped check is how the skin-depth check went unrun.
 
 The take directory holds the plan (take.json) and the physics run (sim.npz and checks.json, written by
 moonshot/sim/vise_take.py). The skin's depth is measured from them (moonshot/validate/skin.py), not read from the
-render's bake, so the checks need nothing the render makes.
+render's bake, so the checks need nothing the render makes. The muscles' activations come from replaying the run in
+MyoSuite (moonshot/validate/muscle.py), which needs the load on the hand (checks.json hand_wrench): without it the
+muscle check has nothing to read. The posture checks compare the run's angles with people's (validate/posture.py),
+from a prior only the data root holds. Machine axes, active constraints and applied forces, and the lifting force
+(checks.json machine_axes, active_constraints, applied_forces, load_N) are read as the run writes them, and the card
+a take plays from take.json's `card`; where the run or the plan doesn't write one yet, its check fails.
 """
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from moonshot.validate import cause, footage, grasp_timing, hand_opening, muscle, posture
 from moonshot.validate.registry import Result, load_all
 from moonshot.validate.skin import depth_mm
 
@@ -26,6 +32,12 @@ def inputs(take: Path) -> dict:
     if (take / "checks.json").exists():
         out |= json.loads((take / "checks.json").read_text(encoding="utf-8"))
     out["depth_mm"] = depth_mm(take)
+    if "hand_wrench" in out:
+        out |= muscle.measure(take)
+    if posture.PRIOR.exists():
+        out |= posture.measure(sim["theta"][:, :10])
+    for check_inputs in (cause.measure, grasp_timing.measure, hand_opening.measure, footage.measure):
+        out |= check_inputs(take)
     return out
 
 

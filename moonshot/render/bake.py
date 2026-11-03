@@ -400,36 +400,38 @@ def bake(take: Path, out: Path, fps: int = FPS, workers: int | None = None) -> d
     geoms = [(names.index(b), g) for b, e in scene["bodies"].items() if e["role"] == "object"
              for g in e.get("geoms", [])]
     n, arms = r["n"], r["arms"]
-    frames: list = [None] * n
+    frames: list = [{}] * n
     workers = workers or max(1, min(10, (os.cpu_count() or 2) - 1))
-    if workers == 1:
+    if arms and workers == 1:
         _init(r, geoms)
         frames = [_frame(i)[1] for i in range(n)]
-    else:
+    elif arms:
         with ProcessPoolExecutor(workers, initializer=_init, initargs=(r, geoms)) as ex:
             for i, f in ex.map(_frame, range(n), chunksize=4):
                 frames[i] = f
-    if "skin" not in _W:
-        _init(r, geoms)
-    skin, sleeve = _W["skin"], _W["sleeve"]
-    arrays = {"fps": fps, "n": n, "t": r["t"], "arms": np.array(arms), "bodies": r["bodies"], "pos": r["pos"],
-              "quat": r["quat"], "eye": r["eye"], "look": r["look"], "up": r["up"],
-              "focus": np.mean([r[f"{s}_W"] if s == "R" else mirror(r[f"{s}_W"], r["mirror_x"]) for s in arms], 0),
-              "hand_uv": skin.uv, "sleeve_uv": sleeve.uv, **{f"attr_{k}": v for k, v in skin.attr.items()}}
-    for s in arms:
-        flip = (lambda f: f[:, ::-1]) if s != "R" else (lambda f: f)  # noqa: E731
-        arrays[f"hand_faces_{s}"], arrays[f"sleeve_faces_{s}"] = flip(skin.faces), flip(sleeve.faces)
-        arrays[f"hand_face_uv_{s}"] = flip(skin.face_uv)                 # each face's UVs follow its corners
-        arrays[f"depth_{s}"] = np.array([f[s][2] for f in frames], np.float32)
-        write_pc2(out / f"hand_{s}.pc2", np.array([f[s][0] for f in frames]) * 0.001)
-        write_pc2(out / f"sleeve_{s}.pc2", np.array([f[s][1] for f in frames]) * 0.001)
+    arrays = {"fps": fps, "n": n, "t": r["t"], "arms": np.array(arms, dtype=str), "bodies": r["bodies"],
+              "pos": r["pos"], "quat": r["quat"], "eye": r["eye"], "look": r["look"], "up": r["up"],
+              "focus": np.mean([r[f"{s}_W"] if s == "R" else mirror(r[f"{s}_W"], r["mirror_x"]) for s in arms], 0)
+              if arms else r["look"]}                    # no hands (a machine's cycle): what the eyes look at
     for name, b in scene["bodies"].items():
         if "meshes" in b:
             arrays[f"mesh_{name}"] = mesh_frames(r["x"], b["meshes"]["frames"])
+    if arms:
+        if "skin" not in _W:
+            _init(r, geoms)
+        skin, sleeve = _W["skin"], _W["sleeve"]
+        arrays |= {"hand_uv": skin.uv, "sleeve_uv": sleeve.uv, **{f"attr_{k}": v for k, v in skin.attr.items()}}
+        for s in arms:
+            flip = (lambda f: f[:, ::-1]) if s != "R" else (lambda f: f)  # noqa: E731
+            arrays[f"hand_faces_{s}"], arrays[f"sleeve_faces_{s}"] = flip(skin.faces), flip(sleeve.faces)
+            arrays[f"hand_face_uv_{s}"] = flip(skin.face_uv)             # each face's UVs follow its corners
+            arrays[f"depth_{s}"] = np.array([f[s][2] for f in frames], np.float32)
+            write_pc2(out / f"hand_{s}.pc2", np.array([f[s][0] for f in frames]) * 0.001)
+            write_pc2(out / f"sleeve_{s}.pc2", np.array([f[s][1] for f in frames]) * 0.001)
+        from PIL import Image
+        for k, img in skin.hand.model.textures(SKIN_ALPHA).items():
+            Image.fromarray((img * 255).astype(np.uint8)).save(out / f"skin_{k}.png")
     np.savez(out / "bake.npz", **arrays)
-    from PIL import Image
-    for k, img in skin.hand.model.textures(SKIN_ALPHA).items():
-        Image.fromarray((img * 255).astype(np.uint8)).save(out / f"skin_{k}.png")
     return {"frames": n, "fps": fps, "arms": arms, "seconds": round(time.perf_counter() - t0, 1),
             "depth_mm": {s: round(float(arrays[f"depth_{s}"].max()), 2) for s in arms}}
 

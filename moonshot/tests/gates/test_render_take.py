@@ -2,10 +2,11 @@
 the skin bake (moonshot/render/bake.py) and the Blender scene (moonshot/render/render_take.py), on a small take made
 here.
 
-The take, 7 frames at 30 fps, so the render resamples it: a body carrying a GLB slides along x; a body with geoms
-only turns about z; the stock swaps its mesh at frame 4; a plate rises into the right hand from frame 3; both arms
-work, the left given as the right in the mirrored world, so it draws as the right's reflection; and a person's body
-is never drawn as an object.
+The take, 7 frames at 30 fps, so the render resamples it: a body carrying a GLB (metres, as the contract has GLBs)
+slides along x; a body with geoms only turns about z; the stock swaps its mesh (mm, as the contract has meshes) at
+frame 4; a plate rises into the right hand from frame 3; both arms work, the left given as the right in the mirrored
+world, so it draws as the right's reflection; and a person's body is never drawn as an object. A take with no arms
+(a machine's cycle) draws its bodies alone.
 
 `render_take.py --inspect` writes what Blender would draw at each frame instead of rendering it: the render
 settings, the camera, and each drawn mesh's world bounds (mm) with the body it belongs to:
@@ -60,10 +61,11 @@ XML = f"""<mujoco><worldbody>
 </worldbody></mujoco>"""
 
 
-def _glb(path: Path, extents_mm) -> None:
+def _glb(path: Path, extents_mm, mm: bool = False) -> None:
+    """A box GLB in raw coordinates, as extract.py writes them: metres, or mm for a changing body's meshes."""
     import trimesh
     path.parent.mkdir(parents=True, exist_ok=True)
-    trimesh.creation.box(extents=np.asarray(extents_mm) / 1000).export(path)     # raw coordinates, as extract.py
+    trimesh.creation.box(extents=np.asarray(extents_mm, float) / (1 if mm else 1000)).export(path)
 
 
 def eye(k):
@@ -127,7 +129,7 @@ def made(tmp_path_factory):
     (take / "scene.json").write_text(json.dumps(scene, indent=1), encoding="utf-8")
     _glb(data / "test" / "slider.glb", SLIDER_GLB)
     for k, size in STOCK.items():
-        _glb(take / "stock" / f"{k}.glb", size)
+        _glb(take / "stock" / f"{k}.glb", size, mm=True)
     assert check(take) == []
     bake(take, out, fps=24, workers=1)
     return {"take": take, "data": data, "bake": out, "b": np.load(out / "bake.npz")}
@@ -259,3 +261,31 @@ def test_the_camera_is_the_operators_eyes(drawn):
         e = eye(i * SRC_FPS / 24)
         assert np.allclose(cam["eye"], e, atol=0.01)
         assert np.allclose(cam["forward"], (LOOK - e) / np.linalg.norm(LOOK - e), atol=1e-4)
+
+
+def test_a_take_with_no_arms_draws_its_bodies_alone(made, tmp_path):
+    """A machine's cycle: no hands, so nothing is baked but the bodies, and nothing of the person is drawn."""
+    if BLENDER is None:
+        pytest.skip("no Blender")
+    from moonshot.render.bake import bake
+    from moonshot.sim.record import Recorder
+    take, out = tmp_path / "take", tmp_path / "bake"
+    take.mkdir()
+    m = mujoco.MjModel.from_xml_string(XML)
+    d = mujoco.MjData(m)
+    rec = Recorder(m, {"R_hand"}, ())
+    for k in range(3):
+        d.qpos[:] = [0.1 * k, 0.0, 0.0]
+        mujoco.mj_kinematics(m, d)
+        rec.frame(d, {}, eye(k), LOOK, UP)
+    rec.write(take, 24, MIRROR_X, {}, "test", {"slider": [{"path": "test/slider.glb", "in_body": SLIDER_IN_BODY}]})
+    bake(take, out, fps=24, workers=1)
+    assert not list(out.glob("*.pc2"))
+    report = tmp_path / "report.json"
+    r = subprocess.run([BLENDER, "-b", "--factory-startup", "--python", str(SCRIPT), "--", "--take", str(take),
+                        "--bake", str(out), "--data", str(made["data"]), "--look", str(data_root() / "cc0"),
+                        "--frames", "0:3", "--inspect", str(report)], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0 and report.exists(), (r.stderr or r.stdout)[-3000:]
+    for i, f in json.loads(report.read_text(encoding="utf-8"))["frames"].items():
+        assert {x["body"] for x in f["drawn"]} == {"slider", "block", "stock", "plate"}, i
+        assert np.allclose(f["camera"]["eye"], eye(int(i)), atol=0.01)

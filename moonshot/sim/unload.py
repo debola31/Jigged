@@ -14,14 +14,13 @@ import sys
 import mujoco
 import numpy as np
 
-from moonshot.motion import door_cycle as DC
 from moonshot.motion import unload as UL
 from moonshot.sim.door_cycle import _Cell
 from moonshot.world import vise as V
 
 
 class Unload(_Cell):
-    doors_open_mm = DC.OPEN_MM
+    doors_open_mm = 600.0          # fully open, as the vise take loads with them: at 300 the forearm meets the right one
     grip_geoms = {"knob": "knob", "blank_faces": "blank"}
     encloses = {"knob": "knob"}
 

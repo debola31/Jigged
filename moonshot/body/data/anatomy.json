@@ -145,6 +145,26 @@
       "middle": 0,
       "ring": 5,
       "little": 10
+    },
+    "tenodesis": {
+      "about": "Two-joint finger muscles (plan 3.1): the long flexors and extensors cross the wrist, so in a relaxed hand bending the wrist back closes the fingers and bending it forward opens them. Each finger's relaxed MCP and PIP angle, linear in wrist flexion between wrist_deg's two ends; moonshot/body/skeleton.py makes each a spring along a fixed tendon across the wrist and the finger joint, so the finger's motor overrides it.",
+      "wrist_deg": [
+        -65,
+        80
+      ],
+      "mcp_flex": [
+        35,
+        0
+      ],
+      "pip": [
+        50,
+        0
+      ],
+      "source": "study",
+      "reason": "At full wrist extension: Neumann 2009, Kinesiology of the Musculoskeletal System, 2nd ed. (Mosby), ch. 8, pp. 266-267: complete wrist extension flexes a healthy relaxed hand's MCP joints about 35 deg, PIP 50 and DIP 20 (as cited by Sonune et al. 2024, Can Prosthet Orthot J 7(1):42879); DIP follows PIP by its own coupling. Proposed: the fingers straight at full wrist flexion, and linear between",
+      "stiffness_nm_per_rad": 0.3,
+      "stiffness_source": "proposed",
+      "stiffness_reason": "Enough that a relaxed finger keeps its posture against its own weight (about 0.01 N m), and well under the fingers' servo stiffness (0.9-1.6 N m/rad, strength.json), so effort overrides it"
     }
   },
   "wrist_deg": {

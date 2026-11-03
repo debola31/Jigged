@@ -5,7 +5,8 @@ Each motor gets the planned position, with the planned motion's own torques fed 
 dynamics, as moonshot/body/controller.py's `track`), so the body follows the plan within its strength. A hand with
 effort on a grip pushes its pads into the grip's object (the vise take's squeeze, per hand: each pad's joint
 direction from its Jacobian) and stiffens, as people co-contract while they work (Gribble et al. 2003); a load the
-step knows its hand meets (`hand_force`) is fed forward through the arm.
+step knows its hand meets (`hand_force`) is fed forward through the arm; and a steady error in where a hand is, in
+place and turn, is corrected slowly, as by sight (`correction`, as the vise take's).
 
 A step subclasses TakeRunner: `scene(body_xml)` returns the MJCF with its station and objects, `grip_geoms` names
 each grip's object geom, `before_step(t)` runs the machine's control and the step's own logic, and `station`,
@@ -21,6 +22,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 from scipy.interpolate import CubicSpline
+from scipy.spatial.transform import Rotation
 
 from moonshot.body.skeleton import H0, build
 from moonshot.motion import kinematics as BM
@@ -38,6 +40,10 @@ SETTLE_STEPS = 300
 
 FIST_MM = np.array([70.0, 0.0, -20.0])     # the middle of a closed fist, in the hand frame (long, radial, dorsal)
 APPROACH_S = 0.4                           # a welded tool and the hand stop colliding this long before the grip closes
+# people correct a steady error in where their hand is by sight, slowly (as the vise take, moonshot/sim/vise_take.py)
+VISUAL_TAU = 0.3                           # s
+VISUAL_MAX = np.array([0.04, 0.35])        # at most this far (m) and this much turn (rad)
+DAMPING = 0.02                             # damped least squares for the arm's wrist corrections
 
 
 class TakeRunner:
@@ -96,6 +102,10 @@ class TakeRunner:
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root}
         self.squeeze: dict[tuple[str, str], dict] = {}
         self._held_apart: dict[str, bool] = {}
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{n}").id] for n in ARM]) for s in SIDES}
+        self.side_bodies = {s: {b for b in range(m.nbody) if m.body(b).name.startswith(f"{s}_")} for s in SIDES}
+        self.visual = {s: np.zeros(6) for s in SIDES}
+        self._touch, self._steps = {s: False for s in SIDES}, 0
 
     # --- for a step to fill in ---------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
@@ -237,11 +247,52 @@ class TakeRunner:
                 target[self.body_q] += dq[self.body_dof]
             k[self.hand_acts[side]] = 1.0 + STIFFEN * effort
             k[self.arm_acts[side]] = 1.0 + STIFFEN_ARM * effort
+        target[self.body_q] += self.correction(t)[self.body_dof]
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
         d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * p.qvel[self.act_dof]) / (self.kp0 * k)
         self.before_step(t)
         mujoco.mj_step(m, d)
+
+    def touching(self, side: str) -> bool:
+        """Does the side's arm touch anything but the person and what it holds by a constraint?"""
+        m, d = self.model, self.data
+        held = {m.body(self.encloses[e["grip"]]).id for e in self.grip_events
+                if e["side"] == side and d.eq_active[m.equality(f"enclose_{e['grip']}").id]}
+        mine = self.side_bodies[side]
+        for i in range(d.ncon):
+            b1, b2 = m.geom_bodyid[d.contact[i].geom1], m.geom_bodyid[d.contact[i].geom2]
+            if (b1 in mine) != (b2 in mine) and (b2 if b1 in mine else b1) not in held:
+                return True
+        return False
+
+    def correction(self, t: float) -> np.ndarray:
+        """Joint offsets (nv) that move each hand toward where the plan has it, by the steady error seen so far, in
+        place and in turn; paused while the arm touches something, where it would wind up against the contact."""
+        m, d, p = self.model, self.data, self.plan
+        dt, dq = m.opt.timestep, np.zeros(m.nv)
+        for side in SIDES:
+            hb = m.body(f"{side}_hand").id
+            Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+            err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+            v = self.visual[side]
+            if self._steps % 10 == 0:                            # contacts change slowly next to a 1 ms step
+                self._touch[side] = self.touching(side)
+            if not self._touch[side]:
+                v += err * dt / VISUAL_TAU
+            for i, cap in enumerate(VISUAL_MAX):
+                n = np.linalg.norm(v[3 * i:3 * i + 3])
+                if n > cap:
+                    v[3 * i:3 * i + 3] *= cap / n
+            if not v.any():
+                continue
+            jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+            mujoco.mj_jacBody(m, p, jacp, jacr, hb)
+            idx = self.arm_dofs[side]
+            J = np.vstack([jacp[:, idx], jacr[:, idx] * 0.1])            # a radian weighs like 100 mm
+            dq[idx] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(6), np.r_[v[:3], v[3:] * 0.1])
+        self._steps += 1
+        return dq
 
     # --- the run ---------------------------------------------------------------------------------------
     def hands(self) -> dict[str, dict]:

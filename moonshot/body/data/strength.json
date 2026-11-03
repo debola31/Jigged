@@ -1,5 +1,28 @@
 {
- "about": "Peak isometric strength per joint motor: [against the joint's positive direction, along it], N m for hinges, N for the shoulder girdle's slides. These are single peaks; strength curves by angle and speed are a separate checklist item. source: study | proposed.",
+ "about": "Peak isometric strength per joint motor: [against the joint's positive direction, along it], N m for hinges, N for the shoulder girdle's slides. Each hinge motor's strength at any moment is its peak scaled by its curve in `curves`, by angle and speed. source: study | proposed.",
+ "curves": {
+  "about": "Strength by joint angle and speed, as a fraction of the peak in `joints` (moonshot/body/skeleton.py StrengthCurve; the controller caps each motor at it every step). Per strength key and direction (`against` / `along` the joint's positive direction, as `max`): `torque_nm` [speed][angle], normalised to its own isometric maximum; else flat in angle, with the `speed` default. `grip_by_wrist` scales the long finger flexors by wrist flexion. Speeds are shortening, the joint moving the way the motor pushes; off the grid each holds its nearest edge. Slides (pelvis, girdle) have no curve.",
+  "speed": {"speed_deg_s": [0, 60, 120, 180, 240, 300], "scale": [1.0, 0.730, 0.644, 0.564, 0.469, 0.437],
+   "source": "proposed",
+   "reason": "Every hinge without its own surface: the elbow's mid-range decay from Frey-Law et al. 2012 (J Appl Biomech 28(6):726-737, men, at 65 deg: flexion 63.0 / 44.7 / 38.7 / 33.1 / 27.9 / 25.7 N m and extension 52.8 / 39.6 / 35.6 / 31.8 / 26.1 / 24.6 N m at 0-300 deg/s, each normalised and the two averaged), mid-range being where the decay is least. The authors found every joint and direction differs, so this stands in until each has its own"},
+  "lengthening": {"scale": 1.0, "source": "proposed",
+   "reason": "A motor being stretched (moving against its push) keeps its isometric strength. People's eccentric strength is somewhat higher; keeping it at isometric errs weak"},
+  "elbow": {
+   "along": {"angle_deg": [15, 40, 65, 90, 110], "speed_deg_s": [0, 60, 120, 180, 240, 300],
+    "torque_nm": [[56.4, 62.9, 63.0, 60.3, 56.4], [41.2, 43.9, 44.7, 42.3, 35.7], [36.1, 38.0, 38.7, 36.8, 27.9],
+                  [32.1, 33.9, 33.1, 29.2, 18.7], [28.1, 30.0, 27.9, 21.5, 12.0], [24.1, 26.1, 25.7, 18.4, 8.4]],
+    "source": "study",
+    "reason": "Flexion: Frey-Law et al. 2012, J Appl Biomech 28(6):726-737, Table 4, men's mean peak torque (Biodex, 30 men) by elbow flexion and speed. Three cells are proposed, where over half the men couldn't reach the speed: 240 deg/s at 15 deg (28.1) and 300 deg/s at 15 and 40 deg (24.1, 26.1), each extrapolated along speed from its two fastest measured cells"},
+   "against": {"angle_deg": [15, 40, 65, 90, 110], "speed_deg_s": [0, 60, 120, 180, 240, 300],
+    "torque_nm": [[40.2, 50.5, 52.8, 50.7, 45.4], [26.2, 37.4, 39.6, 38.3, 36.4], [21.9, 33.6, 35.6, 35.2, 33.7],
+                  [15.3, 29.0, 31.8, 33.0, 30.8], [8.7, 20.5, 26.1, 28.5, 27.9], [5.5, 17.1, 24.6, 26.7, 25.0]],
+    "source": "study",
+    "reason": "Extension: Frey-Law et al. 2012, Table 5, men's mean peak torque by elbow flexion and speed. Two cells are proposed, where over half the men couldn't reach the speed: 240 and 300 deg/s at 110 deg (27.9, 25.0), extrapolated along speed from its two fastest measured cells"}},
+  "grip_by_wrist": {"wrist_deg": [-65, -45, -35, -15, 30, 80], "scale": [1.0, 1.0, 1.0, 0.71, 0.50, 0.27],
+   "applies_to": ["mcp_flex", "pip", "thumb_ip"],
+   "source": "study",
+   "reason": "Finger flexion (the long flexors cross the wrist) by wrist flexion (+) / extension (-): strongest at 35 deg extension and 0.71 at 15 deg extension (O'Driscoll et al. 1992, J Hand Surg Am 17(1):169-177: two thirds to three quarters); 0.50 at 30 deg flexion (Bhardwaj et al. 2011, Indian J Plast Surg 44(1):55-58, 100 adults, splinted: 13.9 kg against 27.9 kg at 45 deg extension, the strongest splinted position). Proposed: 1.0 past 45 deg extension, where neither measured, and 0.27 at full flexion, the 15 deg extension to 30 deg flexion slope continued"}
+ },
  "hand_stiffness_nm_per_rad": {
   "mcp_flex": 1.6, "mcp_abd": 0.6, "pip": 0.9, "cmc": 0.6, "thumb_cmc_flex": 3.0, "thumb_cmc_abd": 3.0, "thumb_mcp_flex": 1.6,
   "thumb_mcp_abd": 0.6, "thumb_ip": 0.9,

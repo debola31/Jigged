@@ -715,6 +715,39 @@ class Planner:
             env = envelope(s_w[order], c2[g][order])
             lo, hi = sorted((ax(x0), ax(rc["to"])))
             p.cut(prism(env, ez, ex, lo, hi), f)
+        # the junction, where the ridge meets the last hump: passes along model x ride both, so a pass's height varies
+        # along it; the cut is the surface the ball's lowest points sweep there, through a 0.5 mm grid (within 10 µm),
+        # as a solid of its triangles under a lid. It ignores the ridge's blend into the hump, which the ball may graze
+        # (an exempt blend)
+        xa, xb = cfg["junction"], max(starts)
+        xs = np.arange(xa, xb + 1e-9, 0.1)
+        C = np.maximum(drop(prof, xs)[None, :], c2[:, None])            # (pass, x): the ball's centre, world height
+        for i, z in enumerate(st2):
+            order = slice(None, None, 5 if i % 2 == 0 else -5)            # a move every 0.5 mm, zig-zag
+            pts = [f.world([x, 0, z]) * [1, 1, 0] + [0, 0, h - R] for x, h in zip(xs[order], C[i][order])]
+            p.to([*pts[0][:2], top + CLEAR_MM])
+            for q in pts:
+                p.to(q, t.feed)
+            p.to([*pts[-1][:2], top + CLEAR_MM])
+        gx, gz = np.linspace(xa, xb, int(round((xb - xa) / 0.5)) + 1), np.linspace(-gap, gap, int(round(2 * gap / 0.5)) + 1)
+        S = np.full((len(gz), len(gx)), np.inf)
+        for i, z in enumerate(st2):
+            r2 = R * R - (gz[:, None, None] - z) ** 2 - (gx[None, :, None] - xs[None, None, :]) ** 2
+            S = np.minimum(S, np.where(r2 >= 0, C[i] - np.sqrt(np.maximum(r2, 0)), np.inf).min(axis=2))
+        P = np.array([[f.world([x, 0, z]) * [1, 1, 0] + [0, 0, S[i, j]] for j, x in enumerate(gx)]
+                      for i, z in enumerate(gz)])
+        lid = top + CLEAR_MM
+        V = lambda q: cq.Vector(*map(float, q))                         # noqa: E731
+        tri = lambda *q: cq.Face.makeFromWires(cq.Wire.makePolygon([V(v) for v in q], close=True))   # noqa: E731
+        faces = [tri(P[i, j], P[i, j + 1], P[i + 1, j + 1]) for i in range(len(gz) - 1) for j in range(len(gx) - 1)]
+        faces += [tri(P[i, j], P[i + 1, j + 1], P[i + 1, j]) for i in range(len(gz) - 1) for j in range(len(gx) - 1)]
+        up = lambda q: np.r_[q[:2], lid]                                # noqa: E731
+        for edge in (P[0, :], P[-1, :], P[:, 0], P[:, -1]):             # four walls up to the lid, and the lid
+            faces.append(cq.Face.makeFromWires(cq.Wire.makePolygon([V(q) for q in edge] + [V(up(edge[-1])), V(up(edge[0]))],
+                                                                   close=True)))
+        faces.append(cq.Face.makeFromWires(cq.Wire.makePolygon([V(up(q)) for q in (P[0, 0], P[0, -1], P[-1, -1], P[-1, 0])],
+                                                               close=True)))
+        p.cut(cq.Solid.makeSolid(cq.Shell.makeShell(faces)), f)
         return p
 
 

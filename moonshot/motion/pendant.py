@@ -16,9 +16,11 @@ from __future__ import annotations
 import math
 import shutil
 
+import mujoco
 import numpy as np
 import torch
 
+from moonshot.body.skeleton import H0, build as build_body
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion.primitives import PosePath, min_jerk, open_like
@@ -37,11 +39,13 @@ DETENT_DEG = 360.0 / DIAL["detents_per_turn"]
 STROKE_CLICKS = 30                                        # 108 deg a stroke: a comfortable turn of the forearm
 LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pendant's left half, the machine at the left
 REF_KEY = "offset"
+KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
+                                                          # co-contract for precise aiming (Gribble et al. 2003)
 OVERTURN = 1.25                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 HOVER_MM = 40.0
-TOUCH_LIFT_MM = 3.0                                       # a press is planned to the pad touching the key, not in it:
+TOUCH_LIFT_MM = 1.0                                       # a press is planned to the pad touching the key, not in it:
                                                           # the push presses (moonshot/sim/pendant.py)
 SHARED_GRIPS = data_root() / "takes" / "pendant" / "grips.json"   # every pendant take stands and grips alike
 
@@ -52,6 +56,26 @@ def key_at(name: str) -> np.ndarray:
         return np.array(A[name]["at_mm"], float) + OFFSET
     x, z = A["keys"]["at_mm"][name]
     return np.array([x, FACE_Y, z], float) + OFFSET
+
+
+def fingertip_in_hand(q: dict, press: np.ndarray) -> np.ndarray:
+    """Where the body model's index meets a key, in the hand's frame (mm, from the wrist): its distal capsule's end
+    farthest along the press direction (in the hand's frame), at the grip's finger angles. The physics run presses with
+    that capsule, which sits inside the rendered skin, so the plan aims that point, not a skin vertex."""
+    body = build_body()
+    m = mujoco.MjModel.from_xml_string(body.xml)
+    d = mujoco.MjData(m)
+    for n, v in q.items():
+        j = body.joints.get(f"R_{n}")
+        if j is not None:
+            d.qpos[m.jnt_qposadr[m.joint(j.name).id]] = math.radians(v - j.rest)
+    mujoco.mj_kinematics(m, d)
+    Hm, W = d.body("R_hand").xmat.reshape(3, 3) @ H0, d.body("R_hand").xpos
+    g = m.geom("R_g_dis2").id
+    axis = d.geom_xmat[g].reshape(3, 3)[:, 2] * m.geom_size[g][1]
+    n = Hm @ np.asarray(press, float)
+    tip = max((d.geom_xpos[g] + axis, d.geom_xpos[g] - axis), key=lambda e: e @ n) + n * m.geom_size[g][0]
+    return Hm.T @ (tip - W) * 1000
 
 
 def _rot(deg: float) -> np.ndarray:
@@ -102,12 +126,9 @@ class PendantTake(StepTake):
         SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(own, SHARED_GRIPS)
         g = self.grips["keypad"]
-        # where the index meets the face, in the hand's frame: the grip's skin vertex standing farthest toward the face
-        # (an inclined finger touches with its tip, a centimetre past the pad's centre), and the press direction
-        skin = self.hand.forward(g["q"], collision=True, smooth=True)["skin"]
-        world = (skin @ (g["H"] @ self.hand.wrist_frame().T).T + g["W"])[np.unique(self.hand.model.skin_f)]
-        tip = world[np.argmax(world[:, 1])]
-        self.pad_in_hand = (g["H"].T @ (tip - g["W"]), g["H"].T @ np.array([0.0, 1.0, 0.0]))
+        # where the index meets the face, in the hand's frame (fingertip_in_hand), and the press direction
+        ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
+        self.pad_in_hand = (fingertip_in_hand(g["q"], ax), ax)
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
         self.cursor = 0                           # the work offsets page's cursor: x, y or z
@@ -154,10 +175,13 @@ class PendantTake(StepTake):
         W_on = key_at(name) - [0, TOUCH_LIFT_MM, 0] - H @ pt      # the wrist with the fingertip just off the key
         hover = W_on + [0, -HOVER_MM, 0]
         t0 = self.t
-        if self.where != "keys":
+        reached = self.where != "keys"
+        if reached:
             self.look(t0, key_at(name))
             dur = float(np.clip(0.35 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
             self.transit("R", t0, t0 + dur, hover, fade=(H, 1.0))
+            self.effort("R", t0, 0.0, "keypad")
+            self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
             self.fingers("R", t0 + 0.1, self.grips["keypad"]["q"])
             t0 += dur
             move_s = 0.05
@@ -166,7 +190,7 @@ class PendantTake(StepTake):
         start = self.side["R"]["wrist"]
         # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
         # settle on its target
-        dwell = 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
+        dwell = 0.6 if reached else 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
         move_s += dwell
         path = PosePath(H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
             t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
@@ -177,8 +201,14 @@ class PendantTake(StepTake):
             ("pose", H, path.at(t)[1], 0.3), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 3.0)])
         self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
+        self.effort("R", t1, KEY_EFFORT, "keypad")
         self.side["R"]["wrist"], self.t, self.where = hover, t1, "keys"
         self._follow(name)
+
+    def leave_keys(self, t: float) -> None:
+        """The arm eases off as the hand leaves the keys."""
+        if self.where == "keys":
+            self.effort("R", t + 0.25, 0.0, None)
 
     def keys(self, names) -> None:
         for n in names:
@@ -215,6 +245,7 @@ class PendantTake(StepTake):
             a0, a1 = -d / 2, d / 2
             t0 = self.t
             H0_, W_off = self.dial_pose(a0, OFF_RIM_MM)
+            self.leave_keys(t0)
             if self.where != "dial":
                 dur = float(np.clip(0.35 + np.linalg.norm(W_off - self.side["R"]["wrist"]) / 800.0, 0.45, 0.8))
                 self.transit("R", t0, t0 + dur, W_off, fade=(H0_, 1.0))
@@ -286,6 +317,7 @@ class PendantTake(StepTake):
 
     def rest_hand(self, dur: float = 1.0) -> None:
         """The right hand back to the side."""
+        self.leave_keys(self.t)
         self.fingers("R", self.t + 0.2, self.q_relax)
         self.transit("R", self.t, self.t + dur, self.rest)
         self.t += dur

@@ -4,10 +4,9 @@
 
 - A press is force control at the index pad: the planned force pushed into the key along the plan's normal,
   trimmed by how hard the pad really presses (integral control), as the vise take presses (moonshot/sim/vise_take.py).
-  The fingertip is steered onto the key by sight as it comes in (people point at a 14 mm key this way), across the
-  key's face, through the arm's joints: by where the plan's own fingertip misses the key (known, so fed forward), and
-  slowly by how far the hand trails the plan (as the vise take's sight-guided correction). It is held off the face
-  until it is over the key; the press's own direction is the force's.
+  The plan aims the fingertip at the key; how far the hand trails the plan is the runner's sight-guided correction
+  (moonshot/sim/runner.py). Until the fingertip is over its key it is held off the face, so a hand that arrives off
+  its key re-aims rather than sliding across the keys between; the press's own direction is the force's.
 - A stroke of the handle ends when the dial has turned its clicks, as people stop turning when the dial reads right:
   the plan turns the hand a little farther, and the grip lets go there.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
@@ -38,11 +37,9 @@ from moonshot.world.vise import Load
 
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
 TOUCH_N = 0.2               # less than this on a key isn't touching it
-AIM_TAU = 0.3               # s: how fast sight takes up the hand's lag behind the plan (as moonshot/sim/vise_take.py)
 ALIGNED_MM = 6.0            # a press pushes only once the fingertip is this close to the key's centre (keys are 14 mm)
 STANDOFF_MM = 8.0           # until then the fingertip is held this far off the face, so a hand that lands off its key
                             # lifts and re-aims rather than sliding across the keys between
-AIM_MAX = 0.04              # m: the most sight corrects
 DAMPING = 0.02              # m: damped least squares for the corrections
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
@@ -107,7 +104,6 @@ class PendantRunner(TakeRunner):
         self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM]) for s in ("R", "L")}
         act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
-        self.aim_c = {s: np.zeros(3) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}
         self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.turn_from: dict[int, int] = {}
@@ -178,8 +174,8 @@ class PendantRunner(TakeRunner):
                 continue                                       # not over the key yet: sight first, then press
             ramp = min(1.0, (t - (e["t0"] - 0.05)) / 0.05)
             fade = 1.0 - min(1.0, max(0.0, (t - e["t1"]) / 0.08))
-            if e["t0"] <= t < e["t1"] and F > TOUCH_N:
-                self.press_i[i] = float(np.clip(self.press_i[i] + PRESS_KI * (e["force"] - F) * dt, -e["force"], 2 * e["force"]))
+            if e["t0"] <= t < e["t1"]:                         # pushing until the key is felt, then holding its force
+                self.press_i[i] = float(np.clip(self.press_i[i] + PRESS_KI * (e["force"] - F) * dt, -e["force"], e["force"]))
             mag = max(0.0, e["force"] * ramp + self.press_i[i]) * fade
             g = self.index_pad[e["side"]]
             jacp = np.zeros((3, m.nv))
@@ -200,28 +196,18 @@ class PendantRunner(TakeRunner):
 
     def aim(self, t: float) -> None:
         """Steer each index pad onto the key it is about to press, by sight, across the key's face."""
-        m, d, dt = self.model, self.data, self.model.opt.timestep
+        m, d = self.model, self.data
         for s in ("R", "L"):
             # the next press within reach in time: the hand works toward it from the last one's end
             near = [e for e in self.presses if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
-            lag = self.aim_c[s]
-            if near:
-                n = np.asarray(near[0]["normal"], float)
-                key = self.key_at[near[0]["key"]]
-                flat = lambda v: v - n * (v @ n)                        # noqa: E731  across the face
-                planned = self.fingertip(s, n, self.plan)
-                ff = flat(key - planned)                                # the plan's own miss, known
-                tip = self.fingertip(s, n)
-                lag += flat(planned + ff - tip) * dt / AIM_TAU          # the hand trailing, taken up by sight
-                if np.linalg.norm(lag) > AIM_MAX:
-                    lag *= AIM_MAX / np.linalg.norm(lag)
-                c = ff + lag
-                err = key - tip
-                if np.linalg.norm(flat(err)) > ALIGNED_MM / 1000 and self._key_n.get(near[0]["key"], 0.0) < TOUCH_N:
-                    c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)  # off the face until over the key
-            else:
-                lag *= 1 - dt / 0.2
-                c = lag
+            if not near:
+                continue
+            n = np.asarray(near[0]["normal"], float)
+            err = self.key_at[near[0]["key"]] - self.fingertip(s, n)
+            across = err - n * (err @ n)
+            if np.linalg.norm(across) <= ALIGNED_MM / 1000 or self._key_n.get(near[0]["key"], 0.0) >= TOUCH_N:
+                continue
+            c = n * min(0.0, err @ n - STANDOFF_MM / 1000)              # off the face until over the key
             if not c.any():
                 continue
             g = self.index_pad[s]

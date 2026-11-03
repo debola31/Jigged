@@ -337,21 +337,21 @@ class PendantRunner(TakeRunner):
     def hold_dial(self, t: float) -> None:
         """The dial_pinch shortcut: on while a stroke of a jog not yet done turns the dial (not while the grip closes
         on it, while the hand still settles) and a finger touches its rim, its anchor set where the hand is then, so
-        switching it on moves nothing; and dial_lock whenever it is
+        switching it on moves nothing; off the moment no finger touches it (left on, it turned the dial under a hand
+        gone off the rim, and back 7 clicks as the hand went back: op10-z); and dial_lock whenever it is
         off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
         m, d = self.model, self.data
         e, grip = self.effort("R", t)
         stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
         want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
-        if want and not d.eq_active[self.pinch]:
-            touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
-                           for c in d.contact[:d.ncon])
-            if touching:
-                hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
-                p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
-                m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
-                d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
-        elif not want and d.eq_active[self.pinch]:
+        touching = want and any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
+                                for c in d.contact[:d.ncon])
+        if touching and not d.eq_active[self.pinch]:
+            hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
+            p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
+            m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
+            d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
+        elif not touching and d.eq_active[self.pinch]:
             d.eq_active[self.pinch] = 0
         if not d.eq_active[self.pinch] and not d.eq_active[self.lock]:
             n = self.machine.detents

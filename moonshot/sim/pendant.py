@@ -137,8 +137,6 @@ class PendantRunner(TakeRunner):
         self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
         self.jog_t0 = {e["jog"]: e["t0"] - 0.25 for e in reversed(self.turns)}  # counted from its first stroke
         self.jog_end = {j: e["t1"] + 0.2 for j, e in self.jog_ev.items()}       # to its last stroke's end
-        self.jog_from: dict[int, int] = {}          # jog -> the dial's clicks at its start
-        self.jog_need: dict[int, int] = {}          # jog -> the clicks it needs, from where the machine is then
         self.jog_done: dict[int, float] = {}        # jog -> when the machine read right
         self.jog_hold: dict[int, np.ndarray] = {}   # jog -> the joints its hand is held at
         self._corr = np.zeros(m.nv)                 # the sight correction the last step added
@@ -275,19 +273,17 @@ class PendantRunner(TakeRunner):
         return self._corr
 
     def count_clicks(self, t: float) -> None:
-        """While a jog's strokes turn the dial: the moment the machine reads where the plan has it after the jog, and
+        """While a jog's strokes turn the dial: the moment the position display reads where the plan has the axis
+        after the jog (counting clicks would count those lost at a travel limit), and
         the joints the hand stops at then: the arm where it is (what the servo aims at, less the sight correction it
         adds), not where the plan had it, which the lagging hand would catch up to, turning the dial on; the fingers
         as the plan has them, gripping."""
         for j, t0 in self.jog_t0.items():
             if t0 <= t <= self.jog_end[j] and j not in self.jog_done:
-                c, e = self.machine.clicks(), self.jog_ev[j]
-                if j not in self.jog_from:
-                    self.jog_from[j] = c
-                    i = "xyz".index(e["axis"])
-                    at = self.machine.machine_mm()[i] - self.machine0[i]
-                    self.jog_need[j] = round((e["to_mm"] - at) / e["inc_mm"])
-                if (c - self.jog_from[j]) * self.jog_dir[j] >= self.jog_need[j] * self.jog_dir[j]:
+                e = self.jog_ev[j]
+                i = "xyz".index(e["axis"])
+                at = self.machine.jog_goal_mm()[i] - self.machine0[i]
+                if (e["to_mm"] - at) * self.jog_dir[j] < e["inc_mm"] / 2:
                     q, _, _ = super().at(t)
                     arm_q, arm_dof = self.r_q[self.r_arm], self.r_dof[self.r_arm]
                     q[arm_q] = self.data.qpos[arm_q] - self._corr[arm_dof]
@@ -320,12 +316,14 @@ class PendantRunner(TakeRunner):
         return q, v, a
 
     def hold_dial(self, t: float) -> None:
-        """The dial_pinch shortcut: on while a stroke of a jog not yet done grips the dial and a finger touches its
-        rim, its anchor set where the hand is then, so switching it on moves nothing; and dial_lock whenever it is
+        """The dial_pinch shortcut: on while a stroke of a jog not yet done turns the dial (not while the grip closes
+        on it, while the hand still settles) and a finger touches its rim, its anchor set where the hand is then, so
+        switching it on moves nothing; and dial_lock whenever it is
         off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
         m, d = self.model, self.data
         e, grip = self.effort("R", t)
-        want = grip == "dial" and e >= 0.5 and self.frozen(t) is None
+        stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
+        want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
         if want and not d.eq_active[self.pinch]:
             touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
                            for c in d.contact[:d.ncon])

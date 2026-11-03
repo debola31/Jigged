@@ -209,6 +209,11 @@ class Control:
         d = self.data
         return np.array([-d.qpos[self.q["x"]], -d.qpos[self.q["y"]], d.qpos[self.q["z"]]]) / M
 
+    def jog_goal_mm(self) -> np.ndarray:
+        """Where the handle has sent the axes (machine mm, Haas's signs): the position display's number, which the
+        axes reach no slower than rapid."""
+        return np.array([-self._jog_goal[0], -self._jog_goal[1], self._jog_goal[2]]) / M
+
     def clicks(self) -> int:
         """The jog handle's position in detents, clockwise from the operator positive."""
         return round(self.data.qpos[self.q["jog"]] * self.detents / (2 * math.pi))

@@ -36,14 +36,15 @@ DIAL_C = np.array(DIAL["at_mm"], float) + OFFSET          # the dial's front fac
 DIAL_U = np.array(DIAL["axis"], float)                    # into the pendant: a + turn is clockwise from the operator
 DIAL_R = DIAL["radius_mm"]
 DETENT_DEG = 360.0 / DIAL["detents_per_turn"]
-STROKE_CLICKS = 30                                        # 108 deg a stroke: a comfortable turn of the forearm
+STROKE_CLICKS = 20                                        # 72 deg a stroke: wider, and the turned hand's fingers swing
+                                                          # down onto Cycle Start and Feed Hold below the handle
 LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pendant's left half, the machine at the left
 # a keypad grip per region of the keys, each solved at one key there: one hand pose can't reach every key without
 # pitching the curled fingers into the face
 KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi"}
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
-OVERTURN = 1.35                                           # a stroke turns the hand this much farther than its clicks;
+OVERTURN = 1.15                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
 OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far

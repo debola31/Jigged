@@ -28,7 +28,7 @@ GLTF_TRANSFORM = "@gltf-transform/cli@4.5.1"
 # Triangle budgets for the shop view, where a machine is a few hundred pixels across and a tool a few.
 BUDGET = {"machines": 15_000, "support": 4_000}
 BUDGET_DEFAULT = 1_500
-SIMPLIFY_ERROR = 0.02                      # a fraction of the mesh's extent; at 0.005 the big machines stopped short
+SIMPLIFY_ERROR = 0.02                      # a fraction of the mesh's extent; invisible at shop scale
 PORT = 8787
 
 

@@ -139,9 +139,10 @@ export class ShopScene {
       this.controls = new OrbitControls(this.camera, this.renderer.domElement);
       this.controls.target = this.target;
       this.controls.enableDamping = false;
+      // No wheel zoom: the wheel over the view has to keep scrolling the page. The steps' flights
+      // give the close-ups.
+      this.controls.enableZoom = false;
       this.controls.maxPolarAngle = deg(85);
-      this.controls.minDistance = 2;
-      this.controls.maxDistance = 120;
       this.controls.addEventListener('change', () => this.render());
       this.controls.addEventListener('start', () => (this.flight = null));
       this.controls.update();
@@ -155,6 +156,12 @@ export class ShopScene {
 
   /** Outline where a step happens: its machine's box, or its zone on the floor. */
   highlight(where: Where): void {
+    this.outline.traverse((o) => {
+      if (o instanceof LineSegments) {
+        o.geometry.dispose();
+        o.material.dispose();
+      }
+    });
     this.outline.clear();
     const station = this.station(where);
     if (station.item) {
@@ -175,7 +182,7 @@ export class ShopScene {
     this.render();
   }
 
-  /** Fly to where a step happens, seen from its front: a machine's operator side, or a zone's aisle. */
+  /** Fly to where a step happens: a machine seen from its operator side, or a zone from the south. */
   flyToStation(where: Where): void {
     const station = this.station(where);
     if (station.item) {
@@ -191,9 +198,9 @@ export class ShopScene {
       });
       return;
     }
+    // A zone is seen from the south, the way its floor label reads.
     const target = new Vector3(...toScene(where.x, where.y, 0));
-    const facing = where.y < this.shop.building.size[1] / 2 ? 1 : -1;
-    this.flyTo({ target, position: target.clone().add(new Vector3(1.5, 7, -facing * 9)) });
+    this.flyTo({ target, position: target.clone().add(new Vector3(0, 10, 13)) });
   }
 
   showWholeShop(): void {
@@ -224,6 +231,7 @@ export class ShopScene {
         }
       }
     });
+    this.scene.environment?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

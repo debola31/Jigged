@@ -100,12 +100,14 @@ export function StepList({ part, index, onSelect }: { part: LivePart; index: num
   const current = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Keep the current step in view inside the list, without scrolling the page.
+    // Keep the current step in view inside the list, without scrolling the page. Measured against
+    // the box, since each group's List is its own offsetParent.
     const b = box.current;
     const c = current.current;
     if (!b || !c) return;
-    if (c.offsetTop < b.scrollTop + 48 || c.offsetTop + c.offsetHeight > b.scrollTop + b.clientHeight) {
-      b.scrollTop = c.offsetTop - b.clientHeight / 3;
+    const top = c.getBoundingClientRect().top - b.getBoundingClientRect().top + b.scrollTop;
+    if (top < b.scrollTop + 48 || top + c.offsetHeight > b.scrollTop + b.clientHeight) {
+      b.scrollTop = top - b.clientHeight / 3;
     }
   }, [index]);
 

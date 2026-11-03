@@ -71,7 +71,7 @@ JAW_TOP = VISE["jaw_top_z"]
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
 REACH_S, REACH_PEAK = 0.66, 0.65
-KNOB_REACH_S, KNOB_PEAK, KNOB_PEAK_FINAL = 0.72, 0.627, 0.613
+KNOB_REACH_S, KNOB_PEAK, KNOB_PEAK_FINAL = 0.68, 0.665, 0.6
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
@@ -637,8 +637,11 @@ class Take:
         self.look(t0, knob_center(phi_g))
         # from over the vise: out over the crank disc, then onto the knob from the operator's side, in as long as
         # people's reach (1.2 s measured 0.90 and 0.97, onset to first touch); paced, so the long leg out over the disc
-        # doesn't spike
-        self.transit(t0, t0 + reach, Wk, via=[over, Wk + Hk[:, 2] * 45 + [0, -10, 15]], fade=(Hk, 1.0), paced=True)
+        # doesn't spike. The final pull's comes onto the knob along its axis from beyond its end, the hand open past it,
+        # and slides on, as the hand backs off it: across it from the side along the hand's own axis, at op40's crank
+        # angle the fingers swept over the lever on the way in
+        on = Wk + KNOB_AXIS * 60 + [0, 0, 10] if final else Wk + Hk[:, 2] * 45 + [0, -10, 15]
+        self.transit(t0, t0 + reach, Wk, via=[over, on], fade=(Hk, 1.0), paced=True)
         ko = open_like(self.hand, g["q"], 0.9)
         # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
         # the knob (before tg), with the fingers ~0.1 s behind their keys

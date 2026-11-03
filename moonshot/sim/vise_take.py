@@ -87,10 +87,18 @@ class ViseTake:
         self.stiffen = STIFFEN * max(1.0, self.load.mass_kg / V.REFERENCE.mass_kg) ** 0.5
         # the blank starts at the load's stage; reference.npz frame 0 wrongly has it in the vise (frames 1+ and
         # trainual's sim agree)
-        self.xml = cell.with_body(self.body.xml, self.load.stage, parallels, "R_hand", self.load)
+        # a lift-out take starts with the part in the vise, the jaw a turn open (moonshot/motion/setup_take.py start)
+        self.in_vise = self.tk.get("start") == "vise"
+        self.start_p = np.array(self.tk["home"]) if self.in_vise else self.load.stage
+        self.xml = cell.with_body(self.body.xml, self.start_p, parallels, "R_hand", self.load)
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.machine = cell.start(m, self.data)          # idle: holds the table, and the vise on it, where it is
+        if self.in_vise:                                  # the jaw a turn of the screw off the part, the screw locked
+            jaw = (self.load.opening0 - self.load.size[1] - V.VISE["lead"]) * 0.001
+            q = m.jnt_qposadr
+            self.data.qpos[q[m.joint("jaw_slide").id]] = jaw
+            self.data.qpos[q[m.joint("crank").id]] = jaw / m.eq_data[m.equality("lead_screw").id, 1]
         self.ref = ReferenceTake(self.body, m, folder)
         self.t = self.rd["t"]
         self.fps = int(self.rd["fps"])
@@ -140,7 +148,7 @@ class ViseTake:
         self.resight_t = hold[0]["t1"] if hold and heavier else None
         z = self.rd["blank"][:, 2].copy()
         z[0] = z[1]                                        # frame 0's glitch (see above)
-        self.t_lift = float(self.t[np.argmax(z > self.load.stage[2] + 1.0)])
+        self.t_lift = float(self.t[np.argmax(z > self.start_p[2] + 1.0)])
         top = int(np.argmax(z))
         self.t_down = float(self.t[top + np.argmax(z[top:] <= z[-1] + 0.5)])
 
@@ -694,7 +702,7 @@ class ViseTake:
                "max_deviation_while_pushing_mm": round(float(lag[pushing].max(initial=0)), 2),
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():
-            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > self.load.stage[2] + 5)),
+            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > self.start_p[2] + 5)),
                                 "grip_N_thumb_median": round(float(np.median(force[lift, 0])), 2),
                                 "grip_N_fingers_median": round(float(np.median(force[lift, 1:5].sum(1))), 2),
                                 "max_slip_mm": round(float(np.max(rec["slip"])), 2)}
@@ -702,6 +710,8 @@ class ViseTake:
         if kd < n:
             out["place"] = {"set_down_vs_planned_mm": [round(float(x), 2) for x in B[kd] - self.rd["blank"][kd]],
                             "tilt_deg": round(float(np.degrees(np.arccos(np.clip(rec["blank_R"][kd][2, 2], -1, 1)))), 2)}
+        if self.in_vise:                                  # a lift-out has no slide, push, crank or parallels check
+            return out
         sl = clips["slide"]
         if int(sl["t1"] * fps) <= n:
             out["slide"] = {"moved_mm": round(float(B[int(sl["t1"] * fps) - 1][1] - B[int(sl["t0"] * fps)][1]), 2),

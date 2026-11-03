@@ -99,9 +99,10 @@ def plane(point, normal, comp=2.0, band=None):
 
 
 class Take:
-    def __init__(self, verbose=True, load: Load = REFERENCE, out=OUT, grips_from=None):
+    def __init__(self, verbose=True, load: Load = REFERENCE, out=OUT, grips_from=None, start="stage"):
         """load: what goes in the vise; out: the folder the take and its grip cache go to; grips_from: a grips.json
-        to use as solved instead of solving (to check the trajectory solver on its own against a known take)."""
+        to use as solved instead of solving (to check the trajectory solver on its own against a known take);
+        start: where the part starts, on the table ("stage") or in the vise, loosened, to be lifted out ("vise")."""
         torch.set_num_threads(8)
         self.verbose = verbose
         self.load, self.out = load, Path(out)
@@ -119,7 +120,9 @@ class Take:
         self.prior = BS.ArmPrior()
         self.out.mkdir(parents=True, exist_ok=True)
         self.cons, self.fkeys, self.ekeys, self.gaze, self.events, self.clips = [], [], [], [], [], []
-        self.blank_keys = [(0.0, np.eye(3), self.stage.copy())]       # (t, R, p) the planned blank pose, piecewise min-jerk
+        self.start = start
+        start_p = self.stage.copy() if start == "stage" else self.home.copy()
+        self.blank_keys = [(0.0, np.eye(3), start_p)]                 # (t, R, p) the planned blank pose, piecewise min-jerk
         self.crank_keys = [(0.0, CRANK0)]
         self.crank_plans = []
         self._knob_free_from = 0.0
@@ -183,9 +186,14 @@ class Take:
         for n in ("index", "middle", "ring", "little"):
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 25.0, 40.0
         q0.update(thumb_cmc_abd=22.0, thumb_cmc_flex=-5.0, thumb_mcp_flex=30.0, thumb_ip=20.0)
-        far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=(4, 10), x=(lo, hi)))
+        # the pads 4-10 mm below the top, where the reference part stands 19 mm proud of the jaws; a part standing
+        # far prouder (op30's, 56 mm, on its side) is pinched halfway down what stands proud, nearer its centre of mass,
+        # or it swings in the hand
+        proud = -jaw_clear
+        depth = (4, 10) if proud < 30 else (proud / 2 - 3, proud / 2 + 3)
+        far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(lo, hi)))  # noqa: E731
         specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets={
-            "thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=(4, 10), x=(-14, 14))),
+            "thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(-14, 14))),
             "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)},
             starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 2. slide: the thumb pad on the near face (above the moving jaw) pushes the part toward the fixed jaw, index
@@ -431,6 +439,34 @@ class Take:
         self.clip("place", t0 - 0.3, self.t + 0.2, "PLACE  over the jaw, down onto the parallels, let go by lifting off")
         self.t_down = t_down
 
+    def set_on_table(self, grip="blank_faces", dur=3.0):
+        """Carry the part, lifted out of the vise, back to the table where the load take found it and set it down;
+        let go by lifting off, as the vise take lets go in the vise."""
+        t0 = self.t
+        R, p = self.blank_at(t0)
+        high = np.array([self.stage[0], self.stage[1], JAW_TOP + self.half[2] + 30])
+        self.look(t0 - 0.4, self.stage)
+        self.move_blank(t0, t0 + 0.6, R, p + [0, 0, 45])
+        self.move_blank(t0 + 0.55, t0 + 1.8, np.eye(3), high)
+        t_down = t0 + dur - 0.2
+        self.move_blank(t0 + 1.75, t_down, np.eye(3), self.stage)
+        self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
+        self.effort(t_down - 0.05, 1.0, grip)
+        self.effort(t_down + 0.1, 0.0, grip)
+        g = self.grips[grip]
+        W_set = self.grip_pose(grip, t_down)[1]
+        t_rel = t_down + 0.1
+        self.fingers(t_rel, g["q"])
+        self.fingers(t_rel + 0.3, open_like(self.hand, g["q"], 0.5))
+        self.transit(t_rel, t_rel + 0.7, W_set + [0, -35, 70], via=[W_set + [0, -4, 22]])
+        self.event("hold_object", None, t_rel, obj="blank")
+        self.event("place_correct", None, t_rel + 0.3)
+        self.event("grip", None, t_rel + 0.1, grip=grip)
+        self.wrist = W_set + [0, -35, 70]
+        self.t = t_rel + 0.7
+        self.clip("set_on_table", t0 - 0.3, self.t + 0.2, "SET DOWN  out of the vise and onto the table beside it")
+        self.t_down = t_down
+
     def slide(self, grip="blank_slide", mm=PLACE_GAP, approach=0.9, dur=0.8, push_N=9.0):
         """The thumb pad comes down onto the near face above the moving jaw (index and middle on the top) and pushes
         the part along the parallels until it meets the fixed jaw (friction on the parallels resists; the physics
@@ -671,7 +707,9 @@ class Take:
         for k in range(n):
             t = k / FPS
             s.load[k] = self.kg if any(e["t0"] + 0.4 <= t < e["t1"] - 0.1 for e in holding) else 0.0
-        for c, h, a, b in self.hand_boxes + [(self.hand_boxes[-1][0], self.hand_boxes[-1][1], self._knob_free_from, 1e9)]:
+        boxes = self.hand_boxes + ([(self.hand_boxes[-1][0], self.hand_boxes[-1][1], self._knob_free_from, 1e9)]
+                                   if self.hand_boxes else [])         # a take with no crank (the lift-out) has none
+        for c, h, a, b in boxes:
             mask = torch.as_tensor([1.0 if a <= k / FPS < b else 0.0 for k in range(n)], dtype=torch.float64)
             s.hand_boxes.append((torch.as_tensor(c, dtype=torch.float64), torch.as_tensor(h, dtype=torch.float64), mask))
         t0 = time.time()
@@ -690,6 +728,9 @@ class Take:
 
     def _knob_tables(self):
         """Body pose on the knob as a function of knob angle (from the solved trajectory), for the closed-loop crank."""
+        if not self.crank_plans:
+            self.knob_phi = self.knob_theta = self.knob_dp = np.zeros(0)
+            return
         ks = [k for k in range(self.n) if any(cp["t0"] <= k / FPS <= cp["t2"] for cp in self.crank_plans)]
         phi = np.array([self.crank_angle(k / FPS) for k in ks])
         keep = np.r_[True, np.diff(phi) > 1e-6]               # strictly increasing for the lookup
@@ -733,7 +774,8 @@ class Take:
             "events": [{k: (v if not isinstance(v, np.ndarray) else v.tolist()) for k, v in e.items()} for e in self.events],
             "clips": self.clips, "T": self.T, "lumbar": LUMBAR.tolist(),
             "parallels": {k: v.tolist() for k, v in self.parallels.items()}, "home": self.home.tolist(), "set": self.set_down.tolist(),
-            "crank_plans": self.crank_plans, "knob_pt_hand": self.knob_pt_hand.tolist(), "opening0": self.opening0,
+            "crank_plans": self.crank_plans, "knob_pt_hand": getattr(self, "knob_pt_hand", np.zeros(3)).tolist(),
+            "opening0": self.opening0, "start": self.start,
             "load": self.load.to_json()}, indent=1),
             encoding="utf-8")
 
@@ -770,6 +812,18 @@ def head_camera(take, theta, dp):
     sm = lambda A: np.stack([np.convolve(np.pad(A[:, i], 6, mode="edge"), np.hanning(13) / np.hanning(13).sum(), "valid")
                              for i in range(3)], 1)
     return sm(np.array(eyes)), sm(np.array(looks)), np.array(ups)
+
+
+def build_lift_out(verbose=True, load: Load = REFERENCE, out=TAKES / "lift-out", grips_from=None):
+    """The part lifted out of the loosened vise and set on the table: the unload's last take."""
+    take = Take(verbose, load, out, grips_from, start="vise")
+    take.grab()
+    take.set_on_table()
+    take.solve()
+    take.save()
+    if verbose:
+        print(f"lift-out: {take.T:.1f} s, {take.n} frames; clips " + ", ".join(f"{c['verb']} {c['t0']:.1f}-{c['t1']:.1f}" for c in take.clips))
+    return take
 
 
 def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=None):

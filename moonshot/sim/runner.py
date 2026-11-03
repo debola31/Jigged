@@ -27,6 +27,7 @@ from scipy.spatial.transform import Rotation
 from moonshot.body.skeleton import H0, build
 from moonshot.motion import kinematics as BM
 from moonshot.sim.record import Recorder
+from moonshot.sim.reference import ARM as REF_ARM
 
 SIDES = ("R", "L")
 ARM = ["sh_plane", "sh_elev", "sh_rot", "elbow", "pron", "wr_flex", "wr_dev", "sc_prot", "sc_elev"]
@@ -309,6 +310,12 @@ class TakeRunner:
                       "S": fr["S"][1], "E": fr["forearm"][1], "forearm": fr["forearm"][0] @ H0}
         return out
 
+    def anatomical(self, name: str) -> float:
+        """A joint's angle now as the body model names it: degrees for a hinge, mm for the girdle's slides."""
+        m, j = self.model, self.body.joints[name]
+        q = self.data.qpos[m.jnt_qposadr[m.joint(name).id]]
+        return j.rest + (math.degrees(q) if j.kind == "hinge" else q * 1000)
+
     def run(self, seconds: float | None = None, log=print) -> int:
         m, d = self.model, self.data
         for qadr, dof, s in self.splines:
@@ -320,16 +327,29 @@ class TakeRunner:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, SIDES)
+        self.theta = {s: [] for s in SIDES}
         for k in range(n):
             for s in range(spf):
                 self.step((k + s / spf) / self.fps)
             self.recorder.frame(d, self.hands(), self.rd["eye"][k], self.rd["look"][k], self.rd["up"][k])
+            self.theta["R"].append([self.anatomical(a if a.startswith("trunk") else f"R_{a}") for a in REF_ARM])
+            self.theta["L"].append([self.anatomical(f"L_{a}") for a in REF_ARM[3:]])
             self.on_frame(k)
             if log and k % (5 * self.fps) == 0:
                 log(f"frame {k}/{n}")
         return n
 
     def export(self, folder: Path | None = None) -> None:
+        """The take record, and beside it sim.npz in the vise runner's keys (moonshot/sim/vise_take.py export_sim) for
+        the checks that read one: the right arm under the plain keys, the left with an _L suffix, in the mirrored
+        world as in the take record."""
         folder = Path(folder or self.folder)
         self.recorder.write(folder, self.fps, self.lumbar[0], {s: self.names for s in SIDES}, self.station,
                             self.glbs(), self.meshes(folder))
+        hands, n = self.recorder.hands, len(self.theta["R"])
+        sim = {"t": np.arange(n) / self.fps, "fps": self.fps, "names": np.array(self.names),
+               "theta": np.array(self.theta["R"]), "theta_L": np.array(self.theta["L"]),
+               "eye": self.rd["eye"][:n], "look": self.rd["look"][:n], "up": self.rd["up"][:n]}
+        for s, suffix in (("R", ""), ("L", "_L")):
+            sim |= {f"{k}{suffix}": np.array(hands[s][k]) for k in ("q", "H", "W", "S", "E", "forearm")}
+        np.savez(folder / "sim.npz", **sim)

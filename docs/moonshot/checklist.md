@@ -171,8 +171,14 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   and the planner plans with it too. Held to the other people, people themselves sit a median 82.9% inside (5th
   percentile 50.3%: nobody meets the proposed 95%), so the bar is their median, 0.83, your decision; the likelihood
   limit, people's own 95th percentile, 24.2. The vise takes, on today's plans: 51-65% inside, likelihood 34-38,
-  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg);
-  the planner's prior weight is being raised to pull it toward people's. Which checks a take is held to, your
+  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg). AnDy's
+  people never hold a part up close, grasp palm down or crank, so posture is held to people seated or standing
+  together (your decision; `moonshot/validate/people_prior.py`, GRAB/ARCTIC and AnDy evenly, 694 trials): range 0.93
+  (people's median), likelihood 28.7 (their 95th percentile). The vise operator stands 120 mm further back and holds
+  the part 80 mm lower to look at it; the planner's prior weight stays 0.3 (at 5 the bench takes' hands missed their
+  targets and their caliper and deburr gates failed). op10 and op20 on it: likelihood 25.6 and 24.9, pass; in range
+  92.8% and 92.9%, shoulder rotation the only joint out; but the new stance presses the fingers into the crank's knob
+  (skin 7.3-7.6 mm), with the vise-timing agent. Which checks a take is held to, your
   decision: the pendant takes are exempt from grasp timing, hand opening and footage (no reach to lift a part),
   not from nothing moving without a cause; a take at a station with no machine passes machines inside spec.
   Since the body-checks merge every check runs before a render, so no vise take

@@ -34,6 +34,26 @@ def glbs_in_bodies(model: mujoco.MjModel, root: str, links: dict[str, tuple[str,
     return out
 
 
+def hand_wrench(model: mujoco.MjModel, data: mujoco.MjData, hand: str) -> list[float]:
+    """The net force and torque the world puts on a hand and everything it carries in its subtree (N, N m, world;
+    torque about the wrist), what the muscle check replays the hand's load from (checks.json hand_wrench)."""
+    m, d = model, data
+    mujoco.mj_rnePostConstraint(m, d)
+    h = m.body(hand).id
+    W = d.xpos[h]
+    f, tq = np.zeros(3), np.zeros(3)
+    for b in range(m.nbody):
+        p = b
+        while p and p != h:
+            p = m.body_parentid[p]
+        if p != h:
+            continue
+        fb, tb = d.cfrc_ext[b][3:], d.cfrc_ext[b][:3]
+        f += fb
+        tq += tb + np.cross(d.subtree_com[m.body_rootid[b]] - W, fb)
+    return [*f.round(4).tolist(), *tq.round(5).tolist()]
+
+
 class Recorder:
     def __init__(self, model: mujoco.MjModel, person: set[str], arms=("R",)):
         self.model, self.person, self.arms = model, person, tuple(arms)

@@ -29,9 +29,10 @@ import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from moonshot.body.controller import StrengthCaps
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
-from moonshot.sim.record import Recorder, glbs_in_bodies
+from moonshot.sim.record import Recorder, glbs_in_bodies, hand_wrench
 from moonshot.sim.reference import ReferenceTake, take_dir
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
@@ -118,6 +119,7 @@ class ViseTake:
         self.act_dof, self.act_q = m.jnt_dofadr[jid], m.jnt_qposadr[jid]
         self.kp0 = m.actuator_gainprm[self.acts, 0].copy()
         self.kv = -m.actuator_biasprm[self.acts, 2].copy()
+        self.caps = StrengthCaps(self.body, m)          # each motor capped at its strength for its angle and speed
         names = [m.actuator(a).name[2:] for a in self.acts]
         self.hand_acts = np.array([a for a, n in enumerate(names) if n.startswith("R_") and
                                    n[2:] not in ARM_JOINTS], dtype=int)
@@ -530,6 +532,7 @@ class ViseTake:
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
         d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
+        self.caps.apply(d)
         self.machine.apply()
         mujoco.mj_step(m, d)
 
@@ -551,6 +554,18 @@ class ViseTake:
                 mujoco.mj_contactForce(m, d, i, c6)
                 clamp += abs(c6[0])
         return f, clamp, depth
+
+    def lifting_force(self) -> float:
+        """The hand's upward force on the blank (N, world z): its lifting force, against the part's weight."""
+        m, d = self.model, self.data
+        total, c6, blank = 0.0, np.zeros(6), self.geom["blank"]
+        for i in range(d.ncon):
+            c = d.contact[i]
+            if blank in (c.geom1, c.geom2) and (c.geom2 if c.geom1 == blank else c.geom1) in self.geom_digit:
+                mujoco.mj_contactForce(m, d, i, c6)
+                fw = c.frame.reshape(3, 3).T @ c6[:3]
+                total += float(fw[2] if c.geom2 == blank else -fw[2])
+        return total
 
     def press_force(self, geom, normal):
         """The hand's whole force on one geom along the push (-normal)."""
@@ -580,12 +595,15 @@ class ViseTake:
             self.step(0.0, "", 0.0)
         mujoco.mj_forward(m, d)
         rd, fps = self.rd, self.fps
-        spf = int(round(1.0 / (fps * m.opt.timestep)))
+        dt = m.opt.timestep
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing", "stray", "touching", "pose")}
+                               "slip", "lag", "pushing", "stray", "touching", "pose", "hand_wrench", "load_N",
+                               "active_constraints", "applied_forces")}
+        rec["machine_axes"] = {f"vf2_{a}": [] for a in ("x", "y", "z", "spindle")}
+        spindle = m.jnt_dofadr[m.joint("vf2_spindle").id]
         hold_rel, t0w = None, time.time()
         hold0 = self.iv["hold_object"][0]
         root = m.body_rootid[m.body("R_hand").id]
@@ -626,8 +644,10 @@ class ViseTake:
             grip = str(rd["grip"][k])
             effort = float(rd["effort"][k])
             self.set_contact_coupling(grip)
-            for s in range(spf):
-                tt = (k + s / spf) / fps
+            # the steps whose time falls in this frame, so physics time is the plan's: a fixed 33 steps a frame at
+            # 1 ms ran the plan 1% slow against the body
+            for s in range(round(k / (fps * dt)), round((k + 1) / (fps * dt))):
+                tt = s * dt
                 for i, e in enumerate(self.iv["press"]):
                     if e["t0"] <= tt < e["t1"]:
                         F = self.press_force(self.geom[e["contact"]], e["normal"])
@@ -660,6 +680,13 @@ class ViseTake:
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
             rec["touching"].append(self.touching())
+            rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
+            rec["load_N"].append(round(self.lifting_force(), 3))
+            rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
+            rec["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
+            for a in ("x", "y", "z"):
+                rec["machine_axes"][f"vf2_{a}"].append(round(float(d.qpos[self.machine.q[a]]) * 1000, 4))
+            rec["machine_axes"]["vf2_spindle"].append(round(float(d.qvel[spindle]) * 60 / (2 * math.pi), 1))
             rec["pushing"].append(any(e["t0"] - 0.05 <= tk < e["t1"] + 0.15 for e in self.iv["press"]) or
                                   any(e["t0"] <= tk < e["t1"] for e in self.iv["enclose"]) or
                                   self.crank_at(tk)[1] is not None)
@@ -711,8 +738,9 @@ class ViseTake:
                  opening=np.array(rec["opening"]), para=np.array(rec["para"]), effort=rd["effort"][:n],
                  grip=rd["grip"][:n], clamp=np.array(rec["clamp"]), slip=np.array(rec["slip"]),
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
-        (Path(path).parent / "checks.json").write_text(
-            json.dumps({"touching": rec["touching"], "never_held": NEVER_HELD}), encoding="utf-8")
+        (Path(path).parent / "checks.json").write_text(json.dumps(
+            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "machine_axes")} |
+            {"load_N": {"blank": rec["load_N"]}, "never_held": NEVER_HELD}), encoding="utf-8")
         glbs = glbs_in_bodies(self.model, "vf2", vf2.render_links())
         for body, entries in V.render_glbs().items():
             glbs.setdefault(body, []).extend(entries)

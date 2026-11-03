@@ -1,0 +1,3 @@
+{"source": "hand-made: the 6 mm drill at 6,000 rpm fed at 2,000 mm/min, 0.33 mm/rev, 5.6% of its diameter, past the table's 3.2%",
+ "schema": "jigged.cycle-program/1",
+ "passes": [{"tool": "drill-6", "rpm": 6000, "moves": [[380, 150, -300, null], [380, 150, -330, 2000], [380, 150, -300, null]]}]}

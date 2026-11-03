@@ -1,0 +1,5 @@
+{"source": "hand-made: the 2.5 mm drill at 0.04 mm/rev, the 3.5 mm reamer at half speed and 0.1 mm/rev, the M3 tap fed at its 0.5 mm pitch",
+ "schema": "jigged.cycle-program/1",
+ "passes": [{"tool": "drill-2p5", "rpm": 8000, "moves": [[380, 150, -300, null], [380, 150, -330, 320], [380, 150, -300, null]]},
+            {"tool": "ream-3p5", "rpm": 3000, "moves": [[380, 150, -300, null], [380, 150, -330, 300], [380, 150, -300, 300]]},
+            {"tool": "tap-m3", "rpm": 1000, "moves": [[380, 150, -300, null], [380, 150, -315, 500], [380, 150, -300, 500]]}]}

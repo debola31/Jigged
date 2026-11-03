@@ -226,13 +226,18 @@ def muscle_activation(take: dict) -> Result:
 
 
 def main(argv: list[str]) -> int:
-    out = measure(Path(argv[0]))
+    try:
+        out = measure(Path(argv[0]))
+    except KeyError:
+        print("FAIL muscle_activation: the run's checks.json has no hand_wrench to replay the hand's load from")
+        return 1
     act = np.array(out["muscle_activation"])
     k = int(act.argmax())
     print(f"peak activation {act[k]:.2f} at frame {k} ({out['muscle_worst'][k]}); "
           f"frames over 1.0: {int((act > 1).sum())}; worst unmade torque {max(out['muscle_residual_nm']):.2f} N m")
-    print(muscle_activation(out))
-    return 0
+    r = muscle_activation(out)
+    print(r)
+    return 0 if r.passed else 1
 
 
 if __name__ == "__main__":

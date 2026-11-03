@@ -58,6 +58,10 @@ class StepTake:
         p = np.asarray(p, float)
         return p if side == "R" else BM.mirror_points(p, self.lumbar)
 
+    def rest_of(self, side: str) -> np.ndarray:
+        """Where the side's hand hangs relaxed, in the world."""
+        return self.at(side, self.rest)
+
     def solve_grips(self, specs: dict[str, dict]) -> None:
         """Grips by name from grasp.solve_spec specs (each with its "side"), cached in the take's grips.json and
         solved again only when the code or the specs' source change. obj is given in the world."""
@@ -162,8 +166,10 @@ class StepTake:
             for k in range(n):
                 t = k / FPS
                 active = [fn for t0, t1, fn in self.side[side]["cons"] if t0 <= t < t1]
-                if not active:
-                    s.pos(k, self.rest, 0.6, side=side)
+                if not active:                       # hold where the last move ended, or hang at rest before any
+                    done = [(t1, fn) for t0, t1, fn in self.side[side]["cons"] if t1 <= t]
+                    last = max(done, key=lambda c: c[0], default=None)
+                    s.pos(k, self.rest if last is None else self.target_of(last[1], last[0] - 1e-6), 0.6, side=side)
                 for fn in active:
                     for c in fn(t):
                         if c[0] == "pos":
@@ -175,8 +181,31 @@ class StepTake:
         self.theta, self.dp, self.frames, terms = s.solve(np.array(theta0 if theta0 is not None else THETA0, float),
                                                          iters=iters, lr=0.03)
         self.left_frames = s.left_frames
+        self.misses = self.plan_misses()
         if self.verbose:
             print(f"body: {n} frames solved in {time.time() - t0:.0f} s; {({k: round(v, 1) for k, v in terms.items()})}")
+            print("wrist off its targets (mm, median / max): " + ", ".join(
+                f"{s} {np.median(m):.1f} / {np.max(m):.1f}" for s, m in self.misses.items() if len(m)))
+
+    def plan_misses(self) -> dict[str, np.ndarray]:
+        """How far each hand's planned wrist is from its targets, at every frame that has one (mm)."""
+        out = {}
+        for side in SIDES:
+            miss = []
+            for k in range(self.n):
+                t = k / FPS
+                W = self.frames_at(k)[side]["W"]
+                for t0, t1, fn in self.side[side]["cons"]:
+                    if t0 <= t < t1:
+                        miss.append(float(np.linalg.norm(W - self.target_of(fn, t))))
+            out[side] = np.array(miss)
+        return out
+
+    @staticmethod
+    def target_of(fn, t) -> np.ndarray:
+        """The wrist position a constraint function asks for at t (its first constraint's)."""
+        c = fn(t)[0]
+        return np.asarray(c[1] if c[0] == "pos" else c[2], float)
 
     def frames_at(self, k: int) -> dict[str, dict]:
         """Each hand's frames at frame k, the left's in the mirrored world, as the solver planned them."""

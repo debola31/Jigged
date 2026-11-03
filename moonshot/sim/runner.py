@@ -82,6 +82,9 @@ class TakeRunner:
     def scene(self, body_xml: str) -> str:
         return body_xml
 
+    def start(self) -> None:
+        """The scene's state before the take starts (the body is already at its first pose)."""
+
     def before_step(self, t: float) -> None:
         pass
 
@@ -171,6 +174,7 @@ class TakeRunner:
         m, d = self.model, self.data
         for qadr, dof, s in self.splines:
             d.qpos[qadr], d.qvel[dof] = s(0.0), s(0.0, 1)
+        self.start()
         mujoco.mj_forward(m, d)
         for _ in range(SETTLE_STEPS):
             self.step(0.0)

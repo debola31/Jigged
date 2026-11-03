@@ -31,6 +31,9 @@ LIFT_MM = 170.0                                          # clears the 115 mm noz
 TIP_OVER_VISE = np.array([VISE["x"], VISE["fixed_face_y"] - 50.0, VISE["jaw_top_z"] + 110.0])
 SWEEP_MM = 55.0                                          # along the jaws, either side of the middle
 DOORWAY = np.array([ORIGIN[0], -900.0, 0.0])             # in front of the door opening's middle
+# the doors stand open wider than for loading: at 300 mm the right forearm, reaching in from where the gun is in
+# reach, meets the right door's edge; past 430 the door's bar would sweep into the holster
+DOORS_OPEN_MM = 420.0
 # blowing: the nozzle pointing forward and down into the vise, the handle up and back toward the operator
 AIM = np.stack([[0.0, 0.6, -0.8], [-1.0, 0.0, 0.0], [0.0, 0.8, 0.6]], 1)
 
@@ -114,10 +117,11 @@ class BlowOff(StepTake):
         # right door's panel
         gate = DOORWAY + np.array([0.0, 0.0, lifted[2] - DOORWAY[2]])
         mid = Rotation.from_matrix(np.stack([self.R0, AIM])).mean().as_matrix()
-        keys = [(t_lift, self.R0, self.p0), (t_lift + 0.8, self.R0, lifted), (t_lift + 1.6, mid, gate),
-                (t_lift + 2.5, AIM, aim_p(-SWEEP_MM)), (t_lift + 3.2, AIM, aim_p(SWEEP_MM)),
-                (t_lift + 3.9, AIM, aim_p(-SWEEP_MM)), (t_lift + 4.4, AIM, aim_p(0.0)), (t_lift + 5.3, mid, gate),
-                (t_lift + 6.1, self.R0, lifted), (t_lift + 6.9, self.R0, self.p0)]
+        # unhurried: a 460 mm move across the body in 0.8 s left the arm 350 mm behind
+        dt = np.cumsum([0.0, 1.0, 1.3, 1.2, 0.7, 0.7, 0.5, 1.2, 1.4, 1.1])
+        poses = [(self.R0, self.p0), (self.R0, lifted), (mid, gate), (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(SWEEP_MM)),
+                 (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(0.0)), (mid, gate), (self.R0, lifted), (self.R0, self.p0)]
+        keys = [(t_lift + d, R, p) for d, (R, p) in zip(dt, poses)]
         self.keys = keys
         t_down = keys[-1][0]
         self.look(0.0, self.p0)

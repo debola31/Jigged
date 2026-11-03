@@ -16,7 +16,6 @@ import numpy as np
 
 from moonshot.body.skeleton import H0
 from moonshot.motion import blow_off as BO
-from moonshot.motion import door_cycle as DC
 from moonshot.sim.door_cycle import _Cell
 from moonshot.world import air_gun as AG
 from moonshot.world.vise import VISE
@@ -26,7 +25,7 @@ SETTLE_S = 0.3
 
 
 class BlowOff(_Cell):
-    doors_open_mm = DC.OPEN_MM
+    doors_open_mm = BO.DOORS_OPEN_MM
     grip_geoms = {"gun": "air_gun_handle", "gun_fire": "air_gun_trigger"}
     encloses = {"gun": "air_gun"}
     welded = {"gun"}

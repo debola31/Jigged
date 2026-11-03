@@ -256,13 +256,18 @@ class Take:
         q0.update(index_mcp_flex=20, index_pip=25, middle_mcp_flex=75, middle_pip=95, ring_mcp_flex=80, ring_pip=95,
                   little_mcp_flex=80, little_pip=90, thumb_cmc_flex=15, thumb_cmc_abd=5, thumb_mcp_flex=40, thumb_ip=35)
         x_end = VISE["x"] + self.half[0] + (PAR_L / 2 - self.half[0]) / 2                  # middle of the exposed end
+        covered = self.half[0] >= PAR_L / 2      # a part longer than the parallels hides their tops: push an end instead
         for name in ("para_b", "para_a"):
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
+            if covered:                          # the pad on the parallel's end face, under the part's overhang
+                end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
+                target = plane(end, [1, 0, 0], 1.5, bands(end, y=(-1.0, 1.0), z=(-4.0, 4.0)))
+            else:
+                target = plane([x_end, pc[1], pc[2]], [0, 0, 1], 1.5, bands([x_end, pc[1], pc[2]], x=(-6, 6), y=(-1.0, 1.0)))
             specs[f"tip_{name}"] = dict(obj=self.parallels[name].copy(), q0=q0,
                                         colliders=[box(self.home, self.half + 4)]
                                         + vise_boxes(self.parallels, self.par_h, self.size[1], margin=6.0),
-                                        targets={"index": plane([x_end, pc[1], pc[2]], [0, 0, 1], 1.5,
-                                                                bands([x_end, pc[1], pc[2]], x=(-6, 6), y=(-1.0, 1.0)))},
+                                        targets={"index": target},
                                         iters=1200,
                                         starts=[S(25, 0, r, 45, 40, -5, 80, p, w, 0) for p in (20, 45, 70) for r in (5, 20)
                                                 for w in (-15, 10)])
@@ -566,7 +571,8 @@ class Take:
 
     def measure(self, parallels=("para_a", "para_b"), press_N=3.0, feel_mm=1.0, clip_from=None):
         """The fingertip check that the part is seated: press each parallel's exposed end down and try to slide it
-        along its length; seated parallels are pinched under the part and don't move (the physics decides)."""
+        along its length; seated parallels are pinched under the part and don't move (the physics decides). Under a
+        part longer than the parallels no end shows, so the fingertip pushes each one's end face along its length."""
         t0 = self.t
         for i, name in enumerate(parallels):
             g = self.grips[f"tip_{name}"]
@@ -587,7 +593,9 @@ class Take:
             self.effort(tc + 0.9, 0.5, f"tip_{name}")
             self.effort(tc + 1.0, 0.0, f"tip_{name}")
             self.event("grip", tc, tc + 1.0, grip=f"tip_{name}")
-            self.event("press", tc + 0.05, tc + 0.95, normal=[0, 0, 1.0], force=press_N, contact=name)
+            covered = self.half[0] >= PAR_L / 2   # its end face, pushed along its length (see _grip_specs)
+            self.event("press", tc + 0.05, tc + 0.95, normal=[1.0, 0, 0] if covered else [0, 0, 1.0], force=press_N,
+                       contact=name)
             self.event("free_parallel", tc - 0.2, 1e9, name=name)
             self.fingers(tc + 0.95, g["q"])
             self.fingers(tc + 1.2, open_like(self.hand, g["q"], 0.3))

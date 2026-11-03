@@ -72,9 +72,17 @@ def test_the_record_is_complete(take):
     assert check(take) == []
 
 
+# not applicable to a pendant take (the user's decision, 2026-11-03): they measure a reach to grasp a part, the hand's
+# opening for it, and the card's footage, none of which a hand at the pendant's keys and handle makes; every other
+# per-frame check holds, nothing_moves_without_a_cause included
+NOT_APPLICABLE = ("grasp_timing", "hand_opening", "matches_its_footage")
+
+
 def test_every_per_frame_check_passes(take):
-    from moonshot.validate.take import run
-    failed = {k: v for k, v in run(take).items() if isinstance(v, str) or not v.passed}
+    from moonshot.validate.take import load_all, run
+    assert set(NOT_APPLICABLE) <= set(load_all()), "a check named not applicable no longer exists"
+    failed = {k: v for k, v in run(take).items()
+              if k not in NOT_APPLICABLE and (isinstance(v, str) or not v.passed)}
     assert not failed, failed
 
 

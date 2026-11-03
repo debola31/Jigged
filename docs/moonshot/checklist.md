@@ -223,7 +223,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
 | C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
-| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session) | [x] 2026-11-02 | [ ] op10 passes every check and verb gate (2026-11-02); op20–op40 running |
+| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session, `test_cycle_takes.py`, `test_cycle_stock.py`) | [x] 2026-11-02 | [ ] its 15 cutting takes pass their gate (26 of 26) and are merged (2026-11-03); the finished stock is within 0.03 mm except three plan gaps no tool in the plan reaches (§6). Op10–op50's vise takes re-running on the farm with the new hand opening (2026-11-03) |
 | F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] |
 | G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 8 of nist-ftc-10's 61 steps (2026-11-02) |
 
@@ -231,10 +231,17 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 
 - [x] Nov 1: vise compiles in the new core; benchmark sets the forecast (§1 above)
 - [x] Nov 2: queue reliable (§4); vise take reproduced in the new core, every check passing (§3b, 2026-11-02)
-- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-02
-  23:45: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
-  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`; the rest wait on their takes (`python -m
-  moonshot.planning.takes nist-ftc-10` lists them). The plan is 61 steps since op60 was found to cut nothing.
+- [ ] Nov 3: VF-2, band saw, inspection bench conformant; `nist-ftc-10` drafts reviewed by you. As of 2026-11-03
+  01:00: drafts of 8 of its 61 steps (each setup's door and Cycle Start step, op10's load, seat and check) in
+  `C:\jigged-data\takes\nist-ftc-10-<step>\draft.mp4`, and of its 15 cutting takes, rendering (8 done); the rest
+  wait on their takes (`python -m moonshot.planning.takes nist-ftc-10` lists them). The plan is 61 steps since op60
+  was found to cut nothing. Loosen passes (0.99 turns, 6.28 mm); the lift-out holds the part (0.9 mm slip) and sets
+  it on the table 12 mm off plan; the blow-off blows the vise 2.4 s with 0.45 mm slip, but the gun doesn't yet sit
+  back in its holster; set-parallels carries both parallels, but one falls over (the cycle session has it).
+  **Waiting on you:** every vise take, approved draft 3 too, fails the posture checks that the body-checks merge
+  put in front of rendering (53% of frames inside people's range against 95%; that data is seated work), so no
+  vise-take draft renders until you choose how they gate. Three of the stock's plan gaps need a tool or a mask (the
+  +Z side slot 2.64 mm, the boss's V flanks 2.31 mm, the pad grooves 1.50 mm).
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web

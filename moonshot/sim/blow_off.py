@@ -13,6 +13,7 @@ import sys
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from moonshot.motion import blow_off as BO
 from moonshot.sim.door_cycle import _Cell
@@ -33,6 +34,8 @@ class BlowOff(_Cell):
     def __init__(self, folder=BO.TAKES / "blow-off"):
         super().__init__(folder)
         self.carry = next(e for e in self.tk["events"] if e["kind"] == "carry")
+        k = np.load(self.folder / "gun_keys.npz")
+        self.gun_keys = list(zip(k["t"], k["R"], k["p"]))
         self.gun_at, self.hand_at, self.trigger_N, self.tip = [], [], [], []
 
     def scene(self, body_xml: str) -> str:
@@ -51,6 +54,15 @@ class BlowOff(_Cell):
         hb = self.model.body("R_hand").id
         R0, p0 = AG.holstered_pose(BO.ORIGIN)
         return R0.T @ (pl.xpos[hb] * 1000 - p0) * 0.001, R0.T @ pl.xmat[hb].reshape(3, 3)
+
+    def held_error(self, side, t):
+        """While the gun is in the hand, the eye is on the gun: its planned pose (gun_keys.npz) against where it is."""
+        m, d = self.model, self.data
+        if side != "R" or not d.eq_active[m.equality("enclose_gun").id]:
+            return None
+        R, p = BO.BlowOff.pose_at(None, t, self.gun_keys)
+        b = m.body("air_gun").id
+        return np.r_[(p * 0.001 - d.xpos[b]), Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
 
     def hand_force(self, side, t):
         """The gun's weight, carried."""

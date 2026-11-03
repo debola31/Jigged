@@ -24,7 +24,8 @@ TRIGGER_C, TRIGGER_HALF = np.array([20.0, 0.0, 30.0]), np.array([5.0, 4.0, 12.0]
 HOLSTER_TOP = np.array([520.0, -870.0, 1120.0])     # station frame: the middle of the holster's open top, on a bracket
 # standing 95 mm proud of the right door, so the door's pull bar (out to y -845) passes behind the holstered gun as
 # the door slides; at -812 the pull swept into the gun, and the fingers round its handle met the door's panel
-HOLSTER_IN, HOLSTER_DEPTH, WALL = 24.0, 125.0, 3.0  # a 24 mm square bore: the nozzle drops in, the 32 mm body can't
+HOLSTER_IN, HOLSTER_DEPTH, WALL = 14.0, 125.0, 3.0  # a 14 mm square bore: the 8 mm nozzle drops in, the 32 mm body can't;
+# at 24 the hung gun leant 8 degrees under its handle's weight, one way or the other
 # holstered: the nozzle points down and the handle out to the left
 HOLSTERED = Rotation.from_euler("y", 90, degrees=True).as_matrix()
 

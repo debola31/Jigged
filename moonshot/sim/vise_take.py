@@ -151,6 +151,8 @@ class ViseTake:
         self.t_lift = float(self.t[np.argmax(z > self.start_p[2] + 1.0)])
         top = int(np.argmax(z))
         self.t_down = float(self.t[top + np.argmax(z[top:] <= z[-1] + 0.5)])
+        if self.in_vise:            # a lift-out's part is looked at again over the table, before it is set down: the
+            self.resight_t = self.t_down - 1.2      # first sighting is taken as it leaves the jaws (11 mm off without)
 
     @staticmethod
     def _intervals(events, kind):
@@ -709,9 +711,14 @@ class ViseTake:
                "max_contact_depth_mm": round(float(max(rec["depth"])), 2)}
         if lift.any():
             # held up: over where it started; a lift-out's part ends on the table, below where it started in the vise,
-            # so it is held up while it stays near its planned path instead (the grip holds it ~11 mm low in the hand)
-            floor = self.rd["blank"][:n, 2] - 20 if self.in_vise else np.full(n, self.start_p[2] + 5)
-            out["grab_hold"] = {"lifted_by_friction": bool(np.all(B[lift][:, 2] > floor[lift])),
+            # so it is held up if it rose clear of where it started and never fell far under its planned path (it
+            # starts up 20 mm behind the plan as the grip takes its weight, and rides ~11 mm low in the hand)
+            if self.in_vise:
+                held = (B[lift][:, 2].max() > self.start_p[2] + 5
+                        and np.all(B[lift][:, 2] > self.rd["blank"][:n, 2][lift] - 40))
+            else:
+                held = np.all(B[lift][:, 2] > self.start_p[2] + 5)
+            out["grab_hold"] = {"lifted_by_friction": bool(held),
                                 "grip_N_thumb_median": round(float(np.median(force[lift, 0])), 2),
                                 "grip_N_fingers_median": round(float(np.median(force[lift, 1:5].sum(1))), 2),
                                 "max_slip_mm": round(float(np.max(rec["slip"])), 2)}

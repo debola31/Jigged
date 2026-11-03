@@ -95,7 +95,9 @@ class StepTake:
 
     # --- the plan's pieces -------------------------------------------------------------------------------
     def add(self, side, t0, t1, fn):
-        """fn(t) -> constraints in the side's world: ("pos", W, w) | ("pose", H, W, w)."""
+        """fn(t) -> constraints in the side's world: ("pos", W, w) | ("pose", H, W, w) | ("tsr", point in the hand,
+        world point, axis in the hand, world axis, w): a point of the hand on a point, an axis along an axis, turning
+        about it free (moonshot/motion/solver.py)."""
         self.side[side]["cons"].append((t0, t1, fn))
 
     def transit(self, side, t0, t1, W_to, via=(), fade=None):
@@ -174,6 +176,8 @@ class StepTake:
                     for c in fn(t):
                         if c[0] == "pos":
                             s.pos(k, c[1], c[2], side=side)
+                        elif c[0] == "tsr":
+                            s.tsr(k, *c[1:5], w=c[5], side=side)
                         else:
                             s.pose(k, c[1], c[2], c[3], side=side)
                 s.side[side]["load"][k] = sum(kg for t0, t1, kg in self.side[side]["loads"] if t0 <= t < t1)

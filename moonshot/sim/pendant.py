@@ -4,6 +4,10 @@
 
 - A press is force control at the index pad: the planned force pushed into the key along the plan's normal,
   trimmed by how hard the pad really presses (integral control), as the vise take presses (moonshot/sim/vise_take.py).
+  The pad is steered onto the key by sight as it comes in (people point at a 14 mm key this way): an integral of its
+  error across the face from the key's centre, through the arm's joints, the press's own direction left to the force.
+- A stroke of the handle ends when the dial has turned its clicks, as people stop turning when the dial reads right:
+  the plan turns the hand a little farther, and the grip lets go there.
 - A key or button registers from the force the hand puts on it (`Control.touch`): contact with the pendant's face
   inside a key's square, or with a button.
 - The handle turns only by the hand's grip on it; the machine counts its detents.
@@ -26,12 +30,21 @@ import mujoco
 import numpy as np
 
 from moonshot.sim.record import glbs_in_bodies
-from moonshot.sim.runner import SETTLE_STEPS, TakeRunner
+from moonshot.sim.runner import ARM, SETTLE_STEPS, TakeRunner
 from moonshot.world import cell, vf2
 from moonshot.world.vise import Load
 
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
 TOUCH_N = 0.2               # less than this on a key isn't touching it
+AIM_TAU = 0.05              # s: the pad steered onto its key by sight [proposed: visually guided pointing settles in ~0.1-0.2 s]
+ALIGNED_MM = 4.0            # a press pushes only once the fingertip is this close to the key's centre
+STANDOFF_MM = 8.0           # until then sight keeps the fingertip this far off the face,
+BACK_TAU = 0.03             # s: lifting it off faster than it aims, so a fingertip that lands off its key lifts and
+                            # re-aims rather than sliding across the keys between
+AIM_MAX = 0.04              # m: the most sight corrects
+DAMPING = 0.02              # m: damped least squares for the corrections
+DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
+                            # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
 
 
@@ -85,9 +98,19 @@ class PendantRunner(TakeRunner):
         self.key_half = keys["half_mm"] / 1000
         self.key_names = list(keys["at_mm"])
         self.key_xz = np.array([d.site(f"vf2_key_{k}").xpos[[0, 2]] for k in self.key_names])
+        self.key_at = {k: d.site(f"vf2_key_{k}").xpos.copy() for k in self.key_names}
+        self.key_at |= {b: d.site(f"vf2_{b}").xpos.copy() for b in ("cycle_start", "feed_hold")}
         self.index_pad = {s: m.geom(f"{s}_g_dis2").id for s in ("R", "L")}
         self.rec = {"touching": [], "handle_deg": [], "hand_wrench": [], "machine_mm": [], "key_n": []}
         self._key_n: dict[str, float] = {}
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{j}").id] for j in ARM]) for s in ("R", "L")}
+        act_of_dof = {int(dof): a for a, dof in enumerate(self.act_dof)}
+        self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
+        self.aim_c = {s: np.zeros(3) for s in ("R", "L")}
+        self._last_on: dict[str, float] = {}
+        self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
+        self.turn_from: dict[int, int] = {}
+        self.turn_done: set[int] = set()
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -148,6 +171,10 @@ class PendantRunner(TakeRunner):
             if not e["t0"] - 0.05 <= t < e["t1"] + 0.08:
                 continue
             F = self._key_n.get(e["key"], 0.0)
+            n = np.asarray(e["normal"], float)
+            off = self.key_at[e["key"]] - self.fingertip(e["side"], n)
+            if F < TOUCH_N and np.linalg.norm(off - n * (off @ n)) > ALIGNED_MM / 1000:
+                continue                                       # not over the key yet: sight first, then press
             ramp = min(1.0, (t - (e["t0"] - 0.05)) / 0.05)
             fade = 1.0 - min(1.0, max(0.0, (t - e["t1"]) / 0.08))
             if e["t0"] <= t < e["t1"] and F > TOUCH_N:
@@ -155,14 +182,73 @@ class PendantRunner(TakeRunner):
             mag = max(0.0, e["force"] * ramp + self.press_i[i]) * fade
             g = self.index_pad[e["side"]]
             jacp = np.zeros((3, m.nv))
-            mujoco.mj_jac(m, d, jacp, None, d.geom_xpos[g], m.geom_bodyid[g])
+            mujoco.mj_jac(m, d, jacp, None, self.fingertip(e["side"], e["normal"]), m.geom_bodyid[g])
             tau = jacp[:, self.act_dof].T @ (np.asarray(e["normal"], float) * mag)
             d.ctrl[self.acts] += tau / m.actuator_gainprm[self.acts, 0]
 
+    def fingertip(self, side: str, n) -> np.ndarray:
+        """Where the index's pad meets a face with inward normal n (world, m): the point of its distal capsule that
+        stands farthest along n, not the capsule's centre, which lies a centimetre back along the finger."""
+        m, d = self.model, self.data
+        g = self.index_pad[side]
+        axis = d.geom_xmat[g].reshape(3, 3)[:, 2] * m.geom_size[g][1]
+        ends = (d.geom_xpos[g] + axis, d.geom_xpos[g] - axis)
+        n = np.asarray(n, float)
+        return max(ends, key=lambda e: e @ n) + n * m.geom_size[g][0]
+
+    def aim(self, t: float) -> None:
+        """Steer each index pad onto the key it is about to press, by sight, across the key's face."""
+        m, d, dt = self.model, self.data, self.model.opt.timestep
+        for s in ("R", "L"):
+            # the next press within reach in time: the hand works toward it from the last one's end
+            near = [e for e in self.presses if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
+            c = self.aim_c[s]
+            if near:
+                n = np.asarray(near[0]["normal"], float)
+                err = self.key_at[near[0]["key"]] - self.fingertip(s, n)
+                across = err - n * (err @ n)
+                c += across * dt / AIM_TAU
+                if np.linalg.norm(across) > ALIGNED_MM / 1000 and self._key_n.get(near[0]["key"], 0.0) < TOUCH_N:
+                    c += n * min(0.0, err @ n - STANDOFF_MM / 1000) * dt / BACK_TAU   # off the face until over the key
+                if np.linalg.norm(c) > AIM_MAX:
+                    c *= AIM_MAX / np.linalg.norm(c)
+            else:
+                c *= 1 - dt / 0.2
+            if not c.any():
+                continue
+            g = self.index_pad[s]
+            jacp = np.zeros((3, m.nv))
+            mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])
+            J = jacp[:, self.arm_dofs[s]]
+            d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+
+    def effort(self, side: str, t: float) -> tuple[float, str]:
+        """The plan's effort, but a stroke's grip lets go once the dial has turned the stroke's clicks."""
+        e, grip = super().effort(side, t)
+        if side != "R" or grip != "dial":
+            return e, grip
+        for i, ev in enumerate(self.turns):
+            if ev["t0"] - 0.25 <= t <= ev["t1"] + 0.15:
+                c = self.machine.clicks()
+                self.turn_from.setdefault(i, c)
+                if (c - self.turn_from[i]) * np.sign(ev["clicks"]) >= abs(ev["clicks"]):
+                    self.turn_done.add(i)
+                return (0.0, grip) if i in self.turn_done else (e, grip)
+        return e, grip
+
+    def debounced(self, forces: dict[str, float]) -> dict[str, float]:
+        now, on = float(self.data.time), self.machine.actuation
+        for k, f in forces.items():
+            if f >= 0.3 * on:
+                self._last_on[k] = now
+        held = {k: on for k, t in self._last_on.items() if k in self.machine._down and now - t < DEBOUNCE_S}
+        return held | {k: f for k, f in forces.items() if f >= held.get(k, 0.0)}
+
     def before_step(self, t: float) -> None:
         self._key_n = self.key_forces()
-        self.machine.touch(self._key_n)
+        self.machine.touch(self.debounced(self._key_n))
         self.push(t)
+        self.aim(t)
         self.machine.apply()
 
     # --- each frame --------------------------------------------------------------------------------------

@@ -55,9 +55,9 @@
   "cycle_start": {"link": "pendant", "at_mm": [649.6, -996.4, 1300.0], "grip": "fingertip_press", "force_n": 5},
   "feed_hold": {"link": "pendant", "at_mm": [705.5, -996.4, 1300.0], "grip": "fingertip_press", "force_n": 5},
   "jog_handle": {"link": "pendant", "at_mm": [677.4, -1023.1, 1410.5], "axis": [0, 1, 0], "radius_mm": 40.0, "depth_mm": 36.8,
-                 "detents_per_turn": 100, "detent_torque_nm": 0.015, "damping_nms": 0.004, "mass_kg": 0.15,
+                 "detents_per_turn": 100, "detent_torque_nm": 0.015, "damping_nms": 0.004, "mass_kg": 0.15, "friction": 1.0,
                  "grip": "precision_disk", "force_n": 1,
-                 "reason": "The CAD's 80 mm dial, its front face 36.8 mm proud; at_mm is that face's centre. The axis points into the pendant, so a positive turn is clockwise as the operator sees it, which jogs +. 100 clicks a turn (one turn at .001 is 0.100 in, Virasak and Kepka); the detent and damping are proposed: under the card's 1 N at the rim, and settling a click in about a tenth of a second"},
+                 "reason": "The CAD's 80 mm dial, its front face 36.8 mm proud; at_mm is that face's centre. The axis points into the pendant, so a positive turn is clockwise as the operator sees it, which jogs +. 100 clicks a turn (one turn at .001 is 0.100 in, Virasak and Kepka); the detent and damping are proposed: under the card's 1 N at the rim, and settling a click in about a tenth of a second; so is the knurled rim's friction with skin, 1.0"},
   "keys": {"link": "pendant", "face_y_mm": -986.3, "half_mm": 7.0, "actuation_n": 2.0, "grip": "fingertip_press", "force_n": 3,
            "reason": "Positions [x, z] on the face, proposed: the CAD's face is flat, so they follow the NGC keyboard's arrangement under the screen (function keys and PART ZERO SET top left, the cursor in the middle, the display keys top right, the mode and increment keys at right, numbers below them, letters in the centre, jog keys bottom left); 14 mm keys on an 18 mm pitch. A key registers at 2 N, under the card's proposed 3 N press",
            "at_mm": {

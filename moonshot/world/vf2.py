@@ -128,7 +128,7 @@ def pendant() -> str:
     out += f"""    <body name="vf2_jog_handle" pos="{c[0]:.5f} {c[1]:.5f} {c[2]:.5f}">
       <joint name="vf2_jog" type="hinge" axis="{' '.join(str(v) for v in h['axis'])}" limited="false" damping="{h['damping_nms']}"/>
       <geom name="vf2_jog_handle" class="steel" type="cylinder" size="{h['radius_mm'] * M:.5f} {half:.5f}"
-            quat="0.7071068 0.7071068 0 0" mass="{h['mass_kg']}" friction="0.8 0.004 0.0001" rgba="0.1 0.1 0.1 1"/>
+            quat="0.7071068 0.7071068 0 0" mass="{h['mass_kg']}" friction="{h['friction']} 0.004 0.0001" rgba="0.1 0.1 0.1 1"/>
       <site name="vf2_jog_rim" pos="0 {-half:.5f} {(h['radius_mm'] - 3) * M:.5f}" size="0.002"/>
     </body>
 """
@@ -276,7 +276,12 @@ class Control:
     def _mdi(self, line: str) -> None:
         """Run a typed MDI line: S sets the speed, M03 starts the spindle and M05 stops it."""
         words = line.split()
-        s = next((float(w[1:]) for w in words if w.startswith("S")), self.spindle_rpm)
+        try:
+            s = next((float(w[1:]) for w in words if w.startswith("S")), self.spindle_rpm)
+        except ValueError:                        # a mistyped line: the control alarms and runs nothing
+            self.mdi_line = ""
+            self.events.append(f"mdi_alarm {line}")
+            return
         if "M03" in words:
             self.spindle_rpm = s
         if "M05" in words:
@@ -298,7 +303,8 @@ class Control:
         """Apply the interlocks, then set the axes' controls toward the program's current move at no more than rapid
         speed. For a scene that steps the simulation itself (a take): call this before each mj_step."""
         d, dt = self.data, self.model.opt.timestep
-        down = {k for k, f in self._force.items() if f >= self.actuation}
+        # a key or button switches on at its actuation force and off below 30% of it, so it can't chatter about one
+        down = {k for k, f in self._force.items() if f >= self.actuation or (k in self._down and f >= 0.3 * self.actuation)}
         for k in sorted(down - self._down):
             self.press(k)
         self._down = down

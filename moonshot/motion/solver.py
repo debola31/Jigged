@@ -1,5 +1,5 @@
 """Ported from trainual's motion/body_solver.py. Whole-motion body solver: trunk + arm joint angles for every frame at once, from task constraints, under a
-posture prior measured from people standing at work (AnDy; the fitted mixture is in the data root, arm-prior/standing_prior.npz), joint ranges, gravity effort and smoothness.
+posture prior measured from people manipulating objects seated or standing (GRAB, ARCTIC, AnDy; the fitted mixture is in the data root, arm-prior/people_prior.npz), joint ranges, gravity effort and smoothness.
 
 Why a trajectory and not frame-by-frame IK: a person's arm doesn't pick the best posture for each instant;
 it moves economically (minimum effort and jerk) through postures that are typical for the task. The first
@@ -63,8 +63,9 @@ def wrist_inside(th):
 
 class ArmPrior:
     def __init__(self, path=None):
-        # people standing at work (moonshot/validate/standing_prior.py), as the posture checks hold a take to
-        d = np.load(path or data_root() / "arm-prior" / "standing_prior.npz")
+        # people manipulating objects seated or standing (moonshot/validate/people_prior.py), as the posture checks hold
+        # a take to
+        d = np.load(path or data_root() / "arm-prior" / "people_prior.npz")
         self.w = torch.as_tensor(d["weights"], dtype=torch.float64)
         self.mu = torch.as_tensor(d["means"], dtype=torch.float64)
         cov = torch.as_tensor(d["covs"], dtype=torch.float64)
@@ -83,7 +84,7 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
-def posture_cost(th, prior=None, w_comfort=1.0, w_prior=5.0, trunk=True):
+def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
     people's prior. th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm
@@ -116,10 +117,11 @@ def ranges():
 
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
-         "comfort": 1.0, "prior": 5.0, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
+         "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
          "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
-    # prior 5.0, not 0.3 (2026-11-03): at 0.3 the people's mixture barely moved a take (the vise take's median
-    # likelihood 35.1 against people's 24.2; 29.7 at 5); the grip solver weighs it the same (posture_cost)
+    # prior 0.3 (2026-11-03): against people seated or standing, the vise take plans inside their range (0.936) and
+    # likelihood (24.6) at 0.3, and 1.5 adds little (0.941, 23.6) while its hands miss more; at 5 the bench takes'
+    # hands missed by up to 118 mm and their caliper and deburr gates failed, and the grip solver's pads came off
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 

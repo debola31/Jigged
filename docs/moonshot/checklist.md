@@ -105,14 +105,26 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   2026-11-02 (the solver and grips, `test_body_mirror.py`, `test_two_arms.py`); the physics run and the render are
   still right-hand only. Known gaps: the scapula doesn't yet follow shoulder elevation; fingers have no recorded
   top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
-- [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1)
-- [ ] Two-joint muscle couplings: wrist bend moves the fingers (§3.1)
-- [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1)
+- [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1).
+  Built 2026-11-02 (`moonshot/body/data/strength.json` curves, `test_strength_curves.py`): the elbow from Frey-Law
+  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011);
+  every other hinge has no angle curve and the elbow's mid-range speed decay, *proposed*. The controller caps each
+  motor at its curve every step; the vise take's physics run (`moonshot/sim/vise_take.py`) doesn't call it yet.
+- [x] Two-joint muscle couplings: wrist bend moves the fingers (§3.1). A spring across the wrist and each finger's
+  MCP and PIP: at full wrist extension a relaxed hand flexes them 35 and 50 deg (Neumann 2009), effort overrides
+  it (`test_tenodesis.py`, 2026-11-02). Proposed: straight fingers at full flexion, the spring's stiffness.
+- [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1).
+  Built 2026-11-02 (`moonshot/validate/muscle.py`, registered as `muscle_activation`): MyoArm posed by the run's
+  angles, least-effort activations for the torque the motion and the hand's load need. Waits on the physics run
+  recording the load on the hand (`checks.json` `hand_wrench`); without it the vise take's motion alone peaks at
+  38%.
 - [ ] Body conformance tests pass: range, speed, strength, strength curves, couplings, muscle check agrees,
   proportions, gravity (§3.1). Range, speed, strength, couplings, proportions, gravity and left-right mirroring
   pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-01), as do the wrist's ellipse
   (`test_wrist_ellipse.py`) and the left arm as the right mirrored under any trunk (`test_body_mirror.py`,
-  2026-11-02); strength curves and the muscle check wait on their own items.
+  2026-11-02). Since 2026-11-02 strength curves (`test_strength_curves.py`), the wrist moving the fingers
+  (`test_tenodesis.py`) and the muscle check agreeing (`test_muscle_check.py`: easy motions and 5 kg held out
+  pass, 25 kg held out and a 0.1 s elbow flexion fail) pass too. Open: the scapula following shoulder elevation.
 - [ ] Watch the deformable-pad trigger: count grip assists and grip complaints per station (§3.1). Only if it
   fires: MuJoCo deformable fingertip and palm pads.
 - [ ] Record conformance tests for every machine and tool as it lands (§3.2). So far (2026-11-01): the VF-2
@@ -133,9 +145,16 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   the production checks that run on every frame (§5.1–5.2). 2026-11-02: the wrist ellipse, skin penetration
   (measured on NIMBLE's skin from the physics run, agreeing with the bake) and the lever are per-frame checks that
   `moonshot/validate/take.py` runs before a render, and the re-planned vise take passes all three (the skin at
-  3.45 mm against the pads' 3.5 mm, decided 2026-11-02); body vs. people is still the gates' only.
-- [ ] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
-  hand opening; matches its footage (cards with footage only)
+  3.45 mm against the pads' 3.5 mm, decided 2026-11-02). Body vs. people is per-frame since 2026-11-02
+  (`moonshot/validate/posture.py`), reproducing trainual's report on its reference take (`test_posture_port.py`);
+  the re-planned vise take fails it: 53% of frames inside people's range against 95%, likelihood median 25.6
+  against 25. Open: joint ranges and the per-verb physics are gates only.
+- [x] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
+  hand opening; matches its footage (cards with footage only). Each registered with its good and bad takes
+  (`moonshot/validate/`, `test_checks_prove_themselves.py`, 2026-11-02). On the re-planned vise take nothing moves
+  without a cause; the hand opens 133-140 mm for both the 76 mm blank and the 27 mm knob (0.15 mm wider per mm
+  against 0.74-0.92), so it fails hand opening. The other four have nothing to read until the physics run records
+  machine axes, active constraints and applied forces, and the lifting force, and `take.json` names its card.
 - [x] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
   Done 2026-11-02, on the take the ported planner (`moonshot/motion/`) writes, since trainual's stopped being the bar
   on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 13.0 / 14.0 N grip, 1.76 mm
@@ -145,13 +164,17 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   39 mm against 10 mm, which belongs to the planner: near-misses
   (`stray_contacts`), no arm volume in planning, and the held blank's inertia not fed forward, which trips a latent
   launch of the blank on the parallels during cranking.
-- [ ] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle
-- [ ] Timestep halving converges
+- [x] Counterfactuals: half friction drops the part; no crank leaves the vise open; an open door refuses the cycle.
+  `test_counterfactuals.py`, 2026-11-02: each alters the model or plan in the test; the open door in the fast tier,
+  the other two on the hub's vise take (physics tier).
+- [ ] Timestep halving converges. Gate `test_timestep.py` (2026-11-02): the grab, place, slide, push, crank and
+  finger depth agree at 0.5 ms; the parallels don't: para_b moves 1.07 mm under the 3 N check at 1 ms and 0.11 mm
+  at 0.5 ms, so whether it's pinched depends on the timestep.
 - [ ] The six known gaps in §5.5, on the re-planned vise take (2026-11-02). Fixed: the wrist's ellipse (0.80 at
   most), the crank grip (the lever never touched), the skin (3.45 mm, within the pads' 3.5), finger spread (0.11
   deg past range at worst, inside the 1 deg tolerance). Open: shoulder rotation at 151.5 deg/s against 150, and
-  trunk rotation against recorded people, unchecked until body vs. people is ported (a standing-work range may be
-  the fix, §11).
+  trunk rotation past recorded people's 99th percentile (13.3 deg) in 435 of 955 frames, up to 23.9 deg; trainual's
+  take, 359 (`posture_like_people`, 2026-11-02). A standing-work range may be the fix (§11).
 
 ## 4. Job queue (timeboxed Nov 1–2)
 

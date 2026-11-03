@@ -1,6 +1,6 @@
 """Hand opening (plan §5.2; Bhatia 2022, Smeets 2020): on each reach to grasp the thumb and index open widest 71-77% of
 the way through (person.peak_aperture_reach_frac), and wider for a bigger object, 0.74-0.92 mm per mm of its size
-(person.aperture_per_object_mm). The size rule needs grasps of two sizes or more; a take that grasps one size is
+(person.aperture_per_object_mm). The size rule needs grasps of sizes 20 mm apart or more; a take that grasps one size is
 judged on timing alone.
 
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
@@ -60,6 +60,10 @@ def measure(take: Path) -> dict:
             "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}}
 
 
+MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart or more: op30's 31 mm part and the 27 mm
+                       # knob gave a slope of noise (-1.16 mm per mm), as the studies' objects span 2-8 cm
+
+
 @check("hand_opening",
        good=["good/hand_opening_people.json"],
        bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json"])
@@ -85,7 +89,7 @@ def hand_opening(take: dict) -> Result:
         raise ValueError("no reach to grasp: the hand never closed on what the take grasps")
     per_mm = None
     sizes = {o: take["size_mm"][o] for o in peaks}
-    if len(set(sizes.values())) > 1:
+    if max(sizes.values()) - min(sizes.values()) >= MIN_SPREAD_MM:
         x = np.array([sizes[o] for o in peaks for _ in peaks[o]])
         y = np.array([p for o in peaks for p in peaks[o]])
         per_mm = float(np.polyfit(x, y, 1)[0])

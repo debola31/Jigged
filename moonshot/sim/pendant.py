@@ -39,6 +39,7 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
@@ -138,7 +139,7 @@ class PendantRunner(TakeRunner):
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.lifting = {s: False for s in ("R", "L")}
-        self.pressing = {s: False for s in ("R", "L")}
+        self.press_n: dict[str, np.ndarray | None] = {s: None for s in ("R", "L")}
         self.turns =sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.jog_ev = {e["jog"]: e for e in self.turns}                  # its last stroke: the target, axis and step
         self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
@@ -257,7 +258,7 @@ class PendantRunner(TakeRunner):
             # the next press within reach in time: the hand works toward it from the last one's end
             near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
-            self.pressing[s] = bool(near)
+            self.press_n[s] = np.asarray(near[0][1]["normal"], float) if near else None
             self.lifting[s] = bool(near) and near[0][0] in self.press_done
             if not near:
                 i *= 1 - dt / 0.2
@@ -281,12 +282,21 @@ class PendantRunner(TakeRunner):
             J = jacp[:, self.arm_dofs[s]]
             d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
 
-    def touching(self, side: str) -> bool:
-        """As the runner's, and a hand working a press counts as on its key: there the press's aim steers the index,
-        and holds it off the face until it's over the key, and off it once it has clicked, both meant to leave the
-        plan. Sight, correcting them, wound up a push into the keypad, 10 mm by op20-xy's 11th second, that pressed
-        a digit with the middle finger as the hand left for the dial."""
-        return self.pressing[side] or super().touching(side)
+    def held_error(self, side: str, t: float) -> np.ndarray | None:
+        """While a press is under way, sight corrects the hand across the key's face only: how deep the index stands
+        is the press's, which holds it off the face until it's over the key, pushes, and lifts it once it has
+        clicked, all meant to leave the plan. Sight, correcting the depth too, wound up 10 mm into the keypad by
+        op20-xy's 11th second, and the middle finger pressed 2 as the hand left for the dial; held still through
+        the press altogether, it let the hand drift onto other keys."""
+        n = self.press_n[side]
+        if n is None:
+            return None
+        m, d, p = self.model, self.data, self.plan
+        hb = m.body(f"{side}_hand").id
+        Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+        err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+        err[:3] -= n * (err[:3] @ n)
+        return err
 
     def correction(self, t: float) -> np.ndarray:
         """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its

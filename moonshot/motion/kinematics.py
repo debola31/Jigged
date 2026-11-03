@@ -28,6 +28,12 @@ R_hand @ H0 with H0 = [-Z, +Y, +X].
 
 `anatomical_angles` inverts this for SMPL-X segment rotations (trainual's human_data.py), so the data and the solver
 measure the same angles.
+
+The left arm is the right arm mirrored through the body's mid-plane: with the same anatomical angles, and the trunk's
+side-bend and twist negated (`mirror_trunk`), the right arm's frames reflected back (`mirror_points`,
+`mirror_frames`) are the left arm's. Exact for the body model, which builds its left side as its right mirrored
+(moonshot/body/skeleton.py; moonshot/tests/gates/test_body_conformance.py). So everything here, and the solver and
+grips on top, plans a left hand as a right hand in the mirrored world.
 """
 from __future__ import annotations
 
@@ -40,6 +46,27 @@ NAMES = ["trunk_flex", "trunk_lat", "trunk_rot", "sh_plane", "sh_elev", "sh_rot"
          "sc_prot", "sc_elev"]
 ARM = slice(3, 10)          # the 7 arm angles (the human-data prior's dimensions)
 H0 = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])      # columns: long (-Z), radial (+Y), dorsal (+X)
+MIRROR = np.diag([-1.0, 1.0, 1.0])                                         # through the body's mid-plane (world X)
+TRUNK_MIRROR = np.array([1.0, -1.0, -1.0])                                 # flex, side-bend, twist
+
+
+def mirror_trunk(theta):
+    """Angles (..., >=3) with the trunk mirrored: the body whose right arm, reflected, is this body's left arm."""
+    th = np.array(theta, dtype=np.float64, copy=True)
+    th[..., :3] *= TRUNK_MIRROR
+    return th
+
+
+def mirror_points(p, lumbar):
+    """Points (..., 3) reflected through the body's mid-plane, the vertical plane through the lumbar pivot."""
+    q = np.array(p, dtype=np.float64, copy=True)
+    q[..., 0] = 2 * np.asarray(lumbar, dtype=np.float64)[..., 0] - q[..., 0]
+    return q
+
+
+def mirror_frames(R):
+    """Frames (..., 3, 3) reflected through the mid-plane: M R M, still a rotation."""
+    return MIRROR @ np.asarray(R, dtype=np.float64) @ MIRROR
 
 # body dimensions (mm): a 50th-percentile adult male (ANSUR II), from the lumbar pivot (L5-S1)
 # ANSUR II: acromion 1439 mm, eye 1640, biacromial 415 (acromion ~207 lateral); the glenohumeral centre

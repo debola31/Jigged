@@ -82,19 +82,24 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
-def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3):
+def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
-    people's prior. th: (n, 10) degrees -> (n,)."""
+    people's prior. th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm
+    on a trunk the first arm's cost already counts."""
     cf = SPEC["body"]["comfort"]
-    t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)
+    t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)[:th.shape[1]]
     ctr, half, w = t("centre"), t("half"), t("weight")
+    if not trunk:
+        w = torch.cat([torch.zeros(3, dtype=th.dtype), w[3:]])
     z = (th - ctr) / half
     c = w_comfort * (w * z ** 2).sum(-1)
     c = c + w_comfort * 2 * w[7] * (torch.relu((th[:, 7] - ctr[7]).abs() - 45.0) / half[7]) ** 2
-    lo, hi = (torch.as_tensor(x, dtype=th.dtype) for x in ranges())
+    lo, hi = (torch.as_tensor(x, dtype=th.dtype)[:th.shape[1]] for x in ranges())
     span = hi - lo
     near = torch.relu(0.1 - (th - lo) / span) + torch.relu(0.1 - (hi - th) / span)
+    if not trunk:
+        near = near[:, 3:]
     c = c + 1e3 * (near ** 2).sum(-1)
     if prior is not None:
         c = c + w_prior * prior.nll(th[:, 3:10])
@@ -115,37 +120,38 @@ class BodySolver:
     # the trunk is heavy and moves slowly: its angular acceleration costs more
     ACCEL_SCALE = [300, 300, 300, 1, 1, 1, 1, 1, 1, 1, 0.3, 0.3]
 
-    def __init__(self, n, fps, lumbar, prior: ArmPrior | None = None, boxes=()):
+    def __init__(self, n, fps, lumbar, prior: ArmPrior | None = None, boxes=(), arms=("R",)):
+        """arms: ("R",) solves the trunk and the right arm (12 angles a frame); ("R", "L") adds the left arm's 9
+        (theta columns 12-20), planned as the right arm of the mirrored world on the same trunk (kinematics.py)."""
         self.n, self.fps = n, fps
         self.lumbar = np.asarray(lumbar, float)
         self.prior = prior or ArmPrior()
         lo, hi = ranges()
         self.lo, self.hi = torch.as_tensor(lo), torch.as_tensor(hi)
         self.boxes = [(torch.as_tensor(c, dtype=torch.float64), torch.as_tensor(h, dtype=torch.float64)) for c, h in boxes]
-        # obstacles for the hand itself (wrist and points along the fingers), each with a per-frame mask:
-        # e.g. the crank's swept disc, except while the hand is meant to hold the knob
-        self.hand_boxes = []
-        self.tasks = [dict() for _ in range(n)]
-        self.load = np.zeros(n)                                         # kg held in the hand per frame
         sm = SPEC["body"]["speed_max_deg_s"]
         self.vmax = torch.as_tensor([sm[nm] for nm in BM.NAMES], dtype=torch.float64)
-        cf = SPEC["body"]["comfort"]
-        self.c_ctr = torch.as_tensor([cf["centre"][nm] for nm in BM.NAMES], dtype=torch.float64)
-        self.c_half = torch.as_tensor([cf["half"][nm] for nm in BM.NAMES], dtype=torch.float64)
-        self.c_w = torch.as_tensor([cf["weight"][nm] for nm in BM.NAMES], dtype=torch.float64)
-        self.hand_rot_w = torch.zeros(n, dtype=torch.float64)          # per-frame weight on hand rotation speed
+        # per arm: its hand's tasks, the obstacles for the hand itself (wrist and points along the fingers, each with
+        # a per-frame mask: e.g. the crank's swept disc, except while the hand is meant to hold the knob), the kg
+        # it holds, and a per-frame weight on its rotation speed. The left arm's are in the mirrored world.
+        self.side = {s: {"tasks": [dict() for _ in range(n)], "hand_boxes": [], "load": np.zeros(n),
+                         "hand_rot_w": torch.zeros(n, dtype=torch.float64)} for s in arms}
+        r = self.side["R"]
+        self.tasks, self.hand_boxes, self.load, self.hand_rot_w = r["tasks"], r["hand_boxes"], r["load"], r["hand_rot_w"]
 
     # -- constraints -------------------------------------------------------------------------
-    def pose(self, k, H, W, w=1.0):
-        self.tasks[k]["pose"] = (torch.as_tensor(H), torch.as_tensor(W), w)
+    # A left hand's targets are given as the right hand of the mirrored world (kinematics.mirror_points and
+    # mirror_frames make one from a world target), as its grips are solved.
+    def pose(self, k, H, W, w=1.0, side="R"):
+        self.side[side]["tasks"][k]["pose"] = (torch.as_tensor(H), torch.as_tensor(W), w)
 
-    def tsr(self, k, point_hand, world_point, axis_hand, world_axis, w=1.0):
+    def tsr(self, k, point_hand, world_point, axis_hand, world_axis, w=1.0, side="R"):
         """point_hand / axis_hand are in the hand frame H (columns long, radial, dorsal), relative to W."""
-        t = lambda x: torch.as_tensor(np.asarray(x, float))
-        self.tasks[k]["tsr"] = (t(point_hand), t(world_point), t(axis_hand), t(world_axis), w)
+        t = lambda x: torch.as_tensor(np.asarray(x, float))   # noqa: E731
+        self.side[side]["tasks"][k]["tsr"] = (t(point_hand), t(world_point), t(axis_hand), t(world_axis), w)
 
-    def pos(self, k, W, w=1.0):
-        self.tasks[k]["pos"] = (torch.as_tensor(np.asarray(W, float)), w)
+    def pos(self, k, W, w=1.0, side="R"):
+        self.side[side]["tasks"][k]["pos"] = (torch.as_tensor(np.asarray(W, float)), w)
 
     # -- solve ------------------------------------------------------------------------------
     def angles(self, u):
@@ -156,87 +162,113 @@ class BodySolver:
         x = ((th - self.lo) / (self.hi - self.lo)).clamp(1e-3, 1 - 1e-3)
         return torch.log(x / (1 - x))
 
+    @staticmethod
+    def _pack(tasks, n):
+        """One arm's per-frame tasks as stacked tensors: kind -> (frames, [tensors], weights)."""
+        out = {}
+        for kind, width in (("pose", 2), ("tsr", 4), ("pos", 1)):
+            ks = [k for k in range(n) if kind in tasks[k]]
+            if ks:
+                rows = [tasks[k][kind] for k in ks]
+                out[kind] = (ks, [torch.stack([r[i] for r in rows]) for i in range(width)],
+                             torch.as_tensor([r[width] for r in rows]))
+        return out
+
+    def _arm_terms(self, th, L, packed, side, boxes, trunk):
+        """The cost terms of one arm on its trunk: its hand's tasks, posture, effort, smoothness and clearance.
+        th: (n, 12) angles of this arm's world (for the left, the mirrored one); trunk: whether to count the trunk's
+        own posture and smoothness, which happens once per body."""
+        W, dt = self.W, 1.0 / self.fps
+        f = BM.torch_fk(th, L)
+        H, Wp = f["H"], f["W"]
+        terms = {}
+        if "pose" in packed:
+            ks, (PH, PW), Pw = packed["pose"]
+            e_p = ((Wp[ks] - PW) ** 2).sum(-1)
+            e_r = ((H[ks] - PH) ** 2).sum((-1, -2))
+            terms["pose"] = (Pw * (W["pose_pos"] * e_p + W["pose_rot"] * e_r)).sum()
+        if "tsr" in packed:
+            ks, (Tp, Tq, Ta, Tb), Tw = packed["tsr"]
+            Hk = H[ks]
+            pt = Wp[ks] + torch.einsum("nij,nj->ni", Hk, Tp)
+            ax = torch.einsum("nij,nj->ni", Hk, Ta)
+            terms["tsr"] = (Tw * (W["tsr_pos"] * ((pt - Tq) ** 2).sum(-1)
+                                  + W["tsr_axis"] * ((ax - Tb) ** 2).sum(-1))).sum()
+        if "pos" in packed:
+            ks, (QW,), Qw = packed["pos"]
+            terms["pos"] = (Qw * W["pos"] * ((Wp[ks] - QW) ** 2).sum(-1)).sum()
+        terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"], trunk=trunk).sum()
+        # gravity moment at the shoulder: arm segments (upper 2.1 kg, forearm 1.2, hand 0.5) + load
+        S = f["S"]
+        mom = lambda m, p: m * torch.linalg.norm((p - S)[:, :2], dim=-1)   # noqa: E731
+        M = mom(2.1, (S + f["E"]) / 2) + mom(1.2, (f["E"] + Wp) / 2) + mom(0.5 + torch.as_tensor(side["load"]), Wp)
+        terms["effort"] = W["effort"] * (M ** 2).sum() * 9.81 ** 2
+        cols = slice(None) if trunk else slice(3, None)
+        vel = (th[1:, cols] - th[:-1, cols]) / dt
+        acc = (th[2:, cols] - 2 * th[1:-1, cols] + th[:-2, cols]) / dt ** 2
+        scale = torch.as_tensor(self.ACCEL_SCALE, dtype=torch.float64)[cols]
+        terms["accel"] = W["accel"] * 1e-4 * ((acc ** 2) * scale).sum()
+        # the hand's rotation speed (cranking: a translating fist, the knob spinning in it)
+        dH = ((H[1:] - H[:-1]) ** 2).sum((-1, -2)) / dt ** 2
+        terms["hand_rot"] = (side["hand_rot_w"][1:] * dH).sum()
+        terms["speed"] = W["speed"] * (torch.relu(vel.abs() - self.vmax[cols]) ** 2).sum()
+        if side["hand_boxes"]:
+            long = H[:, :, 0]
+            hp = torch.cat([Wp, Wp + 70 * long, Wp + 140 * long], 0)
+            c = 0
+            for bc, bh, mask in side["hand_boxes"]:
+                m3 = torch.cat([mask, mask, mask])
+                d = (hp - bc).abs() - bh
+                out = torch.linalg.norm(d.clamp_min(0), dim=-1) + d.max(-1).values.clamp_max(0)
+                c = c + (m3 * torch.relu(30.0 - out) ** 2).sum()
+            terms["hand_clear"] = W["clear"] * c
+        if boxes:
+            pts = torch.cat([f["E"], (f["E"] + Wp) / 2, Wp * 0.75 + f["E"] * 0.25], 0)
+            c = 0
+            for bc, bh in boxes:
+                d = (pts - bc).abs() - bh
+                out = torch.linalg.norm(d.clamp_min(0), dim=-1) + d.max(-1).values.clamp_max(0)
+                c = c + (torch.relu(45.0 - out) ** 2).sum()            # forearm radius ~ 40 mm
+            terms["clear"] = W["clear"] * c
+        return terms
+
     def solve(self, theta0, iters=1500, lr=0.03, verbose=False):
+        """theta0: a starting pose, 10 or 12 angles (trunk and right arm), or 21 with the left arm's (otherwise the
+        left starts as the right). Returns the angles (n, 12, or 21 with the left arm), the pelvis shift (n, 3), the
+        right arm's frames per frame and the terms; a left arm's frames, in the mirrored world, are left_frames."""
         th0 = np.asarray(theta0, float)
         if th0.shape[-1] == 10:
             th0 = np.concatenate([th0, np.zeros(th0.shape[:-1] + (2,))], -1)
-        th0 = np.broadcast_to(th0, (self.n, 12)).copy()
+        two = "L" in self.side
+        thL0 = th0[..., 12:21] if th0.shape[-1] == 21 else th0[..., 3:12]
+        th0 = np.broadcast_to(th0[..., :12], (self.n, 12)).copy()
         u = self.free(th0).clone().requires_grad_(True)
         dp = torch.zeros(self.n, 3, dtype=torch.float64, requires_grad=True)      # pelvis shift (mm)
-        opt = torch.optim.Adam([u, dp], lr=lr)
+        params = [u, dp]
+        if two:
+            loL, hiL = self.lo[3:], self.hi[3:]
+            xL = ((torch.as_tensor(np.broadcast_to(thL0, (self.n, 9)).copy()) - loL) / (hiL - loL)).clamp(1e-3, 1 - 1e-3)
+            uL = torch.log(xL / (1 - xL)).clone().requires_grad_(True)
+            params.append(uL)
+            boxes_L = [(torch.as_tensor(BM.mirror_points(c.numpy(), self.lumbar)), h) for c, h in self.boxes]
+            flip = torch.as_tensor(np.r_[BM.TRUNK_MIRROR, np.ones(9)], dtype=torch.float64)
+            dp_flip = torch.as_tensor([-1.0, 1.0, 1.0], dtype=torch.float64)
+        opt = torch.optim.Adam(params, lr=lr)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iters)
-        W = self.W
-        # vectorised task data
-        pose_k = [k for k in range(self.n) if "pose" in self.tasks[k]]
-        tsr_k = [k for k in range(self.n) if "tsr" in self.tasks[k]]
-        pos_k = [k for k in range(self.n) if "pos" in self.tasks[k]]
-        if pose_k:
-            PH = torch.stack([self.tasks[k]["pose"][0] for k in pose_k])
-            PW = torch.stack([self.tasks[k]["pose"][1] for k in pose_k])
-            Pw = torch.as_tensor([self.tasks[k]["pose"][2] for k in pose_k])
-        if tsr_k:
-            T = [self.tasks[k]["tsr"] for k in tsr_k]
-            Tp, Tq, Ta, Tb = (torch.stack([x[i] for x in T]) for i in range(4))
-            Tw = torch.as_tensor([x[4] for x in T])
-        if pos_k:
-            QW = torch.stack([self.tasks[k]["pos"][0] for k in pos_k])
-            Qw = torch.as_tensor([self.tasks[k]["pos"][1] for k in pos_k])
-        load = torch.as_tensor(self.load)
-        dt = 1.0 / self.fps
+        packed = {s: self._pack(v["tasks"], self.n) for s, v in self.side.items()}
         best = None
         for it in range(iters):
             opt.zero_grad()
             th = self.angles(u)
             L = torch.as_tensor(self.lumbar) + dp
-            f = BM.torch_fk(th, L)
-            H, Wp = f["H"], f["W"]
-            terms = {}
-            if pose_k:
-                e_p = ((Wp[pose_k] - PW) ** 2).sum(-1)
-                e_r = ((H[pose_k] - PH) ** 2).sum((-1, -2))
-                terms["pose"] = (Pw * (W["pose_pos"] * e_p + W["pose_rot"] * e_r)).sum()
-            if tsr_k:
-                Hk = H[tsr_k]
-                pt = Wp[tsr_k] + torch.einsum("nij,nj->ni", Hk, Tp)
-                ax = torch.einsum("nij,nj->ni", Hk, Ta)
-                terms["tsr"] = (Tw * (W["tsr_pos"] * ((pt - Tq) ** 2).sum(-1)
-                                      + W["tsr_axis"] * ((ax - Tb) ** 2).sum(-1))).sum()
-            if pos_k:
-                terms["pos"] = (Qw * W["pos"] * ((Wp[pos_k] - QW) ** 2).sum(-1)).sum()
-            terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"]).sum()
-            # gravity moment at the shoulder: arm segments (upper 2.1 kg, forearm 1.2, hand 0.5) + load
-            S = f["S"]
-            mid_u = (S + f["E"]) / 2
-            mid_f = (f["E"] + Wp) / 2
-            mom = lambda m, p: m * torch.linalg.norm((p - S)[:, :2], dim=-1)
-            M = mom(2.1, mid_u) + mom(1.2, mid_f) + mom(0.5 + load, Wp)
-            terms["effort"] = W["effort"] * (M ** 2).sum() * 9.81 ** 2
-            vel = (th[1:] - th[:-1]) / dt
-            acc = (th[2:] - 2 * th[1:-1] + th[:-2]) / dt ** 2
-            terms["accel"] = W["accel"] * 1e-4 * ((acc ** 2) * torch.as_tensor(self.ACCEL_SCALE, dtype=torch.float64)).sum()
-            # the hand's rotation speed (cranking: a translating fist, the knob spinning in it)
-            dH = ((H[1:] - H[:-1]) ** 2).sum((-1, -2)) / dt ** 2
-            terms["hand_rot"] = (self.hand_rot_w[1:] * dH).sum()
-            terms["speed"] = W["speed"] * (torch.relu(vel.abs() - self.vmax) ** 2).sum()
-            terms["pelvis"] = W["pelvis"] * (dp ** 2).sum() + 1e-3 * (((dp[1:] - dp[:-1]) / dt) ** 2).sum()
-            if self.hand_boxes:
-                long = H[:, :, 0]
-                hp = torch.cat([Wp, Wp + 70 * long, Wp + 140 * long], 0)
-                c = 0
-                for bc, bh, mask in self.hand_boxes:
-                    m3 = torch.cat([mask, mask, mask])
-                    d = (hp - bc).abs() - bh
-                    out = torch.linalg.norm(d.clamp_min(0), dim=-1) + d.max(-1).values.clamp_max(0)
-                    c = c + (m3 * torch.relu(30.0 - out) ** 2).sum()
-                terms["hand_clear"] = W["clear"] * c
-            if self.boxes:
-                pts = torch.cat([f["E"], (f["E"] + Wp) / 2, Wp * 0.75 + f["E"] * 0.25], 0)
-                c = 0
-                for bc, bh in self.boxes:
-                    d = (pts - bc).abs() - bh
-                    out = torch.linalg.norm(d.clamp_min(0), dim=-1) + d.max(-1).values.clamp_max(0)
-                    c = c + (torch.relu(45.0 - out) ** 2).sum()            # forearm radius ~ 40 mm
-                terms["clear"] = W["clear"] * c
+            terms = self._arm_terms(th, L, packed["R"], self.side["R"], self.boxes, trunk=True)
+            terms["pelvis"] = self.W["pelvis"] * (dp ** 2).sum() + 1e-3 * (((dp[1:] - dp[:-1]) * self.fps) ** 2).sum()
+            if two:
+                # the left arm: the right arm of the mirrored world, on the mirrored trunk and pelvis
+                thL = wrist_inside(torch.cat([th[:, :3], loL + (hiL - loL) * torch.sigmoid(uL)], 1) * flip)
+                for k, v in self._arm_terms(thL, torch.as_tensor(self.lumbar) + dp * dp_flip, packed["L"],
+                                            self.side["L"], boxes_L, trunk=False).items():
+                    terms[k + "_L"] = v
             loss = sum(terms.values())
             loss.backward()
             opt.step()
@@ -244,10 +276,12 @@ class BodySolver:
             if verbose and (it % 250 == 0 or it == iters - 1):
                 print(it, f"{loss.item():.1f}", {k: round(float(v), 1) for k, v in terms.items()})
             if best is None or loss.item() < best[0]:
-                best = (loss.item(), th.detach().clone(), dp.detach().clone(), {k: float(v) for k, v in terms.items()})
+                full = torch.cat([th, thL[:, 3:]], 1) if two else th
+                best = (loss.item(), full.detach().clone(), dp.detach().clone(), {k: float(v) for k, v in terms.items()})
         _, th, dp, terms = best
-        f = BM.fk  # numpy frames for the result
-        out = []
-        for k in range(self.n):
-            out.append(BM.fk(th[k].numpy(), self.lumbar + dp[k].numpy()))
-        return th.numpy(), dp.numpy(), out, terms
+        th, dp = th.numpy(), dp.numpy()
+        out = [BM.fk(th[k, :12], self.lumbar + dp[k]) for k in range(self.n)]
+        if two:
+            self.left_frames = [BM.fk(BM.mirror_trunk(np.r_[th[k, :3], th[k, 12:21]]),
+                                      self.lumbar + dp[k] * np.array([-1.0, 1.0, 1.0])) for k in range(self.n)]
+        return th, dp, out, terms

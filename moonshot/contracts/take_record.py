@@ -26,8 +26,11 @@ scene.json:
   "body" bodies are the person, drawn as skin from the hands above, not from geoms; an "object" with no GLBs is drawn
   from its geoms. Geoms are also what the skin bake presses the skin onto.
   A body whose shape changes (the stock as it's cut) also carries "meshes": {"dir": "<folder in the take>",
-  "frames": [k, ...]}, one <dir>/<k>.glb per listed frame in the body's frame (mm); each frame draws the latest
-  mesh at or before it, in place of the body's GLBs and geoms.
+  "frames": [k, ...]}, one <dir>/<k>.glb per listed frame in the body's frame; each frame draws the latest mesh at or
+  before it, in place of the body's GLBs and geoms.
+  A GLB's frame is its raw stored coordinates, in metres, with no glTF Y-up conversion: what trimesh writes (the
+  stations' links, the meshes). A GLB stored Y up, as Blender exports by default (trainual's library), has the turn
+  from Y up to Z up, +90° about x, in its in_body.
 """
 from __future__ import annotations
 
@@ -38,6 +41,13 @@ import numpy as np
 
 SCHEMA = "jigged.take-scene/1"
 ARM_KEYS = {"q": 2, "W": 2, "S": 2, "E": 2, "H": 3, "forearm": 3}
+
+
+def files(folder: Path) -> list[str]:
+    """A take record's files, relative to its folder with / between parts: take.npz, scene.json and its meshes."""
+    scene = json.loads((Path(folder) / "scene.json").read_text(encoding="utf-8"))
+    return ["take.npz", "scene.json"] + [f"{b['meshes']['dir']}/{k}.glb" for b in scene["bodies"].values()
+                                         if "meshes" in b for k in b["meshes"]["frames"]]
 
 
 def check(folder: Path) -> list[str]:

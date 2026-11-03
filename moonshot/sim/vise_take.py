@@ -645,8 +645,11 @@ class ViseTake:
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
         (Path(path).parent / "checks.json").write_text(
             json.dumps({"touching": rec["touching"], "never_held": NEVER_HELD}), encoding="utf-8")
+        glbs = glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        for body, entries in V.render_glbs().items():
+            glbs.setdefault(body, []).extend(entries)
         self.recorder.write(Path(path).parent, self.fps, self.tk["lumbar"][0], {"R": [str(x) for x in rd["names"]]},
-                            "vf2", glbs_in_bodies(self.model, "vf2", vf2.render_links()))
+                            "vf2", glbs, V.render_meshes(self.load, Path(path).parent))
 
     def plan_time_for_phi(self, e, phi):
         k0, k1 = (int(np.searchsorted(self.t, x)) for x in (e["t0"], e["t1"]))

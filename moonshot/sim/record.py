@@ -51,8 +51,9 @@ class Recorder:
                 self.hands[s][k].append(np.asarray(hands[s][k], float))
 
     def write(self, folder: Path, fps: int, mirror_x: float, q_names: dict[str, list[str]], station: str,
-              glbs: dict[str, list[dict]] | None = None) -> None:
-        folder, m, glbs = Path(folder), self.model, glbs or {}
+              glbs: dict[str, list[dict]] | None = None, meshes: dict[str, dict] | None = None) -> None:
+        """meshes: {body: {"dir", "frames"}} for the bodies drawn from GLBs already written into the folder."""
+        folder, m, glbs, meshes = Path(folder), self.model, glbs or {}, meshes or {}
         n = len(self.pos)
         cam = np.array(self.cam)
         arrays = {"fps": fps, "t": np.arange(n) / fps, "bodies": np.array(self.names), "pos": np.array(self.pos),
@@ -73,6 +74,8 @@ class Recorder:
             entry = {"role": "body" if name in self.person else "object", "geoms": geoms}
             if name in glbs:
                 entry["glbs"] = glbs[name]
+            if name in meshes:
+                entry["meshes"] = meshes[name]
             bodies[name] = entry
         scene = {"schema": SCHEMA, "station": station, "arms": list(self.arms), "bodies": bodies}
         (folder / "scene.json").write_text(json.dumps(scene, indent=1), encoding="utf-8")

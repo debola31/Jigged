@@ -98,7 +98,7 @@ def program_of(c: cam.Cycle) -> tuple[list[tuple], list[int], list[tuple[int, ob
     prog, starts, cuts = [], [], []
     for p in c.passes:
         if prog:
-            prog.append((*prog[-1][:2], 0.0, 0.0))
+            prog.append((*prog[-1][:2], 0.0, 0.0, None))
         starts.append(len(prog))
         for i, (pt, feed) in enumerate(p.moves):
             prog.append((*cam.joints(pt, p.tool), p.tool.rpm, feed))

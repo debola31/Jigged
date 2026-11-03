@@ -132,8 +132,12 @@ class ViseTake:
         self.contact_label: set[str] = set()
         self.letgo, self.reach_off = {}, {}
         self.offsets: list[tuple[float, np.ndarray]] = []   # (time, the wrist correction the part's place in the hand asks)
+        # a part heavier than the reference is looked at again before it is set down: braced harder and turned less,
+        # it settles in the hand during the hold (op10's moved 2 mm); the reference's doesn't, and a second sighting
+        # only adds noise to its set-down
         hold = [c for c in self.tk["clips"] if c["verb"] == "hold"]
-        self.resight_t = hold[0]["t1"] if hold else None    # looked at again before it is set down
+        heavier = self.load.mass_kg > V.REFERENCE.mass_kg
+        self.resight_t = hold[0]["t1"] if hold and heavier else None
         z = self.rd["blank"][:, 2].copy()
         z[0] = z[1]                                        # frame 0's glitch (see above)
         self.t_lift = float(self.t[np.argmax(z > self.load.stage[2] + 1.0)])

@@ -208,25 +208,32 @@ def deviation(part, stock, fx: dict) -> dict:
     d1 = smesh.nearest(pts)[1]
     gated1 = np.array([why[i] is None for i in fid]) & ~banded(pts, fid)
     np.maximum.at(worst, fid, d1)
+    gated_worst = np.zeros(len(faces))
+    np.maximum.at(gated_worst, fid[gated1], d1[gated1])
     # the stock's surface against the part: nothing standing over a machined face
     spts, _ = smesh.samples(seed=1)
     c2, d2, fid2 = pmesh.nearest(spts)
     gated2 = np.array([why[i] is None for i in fid2]) & ~banded(c2, fid2)
     np.maximum.at(worst, fid2, d2)
+    np.maximum.at(gated_worst, fid2[gated2], d2[gated2])
     w1 = d1[gated1].max(initial=0.0)
     w2 = d2[gated2].max(initial=0.0)
     at = pts[gated1][np.argmax(d1[gated1])] if w1 >= w2 and gated1.any() else c2[gated2][np.argmax(d2[gated2])]
     per_face = [{"face": i, "type": f.geomType(), "exempt": why[i], "worst_mm": round(float(worst[i]), 4),
+                 "gated_worst_mm": round(float(gated_worst[i]), 4),
                  "centre": [round(v, 2) for v in f.Center().toTuple()]} for i, f in enumerate(faces)]
     return {"worst_mm": float(max(w1, w2)), "at": [round(float(v), 2) for v in at], "per_face": per_face,
             "gated_frac": float(gated1.mean())}
 
 
 def report(r: dict, limit: float) -> str:
-    bad = sorted((f for f in r["per_face"] if f["worst_mm"] > limit), key=lambda f: -f["worst_mm"])
-    lines = [f"worst on machined faces {r['worst_mm']:.3f} mm at {r['at']}; {r['gated_frac']:.0%} of samples gated"]
-    lines += [f"  face {f['face']:3d} {f['type']:9s} {f['exempt'] or 'machined':11s} {f['worst_mm']:7.3f} mm "
-              f"near {f['centre']}" for f in bad[:40]]
+    """Each face past the limit: its worst where it's gated (what fails the gate), and its worst anywhere, its exempt
+    band and exempt faces included (reported only)."""
+    bad = sorted((f for f in r["per_face"] if f["worst_mm"] > limit), key=lambda f: (-f["gated_worst_mm"], -f["worst_mm"]))
+    lines = [f"worst on machined faces {r['worst_mm']:.3f} mm at {r['at']}; {r['gated_frac']:.0%} of samples gated",
+             "  face  type      class        gated     anywhere"]
+    lines += [f"  face {f['face']:3d} {f['type']:9s} {f['exempt'] or 'machined':11s} {f['gated_worst_mm']:7.3f} "
+              f"{f['worst_mm']:7.3f} mm  near {f['centre']}" for f in bad[:40]]
     return "\n".join(lines)
 
 

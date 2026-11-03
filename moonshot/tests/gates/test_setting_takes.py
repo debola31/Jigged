@@ -101,7 +101,7 @@ def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):
             tool = str(out["tool"])
             # with the tool commanded to work Z0 the gauge line stands at machine Z = G54 Z + the tool's length offset
             gauge = spindle[2] - head[2] + G54[2] + out["tool_length"][tool]
-            tip = gauge - tk["tool"]["length_mm"]
+            tip = gauge - tk["setup"]["tool"]["length_mm"]
             assert abs(tip - datum[2]) <= tol, f"z: the tool's tip {tip - datum[2]:+.4f} mm off the datum"
 
 

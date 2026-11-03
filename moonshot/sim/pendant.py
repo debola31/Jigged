@@ -64,10 +64,12 @@ NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
 def tool_xml(tool: dict) -> str:
     """A tool in its holder, hanging from the spindle's gauge line; it turns with the spindle. It doesn't collide:
     an edge finder's, probe's or indicator's touch is the machine's sensing, or the needle's, read from the geometry.
-    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus."""
+    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus.
+    Its weight is carried by the head's counterbalance, as the spindle's is: uncompensated, its 1.2 kg sagged the Z
+    servo 5.7 um below its setpoint, past the 5 um a probing cycle waits for, and op30-z's cycle never ended."""
     hl, st, tip = tool["holder_mm"], tool["stickout_mm"], tool["tip_mm"]
     f = lambda v: f"{v / 1000:.5f}"                      # noqa: E731
-    body = (f'\n        <body name="tool">'
+    body = (f'\n        <body name="tool" gravcomp="1">'
             f'<geom name="tool_holder" type="cylinder" size="{f(tool["holder_r"])} {f(hl / 2)}" pos="0 0 {f(-hl / 2)}" '
             f'contype="0" conaffinity="0" mass="1.1" rgba="0.6 0.6 0.62 1"/>'
             f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip) / 2)}" '

@@ -363,8 +363,9 @@ def main():
     look.apply_look(cc0)
     look.world(cc0, 0.6)
     look.lights(take.scene["station"], Vector(np.mean(take.b["look"], 0)))
-    sc.cycles.device = "GPU"
-    log("devices", gpu(arg("--device", "METAL")))
+    device = arg("--device", "METAL")
+    sc.cycles.device = "CPU" if device == "CPU" else "GPU"
+    log("devices", ["CPU"] if device == "CPU" else gpu(device))
     if arg("--save"):
         bpy.ops.wm.save_as_mainfile(filepath=arg("--save"))
     out = Path(arg("--out", str(take.bake_dir / "frames")))

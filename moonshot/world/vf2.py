@@ -35,14 +35,14 @@ PROBE_FAST_MM_S, PROBE_SLOW_MM_S, PROBE_BACK_MM = 8.0, 0.5, 1.0   # Renishaw's c
 
 # The spindle's bore and drawbar, in the spindle's frame (mm: its gauge point, +Z up the axis), for a CAT40 holder
 # as moonshot/world/tooling.py builds it [proposed: sized to that holder, not measured]. A ring of 12 boxes round the
-# taper's capsule centres it (0.4 mm clear); a shoulder ring of 8 above stops the taper's round top where the holder's
+# taper's capsule guides it (2 mm clear: at 0.4 a hand-guided holder 5 deg off upright jammed in it); a shoulder ring of 8 above stops the taper's round top where the holder's
 # gauge line meets the gauge point, as a 7/24 taper seats; the knob's head passes up through it into the drawbar's
 # three fingers. Each finger hangs from a pivot on a hinge and is held by its own servo: open while Tool Release is
 # held, closed otherwise, when its tip swings in under the knob's head and lifts it 1 mm against the shoulder. A
 # finger only turns about its pivot, the drawbar's stroke left out: the hand seats the holder, the fingers hold it.
 # The fingers are hardened and greased: on the knob they slide (friction 0.02), so their push lifts the knob rather
 # than wedging it at 0.25, where three fingers held a holder 0.4 mm short of its seat.
-SPINDLE_BORE = {"ring_r": 16.9, "ring_depth": 6.0, "ring_z": (2.0, 60.0), "ring_n": 12,
+SPINDLE_BORE = {"ring_r": 18.5, "ring_depth": 6.0, "ring_z": (2.0, 60.0), "ring_n": 12,
                 "seat_r": 11.0, "seat_depth": 5.0, "seat_z": 64.30, "seat_n": 8,
                 "finger_pivot": (16.0, 100.0), "finger_tip": (8.3, 78.8), "finger_r": 1.5, "finger_n": 3,
                 "open_rad": -0.20, "closed_rad": 0.05, "kp": 5.0, "torque_nm": 0.4}

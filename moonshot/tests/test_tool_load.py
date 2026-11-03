@@ -93,7 +93,7 @@ def test_the_taper_seats_where_the_holder_meets_the_gauge_point():
     """The bore's shoulder ring stops the taper's round top with the holder's gauge line on the spindle's."""
     b, t = vf2.SPINDLE_BORE, TL.TAPER
     assert t["z1"] + math.sqrt(t["r"] ** 2 - b["seat_r"] ** 2) == pytest.approx(b["seat_z"], abs=0.01)
-    assert b["ring_r"] - t["r"] == pytest.approx(0.4, abs=0.05)
+    assert b["ring_r"] - t["r"] == pytest.approx(2.0, abs=0.05)
     assert b["seat_r"] > TL.KNOB_HEAD[0] + 1.0                  # the knob's head passes up through the shoulder
 
 

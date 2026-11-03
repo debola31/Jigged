@@ -68,6 +68,7 @@ class ToolLoadRun(PendantRunner):
         self.rec |= {"holder": [], "holder_quat": [], "load_N": [], "touching_R": [], "fingers": [], "clamp_N": [],
                      "released": []}
         self.weld = m.equality("carry_holder").id if self.loose is not None else None
+        self._pivoting = False
         self._apart_on = False
         self.holder_kg_model = float(m.body_subtreemass[self.loose]) if self.loose is not None else 0.0
 
@@ -129,16 +130,15 @@ class ToolLoadRun(PendantRunner):
         return self.carry is not None and self.carry["t0"] <= t < self.carry["t1"]
 
     def held_error(self, side: str, t: float) -> np.ndarray | None:
-        """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder, on its planned
-        path and standing upright, its taper over the bore. The hand's own turn isn't the target: the carry weld keeps
-        the holder where it sat in the hand as the fingers closed, which a hand turned off its grip (30 deg, in a run)
-        would carry tilted into the bore."""
+        """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder's planned path,
+        its taper over the bore, and the hand turned as planned, which with the hand on its planned grip
+        (planned_grip) stands the holder upright."""
         if side != "R" or self.loose is None or not (self.carry["t0"] <= t < self.carry["t1"]):
             return None
-        d = self.data
-        Rh = d.xmat[self.loose].reshape(3, 3)
-        upright = Rotation.from_euler("z", np.arctan2(Rh[1, 0], Rh[0, 0])).as_matrix()      # its yaw kept
-        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(upright @ Rh.T).as_rotvec()]
+        m, d, p = self.model, self.data, self.plan
+        hb = m.body("R_hand").id
+        Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
 
     def touching(self, side: str) -> bool:
         """As the runner's, but the holder the right hand reaches for and carries in isn't a contact to stop
@@ -177,19 +177,43 @@ class ToolLoadRun(PendantRunner):
             F += sign * (c.frame.reshape(3, 3).T @ f6[:3])
         return F
 
+    def planned_grip(self) -> tuple[np.ndarray, np.ndarray]:
+        """The hand body's pose in the holder's frame (m, rotation) as the plan has it when the carry starts: the
+        holder upright in its fork, the hand on its grip. Holding the holder there, the weld pulls a hand that closed off
+        its grip onto it (the holder can't turn in the fork), rather than carry the holder turned as the hand was: held
+        where it sat in the hand, a hand 28 deg off its grip carried it 28 deg tilted, and steering it upright again bent
+        the wrist to its limit short of the spindle."""
+        q, _, _ = self.at(self.carry["t0"])
+        pl = mujoco.MjData(self.model)
+        pl.qpos[:] = q
+        mujoco.mj_kinematics(self.model, pl)
+        hb = self.model.body("R_hand").id
+        return pl.xpos[hb] - self.planned_holder(self.carry["t0"]) * 0.001, pl.xmat[hb].reshape(3, 3).copy()
+
     def carry_weld(self, t: float) -> None:
-        """carry_holder on from just after the fingers close to when the drawbar has the holder, holding it where it
-        sits in the hand then, so switching it on moves nothing; the hand's skin and the holder apart while it's on and
-        until the hand is well off it (the runner's RELEASE_S)."""
+        """carry_holder on from just after the fingers close to when the drawbar has the holder, holding the hand on
+        its planned grip (planned_grip); from when the push into the bore starts it holds only the holder's place in
+        the hand, not its turn (the weld's torquescale 0), so the bore's rings stand it upright as it goes up, as a
+        taper aligns a holder the hand guides: carried rigidly, a hand 7 deg off its grip jammed it in the bore. The
+        hand's skin and the holder are apart while it's on and until the hand is well off it (the runner's RELEASE_S)."""
         m, d = self.model, self.data
         want = self.carry["t0"] <= t < self.carry["t1"]
-        if want and not d.eq_active[self.weld]:
-            hb = m.body("R_hand").id
+        pivot = want and t >= self.seat_ev["t0"]
+        if pivot and not self._pivoting and d.eq_active[self.weld]:
+            hb = m.body("R_hand").id                              # where the hand holds it now, turning free
             Ro, Rh = d.xmat[self.loose].reshape(3, 3), d.xmat[hb].reshape(3, 3)
-            m.eq_data[self.weld, 0:3] = 0.0
             m.eq_data[self.weld, 3:6] = Ro.T @ (d.xpos[hb] - d.xpos[self.loose])
             qr = np.zeros(4)
             mujoco.mju_mat2Quat(qr, np.ascontiguousarray(Ro.T @ Rh).reshape(-1))
+            m.eq_data[self.weld, 6:10] = qr
+            m.eq_data[self.weld, 10] = 0.0
+            self._pivoting = True
+        if want and not d.eq_active[self.weld]:
+            p_rel, R_rel = self.planned_grip()
+            m.eq_data[self.weld, 0:3] = 0.0
+            m.eq_data[self.weld, 3:6] = p_rel
+            qr = np.zeros(4)
+            mujoco.mju_mat2Quat(qr, np.ascontiguousarray(R_rel).reshape(-1))
             m.eq_data[self.weld, 6:10] = qr
             d.eq_active[self.weld] = 1
         elif not want and d.eq_active[self.weld]:

@@ -156,6 +156,13 @@ class PendantRunner(TakeRunner):
         self.pinch = m.equality("dial_pinch").id
         self.lock = m.equality("dial_lock").id
         self.dial_geom = m.geom("vf2_jog_handle").id
+        # the dial's axis and a basis across it (its own frame), and the angle about it the pinch holds the hand at
+        a = m.jnt_axis[m.joint("vf2_jog").id] / np.linalg.norm(m.jnt_axis[m.joint("vf2_jog").id])
+        e1 = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
+        e1 /= np.linalg.norm(e1)
+        self.dial_basis = (a, e1, np.cross(a, e1))
+        rim = m.eq_data[self.pinch, 0:3]
+        self.pinch_angle = math.atan2(rim @ self.dial_basis[2], rim @ e1)
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -353,20 +360,31 @@ class PendantRunner(TakeRunner):
         on it, while the hand still settles) and a finger touches its rim, its anchor set where the hand is then, so
         switching it on moves nothing; off the moment no finger touches it (left on, it turned the dial under a hand
         gone off the rim, and back 7 clicks as the hand went back: op10-z); and dial_lock whenever it is
-        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
+        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there.
+        The pinch turns the dial and does nothing else: each step its dial-side point is moved to the hand's own depth
+        along the axis and distance from it, keeping only its angle about the axis, so it pulls only round the rim.
+        Held as a point, it held the hand where it first touched the rim while the plan carried it on along the axis,
+        12 N median into the dial and 23 N at the 95th percentile, and op30-z's muscles overloaded."""
         m, d = self.model, self.data
+        hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
         e, grip = self.effort("R", t)
         stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
         want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
         touching = want and any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
                                 for c in d.contact[:d.ncon])
         if touching and not d.eq_active[self.pinch]:
-            hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
             p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
             m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
             d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
         elif not touching and d.eq_active[self.pinch]:
             d.eq_active[self.pinch] = 0
+        if d.eq_active[self.pinch]:
+            a, e1, e2 = self.dial_basis
+            hand = d.xpos[hb] + d.xmat[hb].reshape(3, 3) @ m.eq_data[self.pinch, 3:6]
+            b = d.xmat[gb].reshape(3, 3).T @ (hand - d.xpos[gb])            # the hand's point, in the dial's frame
+            h = b @ a
+            r = np.linalg.norm(b - h * a)
+            m.eq_data[self.pinch, 0:3] = h * a + r * (math.cos(self.pinch_angle) * e1 + math.sin(self.pinch_angle) * e2)
         if not d.eq_active[self.pinch] and not d.eq_active[self.lock]:
             n = self.machine.detents
             m.eq_data[self.lock, 0] = round(d.qpos[self.machine.q["jog"]] * n / (2 * math.pi)) * 2 * math.pi / n

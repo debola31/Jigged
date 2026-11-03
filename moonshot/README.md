@@ -26,8 +26,10 @@ http://desktop-4hvjqis:8765/). Each machine runs `python -m moonshot.orchestrate
 **The web page** is `/showcase`, in `app/(marketing)/showcase/`. It reads one generated file, `showcase.json`, which
 `python -m moonshot.web.export` writes from the plans and records (gate: `tests/gates/test_web_steps.py`). Its models
 and videos come from Supabase Storage, staged first in `<data root>/web/` by `python -m moonshot.web.media models` and
-`videos`. For development, `python -m moonshot.web.media serve --draft takes/setup-take/draft.mp4` serves that folder,
-and `.env.development.local` sets `NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787`.
+`videos`, then published to the public `showcase` bucket by `upload`, which records each video in
+`web/published.json`; the page plays only those. For development, `python -m moonshot.web.media serve --draft
+takes/setup-take/draft.mp4` serves that folder, and `.env.development.local` sets
+`NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787` and `NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED=1`.
 
 `library/records/` holds trainual's asset, shop and part records in trainual's own schema, the starting point for
 the `jigged.resource/1` records (plan §3.2).

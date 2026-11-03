@@ -202,19 +202,14 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
 
     # the stock, keyframe by keyframe: each cut lands at its frame
     v0 = stock.Volume()
-    write_glb(stock, out / "stock" / "0.glb")
-    keyframes = [0]
-    for i in sorted(range(len(cuts)), key=lambda i: (done_at[i], i)):
-        stock = cam.cut(stock, cuts[i][1])
-        k = max(1, done_at[i])
-        if k == keyframes[-1]:
-            (out / "stock" / f"{k}.glb").unlink()
-        else:
-            keyframes.append(k)
-        write_glb(stock, out / "stock" / f"{k}.glb")
-    from OCP.BRepTools import BRepTools
-    BRepTools.Clean_s(stock.wrapped)
+    states = {0: stock}                                        # every cut first: meshing a shape for its GLB can
+    for i in sorted(range(len(cuts)), key=lambda i: (done_at[i], i)):     # widen its edges' tolerances, which
+        stock = cam.cut(stock, cuts[i][1])                     # the next boolean then trips on
+        states[max(1, done_at[i])] = stock
     stock.exportBrep(str(out / "stock-end.brep"))
+    keyframes = sorted(states)
+    for k in keyframes:
+        write_glb(states[k], out / "stock" / f"{k}.glb")
 
     glbs = glbs_in_bodies(m, "vf2", vf2.render_links())
     for body, drawn in V.render_glbs().items():                 # the D688, as the vise takes draw it

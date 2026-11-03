@@ -60,7 +60,10 @@ def inputs(take: Path) -> dict:
     if posture.PRIOR.exists():
         out |= posture.measure(np.load(take / "sim.npz")["theta"][:, :10])
     for check_inputs in (cause.measure, grasp_timing.measure, hand_opening.measure, footage.measure):
-        out |= check_inputs(take)
+        try:
+            out |= check_inputs(take)
+        except KeyError:
+            pass                                    # the run doesn't write what it reads: only its check fails
     return out
 
 

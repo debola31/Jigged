@@ -162,7 +162,7 @@ class Control:
     """The VF-2's control: its state, the program it runs, and the interlocks."""
     model: mujoco.MjModel
     data: mujoco.MjData
-    program: list[tuple[float, float, float, float]] = field(default_factory=list)   # (x, y, z mm, rpm) per move
+    program: list[tuple] = field(default_factory=list)    # (x, y, z mm, rpm[, feed mm/min]) per move; rapid if no feed
     state: str = "idle"
     step_index: int = 0
     events: list[str] = field(default_factory=list)
@@ -300,11 +300,11 @@ class Control:
         self._handle(dt)
         rpm = 0.0
         if self.state == "running" and self.step_index < len(self.program):
-            x, y, z, rpm = self.program[self.step_index]
+            x, y, z, rpm, *feed = self.program[self.step_index]
             goal = np.array([x, y, z]) * M
             delta = goal - self.setpoint
             dist = np.linalg.norm(delta)
-            stepmax = self.rapid * M * dt
+            stepmax = min(self.rapid, feed[0] / 60 if feed and feed[0] else self.rapid) * M * dt
             self.setpoint = goal if dist <= stepmax else self.setpoint + delta / dist * stepmax
             pos = np.array([d.qpos[self.q[a]] for a in ("x", "y", "z")])
             if dist <= stepmax and np.linalg.norm(goal - pos) < 0.0005:

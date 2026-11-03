@@ -1,0 +1,3 @@
+{"source": "hand-made: the M3x0.5 tap fed at 0.6 mm/rev: rigid tapping off its pitch strips the thread",
+ "schema": "jigged.cycle-program/1",
+ "passes": [{"tool": "tap-m3", "rpm": 1000, "moves": [[380, 150, -300, null], [380, 150, -315, 600], [380, 150, -300, 600]]}]}

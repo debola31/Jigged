@@ -20,10 +20,10 @@ FLOOR = '    <geom name="floor" type="plane" size="3 3 0.1" contype="1" conaffin
 
 
 def with_body(body_xml: str, blank_mm, parallels_mm: dict[str, np.ndarray], hand_body: str,
-              load: V.Load = V.REFERENCE) -> str:
+              load: V.Load = V.REFERENCE, stop_mm=None) -> str:
     """The body model's MJCF with the cell added: the steel default, the machine carrying the vise, the floor and the
     loose objects, their equalities, and the machine's actuators after the body's (so the body's keep their ids)."""
-    on_table, loose, eq = V.worldbody(load, blank_mm, parallels_mm, hand_body, "vf2_table")
+    on_table, loose, eq = V.worldbody(load, blank_mm, parallels_mm, hand_body, "vf2_table", stop_mm)
     machine, acts = vf2.worldbody(on_table)
     machine = f'    <body name="vf2" pos="{-LOAD_X_MM * vf2.M:.4f} 0 0">\n{machine}    </body>\n'
     head, _, tail = body_xml.rpartition("\n  </default>")

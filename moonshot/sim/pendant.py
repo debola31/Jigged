@@ -455,7 +455,13 @@ class PendantRunner(TakeRunner):
     def export(self, folder: Path | None = None) -> None:
         folder = Path(folder or self.folder)
         super().export(folder)
+        # for nothing_moves_without_a_cause: the machine's own bodies move by its servos, not a hand; the rest, the
+        # stock, the parallels and the vise's jaw, crank and knob, sit on its table and are judged by how they move on it
+        scene = json.loads((folder / "scene.json").read_text(encoding="utf-8"))["bodies"]
+        objects = [n for n, b in scene.items() if b["role"] == "object"]
+        driven = [n for n in objects if n.startswith("vf2") or n == "tool"]
         checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
                                            "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
+        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven}}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

@@ -97,15 +97,15 @@ def render_glbs(table_body: str = "vf2_table") -> dict[str, list[dict]]:
 
 def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
     """The part and the parallels as boxes at the load's size, written into a take's folder for its record's "meshes"
-    (one each, at frame 0, centred on its body): trainual's rig drew them as plain boxes too, and their sizes change
-    with the load."""
+    (one each, at frame 0, centred on its body, in mm as meshes are): trainual's rig drew them as plain boxes too, and
+    their sizes change with the load."""
     import trimesh
     from trimesh.visual.material import PBRMaterial
     boxes = {"blank": (load.size, "aluminium_6061", [0.8, 0.81, 0.82, 1.0], 0.33)}
     boxes |= {n: ([PARALLEL_L, PARALLEL_T, load.parallel_h], "hardened_steel", [0.62, 0.63, 0.65, 1.0], 0.22)
               for n in load.parallels_y}
     for body, (size, name, colour, rough) in boxes.items():
-        box = trimesh.creation.box(extents=np.asarray(size, float) * M)
+        box = trimesh.creation.box(extents=np.asarray(size, float))
         box.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
             name=name, baseColorFactor=colour, metallicFactor=1.0, roughnessFactor=rough))
         (Path(folder) / body).mkdir(parents=True, exist_ok=True)

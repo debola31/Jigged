@@ -151,6 +151,15 @@ def cotton(mat, rgb=(0.03, 0.05, 0.10)):
     return n
 
 
+def bare_steel() -> bpy.types.Material:
+    """What a GLB with no materials is drawn in: most of what a shop holds is steel."""
+    mat = bpy.data.materials.get("bare_steel")
+    if mat is None:
+        mat = bpy.data.materials.new("bare_steel")
+        metal(mat, (0.62, 0.63, 0.65), 0.3)
+    return mat
+
+
 def geom(rgba) -> bpy.types.Material:
     """A collider drawn as itself: painted in its MuJoCo colour."""
     name = "geom_" + "_".join(f"{c:.2f}" for c in rgba[:3])

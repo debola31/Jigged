@@ -415,7 +415,7 @@ class PendantRunner(TakeRunner):
         c = self.machine
         return {"work": {k: v.round(4).tolist() for k, v in c.work.items()}, "tool": c.tool,
                 "tool_length": {str(k): round(v, 4) for k, v in c.tool_length.items()},
-                "pressed": [[round(t - self.settle_s, 3), key] for t, key in c.pressed], "events": c.events,
+                "pressed": [[round(self.plan_time(t), 3), key] for t, key in c.pressed], "events": c.events,
                 "machine_mm": c.machine_mm().round(4).tolist(),
                 "press_n_max": {e["key"] + f"@{e['t0']}": round(max((f.get(e["key"], 0.0) for f in
                                 self.rec["key_n"][int(e["t0"] * self.fps):int(e["t1"] * self.fps) + 2]), default=0.0), 2)
@@ -424,6 +424,12 @@ class PendantRunner(TakeRunner):
     @property
     def settle_s(self) -> float:
         return SETTLE_STEPS * self.model.opt.timestep
+
+    def plan_time(self, sim_t: float) -> float:
+        """The plan's time at a simulation time: after the settle, each frame steps a whole number of timesteps (33 of
+        1 ms at 30 fps), so the simulation runs at 0.99 of the plan's clock, 0.85 s behind by the end of an 85 s take."""
+        spf = round(1.0 / (self.fps * self.model.opt.timestep))
+        return (sim_t - self.settle_s) / (spf * self.model.opt.timestep * self.fps)
 
     def export(self, folder: Path | None = None) -> None:
         folder = Path(folder or self.folder)

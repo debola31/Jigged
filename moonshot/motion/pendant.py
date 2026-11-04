@@ -59,7 +59,11 @@ TURN_BACK_S = 0.4                                         # off the rim, back ov
                                                           # peaked at 990 mm/s, the run's hand fell 30 mm behind and
                                                           # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
-STROKE_DEG_S = 200.0                                      # a stroke turns the handle this fast: at 300 the wrist's arc
+RANGE_W = 2.0                                             # people's range weighed this much in the pendant's grips and
+                                                          # plans (the solver's 0.5): at 0.5 the trunk leaned 9 deg to
+                                                          # reach the high keys and op10-z ran 92.6% in range; at 2,
+                                                          # 97.7%, with every pad still on its key
+STROKE_DEG_S = 200.0                                     # a stroke turns the handle this fast: at 300 the wrist's arc
                                                           # ran 900 mm/s, the run's hand 24-40 mm behind it pulled
                                                           # the grip off the rim's centre, and op50-z's pronator went
                                                           # past its maximum mid-stroke
@@ -166,6 +170,7 @@ def dial_open(hand, q: dict) -> dict:
 class PendantTake(StepTake):
     """A step at the pendant. The machine's handle state is followed as the step presses keys, so a stroke knows the
     axis and increment it jogs: `axis_mm` is where the plan expects the machine (Haas's machine mm) after it."""
+    SOLVER_W = {"range": RANGE_W}
 
     def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0)):
         super().__init__(out, lumbar, verbose)
@@ -229,7 +234,7 @@ class PendantTake(StepTake):
                         targets={"index": G.plane_target(c, [0, -1.0, 0], 1.0,
                                                          lambda p: 0.5 * ((p[0] - c[0]) ** 2 + (p[2] - c[2]) ** 2))},
                         starts=[S(8, 0, r, 75, 50, -10, 80, p, 0, 0) for p in (40, 75) for r in (-15, 0)])
-        return specs | {"dial": dial, "button_L": button_l}
+        return {k: v | {"w_range": RANGE_W} for k, v in (specs | {"dial": dial, "button_L": button_l}).items()}
 
     def shape_now(self, side: str, t: float) -> dict:
         """The hand's shape as last set at or before t."""

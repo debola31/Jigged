@@ -65,6 +65,8 @@ STANCE_MM_PER_FORK = 72.0                                # the stance moves this
 BACK_S = 1.3                                             # back to rest from the spindle in this long ...
 BACK_MM = 900.0                                          # ... from this far, longer farther: in 0.85 s, 1 m from the
                                                          # fifth fork's stance, the arm reached 30 m/s^2
+OUT_MM = np.array([20.0, -45.0, -15.0])                  # the hand off the seated holder: back toward the body along
+                                                         # the open fingers, a little right and down
 OPEN_OFF = 0.9                                           # the fingers open this far off the holder before the palm
                                                          # comes away: at 0.7, with the hand turned 13 deg round the
                                                          # holder from its planned grip, they dragged through it
@@ -360,16 +362,17 @@ class Seat(ToolTake):
         # moves one after the other, the first crossed its 330 mm in 0.22 s, and the plan's hand, at 31 m/s^2, outran
         # the acceleration the cause check allows (physics.acceleration_spike_m_s2) and the arm, after it, twice that
         t_on = 0.2
+        # in from level with the grip where the tool is wider than the holder's body (the face mill): from below it,
+        # the open fingers swept through the cutter
+        pre = Wg + [15.0, -60.0, 0.0 if TL.cutter(self.tool)["r"] > TL.BODY[0] else -12.0]
         # farther reaches take longer, their peak acceleration kept (a minimum-jerk move's grows as its length over its
         # duration squared), the approach onto the grip as long as ever
-        reach_s = REACH_S * math.sqrt(max(1.0, np.linalg.norm(Wg + [15.0, -60.0, -12.0] - self.side["R"]["wrist"])
-                                          / REACH_MM))
+        reach_s = REACH_S * math.sqrt(max(1.0, np.linalg.norm(pre - self.side["R"]["wrist"]) / REACH_MM))
         t_app = t_on + APPROACH_AT + reach_s - REACH_S
         t_c = t_app + APPROACH_S                          # on the grip
         t_touch = t_c + TOUCH_S                           # the fingers on it: the carry takes it (moonshot/sim/
         # tool_load.py: the hand and the holder don't collide from the final approach on, as a welded tool's grip, so
         # that is when the hand has it), and the reach, timed to it, ends
-        pre = Wg + [15.0, -60.0, -12.0]
         W0 = self.side["R"]["wrist"]
         self.look(0.0, P0 + [0, 0, -30.0])
 
@@ -457,10 +460,11 @@ class Seat(ToolTake):
         t_open = t9 + self.shape_s(g["q"], open_q)
         self.fingers("R", t_open, open_q)
         H9, W9 = self.grip_pose("holder", SPINDLE - [0, 0, EASE_MM], turned(t9))
-        # the fingers open off it first, then the palm comes away to the right and down, and only then does the hand
-        # draw back: drawn back with the fingers still round the holder's far side, they would pass through it
-        out = W9 + turned(t9) @ [35.0, -15.0, -20.0]
-        t_out = t_open - 0.1                                # the palm off it as the fingers finish opening
+        # the fingers open off it first, then the hand draws back along them, toward the body, a little right and
+        # down, so the open fingers slide out from round the holder's far side: drawn back with them still round it,
+        # they would pass through it, and moved right across its front, they dragged through its body
+        out = W9 + turned(t9) @ OUT_MM
+        t_out = t_open - 0.1                                # off it as the fingers finish opening
         self.add("R", t9, t_out + 0.45, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t_out) / 0.45), 2.0)])
         self.side["R"]["wrist"] = out
         clear = self.rest + CLEAR_STAND_MM

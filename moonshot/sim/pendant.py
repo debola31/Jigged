@@ -492,6 +492,7 @@ class PendantRunner(TakeRunner):
         driven = [n for n in objects if n.startswith("vf2") or n == "tool"]
         checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
                                            "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
-        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven}}
+        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven},
+                   "touch_lead": self.checks["touch_lead"]}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

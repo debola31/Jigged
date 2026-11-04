@@ -68,7 +68,8 @@ def inputs(take: Path) -> dict:
 
 
 def run(take: Path) -> dict[str, Result | str]:
-    """Each check's result, or why it couldn't run."""
+    """Each check's result, or why it couldn't run: with nothing to read, or nothing it can judge (a grasp check on a
+    take with no grasp it times), it fails rather than stopping the others."""
     data, out = inputs(take), {}
     for name, c in load_all().items():
         try:

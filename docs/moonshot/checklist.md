@@ -108,10 +108,14 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1).
   Built 2026-11-02 (`moonshot/body/data/strength.json` curves, `test_strength_curves.py`): the elbow from Frey-Law
-  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011);
-  every other hinge has no angle curve and the elbow's mid-range speed decay, *proposed*. The controller caps each
-  motor at its curve every step; the vise take's physics run (`moonshot/sim/vise_take.py`) doesn't call it yet:
-  handed to the body-model session with the checks' other hooks (2026-11-03, the body-checks session done).
+  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011).
+  Since 2026-11-04 also by angle, each reproducing its source in the test: raising the arm (Aronis 2025, 90-160
+  deg) and its speed to 50 deg/s (Koski & McGill 1994), humeral rotation both ways (Ruas 2015) and wrist flexion
+  (Behrens 2019) and extension (Delp 1996). Still *proposed*, each saying why in strength.json (paywalled or
+  unreviewed numbers): lowering the arm, the plane of elevation, forearm rotation, wrist deviation, the trunk and the
+  fingers' own joints, and every speed curve but the elbow's and raising the arm's (the elbow's mid-range decay). The
+  controller caps each motor at its curve every step, and so does the vise take's physics run
+  (`moonshot/sim/vise_take.py`, `StrengthCaps`).
 - [x] Two-joint muscle couplings: wrist bend moves the fingers (§3.1). A spring across the wrist and each finger's
   MCP and PIP: at full wrist extension a relaxed hand flexes them 35 and 50 deg (Neumann 2009), effort overrides
   it (`test_tenodesis.py`, 2026-11-02). Proposed: straight fingers at full flexion, the spring's stiffness.

@@ -54,10 +54,14 @@ def local_bands(c, R, **lims):
         return 0.5 * out
     return f
 
+# standing 90 mm left of and 140 mm nearer the table than the vise take's operator (setup_take.LUMBAR): the rack waits
+# ahead and to the left, and from the vise take's place the trunk turned past people's range to reach it (in range
+# 71% and 80% of frames there, standing back or only left; 95-100% from here, the hands within 1.5 mm of their targets)
+LUMBAR = ST.LUMBAR + np.array([-90.0, 140.0, 0.0])
 
 class SetParallels(StepTake):
     def __init__(self, out=TAKES / "set-parallels", load: V.Load = V.REFERENCE, verbose=True):
-        super().__init__(out, ST.LUMBAR, verbose)
+        super().__init__(out, LUMBAR, verbose)
         self.vload = load
         self.rack, self.dest = RACK.slots(load), load.parallels()
         self.kg = STEEL * V.PARALLEL_L * V.PARALLEL_T * load.parallel_h * 1e-9
@@ -161,8 +165,8 @@ class SetParallels(StepTake):
             self.add("R", t_near - 0.2, t_lift, lambda tt, grip=grip, obj_at=obj_at, R_at=R_at:
                      [("pose", *self.grip_pose(grip, obj_at(tt), R_at(tt)), 4.0)])
             self.load("R", t_on + 0.3, t_down, self.kg)
-            self.event("grip", t_on, t_down + 0.25, side="R", grip=grip)
-            self.event("carry", t_on + 0.3, t_down, side="R", object=name)
+            self.event("grip", t_on, t_down + 0.25, side="R", grip=grip, on=name)
+            self.event("carry", t_on + 0.3, t_down, side="R", obj=name)
             self.effort("R", t_down - 0.1, 0.6, grip)
             self.effort("R", t_down + 0.2, 0.0, None)
             self.fingers("R", t_down + 0.25, g["q"])

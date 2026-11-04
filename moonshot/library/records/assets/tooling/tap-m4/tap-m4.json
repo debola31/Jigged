@@ -1,0 +1,48 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tap-m4",
+  "name": "M4x0.7 spiral-point tap",
+  "category": "tooling",
+  "make": "OSG",
+  "model": "1980401",
+  "description": "M4x0.7 HSS spiral-point plug tap, D4 thread limit, 2 flutes, steam oxide: for through holes.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Thread",
+      "value": "M4x0.7, D4 limit"
+    },
+    {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+    },
+    {
+      "name": "Chamfer",
+      "value": "plug"
+    },
+    {
+      "name": "Material",
+      "value": "HSS, steam oxide"
+    }
+  ],
+  "source_urls": [
+    "https://www.mallory.com/2557649/product/osg-1980401",
+    "https://www.freertool.com/products/tp121980401"
+  ],
+  "source_files": [
+    "1980401 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1007223's two M4x0.7-6H through holes (Op 30).",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "tap-m4.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/1980401.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

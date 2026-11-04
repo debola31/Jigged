@@ -2,14 +2,10 @@
 // on the floor, and the station of the current step outlined. Nothing in it moves except the
 // camera, so it draws on demand rather than every frame.
 import {
-  ACESFilmicToneMapping,
   BoxGeometry,
   CanvasTexture,
-  Color,
   EdgesGeometry,
   Group,
-  HemisphereLight,
-  DirectionalLight,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -18,23 +14,19 @@ import {
   Object3D,
   PerspectiveCamera,
   PlaneGeometry,
-  PMREMGenerator,
   Scene,
   SRGBColorSpace,
   Vector3,
-  WebGLRenderer,
+  type WebGLRenderer,
 } from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { BRAND } from '@/components/marketing/marketingStyles';
+import { createRenderer, gltfLoader, light } from './sceneBasics';
 import { mediaUrl, type Rect, type Shop, type Where } from './showcaseData';
 
 // Scene colours. three.js takes literal colours, so they are named here once; the accents are
 // the marketing palette's.
 const COLOURS = {
-  background: BRAND.indigo,
   floor: '#3a3f55',
   wall: '#565c74',
   furniture: '#6b7186',
@@ -99,12 +91,7 @@ export class ShopScene {
     private shop: Shop,
     options: { orbit: boolean; onLoad(state: LoadState, error?: unknown): void },
   ) {
-    this.renderer = new WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.domElement.style.display = 'block';
-    container.appendChild(this.renderer.domElement);
+    this.renderer = createRenderer(container);
 
     this.camera = new PerspectiveCamera(40, 1, 0.1, 400);
     const [w, d] = shop.building.size;
@@ -119,15 +106,7 @@ export class ShopScene {
     this.target.copy(this.overview.target);
     this.camera.lookAt(this.target);
 
-    this.scene.background = new Color(COLOURS.background);
-    const pmrem = new PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-    this.scene.environmentIntensity = 0.6;
-    this.scene.add(new HemisphereLight('#ffffff', '#30344a', 1.4));
-    const sun = new DirectionalLight('#ffffff', 1.6);
-    sun.position.set(-20, 40, 25);
-    this.scene.add(sun);
+    light(this.scene, this.renderer);
 
     this.addBuilding();
     this.scene.add(this.outline);
@@ -269,7 +248,7 @@ export class ShopScene {
   }
 
   private async loadModels(onLoad: (state: LoadState, error?: unknown) => void): Promise<void> {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const loader = gltfLoader();
     const assets = Object.keys(this.shop.assets);
     const state: LoadState = { loaded: 0, failed: 0, total: assets.length };
     let firstError: unknown;

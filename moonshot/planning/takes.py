@@ -4,7 +4,12 @@ take, played one after another. The render track joins them into the step's own 
 
 A take is named by its folder under the data root's takes/. A span is (take, first clip, last clip) by the take's
 clip names (take.json "clips"), or the whole take. Many steps share takes: every VF-2 setup closes its doors the same
-way, so `door-close` and `cycle-start` serve them all (25-35% reuse, plan §8).
+way, so `door-close` and `cycle-start` serve them all (25-35% reuse, plan §8). A take a machine's setups share is
+named for its machine (`hurco-door-close`); the VF-2's keep their bare names. The band saw's Start, coolant and feed
+are the same for every bar (`saw-start`).
+
+A machine-only (cycle) step is no take of people's work: the web shows it as its caption and a still, or in
+three.js, from the cycle's own simulation in takes/<part>-<step id>.
 
     python -m moonshot.planning.takes nist-ftc-10         # prints each step's takes, and which aren't made yet
 """
@@ -32,6 +37,12 @@ def split(fork: int) -> bool:
     return fork >= SPLIT_FROM_FORK
 
 
+def shared(step: dict, take: str) -> Span:
+    """A take every setup on the step's machine shares."""
+    m = step.get("machine", "vf2")
+    return (take if m == "vf2" else f"{m}-{take}", None, None)
+
+
 def tool_takes(step: dict) -> list[str]:
     """A Load the tools step's takes, in order, by their folders under the step's own (moonshot/motion/tool_load.py):
     the change at the pendant that empties the spindle, then for each tool its seat in the doorway (or, from a far fork,
@@ -52,37 +63,51 @@ def spans(part: str, step: dict) -> list[Span]:
     sid, setup = step["id"], step.get("setup")
     vise = f"{part}-{setup}"
     kind = sid[len(setup) + 1:] if setup else sid
+    facts = step.get("facts", {})
     if step["kind"] == "cycle":
-        return [(f"{part}-{sid}", None, None)]              # the cycle session's take, one per operation
-    if "stop" in step.get("facts", {}).get("parallels", ""):     # on the vise floor against a stop (op50)
+        return [(f"{part}-{sid}", None, None)]              # the cycle's own simulation, one per operation
+    if step.get("machine") == "bandsaw":                    # one load take and one lift-out per part's bar
+        return {"load": [(vise, None, None)], "start": [("saw-start", None, None)],
+                "unload": [(f"lift-out-{vise}", None, None)]}[kind]
+    own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
+    setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
+    start = [shared(step, "door-close"), shared(step, "cycle-start")]
+    if "clamps" in facts:                                   # a plate clamped to the table: its own takes
+        return {"clean": own, "load": own, "seat": own, "check": own, "shift": own, "xy": setting, "z": setting,
+                "tools": setting, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
+    if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":
-            return [("blow-off", None, None), ("set-stop", None, None)]
+            return [shared(step, "blow-off"), shared(step, "set-stop")]
         if kind == "check":                                  # squared by indicator: the setting session's take
-            return [(f"{part}/{sid}", None, None)]
+            return setting
     return {
-        "clean": [("blow-off", None, None), ("set-parallels", None, None)],
+        "clean": [shared(step, "blow-off"), shared(step, "set-parallels")],
         "load": [(vise, "grab", "slide")],
         "seat": [(vise, "rotate", "push")],
         "check": [(vise, "measure", "measure")],
-        "xy": [(f"{part}/{sid}", None, None)],               # the setting session's takes, per setup, in takes/<part>/
-        "z": [(f"{part}/{sid}", None, None)],
+        "xy": setting,
+        "z": setting,
         "tools": [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else [],
-        "start": [("door-close", None, None), ("cycle-start", None, None)],
-        "unload": [("door-open", None, None), ("blow-off", None, None), ("loosen", None, None), (f"lift-out-{vise}", None, None)],
-    }.get(kind, [(f"{part}-{sid}", None, None)])           # finishing: the inspection session's takes
+        "start": start,
+        "unload": [shared(step, "door-open"), shared(step, "blow-off"), shared(step, "loosen"),
+                   (f"lift-out-{vise}", None, None)],
+    }.get(kind, own)                                         # finishing: the bench's and inspection's takes
 
 
 def main(argv: list[str]) -> None:
     part = argv[0]
     takes = data_root() / "takes"
-    missing = set()
+    missing, machine_only = set(), set()
     for i, s in enumerate(expand(load_plan(part)), 1):
         sp = spans(part, s)
         for take, _, _ in sp:
-            if not (takes / take / "take.npz").exists():
-                missing.add(take)
-        print(f"{i:3d}. {s['id']:<14} " + " + ".join(t if a is None else f"{t}[{a}..{b}]" for t, a, b in sp))
+            if not (takes / take / "take.npz").exists() and not (takes / take / "still.png").exists():
+                (machine_only if s["kind"] == "cycle" else missing).add(take)
+        tag = "  [machine-only]" if s["kind"] == "cycle" else ""
+        print(f"{i:3d}. {s['id']:<14} " + " + ".join(t if a is None else f"{t}[{a}..{b}]" for t, a, b in sp) + tag)
     print(f"\nnot made yet ({len(missing)}): " + ", ".join(sorted(missing)))
+    print(f"machine-only, no take of people's work: their stills or three.js not made yet ({len(machine_only)}): "
+          + ", ".join(sorted(machine_only)))
 
 
 if __name__ == "__main__":

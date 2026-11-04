@@ -173,6 +173,11 @@ class PendantTake(StepTake):
         self.solve_grips(self._grip_specs())
         SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(own, SHARED_GRIPS)
+        # the keypad grips' fingers as the run holds them: its body couples each DIP to its PIP, the palm to the ring
+        # and the thumb's roll to its flexion, which the grip solver only weighs; the index's DIP solved at -8 deg ran
+        # at +1, its pad 2-3 mm from where the plan aimed it, and at op10-xy's +Y 6-7 mm across: held off, unpressed
+        for name in KEY_GRIPS:
+            self.grips[name]["q"] = self.hand.couple(self.grips[name]["q"])
         # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
         # direction
         self.pad_in_hand = {}

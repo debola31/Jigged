@@ -84,11 +84,13 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
-def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True):
+def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range=0.5):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
-    people's prior. th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm
-    on a trunk the first arm's cost already counts."""
+    people's prior: their mixture's likelihood, and each angle's distance outside their 1st-99th percentile range
+    (what the posture checks hold a take to; without it the arm turned out past people's range rising from rest,
+    2026-11-03). th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm on a
+    trunk the first arm's cost already counts."""
     cf = SPEC["body"]["comfort"]
     t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)[:th.shape[1]]
     ctr, half, w = t("centre"), t("half"), t("weight")
@@ -105,6 +107,9 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True):
     c = c + 1e3 * (near ** 2).sum(-1)
     if prior is not None:
         c = c + w_prior * prior.nll(th[:, 3:10])
+        plo, phi = (torch.as_tensor(prior.pct[:, i], dtype=th.dtype) for i in (0, -1))
+        out = torch.relu(plo - th[:, :10]) + torch.relu(th[:, :10] - phi)          # degrees outside people's range
+        c = c + w_range * ((out if trunk else out[:, 3:]) ** 2).sum(-1)
     return c
 
 

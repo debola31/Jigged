@@ -1,4 +1,20 @@
 {
  "note": "Step media in the public showcase bucket. Written by python -m moonshot.web.media upload; the page shows only these.",
- "media": []
+ "media": [
+  "still/nist-ftc-10/op10-cross_drill.webp",
+  "still/nist-ftc-10/op10-ears.webp",
+  "still/nist-ftc-10/op10-face.webp",
+  "still/nist-ftc-10/op10-outline.webp",
+  "still/nist-ftc-10/op10-pocket.webp",
+  "still/nist-ftc-10/op20-ear_cbores.webp",
+  "still/nist-ftc-10/op20-face.webp",
+  "still/nist-ftc-10/op20-pads.webp",
+  "still/nist-ftc-10/op20-pins.webp",
+  "still/nist-ftc-10/op20-scallops.webp",
+  "still/nist-ftc-10/op20-taps.webp",
+  "still/nist-ftc-10/op30-bores.webp",
+  "still/nist-ftc-10/op30-cbores.webp",
+  "still/nist-ftc-10/op40-cbores.webp",
+  "still/nist-ftc-10/op50-deep.webp"
+ ]
 }

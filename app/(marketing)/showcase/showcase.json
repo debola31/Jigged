@@ -195,7 +195,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op10-face.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-outline",
@@ -213,7 +213,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op10-outline.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-pocket",
@@ -231,7 +231,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op10-pocket.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-cross_drill",
@@ -249,7 +249,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op10-cross_drill.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-ears",
@@ -267,7 +267,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op10-ears.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -447,7 +447,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-face.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-scallops",
@@ -465,7 +465,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-scallops.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-pads",
@@ -483,7 +483,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-pads.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-pins",
@@ -501,7 +501,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-pins.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-taps",
@@ -519,7 +519,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-taps.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-ear_cbores",
@@ -537,7 +537,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op20-ear_cbores.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -717,7 +717,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op30-bores.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-cbores",
@@ -735,7 +735,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op30-cbores.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",
@@ -897,7 +897,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op40-cbores.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-unload",
@@ -1077,7 +1077,7 @@
       "type": "still",
       "path": "still/nist-ftc-10/op50-deep.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-unload",

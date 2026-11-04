@@ -1,7 +1,7 @@
 """The showcase page's data (moonshot/web): the committed file is what the plans and records give today."""
 import json
 
-from moonshot.web.export import OUT, PUBLISHED, build, shop_assets, shop_items, _json, RECORDS
+from moonshot.web.export import OUT, PUBLISHED, build, media_paths, shop_assets, shop_items, _json, RECORDS
 
 
 def test_the_committed_page_data_is_current():
@@ -18,19 +18,21 @@ def test_every_placed_item_has_its_asset_and_model():
 
 
 def test_each_step_has_its_own_media_and_a_place_in_the_shop():
-    """People's work is shown as video and a machine cycle as one still; either shows only once the upload has
-    recorded it in published.json."""
+    """People's work is shown as video and a machine cycle as the part after it, a still and its model; either shows
+    only once the upload has recorded all of it in published.json."""
     items = {i["item"] for i in build()["shop"]["items"]}
     published = set(_json(PUBLISHED)["media"])
     for part in build()["parts"]:
         steps = part.get("steps", [])
-        assert len({s["media"]["path"] for s in steps}) == len(steps)
+        paths = [p for s in steps for p in media_paths(s["media"])]
+        assert len(set(paths)) == len(paths)
         for s in steps:
             if s["kind"] == "cycle":
-                assert s["media"] == {"type": "still", "path": f"still/{part['id']}/{s['id']}.webp"}
+                assert s["media"] == {"type": "cut", "still": f"still/{part['id']}/{s['id']}.webp",
+                                      "model": f"cut/{part['id']}/{s['id']}.glb"}
             else:
                 assert s["media"] == {"type": "video", "path": f"video/{part['id']}/{s['id']}.mp4"}
-            assert s["published"] == (s["media"]["path"] in published)
+            assert s["published"] == all(p in published for p in media_paths(s["media"]))
             if "item" in s["where"]:
                 assert s["where"]["item"] in items
             assert s["group"] in {g["id"] for g in part["groups"]}

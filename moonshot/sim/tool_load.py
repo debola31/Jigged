@@ -152,6 +152,23 @@ class ToolLoadRun(PendantRunner):
     def meshes(self, folder: Path) -> dict[str, dict]:
         return V.render_meshes(Load.from_json(self.tk["setup"]["load"]), folder)
 
+    def start(self) -> None:
+        """An insert's holder in the hand as its grip has it, where the hand stands at the first frame: placed on its
+        planned path instead, it sat in a hand a few millimetres off its planned grip, and the weld, holding it so for
+        the whole carry, held the skin 4.5 mm into it."""
+        super().start()
+        if self.kind != "insert":
+            return
+        m, d = self.model, self.data
+        mujoco.mj_kinematics(m, d)
+        hb = m.body("R_hand").id
+        from moonshot.motion.tool_load import holder_grip
+        W_rel = np.array(holder_grip(self.tk["load"]["tool"])["W_rel"], float) * 0.001
+        Ro = d.xmat[hb].reshape(3, 3) @ self.grip_in_holder.T              # the holder's frame in the world
+        adr = m.jnt_qposadr[m.body_jntadr[self.loose]]
+        d.qpos[adr:adr + 3] = d.xpos[hb] - Ro @ W_rel
+        mujoco.mju_mat2Quat(d.qpos[adr + 3:adr + 7], np.ascontiguousarray(Ro).reshape(-1))
+
     # --- the hand and the holder ------------------------------------------------------------------------------------
     def planned_holder(self, t: float) -> np.ndarray:
         """The holder's gauge line where the plan has it at t (mm, world)."""

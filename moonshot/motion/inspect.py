@@ -33,7 +33,9 @@ from moonshot.world import bench_cell as BC
 
 OUT = data_root() / "takes" / "nist-ftc-10-inspect"
 CAL_YAW = 180.0             # the station's: beam along X, jaws to the right, face up; the roller faces the operator
-SEAT_N = 2.0                 # the push that seats the rod on the floor (proposed: light, as the manual asks)
+SEAT_N = 2.0                 # the push that seats the rod on the floor (proposed: light, as the manual asks): at 1 N,
+                             # under the slider's own 2 N drag on the beam, the rod stopped 6 mm short of the floor;
+                             # stopped before the reading, the rod rose off it and read 0.05-0.11 mm short
 LIFT_N = 4.0                 # the thumb's push closing the slider again, up its 2 N drag and its weight (proposed)
 BEAM_N = 5.0                 # the left hand's push holding the beam's end on the face (proposed): firmer than the
                              # slider's 2 N drag, or the slider, its rod on the floor, holds the beam 0.06 mm off it;
@@ -58,23 +60,27 @@ BEAM_GRIP = np.array([80.0, 9.75, 4.25])     # the left hand's pinch across the 
 HOLD_GRIP = np.array([50.0, 9.75, 4.25])     # ... and as it holds them on end: 66 mm above the rim, the hand clear of
                                              # the part's ear; at 36 mm it lay on it
 EDGE = (-1.5, 1.5)                           # ... each pad's centre this near its edge's middle, across the beam's
-                                             # 3.5 mm (world z lying, world x on end)
+                                             # 3.5 mm (world x, on end)
 GRIP_AT = {"slider": SLIDER_GRIP, "beam": BEAM_GRIP, "hold": HOLD_GRIP}
 SLIDER_AFTER_S = 0.8         # the right hand's grip on the slider closed this long after the beam's end touches down,
                              # the calipers settled: at 0.4 s, as they still turned, its fingers pushed the slider 8 mm
                              # open
 CAL_EASE_S = 0.15            # the carry's correction of the hand eases in this fast as it lifts the calipers
-TAKE_MM, TAKE_S = 8.0, 0.45  # ... and it first rises this far over this long, taking their weight as the arm gives
+TAKE_MM, TAKE_S = 8.0, 0.6   # ... and it first rises this far over this long, taking their weight as the arm gives
                              # under their 1.7 N, lifted by the beam's end, so they tilt before their middle leaves the
-                             # bench: taking 5 mm, the load took 0.47 s to lift them
+                             # bench: taking 5 mm, the load took 0.47 s to lift them; 8 mm over 0.45 s, 133 ms
+                             # (people's 163-265)
 PRELOAD_S = 0.15             # ... from this long after the grip has closed, and the carry with it (people's preload
                              # 0.14-0.32 s)
 LAY_W = 1.5                  # laying them back, the hand holds their turn this loosely (the carry's 3): they settle on
                              # the bench. Held as firmly, the left forearm turned past people's (62-63 deg, their 61)
                              # for the hand on end to lay them flat; at 0.5 they were put back 15 mm off
-PRESS_MM = 2.0               # taken, they are held this far into the bench until they are lifted: the carry closing on
-                             # them, the hand's give lifted 0.1-0.2 N of them at once, past people's load onset (5%),
-                             # held 0.5 mm in as well
+SET_DOWN_MM = 1.5            # laid back, let go this far over where they lay: dropped from 8 mm, they still rocked
+                             # 0.18 mm on the bench 0.7 s after; from 3 mm, 0.1 mm 1.4 s after
+HOLD_EASE_S = 0.5            # the hand taking them again on end corrects them to where it sees they should be this
+                             # gently: at once, the beam's end on the rim slid the part 3 mm on its mat
+SLIDER_EFFORT = 0.2          # the right hand's grip on the slider: at 0.3, on the body whose pads meet it 1.75 mm sooner,
+                             # the reading wandered 0.03 mm
 CARD = "caliper-measure-bore"                # the usage card the take plays (moonshot/cards), whose footage it is held to
 
 
@@ -128,14 +134,19 @@ class InspectPlan(BenchPlan):
         q0.update(index_mcp_flex=45, index_pip=55, middle_mcp_flex=45, middle_pip=55, ring_mcp_flex=55, ring_pip=65,
                   little_mcp_flex=60, little_pip=70, thumb_cmc_abd=35, thumb_cmc_flex=15, thumb_mcp_flex=20, thumb_ip=15)
         slider = dict(of="insp_cal6_slider", at=stand, obj=stand[0], q0=q0, iters=1000, colliders=cols,
-                      targets={"thumb": G.plane_target(thumb_at, Rs[:, 1], 2.0, along(thumb_at, -3, 3, x=(-3, 3))),
+                      # the thumb 1 mm into the roller's end, not 2: there through the hold, squeezed and pushing the
+                      # slider closed, the skin was 3 mm in it, and 3.9-4.1 mm as the hand let go (the skin's 3.5)
+                      targets={"thumb": G.plane_target(thumb_at, Rs[:, 1], 1.0, along(thumb_at, -3, 3, x=(-3, 3))),
                                "index": G.plane_target(bulge, -Rs[:, 1], 2.0, along(bulge, 2, 8, x=(-4, 4))),
                                "middle": G.plane_target(bulge, -Rs[:, 1], 2.0, along(bulge, -8, -2, x=(-4, 4)))},
                       starts=[S(20, 0, r, 70, 50, 0, 80, pr, 0, 0) for pr in (0, 30, 60) for r in (-10, 5)])
-        # the left hand pinching the beam near its end across its width: the thumb on the beam's edge toward the
-        # operator, the index and middle on its far edge, the index nearer the jaws, each pad on its edge's 3.5 mm
-        # (EDGE): held only to the edges' planes, the pads sat on them in the air, 13-28 mm over the beam lying and
-        # 70 mm off its face on end, and the body's fingers never touched it. Twice: as it takes them, lying
+        # the left hand on the beam near its end. Lying, the thumb and two fingers on the display's face across the
+        # beam's width, the thumb toward the operator, the index nearer the jaws, the carry lifting them: pinched by
+        # its edges, 3.5 mm thick on the bench, the pads could come no nearer than 6-10 mm over the beam with the
+        # fingers in the bench. On end, pinching it across its width: the thumb on its edge toward the operator, the
+        # index and middle on its far edge, each pad on its edge's 3.5 mm (EDGE). Held only to the edges' planes, the
+        # pads sat on them in the air, 13-28 mm over the beam lying and 70 mm off its face on end, and the body's
+        # fingers never touched it. Twice: as it takes them, lying
         # face up at the station's rest (along the beam is world x), and as it holds them on end on the rim (`hold`,
         # weighing people's posture as the deburring tool's grip does). One grip can't do both: the hand's turn is the
         # grip's only where the body can put it, and the calipers follow the hand. The grip solved lying put the body
@@ -146,13 +157,14 @@ class InspectPlan(BenchPlan):
                   little_mcp_flex=65, little_pip=75, thumb_cmc_abd=35, thumb_cmc_flex=15, thumb_mcp_flex=15, thumb_ip=10)
         lay = self.cal0
         R0 = lay[1]
-        near = self.cal_point([BEAM_GRIP[0], C["beam"][1][1], BEAM_GRIP[2]])
-        far = self.cal_point([BEAM_GRIP[0], C["beam"][0][1], BEAM_GRIP[2]])
+        face = lambda y: self.cal_point([BEAM_GRIP[0], y, C["beam"][1][2]])   # noqa: E731  (the display's face, up)
+        # the pads meeting the face, not pressed 2 mm into it: carried, the calipers leave the skin, and the hand,
+        # pressed up by them, dropped onto the weld and the bench threw them 1.3 mm up
+        on_face = lambda y, x: G.plane_target(face(y), R0[:, 2], 0.5, bands(face(y), x=x, y=(-3, 3)))  # noqa: E731
         beam = dict(side="L", of="insp_cal6", obj=lay[0], q0=q0, iters=1000,
                     colliders=self.cal_colliders(lay) + [box(bc, bh)],
-                    targets={"thumb": G.plane_target(near, R0[:, 1], 2.0, bands(near, x=(-6, 6), z=EDGE)),
-                             "index": G.plane_target(far, -R0[:, 1], 2.0, bands(far, x=(0, 12), z=EDGE)),
-                             "middle": G.plane_target(far, -R0[:, 1], 2.0, bands(far, x=(-14, -2), z=EDGE))},
+                    targets={"thumb": on_face(14.5, (-6, 6)), "index": on_face(5.0, (0, 12)),
+                             "middle": on_face(5.0, (-14, -2))},
                     starts=[S(20, 0, r, 60, 45, -10, 80, p, 0, 0) for p in (30, 60) for r in (0, -10)])
         near = self.cal_point([HOLD_GRIP[0], C["beam"][1][1], HOLD_GRIP[2]], stand)
         far = self.cal_point([HOLD_GRIP[0], C["beam"][0][1], HOLD_GRIP[2]], stand)
@@ -201,22 +213,25 @@ class InspectPlan(BenchPlan):
         back = W - (self.mirror(c) if g["side"] == "L" else c)
         return back / np.linalg.norm(back), W
 
-    def let_go(self, grip, t_on, t_off, lifted=None, relax=1.2, wait=0.0, away=(0.0, 0.0, 0.0), **carry):
-        """A hand holding a grip from t_on lets go at t_off and goes back along its forearm (and `away`), `wait` after
-        it lets go, relaxing only as it goes (relaxed relax after it lets go, or kept open for another grip): relaxed
-        first, the arm sagged with the tool still in it, opening the calipers 1 mm, and let go, sank 5.8 mm into their
-        slider. Its carry and events: the carry from 0.1 s into the grip, or, for a tool taken off the bench, from
-        `lifted`, easing in (CAL_EASE_S)."""
+    def let_go(self, grip, t_on, t_off, lifted=None, relax=1.2, wait=0.0, away=(0.0, 0.0, 0.0), effort=0.3, ease=None,
+               release=0.0, **carry):
+        """A hand holding a grip from t_on with `effort` lets go at t_off, its fingers opening from `release` before,
+        and goes back along its forearm (and `away`), `wait` after it lets go, relaxing only as it goes (relaxed relax
+        after it lets go, or kept open for another grip): relaxed first, the arm sagged with the tool still in it,
+        opening the calipers 1 mm, and let go, sank 5.8 mm into their slider. Its carry and events: the carry from
+        0.1 s into the grip, its correction easing in over `ease`, or, for a tool taken off the bench, from `lifted`,
+        easing in over CAL_EASE_S."""
         g = self.grips[grip]
         side = g["side"]
         self.carry(grip, t_on, t_off, **carry)
         back, W = self.back_from(grip, t_off)
-        self.effort(side, t_off + 0.1, 0.3, grip)
+        self.effort(side, t_off + 0.1, effort, grip)
         self.effort(side, t_off + 0.3, 0.0, grip)
         self.event("grip", t_on, t_off, side=side, grip=grip, on=g["of"])   # its squeeze ends with its hold: on after,
-        self.event("carry", lifted or t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side,   # it sank the fingers 6 mm in
-                   **({"ease_in": CAL_EASE_S} if lifted else {}))
-        self.fingers(side, t_off, g["q"])
+        ease = ease if ease is not None else (CAL_EASE_S if lifted else None)  # it sank the fingers 6 mm in
+        self.event("carry", lifted or t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side,
+                   **({"ease_in": ease} if ease else {}))
+        self.fingers(side, t_off - release, g["q"])
         self.fingers(side, t_off + 0.3, open_like(self.hand, g["q"], 0.5))
         self.transit(side, t_off + 0.02 + wait, t_off + 0.5 + wait, W + back * PRE_MM + np.asarray(away, float))
         if relax is not None:
@@ -260,15 +275,20 @@ class InspectPlan(BenchPlan):
         # the beam's edges, where the grip's skin closes on them), and the body's fingers close a frame ahead of the
         # plan's: planned widest 0.035 s before it came to rest, it was widest 71% of the way (people's 71-77). Opened,
         # its fingers reach 2-5 mm below the bench under it (closed, 4.8 mm over it): it comes to rest 6 mm over the grip
-        tg = self.reach("L", "beam", t0, ready=Wg + [-130, -120, 110], approach=Wg + [0, -10, 55], opened=0.5,
-                        lead=0.0, reach_s=0.4, above=6.0, open_s=0.2)
+        # coming down steeply from 55 mm over, the arm ran 10-14 mm ahead of its plan, struck the bench and closed
+        # 9-15 mm over the face: it comes in shallower. Its fingers on the face reach 1 mm into the bench closed, 15 mm
+        # opened 0.2, 27 mm opened 0.5: it opens 0.35, widest 0.04 s before it comes to rest 22 mm over the grip, and
+        # closes as it comes down over 0.15 s, widest as it comes to rest (opened 0.2, it was widest where the noise put
+        # it, 18% of the way; widest 0.04 s before, 69%; 0.02 s before, 71-73%)
+        tg = self.reach("L", "beam", t0, ready=Wg + [-130, -120, 110], approach=Wg + [0, -30, 45], opened=0.35,
+                        lead=0.0, reach_s=0.4, above=22.0, open_s=0.2, close_s=0.15)
         self.effort("L", tg, 0.0, "beam")
         self.effort("L", tg + 0.25, 0.3, "beam")
         p0, R0 = self.cal0
-        # held PRESS_MM into the bench as the carry closes on them, and lifted PRELOAD_S after the grip has closed, the
-        # hand releasing its press into them as the carry eases in (CAL_EASE_S)
+        # lifted PRELOAD_S after the grip has closed, the hand releasing its press into them as the carry eases in
+        # (CAL_EASE_S): carried from the grip's closing, its give lifted 0.1-0.2 N of them at once, past people's load
+        # onset (5% of their weight)
         self.t_lift = tg + PRELOAD_S
-        self.move_cal(tg, tg + 0.1, R0, p0 - [0, 0, PRESS_MM])
         self.move_cal(self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
         self.move_cal(self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + [0, 0, 30])
         self.t_beam, self.t = tg, self.t_lift + LIFT_S
@@ -291,7 +311,7 @@ class InspectPlan(BenchPlan):
         tS = self.reach("R", "slider", self.t_touch + SLIDER_AFTER_S - (RISE_S + STILL_S + REACH_S + CLOSE_S),
                         ready=Ws + [60, -150, 60], approach=Ws + [0, -10, 45], opened=0.6)
         self.effort("R", tS, 0.0, "slider")
-        self.effort("R", tS + 0.2, 0.3, "slider")
+        self.effort("R", tS + 0.2, SLIDER_EFFORT, "slider")
         self.t_slider = tS
         self.clip("stand", t0, tS + 0.3, "STAND  the calipers on end on the rim, the right hand on the slider")
         # the right holding them by the slider, the beam's end on the rim, the left lets go and takes them again
@@ -299,7 +319,7 @@ class InspectPlan(BenchPlan):
         self.press_beam(self.t_touch, t_rel)
         # opening first, and up as it goes back: straight back along its forearm, its fingers still round the beam's
         # edge, it caught the part's ear, was 68 mm off its plan and threw the calipers 8 mm up
-        self.let_go("beam", self.t_beam, t_rel, lifted=self.t_beam, relax=None, wait=0.15, away=(0.0, 0.0, 30.0))
+        self.let_go("beam", self.t_beam, t_rel, lifted=self.t_lift, relax=None, wait=0.15, away=(0.0, 0.0, 30.0))
         self.look(t_rel, p + R @ HOLD_GRIP)
         self.t_hold = self.retake("hold", t_rel + 0.65)
         self.t = self.t_hold + 0.3
@@ -316,7 +336,10 @@ class InspectPlan(BenchPlan):
         self.move("insp_cal6_slider", t0, t_seat, R, p + down * s_end)
         wall = self.to_world([np.mean(BC.POCKET["x"]), 0.0, BC.POCKET["z"][1]])
         self.look(t0, wall + np.array([0.0, 0.0, -depth / 2]))
-        t_read = t_seat + 0.8                              # the hand lags its descent: at 0.3 s the rod was 0.5 mm up
+        # read once the display has settled: the hand lags its descent (at 0.3 s the rod was 0.5 mm up), and on the body
+        # whose pads meet the slider sooner the rod settled on the floor 1.3 s after the slider's plan reached it,
+        # the reading wandering 0.04 mm until then
+        t_read = t_seat + 1.3
         self.look(t_seat, self.cal_point([-80.0, 10.0, 12.5], (p, R)))      # the display
         t_lift = t_read + 1.6
         t_shut = t_lift + 0.4 + s_end / 25.0
@@ -335,7 +358,13 @@ class InspectPlan(BenchPlan):
         # left the slider, 2 N of drag on it, where it was
         # relaxing all the way down to the thigh: relaxed by the bench's edge, it went down still, and the right hand's
         # five moves were widest a median 0.77 of the way through them (the card's footage's 0.5)
-        W = self.let_go("slider", self.t_slider, t_off, relax=2.0)
+        # and opening a moment before it draws back: at once, it was widest 0.67 of the way back (the footage's 0.5);
+        # after 0.05 s, 0.33 (its fast part is 7 frames). Its squeeze eased off once the slider is closed, and its thumb
+        # coming off the roller as it lets go: carried, the slider leaves the skin, and the thumb, 3 mm into the
+        # roller through the hold, sank to 3.9-4.1 mm as it let go (the skin's 3.5)
+        self.effort("R", t_shut, SLIDER_EFFORT, "slider")
+        self.effort("R", t_off, 0.0, "slider")
+        W = self.let_go("slider", self.t_slider, t_off, relax=2.0, effort=0.0, wait=0.025, release=0.15)
         # back past the bench's edge, a moment, then down to the thigh: in one, a second's move
         self.transit("R", t_off + 0.6, t_off + 1.2, W + [0, -230, 60])
         self.transit("R", t_off + 1.2, t_off + 1.4, W + [0, -230, 60])
@@ -360,9 +389,10 @@ class InspectPlan(BenchPlan):
         # under their weight 4-6 deg past it, for 1.3 s at 1.2 s and 0.6 s
         self.move_cal(t0 + 2.2, t0 + 3.2, Re, p0 + [0, 0, 30])                  # turned back
         t_down = t0 + 3.6
-        self.move_cal(t0 + 3.2, t_down, Re, p0 + [0, 0, 8.0])
+        self.move_cal(t0 + 3.2, t_down, Re, p0 + [0, 0, SET_DOWN_MM])
         t_off = t_down + 0.1
-        W = self.let_go("hold", self.t_hold, t_off, w=lambda t: LAY_W if t >= t0 + 2.2 else 3.0)   # from turning back
+        W = self.let_go("hold", self.t_hold, t_off, ease=HOLD_EASE_S,
+                        w=lambda t: LAY_W if t >= t0 + 2.2 else 3.0)   # loosely from turning back
         # up off them, then past the bench's edge: drawn straight back toward the body, the shoulder turned 43 deg
         # (people's 31)
         self.transit("L", t_off + 0.7, t_off + 1.85, self.rest, via=[W + [0, 0, 80], W + [0, -230, 60]])

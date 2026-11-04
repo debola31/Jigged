@@ -656,7 +656,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-z",

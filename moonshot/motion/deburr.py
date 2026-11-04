@@ -30,9 +30,8 @@ from moonshot.world import bench_cell as BC
 
 OUT = data_root() / "takes" / "nist-ftc-10-deburr"
 TOOL_AT, TOOL_YAW = np.array([190.0, -230.0, TOP + BC.DEBURR["handle_r"] + 0.1]), 90.0
-                            # straight away: turned 20 deg to the right, along the forearm reaching for it, the grip
-                            # took the forearm to 71 deg of pronation (people's 61) and the take was 0.73 in their
-                            # range, 0.91 at 90
+                            # straight away: turned 20 deg to the right the grip took the forearm to 71 deg of
+                            # pronation (people's 61), the take 0.73 in their range; to the left, 0.90; here 0.91
 STROKE_N = 2.0              # into the edge: a swivel blade breaks an edge under light pressure (proposed); at 4 N
                             # the part slid away from the steadying hand: the bench holds 0.4 x (5 + 5) N
 TRAIL_DEG = 20.0            # the blade trails the hand along the stroke
@@ -77,7 +76,8 @@ def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
 
 class DeburrPlan(BenchPlan):
     # its grips weigh people's posture at 3, not the shared 0.3, and their pads x3 to keep contact: the pen grip took
-    # the shoulder to 53 deg of rotation (people's 31); at 5 alone the pads came off the tool
+    # the shoulder to 53 deg of rotation (people's 31); at 5 alone the pads came off it, and at (5, 5) the forearm
+    # turned to 77 deg of pronation (0.72 in people's range, 0.91 at (3, 3))
     grip_weights = (3.0, 3.0)
 
     def __init__(self, out=OUT, verbose=True):
@@ -114,7 +114,10 @@ class DeburrPlan(BenchPlan):
                              colliders=[hand_cyl, blade, box(bc, bh)] + instrument_colliders(self.rests, ("rough",), 3.0),
                              targets={"thumb": on(70, 115, upper_left), "index": on(85, 125, up),
                                       "middle": on(80, 125, upper_right)},
-                             starts=[S(20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (55, 75, 90) for r in (0, 15)])
+                             # from the shoulder turned out and the forearm less turned: from 55-90 deg of
+                             # pronation the shoulder ended rotated in to 53 deg (people's 31)
+                             starts=[S(20, 0, r, 45, 45, sr, 75, p, 0, 0) for p in (30, 55) for sr in (-35, -10)
+                                     for r in (0, 15)])
         specs["steady"] = self.steady_spec()
         # the left hand comes onto the rim beside the micrometer and over the calipers: kept off them, as its thumb
         # pushed the micrometer 3.9 mm
@@ -145,9 +148,8 @@ class DeburrPlan(BenchPlan):
         self.look(t0, self.tool0[0] + self.tool0[1] @ [110, 0, 0])
         # ready in front of the bench's edge and high enough that the hanging fingers clear its top: 4 mm in front and
         # 110 mm up, they caught its edge and held the hand 115 mm off the tool as the carry closed
-        # widest 0.12 s before the hand came to rest, it was widest 70% of the way through its 0.67 s reach: the
-        # fingers meet the handle later than the calipers' slider
-        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8, lead=0.08)
+        # widest 0.08 s before the hand came to rest, it was widest 82% of the way through its reach; 0.13 s, 67%
+        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8, lead=0.105)
         self.effort("R", tg, 0.0, "tool")
         self.effort("R", tg + 0.25, 0.3, "tool")
         self.t_grab = tg

@@ -10,7 +10,7 @@ the grip, solved once at the object's rest.
     plan = BenchPlan(out)                 # then a step's verbs, then plan.solve(); plan.save()
 
 A step may stand elsewhere at the bench (`lumbar`), and solve its grips weighing people's posture more than the
-shared solver does (`grip_weights`).
+shared solver does (`grip_weights`, or one grip's own: its spec's `weights`).
 """
 from __future__ import annotations
 
@@ -55,17 +55,20 @@ OPEN_LEAD_S = 0.12                                # its hand widest this long be
                                                   # 0.06 s the hand was widest 83-84% of the way through the reach.
                                                   # A pickup sets its own: one frame is 5% of a reach
 CLOSE_S = 0.1                                     # ... then closing on the tool over this long (proposed)
-PRELOAD_S = 0.07                                  # a lift, and the carry bearing it, start this long after the grip
-                                                  # has closed, so the grip rises for about people's 0.23 s
-                                                  # (anatomy.json grip preload_s) before the load. Carried from 0.1 s
-                                                  # after contact, the carry's closing pressed the calipers 3.4 N into
-                                                  # the bench and loaded the deburring tool at once
+PRELOAD_S = 0.0                                   # a lift, and the carry bearing it, start this long after the grip
+                                                  # has closed: the hand's press into the tool takes ~0.15 s to let go
+                                                  # as the carry eases in, so the grip rises for about people's 0.23 s
+                                                  # (anatomy.json grip preload_s) before the load; from 0.07 s, 0.33 s.
+                                                  # Carried from 0.1 s after contact, the carry's closing pressed the
+                                                  # calipers 3.4 N into the bench and loaded the deburring tool at once
 CARRY_EASE_S = 0.3                                # ... the carry's correction of the hand easing in over this long
                                                   # (moonshot/sim/bench.py carry_offset)
-TAKE_MM, TAKE_S = 1.5, 0.6                        # a lift first takes the tool's weight, slowly, so the load comes on
-                                                  # over people's loading time (anatomy.json grip loading_s) before it
+TAKE_MM, TAKE_S = 2.5, 0.55                       # a lift first takes the tool's weight, so the load comes on over
+                                                  # people's loading time (anatomy.json grip loading_s) before it
                                                   # leaves the bench: lifted straight off, the load took 33 and 100 ms
-                                                  # to lift the tools; the deburring tool's 2 mm over 0.45 s, 100 ms
+                                                  # to lift the tools; taking 1.5 mm over 0.6 s, the hand's give left
+                                                  # the deburring tool down until the lift went on (533 ms); 2 mm
+                                                  # over 0.5 s, 400 ms; 2.5 mm over 0.45 s, 100 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
 HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]   # an arm hanging relaxed, the body solve's start where
                                                                  # it has no task: sh_plane .. wr_dev, the girdle
@@ -164,9 +167,10 @@ class BenchPlan:
             data = {"key": key}
             for name, spec in specs.items():
                 t0 = time.time()
-                spec = {k: v for k, v in spec.items() if k != "of"}
-                if self.grip_weights:
-                    w_prior, w_pad = self.grip_weights
+                weights = spec.get("weights", self.grip_weights)
+                spec = {k: v for k, v in spec.items() if k not in ("of", "weights")}
+                if weights:
+                    w_prior, w_pad = weights
                     spec |= {"w_prior": w_prior,
                              "targets": {d: (lambda c, n, f=f: w_pad * f(c, n)) for d, f in spec["targets"].items()}}
                 best = G.solve_spec(self.th, spec, self.lumbar, self.prior)

@@ -225,8 +225,11 @@ class Take:
             targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(-8, 8))),
                        "index": far(-13, -2), "middle": far(2, 13)}
             # the ring and little tucked, as in a three-finger pinch: hanging straight along the far face, they pressed
-            # it 4 N each outside the grip's regulation, and the fingers' side 2.4 times the slip force
+            # it 4 N each outside the grip's regulation, and the fingers' side 2.4 times the slip force; tucked, they
+            # lie over its top, so its top is 2.5 mm higher to them, as the jaws are bigger (the ring's knuckle rested
+            # 0.4 mm into it, pressing it down as the hand lifted)
             q0 = dict(q0, ring_mcp_flex=60.0, ring_pip=80.0, little_mcp_flex=65.0, little_pip=85.0)
+            cols.append(box(c + [0, 0, hz + 1.25], [hx, hy, 1.25]))
         specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets=targets,
                                     starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 2. slide: the thumb pad on the near face (above the moving jaw) pushes the part toward the fixed jaw, index
@@ -414,7 +417,11 @@ class Take:
         # a lift-out's reach runs high over the crank first: 0.53 measured 0.571 there, 0.70 0.844
         t_peak = t0 + 0.35 + (0.63 if self.start == "vise" else 0.54) * reach
         self.fingers(t0 + 0.35, self.q_relax)
-        self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
+        opened = open_for(self.hand, g["q"], self.size[1])
+        if self.half[0] < 30:   # the ring and little tucked out of a narrow part's way (_grip_specs) stay tucked: opened
+            # with the hand, they closed onto op50's top as it came down over it, 11 mm into it
+            opened.update({n: v for n, v in g["q"].items() if n.split("_")[0] in ("ring", "little", "cmc4", "cmc5")})
+        self.fingers(t_peak, opened)
         self.fingers(t_contact, g["q"])
         t_load = t_contact + ga["preload_s"]
         t_lift = t_load + ga["loading_s"]
@@ -745,12 +752,17 @@ class Take:
             self.wrist = Wm
             self.transit(tc + 1.0, tc + 1.3, Wm + [0, -10, 40], via=[Wm + [0, 0, 15]])
             self.t = tc + 1.3
+        self.to_rest()
+        self.clip("measure", (t0 if clip_from is None else clip_from) - 0.2, self.t,
+                  "MEASURE  final pull on the crank, then the fingertip check: press each parallel and feel that it can't move")
+
+    def to_rest(self):
+        """The fingers relaxed and the hand back down by the thigh as the take ends: with nothing planned after its
+        last step, the body solve pulls it there in the take's last 0.3 s (op50's at 1.7 m/s)."""
         self.fingers(self.t + 0.2, self.q_relax)
         dur = float(np.clip(0.5 + np.linalg.norm(REST_W - self.wrist) / 600.0, 1.1, 1.6))
         self.transit(self.t, self.t + dur, REST_W, via=[self.wrist + [80, -60, 40]])
         self.t += dur + 0.3
-        self.clip("measure", (t0 if clip_from is None else clip_from) - 0.2, self.t,
-                  "MEASURE  final pull on the crank, then the fingertip check: press each parallel and feel that it can't move")
 
     # --- assembling the take ---------------------------------------------------------------------------
     def finger_at(self, t):
@@ -948,7 +960,8 @@ def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=
     if take.parallels:
         take.measure(clip_from=t_final)
     else:                           # on the vise's floor: no parallels to try; it is checked square by indicator
-        take.clip("measure", t_final - 0.2, take.t + 0.2, "TIGHTEN  the last pull on the crank, ending on feel")
+        take.to_rest()
+        take.clip("measure", t_final - 0.2, take.t, "TIGHTEN  the last pull on the crank, ending on feel")
     take.grip_digits = {name: list(spec["targets"]) for name, spec in take._grip_specs().items()}
     if not solve:
         take.load_solution()

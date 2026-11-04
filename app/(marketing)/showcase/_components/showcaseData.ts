@@ -90,10 +90,13 @@ export interface Showcase {
 }
 
 // Videos, stills and models are served from Supabase Storage, never from the Next build (plan §1).
-// NEXT_PUBLIC_SHOWCASE_MEDIA_URL points development at `python -m moonshot.web.media serve`.
+// They are published to production's bucket only (`python -m moonshot.web.media upload`), so every
+// deployment reads from there: a preview's NEXT_PUBLIC_SUPABASE_URL is its Supabase preview branch,
+// whose bucket is empty. NEXT_PUBLIC_SHOWCASE_MEDIA_URL points development at
+// `python -m moonshot.web.media serve`.
 const MEDIA_ROOT =
   process.env.NEXT_PUBLIC_SHOWCASE_MEDIA_URL ??
-  `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/showcase`;
+  'https://mayuquvexmqjvwkfasxg.supabase.co/storage/v1/object/public/showcase';
 
 export function mediaUrl(path: string): string {
   return `${MEDIA_ROOT.replace(/\/$/, '')}/${path}`;

@@ -27,12 +27,15 @@ Cut = tuple[Path, float, "float | None"]                 # (video, start s, end 
 
 
 def cuts(part: str, step: dict, name: str = "final", takes: Path | None = None) -> list[Cut] | None:
-    """The step's cuts, in order, or None while any of its takes has no <name>.mp4 yet."""
+    """The step's cuts, in order, or None while any of its takes has no <name>.mp4 rendered from its record as it
+    is now: one older than the take's take.npz drew an earlier run (every take re-runs on the body fitted to the skin,
+    2026-11-04, and yesterday's finals are 1080p where today's are 720p)."""
     takes = Path(takes or data_root() / "takes")
     out = []
     for take, first, last in spans(part, step):
         video = takes / take / f"{name}.mp4"
-        if not video.exists():
+        record = takes / take / "take.npz"
+        if not video.exists() or (record.exists() and video.stat().st_mtime < record.stat().st_mtime):
             return None
         clips = {}
         if first is not None or last is not None:

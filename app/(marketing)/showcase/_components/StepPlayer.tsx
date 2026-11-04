@@ -167,6 +167,7 @@ export function StepList({ part, index, onSelect }: { part: LivePart; index: num
         position: 'relative',
         maxHeight: '60vh',
         overflowY: 'auto',
+        colorScheme: 'dark', // a dark scrollbar, not the browser's light one
         borderRadius: 2,
         border: '1px solid rgba(255, 255, 255, 0.1)',
         bgcolor: 'rgba(17, 20, 57, 0.55)',

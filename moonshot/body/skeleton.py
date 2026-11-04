@@ -89,18 +89,23 @@ FLAT = StrengthCurve()
 
 
 def strength_curves(data: dict, key: str, kind: str) -> tuple[StrengthCurve, StrengthCurve]:
-    """The (against, along) curves for a strength key, from strength.json's `curves`. Slides have none."""
+    """The (against, along) curves for a strength key, from strength.json's `curves`. Slides have none. Each direction
+    is a measured surface (`torque_nm` [speed][angle], normalised to its isometric peak), or isometric torque by angle
+    (`torque_nm` [angle], normalised to its peak) times a scale by speed (its own `speed`, else the default), or, with
+    neither, flat in angle with the default speed. A constant row is flat, so the controller takes its fast path."""
     if kind != "hinge":
         return FLAT, FLAT
     C, out = data["curves"], []
     for direction in ("against", "along"):
-        c = C.get(key, {}).get(direction)
-        if c:
-            T = np.array(c["torque_nm"], float)
+        c = C.get(key, {}).get(direction) or {}
+        T = np.array(c.get("torque_nm", [1.0]), float)
+        if T.ndim == 2:
             curve = StrengthCurve(tuple(c["angle_deg"]), tuple(c["speed_deg_s"]), tuple(map(tuple, T / T[0].max())))
         else:
-            curve = StrengthCurve(speed_deg_s=tuple(C["speed"]["speed_deg_s"]),
-                                  scale=tuple((x,) for x in C["speed"]["scale"]))
+            flat = np.ptp(T) == 0
+            speed = c.get("speed", C["speed"])
+            curve = StrengthCurve((0.0,) if flat else tuple(c["angle_deg"]), tuple(speed["speed_deg_s"]),
+                                  tuple(map(tuple, np.outer(speed["scale"], np.ones(1) if flat else T / T.max()))))
         g = C["grip_by_wrist"]
         if direction == "along" and key in g["applies_to"]:
             curve = StrengthCurve(curve.angle_deg, curve.speed_deg_s, curve.scale, tuple(g["wrist_deg"]),
@@ -256,14 +261,16 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     dofs_at = {}
     for d in hand["dofs"]:
         dofs_at.setdefault(d["joint"], []).append(d)
+    # the colliders fitted to the skin (moonshot/body/derive_hand.py fit_colliders): a capsule per fingertip, a
+    # convex shell (a mesh) per other bone, the palm's the carpal bone's
     vols = {}
     for nm, c in hand["capsules"].items():
         r, ln = c["radius_mm"] * M, np.linalg.norm(np.subtract(c["to_mm"], c["from_mm"])) * M
         vols[nm] = math.pi * r * r * ln + 4 / 3 * math.pi * r ** 3
-    palm_r = 0.016
-    palm_len = np.linalg.norm((J[5] + J[20]) / 2 - J[0]) * M
-    vols["_palm"] = math.pi * palm_r ** 2 * palm_len + 4 / 3 * math.pi * palm_r ** 3
+    for nm, sh in hand["shells"].items():
+        vols[nm] = sh["volume_mm3"] * M ** 3
     hand_density = frac["hand"] * mass / sum(vols.values())
+    meshes = []
 
     def hand_xml(side, T, indent):
         R = T @ attach
@@ -281,15 +288,18 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
             if names[j] in hand["capsules"]:
                 c = hand["capsules"][names[j]]
                 a, b = (R @ np.array(c["from_mm"]) - P[j]) * M, (R @ np.array(c["to_mm"]) - P[j]) * M
-                pad = names[j].startswith("dis")
-                fr = ' condim="4" friction="0.6 0.012 0.0001"' if pad else ' condim="3" friction="0.6 0.004 0.0001"'
                 out.append(f'{ind}  <geom name="{side}_g_{names[j]}" class="skin" type="capsule" '
                            f'size="{c["radius_mm"] * M:.5f}" fromto="{_f(a)} {_f(b)}" '
-                           f'mass="{hand_density * vols[names[j]]:.6f}"{fr}/>')
+                           f'mass="{hand_density * vols[names[j]]:.6f}" condim="4" friction="0.6 0.012 0.0001"/>')
+            if names[j] in hand["shells"]:
+                v = (np.array(hand["shells"][names[j]]["vertices_mm"]) @ R.T - P[j]) * M
+                mesh = f"{side}_{names[j]}"
+                meshes.append(f'    <mesh name="{mesh}" vertex="{" ".join(_f(x) for x in v)}"/>')
+                geom = "palm" if j == 0 else names[j]            # the carpal bone's shell is the palm
+                out.append(f'{ind}  <geom name="{side}_g_{geom}" class="skin" type="mesh" mesh="{mesh}" '
+                           f'mass="{hand_density * vols[names[j]]:.6f}" condim="3" friction="0.6 0.004 0.0001"/>')
             if j == 0:
                 tip = (P[5] + P[20]) / 2 * M
-                out.append(f'{ind}  <geom name="{side}_g_palm" class="skin" type="capsule" size="{palm_r}" '
-                           f'fromto="0 0 0 {_f(tip)}" mass="{hand_density * vols["_palm"]:.6f}"/>')
                 if side == "R" and load_kg > 0:
                     out.append(f'{ind}  <body name="load" pos="{_f(tip * 0.8)}"><geom name="load" type="box" '
                                f'size="0.02 0.02 0.02" mass="{load_kg}" contype="0" conaffinity="0"/></body>')
@@ -368,6 +378,9 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
       <geom contype="2" conaffinity="1" priority="2" solref="0.006 1" solimp="0.9 0.99 0.003 0.5 2" rgba="0.9 0.7 0.6 1"/>
     </default>
   </default>
+  <asset>
+{chr(10).join(meshes)}
+  </asset>
   <worldbody>
     <body name="pelvis" pos="{_f(np.array(pelvis_mm or (0, 0, segs["length_mm"]["lumbar_height"])) * M)}">
 {chr(10).join("      " + p for p in pelvis)}

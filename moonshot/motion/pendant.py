@@ -180,37 +180,43 @@ class PendantTake(StepTake):
     axis and increment it jogs: `axis_mm` is where the plan expects the machine (Haas's machine mm) after it."""
     SOLVER_W = {"range": RANGE_W}
 
-    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0)):
+    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0), shared=SHARED_GRIPS,
+                 grip_source=None):
+        """shared: the grips file pendant takes share (they stand and grip alike); grip_source: what the grips'
+        cache is keyed on (default: the take's class, moonshot/motion/step_take.py solve_grips)."""
         super().__init__(out, lumbar, verbose)
         lo, hi = (np.array(C["pendant_face"][k], float) + OFFSET for k in ("box_min_mm", "box_max_mm"))
         self.boxes = [((lo + hi) / 2, (hi - lo) / 2)]
         own = self.out / "grips.json"
-        if SHARED_GRIPS.exists() and not own.exists():
-            shutil.copy(SHARED_GRIPS, own)
-        self.solve_grips(self._grip_specs())
-        SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(own, SHARED_GRIPS)
+        if shared.exists() and not own.exists():
+            shutil.copy(shared, own)
+        self.solve_grips(self._grip_specs(), source=grip_source)
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        if shared.resolve() != own.resolve():
+            shutil.copy(own, shared)
         # the keypad grips' fingers as the run holds them: its body couples each DIP to its PIP, the palm to the ring
         # and the thumb's roll to its flexion, which the grip solver only weighs; the index's DIP solved at -8 deg ran
         # at +1, its pad 2-3 mm from where the plan aimed it, and at op10-xy's +Y 6-7 mm across: held off, unpressed
-        for name in KEY_GRIPS:
+        for name in (n for n in KEY_GRIPS if n in self.grips):
             self.grips[name]["q"] = self.hand.couple(self.grips[name]["q"])
         # the dial grip's ring and little tucked TUCK_DEG tighter, into the palm: as solved, the ring lay along the rim
         # beside the middle and its skin, bulkier than the run's capsule, sank 4.1 mm into it (op50-check); and its
         # fingers bent as the run bends them at the handle, the index and middle the contact way (dial_coupling)
-        q = dict(self.grips["dial"]["q"])
-        for f in ("ring", "little"):
-            for j in ("mcp_flex", "pip"):
-                q[f"{f}_{j}"] += TUCK_DEG
-        self.grips["dial"]["q"] = self.hand.couple(self.hand.clamp(q), contact={"index", "middle"})
+        if "dial" in self.grips:
+            q = dict(self.grips["dial"]["q"])
+            for f in ("ring", "little"):
+                for j in ("mcp_flex", "pip"):
+                    q[f"{f}_{j}"] += TUCK_DEG
+            self.grips["dial"]["q"] = self.hand.couple(self.hand.clamp(q), contact={"index", "middle"})
         # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
         # direction
         self.pad_in_hand = {}
-        for name in KEY_GRIPS:
+        for name in (n for n in KEY_GRIPS if n in self.grips):      # a take may solve only the regions it uses
             g = self.grips[name]
             ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
             self.pad_in_hand[name] = (fingertip_in_hand(g["q"], ax), ax)
-        self.key_H = self.grips["keypad"]["H"]    # the keypad grip's hand frame the hand last pressed with
+        self.key_H = self.grips[next(iter(self.pad_in_hand))]["H"]    # the keypad grip's hand frame the hand last
+                                                                      # pressed with
         self.key_grip_last = ""                   # ... and its name
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
@@ -267,7 +273,8 @@ class PendantTake(StepTake):
     def key_grip(self, name: str) -> str:
         """The keypad grip solved nearest a key."""
         k = key_at(name)
-        return min(KEY_GRIPS, key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
+        return min((g for g in KEY_GRIPS if g in self.pad_in_hand),
+                   key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
 
     def key_pose(self, name: str, lift: float = 0.0):
         """The hand frame and wrist with the fingertip `lift` mm off a key, in its region's grip."""

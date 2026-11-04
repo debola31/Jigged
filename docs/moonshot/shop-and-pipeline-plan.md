@@ -446,10 +446,10 @@ It fails six checks. The new body model must fix them, or you consciously loosen
 | # | Part | Routing | Steps | Group |
 |---|---|---|---|---|
 | 1 | **nist-ftc-10**, NIST prismatic, 158 × 75 × 31 mm | VMC → inspection | 12 | **G1, Thu Nov 5: first shared** |
-| 2 | nist-ctc-01, NIST prismatic test part, 800 × 450 × 150 mm | band saw → VMC → inspection | 16 | G1, **open question** (§11) |
-| 3 | ll-1005337, L&L Delrin pallet inlay | VMC → inspection | 13 | G1 |
-| 4 | ct-slbeam, Contour L-block, 4140 | saw → Hurco VM1 → black oxide → QC | 17 | G1, Fri Nov 6 |
-| 5 | ll-1007223, L&L gripper jaw, 4140 | saw → VMC → zinc plate → inspection | 17 | G1, Fri Nov 6 |
+| 2 | nist-ftc-09, NIST stainless sheet, 279.4 × 190.5 × 3 mm | VF-2, the sheet clamped to the table → inspection (no sheet laser station yet) | 9 | G1, in place of nist-ctc-01 (§11) |
+| 3 | ll-1005337, L&L Delrin pallet inlay | VF-2, clamped to the table in two setups → inspection | 13 | G1 |
+| 4 | ct-slbeam, Contour L-block, 4140 | saw → VF-2 (its routing's Hurco VM1 has no station) → black oxide → QC | 17 | G1, Fri Nov 6 |
+| 5 | ll-1007223, L&L gripper jaw, 4140 | saw → VF-2 → zinc plate → inspection | 17 | G1, Fri Nov 6 |
 | 6 | ct-tpg322, Contour carbide insert | surface grinder → quick check | 9 | G2, Sat Nov 7 |
 | 7 | ll-1011439, L&L bronze centering pin | lathe → inspection | 11 | G2 |
 | 8 | ll-1007224, L&L 6061 spacer | saw → lathe (2 ops) → VMC → inspection | 32 | G2 |
@@ -458,7 +458,7 @@ It fails six checks. The new body model must fix them, or you consciously loosen
 | 11 | mcm-8492a054, McMaster drill bushing | lathe → heat treat → OD grinder → hone → inspection | 24 | G3 |
 | 12 | mcm-91259a544, McMaster shoulder screw | lathe → thread roller → heat treat → OD grinder → black oxide → inspection | 24 | G3 |
 | 13 | ct-8848hn, Contour thread bar | Hurco lathe → grind → Hurco mill → grind → laser marker → QC | 36 | G3 |
-| 14 | nist-ftc-09, NIST stainless sheet | sheet laser → inspection | 9 | G4, Tue Nov 10 |
+| 14 | nist-ctc-01, NIST prismatic test part, 800 × 450 × 150 mm | band saw → VMC → inspection | 16 | G4, Tue Nov 10, **open question** (§11) |
 | 15 | ll-1011443, L&L aluminium bracket | sheet laser → press brake → inspection | 15 | G4 |
 | 16 | ll-1011604, L&L steel cover | sheet laser → press brake → powder coat → inspection | 18 | G4 |
 | 17 | ct-brmb0143, Contour form tool, M2 | grinding → wire EDM → laser marker → QC | 20 | G4 |
@@ -524,6 +524,8 @@ Outside processes (heat treat, plating, coating) are one "send out and receive" 
    a stated scale that fits the VF-2 by hand, with the drawing's dimensions scaled to match; (c) replace it with
    another public part. My recommendation is (b) at 1:4 (200 × 112.5 × 37.5 mm, about 2.3 kg), labelled as a
    scale model, since NIST's test cases exist to exercise GD&T, not size. `nist-ftc-10` goes first meanwhile.
+   **Decided 2026-11-04 (yours):** out of G1, swapped with `nist-ftc-09` (§7); what becomes of it in G4 is still
+   open.
 
 **Decided 2026-11-01** (you delegated 1 and 2 to my judgement):
 

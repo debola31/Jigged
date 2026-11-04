@@ -8,6 +8,7 @@
 --   models/<asset>.glb           the shop's decimated GLBs
 --   video/<part>/<step>.mp4      a person's step: one video
 --   still/<part>/<step>.webp     a machine cycle: one still of the part after the cut
+--   cut/<part>/<step>.glb        ... and that part as a model, for a desktop to turn
 --
 --   public = true           — the page is public and has no session; objects are read through the
 --                             public URL, which does not consult RLS on storage.objects

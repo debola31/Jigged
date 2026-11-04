@@ -94,7 +94,9 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
     people's prior: their mixture's likelihood, and each angle's distance outside their 1st-99th percentile range
     (what the posture checks hold a take to; without it the arm turned out past people's range rising from rest,
     2026-11-03). th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm on a
-    trunk the first arm's cost already counts."""
+    trunk the first arm's cost already counts, all but their range: a left arm sees the trunk mirrored, and people's
+    range of side-bend and twist isn't symmetric, so the posture checks hold the trunk to both arms' views of it
+    (door-close planned its trunk to 13 deg of side-bend, inside the right arm's range, outside the left's)."""
     cf = SPEC["body"]["comfort"]
     t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)[:th.shape[1]]
     ctr, half, w = t("centre"), t("half"), t("weight")
@@ -113,7 +115,7 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
         c = c + w_prior * prior.nll(th[:, 3:10])
         plo, phi = (torch.as_tensor(prior.pct[:, i], dtype=th.dtype) for i in (0, -1))
         out = torch.relu(plo + RANGE_MARGIN_DEG - th[:, :10]) + torch.relu(th[:, :10] - phi + RANGE_MARGIN_DEG)
-        c = c + w_range * ((out if trunk else out[:, 3:]) ** 2).sum(-1)
+        c = c + w_range * (out ** 2).sum(-1)
     return c
 
 

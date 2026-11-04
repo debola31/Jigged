@@ -105,13 +105,13 @@ class PendantRunner(TakeRunner):
         self.machine = cell.start(m, d)
         self.machine0 = self.machine.machine_mm()  # the plan counts the axes from where the take starts them
         self.machine.setup_mode = bool(s.get("setup_mode"))
-        self.machine.tool = int(s["tool"].get("number", 0))
+        self.machine.tool = int((s.get("tool") or {}).get("number", 0))
         self.machine.tool_length = {int(k): v for k, v in s.get("tool_length", {}).items()}
         self.machine.vps_queue = [dict(v) for v in s.get("vps", [])]
         c0 = np.array(s["centre_mm"], float)
         self.bores = [{"rel": (np.array(b["centre_mm"], float) - c0[:2]) / 1000, "r": b["r_mm"] / 1000,
                        "top": (b["top_z_mm"] - c0[2]) / 1000} for b in s.get("bores", [])]
-        if s["tool"].get("ball"):
+        if (s.get("tool") or {}).get("ball"):
             self.machine.sensor = self.probe_touch
         # the vise clamped on the part: the jaw at its width, the screw locked
         load = Load.from_json(s["load"])
@@ -128,12 +128,14 @@ class PendantRunner(TakeRunner):
         self.hand_geoms = {g for g in range(m.ngeom) if m.geom(g).name[:2] in ("R_", "L_")}
         self.face = m.geom("vf2_pendant_face").id
         self.buttons = {m.geom(f"vf2_{b}_button").id: b for b in ("cycle_start", "feed_hold")}
+        self.buttons[m.geom("vf2_tool_release_button").id] = "tool_release_head"     # on the head
         keys = vf2.record()["affordances"]["keys"]
         self.key_half = keys["half_mm"] / 1000
         self.key_names = list(keys["at_mm"])
         self.key_xz = np.array([d.site(f"vf2_key_{k}").xpos[[0, 2]] for k in self.key_names])
         self.key_at = {k: d.site(f"vf2_key_{k}").xpos.copy() for k in self.key_names}
         self.key_at |= {b: d.site(f"vf2_{b}").xpos.copy() for b in ("cycle_start", "feed_hold")}
+        self.key_at["tool_release_head"] = d.site("vf2_tool_release").xpos.copy()
         self.index_pad = {s: m.geom(f"{s}_g_dis2").id for s in ("R", "L")}
         self.rec = {"touching": [], "handle_deg": [], "hand_wrench": [], "machine_mm": [], "key_n": [],
                     "active_constraints": [], "applied_forces": [], "machine_axes": {f"vf2_{a}": [] for a in
@@ -189,6 +191,8 @@ class PendantRunner(TakeRunner):
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
                           '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '
                           'solref="0.005 1"/>\n', 1)
+        if not s.get("tool"):
+            return xml                                     # the spindle empty
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -240,7 +244,7 @@ class PendantRunner(TakeRunner):
         for i, e in enumerate(self.presses):
             if not e["t0"] - 0.05 <= t < e["t1"] + 0.08 or i in self.press_done:
                 continue
-            if e["key"] in self.machine._down:                 # it clicked: ease off, as people do
+            if e["key"] in self.machine._down and not e.get("hold"):   # it clicked: ease off, as people do
                 self.press_done.add(i)
                 continue
             F = self._key_n.get(e["key"], 0.0)
@@ -537,6 +541,7 @@ class PendantRunner(TakeRunner):
         driven = [n for n in objects if n.startswith("vf2") or n == "tool"]
         checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
                                            "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
-        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven}}
+        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven},
+                   "touch_lead": self.checks["touch_lead"]}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

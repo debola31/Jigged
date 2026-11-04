@@ -89,6 +89,21 @@ READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before 
 # from a touch LIFT_TOUCH_LEAD_S before the close; the planned loading is shorter by the lift's lag off the parallels
 # (at 0.21 it measured 267-300 ms against people's 163-265)
 LIFT_RAISE_S, LIFT_ARRIVE_EARLY_S, LIFT_PEAK, LIFT_TOUCH_LEAD_S, LIFT_LOADING_S = 1.5, 0.12, 0.52, 0.22, 0.16
+# a lift-out of a part standing 30 mm or more proud of the jaws (op30's and op40's on their side, op50's on end) weighs
+# people's range at LIFT_PROUD_RANGE_W, as the loosen and the pendant's keys do: at the default 0.5 the shoulder turned
+# out past people's range raising the hand over it and lowering it back, 18-21 frames (92.3-93.4% inside against 93%).
+# Not the shorter parts': op10's touch came 0.1 s later and its hand opened widest at 63% of the reach
+LIFT_PROUD_RANGE_W = 2.0
+# of those, one on its side on parallels (op30's, op40's, pinched halfway down the 56 mm it stands proud) is taken
+# LIFT_TALL_RAISE_MM higher than the load's grip, the ring LIFT_TALL_RING (MCP, PIP degrees) less curled: reaching over
+# the 31 mm wide part to the load's grip, the ring's middle segment landed on its top as the hand came down, pressed it
+# down 5.9 N and held it down, so the load came on 67-100 ms after the touch and the part rose 400-630 ms later
+# (people's 163-265). 5 mm higher without the ring, it slipped 2.1-2.3 mm in the hand (2 mm reads as a fumble); with the
+# ring alone, it still knocked. The hand meets it sooner, so it opens widest earlier (LIFT_TALL_PEAK)
+LIFT_TALL_RAISE_MM, LIFT_TALL_RING, LIFT_TALL_PEAK = 3.0, (5.0, 10.0), 0.47
+# one stood on end on the vise's floor (op50's) is pinched by two fingers and the thumb a little below full effort
+# while carried: at full effort the pinch's least squeeze pressed 2.20 times its slip force, the top of people's 1.7-2.2
+LIFT_END_PEAK, LIFT_END_EFFORT = 0.50, 0.95
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 # letting go of the first crank: the fist eases open this much and slides off the knob's end along its axis, this long
 # and this far (the fist spans the 90 mm knob), held to the axis as it cranked, turning back to the grip's own
@@ -135,10 +150,11 @@ def plane(point, normal, comp=2.0, band=None):
 
 
 class Take:
-    def __init__(self, verbose=True, load: Load = REFERENCE, out=OUT, grips_from=None, start="stage"):
+    def __init__(self, verbose=True, load: Load = REFERENCE, out=OUT, grips_from=None, start="stage", start_at=None):
         """load: what goes in the vise; out: the folder the take and its grip cache go to; grips_from: a grips.json
         to use as solved instead of solving (to check the trajectory solver on its own against a known take);
-        start: where the part starts, on the table ("stage") or in the vise, loosened, to be lifted out ("vise")."""
+        start: where the part starts, on the table ("stage") or in the vise, loosened, to be lifted out ("vise");
+        start_at: for a lift-out, the part's centre (mm) where the load left it, if not where it was planned (home)."""
         torch.set_num_threads(8)
         self.verbose = verbose
         self.load, self.out = load, Path(out)
@@ -149,7 +165,7 @@ class Take:
         # parallels a little inboard of the blank's edges, so it sits on both whether set down short or slid home
         self.parallels = load.parallels()
         # against the fixed jaw, and where it is set down
-        self.home = np.array([VISE["x"], VISE["fixed_face_y"] - self.half[1], SEAT_Z + self.par_h + self.half[2]])
+        self.home = self.home_of(load)
         # a part standing taller than it is wide swings in the hand (op30's 8 mm), so it is set down further off the
         # fixed jaw, with the jaws opened wider for it (loads.vise_load): at 6 mm it landed on the jaw's top
         self.place_gap = TALL_PLACE_GAP if self.size[2] > self.size[1] else PLACE_GAP
@@ -165,6 +181,8 @@ class Take:
         self.out.mkdir(parents=True, exist_ok=True)
         self.cons, self.fkeys, self.ekeys, self.gaze, self.events, self.clips = [], [], [], [], [], []
         self.start = start
+        if start_at is not None:            # a lift-out's part where its load's run left it (build_lift_out)
+            self.home = np.asarray(start_at, float)
         start_p = self.stage.copy() if start == "stage" else self.home.copy()
         self.blank_keys = [(0.0, np.eye(3), start_p)]                 # (t, R, p) the planned blank pose, piecewise min-jerk
         self.crank_keys = [(0.0, CRANK0)]
@@ -177,6 +195,22 @@ class Take:
         self.ekeys.append((0.0, 0.0, None))
         self.wrist = REST_W.copy()
         self._grips()
+        # a lift-out of a part standing far proud of the jaws (LIFT_PROUD_RANGE_W): on its side on parallels (op30's,
+        # op40's), taken a little higher than the load's grip, the ring held up off its top; on end (op50's)
+        self.proud_lift = start == "vise" and self.set_down[2] + self.half[2] - JAW_TOP >= 30
+        self.tall_lift, self.end_lift = self.proud_lift and self.stop is None, self.proud_lift and self.stop is not None
+        if self.tall_lift:
+            g = self.grips["blank_faces"]
+            g["W_rel"] = g["W_rel"] + [0.0, 0.0, LIFT_TALL_RAISE_MM]
+            q = dict(g["q"])
+            q["ring_mcp_flex"] -= LIFT_TALL_RING[0]
+            q["ring_pip"] -= LIFT_TALL_RING[1]
+            g["q"] = self.hand.clamp(q)
+
+    @staticmethod
+    def home_of(load: Load) -> np.ndarray:
+        """Where the load sits clamped: against the fixed jaw, on its parallels or the vise's floor (mm)."""
+        return np.array([VISE["x"], VISE["fixed_face_y"] - load.half[1], SEAT_Z + load.parallel_h + load.half[2]])
 
     # --- grips (affordances), solved with the body, cached ----------------------------------------------
     def _grips(self):
@@ -468,6 +502,7 @@ class Take:
         if self.start == "vise":                  # the lift-out's own timing (LIFT_*)
             raise_s, via = LIFT_RAISE_S, [np.array([self.wrist[0] - 60, -760.0, 1160.0])]
             peak, touch_lead, early, loading_s = LIFT_PEAK, LIFT_TOUCH_LEAD_S, LIFT_ARRIVE_EARLY_S, LIFT_LOADING_S
+            peak = LIFT_TALL_PEAK if self.tall_lift else LIFT_END_PEAK if self.end_lift else peak
         else:
             # a part stood on end is held from its end, and the thumb meets its near face as the hand arrives, 0.16 s
             # before the close, and it rises off the table 0.09 s after the plan lifts it: timed from the other loads'
@@ -501,7 +536,7 @@ class Take:
         t_lift = t_load + loading_s
         self.effort(t_contact, 0.0, grip)
         self.effort(t_load, PRELOAD_EFFORT, grip)
-        self.effort(t_lift, 1.0, grip)
+        self.effort(t_lift, LIFT_END_EFFORT if self.end_lift else 1.0, grip)
         R, p = self.blank_at(t_lift)
         self.move_blank(t_lift, t_lift + 0.45, R, p + [0, 0, lift_mm])
         self.add(t_contact, t_lift + 0.6, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
@@ -600,7 +635,7 @@ class Take:
         t_down = t0 + dur - 0.2
         self.move_blank(t_high - 0.05, t_down, np.eye(3), self.stage)
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
-        self.effort(t_down - 0.05, 1.0, grip)
+        self.effort(t_down - 0.05, LIFT_END_EFFORT if self.end_lift else 1.0, grip)
         self.effort(t_down + 0.1, 0.0, grip)
         g = self.grips[grip]
         W_set = self.grip_pose(grip, t_down)[1]
@@ -957,6 +992,8 @@ class Take:
         boxes = [([-381.5, -340.0, TABLE_Z - 50], [460, 184, 50]),
                  ([VISE["x"], VISE["fixed_face_y"] - 60, (TABLE_Z + JAW_TOP) / 2], [110, 120, (JAW_TOP - TABLE_Z) / 2])]
         s = BS.BodySolver(n, FPS, LUMBAR, self.prior, boxes=boxes)
+        if self.proud_lift:
+            s.W = BS.BodySolver.W | {"range": LIFT_PROUD_RANGE_W}
         for k in range(n):
             t = k / FPS
             active = [c for c in self.cons if c[0] <= t < c[1]]
@@ -1084,9 +1121,16 @@ def head_camera(take, theta, dp, lumbar=LUMBAR):
     return sm(np.array(eyes)), sm(np.array(looks)), np.array(ups)
 
 
-def build_lift_out(verbose=True, load: Load = REFERENCE, out=TAKES / "lift-out", grips_from=None):
-    """The part lifted out of the loosened vise and set on the table: the unload's last take."""
-    take = Take(verbose, load, out, grips_from, start="vise")
+def build_lift_out(verbose=True, load: Load = REFERENCE, out=TAKES / "lift-out", grips_from=None, start_from=None):
+    """The part lifted out of the loosened vise and set on the table: the unload's last take. start_from: the load's
+    physics run (a take folder with its sim.npz), to start the part along the jaws where that run left it, against
+    the fixed jaw on what it stood on: op50's, clamped against the stop, ended 3.1 mm off it."""
+    start_at = None
+    if start_from is not None:
+        end = np.load(Path(start_from) / "sim.npz")["blank"][-1]
+        home = Take.home_of(load)
+        start_at = home + [end[0] - home[0], 0.0, 0.0]
+    take = Take(verbose, load, out, grips_from, start="vise", start_at=start_at)
     take.grab()
     take.set_on_table()
     take.solve()

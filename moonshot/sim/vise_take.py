@@ -51,6 +51,10 @@ SQUARE_MAX = 0.6          # by turning the hand about the part, by at most this 
 TOUCH_RELEASE_S = 0.2     # after a press, its touch correction fades with this time constant (s)
 TOUCH_TAU = 0.07          # while pressing, sideways slip under the fingertip is felt and corrected this fast (s);
                           # tactile slip responses take ~70 ms (Johansson & Westling 1984)
+ENCLOSE_BLEND_S = 0.12    # the knob's hold in the fist eases from where it is to where it was planned this long (s),
+                          # done before the crank turns (it starts 0.15 s after the hold)
+TOUCH_MAX = 0.004         # ... by at most this much (m): a slip is millimetres; up to VISUAL_MAX, held by the part's
+                          # friction the correction wound up through the 30 N push and pushed the hand 15 N sideways
 LEAD_MAX_DEG = 8.0
 TIGHTEN_LEAD_DEG = 4.0
 ANGLOCK = 0.05            # Kurt's AngLock: a downward push on the moving jaw of this fraction of the clamp force
@@ -422,10 +426,10 @@ class ViseTake:
             self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / CARRY_TAU
         elif press is None and not cranking and not self.hand_touching():
             self.visual += err * dt / VISUAL_TAU
-        for v in (self.visual, self.touch):
+        for v, most in ((self.visual, VISUAL_MAX), (self.touch, TOUCH_MAX)):
             n = np.linalg.norm(v)
-            if n > VISUAL_MAX:
-                v *= VISUAL_MAX / n
+            if n > most:
+                v *= most / n
         return self.visual + self.touch
 
     def hand_forces(self, tt: float) -> np.ndarray:
@@ -601,6 +605,7 @@ class ViseTake:
         dt = m.opt.timestep
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
+        jc = m.joint("crank").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
                                "slip", "lag", "pushing", "stray", "touching", "touch_lead", "pose", "hand_wrench",
@@ -623,16 +628,31 @@ class ViseTake:
                 self.set_plan(self.plan_time(tk))
                 mujoco.mj_kinematics(m, p)
                 pk = p.xpos[kb] + p.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
-                m.eq_data[enc, 3:6] = p.xmat[hb].reshape(3, 3).T @ (pk - p.xpos[hb])
+                planned = p.xmat[hb].reshape(3, 3).T @ (pk - p.xpos[hb])
+                # taken from where the knob really is in the hand to where it was planned, smoothly, before the crank
+                # turns: set there at once, the constraint snapped the hand onto it, 180 N and 48 N m at the final
+                # pull's grasp, and the hand's muscles saturated
+                pk = d.xpos[kb] + d.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
+                self.enc_blend = (tk, d.xmat[hb].reshape(3, 3).T @ (pk - d.xpos[hb]), planned)
                 d.eq_active[enc] = 1
             elif not want_enc and d.eq_active[enc]:
                 d.eq_active[enc] = 0
+            if d.eq_active[enc]:
+                t_a, real, planned = self.enc_blend
+                m.eq_data[enc, 3:6] = real + (planned - real) * min_jerk((tk - t_a) / ENCLOSE_BLEND_S)
             driven = any(e["t0"] - 0.15 <= tk < e["t1"] for e in self.cranks)
             if not driven and not d.eq_active[lock]:
                 m.eq_data[lock, 0] = d.qpos[self.q_crank]
                 d.eq_active[lock] = 1
+                m.jnt_limited[jc] = 0
             elif driven and d.eq_active[lock]:
+                # unlocked to be turned, the screw still can't be turned back by the clamp it holds: a lead screw's
+                # friction self-locks it, which MuJoCo's constant friction can't. Free both ways, the final pull's
+                # snug clamp (400-450 N) spun the crank back 125 degrees as it was unlocked, flinging the hand
+                # (24-28 m/s^2) and losing the clamp; it is turned on as a ratchet, its stop following it
                 d.eq_active[lock] = 0
+                m.jnt_limited[jc] = 1
+                m.jnt_range[jc] = [d.qpos[self.q_crank], d.qpos[self.q_crank] + 1e3]
             for e in self.iv["free_parallel"]:
                 if tk >= e["t0"] and d.eq_active[keep[e["name"]]]:
                     d.eq_active[keep[e["name"]]] = 0
@@ -653,6 +673,8 @@ class ViseTake:
             # 1 ms ran the plan 1% slow against the body
             for s in range(round(k / (fps * dt)), round((k + 1) / (fps * dt))):
                 tt = s * dt
+                if m.jnt_limited[jc]:                      # the ratchet's stop follows the crank as it is turned on
+                    m.jnt_range[jc, 0] = max(m.jnt_range[jc, 0], d.qpos[self.q_crank])
                 for i, e in enumerate(self.iv["press"]):
                     if e["t0"] <= tt < e["t1"]:
                         F = self.press_force(self.geom[e["contact"]], e["normal"])

@@ -6,12 +6,13 @@ their pockets, and the VF-2's drawbar (moonshot/world/vf2.py SPINDLE_BORE) readi
   and from then until the drawbar holds it the hand carries it by the declared grip assist `carry_holder`, a stiff weld
   where the holder sits in the hand as the fingers close (as the inspection bench's tools, moonshot/world/bench_cell.py;
   capsule fingers can't keep a 1.25 in body steady in a wrap), its skin and the holder not colliding meanwhile (the
-  weld stands for their contact); it lifts the holder off the tines, slides it out and carries it in under the
-  spindle, watching it (the hand's correction by sight is on the holder's planned path, as the blow-off take's is on
-  the gun's, until the push starts), with its weight fed forward through the arm; then pushes it up into the bore
-  while the left index holds the head's button (a held press: it keeps pushing once the button clicks, sim/pendant.py),
-  and the drawbar's fingers, open while it is held, close under the knob when it is let go. Then the weld lets go, and
-  only the drawbar holds the holder.
+  weld stands for their contact); it takes the holder's weight over people's loading time (fed forward through the
+  arm), lifts it off the tines, slides it out and carries it in under the spindle, watching it (the hand's correction
+  by sight is on the holder: on its planned path and upright, as the blow-off take's is on the gun's); then pushes it
+  up into the bore, the weld now a pivot on the holder's axis so the bore stands it upright, while the left index holds
+  the head's button (a held press: it keeps pushing once the button clicks, sim/pendant.py), and the drawbar's
+  fingers, open while it is held, close under the knob when it is let go. Then the weld lets go, and only the drawbar
+  holds the holder.
 - A tool change take (00-change, NN-atc): keys at the pendant, the holder in the spindle part of it (it is clamped
   there), nothing loose. The changer's own motion isn't simulated: the machine counts the change (world/vf2.py
   Control.tool_change) and the next take starts from the carousel it leaves, across the cut.
@@ -35,12 +36,19 @@ from scipy.spatial.transform import Rotation
 from moonshot.config import data_root
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.pendant import PendantRunner
-from moonshot.sim.runner import RELEASE_S
+from moonshot.sim.runner import APPROACH_S, RELEASE_S, TakeRunner
 from moonshot.world import tooling as TL
 from moonshot.world import vise as V
 from moonshot.world.vise import Load
 
 G = 9.81
+GRIP_Z_MM = -30.0           # where the fingers wrap the holder's body, on its axis (its frame: the gauge line's centre)
+BORE_IN_MM = 45.0           # the holder's gauge line this close under the spindle's: its taper's top 11 mm up the rings
+BORE_AXIS_MM = 4.0          # ... and its axis this close to the spindle's
+L_SIGHT_EASE_S = 0.3        # the left hand's sight correction, its press over, eases off this fast
+FAST_MM_S = 250.0           # while the plan moves a hand faster than this, sight doesn't correct it: it acts in a
+                            # movement's slow end (corrected through the fast reach to the holder, the eye wound up 22 mm
+                            # of lag and threw the hand 30 mm past its grip as the reach slowed)
 
 
 class ToolLoadRun(PendantRunner):
@@ -63,6 +71,10 @@ class ToolLoadRun(PendantRunner):
         self.spindle = m.body("vf2_spindle").id
         ev = {e["kind"]: e for e in self.tk["events"]}
         self.grip, self.carry, self.seat_ev = ev.get("grip"), ev.get("carry"), ev.get("seat")
+        reach = [e for e in self.presses if e["side"] == "L" and "reach_t0" in e]
+        self.l_sight = (reach[0]["reach_t0"], reach[0]["t1"] + 0.2) if reach else None
+        self.wrist_speed = {s: np.linalg.norm(np.gradient(self.rd[f"{s}_W"], 1.0 / self.fps, axis=0), axis=1)
+                            for s in ("R", "L")}
         self.path = [(k[0], np.array(k[1:], float)) for k in ld.get("path", [])]
         self.kg = TL.holder_kg(ld["tool"]) if self.kind == "seat" else 0.0
         self.rec |= {"holder": [], "holder_quat": [], "load_N": [], "touching_R": [], "fingers": [], "clamp_N": [],
@@ -129,16 +141,51 @@ class ToolLoadRun(PendantRunner):
     def carrying(self, t: float) -> bool:
         return self.carry is not None and self.carry["t0"] <= t < self.carry["t1"]
 
+    def planned_speed(self, side: str, t: float) -> float:
+        """How fast the plan moves the side's wrist at t (mm/s)."""
+        k = min(len(self.t) - 1, int(round(t * self.fps)))
+        return float(self.wrist_speed[side][k])
+
+    def correction(self, t: float) -> np.ndarray:
+        """As a pendant take's, but for the left hand's reach up to the head's Tool Release, which sight corrects too,
+        from its start to its press's end, and lets go of slowly after: the pendant's left hand only presses Cycle
+        Start, beside it, but uncorrected on its long reach up to the head the left arm sagged 20 mm and drifted 28 mm
+        forward, its index onto the button half a second early."""
+        w = self.l_sight
+        if w is None or t < w[0]:
+            return super().correction(t)
+        if t >= w[1]:
+            self.visual["L"] *= 1.0 - self.model.opt.timestep / L_SIGHT_EASE_S
+        self._corr = TakeRunner.correction(self, t)
+        return self._corr
+
     def held_error(self, side: str, t: float) -> np.ndarray | None:
-        """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder's planned path,
-        its taper over the bore, and the hand turned as planned, which with the hand on its planned grip
-        (planned_grip) stands the holder upright."""
-        if side != "R" or self.loose is None or not (self.carry["t0"] <= t < self.carry["t1"]):
-            return None
+        """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder, on its
+        planned path and standing upright, its taper over the bore, as people watch what they carry, not their hand.
+        Upright only: how it has turned about its own axis doesn't matter to the taper or the drawbar. Otherwise as a
+        pendant take's (a press's); the left hand's sight, past its press, only eases off (`correction`)."""
+        if side == "L" and self.l_sight is not None and t >= self.l_sight[1]:
+            return np.zeros(6)
+        if self.loose is not None and self.planned_speed(side, t) > FAST_MM_S:
+            return np.zeros(6)
+        if side != "R" or self.loose is None or not self.carrying(t):
+            return super().held_error(side, t)
         m, d, p = self.model, self.data, self.plan
-        hb = m.body("R_hand").id
-        Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
-        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+        if self._pivoting:
+            # the holder turns free in the hand, its taper in the bore: the eye puts the hand's grip on it under the
+            # spindle's axis, which stands it upright, and the hand keeps its planned turn
+            hb = m.body("R_hand").id
+            Rh = d.xmat[hb].reshape(3, 3)
+            grip = d.xpos[hb] + Rh @ m.eq_data[self.weld, 0:3]
+            want = self.planned_holder(t) * 0.001 + [0.0, 0.0, GRIP_Z_MM * 0.001]
+            turn = Rotation.from_matrix(p.xmat[hb].reshape(3, 3) @ Rh.T).as_rotvec()
+            return np.r_[want - grip, turn]
+        else:
+            z = d.xmat[self.loose].reshape(3, 3)[:, 2]
+            axis = np.cross(z, [0.0, 0.0, 1.0])
+            s = np.linalg.norm(axis)
+            turn = axis / s * np.arctan2(s, z[2]) if s > 1e-9 else np.zeros(3)
+        return np.r_[self.planned_holder(t) * 0.001 - d.xpos[self.loose], turn]
 
     def touching(self, side: str) -> bool:
         """As the runner's, but the holder the right hand reaches for and carries in isn't a contact to stop
@@ -157,9 +204,11 @@ class ToolLoadRun(PendantRunner):
         return super().touching(side)
 
     def hand_force(self, side: str, t: float) -> np.ndarray | None:
-        """The holder's weight while it is carried, as people anticipate a load they know."""
+        """The holder's weight while it is carried, as people anticipate a load they know: taken over the plan's
+        loading time once the grip has closed (the carry event's `loading`), until then none."""
         if side == "R" and self.carrying(t):
-            return np.array([0.0, 0.0, self.kg * G])
+            a, b = self.carry.get("loading", (self.carry["t0"], self.carry["t0"]))
+            return np.array([0.0, 0.0, self.kg * G * float(np.clip((t - a) / max(b - a, 1e-9), 0.0, 1.0))])
         return None
 
     def forces_on(self, geoms: set, by: set) -> np.ndarray:
@@ -177,51 +226,53 @@ class ToolLoadRun(PendantRunner):
             F += sign * (c.frame.reshape(3, 3).T @ f6[:3])
         return F
 
-    def planned_grip(self) -> tuple[np.ndarray, np.ndarray]:
-        """The hand body's pose in the holder's frame (m, rotation) as the plan has it when the carry starts: the
-        holder upright in its fork, the hand on its grip. Holding the holder there, the weld pulls a hand that closed off
-        its grip onto it (the holder can't turn in the fork), rather than carry the holder turned as the hand was: held
-        where it sat in the hand, a hand 28 deg off its grip carried it 28 deg tilted, and steering it upright again bent
-        the wrist to its limit short of the spindle."""
-        q, _, _ = self.at(self.carry["t0"])
-        pl = mujoco.MjData(self.model)
-        pl.qpos[:] = q
-        mujoco.mj_kinematics(self.model, pl)
-        hb = self.model.body("R_hand").id
-        return pl.xpos[hb] - self.planned_holder(self.carry["t0"]) * 0.001, pl.xmat[hb].reshape(3, 3).copy()
+    def anchor_weld(self, at_holder) -> None:
+        """Set carry_holder to hold the holder where it is in the hand now, at a point given in the holder's frame (mm):
+        no jump as it switches on or changes."""
+        m, d = self.model, self.data
+        hb = m.body("R_hand").id
+        Ro, Rh = d.xmat[self.loose].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+        P = d.xpos[self.loose] + Ro @ (np.asarray(at_holder, float) * 0.001)
+        m.eq_data[self.weld, 0:3] = Rh.T @ (P - d.xpos[hb])          # the point in the hand (body2)
+        m.eq_data[self.weld, 3:6] = Ro.T @ (P - d.xpos[self.loose])  # ... and in the holder (body1)
+        qr = np.zeros(4)
+        mujoco.mju_mat2Quat(qr, np.ascontiguousarray(Ro.T @ Rh).reshape(-1))
+        m.eq_data[self.weld, 6:10] = qr
 
     def carry_weld(self, t: float) -> None:
-        """carry_holder on from just after the fingers close to when the drawbar has the holder, holding the hand on
-        its planned grip (planned_grip); from when the push into the bore starts it holds only the holder's place in
-        the hand, not its turn (the weld's torquescale 0), so the bore's rings stand it upright as it goes up, as a
-        taper aligns a holder the hand guides: carried rigidly, a hand 7 deg off its grip jammed it in the bore. The
-        hand's skin and the holder are apart while it's on and until the hand is well off it (the runner's RELEASE_S)."""
+        """carry_holder on from just after the fingers close to when the drawbar has the holder, holding the holder
+        where it then sits in the hand (no jump: welded to where the plan had the hand, a hand that closed off it
+        snapped onto it, and the holder's load spiked as the grip closed); the eye keeps it on its path and upright
+        (held_error). From when the push into the bore starts it holds only the holder's place in the hand, not its
+        turn (torquescale 0), at a point on the holder's own axis among the fingers, so the bore's rings stand it
+        upright as it goes up, as a taper aligns a holder a hand guides: carried rigidly, a hand 7 deg off its grip
+        jammed it in the bore, and held at the wrist, beside the holder, the push up through it tipped the holder until
+        its taper wedged across the rings. The hand's skin and the holder are apart while it's on and until the hand
+        is well off it (the runner's RELEASE_S)."""
         m, d = self.model, self.data
         want = self.carry["t0"] <= t < self.carry["t1"]
-        pivot = want and t >= self.seat_ev["t0"]
-        if pivot and not self._pivoting and d.eq_active[self.weld]:
-            hb = m.body("R_hand").id                              # where the hand holds it now, turning free
-            Ro, Rh = d.xmat[self.loose].reshape(3, 3), d.xmat[hb].reshape(3, 3)
-            m.eq_data[self.weld, 3:6] = Ro.T @ (d.xpos[hb] - d.xpos[self.loose])
-            qr = np.zeros(4)
-            mujoco.mju_mat2Quat(qr, np.ascontiguousarray(Ro.T @ Rh).reshape(-1))
-            m.eq_data[self.weld, 6:10] = qr
+        if want and not self._pivoting and d.eq_active[self.weld] and t >= self.seat_ev["t0"] and self.in_bore():
+            self.anchor_weld([0.0, 0.0, GRIP_Z_MM])
             m.eq_data[self.weld, 10] = 0.0
             self._pivoting = True
         if want and not d.eq_active[self.weld]:
-            p_rel, R_rel = self.planned_grip()
-            m.eq_data[self.weld, 0:3] = 0.0
-            m.eq_data[self.weld, 3:6] = p_rel
-            qr = np.zeros(4)
-            mujoco.mju_mat2Quat(qr, np.ascontiguousarray(R_rel).reshape(-1))
-            m.eq_data[self.weld, 6:10] = qr
+            self.anchor_weld([0.0, 0.0, 0.0])
+            m.eq_data[self.weld, 10] = 1.0
             d.eq_active[self.weld] = 1
         elif not want and d.eq_active[self.weld]:
             d.eq_active[self.weld] = 0
-        apart = self.carry["t0"] <= t < self.carry["t1"] + RELEASE_S
+        # apart from the final approach on, as the runner holds a welded tool's grip (APPROACH_S): a hand trailing its
+        # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork
+        apart = self.grip["t0"] - APPROACH_S <= t < self.carry["t1"] + RELEASE_S
         if apart != self._apart_on:
             self.hold_apart(self.loose, 1 if apart else 0)
             self._apart_on = apart
+
+    def in_bore(self) -> bool:
+        """Is the holder's taper up in the spindle's bore, past the lead-in and among the rings, on its axis? Only then
+        may the weld let it turn: lower, nothing stands it up, and freed under the nose it toppled over in the hand."""
+        s = self.seated()
+        return s["s_mm"] >= -BORE_IN_MM and s["offset_mm"] <= BORE_AXIS_MM
 
     def before_step(self, t: float) -> None:
         if self.loose is not None:

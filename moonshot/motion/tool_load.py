@@ -1,10 +1,11 @@
 """Load the tools (a VF-2 setup's step 7; the vf2-tool-load card): every tool the setup uses first goes into the
 carousel through the spindle, as Haas's manual has it for the umbrella changer. The step is a run of takes cut
-together, as the body model doesn't walk (the declared cut of moonshot/motion/door_cycle.py): at the pendant, MDI
-T<n> M06 and Cycle Start put the probe away and bring pocket n to the spindle, empty; then, for each tool, standing in
-the doorway the right hand takes its holder off the tool stand on the table, carries it in under the spindle and pushes it up into the
-spindle while the left holds the head's Tool Release button, lets go of the button so the drawbar clamps, and lets
-go of the holder (`Seat`); and at the pendant ATC FWD puts it in its pocket and brings the next one (`ToolChange`).
+together, as the body model doesn't walk (the declared cut of moonshot/motion/door_cycle.py): at the pendant, MDI,
+T<n> and ATC FWD put the probe away and bring pocket n to the spindle, empty; then, for each tool, standing in the
+doorway the right hand takes its holder off the tool stand on the table, carries it in under the spindle and pushes it
+up into the spindle while the left holds the head's Tool Release button, lets go of the button so the drawbar clamps,
+and lets go of the holder (`Seat`); and at the pendant ATC FWD puts it in its pocket and brings the next one
+(`ToolChange`).
 
     python -m moonshot.motion.tool_load nist-ftc-10 op50-tools    # plans <data root>/takes/nist-ftc-10/op50-tools/*
 
@@ -46,8 +47,21 @@ BUTTON = np.array(REC["affordances"]["tool_release_head"]["at_mm"], float) + OFF
 DOOR_LUMBAR = np.array([-470.0, -935.0, 955.0])          # in the doorway, a little left of the spindle: the right
                                                          # hand reaches it and the stand right of the vise, the
                                                          # left the button
-BELOW_MM = 80.0                                          # the holder carried in to this far below its seat, clear of
-                                                         # the bore, and lined up there before it goes up
+BELOW_MM = 115.0                                         # the holder carried in to this far below its seat, its knob
+                                                         # 20 mm under the spindle's nose, and lined up there before it
+                                                         # goes up: at 80, its knob up in the nose's bore, a holder
+                                                         # arriving 40 mm off the axis met the nose from below
+LINE_UP_S = 0.8                                          # lined up under the spindle, by eye, this long
+TRANSPORT_S = 1.2                                        # up from the stand to under the spindle
+# the grasp's timing (Guillery 2013, thresholds.toml person.grasp_*): the fingers close, the grip firms with no load
+# yet (preload), the hand takes the holder's weight (loading), and the holder comes off the tines as the weight is
+# taken. Each phase's middle of people's band
+CLOSE_S = 0.12
+PRELOAD_S = 0.23
+LOADING_S = 0.21
+OPEN_AT = 0.70                                           # the hand opens widest this far into its reach, as people's
+                                                         # do at 71-77% (person.peak_aperture_reach_frac), the
+                                                         # fingers' lag behind their shape taking it a little later
 SHORT_MM = 25.0                                          # pushed up to this far short before Tool Release opens the
                                                          # drawbar: the knob stops 10 mm under the closed fingers
 OVER_MM = 1.0                                            # and pushed this far past the seat, which stops it
@@ -217,25 +231,38 @@ class Seat(StepTake):
                     p = a + (b - a) * min_jerk((t - t0) / max(t1 - t0, 1e-9))
             return p
 
-        t_on, t_near, t_c = 0.2, 0.6, 0.82                 # reach onset, at the pre-grasp, contact
-        pre = Wg + [12.0, -60.0, -4.0]           # in front of the holder and right of it: the open fingers go past its side
+        # reach onset, at the pre-grasp, on the grip; the fingers closed on it CLOSE_S later, when the carry takes it
+        # (moonshot/sim/tool_load.py: the hand and the holder don't collide from the final approach on, as a welded
+        # tool's grip, so that is when the hand has it)
+        t_on, t_near, t_c = 0.2, 0.48, 0.72
+        # in front of the holder, right of it and below its flange: the open fingers go past its side, and the hand
+        # rises the last few millimetres to the flange's underside
+        pre = Wg + [15.0, -60.0, -12.0]
         self.look(0.0, P0 + [0, 0, -30.0])
         self.transit("R", t_on, t_near, pre, fade=(H, 2.0))
         size = 2 * TL.BODY[0]
         self.fingers("R", t_on + 0.05, open_like(self.hand, g["q"], 0.2))
-        self.fingers("R", t_on + 0.74 * (t_c - t_on), open_for(self.hand, g["q"], size))
+        self.fingers("R", t_on + OPEN_AT * (t_c + CLOSE_S - t_on), open_for(self.hand, g["q"], size))
         self.add("R", t_near, t_c + 0.05, lambda t: [("pose", H, pre + (Wg - pre) * min_jerk((t - t_near) / (t_c - t_near)), 2.0)])
-        self.fingers("R", t_c + 0.12, g["q"])
+        self.fingers("R", t_c + CLOSE_S, g["q"])
         self.effort("R", t_c, 0.0, "holder")
         self.effort("R", t_c + 0.2, 0.6, "holder")
+        # the weight taken over the loading time (moonshot/sim/tool_load.py feeds it forward), and the holder lifted so
+        # it comes 1 mm off the tines as it is taken (a min-jerk rise is 40% of the way 43% of the way through)
+        tw0 = t_c + CLOSE_S + PRELOAD_S
+        tw1 = tw0 + LOADING_S
+        tl = tw1 - 0.43 * 0.32
         # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
-        t1, t2, t2b, t3 = t_c + 0.42, t_c + 0.85, t_c + 1.35, t_c + 2.45
+        t1 = tl + 0.32
+        t2 = t1 + 0.43
+        t2b = t2 + 0.5
+        t3 = t2b + TRANSPORT_S
         slid = P0 + [0, -SLIDE_MM, LIFT_MM]
-        keys += [(t_c + 0.12, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, slid + [0, 0, CLEAR_UP_MM]),
-                 (t3, SPINDLE - [0, 0, BELOW_MM])]
-        self.look(t_c + 0.5, SPINDLE - [0, 0, 60.0])
-        t4 = t3 + 0.6                                       # lined up under it, by eye
-        t5 = t4 + 0.4
+        keys += [(t_c + CLOSE_S, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid),
+                 (t2b, slid + [0, 0, CLEAR_UP_MM]), (t3, SPINDLE - [0, 0, BELOW_MM])]
+        self.look(t2, SPINDLE - [0, 0, 60.0])
+        t4 = t3 + LINE_UP_S                                 # lined up under it, by eye
+        t5 = t4 + 0.6
         keys += [(t4, SPINDLE - [0, 0, BELOW_MM]), (t5, SPINDLE - [0, 0, SHORT_MM])]
         # the left hand to the button, pressed and held while the right pushes the holder home
         gl = self.grips["release"]
@@ -253,7 +280,8 @@ class Seat(StepTake):
         path = PosePath(HL, hover).to(tl1, tp - tl1, HL, WL_on).to(tr, 0.15, HL, hover)
         self.add("L", tl1, tr + 0.15, lambda t, path=path: [("pose", *path.at(t), 3.0)])
         self.event("press", round(tp + 0.05, 3), round(tr, 3), side="L", key="tool_release_head",
-                   force=REC["affordances"]["tool_release_head"]["force_n"], normal=[0.0, 1.0, 0.0], hold=True)
+                   force=REC["affordances"]["tool_release_head"]["force_n"], normal=[0.0, 1.0, 0.0], hold=True,
+                   reach_t0=round(tl0, 3))
         self.look(tl1, BUTTON)
         self.look(t5, SPINDLE - [0, 0, 20.0])
         self.side["L"]["wrist"] = hover
@@ -264,21 +292,24 @@ class Seat(StepTake):
         t9 = t8 + 0.25
         keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, SPINDLE - [0, 0, EASE_MM])]
         self.follow("R", t_c + 0.05, t9, "holder", at)
-        self.load("R", t_c + 0.3, t8, kg)
+        self.load("R", tw0, t8, kg)
         self.effort("R", t8, 0.6, "holder")
         self.effort("R", t9, 0.0, None)
         self.fingers("R", t9, g["q"])
-        open_q = open_like(self.hand, g["q"], 0.6)
+        open_q = open_like(self.hand, g["q"], 0.7)
         self.fingers("R", t9 + 0.25, open_q)
         _, W9 = self.grip_pose("holder", SPINDLE - [0, 0, EASE_MM])
-        out = W9 + [30.0, -50.0, -30.0]                     # out to the right, back and down, off the holder
-        self.add("R", t9, t9 + 0.4, lambda t: [("pose", H, W9 + (out - W9) * min_jerk((t - t9) / 0.4), 2.0)])
+        # the fingers open off it first, then the palm comes away to the right and down, and only then does the hand
+        # draw back: drawn back with the fingers still round the holder's far side, they would pass through it
+        out = W9 + [35.0, -15.0, -20.0]
+        self.add("R", t9, t9 + 0.55, lambda t: [("pose", H, W9 + (out - W9) * min_jerk((t - t9 - 0.15) / 0.4), 2.0)])
         self.side["R"]["wrist"] = out
-        self.transit("R", t9 + 0.4, t9 + 1.4, self.rest)
+        self.transit("R", t9 + 0.55, t9 + 1.4, self.rest)
         self.fingers("R", t9 + 1.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
         self.event("grip", round(t_c, 3), round(t9, 3), side="R", grip="holder", on="holder")
-        self.event("carry", round(t_c + 0.12, 3), round(t8, 3), side="R", kg=round(kg, 4))
+        self.event("carry", round(t_c + CLOSE_S, 3), round(t8, 3), side="R", kg=round(kg, 4),
+                   loading=[round(tw0, 3), round(tw1, 3)])
         self.event("seat", round(t5, 3), round(t8, 3), tool=self.tool)
         self.clip("Load the tools", 0.0, t9 + 1.4, f"Load {self.tool}")
         self.t = t9 + 1.6
@@ -287,7 +318,7 @@ class Seat(StepTake):
 
 
 class ToolChange(PendantTake):
-    """At the pendant: MDI T<n> M06 and Cycle Start (the left hand, the right over Feed Hold), or ATC FWD."""
+    """At the pendant, the right index: MDI, T<n> and ATC FWD (`plan_change`), or ATC FWD alone (`plan_atc`)."""
 
     def __init__(self, out, verbose=True, shared: Path | None = None):
         super().__init__(out, PENDANT_LUMBAR, verbose, shared=shared or Path(out) / "grips.json",
@@ -337,22 +368,29 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
     p = part_in_vise(plan, step["setup"])
     seq = sequence(plan, step)
     shared = {"seat": root / "seat-grips.json", "pendant": root / "pendant-grips.json"}
+    for f in shared.values():               # every step's takes stand and grip alike: a grip another step solved
+        if not f.exists():                  # serves (the cache's key says whether it still does)
+            other = sorted(root.parent.glob(f"*/{f.name}"))
+            if other:
+                root.mkdir(parents=True, exist_ok=True)
+                f.write_bytes(other[0].read_bytes())
     made = []
     for s in seq:
         if only and s["name"] != only:
             continue
         out = root / s["name"]
+        own = out / "grips.json"
+        out.mkdir(parents=True, exist_ok=True)
         extra = {}
         if s["kind"] == "seat":
-            own = out / "grips.json"
-            out.mkdir(parents=True, exist_ok=True)
             if shared["seat"].exists():
                 own.write_bytes(shared["seat"].read_bytes())
             take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose)
             shared["seat"].write_bytes(own.read_bytes())
             extra = take.plan()
         else:
-            out.mkdir(parents=True, exist_ok=True)
+            if shared["pendant"].exists():
+                own.write_bytes(shared["pendant"].read_bytes())
             take = ToolChange(out, verbose, shared=shared["pendant"])
             take.plan_change(s["to"]) if s["kind"] == "change" else take.plan_atc()
         take.solve()

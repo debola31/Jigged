@@ -1,0 +1,31 @@
+{
+ "schema": "jigged.plan/1",
+ "part": "ll-1005337",
+ "about": "Process plan for the L&L Delrin pallet inlay (Paletteneinlage, 1005337) on the shop's Haas VF-3SSYT, clamped to its table. At 600 x 400 mm it is too big for the VF-2: its 406.4 mm of Y travel can't profile both 400 mm edges (the 1/2 in end mill needs 412.7), its table is 356 mm wide, and no vise in the shop opens past 224 mm. Written by Claude from the drawing (314-092-59986-10) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: Z is thickness (the Z=-20 face is the bottom, datum A; the nests open from the top at Z=-0.95), Y is length (600), X is width (400, from -400 to 0). The VF-3 has no probe or tool setter in the shop record, so its X and Y are found with the edge finder and its tools measured on the presetter.",
+ "stock": {"material": "Delrin (acetal), black", "material_note": "As the drawing. 3/4 in plate, its two faces left as bought: the part is 19.05 thick (19.1 ±0.2)",
+           "size_mm": [457.2, 660.4, 19.05], "size_in": "18 x 26 x 0.75", "from": "3/4 in plate cut to 18 x 26 in by the supplier: wider than the band saw's 16 in"},
+ "faces": {"+Z": "nests side up"},
+ "setups": [
+  {"id": "op10", "title": "Op 10: nests and outline", "machine": "vf3", "face_up": "+Z",
+   "workholding": {"clamps": 6, "on": "the spoilboard", "note": "On a 3/4 in MDF spoilboard bolted to the table, which the through cuts run into; six step clamps on the plate's 29-30 mm margin, clear of the outline's cutter path. The outline leaves four 1 mm tabs so the part stays put; they're cut at the bench"},
+   "wcs": {"code": "G54", "x": "the centre of the plate's length", "y": "the centre of its width", "z": "the top of the plate", "by": "edge finder in X and Y; Z touched off the top"},
+   "operations": [
+    {"id": "dowels", "kind": "ream", "tool": "ream-8", "what": "Drill and ream 2X Ø8.000 slip fit for the dowels",
+     "features": [{"type": "hole", "dia_mm": 8.0, "axis": "Z", "count": 2}]},
+    {"id": "recesses", "kind": "pocket", "tool": "em12", "what": "Rough and finish the 12 nest recesses 12 deep",
+     "features": [{"type": "plane", "normal": "+Z", "at_mm": -12.9}]},
+    {"id": "nests", "kind": "pocket", "tool": "em38", "what": "Finish the 12 nests 25.70 x 159.00 (+0.10/0) through and their R6.4 corners, parallel 0.2 to A",
+     "features": [{"type": "hole", "dia_mm": 12.7, "axis": "Z", "count": 144}]},
+    {"id": "chamfer", "kind": "chamfer", "tool": "chamf", "what": "Chamfer the nests' openings 3.0 x 45°"},
+    {"id": "outline", "kind": "profile", "tool": "em12", "what": "Profile the outline to 600 x 400 (-0.3/-0.5) with its 45° corners and the two end notches, leaving four tabs",
+     "features": [{"type": "plane", "normal": "+X", "at_mm": -2.0}, {"type": "plane", "normal": "-X", "at_mm": -398.0},
+                  {"type": "plane", "normal": "-Y", "at_mm": 0.0}, {"type": "plane", "normal": "+Y", "at_mm": 600.0}]},
+    {"id": "undercut", "kind": "profile", "tool": "dovetail-20", "what": "Undercut the two end notches' walls 20° with their R15 corners"}
+   ]}
+ ],
+ "finish": [
+  {"id": "deburr", "station": "bench", "title": "Cut the tabs and deburr", "what": "Cut the four tabs and file them flush, break every sharp corner 0.2 x 45° (note 1), and countersink the back of the two dowel holes 3.0 x 45° by hand"},
+  {"id": "inspect", "station": "inspection", "title": "Check the outline, nests and dowel holes", "what": "Check the 600 and 400 outline, the 25.70 and 159.00 nests and their 12 depth, and the Ø8.000 dowel holes with gauge pins",
+   "tools": ["cal24", "gblock"]}
+ ]
+}

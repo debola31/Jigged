@@ -59,7 +59,11 @@ TURN_BACK_S = 0.4                                         # off the rim, back ov
                                                           # peaked at 990 mm/s, the run's hand fell 30 mm behind and
                                                           # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
-FINGER_DEG_S = 300.0                                      # a change of the hand's shape, at its quickest joint: the
+STROKE_DEG_S = 200.0                                      # a stroke turns the handle this fast: at 300 the wrist's arc
+                                                          # ran 900 mm/s, the run's hand 24-40 mm behind it pulled
+                                                          # the grip off the rim's centre, and op50-z's pronator went
+                                                          # past its maximum mid-stroke
+FINGER_DEG_S = 300.0                                     # a change of the hand's shape, at its quickest joint: the
                                                           # key grip curled the middle finger 82 deg in 0.14 s off
                                                           # the dial, 710 deg/s at its peak, and its deep flexor went
                                                           # past its maximum (op20-xy)
@@ -355,7 +359,7 @@ class PendantTake(StepTake):
         R = _rot(deg)
         return R @ g["H"], DIAL_C + R @ (g["W"] - g["obj"]) - DIAL_U * off
 
-    def turn(self, clicks: int, deg_s: float = 300.0) -> None:
+    def turn(self, clicks: int, deg_s: float = STROKE_DEG_S) -> None:
         """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS, and a spare one: the run
         stops the hand once the machine reads where this jog takes it (`to_mm`, from where the take starts the axis:
         moonshot/sim/pendant.py), so a stroke whose grip slipped is made up by the spare, and an unneeded spare is a

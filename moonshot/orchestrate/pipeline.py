@@ -9,7 +9,9 @@ check passed. Runs on the hub; the jobs show on the dashboard like any other.
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
 baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
 draws the take record at 24 fps with moonshot's renderer (moonshot/render/), or with --trainual the sim.npz at the
-take's own rate with trainual's scripts. --final renders at 1080p instead of the draft's 960x540.
+take's own rate with trainual's scripts. A take whose checks pass renders its final straight away, at 720p, with no
+draft before it (your decision, 2026-11-04: nist-ftc-10 on the web tonight, its backlog's drafts taken as approved);
+--render-only renders a draft (960x540) unless --final.
 
 --still renders one 1080p picture of a machine-only step's take, its last frame, close on the part from in front and
 above, nothing blurred: the web shows it in place of a video (your decision, 2026-11-03: the machine's own work isn't
@@ -30,7 +32,9 @@ from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
 
 DRAFT = {"res": "960x540", "samples": 32}
-FINAL = {"res": "1920x1080", "samples": 48}              # tuned: moonshot/render/render_take.py settings()
+FINAL = {"res": "1280x720", "samples": 48}               # tuned: moonshot/render/render_take.py settings(); 720p, not
+                                                          # 1080p, so nist-ftc-10's 31,000 frames fit a night (your
+                                                          # decision, 2026-11-04)
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:
@@ -95,7 +99,7 @@ def main(argv: list[str]) -> int:
         return 1
     if "--no-render" in argv:
         return 0
-    return render(take, final=False)
+    return render(take, final=True)
 
 
 def stored(path) -> str:

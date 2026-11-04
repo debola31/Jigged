@@ -29,10 +29,10 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.pendant import LUMBAR as PENDANT_LUMBAR, OFFSET, PendantTake, key_at
-from moonshot.motion.primitives import PosePath, min_jerk, open_for, open_like
+from moonshot.motion.pendant import LUMBAR as PENDANT_LUMBAR, OFFSET, PendantTake, fingertip_in_hand, key_at
+from moonshot.motion.primitives import FPS, PosePath, min_jerk, open_for, open_like
 from moonshot.motion.setting import PROBE, SCREEN, part_in_vise
-from moonshot.motion.step_take import StepTake
+from moonshot.motion.step_take import THETA0, StepTake
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import tool_takes
 from moonshot.planning.validate import load_plan
@@ -59,9 +59,21 @@ TRANSPORT_S = 1.2                                        # up from the stand to 
 CLOSE_S = 0.12
 PRELOAD_S = 0.23
 LOADING_S = 0.21
-OPEN_AT = 0.70                                           # the hand opens widest this far into its reach, as people's
-                                                         # do at 71-77% (person.peak_aperture_reach_frac), the
-                                                         # fingers' lag behind their shape taking it a little later
+LIFT_S = 0.2                                             # the lift off the tines
+TOUCH_MM = 1.0                                           # Tool Release's press planned to the pad just off it: the
+                                                         # press pushes (moonshot/sim/pendant.py), as at the keys
+HOVER_L_MM = 50.0                                        # the left index waits this far off the button, as over Cycle
+                                                         # Start (motion/pendant.py HOVER_DWELL_S), then presses ...
+PRESS_IN_S = 0.15                                        # ... coming in this fast
+# an arm hanging relaxed, the body solve's start where it has no task (as moonshot/motion/bench.py HANGING): started
+# where it works, a hand at rest by the thigh kept its shoulder turned out 31-40 deg, past people's 31, and as unlike
+# people as a 34 negative log-likelihood (a pendant take's left hand rests through it all)
+HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]
+OPEN_AT = 0.76                                           # the hand opens widest this far into its reach, as people's
+                                                         # do at 71-77% (person.peak_aperture_reach_frac): measured
+                                                         # 0.714 at a planned 0.736, the fingers peaking early
+ONSET_LEAD_S = 0.07                                      # the solved reach starts this long before its transit's
+                                                         # start, smoothed by the solver, and is timed from there
 SHORT_MM = 25.0                                          # pushed up to this far short before Tool Release opens the
                                                          # drawbar: the knob stops 10 mm under the closed fingers
 OVER_MM = 1.0                                            # and pushed this far past the seat, which stops it
@@ -234,7 +246,7 @@ class Seat(StepTake):
         # reach onset, at the pre-grasp, on the grip; the fingers closed on it CLOSE_S later, when the carry takes it
         # (moonshot/sim/tool_load.py: the hand and the holder don't collide from the final approach on, as a welded
         # tool's grip, so that is when the hand has it)
-        t_on, t_near, t_c = 0.2, 0.48, 0.72
+        t_on, t_near, t_c = 0.2, 0.42, 0.62
         # in front of the holder, right of it and below its flange: the open fingers go past its side, and the hand
         # rises the last few millimetres to the flange's underside
         pre = Wg + [15.0, -60.0, -12.0]
@@ -242,18 +254,19 @@ class Seat(StepTake):
         self.transit("R", t_on, t_near, pre, fade=(H, 2.0))
         size = 2 * TL.BODY[0]
         self.fingers("R", t_on + 0.05, open_like(self.hand, g["q"], 0.2))
-        self.fingers("R", t_on + OPEN_AT * (t_c + CLOSE_S - t_on), open_for(self.hand, g["q"], size))
+        onset = t_on - ONSET_LEAD_S
+        self.fingers("R", onset + OPEN_AT * (t_c + CLOSE_S - onset), open_for(self.hand, g["q"], size))
         self.add("R", t_near, t_c + 0.05, lambda t: [("pose", H, pre + (Wg - pre) * min_jerk((t - t_near) / (t_c - t_near)), 2.0)])
         self.fingers("R", t_c + CLOSE_S, g["q"])
         self.effort("R", t_c, 0.0, "holder")
         self.effort("R", t_c + 0.2, 0.6, "holder")
-        # the weight taken over the loading time (moonshot/sim/tool_load.py feeds it forward), and the holder lifted so
-        # it comes 1 mm off the tines as it is taken (a min-jerk rise is 40% of the way 43% of the way through)
+        # the weight taken over the loading time (moonshot/sim/tool_load.py feeds it forward), and the holder lifted
+        # off the tines as it is taken: planned 1 mm up 0.14 s into it, the arm, taking the load, lagging behind
         tw0 = t_c + CLOSE_S + PRELOAD_S
         tw1 = tw0 + LOADING_S
-        tl = tw1 - 0.43 * 0.32
+        tl = tw0 + 0.05
         # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
-        t1 = tl + 0.32
+        t1 = tl + LIFT_S
         t2 = t1 + 0.43
         t2b = t2 + 0.5
         t3 = t2b + TRANSPORT_S
@@ -266,20 +279,24 @@ class Seat(StepTake):
         keys += [(t4, SPINDLE - [0, 0, BELOW_MM]), (t5, SPINDLE - [0, 0, SHORT_MM])]
         # the left hand to the button, pressed and held while the right pushes the holder home
         gl = self.grips["release"]
-        HL, WL = gl["H"], gl["W"]                        # in the mirrored world, as solved
-        WL_on = WL + [0, -1.0, 0]
-        hover = WL_on + [0, -40.0, 0]
+        HL = gl["H"]                                     # in the mirrored world, as solved
+        # the wrist with the index's pad, where the physics presses with it (moonshot/motion/pendant.py
+        # fingertip_in_hand), 1 mm off the button: the grip's own pad, the skin's, stood 13 mm deeper and 12 mm across,
+        # so the index met the button a quarter of a second early and off its middle
+        pt = fingertip_in_hand(gl["q"], HL.T @ np.array([0.0, 1.0, 0.0]))
+        WL_on = self.at("L", BUTTON) - [0, TOUCH_MM, 0] - HL @ pt
+        hover = WL_on + [0, -HOVER_L_MM, 0]
         tl0, tl1 = t3 - 0.7, t4 + 0.15
         self.transit("L", tl0, tl1, self.at("L", hover), fade=(HL, 1.0))
         self.fingers("L", tl0 + 0.1, gl["q"])
-        tp = t5 + 0.05
+        tp = t5 + 0.05                                      # the index on the button, from the hover in PRESS_IN_S
         t6 = tp + 0.35                                      # the drawbar open: pushed up past the seat
         t7 = t6 + 0.45
         keys += [(t6, SPINDLE + [0, 0, OVER_MM]), (t7, SPINDLE + [0, 0, OVER_MM])]
         tr = t7 + 0.05                                      # Tool Release let go: the drawbar clamps
-        path = PosePath(HL, hover).to(tl1, tp - tl1, HL, WL_on).to(tr, 0.15, HL, hover)
+        path = PosePath(HL, hover).to(tp - PRESS_IN_S, PRESS_IN_S, HL, WL_on).to(tr, 0.15, HL, hover)
         self.add("L", tl1, tr + 0.15, lambda t, path=path: [("pose", *path.at(t), 3.0)])
-        self.event("press", round(tp + 0.05, 3), round(tr, 3), side="L", key="tool_release_head",
+        self.event("press", round(tp, 3), round(tr, 3), side="L", key="tool_release_head",
                    force=REC["affordances"]["tool_release_head"]["force_n"], normal=[0.0, 1.0, 0.0], hold=True,
                    reach_t0=round(tl0, 3))
         self.look(tl1, BUTTON)
@@ -308,7 +325,7 @@ class Seat(StepTake):
         self.fingers("R", t9 + 1.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
         self.event("grip", round(t_c, 3), round(t9, 3), side="R", grip="holder", on="holder")
-        self.event("carry", round(t_c + CLOSE_S, 3), round(t8, 3), side="R", kg=round(kg, 4),
+        self.event("carry", round(t_c + CLOSE_S, 3), round(t8, 3), side="R", obj="holder", kg=round(kg, 4),
                    loading=[round(tw0, 3), round(tw1, 3)])
         self.event("seat", round(t5, 3), round(t8, 3), tool=self.tool)
         self.clip("Load the tools", 0.0, t9 + 1.4, f"Load {self.tool}")
@@ -358,6 +375,21 @@ class ToolChange(PendantTake):
         self.wait(0.6)
 
 
+def start(take: StepTake) -> np.ndarray:
+    """The body solve's start, per frame (n, 21, deg), as moonshot/motion/bench.py's: each arm hanging relaxed
+    (HANGING) before its first task and after its last, the default start (moonshot/motion/step_take.py THETA0) between;
+    an arm with no task hangs throughout."""
+    n = int((take.t + 0.3) * FPS) + 1
+    th = np.tile(np.r_[THETA0[:12], THETA0[3:12]], (n, 1)).astype(float)
+    for side, cols in (("R", slice(3, 12)), ("L", slice(12, 21))):
+        cons = take.side[side]["cons"]
+        first, last = min((c[0] for c in cons), default=math.inf), max((c[1] for c in cons), default=-math.inf)
+        for k in range(n):
+            if not first <= k / FPS < last:
+                th[k, cols] = HANGING
+    return th
+
+
 def build(part: str, step_id: str, only: str | None = None, verbose: bool = True) -> list[Path]:
     """Plan the step's takes (or the one named `only`) into <data root>/takes/<part>/<step id>/<take>/."""
     plan = load_plan(part)
@@ -393,7 +425,7 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
                 own.write_bytes(shared["pendant"].read_bytes())
             take = ToolChange(out, verbose, shared=shared["pendant"])
             take.plan_change(s["to"]) if s["kind"] == "change" else take.plan_atc()
-        take.solve()
+        take.solve(start(take))
         take.save()
         tk = json.loads((out / "take.json").read_text(encoding="utf-8"))
         spindle_tool = PROBE if s["spindle"] == "probe" else None

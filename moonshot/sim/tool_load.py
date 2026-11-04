@@ -46,9 +46,13 @@ GRIP_Z_MM = -30.0           # where the fingers wrap the holder's body, on its a
 BORE_IN_MM = 45.0           # the holder's gauge line this close under the spindle's: its taper's top 11 mm up the rings
 BORE_AXIS_MM = 4.0          # ... and its axis this close to the spindle's
 L_SIGHT_EASE_S = 0.3        # the left hand's sight correction, its press over, eases off this fast
-FAST_MM_S = 250.0           # while the plan moves a hand faster than this, sight doesn't correct it: it acts in a
-                            # movement's slow end (corrected through the fast reach to the holder, the eye wound up 22 mm
-                            # of lag and threw the hand 30 mm past its grip as the reach slowed)
+FAST_MM_S = 250.0           # while the plan moves the right hand faster than this, sight doesn't correct it: it acts
+                            # in a movement's slow end (corrected through the fast reach to the holder, the eye wound
+                            # up 22 mm of lag and threw the hand 30 mm past its grip as the reach slowed)
+CARRY_SOLREF_S = 0.004      # the carry weld's time constant, holding the holder stiffly in the hand
+PRELOAD_SOLREF_S = 0.05     # ... and before the hand takes the holder's weight
+R_OUT_S = 0.55             # the right hand off the holder this long after its grip ends (motion/tool_load.py)
+R_SIGHT_EASE_S = 0.8        # ... and its carry's correction eases out this fast as it goes back, as the bench's
 
 
 class ToolLoadRun(PendantRunner):
@@ -73,6 +77,7 @@ class ToolLoadRun(PendantRunner):
         self.grip, self.carry, self.seat_ev = ev.get("grip"), ev.get("carry"), ev.get("seat")
         reach = [e for e in self.presses if e["side"] == "L" and "reach_t0" in e]
         self.l_sight = (reach[0]["reach_t0"], reach[0]["t1"] + 0.2) if reach else None
+        self._r_out = None
         self.wrist_speed = {s: np.linalg.norm(np.gradient(self.rd[f"{s}_W"], 1.0 / self.fps, axis=0), axis=1)
                             for s in ("R", "L")}
         self.path = [(k[0], np.array(k[1:], float)) for k in ld.get("path", [])]
@@ -99,7 +104,7 @@ class ToolLoadRun(PendantRunner):
         xml = xml.replace("<worldbody>\n", "<worldbody>\n" + add, 1)
         if ld["kind"] == "seat":                   # the carry's grip assist, switched by before_step
             xml = xml.replace("<equality>\n", '<equality>\n    <weld name="carry_holder" body1="holder" body2="R_hand" '
-                              'active="false" solref="0.004 1" solimp="0.9 0.95 0.002"/>\n', 1)
+                              f'active="false" solref="{CARRY_SOLREF_S} 1" solimp="0.9 0.95 0.002"/>\n', 1)
         if ld["kind"] == "atc":                    # the holder clamped in the spindle, part of it until the change
             gauge = '<geom name="vf2_spindle_gauge" type="cylinder" size="0.022 0.005" contype="0" conaffinity="0" mass="5"/>'
             assert gauge in xml
@@ -151,11 +156,16 @@ class ToolLoadRun(PendantRunner):
         from its start to its press's end, and lets go of slowly after: the pendant's left hand only presses Cycle
         Start, beside it, but uncorrected on its long reach up to the head the left arm sagged 20 mm and drifted 28 mm
         forward, its index onto the button half a second early."""
+        dt = self.model.opt.timestep
+        if self.loose is not None and t >= self.grip["t1"] + R_OUT_S:   # the carry's correction eases out (below)
+            if self._r_out is None:
+                self._r_out = self.visual["R"].copy()
+            self.visual["R"][:] = self._r_out * (1.0 - min_jerk((t - self.grip["t1"] - R_OUT_S) / R_SIGHT_EASE_S))
         w = self.l_sight
         if w is None or t < w[0]:
             return super().correction(t)
         if t >= w[1]:
-            self.visual["L"] *= 1.0 - self.model.opt.timestep / L_SIGHT_EASE_S
+            self.visual["L"] *= 1.0 - dt / L_SIGHT_EASE_S
         self._corr = TakeRunner.correction(self, t)
         return self._corr
 
@@ -163,10 +173,13 @@ class ToolLoadRun(PendantRunner):
         """While the right hand carries the holder, up to when the drawbar has it: the eye on the holder, on its
         planned path and standing upright, its taper over the bore, as people watch what they carry, not their hand.
         Upright only: how it has turned about its own axis doesn't matter to the taper or the drawbar. Otherwise as a
-        pendant take's (a press's); the left hand's sight, past its press, only eases off (`correction`)."""
+        pendant take's (a press's). Once the carry is over, the right hand's correction, which stood for where the
+        holder sat in it, is kept while the hand opens and comes off the holder, then eases out as it goes back
+        (`correction`): taken up afresh at once, the 70 mm it had built up threw the hand into the spindle's nose. The
+        left hand's sight, past its press, only eases off."""
         if side == "L" and self.l_sight is not None and t >= self.l_sight[1]:
             return np.zeros(6)
-        if self.loose is not None and self.planned_speed(side, t) > FAST_MM_S:
+        if side == "R" and self.loose is not None and (t >= self.carry["t1"] or self.planned_speed("R", t) > FAST_MM_S):
             return np.zeros(6)
         if side != "R" or self.loose is None or not self.carrying(t):
             return super().held_error(side, t)
@@ -261,6 +274,10 @@ class ToolLoadRun(PendantRunner):
             d.eq_active[self.weld] = 1
         elif not want and d.eq_active[self.weld]:
             d.eq_active[self.weld] = 0
+        # soft while the grip firms and before the hand takes any weight, as the skin and the fingers give: stiff, the
+        # hand's tremor shook the resting holder against its tines at 1-2 N, past the 0.6 N that starts the loading
+        loading = t >= self.carry.get("loading", (self.carry["t0"],))[0]
+        m.eq_solref[self.weld, 0] = CARRY_SOLREF_S if loading else PRELOAD_SOLREF_S
         # apart from the final approach on, as the runner holds a welded tool's grip (APPROACH_S): a hand trailing its
         # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork
         apart = self.grip["t0"] - APPROACH_S <= t < self.carry["t1"] + RELEASE_S
@@ -274,9 +291,25 @@ class ToolLoadRun(PendantRunner):
         s = self.seated()
         return s["s_mm"] >= -BORE_IN_MM and s["offset_mm"] <= BORE_AXIS_MM
 
+    def weight_moment(self, t: float) -> None:
+        """The rest of the holder's weight fed forward: the runner feeds hand_force forward at the wrist, this adds its
+        moment there, the weight hanging off the hand at the holder's own centre of mass, 100 mm and more away: without
+        it the wrist gave under the load as it was taken, and the holder tipped 6 deg and dropped 9 mm in the fork."""
+        F = self.hand_force("R", t)
+        if F is None:
+            return
+        m, d = self.model, self.data
+        hb = m.body("R_hand").id
+        at, wrist = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+        mujoco.mj_jac(m, d, at, None, d.xipos[self.loose], hb)
+        mujoco.mj_jacBody(m, d, wrist, None, hb)
+        tau = (at - wrist)[:, self.act_dof].T @ F
+        d.ctrl[self.acts] += tau / m.actuator_gainprm[self.acts, 0]
+
     def before_step(self, t: float) -> None:
         if self.loose is not None:
             self.carry_weld(t)
+            self.weight_moment(t)
         super().before_step(t)
         if (self.loose is not None and self.machine.spindle_tool is None and t >= self.seat_ev["t0"]
                 and self._steps % 10 == 0 and self.seated()["clamped"]):

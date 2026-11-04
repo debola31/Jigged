@@ -57,21 +57,25 @@ OPEN_LEAD_S = 0.12                                # its hand widest this long be
                                                   # 0.06 s the hand was widest 83-84% of the way through the reach.
                                                   # A pickup sets its own: one frame is 5% of a reach
 CLOSE_S = 0.1                                     # ... then closing on the tool over this long (proposed)
-PRELOAD_S = 0.0                                   # a lift, and the carry bearing it, start this long after the grip
+PRELOAD_S = 0.1                                   # a lift, and the carry bearing it, start this long after the grip
                                                   # has closed: the hand's press into the tool takes ~0.15 s to let go
                                                   # as the carry eases in, so the grip rises for about people's 0.23 s
                                                   # (anatomy.json grip preload_s) before the load; from 0.07 s, 0.33 s.
                                                   # Carried from 0.1 s after contact, the carry's closing pressed the
-                                                  # calipers 3.4 N into the bench and loaded the deburring tool at once
+                                                  # calipers 3.4 N into the bench and loaded the deburring tool at once.
+                                                  # On the body whose colliders fit its skin, at once: 67 ms
 CARRY_EASE_S = 0.3                                # ... the carry's correction of the hand easing in over this long
                                                   # (moonshot/sim/bench.py carry_offset)
-TAKE_MM, TAKE_S = 2.5, 0.65                       # a lift first takes the tool's weight, so the load comes on over
+TAKE_MM, TAKE_S = 4.5, 0.45                       # a lift first takes the tool's weight, so the load comes on over
                                                   # people's loading time (anatomy.json grip loading_s) before it
                                                   # leaves the bench: lifted straight off, the load took 33 and 100 ms
                                                   # to lift the tools; taking 1.5 mm over 0.6 s, the hand's give left
                                                   # the deburring tool down until the lift went on (533 ms); 2 mm
                                                   # over 0.5 s, 400 ms; 2.5 mm over 0.45 s, 100 ms, over 0.55 s,
-                                                  # 133-167 ms
+                                                  # 133-167 ms. The body whose colliders fit its skin (37b295a8) gives
+                                                  # 2.3 mm before the tool leaves the bench: 2.5 mm over 0.65 s, 467 ms;
+                                                  # 4 mm over 0.45 s, 333 ms; 5 mm over 0.4 s and 6 mm over 0.35 s,
+                                                  # 100 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
 
 
@@ -212,7 +216,9 @@ class BenchPlan:
         bc, bh = bench_box()
         c = self.to_world([41.0, 0.0, 0.0])
         n_up = self.to_world([0.0, -1.0, 0.0], vec=True)
-        top = lambda lo, hi: G.plane_target(c, n_up, 2.0, bands(c, x=(lo, hi), y=(-12, 14)))   # noqa: E731
+        # the pads on the rim's face, not into it: the press holds the part down. 2 mm in, on the body whose pads meet
+        # what they touch (37b295a8), the arm landed as a strut and leant the trunk 16 deg to the right
+        top = lambda lo, hi: G.plane_target(c, n_up, 0.0, bands(c, x=(lo, hi), y=(-12, 14)))   # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 15.0, 15.0
@@ -228,8 +234,10 @@ class BenchPlan:
         g = self.grips["steady"]
         H, W = g["H"], g["W"]                              # the mirrored world
         tc = t_reach + 1.1
-        # up out of the bench's way first: from the thigh, the knuckles catch its front edge
-        self.transit("L", t_reach, tc, W, via=[self.rest + [0, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
+        # up out of the bench's way first: from the thigh, the knuckles catch its front edge. And out to its side as it
+        # rises (+x, the mirrored world's outward): straight up in front of the thigh, the shoulder turned in to 35 deg
+        # (people's 31)
+        self.transit("L", t_reach, tc, W, via=[self.rest + [40, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
         self.fingers("L", t_reach + 0.3, open_like(self.hand, g["q"], 0.4))
         self.fingers("L", tc, g["q"])
         self.hold("L", tc, t_off, H, W)
@@ -278,7 +286,7 @@ class BenchPlan:
         self.wrist[side] = np.asarray(W, float)
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S, above=0.0,
-              open_s=None):
+              open_s=None, close_s=CLOSE_S):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
@@ -290,7 +298,8 @@ class BenchPlan:
         reach below its closed ones comes to rest `above` (mm) the grip and closes as it comes down onto it: the
         left hand's on the calipers lying on the bench struck the bench, bounced 15 mm and closed on nothing. A hand
         opening only a little opens over the last `open_s` of the way: opened over all of it, its last 0.15 s were
-        level to 0.3 mm, and its widest came where the noise put it.
+        level to 0.3 mm, and its widest came where the noise put it. A hand coming down far onto its grip closes over
+        `close_s`.
         Returns when the grip has closed."""
         g = self.grips[grip]
         t_ready = t0 + RISE_S
@@ -301,15 +310,15 @@ class BenchPlan:
         self.transit(side, t0, t_ready, ready)
         self.transit(side, t_ready, t_go, ready)
         self.transit(side, t_go, tc, W + up, via=[approach], fade=(H, 1.0))
-        self.add(side, tc, tc + CLOSE_S, lambda t: [("pose", H, W + up * (1 - min_jerk((t - tc) / CLOSE_S)), 3.0)])
+        self.add(side, tc, tc + close_s, lambda t: [("pose", H, W + up * (1 - min_jerk((t - tc) / close_s)), 3.0)])
         self.wrist[side] = W
         self.fingers(side, t0 + 0.3, self.q_relax)
         if open_s is not None:
             self.fingers(side, tc - lead - open_s, self.q_relax)
         self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
         self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
-        self.fingers(side, tc + CLOSE_S, g["q"])
-        return tc + CLOSE_S
+        self.fingers(side, tc + close_s, g["q"])
+        return tc + close_s
 
     def obj_at(self, name, t):
         """The planned pose (R, p) of a carried object at t: min-jerk between its keys, held between them."""

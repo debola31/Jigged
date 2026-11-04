@@ -1149,9 +1149,9 @@
    ]
   },
   {
-   "id": "nist-ctc-01",
-   "name": "NIST CTC-01 (Combined Test Case 1)",
-   "size": "800 x 450 x 150 mm",
+   "id": "nist-ftc-09",
+   "name": "NIST FTC-09 (Fully-Toleranced Test Case 9)",
+   "size": "279.4 x 190.5 x 3.0 mm",
    "status": "coming"
   },
   {
@@ -1221,9 +1221,9 @@
    "status": "coming"
   },
   {
-   "id": "nist-ftc-09",
-   "name": "NIST FTC-09 (Fully-Toleranced Test Case 9)",
-   "size": "279.4 x 190.5 x 3.0 mm",
+   "id": "nist-ctc-01",
+   "name": "NIST CTC-01 (Combined Test Case 1)",
+   "size": "800 x 450 x 150 mm",
    "status": "coming"
   },
   {

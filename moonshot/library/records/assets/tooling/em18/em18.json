@@ -1,0 +1,59 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "em18",
+  "name": "1/8 in end mill",
+  "category": "tooling",
+  "make": "Harvey Tool",
+  "model": "72125",
+  "description": "1/8 in 2-flute uncoated carbide square end mill, 3/8 in length of cut, 1/8 in shank.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 0.125,
+      "unit": "in"
+    },
+    {
+      "name": "Length of cut",
+      "value": 0.375,
+      "unit": "in"
+    },
+    {
+      "name": "Shank diameter",
+      "value": 0.125,
+      "unit": "in"
+    },
+    {
+      "name": "Overall length",
+      "value": 1.5,
+      "unit": "in"
+    },
+    {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+    },
+    {
+      "name": "Material",
+      "value": "solid carbide, uncoated"
+    }
+  ],
+  "source_urls": [
+    "https://www.dixie-tool.com/2-fl-0-1250-1-8-cutter-dia-x-0-3750-3-8-loc-72125/"
+  ],
+  "source_files": [
+    "72125 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "nist-ftc-09's keyhole slot, .140 wide.",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "em18.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/72125.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

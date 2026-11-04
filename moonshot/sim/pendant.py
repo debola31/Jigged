@@ -51,9 +51,10 @@ from moonshot.world.vise import Load
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
 TOUCH_N = 0.2               # less than this on a key isn't touching it
 ALIGNED_MM = 6.0            # a press pushes only once the fingertip is this close to the key's centre (keys are 14 mm)
-APPROACH_PAST_MM = 2.0      # a lined-up finger is steered in, until its key clicks, to this far past the key's face,
+GOING_IN_S = 0.15           # before a press's start, the index going in: sight leaves the depth to the press
+APPROACH_PAST_MM = 2.0     # a lined-up finger is steered in, until its key clicks, to this far past the key's face,
 APPROACH_TAU = 0.1          # what stays short taken up at this rate (s), up to APPROACH_MAX_MM: steered by the error
-APPROACH_MAX_MM = 30.0      # alone, the sagging arm stopped 2.3-6.5 mm short of a target 2 mm past it
+APPROACH_MAX_MM = 15.0     # alone, the sagging arm stopped 2.3-6.5 mm short of a target 2 mm past it
 PUSH_NEAR_MM = 1.0          # within this of the face, or touching, it's pushed too: steered in, the index came to
                             # rest on keys at under 0.2 N
 AIM_GAIN = 0.6              # of the fingertip's error, steered out at once: under 1, so the arm's lag can't make it ring
@@ -147,6 +148,7 @@ class PendantRunner(TakeRunner):
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
         self.approach_i = {s: 0.0 for s in ("R", "L")}       # the steering in onto a key taken up so far (aim), m
+        self.press_t0: dict[str, float | None] = {"R": None, "L": None}   # the press the aim is on, its start
         self.lifting = {s: False for s in ("R", "L")}
         self.press_n: dict[str, np.ndarray | None] = {s: None for s in ("R", "L")}
         self.turns =sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
@@ -276,6 +278,7 @@ class PendantRunner(TakeRunner):
             near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
             self.press_n[s] = np.asarray(near[0][1]["normal"], float) if near else None
+            self.press_t0[s] = near[0][1]["t0"] if near else None
             self.lifting[s] = bool(near) and near[0][0] in self.press_done
             if not near:
                 i *= 1 - dt / 0.2
@@ -302,15 +305,17 @@ class PendantRunner(TakeRunner):
             if self.lifting[s] or (np.linalg.norm(across) > ALIGNED_MM / 1000 and not touching):
                 move = n * min(0.0, err @ n - STANDOFF_MM / 1000)
             elif t >= e["t0"] - 0.05:
-                # lined up, its press due: in straight the same way, as deep as the plan has it, and once the plan is
-                # at the key, to just past its face. The run's index stopped 14 mm short of the plan's, and pushed the
-                # rest of the way by force through the body it swung 4-7 mm across +Y, out of line, and never pressed
-                # it (op10-xy, op30-xy, op40-xy, op50-xy)
+                # lined up, the plan's index on its key: in straight the same way to just past the key's face. Pushed
+                # there by force through the body, the run's index swung 4-7 mm across +Y, out of line, and never
+                # pressed it (op10-xy, op30-xy, op40-xy, op50-xy); steered through the plan's quick go-in as well, after
+                # a hand lagging it by up to 20 mm, the arm kicked it 7-11 mm across +Y and Reset
                 planned = (self.key_at[e["key"]] - self.fingertip(s, n, data=self.plan)) @ n
-                past = APPROACH_PAST_MM / 1000 if planned < 0.003 else 0.0
-                short = max(0.0, err @ n - planned + past)
-                self.approach_i[s] = min(APPROACH_MAX_MM / 1000, self.approach_i[s] + short * dt / APPROACH_TAU)
-                move = n * (short + self.approach_i[s])
+                if planned < 0.003:
+                    short = max(0.0, err @ n - planned + APPROACH_PAST_MM / 1000)
+                    self.approach_i[s] = min(APPROACH_MAX_MM / 1000, self.approach_i[s] + short * dt / APPROACH_TAU)
+                    move = n * (short + self.approach_i[s])
+                else:
+                    move = None
             else:
                 move = None
             if move is None or self.lifting[s]:
@@ -327,9 +332,11 @@ class PendantRunner(TakeRunner):
         is the press's, which holds it off the face until it's over the key, pushes, and lifts it once it has
         clicked, all meant to leave the plan. Sight, correcting the depth too, wound up 10 mm into the keypad by
         op20-xy's 11th second, and the middle finger pressed 2 as the hand left for the dial; held still through
-        the press altogether, it let the hand drift onto other keys."""
+        the press altogether, it let the hand drift onto other keys. Until the index goes in (GOING_IN_S before the
+        press), sight corrects the depth as well: left to the press from the hover on, the arm's sag held the index
+        14 mm farther off than the plan over +Y after a jog, and it reached the key only as the press ended (op30-xy)."""
         n = self.press_n[side]
-        if n is None:
+        if n is None or t < self.press_t0[side] - GOING_IN_S:
             return None
         m, d, p = self.model, self.data, self.plan
         hb = m.body(f"{side}_hand").id

@@ -74,6 +74,9 @@ FINGER_DEG_S = 300.0                                     # a change of the hand'
                                                           # the dial, 710 deg/s at its peak, and its deep flexor went
                                                           # past its maximum (op20-xy)
 HOVER_MM = 40.0
+GO_IN_S = 0.35                                            # from the hover onto the key: in 0.25 s the index came in at
+                                                          # 480 mm/s, and as it stopped at Reset, the keypad's top left
+                                                          # corner, the run's wrist swung 7-8 mm across (op10-xy)
 HOVER_DWELL_S = 0.4                                       # the left index waits over Cycle Start before pressing it:
                                                           # pressed on arrival from the side, it was 45 mm short and
                                                           # 17 mm across at the press, and slid past (op20-z, op30-xy)
@@ -312,9 +315,9 @@ class PendantTake(StepTake):
         # the move's start jumped the fingertip's target, 16 mm in a frame from op30-z's Edit to Down
         H0 = H if reached else self.key_H
         pt0 = pt if reached or not self.key_grip_last else self.pad_in_hand[self.key_grip_last][0]
-        path = PosePath(H0, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
-            t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
-        t1 = t0 + move_s + 0.37 + hold_s
+        path = PosePath(H0, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, GO_IN_S, H, W_on).to(
+            t0 + move_s + GO_IN_S + hold_s, 0.12, H, hover)
+        t1 = t0 + move_s + GO_IN_S + 0.12 + hold_s
 
         def cons(t, path=path, pt0=pt0, pt=pt, ax=ax, t0=t0, turn_s=move_s - dwell):
             # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the
@@ -323,7 +326,7 @@ class PendantTake(StepTake):
             p = pt0 + (pt - pt0) * min_jerk((t - t0) / turn_s)
             return [("pose", Ht, Wt, 1.0), ("tsr", p, Wt + Ht @ p, ax, [0.0, 1.0, 0.0], 6.0)]
         self.add("R", t0, t1, cons)
-        self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
+        self.event("press", round(t0 + move_s + 0.4 * GO_IN_S, 3), round(t0 + move_s + GO_IN_S + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")
         self.fingers("R", t1, q)                  # the press's shape held to its end: what comes next changes it after

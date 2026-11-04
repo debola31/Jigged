@@ -33,7 +33,7 @@ class SetParallels(_Cell):
         self.base_at = {n: [] for n in SP.ORDER}
         self.tilt = {n: [] for n in SP.ORDER}
         self.in_hand = {n: [] for n in SP.ORDER}
-        self.carry = {e["object"]: e for e in self.tk["events"] if e["kind"] == "carry"}
+        self.carry = {e["obj"]: e for e in self.tk["events"] if e["kind"] == "carry"}
         keys = np.load(self.folder / "parallel_keys.npz")
         self.keys = {n: (keys[f"{n}_t"], keys[f"{n}_p"]) for n in SP.ORDER}
         grips = {e["grip"]: e for e in self.grip_events}

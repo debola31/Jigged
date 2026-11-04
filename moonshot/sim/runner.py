@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation
 
 from moonshot.body.skeleton import H0, build
 from moonshot.motion import kinematics as BM
-from moonshot.sim.record import Recorder
+from moonshot.sim.record import Recorder, hand_wrench
 from moonshot.sim.reference import ARM as REF_ARM
 
 SIDES = ("R", "L")
@@ -59,6 +59,13 @@ class TakeRunner:
     encloses: dict[str, str] = {}
     welded: set[str] = set()
     controls: set[str] = set()               # a welded tool's geoms the fingers still touch (its trigger)
+    never_held: tuple[str, ...] = ()         # mechanism parts the take's hands never touch (never_held_parts)
+
+    def eq_name(self, grip: str) -> str:
+        """A grip's constraint: a welded one is the carry of what it holds (carry_<object>, the declared grip assist
+        the bench's carries are, read as carried by the checks: moonshot/validate/objects.py carried), the rest
+        enclose_<grip>."""
+        return f"carry_{self.encloses[grip]}" if grip in self.welded else f"enclose_{grip}"
 
     def __init__(self, folder: Path):
         self.folder = Path(folder)
@@ -70,7 +77,7 @@ class TakeRunner:
         xml = self.scene(self.body.xml)
         # a held tool is stiff in the hand (4 ms, 4 steps): at 20 ms the index's push on the gun's trigger moved the gun
         # 30 mm in the hand, enough to miss its holster's bore; a held mechanism's knob or bar stays soft
-        eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="enclose_{e["grip"]}" '
+        eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="{self.eq_name(e["grip"])}" '
                      f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
                      f'solref="{0.004 if e["grip"] in self.welded else 0.02} 1" solimp="0.9 0.95 0.002"/>\n'
                      for e in {e["grip"]: e for e in self.grip_events}.values())
@@ -190,7 +197,7 @@ class TakeRunner:
                 if mode != self._held_apart.get(e["grip"], 0):
                     self.hold_apart(ob, mode)
                     self._held_apart[e["grip"]] = mode
-            eq = m.equality(f"enclose_{e['grip']}").id
+            eq = m.equality(self.eq_name(e["grip"])).id
             want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
             if want and not d.eq_active[eq]:
                 hb, ob = m.body(f"{e['side']}_hand").id, m.body(self.encloses[e["grip"]]).id
@@ -271,7 +278,7 @@ class TakeRunner:
         """Does the side's arm touch anything but the person and what it holds by a constraint?"""
         m, d = self.model, self.data
         held = {m.body(self.encloses[e["grip"]]).id for e in self.grip_events
-                if e["side"] == side and d.eq_active[m.equality(f"enclose_{e['grip']}").id]}
+                if e["side"] == side and d.eq_active[m.equality(self.eq_name(e["grip"])).id]}
         mine = self.side_bodies[side]
         for i in range(d.ncon):
             b1, b2 = m.geom_bodyid[d.contact[i].geom1], m.geom_bodyid[d.contact[i].geom2]
@@ -303,7 +310,7 @@ class TakeRunner:
                 # paused too while the hand holds a mechanism (a door's bar, the crank's knob): there being past the
                 # plan is the point, as the vise take pauses while cranking; a welded tool is part of the hand
                 holding = any(e["side"] == side and e["grip"] not in self.welded
-                              and d.eq_active[m.equality(f"enclose_{e['grip']}").id] for e in self.grip_events)
+                              and d.eq_active[m.equality(self.eq_name(e["grip"])).id] for e in self.grip_events)
                 self._touch[side] = holding or self.touching(side)
             if not self._touch[side]:
                 v += err * dt / VISUAL_TAU
@@ -354,16 +361,61 @@ class TakeRunner:
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, SIDES)
         self.theta = {s: [] for s in SIDES}
+        self.checks = {k: [] for k in ("touching", "hand_wrench", "hand_wrench_L", "active_constraints", "applied_forces")}
+        self.machine_q = {a: m.jnt_qposadr[m.joint(f"vf2_{a}").id] for a in ("x", "y", "z")
+                          if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"vf2_{a}") >= 0}
+        self.checks["machine_axes"] = {f"vf2_{a}": [] for a in self.machine_q}
+        carried = {e["obj"] for e in self.tk["events"] if e["kind"] == "carry" and e.get("obj")}
+        self.carried = {o: m.body(o).id for o in carried if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, o) >= 0}
+        self.checks["load_N"] = {o: [] for o in self.carried}
+        self.checks["weight_N"] = {o: round(float(m.body_subtreemass[b]) * 9.81, 4) for o, b in self.carried.items()}
         for k in range(n):
             for s in range(spf):
                 self.step((k + s / spf) / self.fps)
             self.recorder.frame(d, self.hands(), self.rd["eye"][k], self.rd["look"][k], self.rd["up"][k])
             self.theta["R"].append([self.anatomical(a if a.startswith("trunk") else f"R_{a}") for a in REF_ARM])
             self.theta["L"].append([self.anatomical(f"L_{a}") for a in REF_ARM[3:]])
+            self.record_checks()
             self.on_frame(k)
             if log and k % (5 * self.fps) == 0:
                 log(f"frame {k}/{n}")
         return n
+
+    def record_checks(self) -> None:
+        """This frame of what the per-frame checks read that the take record doesn't carry (moonshot/validate/take.py),
+        as the vise take's run writes it: what the arms touch, each hand's wrench (the left's reflected into the right's
+        frame), the active constraints and the bodies pushed from outside the physics, the VF-2's axes where the scene
+        has it, and each carried object's lifting force (its upward force from the person: all its outside force less
+        what anything else's contact puts on it)."""
+        m, d, c = self.model, self.data, self.checks
+        mine = self.side_bodies["R"] | self.side_bodies["L"]
+        touched = set()
+        for i in range(d.ncon):
+            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+            if (m.geom_bodyid[g1] in mine) != (m.geom_bodyid[g2] in mine):
+                other = g2 if m.geom_bodyid[g1] in mine else g1
+                if m.geom_bodyid[other] not in self.person:
+                    touched.add(m.geom(other).name)
+        c["touching"].append(sorted(touched))
+        c["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
+        f, tq = np.array(hand_wrench(m, d, "L_hand")).reshape(2, 3)
+        c["hand_wrench_L"].append([-f[0], f[1], f[2], tq[0], -tq[1], -tq[2]])         # a reflection in x
+        c["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
+        c["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
+        for a, q in self.machine_q.items():
+            c["machine_axes"][f"vf2_{a}"].append(round(float(d.qpos[q]) * 1000, 4))
+        f6 = np.zeros(6)
+        for name, b in self.carried.items():
+            others = 0.0
+            for i in range(d.ncon):
+                g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+                b1, b2 = m.geom_bodyid[g1], m.geom_bodyid[g2]
+                if b in (b1, b2) and (b2 if b1 == b else b1) not in self.person:
+                    mujoco.mj_contactForce(m, d, i, f6)
+                    fw = d.contact[i].frame.reshape(3, 3).T @ f6[:3]
+                    others += float(fw[2] if b2 == b else -fw[2])
+            c["load_N"][name].append(round(float(d.cfrc_ext[b][5]) - others, 3))   # cfrc_ext is fresh: hand_wrench
+                                                                                    # ran mj_rnePostConstraint
 
     def export(self, folder: Path | None = None) -> None:
         """The take record, and beside it sim.npz in the vise runner's keys (moonshot/sim/vise_take.py export_sim) for
@@ -379,3 +431,5 @@ class TakeRunner:
         for s, suffix in (("R", ""), ("L", "_L")):
             sim |= {f"{k}{suffix}": np.array(hands[s][k]) for k in ("q", "H", "W", "S", "E", "forearm")}
         np.savez(folder / "sim.npz", **sim)
+        (folder / "checks.json").write_text(json.dumps(self.checks | {"never_held": list(self.never_held)}),
+                                            encoding="utf-8")

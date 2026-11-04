@@ -29,7 +29,9 @@ from moonshot.sim.runner import SIDES, TakeRunner
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
-PROGRAM = [(cell.LOAD_X_MM, y, 0.0, 1000.0) for y in (60.0, 0.0) * 6]   # the first moves, slow to show it runs
+PROGRAM = [(cell.LOAD_X_MM, y, 0.0, 0.0, 1000.0) for y in (60.0, 0.0) * 6]   # the first moves, slow (1000 mm/min) to
+# show it runs, the spindle still: as (x, y, z, rpm) they were rapids at 1000 rpm, and the rapid slipped the clamped part
+# 0.1 mm on the table and the spinning drawbar fingers read as launched (the cause check)
 DOORS = ("door_left", "door_right")
 NEVER_HELD = ["vf2_estop"]      # pressing it would stop the machine (as moonshot/sim/pendant.py's)
 LAG_N_PER_MM, LAG_MAX_N = 0.5, 25.0     # a hand leans into a door trailing its path: this much more per mm, at most
@@ -237,7 +239,10 @@ class DoorOpen(DoorClose):
 
 
 class CycleStart(_Cell):
-    vise_keys = True
+    """Cycle Start pressed, and the program's first moves run: the table carries the vise and the part. Judged as the
+    pendant's takes are (moonshot/sim/pendant.py): from its record, the machine's own bodies driven by its servos and
+    what sits on its table by how it moves on it; with the vise's keys the cause check read the part riding the jog as
+    moving uncaused."""
     grip_geoms = {"cycle_start": "vf2_cycle_start_button"}
     RELEASE_N = 0.5                 # a button lets go below this, well under its actuation force,
     DEBOUNCE_S = 0.05               # and only once it has stayed below it this long, as controls debounce a switch
@@ -264,6 +269,16 @@ class CycleStart(_Cell):
         self.ctl.touch({"cycle_start": max(f, act) if self.held else min(f, act * 0.99)})
         self.press_N.append(f)
         super().before_step(t)
+
+    def export(self, folder: Path | None = None) -> None:
+        folder = Path(folder or self.folder)
+        super().export(folder)
+        scene = json.loads((folder / "scene.json").read_text(encoding="utf-8"))["bodies"]
+        objects = [n for n, b in scene.items() if b["role"] == "object"]
+        driven = [n for n in objects if n.startswith("vf2")]
+        checks = json.loads((folder / "checks.json").read_text(encoding="utf-8"))
+        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven}}
+        (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
 
     def outcome(self) -> dict:
         return {"events": list(self.ctl.events), "state": self.ctl.state, "press_N_max": round(max(self.press_N), 1)}

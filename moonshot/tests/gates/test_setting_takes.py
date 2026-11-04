@@ -163,18 +163,23 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 # In every setup that brings new tools, its takes cut together under takes/nist-ftc-10/<step id>/ (moonshot/planning/
 # takes.py tool_takes; the vf2-tool-load card): at the pendant MDI, the first tool's number and ATC FWD empty the
 # spindle; then for each tool its holder is taken off the stand on the table and pushed up into the spindle while the
-# left hand holds Tool Release (a seat take), and ATC FWD puts it in its pocket (an atc take). Each holder ends seated
-# on the spindle's gauge point, held by the drawbar alone with the hand off it; every key the plan presses registers and
-# no other; and the machine ends the step with each tool in the pocket its number names, the tools numbered in the order
-# the plan first uses them, the probe in the shop's 20.
+# left hand holds Tool Release (a seat take), and ATC FWD puts it in its pocket (an atc take). A holder in a far fork
+# (planning/takes.py split) is taken in two takes cut together, as the operator steps over: picked off the stand from in
+# front of it and held up (a pick take), then pushed up into the spindle from the doorway (an insert take), which starts
+# with it held where the pick left it, from the body. Each holder ends seated on the spindle's gauge point, held by the
+# drawbar alone with the hand off it; every key the plan presses registers and no other; and the machine ends the step
+# with each tool in the pocket its number names, the tools numbered in the order the plan first uses them, the probe in
+# the shop's 20.
 #
 # Besides the record: take.json "load" (kind, tool, pocket, and the state the run starts from), outcome.json "pockets"
 # ({pocket: tool}), "spindle_tool", "tool_release_held_s" (when the machine read Tool Release held) and "pressed";
 # checks.json "touching_R", the right hand's touches.
 TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
 TOOL_TAKES = [f"{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
-SEATS = [t for t in TOOL_TAKES if "-seat-" in t]
+SEATS = [t for t in TOOL_TAKES if "-seat-" in t or "-insert-" in t]          # the takes that seat a holder
+PICKS = [t for t in TOOL_TAKES if "-pick-" in t]
 PROBE_POCKET = 20                                   # moonshot/library/records/shop.json conventions.probe_tool_number
+INSERT_GRASPED = ("grasp_timing", "hand_opening")   # an insert's holder is grasped in the pick before it, not in it
 
 
 @pytest.fixture(params=TOOL_TAKES)
@@ -184,6 +189,11 @@ def tool_take(request):
 
 @pytest.fixture(params=SEATS)
 def seat(request):
+    return _folder(request.param)
+
+
+@pytest.fixture(params=PICKS)
+def pick(request):
     return _folder(request.param)
 
 
@@ -202,12 +212,15 @@ def test_a_tool_take_record_is_complete(tool_take):
 
 
 def test_every_per_frame_check_passes_on_a_tool_take(tool_take):
-    """At the pendant, every check but the three not applicable to a pendant take (NOT_APPLICABLE); a seat take reaches
-    to grasp a holder and lifts it, so it is held to every check, the grasp's timing and the hand's opening included."""
+    """At the pendant, every check but the three not applicable to a pendant take (NOT_APPLICABLE); a seat or pick take
+    reaches to grasp a holder and lifts it, so it is held to every check, the grasp's timing and the hand's opening
+    included; an insert, the holder in the hand from its first frame, to every check but those two (INSERT_GRASPED:
+    its grasp is the pick's, timed and measured there)."""
     from moonshot.validate.take import run
-    pendant = _json(tool_take, "take.json")["load"]["kind"] != "seat"
+    kind = _json(tool_take, "take.json")["load"]["kind"]
+    exempt = NOT_APPLICABLE if kind in ("change", "atc") else INSERT_GRASPED if kind == "insert" else ()
     failed = {k: v for k, v in run(tool_take).items()
-              if not (pendant and k in NOT_APPLICABLE) and (isinstance(v, str) or not v.passed)}
+              if k not in exempt and (isinstance(v, str) or not v.passed)}
     assert not failed, "\n".join(f"{k}: {v}" for k, v in failed.items())
 
 
@@ -229,13 +242,36 @@ def test_the_holder_ends_seated_in_the_spindle_held_by_the_drawbar_alone(seat):
     assert abs(rel[2]) <= mm, f"the gauge line {rel[2]:+.2f} mm off the spindle's"
     assert np.hypot(*rel[:2]) <= mm, f"the axis {np.hypot(*rel[:2]):.2f} mm off the spindle's"
     assert tilt <= deg, f"tilted {tilt:.2f} deg"
-    assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 300, "the holder never came off the stand"
+    if "-seat-" in seat.name:
+        assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 300, "the holder never came off the stand"
     fps = float(d["fps"])
     tail = d["pos"][-int(0.5 * fps):, h] - d["pos"][-int(0.5 * fps):, sp]
     assert np.ptp(tail, axis=0).max() < 0.1, "the holder moves in the spindle at the end"
     assert not any(n.startswith("holder") for t in ck["touching_R"][-int(0.5 * fps):] for n in t), "still held"
     assert "tool_release_head" in [k for _, k in out["pressed"]]
     assert out["tool_release_held_s"] is not None, "the drawbar never opened"
+
+
+def test_a_pick_holds_the_holder_up_where_its_insert_starts(pick):
+    """From the record's own poses: the holder lifted well clear of the stand and still in the hand (its carry) at the
+    pick's end, not yet near the spindle; and the insert after it starts with the holder where the pick left it
+    from the body (the two takes' lumbars: the operator stepped over, the holder in hand), within the tracking a run's
+    hand keeps to its plan (physics.tracking_lag_mm)."""
+    d, ck, tk = np.load(pick / "take.npz"), _json(pick, "checks.json"), _json(pick, "take.json")
+    names = [str(b) for b in d["bodies"]]
+    h = names.index("holder")
+    assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 150, "the holder never came off the stand"
+    assert "carry_holder" in ck["active_constraints"][-1], "the holder not in the hand at the pick's end"
+    step = next(s for s in TOOL_STEPS if s["id"] == pick.parent.name)
+    takes = tool_takes(step)
+    insert = pick.parent / takes[takes.index(pick.name) + 1]
+    assert "-insert-" in insert.name
+    d2, tk2 = np.load(insert / "take.npz"), _json(insert, "take.json")
+    h2 = [str(b) for b in d2["bodies"]].index("holder")
+    left = d["pos"][-1, h] - np.array(tk["lumbar"], float)
+    starts = d2["pos"][0, h2] - np.array(tk2["lumbar"], float)
+    off = float(np.linalg.norm(left - starts))
+    assert off <= threshold("physics.tracking_lag_mm").value, f"the insert starts {off:.1f} mm off where the pick left it"
 
 
 def _numbers():
@@ -261,8 +297,10 @@ def test_the_step_ends_with_every_tool_in_its_pocket(tool_step):
         if kind == "atc":
             assert "atc_fwd" in [k for _, k in out["pressed"]], f.name
             assert {int(p): t for p, t in out["pockets"].items()}.get(num[tool]) == tool, f.name
-        elif kind == "seat":
+        elif kind in ("seat", "insert"):
             assert out["spindle_tool"] == tool and out["current"] == num[tool], f.name
+        elif kind == "pick":                        # held up, the pocket waiting for it at the spindle
+            assert out["spindle_tool"] is None and out["current"] == num[tool], f.name
         else:                                       # the change: the probe put away, the first new pocket empty
             assert {int(p): t for p, t in out["pockets"].items()}.get(PROBE_POCKET) == "probe", f.name
             assert out["spindle_tool"] is None and out["current"] == num[step["facts"]["tool_ids"][0]], f.name

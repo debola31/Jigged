@@ -72,8 +72,12 @@ JAW_TOP = VISE["jaw_top_z"]
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
 REACH_S, REACH_PEAK = 0.66, 0.65
 KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
-# the final pull: out over the disc, then the reach, sliding on along the knob's axis this far
-FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.7, 0.65, 0.72, 110.0
+# the final pull: out over the disc (slower than the reach, so the reach is the fastest move before the grasp), a
+# moment's pause, then the reach, onto the knob from the back of the hand as the first crank's comes on, from this far
+# out along the knob's axis (straight from behind, op40's fingers swept the lever for 17 frames). FINAL_AXIAL slides
+# the hand on along the knob's axis instead (3e2b0545), by FINAL_SLIDE_MM, the opening's key at KNOB_PEAK_FINAL
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.9, 0.5, 0.72, 110.0
+FINAL_APPROACH_OUT_MM, FINAL_AXIAL = 60.0, False
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 # a lift-out's grab (start "vise"): the raise to the ready point, up over the crank's disc, 0.6 m, slower than the
 # reach; the hand there, still, LIFT_ARRIVE_EARLY_S before the fingers close: arriving as they closed (the stage's),
@@ -264,7 +268,11 @@ class Take:
         for n in ("index", "middle", "ring", "little"):
             q0[f"{n}_mcp_flex"], q0[f"{n}_pip"] = 15.0, 15.0
         topf = lambda lo, hi: plane(c + [0, 0, hz], [0, 0, 1], 2.0, bands(c, x=(lo, hi), y=(-10, 30)))
-        specs["blank_press"] = dict(obj=c, colliders=[box(c, self.half)] + vise, q0=q0,
+        # clear of the jaws as the first crank left them, snug on the part, by as much as a fingertip check keeps off
+        # them: solved with the jaws where they were when the part was slid, the thumb rested on the snug moving jaw's
+        # top, and the press, pushing until the part took its force, put up to 33 N more into the jaw (op20)
+        snug = vise_boxes(self.parallels, self.par_h, self.size[1], margin=6.0)
+        specs["blank_press"] = dict(obj=c, colliders=[box(c, self.half)] + snug, q0=q0,
                                     targets={"index": topf(-30, -12), "middle": topf(-8, 8), "ring": topf(12, 30)}
                                     if hx >= 30 else {"index": topf(-hx + 2, -1), "middle": topf(1, hx - 2)},   # a narrow top
                                     starts=[S(24, 0, 8, 45, 45, -10, 75, p, 0, 0) for p in (40, 70)])
@@ -669,11 +677,17 @@ class Take:
             self.transit(t0, t_over, over)
             self.add(t_over, t_over + 0.3, lambda t, W=over: [("pose", Hk, W, 1.0)])
             t0 = t_over + 0.3
-            on = Wk + KNOB_AXIS * FINAL_SLIDE_MM + [0, 0, 10]
-            via = [on + [0, 0, 60], on]
-            # open before it slides on, less than the opening's peak (open_like isn't: 0.6 was 104 mm on the reference's
-            # grip and 42 on op10's)
-            self.fingers(t0 + 0.55 * reach, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))
+            if FINAL_AXIAL:
+                on = Wk + KNOB_AXIS * FINAL_SLIDE_MM + [0, 0, 10]
+                via = [on + [0, 0, 60], on]
+                # open before it slides on, less than the opening's peak (open_like isn't: 0.6 was 104 mm on the
+                # reference's grip and 42 on op10's)
+                self.fingers(t0 + 0.55 * reach, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))
+            else:
+                # onto the knob from the back of the hand, as the first crank's reach comes onto it: slid on along its
+                # axis, the open index's base met the knob's end, and blocked there the hand was 90 mm and 14 deg off
+                # its grip when the fist closed on the knob, which snapped it on (180 N)
+                via = [Wk + Hk[:, 2] * 45 + [0, -10, 15] + KNOB_AXIS * FINAL_APPROACH_OUT_MM]
         else:
             reach = KNOB_REACH_S if reach is None else reach
             via = [over, Wk + Hk[:, 2] * 45 + [0, -10, 15]]
@@ -683,7 +697,7 @@ class Take:
         # the knob (before tg), with the fingers ~0.1 s behind their keys
         # the fingers, opening out of the fist's shape, reach ~10 mm short of it before closing on the knob (67 of 77);
         # at 12 op10's part and the knob opened only 0.73 mm apart per mm
-        self.fingers(t0 + (KNOB_PEAK_FINAL if final else KNOB_PEAK) * reach,
+        self.fingers(t0 + (KNOB_PEAK_FINAL if final and FINAL_AXIAL else KNOB_PEAK) * reach,
                      open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=10.0))
         tg = t0 + reach
         self.fingers(tg, g["q"])

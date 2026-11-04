@@ -16,6 +16,41 @@ def _pose(p_m, q) -> list[float]:
     return [round(float(v), 4) for v in (*(np.asarray(p_m) * 1000), *q)]
 
 
+
+class TouchOnsets:
+    """When, between a run's frames, each touch the checks read began (checks.json touch_lead; plan §5.2): the
+    touching record has a frame's instant only, and a reach is a few frames long, so with the frame alone the hand's
+    widest opening moved 7% either way through a reach (validate/hand_opening.py, measured between frames: the user's
+    decision, 2026-11-04). Per frame: each geom an arm came to touch, or equality that came on, during it (off at the
+    step before), with how long before the frame's record it first did, in frames, (0, 1].
+
+    mine, others: per geom, the arms' own, and what they may touch."""
+
+    def __init__(self, model: mujoco.MjModel, mine: np.ndarray, others: np.ndarray):
+        self.model, self.mine, self.others = model, mine, others
+        self.prev: set[tuple[str, int]] = set()
+        self.first: dict[tuple[str, int], int] = {}
+        self.n = 0
+
+    def step(self, data: mujoco.MjData) -> None:
+        g = data.contact.geom[:data.ncon]
+        a, b = self.mine[g[:, 0]], self.mine[g[:, 1]]
+        now = {("g", int(x)) for x in g[a & self.others[g[:, 1]], 1]}
+        now |= {("g", int(x)) for x in g[b & self.others[g[:, 0]], 0]}
+        now |= {("e", int(i)) for i in np.flatnonzero(data.eq_active)}
+        for x in now - self.prev:
+            self.first.setdefault(x, self.n)
+        self.prev = now
+        self.n += 1
+
+    def frame(self) -> dict[str, float]:
+        m, n = self.model, max(1, self.n)
+        out = {(m.geom(i).name if k == "g" else m.equality(i).name): round((n - s) / n, 4)
+               for (k, i), s in self.first.items()}
+        self.first, self.n = {}, 0
+        return out
+
+
 def glbs_in_bodies(model: mujoco.MjModel, root: str, links: dict[str, tuple[str, str]]) -> dict[str, list[dict]]:
     """Each body's GLBs, for meshes authored in `root`'s frame at joint zero (a station's links): links maps a link
     to (its body, its GLB's path under the data root)."""

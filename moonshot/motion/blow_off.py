@@ -139,11 +139,11 @@ class BlowOff(StepTake):
         self.fingers("R", t_on, g["q"])
         self.effort("R", t_on, 0.0, "gun")
         self.effort("R", t_lift, 0.5, "gun")
-        self.event("grip", t_on, t_down + 0.2, side="R", grip="gun")
+        self.event("grip", t_on, t_down + 0.2, side="R", grip="gun", on="air_gun")
         self.load("R", t_lift, t_down, AG.GUN_KG)
         rel = lambda t: self.pose_at(t, keys)[0] @ self.R0.T                                           # noqa: E731
         self.follow("R", t_lift, t_down + 0.25, "gun", lambda t: self.pose_at(t, keys)[1], rel)
-        self.event("carry", t_lift, t_down, side="R", object="air_gun")
+        self.event("carry", t_lift, t_down, side="R", obj="air_gun")
         self.event("blow", keys[3][0], keys[6][0], side="R")
         self.effort("R", keys[3][0] - 0.1, 0.5, "gun")
         self.effort("R", keys[3][0], 0.6, "gun_fire")              # the index squeezes the trigger while aiming

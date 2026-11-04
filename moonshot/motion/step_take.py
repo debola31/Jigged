@@ -35,10 +35,17 @@ MOONSHOT = Path(__file__).resolve().parents[1]
 SIDES = ("R", "L")
 REST_OFFSET = np.array([210.0, 55.0, -105.0])      # a hand hanging relaxed by the thigh, from the lumbar pivot
 THETA0 = [8.0, 0, 0, 40, 40, 0, 60, 20, 0, 0, 0, 0]
+HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]   # an arm hanging relaxed, the body solve's start where
+                                                                 # it has no task: sh_plane .. wr_dev, the girdle
+REST_NEAR_MM = 60.0             # a task ending this close to the hand's rest point leaves it at rest
 KEY = "__source_hash__"
 
 
 class StepTake:
+    SOLVER_W: dict = {}          # a take's own weights over the body solver's (BodySolver.W): the pendant's keys weigh
+                                 # people's range more ("range"), where the bench's calipers can't spare the accuracy
+    body_solver = BS.BodySolver  # what `solve` plans the body with: a step may add costs of its own
+
     def __init__(self, out, lumbar, verbose=True):
         self.out, self.lumbar, self.verbose = Path(out), np.asarray(lumbar, float), verbose
         self.out.mkdir(parents=True, exist_ok=True)
@@ -173,7 +180,8 @@ class StepTake:
     def solve(self, theta0=None, iters=3000):
         self.T = self.t + 0.3
         self.n = n = int(self.T * FPS) + 1
-        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.boxes, arms=SIDES)
+        s = self.body_solver(n, FPS, self.lumbar, self.prior, boxes=self.boxes, arms=SIDES)
+        s.W = BS.BodySolver.W | self.SOLVER_W
         for side in SIDES:
             for k in range(n):
                 t = k / FPS
@@ -192,7 +200,7 @@ class StepTake:
                             s.pose(k, c[1], c[2], c[3], side=side)
                 s.side[side]["load"][k] = sum(kg for t0, t1, kg in self.side[side]["loads"] if t0 <= t < t1)
         t0 = time.time()
-        self.theta, self.dp, self.frames, terms = s.solve(np.array(theta0 if theta0 is not None else THETA0, float),
+        self.theta, self.dp, self.frames, terms = s.solve(theta0 if theta0 is not None else self.theta0(n),
                                                          iters=iters, lr=0.03)
         self.left_frames = s.left_frames
         self.misses = self.plan_misses()
@@ -200,6 +208,27 @@ class StepTake:
             print(f"body: {n} frames solved in {time.time() - t0:.0f} s; {({k: round(v, 1) for k, v in terms.items()})}")
             print("wrist off its targets (mm, median / max): " + ", ".join(
                 f"{s} {np.median(m):.1f} / {np.max(m):.1f}" for s, m in self.misses.items() if len(m)))
+
+    def theta0(self, n) -> np.ndarray:
+        """The body solve's start, per frame (n, 21, deg): each arm working (THETA0) from its first task to its last,
+        hanging relaxed (HANGING) before and after, as the bench's takes start (motion/bench.py). Started all from
+        THETA0, an arm at rest by the thigh settled with its shoulder turned out past people's range (2026-11-03)."""
+        th = np.tile(np.r_[THETA0[:12], THETA0[3:12]], (n, 1)).astype(float)
+        for side, cols in (("R", slice(3, 12)), ("L", slice(12, 21))):
+            cons = self.side[side]["cons"]
+            if not cons:
+                th[:, cols] = HANGING
+                continue
+            first = min(t0 for t0, _, _ in cons)
+            t_last, _, fn = max(cons, key=lambda c: c[1])
+            last = max(t1 for _, t1, _ in cons)
+            # after its last task the hand holds where that task left it: hanging only if that's by the thigh. A
+            # left hand's targets are in the mirrored world, where its rest is self.rest too (rest_of is the world's)
+            rests = np.linalg.norm(self.target_of(fn, last - 1e-6) - self.rest) < REST_NEAR_MM
+            for k in range(n):
+                if k / FPS < first or (rests and k / FPS >= last):
+                    th[k, cols] = HANGING
+        return th
 
     def plan_misses(self) -> dict[str, np.ndarray]:
         """How far each hand's planned wrist is from its targets, at every frame that has one (mm)."""

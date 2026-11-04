@@ -1,0 +1,45 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill-5-32",
+  "name": "5/32 in cobalt jobber drill",
+  "category": "tooling",
+  "make": "Chicago-Latrobe",
+  "model": "47710",
+  "description": "5/32 in (0.156) cobalt jobber drill, 135 degree split point.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 0.15625,
+      "unit": "in"
+    },
+    {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+    },
+    {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+    }
+  ],
+  "source_urls": [
+    "https://mrosupply.com/power-tools/6129664_47710_chicago-latrobe"
+  ],
+  "source_files": [
+    "47710 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "nist-ftc-09's seven Ø.156 ±.008 holes.",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "drill-5-32.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/47710.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

@@ -36,10 +36,14 @@ JAWS_OVER_SEAT_MM = SP.JAWS_OVER_SEAT_MM
 def op50() -> V.Load:
     return loads.vise_load(load_plan(PART), SETUP)
 
+# standing 90 mm left of and 140 mm nearer the table than the vise take's operator (setup_take.LUMBAR): the stop waits
+# ahead and to the left, and from the vise take's place the trunk turned past people's range to reach it (in range
+# 66% and 82% of frames there, standing back or only left; 95-100% from here, the hands within 1.5 mm of their targets)
+LUMBAR = ST.LUMBAR + np.array([-90.0, 140.0, 0.0])
 
 class SetStop(StepTake):
     def __init__(self, out=TAKES / "set-stop", load: V.Load | None = None, verbose=True):
-        super().__init__(out, ST.LUMBAR, verbose)
+        super().__init__(out, LUMBAR, verbose)
         self.vload = load or op50()
         self.home, self.dest = V.STOP_HOME, self.vload.stop()
         self.kg = V.STOP_KG
@@ -119,8 +123,8 @@ class SetStop(StepTake):
         self.follow("R", t_on, t_lift, GRIP, obj_at, R_at)
         self.add("R", t_near - 0.2, t_lift, lambda tt: [("pose", *self.grip_pose(GRIP, obj_at(tt), R_at(tt)), 4.0)])
         self.load("R", t_on + 0.3, t_down, self.kg)
-        self.event("grip", t_on, t_down + 0.25, side="R", grip=GRIP)
-        self.event("carry", t_on + 0.3, t_down, side="R", object="stop")
+        self.event("grip", t_on, t_down + 0.25, side="R", grip=GRIP, on="stop")
+        self.event("carry", t_on + 0.3, t_down, side="R", obj="stop")
         self.effort("R", t_down - 0.1, 0.6, GRIP)
         self.effort("R", t_down + 0.2, 0.0, None)
         self.fingers("R", t_down + 0.25, g["q"])

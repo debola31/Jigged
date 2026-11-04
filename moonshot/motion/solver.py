@@ -94,7 +94,9 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
     people's prior: their mixture's likelihood, and each angle's distance outside their 1st-99th percentile range
     (what the posture checks hold a take to; without it the arm turned out past people's range rising from rest,
     2026-11-03). th: (n, 10 or 12) degrees -> (n,). trunk=False leaves the trunk's columns out, for a second arm on a
-    trunk the first arm's cost already counts."""
+    trunk the first arm's cost already counts, all but their range: a left arm sees the trunk mirrored, and people's
+    range of side-bend and twist isn't symmetric, so the posture checks hold the trunk to both arms' views of it
+    (door-close planned its trunk to 13 deg of side-bend, inside the right arm's range, outside the left's)."""
     cf = SPEC["body"]["comfort"]
     t = lambda key: torch.as_tensor([cf[key][nm] for nm in BM.NAMES], dtype=th.dtype)[:th.shape[1]]
     ctr, half, w = t("centre"), t("half"), t("weight")
@@ -113,7 +115,7 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
         c = c + w_prior * prior.nll(th[:, 3:10])
         plo, phi = (torch.as_tensor(prior.pct[:, i], dtype=th.dtype) for i in (0, -1))
         out = torch.relu(plo + RANGE_MARGIN_DEG - th[:, :10]) + torch.relu(th[:, :10] - phi + RANGE_MARGIN_DEG)
-        c = c + w_range * ((out if trunk else out[:, 3:]) ** 2).sum(-1)
+        c = c + w_range * (out ** 2).sum(-1)
     return c
 
 
@@ -127,7 +129,7 @@ def ranges():
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
          "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
-         "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
+         "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0, "range": 0.5}
     # prior 0.3 (2026-11-03): against people seated or standing, the vise take plans inside their range (0.936) and
     # likelihood (24.6) at 0.3, and 1.5 adds little (0.941, 23.6) while its hands miss more; at 5 the bench takes'
     # hands missed by up to 118 mm and their caliper and deburr gates failed, and the grip solver's pads came off
@@ -211,7 +213,7 @@ class BodySolver:
         if "pos" in packed:
             ks, (QW,), Qw = packed["pos"]
             terms["pos"] = (Qw * W["pos"] * ((Wp[ks] - QW) ** 2).sum(-1)).sum()
-        terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"], trunk=trunk).sum()
+        terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"], trunk=trunk, w_range=W["range"]).sum()
         # gravity moment at the shoulder: arm segments (upper 2.1 kg, forearm 1.2, hand 0.5) + load
         S = f["S"]
         mom = lambda m, p: m * torch.linalg.norm((p - S)[:, :2], dim=-1)   # noqa: E731

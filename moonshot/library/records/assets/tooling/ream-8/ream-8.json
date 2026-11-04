@@ -1,0 +1,49 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "ream-8",
+  "name": "8 mm chucking reamer",
+  "category": "tooling",
+  "make": "Cleveland",
+  "model": "C25668",
+  "description": "8.00 mm HSS straight-shank chucking reamer.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 8.0,
+      "unit": "mm"
+    },
+    {
+      "name": "Flute length",
+      "value": 38.1,
+      "unit": "mm"
+    },
+    {
+      "name": "Overall length",
+      "value": 152.4,
+      "unit": "mm"
+    },
+    {
+      "name": "Material",
+      "value": "HSS"
+    }
+  ],
+  "source_urls": [
+    "https://www.zoro.com/cleveland-chucking-reamer-800mm-size-hss-straight-c25668/i/G4844843/"
+  ],
+  "source_files": [
+    "C25668 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1005337's two Ø8.000 slip-fit dowel holes.",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "ream-8.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/C25668.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

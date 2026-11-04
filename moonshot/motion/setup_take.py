@@ -70,6 +70,21 @@ INSPECT = np.array([-290.0, -640.0, 1080.0])              # held up in front, be
                                                           # elbow bent 93 deg to hold it there
 JAW_TOP = VISE["jaw_top_z"]
 
+# reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
+# planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
+REACH_S, REACH_PEAK = 0.66, 0.65
+KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
+# the final pull: out over the disc, then the reach, sliding on along the knob's axis this far
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.7, 0.65, 0.72, 110.0
+READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
+TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
+# letting go of the first crank: the fist eases open this much and slides off the knob's end along its axis, this long
+# and this far (the fist spans the 90 mm knob), held to the axis as it cranked, turning back to the grip's own
+# orientation as it goes (the pose's weight rising to SLIDE_POSE_W). The final pull's release is as it was: slid off
+# that way too, the reference's fingertip then missed para_b (0 N) and its part's parallel a moved 0.56-1.1 mm
+LETGO_OPEN, SLIDE_OFF_S, SLIDE_OFF_MM, SLIDE_POSE_W = 0.5, 0.45, 100.0, 8.0
+PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
+
 
 # --- colliders for the grip solver (world mm) ------------------------------------------------------
 def box(c, h):
@@ -359,16 +374,24 @@ class Take:
             R, p = np.eye(3), np.asarray(obj, float)
         return R @ g["H_rel"], p + R @ g["W_rel"]
 
-    def transit(self, t0, t1, W_to, via=(), fade=None):
+    def transit(self, t0, t1, W_to, via=(), fade=None, paced=False):
         """Free motion of the wrist from where it is to W_to through via points (min-jerk submovements that
         overlap); orientation is the body's choice; fade=(H, w_end) fades in the next grip's orientation over the
-        last 0.5 s."""
+        last 0.5 s. The submovements share the time equally, or, paced, each in proportion to the square root of its
+        length, so each peaks at the same acceleration (a min-jerk move's is 5.77 d / T^2): a quick reach's long leg
+        doesn't spike while its short final approach dawdles."""
         pts = [self.wrist] + [np.asarray(v, float) for v in via] + [np.asarray(W_to, float)]
         n = len(pts) - 1
-        span = (t1 - t0) / n
+        if paced:
+            w = np.sqrt([max(float(np.linalg.norm(b - a)), 1.0) for a, b in zip(pts, pts[1:])])
+            spans = list((t1 - t0) * w / w.sum())
+            starts = list(t0 + 0.85 * np.r_[0.0, np.cumsum(spans[:-1])])
+        else:
+            span = (t1 - t0) / n
+            spans, starts = [span] * n, [t0 + i * span * 0.85 for i in range(n)]
         path = PosePath(np.eye(3), pts[0])
         for i in range(n):
-            path.to(t0 + i * span * 0.85, span * 1.15 if i < n - 1 else span, np.eye(3), pts[i + 1])
+            path.to(starts[i], spans[i] * 1.15 if i < n - 1 else spans[i], np.eye(3), pts[i + 1])
         def fn(t, path=path):
             out = [("pos", path.at(t)[1], 1.0)]
             if fade is not None:
@@ -395,42 +418,68 @@ class Take:
         self.clips.append(dict(verb=verb, t0=t0, t1=t1, caption=caption))
 
     # --- the verbs ---------------------------------------------------------------------------------------
-    def grab(self, grip="blank_faces", reach=1.27, lift_mm=40.0):
-        """Reach (up and out of the table's way, then a slower final approach from above), the hand opening wider
-        than the part with the peak at ~74% of the reach (Jeannerod; Bhatia 2022), closing at contact; then the
-        lifting studies' preload (0.23 s) and loading (0.21 s) before lift-off, and a short lift."""
+    def grab(self, grip="blank_faces", reach=None, lift_mm=40.0, raise_s=0.75, settle_s=0.2):
+        """Raise the hand up and out of the table's way, a moment's pause as it nears the part, then the reach (over
+        it, then a slower final approach from above) in as long as people's take (person.reach_to_grasp_right_s),
+        the hand opening wider than the part with the peak at ~74% of the reach (Jeannerod; Bhatia 2022), closing
+        at contact; then the lifting studies' preload (0.23 s) and loading (0.21 s) before lift-off, and a short
+        lift. A lift-out's grab (start "vise") is one slower reach, high over the crank's disc and down."""
         t0 = self.t
         ga = self.hand.spec["grip"]
         g = self.grips[grip]
         Hg, Wg = self.grip_pose(grip, t0)
-        t_contact = t0 + 0.35 + reach
         self.look(t0, self.stage + [0, 0, self.half[2]])
         if self.start == "vise":       # high over the crank's disc (the knob up to z 1040), then down onto the part
+            reach = 1.27 if reach is None else reach
+            t_reach = t0 + 0.35
             via = [np.array([self.wrist[0] - 60, -760.0, 1160.0]), Wg + [0, -30, 120]]
-        else:                           # in over its top by as much as over op30's (72 mm), and over it with the hand
-            # 110 mm above its top before coming down onto it, as the open fingers reach 95 mm below the hand: op50's
-            # part, on end, pinched 57 mm under its top, stood above the reach planned for the shorter ones, and the
+            self.transit(t_reach, t_reach + reach, Wg, via=via, fade=(Hg, 1.0))
+            # widest at ~74% of the reach as the hand-opening check measures it: 0.53 measured 0.571 there, 0.70 0.844
+            t_peak = t_reach + 0.63 * reach
+        else:
+            # from the thigh the whole 0.53 m in people's 0.32-0.67 s, the hand would peak near the nothing-moves check's
+            # 20 m/s^2 (5.77 d / T^2 per leg): it comes up beside the table first, slower than the reach (so the reach
+            # is the fastest move before the grasp, which is how the grasp-timing check finds its start), and the
+            # reach starts from there, still. Its two legs share the time, so the final approach from above is slow:
+            # paced, it touched the part at 0.3-0.5 m/s, and the knock read as the load's onset 67 ms in. The ready
+            # point is set from the grip, so the reach is the same length whatever the load and wherever the operator
+            # stands
+            reach = REACH_S if reach is None else reach
+            ready = Wg + READY_FROM_GRIP
+            t_ready = t0 + 0.35 + raise_s
+            self.transit(t0 + 0.35, t_ready, ready)
+            self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
+            t_reach = t_ready + settle_s
+            # over a part on end with the hand 110 mm above its top, as the open fingers reach 95 mm below the hand:
+            # op50's, pinched 57 mm under its top, stood above the approach planned for the shorter ones, and the
             # fingers met its top and knocked it over
             top = self.stage[2] + self.half[2]
-            via = [self.wrist + [70, 40, max(150.0, top + 72 - self.wrist[2])], Wg + [0, -12, max(62.0, top + 110 - Wg[2])]]
-        self.transit(t0 + 0.35, t_contact, Wg, via=via, fade=(Hg, 1.0))
-        # widest at ~74% of the reach as the hand-opening check measures it: from the hand's first motion (~0.25 s
-        # before the transit, as the trunk turns to look) to its first touch (~0.15 s before the planned contact,
-        # the open fingers meeting the faces as they close), with the fingers ~0.1 s behind their keys: 0.50 of the
-        # planned reach (0.62 measured 0.795, 0.55 0.778, 0.53 0.692-0.711, 0.50 0.667)
-        # a lift-out's reach runs high over the crank first: 0.53 measured 0.571 there, 0.70 0.844
-        t_peak = t0 + 0.35 + (0.63 if self.start == "vise" else 0.54) * reach
-        self.fingers(t0 + 0.35, self.q_relax)
+            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, max(62.0, top + 110 - Wg[2])]], fade=(Hg, 1.0))
+            # widest at ~74% of the reach as the hand-opening check measures it, from the pause to the first touch; the
+            # physics hand is widest ~0.03 s before the key
+            t_peak = t_reach + REACH_PEAK * reach
+        t_contact = t_reach + reach
+        self.fingers(t_reach, self.q_relax)
         opened = open_for(self.hand, g["q"], self.size[1])
         if self.half[0] < 30:   # the ring and little tucked out of a narrow part's way (_grip_specs) stay tucked: opened
             # with the hand, they closed onto op50's top as it came down over it, 11 mm into it
             opened.update({n: v for n, v in g["q"].items() if n.split("_")[0] in ("ring", "little", "cmc4", "cmc5")})
         self.fingers(t_peak, opened)
         self.fingers(t_contact, g["q"])
-        t_load = t_contact + ga["preload_s"]
-        t_lift = t_load + ga["loading_s"]
-        self.effort(t_contact, 0.0, grip)
-        self.effort(t_load, 0.25, grip)
+        if self.start == "vise":
+            t_load = t_contact + ga["preload_s"]
+            t_lift = t_load + ga["loading_s"]
+            self.effort(t_contact, 0.0, grip)
+            self.effort(t_load, 0.25, grip)
+        else:
+            # the phases from the fingers' first touch on the faces, TOUCH_LEAD_S before the grip's planned close. The
+            # take's effort sets the load the arm lifts with as well as the squeeze, so the preload (grip rising, no
+            # load yet) stays under the loading's onset, 5% of the weight (person.force_onset_frac); at 0.25 there
+            # the load rose from the first touch and the loading phase measured 367 ms
+            t_load = t_contact - TOUCH_LEAD_S + ga["preload_s"]
+            t_lift = t_load + ga["loading_s"]
+            self.effort(t_contact, 0.0, grip)
+            self.effort(t_load, PRELOAD_EFFORT, grip)
         self.effort(t_lift, 1.0, grip)
         R, p = self.blank_at(t_lift)
         self.move_blank(t_lift, t_lift + 0.45, R, p + [0, 0, lift_mm])
@@ -471,11 +520,17 @@ class Take:
         high = np.array([VISE["x"] + 70, VISE["fixed_face_y"] - self.opening0 - self.half[1] - 42, JAW_TOP + self.half[2] + 20])
         over, above = self.set_down + [0, -6, 58], self.set_down + [0, -3, 12]
         self.look(t0 - 0.6, self.set_down + [0, 0, self.half[2]])
-        self.move_blank(t0, t0 + 0.9, np.eye(3), high)
-        self.move_blank(t0 + 0.85, t0 + 1.6, np.eye(3), over)
-        self.move_blank(t0 + 1.55, t0 + 2.05, np.eye(3), above)
-        t_down = t0 + 2.55
-        self.move_blank(t0 + 2.05, t_down, np.eye(3), self.set_down)
+        # a part heavier than the reference, pinched near its top, is carried over more slowly, as it is carried out of
+        # the vise (set_on_table): planned with people's range (2026-11-03), op10's 1.4 kg part turned in the pinch as
+        # the 0.9 s carry slowed over the moving jaw, and fell; the reference's part is carried as before
+        slow = max(1.0, self.load.mass_kg / REFERENCE.mass_kg)
+        t_high = t0 + 0.9 * slow
+        t_over = t_high - 0.05 + 0.75 * slow
+        self.move_blank(t0, t_high, np.eye(3), high)
+        self.move_blank(t_high - 0.05, t_over, np.eye(3), over)
+        self.move_blank(t_over - 0.05, t_over + 0.45, np.eye(3), above)
+        t_down = t_over + 0.95
+        self.move_blank(t_over + 0.45, t_down, np.eye(3), self.set_down)
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.effort(t_down - 0.05, 1.0, grip)
         self.t_down = t_down
@@ -636,7 +691,8 @@ class Take:
         self.t = t1 + 0.45
         self.clip("push", t0 - 0.2, self.t + 0.2, f"PUSH  flat fingers press the part down onto the parallels ({force_N:.0f} N)")
 
-    def rotate(self, grip="knob", rev_s=0.45, snug_deg=2.0, snug_N=15.0, final=False, tighten_deg=40.0):
+    def rotate(self, grip="knob", rev_s=0.45, snug_deg=2.0, snug_N=15.0, final=False, tighten_deg=40.0,
+               reach=None):
         """Crank the vise: the fist keeps its orientation and the knob spins in it (the elbow, the shoulder and the
         shoulder girdle carry the circle, the wrist absorbs a little); speed varies around each turn.
 
@@ -657,15 +713,40 @@ class Take:
         sc = VISE["screw_axis"]
         over = np.array([sc[0] + 205, -640, 1070])                # out to the right, over the crank disc
         self.look(t0, knob_center(phi_g))
-        # from over the vise: out over the crank disc, then onto the knob from the operator's side
-        self.transit(t0, t0 + 1.2, Wk, via=[over, Wk + Hk[:, 2] * 45 + [0, -10, 15]], fade=(Hk, 1.0))
+        # from over the vise: out over the crank disc, then onto the knob from the operator's side, in as long as
+        # people's reach (1.2 s measured 0.90 and 0.97, onset to first touch); paced, so the long leg out over the disc
+        # doesn't spike
+        if final:
+            # the final pull's comes onto the knob along its axis from beyond its end, the hand open past it, and slides
+            # on, as the hand backs off it: across it from the side along the hand's own axis, at op40's crank angle the
+            # fingers swept over the lever on the way in. That way round is 0.55 m from the part, so the hand goes out
+            # over the crank disc first and pauses there, turned to the grip, and the reach starts from there (as the
+            # blank's does): the whole way in people's 0.67 s it planned 28 m/s^2. It stays high until the whole hand is
+            # out past the knob's end, then comes down onto its axis and slides on, open: the fist spans the knob's
+            # length (index 8-40 mm from its root, little finger 66-80), so 60 mm out its index side was still over the
+            # 90 mm knob, and coming down there the open fingers met it 0.2-0.3 s into the reach
+            reach = FINAL_REACH_S if reach is None else reach
+            t_over = t0 + FINAL_OVER_S
+            self.transit(t0, t_over, over)
+            self.add(t_over, t_over + 0.3, lambda t, W=over: [("pose", Hk, W, 1.0)])
+            t0 = t_over + 0.3
+            on = Wk + KNOB_AXIS * FINAL_SLIDE_MM + [0, 0, 10]
+            via = [on + [0, 0, 60], on]
+            # open before it slides on, less than the opening's peak (open_like isn't: 0.6 was 104 mm on the reference's
+            # grip and 42 on op10's)
+            self.fingers(t0 + 0.55 * reach, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))
+        else:
+            reach = KNOB_REACH_S if reach is None else reach
+            via = [over, Wk + Hk[:, 2] * 45 + [0, -10, 15]]
+        self.transit(t0, t0 + reach, Wk, via=via, fade=(Hk, 1.0), paced=True)
         ko = open_like(self.hand, g["q"], 0.9)
         # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
-        # the knob (~0.35 s before tg), with the fingers ~0.1 s behind their keys
+        # the knob (before tg), with the fingers ~0.1 s behind their keys
         # the fingers, opening out of the fist's shape, reach ~10 mm short of it before closing on the knob (67 of 77);
         # at 12 op10's part and the knob opened only 0.73 mm apart per mm
-        self.fingers(t0 + (0.63 if final else 0.7), open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=10.0))   # 0.7: 74%, 81% final
-        tg = t0 + 1.2
+        self.fingers(t0 + (KNOB_PEAK_FINAL if final else KNOB_PEAK) * reach,
+                     open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=10.0))
+        tg = t0 + reach
         self.fingers(tg, g["q"])
         t_c0 = tg + 0.25
         if final:
@@ -679,7 +760,27 @@ class Take:
             plan = dict(t0=t_c0, t1=t_c1, t2=t_t1, phi0=phi_g, phi_c=phi_c, phi_t=phi_c + snug_deg, snug_N=snug_N)
         self.crank_plans.append(plan)
         self.knob_pt_hand = pt
-        self.add(tg, t_t1 + 0.35, lambda t: [("pose", Hk, knob_center(self.crank_angle(t)) - Hk @ pt, 3.0)])
+        # the knob's axis held in the fist, and the fist's orientation only softly: where the arm can't keep both round
+        # the circle it gives up a turn about the knob's axis, not a tilt off it. Held as one (a pose at 3), the
+        # operator standing 120 mm further back tilted the planned fist 15-17 deg off its grip at two places a turn,
+        # and op10's index sank 7.25 mm into the knob
+        ax = Hk.T @ KNOB_AXIS
+        tl = t_t1 + 0.35
+        slide_s = 0.0 if final else SLIDE_OFF_S
+
+        def on_knob(t):
+            # let go, the fist slides off the knob's end along its axis as it held it, turning back to the grip's own
+            # orientation as it goes: moved off from the grip's orientation, wherever the crank had left the fist
+            # turned about the axis, the fingers still round the knob were dragged through it (the index's skin 7.0-7.2
+            # mm into it after every load's first crank; slid off, 2.3-3.0)
+            c = knob_center(self.crank_angle(t))
+            w = 1.0
+            if t > tl and slide_s:
+                u = min_jerk((t - tl) / slide_s)
+                c = c + KNOB_AXIS * SLIDE_OFF_MM * u
+                w = 1.0 + (SLIDE_POSE_W - 1.0) * u
+            return [("pose", Hk, c - Hk @ pt, w), ("tsr", pt, c, ax, KNOB_AXIS, 6.0)]
+        self.add(tg, tl + slide_s, on_knob)
         self.look(t_c0 + 0.3, 0.5 * np.array([VISE["x"], VISE["fixed_face_y"] - 52, JAW_TOP])
                   + 0.5 * np.array([VISE["x"], sc[1] - 40, sc[2] + 20]))
         self.effort(tg, 0.6, grip)
@@ -689,22 +790,29 @@ class Take:
         self.event("grip", tg, t_t1 + 0.35, grip=grip)
         self.event("enclose", tg + 0.1, t_t1 + 0.35)
         self.event("crank", t_c0, t_t1 + 0.35, plan=dict(plan))
-        tl = t_t1 + 0.35
         self.fingers(tl, g["q"])
-        self.fingers(tl + 0.12, open_like(self.hand, g["q"], 0.25))      # eased, so the hand slides off the knob
+        # eased, so the hand slides off the knob
+        self.fingers(tl + 0.12, open_like(self.hand, g["q"], LETGO_OPEN if slide_s else 0.25))
         self.fingers(tl + 0.35, ko)
         Wend = knob_center(plan["phi_t"]) - Hk @ pt
         self.wrist = Wend
         box_c, box_h = np.array([sc[0], sc[1] - VISE["knob_grip"], sc[2]]), np.array([140.0, 55.0, 140.0])
-        self.hand_boxes.append((box_c, box_h, self._knob_free_from, tg - 0.7))
-        self._knob_free_from = tl + 0.35
+        # clear of the crank's sweep until the hand is out over its disc, 0.42 of the way into the reach
+        self.hand_boxes.append((box_c, box_h, self._knob_free_from, t0 + 0.42 * reach))
+        self._knob_free_from = tl + (slide_s + 0.1 if slide_s else 0.35)
         # off the knob's end along its axis first, then away: let go and moved off it out to the right and up, the
         # fingers swept across the lever wherever the crank stopped with the lever that way (op30's and op40's turns)
         off = Wend + [0, -60, 10]
         away = np.array([sc[0] + 175, -820, 990]) if final else over
-        self.transit(tl, tl + 0.9, away, via=[off, off + [60, -10, 40]])
-        self.fingers(tl + 0.9, self.q_relax)
-        self.t = tl + 0.9
+        if slide_s:
+            t_away = tl + slide_s + 0.6
+            self.wrist = Wend + KNOB_AXIS * SLIDE_OFF_MM
+            self.transit(tl + slide_s, t_away, away, via=[off + [60, -10, 40]])
+        else:
+            t_away = tl + 0.9
+            self.transit(tl, t_away, away, via=[off, off + [60, -10, 40]])
+        self.fingers(t_away, self.q_relax)
+        self.t = t_away
         if not final:
             self.clip("rotate", t0 - 0.2, self.t, "ROTATE  crank the jaw onto the part until snug: the fist keeps its orientation, the knob spins in it")
 
@@ -827,6 +935,8 @@ class Take:
                         s.pos(k, c[1], c[2])
                     elif c[0] == "pose":
                         s.pose(k, c[1], c[2], c[3])
+                    elif c[0] == "tsr":
+                        s.tsr(k, *c[1:5], w=c[5])
             if not active and t >= self.cons[-1][1]:
                 s.pos(k, REST_W, 0.6)
         holding = self.intervals("hold_object")

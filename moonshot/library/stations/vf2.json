@@ -33,7 +33,10 @@
                 "reason": "The panel's front is at y = -775 in its link GLB; the handle bar stands in front of it"},
   "door_right": {"link": "door_right", "box_min_mm": [-25, -775, 616], "box_max_mm": [636, -755, 1710],
                  "reason": "Its front is at y = -775 in its link GLB, as the left panel's; the doors run on separate tracks, so they don't collide with each other (moonshot/world/vf2.py DOOR)"},
-  "spindle_nose": {"link": "head", "box_min_mm": [-60, -189, 1453], "box_max_mm": [60, -69, 1590]},
+  "spindle_nose": {"link": "head", "box_min_mm": [-60, -189, 1453], "box_max_mm": [60, -69, 1590], "bore_half_mm": 24,
+                   "reason": "The CAD's spindle nose, bored through for a holder's taper and knob (a square bore 48 mm across, as four boxes round it; the taper's socket and the drawbar are in the spindle, moonshot/world/vf2.py SPINDLE_BORE)"},
+  "tool_release_button": {"link": "head", "cylinder": {"centre_mm": [-110.0, -278.0, 1570.0], "radius_mm": 12.0, "half_mm": 5.0},
+                          "reason": "proposed: Haas's manual has the operator push a holder up into the spindle while pushing the Tool Release button on the spindle head; the CAD's head shows no button, so it stands on the head's front face (y -273 there) left of the spindle, where the left hand reaches it while the right holds the holder"},
   "pendant_face": {"link": "pendant", "box_min_mm": [609, -986.3, 1090], "box_max_mm": [1086, -966.3, 1778],
                    "reason": "The pendant's face in the CAD (y -986.3): keypad and screen; the jog handle, E-stop and buttons stand proud of it"},
   "estop": {"link": "pendant", "cylinder": {"centre_mm": [677.7, -1010.75, 1531.5], "radius_mm": 20.2, "half_mm": 24.45},
@@ -42,10 +45,10 @@
                          "reason": "The CAD's lower-left button, 31.5 mm across, 10 mm proud of the face"},
   "feed_hold_button": {"link": "pendant", "cylinder": {"centre_mm": [705.5, -991.35, 1300.0], "radius_mm": 15.75, "half_mm": 5.05},
                        "reason": "The CAD's lower-right button, beside Cycle Start"},
-  "door_left_pull": {"link": "door_left", "box_min_mm": [-58.8, -845, 680], "box_max_mm": [-27.0, -811, 1160],
-    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height"},
-  "door_right_pull": {"link": "door_right", "box_min_mm": [27.0, -845, 680], "box_max_mm": [58.8, -811, 1160],
-    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height"}
+  "door_left_pull": {"link": "door_left", "box_min_mm": [-58.8, -845, 680], "box_max_mm": [-27.0, -811, 1160], "radius_mm": 16.0,
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height. A round tube (the GLB's vertices 15.9-17.2 mm from its axis), so its collider is a vertical cylinder in its box: the box's corners stood 6 mm proud of the tube, into the palm of a hand wrapped round it"},
+  "door_right_pull": {"link": "door_right", "box_min_mm": [27.0, -845, 680], "box_max_mm": [58.8, -811, 1160], "radius_mm": 16.0,
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height. A round tube (the GLB's vertices 15.9-17.2 mm from its axis), so its collider is a vertical cylinder in its box: the box's corners stood 6 mm proud of the tube, into the palm of a hand wrapped round it"}
  },
  "affordances": {
   "door_left_handle": {"link": "door_left", "at_mm": [-58.8, -828, 1050], "grip": "power", "pull": [-1, 0, 0],
@@ -54,6 +57,8 @@
     "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height"},
   "cycle_start": {"link": "pendant", "at_mm": [649.6, -996.4, 1300.0], "grip": "fingertip_press", "force_n": 5},
   "feed_hold": {"link": "pendant", "at_mm": [705.5, -996.4, 1300.0], "grip": "fingertip_press", "force_n": 5},
+  "tool_release_head": {"link": "head", "at_mm": [-110.0, -283.0, 1570.0], "grip": "fingertip_press", "force_n": 5, "hold": true,
+    "reason": "the head's Tool Release button's face (colliders tool_release_button): held, the drawbar lets go of a holder; let go, it clamps; 5 N as the pendant's buttons [proposed]"},
   "jog_handle": {"link": "pendant", "at_mm": [677.4, -1023.1, 1410.5], "axis": [0, 1, 0], "radius_mm": 40.0, "depth_mm": 36.8,
                  "detents_per_turn": 100, "detent_torque_nm": 0.015, "damping_nms": 0.004, "mass_kg": 0.15, "friction": 1.0,
                  "grip": "precision_disk", "force_n": 1,
@@ -85,6 +90,8 @@
              "+z": [850, 1330], "-z": [850, 1294]}}
  },
  "affordances_source": {"source": "proposed", "reason": "The doors' handles placed on the CAD's door edges, to be checked against the render; the pendant's buttons and jog handle measured from the CAD's pendant (2026-11-02), its keys as noted"},
+ "tool_changer": {"type": "carousel", "pockets": 20, "centre_mm": [-640.0, -128.7, 1340.0], "toward": [1, 0, 0], "radius_mm": 300.0,
+   "reason": "proposed: the 20-pocket umbrella carousel (vf2 asset record) as a ring of pockets 300 mm round, its centre inside the CAD's carousel (x -1025 to -176), level with the spindle in Y; a pocket holds a holder by its V-flange, its gauge line at centre_mm's height, below the carousel's housing (z 1297 up). The pocket facing the spindle is the current one. Tools load into it from the spindle, never directly (Haas's procedure, the vf2-tool-load card)"},
  "logic": {
   "states": ["idle", "running", "feed_hold", "alarm"],
   "interlocks": [

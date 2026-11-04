@@ -108,18 +108,22 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   top speed; 14 of 23 strengths are *proposed* (`moonshot/body/data/strength.json`).
 - [ ] Strength curves (torque by joint angle and speed) sourced from published measurements, per joint (§3.1).
   Built 2026-11-02 (`moonshot/body/data/strength.json` curves, `test_strength_curves.py`): the elbow from Frey-Law
-  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011);
-  every other hinge has no angle curve and the elbow's mid-range speed decay, *proposed*. The controller caps each
-  motor at its curve every step; the vise take's physics run (`moonshot/sim/vise_take.py`) doesn't call it yet:
-  handed to the body-model session with the checks' other hooks (2026-11-03, the body-checks session done).
+  2012's men's surface, and the long finger flexors weakening as the wrist bends (O'Driscoll 1992, Bhardwaj 2011).
+  Since 2026-11-04 also by angle, each reproducing its source in the test: raising the arm (Aronis 2025, 90-160
+  deg) and its speed to 50 deg/s (Koski & McGill 1994), humeral rotation both ways (Ruas 2015) and wrist flexion
+  (Behrens 2019) and extension (Delp 1996). Still *proposed*, each saying why in strength.json (paywalled or
+  unreviewed numbers): lowering the arm, the plane of elevation, forearm rotation, wrist deviation, the trunk and the
+  fingers' own joints, and every speed curve but the elbow's and raising the arm's (the elbow's mid-range decay). The
+  controller caps each motor at its curve every step, and so does the vise take's physics run
+  (`moonshot/sim/vise_take.py`, `StrengthCaps`).
 - [x] Two-joint muscle couplings: wrist bend moves the fingers (§3.1). A spring across the wrist and each finger's
   MCP and PIP: at full wrist extension a relaxed hand flexes them 35 and 50 deg (Neumann 2009), effort overrides
   it (`test_tenodesis.py`, 2026-11-02). Proposed: straight fingers at full flexion, the spring's stiffness.
-- [ ] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1).
+- [x] MyoSuite muscle check running on the farm: every take replayed, muscle activations reported (§3.1, §5.1).
   Built 2026-11-02 (`moonshot/validate/muscle.py`, registered as `muscle_activation`): MyoArm posed by the run's
-  angles, least-effort activations for the torque the motion and the hand's load need. Waits on the physics run
-  recording the load on the hand (`checks.json` `hand_wrench`, being added 2026-11-03); without it the vise take's
-  motion alone peaks at 38%.
+  angles, least-effort activations for the torque the motion and the hand's load need. Since 2026-11-03 every
+  take's physics run records the load on the hand (`checks.json` `hand_wrench`: the vise take's, the bench's and
+  the pendant's), so every take's per-frame checks replay it; the deburr take peaks at 0.85.
 - [ ] Body conformance tests pass: range, speed, strength, strength curves, couplings, muscle check agrees,
   proportions, gravity (§3.1). Range, speed, strength, couplings, proportions, gravity and left-right mirroring
   pass (`moonshot/tests/gates/test_body_conformance.py`, 2026-11-01), as do the wrist's ellipse
@@ -252,15 +256,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 |---|---|---|---|
 | A. Core | [ ] | [ ] | [ ] |
 | B. Catalogue | [ ] | [ ] | [ ] |
-| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); the pendant's conformance passes and is merged (setting session, 2026-11-03); its 15 takes (Find X and Y, Set Z, tool lengths, op50's square check) aren't made yet, so their gate skips; no CI run |
+| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); the pendant's conformance passes and is merged (setting session, 2026-11-03); the 11 setting takes (Find X and Y, Set Z, op50's square check) re-planned on the posture changes and in their per-frame checks, op30-z and op50-check passing all but skin (2026-11-03); doors going fully open with the grip you confirmed, and Load the tools' 26 takes (every tool in full), in progress; no CI run |
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
-| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and is merged (2026-11-03); the pocket-depth inspect take in progress (inspect session); no CI run |
+| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and every per-frame check, and you approved its draft (2026-11-03); the pocket-depth inspect take in progress, the left hand fetching the calipers (your decision); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
 | E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session) |
-| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; publishing waits on the finals and your approval |
+| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; the 15 cutting steps' stills published (2026-11-03); each person's step publishes once you've reviewed its draft and its final is rendered, deburr first |
 | G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 39 of nist-ftc-10's 61 steps (2026-11-03). Its 15 machine-only (cutting) steps show their caption and one still each on the page (your decision), not a video. No final renders before you've reviewed its draft |
 
 ## 6. Milestones

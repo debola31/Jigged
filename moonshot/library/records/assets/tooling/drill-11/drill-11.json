@@ -1,0 +1,55 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill-11",
+  "name": "11 mm flat-bottom carbide drill",
+  "category": "tooling",
+  "make": "YG-1",
+  "model": "DPP447110",
+  "description": "11 mm Dream Drill flat-bottom drill, 180 degree point, solid carbide, no coolant hole.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 11.0,
+      "unit": "mm"
+    },
+    {
+      "name": "Point angle",
+      "value": 180,
+      "unit": "deg",
+      "note": "flat bottom"
+    },
+    {
+      "name": "Flute length",
+      "value": 48,
+      "unit": "mm"
+    },
+    {
+      "name": "Shank diameter",
+      "value": 12,
+      "unit": "mm"
+    },
+    {
+      "name": "Material",
+      "value": "solid carbide"
+    }
+  ],
+  "source_urls": [
+    "https://www.zoro.com/yg-1-tool-dream-drill-flat-bottom-drill-wo-coolant-hole-2xd-dpp447110/i/G4200838/"
+  ],
+  "source_files": [
+    "DPP447110 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1007223's flat-bottomed Ø11, 30 deep up the stem (Op 20).",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "drill-11.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/DPP447110.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

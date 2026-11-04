@@ -58,7 +58,7 @@ class BlowOff(_Cell):
     def held_error(self, side, t):
         """While the gun is in the hand, the eye is on the gun: its planned pose (gun_keys.npz) against where it is."""
         m, d = self.model, self.data
-        if side != "R" or not d.eq_active[m.equality("enclose_gun").id]:
+        if side != "R" or not d.eq_active[m.equality(self.eq_name("gun")).id]:
             return None
         R, p = BO.BlowOff.pose_at(None, t, self.gun_keys)
         b = m.body("air_gun").id

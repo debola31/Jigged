@@ -32,7 +32,7 @@ from scipy.spatial.transform import Rotation
 from moonshot.body.controller import StrengthCaps
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
-from moonshot.sim.record import Recorder, glbs_in_bodies, hand_wrench
+from moonshot.sim.record import Recorder, TouchOnsets, glbs_in_bodies, hand_wrench
 from moonshot.sim.reference import ReferenceTake, take_dir
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
@@ -83,6 +83,7 @@ def min_jerk(x: float) -> float:
 
 class ViseTake:
     def __init__(self, folder: Path | None = None):
+        self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
         folder = folder or take_dir()
         self.tk = json.loads((folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(folder / "reference.npz")
@@ -547,6 +548,8 @@ class ViseTake:
         self.caps.apply(d)
         self.machine.apply()
         mujoco.mj_step(m, d)
+        if self.onsets is not None:
+            self.onsets.step(d)
 
     # --- measurement ---------------------------------------------------------------------------------
     def contacts(self):
@@ -612,8 +615,10 @@ class ViseTake:
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing", "stray", "touching", "pose", "hand_wrench", "load_N",
-                               "active_constraints", "applied_forces")}
+                               "slip", "lag", "pushing", "stray", "touching", "touch_lead", "pose", "hand_wrench",
+                               "load_N", "active_constraints", "applied_forces")}
+        right = np.array([m.geom(g).name.startswith("R_") for g in range(m.ngeom)])
+        self.onsets = TouchOnsets(m, right, ~right)
         rec["machine_axes"] = {f"vf2_{a}": [] for a in ("x", "y", "z", "spindle")}
         spindle = m.jnt_dofadr[m.joint("vf2_spindle").id]
         hold_rel, t0w = None, time.time()
@@ -692,6 +697,7 @@ class ViseTake:
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
             rec["touching"].append(self.touching())
+            rec["touch_lead"].append(self.onsets.frame())
             rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
             rec["load_N"].append(round(self.lifting_force(), 3))
             rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
@@ -751,7 +757,8 @@ class ViseTake:
                  grip=rd["grip"][:n], clamp=np.array(rec["clamp"]), slip=np.array(rec["slip"]),
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
         (Path(path).parent / "checks.json").write_text(json.dumps(
-            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "machine_axes")} |
+            {k: rec[k] for k in ("touching", "touch_lead", "hand_wrench", "active_constraints", "applied_forces",
+                                 "machine_axes")} |
             {"load_N": {"blank": rec["load_N"]}, "never_held": NEVER_HELD}), encoding="utf-8")
         glbs = glbs_in_bodies(self.model, "vf2", vf2.render_links())
         for body, entries in V.render_glbs().items():

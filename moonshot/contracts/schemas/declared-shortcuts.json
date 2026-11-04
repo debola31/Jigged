@@ -12,7 +12,7 @@
               "checked_by": []},
   "dial_pinch": {"stands_in_for": "Fingertips' grip on the jog handle's knurled rim while a stroke turns it, which capsule fingers on a smooth cylinder can't hold without slipping", "grip_assist": true,
                  "checked_by": ["skin_penetration"]},
-  "carry_*": {"stands_in_for": "Fingers' hold on a hand tool while it is carried and used at the inspection bench (the deburr blade, the caliper), which capsule fingers can't keep steady: the tool welded to the hand for the carry (your decision 2026-11-03)", "grip_assist": true,
+  "carry_*": {"stands_in_for": "Fingers' hold on what a hand carries, which capsule fingers can't keep steady: the object welded to the hand for the carry. A hand tool carried and used at the inspection bench (the deburr blade, the caliper; your decision 2026-11-03), and a part or tool a step take carries (the parallels, the stop, the air gun: moonshot/sim/runner.py eq_name; your decision 2026-11-04)", "grip_assist": true,
               "checked_by": ["skin_penetration", "never_held_parts"]},
   "dial_lock": {"stands_in_for": "The jog handle's detent holding it where the hand left it: outside a stroke's grip the handle is locked at its detent, as a hand placing itself on the rim, regripping it and coming off it doesn't turn it, where capsule fingers lagging their plan by centimetres brush it round; and the click that brings the machine to a jog's number locks it, as the hand stops on the number", "grip_assist": false,
                 "checked_by": []}
@@ -20,6 +20,7 @@
  "mechanisms": {
   "couple_*": "The body's anatomical couplings (moonshot/body/skeleton.py hand_couplings)",
   "lead_screw": "The vise's lead screw as an exact ratio (moonshot/world/vise.py)",
+  "saw_vise_screw": "The band saw's vise screw as an exact ratio of its handwheel, as the Kurt vise's lead_screw (moonshot/world/bandsaw.py; declared a mechanism, your decision 2026-11-04)",
   "force on moving_jaw": "Kurt's AngLock: the moving jaw's angled nut pushes it down as it clamps, modelled as a downward force of 5% of the clamp force on the jaw (moonshot/sim/vise_take.py ANGLOCK; declared a mechanism, your decision 2026-11-03)"
  }
 }

@@ -386,10 +386,11 @@ class Seat(ToolTake):
         self.add("R", t_on, t_c + 0.05, reach)
         self.side["R"]["wrist"] = Wg
         size = 2 * TL.BODY[0]
-        # the hand opens for the reach as for the default grip, whatever its own: an end mill's grip, its middle and
-        # ring fingers straightened off the cutter, opened so, put them on the table's front edge as the hand rose
+        # the hand opens for the reach as for the default grip where its own is the default's with fingers moved
+        # ("from"): an end mill's grip, its middle and ring fingers straightened off the cutter, opened so, put them on
+        # the table's front edge as the hand rose
         kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8"))
-        reach_q = self.hand.clamp(kept["grips"][kept["default"]]["q"])
+        reach_q = self.hand.clamp(kept["grips"][kept["default"]]["q"]) if "from" in holder_grip(self.tool) else g["q"]
         self.fingers("R", t_on + 0.05, open_like(self.hand, reach_q, 0.2))
         onset = t_on - ONSET_LEAD_S
         self.fingers("R", onset + OPEN_AT * (t_touch - onset), open_for(self.hand, reach_q, size))

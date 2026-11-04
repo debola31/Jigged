@@ -31,6 +31,7 @@ from moonshot.body.nimble import Nimble
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import kinematics as BM
+from moonshot.motion.step_take import HANGING
 from moonshot.motion import solver as BS
 from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_like, relaxed, tremor
 from moonshot.motion.setup_take import head_camera
@@ -72,8 +73,6 @@ TAKE_MM, TAKE_S = 2.5, 0.65                       # a lift first takes the tool'
                                                   # over 0.5 s, 400 ms; 2.5 mm over 0.45 s, 100 ms, over 0.55 s,
                                                   # 133-167 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
-HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]   # an arm hanging relaxed, the body solve's start where
-                                                                 # it has no task: sh_plane .. wr_dev, the girdle
 
 
 def box(c, h):

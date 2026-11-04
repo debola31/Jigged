@@ -68,13 +68,16 @@ def inputs(take: Path) -> dict:
 
 
 def run(take: Path) -> dict[str, Result | str]:
-    """Each check's result, or why it couldn't run."""
+    """Each check's result, or why it couldn't run: with nothing to read, or nothing it can judge (a grasp check on a
+    take with no grasp it times), it fails rather than stopping the others."""
     data, out = inputs(take), {}
     for name, c in load_all().items():
         try:
             out[name] = c.run(data)
         except KeyError as e:
             out[name] = f"nothing to read: {e}"
+        except ValueError as e:                    # a check that can't judge this take fails alone, not every check
+            out[name] = f"can't judge: {e}"
     return out
 
 

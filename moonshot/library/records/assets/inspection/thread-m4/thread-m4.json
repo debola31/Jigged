@@ -1,0 +1,42 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "thread-m4",
+  "name": "Thread plug gauge, M4x0.7",
+  "category": "inspection",
+  "make": "Vermont Gage",
+  "model": "302111530",
+  "description": "Go/no-go M4x0.70 6H thread plug gauge assembly with handle, for checking tapped holes.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Thread",
+      "value": "M4x0.70, class 6H"
+    },
+    {
+      "name": "Go member",
+      "value": "302111510"
+    },
+    {
+      "name": "No-go member",
+      "value": "302111520"
+    }
+  ],
+  "source_urls": [
+    "https://zoro.com/vermont-gage-gono-go-plug-gage-assy-m40-070-6h-302111530/i/G0828186"
+  ],
+  "source_files": [
+    "302111530 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1007223's M4 threads.",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "thread-m4.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/302111530.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

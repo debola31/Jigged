@@ -23,10 +23,11 @@ export interface Step {
   group: string;
   where: Where;
   /**
-   * What the step is shown with, by path under the media root: a person's step is a video, a
-   * machine cycle one still of the part after the cut (only people's work is rendered).
+   * What the step is shown with, by path under the media root: a person's step is a video; a
+   * machine cycle is the part after the cut, as a still and as the model a desktop can turn (only
+   * people's work is rendered).
    */
-  media: { type: 'video' | 'still'; path: string };
+  media: { type: 'video'; path: string } | { type: 'cut'; still: string; model: string };
   /** The media is in the bucket (moonshot/web/published.json). Until then the step shows as coming. */
   published: boolean;
 }

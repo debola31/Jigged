@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import dynamic from 'next/dynamic';
 import * as Sentry from '@sentry/nextjs';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -13,10 +14,27 @@ import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
 import { mediaUrl, ready, type LivePart, type Step } from './showcaseData';
 
+// three.js comes with it, so it loads only where it is shown: a desktop, on a machine cycle.
+const CutView = dynamic(() => import('./CutView'), { ssr: false });
+
+const FINE_POINTER = '(hover: hover) and (pointer: fine)';
+
+function subscribeFinePointer(change: () => void) {
+  const query = window.matchMedia(FINE_POINTER);
+  query.addEventListener('change', change);
+  return () => query.removeEventListener('change', change);
+}
+
+/** A mouse, so a model can be turned without taking the page's scroll from a finger. */
+function useFinePointer(): boolean {
+  return useSyncExternalStore(subscribeFinePointer, () => window.matchMedia(FINE_POINTER).matches, () => false);
+}
+
 /**
- * One step at a time: its video (or, for a machine cycle, a still of the part after the cut), the
- * plan's title and caption, and previous / next. A video plays once the visitor has picked a step,
- * never on page load. Playback is the only control: nothing a visitor does changes the simulation.
+ * One step at a time: its video (or, for a machine cycle, the part after the cut: a still, which a
+ * desktop overlays with the model to turn), the plan's title and caption, and previous / next. A
+ * video plays once the visitor has picked a step, never on page load. Playback and turning the part
+ * are the only controls: nothing a visitor does changes the simulation.
  */
 export function StepPlayer({
   part,
@@ -33,7 +51,8 @@ export function StepPlayer({
   const group = part.groups.find((g) => g.id === step.group);
   const [failed, setFailed] = useState<string | null>(null);
   const reported = useRef(false);
-  const what = step.media.type === 'still' ? 'picture' : 'video';
+  const finePointer = useFinePointer();
+  const what = step.media.type === 'cut' ? 'picture' : 'video';
   const onError = () => {
     // Published media that won't load is a fault; unpublished media never gets here.
     setFailed(step.id);
@@ -53,15 +72,18 @@ export function StepPlayer({
           >
             This step&apos;s {what} is still being made. Its title and caption are below.
           </Typography>
-        ) : step.media.type === 'still' ? (
-          <Box
-            component="img"
-            key={step.id}
-            src={mediaUrl(step.media.path)}
-            alt={`The part after this step: ${step.title}`}
-            onError={onError}
-            sx={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
-          />
+        ) : step.media.type === 'cut' ? (
+          <>
+            <Box
+              component="img"
+              key={step.id}
+              src={mediaUrl(step.media.still)}
+              alt={`The part after this step: ${step.title}`}
+              onError={onError}
+              sx={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
+            />
+            {finePointer && <CutView url={mediaUrl(step.media.model)} />}
+          </>
         ) : (
           <Box
             component="video"
@@ -116,7 +138,7 @@ export function StepPlayer({
 }
 
 function stepNote(s: Step): string | undefined {
-  const coming = s.media.type === 'still' ? 'Picture coming' : 'Video coming';
+  const coming = s.media.type === 'cut' ? 'Picture coming' : 'Video coming';
   const notes = [s.kind === 'cycle' && 'Machine cycle', !ready(s) && coming].filter(Boolean);
   return notes.length ? notes.join(' · ') : undefined;
 }

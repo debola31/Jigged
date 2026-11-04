@@ -52,6 +52,23 @@ def touched(take: Path, touching: list[list[str]], carried: list[list[str]] | No
     return out
 
 
+def touch_leads(take: Path, leads: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Per frame, how long before it (frames) each object came to be touched, from the run's touch onsets by geom
+    and constraint (checks.json touch_lead): an object's own colliders, its carry (carry_<object>), and what rides
+    on it, as touched maps them; the earliest of them."""
+    owner = {g["name"]: n for n, b in _scene(take).items() if b["role"] == "object" for g in b["geoms"]}
+    moves_with = json.loads((take / "checks.json").read_text(encoding="utf-8")).get("moves_with", {})
+    out = []
+    for frame in leads:
+        f: dict[str, float] = {}
+        for name, lead in frame.items():
+            obj = owner.get(name) or (name[len("carry_"):] if name.startswith("carry_") else None)
+            for o in ([obj, *moves_with.get(obj, ())] if obj else ()):
+                f[o] = max(f.get(o, 0.0), lead)
+        out.append(f)
+    return out
+
+
 def carried(active_constraints: list[list[str]]) -> list[list[str]]:
     """Per frame, the objects welded to a hand by its carry (moonshot/world/bench_cell.py carry_<object>)."""
     return [[c[len("carry_"):] for c in frame if c.startswith("carry_")] for frame in active_constraints]

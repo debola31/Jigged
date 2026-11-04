@@ -6,7 +6,7 @@
            "size_mm": [165.1, 38.1, 82.55], "size_in": "6.5 x 1.5 x 3.25", "from": "pre-cut blank from the rack"},
  "setups": [
   {"id": "op10", "title": "Op 10: pocket side", "machine": "vf2", "face_up": "-Y",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Stock on 1 in parallels, 0.25 in proud of the jaws"},
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Stock on 1 in parallels, 0.25 in proud of the jaws"},
    "wcs": {"code": "G54", "x": "the centre of the stock's length", "y": "the centre of its width", "z": "top of the faced stock", "by": "edge finder in X and Y; tool setter for Z"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face datum A flat (flatness 0.2) and to height"},
@@ -19,7 +19,7 @@
      "features": [{"type": "hole", "dia_mm": 6.0, "axis": "Y", "count": 4}]}
    ]},
   {"id": "op20", "title": "Op 20: scalloped side", "machine": "vf2", "face_up": "+Y",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Flipped onto datum A; clamp on the finished sides; 1 in parallels, so the finished 31 mm part stands 12.3 mm proud of the jaws and every op20 tool clears them"},
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Flipped onto datum A; clamp on the finished sides; 1 in parallels, so the finished 31 mm part stands 12.3 mm proud of the jaws and every op20 tool clears them"},
    "wcs": {"code": "G54", "x": "the ear holes (probe)", "y": "the ear holes (probe)", "z": "datum A on the parallels, plus 31 mm"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face to the 31 mm overall height"},
@@ -35,7 +35,7 @@
      "features": [{"type": "hole", "dia_mm": 10.0, "axis": "Y", "count": 4}, {"type": "hole", "dia_mm": 18.0, "axis": "Y", "count": 4}]}
    ]},
   {"id": "op30", "title": "Op 30: first long side (F65)", "machine": "vf2", "face_up": "+Z",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "On its side; soft jaws protect the humps"},
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "On its side; soft jaws protect the humps"},
    "wcs": {"code": "G54", "x": "the left end (probe)", "y": "datum A (probe)", "z": "top of the side face"},
    "operations": [
     {"id": "bores", "kind": "drill", "tool": "drill-7", "what": "Drill 4X Ø7 ±0.25 through the humps",
@@ -44,13 +44,13 @@
      "features": [{"type": "hole", "dia_mm": 10.0, "axis": "Z", "count": 4}]}
    ]},
   {"id": "op40", "title": "Op 40: second long side (F81)", "machine": "vf2", "face_up": "-Z",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "Rolled over; the bores from Op 30 locate it"},
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "Rolled over; the bores from Op 30 locate it"},
    "wcs": {"code": "G54", "x": "a Ø7 bore (probe)", "y": "datum A (probe)", "z": "top of the side face"},
    "operations": [
     {"id": "cbores", "kind": "counterbore", "tool": "em38", "what": "Counterbore 4X Ø10 ±0.25, 10 ±0.2 deep, coaxial with the bores"}
    ]},
   {"id": "op50", "title": "Op 50: first end", "machine": "vf2", "face_up": "+X",
-   "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "Standing on end against a stop; check it's square with the indicator"},
+   "workholding": {"vise": "d688", "parallels_in": 0, "jaw_on": "Z faces", "note": "Standing on end against a stop; check it's square with the indicator"},
    "wcs": {"code": "G54", "x": "the side (probe)", "y": "datum A (probe)", "z": "top of the end"},
    "operations": [
     {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill both Ø5.5 ±0.2 holes from this end, 35 ±1 and 27.5 ±1 deep",

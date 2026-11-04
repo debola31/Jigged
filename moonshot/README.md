@@ -25,7 +25,8 @@ http://desktop-4hvjqis:8765/). Each machine runs `python -m moonshot.orchestrate
 
 **The web page** is `/showcase`, in `app/(marketing)/showcase/`. It reads one generated file, `showcase.json`, which
 `python -m moonshot.web.export` writes from the plans and records (gate: `tests/gates/test_web_steps.py`). A person's
-step is shown as its video, a machine cycle as one still of the part after the cut. Models, videos and stills come
+step is shown as its video, a machine cycle as the part after the cut: one still, and on a desktop its 3D model to
+turn. Models, videos and stills come
 from Supabase Storage, staged first in `<data root>/web/` by `python -m moonshot.web.media models` and `stage`, then
 published to the public `showcase` bucket by `upload <step> ...`, one named step at a time (a person's step only once
 its draft is reviewed), which records each in `web/published.json`; the page shows only those. For development, `python -m moonshot.web.media serve --draft

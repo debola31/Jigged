@@ -486,11 +486,17 @@ class Take:
         high = np.array([VISE["x"] + 70, VISE["fixed_face_y"] - self.opening0 - self.half[1] - 42, JAW_TOP + self.half[2] + 20])
         over, above = self.set_down + [0, -6, 58], self.set_down + [0, -3, 12]
         self.look(t0 - 0.6, self.set_down + [0, 0, self.half[2]])
-        self.move_blank(t0, t0 + 0.9, np.eye(3), high)
-        self.move_blank(t0 + 0.85, t0 + 1.6, np.eye(3), over)
-        self.move_blank(t0 + 1.55, t0 + 2.05, np.eye(3), above)
-        t_down = t0 + 2.55
-        self.move_blank(t0 + 2.05, t_down, np.eye(3), self.set_down)
+        # a part heavier than the reference, pinched near its top, is carried over more slowly, as it is carried out of
+        # the vise (set_on_table): planned with people's range (2026-11-03), op10's 1.4 kg part turned in the pinch as
+        # the 0.9 s carry slowed over the moving jaw, and fell; the reference's part is carried as before
+        slow = max(1.0, self.load.mass_kg / REFERENCE.mass_kg)
+        t_high = t0 + 0.9 * slow
+        t_over = t_high - 0.05 + 0.75 * slow
+        self.move_blank(t0, t_high, np.eye(3), high)
+        self.move_blank(t_high - 0.05, t_over, np.eye(3), over)
+        self.move_blank(t_over - 0.05, t_over + 0.45, np.eye(3), above)
+        t_down = t_over + 0.95
+        self.move_blank(t_over + 0.45, t_down, np.eye(3), self.set_down)
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.effort(t_down - 0.05, 1.0, grip)
         self.effort(t_down + 0.1, 0.0, grip)

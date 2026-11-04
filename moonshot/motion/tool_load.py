@@ -29,6 +29,7 @@ import torch
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
+from moonshot.motion import solver as BS
 from moonshot.motion.pendant import (FINGER_DEG_S, LUMBAR as PENDANT_LUMBAR, OFFSET, PendantTake,
                                      fingertip_in_hand, key_at)
 from moonshot.motion.primitives import FPS, PosePath, min_jerk, open_for, open_like
@@ -214,6 +215,31 @@ def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
     return out
 
 
+class InRange(BS.BodySolver):
+    """The body solver, every trunk-to-wrist angle held firmly inside people's range, as the posture checks hold each
+    arm of the take to it, and the trunk as both arms' people see it: the left arm's see it mirrored
+    (moonshot/validate/posture.py left_arm), so its lateral bend and rotation must lie inside the range turned about
+    zero too. The solver's own range cost counts the trunk once, against the right arm's people, and lightly, as it is
+    every take's: here the holder held out under the spindle turned the trunk 16-19 deg (people's 1st percentile is
+    13.9) to bring the shoulder nearer, at the keypad the trunk bent 10 deg sideways (8.4), and the left arm, coming
+    down from Tool Release, turned its shoulder out 34 deg (30.9): out of an arm's range in 13-20% of the frames, where
+    the checks allow 7%."""
+    W_RANGE = 30.0                                       # per squared degree past the range less RANGE_MARGIN_DEG
+
+    def _arm_terms(self, th, L, packed, side, boxes, trunk):
+        terms = super()._arm_terms(th, L, packed, side, boxes, trunk)
+        lo, hi = (torch.as_tensor(self.prior.pct[:10, i], dtype=th.dtype) for i in (0, -1))
+        if trunk:
+            flip = torch.as_tensor([1.0, -1.0, -1.0] + [1.0] * 7, dtype=th.dtype)
+            a, b = lo * flip, hi * flip
+            lo, hi = torch.maximum(lo, torch.minimum(a, b)), torch.minimum(hi, torch.maximum(a, b))
+        m = BS.RANGE_MARGIN_DEG
+        cols = slice(0, 10) if trunk else slice(3, 10)
+        out = torch.relu(lo[cols] + m - th[:, cols]) + torch.relu(th[:, cols] - hi[cols] + m)
+        terms["range"] = self.W_RANGE * (out ** 2).sum()
+        return terms
+
+
 def rest_at(take: StepTake) -> None:
     """The take's hands hang at rest at REST_MM from its lumbar (the left's mirrored, as the planner has it)."""
     take.rest = take.lumbar + REST_MM
@@ -229,6 +255,7 @@ def holder_grip(tool_id: str) -> dict:
 
 class Seat(StepTake):
     """One holder off the stand and into the spindle (the vf2-tool-load card's phases 2-7)."""
+    body_solver = InRange
 
     def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True):
         super().__init__(out, DOOR_LUMBAR, verbose)
@@ -390,6 +417,7 @@ class Seat(StepTake):
 
 class ToolChange(PendantTake):
     """At the pendant, the right index: MDI, T<n> and ATC FWD (`plan_change`), or ATC FWD alone (`plan_atc`)."""
+    body_solver = InRange
 
     def __init__(self, out, verbose=True, shared: Path | None = None):
         super().__init__(out, PENDANT_LUMBAR, verbose, shared=shared or Path(out) / "grips.json",

@@ -384,11 +384,15 @@ class BenchPlan:
                 return a + (b - a) * (t - t0) / max(t1 - t0, 1e-9), ga or gb
         return keys[-1][1], keys[-1][2]
 
+    def solver_boxes(self) -> list:
+        """The boxes (centre, half size; world mm) the body solver keeps the elbows and forearms out of."""
+        return [bench_box()]
+
     def solve(self, iters=3000):
         self.T = self.t + 0.3
         n = self.n = int(self.T * FPS) + 1
-        c, h = bench_box()
-        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
+        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.solver_boxes(), arms=SIDES)
+        s.W = BS.BodySolver.W | getattr(self, "SOLVER_W", {})
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)
             last = max((x[1] for x in self.cons[side]), default=0.0)

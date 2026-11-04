@@ -2,8 +2,8 @@
 checks a vise take's run feeds from its own sim.npz keys (blank, para, opening), which no other run writes.
 
 The record has where each object is, frame by frame, and its colliders by name; checks.json's touching names the
-colliders the hands touch. What the record can't tell, the run writes into checks.json (moonshot/sim/bench.py): which
-objects ride on which (moves_with: the calipers' slider on their beam), and the right hand's own touches (touching_R).
+colliders the hands touch, themselves or through a tool they hold. What the record can't tell, the run writes into
+checks.json (moonshot/sim/bench.py): which objects ride on which (moves_with: the calipers' slider on their beam).
 """
 from __future__ import annotations
 
@@ -27,6 +27,18 @@ def positions(take: Path) -> dict[str, np.ndarray]:
     rec, scene = np.load(take / "take.npz"), _scene(take)
     names = [str(b) for b in rec["bodies"]]
     return {n: rec["pos"][:, names.index(n)] for n, b in scene.items() if b["role"] == "object"}
+
+
+def riding(take: Path, obj: str, on: str) -> np.ndarray:
+    """An object's position per frame (mm) as if what it rides on had stayed where it started: its motion on that
+    (stock clamped to a machine's table), not with it."""
+    rec = np.load(take / "take.npz")
+    names = [str(b) for b in rec["bodies"]]
+    i, j = names.index(obj), names.index(on)
+    p, pc = rec["pos"][:, i], rec["pos"][:, j]
+    R = np.stack([_quat_R(q) for q in rec["quat"][:, j]])
+    rel = np.einsum("kji,kj->ki", R, p - pc)                  # in the carrier's frame
+    return pc[0] + rel @ R[0].T
 
 
 def touched(take: Path, touching: list[list[str]], carried: list[list[str]] | None = None) -> list[list[str]]:

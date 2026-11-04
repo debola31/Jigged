@@ -76,6 +76,18 @@ def bands(c, **lims):
     return f
 
 
+def instrument_colliders(rests: dict, names: tuple[str, ...], grow: float = 0.0) -> list:
+    """The station's instruments named, where they settled (settle's rests), as a grip's colliders grown grow mm: what
+    a hand coming onto the part beside them keeps off."""
+    out = []
+    for k in names:
+        p, R = rests[f"insp_{k}"]
+        for lo, hi in IB.record()["rests"][k]["boxes_mm"]:
+            lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+            out.append(oriented_box(p + R @ ((lo + hi) / 2), R, (hi - lo) / 2 + grow))
+    return out
+
+
 def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Each loose body's pose (mm, rotation) once it has come to rest on the bench, no body model: what the plan
     aims at is where the physics will find it."""
@@ -119,6 +131,8 @@ class BenchPlan:
         src += inspect.getsource(type(self).grip_specs) + inspect.getsource(BenchPlan.steady_spec)
         src += json.dumps(LUMBAR.tolist())
         src += json.dumps({k: [np.round(p, 2).tolist(), np.round(R, 4).tolist()] for k, (p, R) in sorted(rests.items())})
+        src += json.dumps({k: [np.round(s["at"][0], 2).tolist(), np.round(s["at"][1], 4).tolist()]
+                           for k, s in sorted(specs.items()) if s.get("at") is not None})
         key = hashlib.sha1(src.encode()).hexdigest()
         data = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
         if data.get("key") != key:
@@ -136,9 +150,9 @@ class BenchPlan:
             H, W = np.array(g["H"]), np.array(g["W"])
             entry = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "theta": np.array(g["theta"]), "side": g["side"],
                      "loss": g["loss"], "terms": g["terms"], "of": spec.get("of")}
-            if spec.get("of"):                      # carried: the grip in the object's frame, at its rest
-                p0, R0 = rests[spec["of"]]
-                entry |= {"H_rel": R0.T @ H, "W_rel": R0.T @ (W - p0)}
+            if spec.get("of"):                      # carried: the grip in the object's frame, where it was solved
+                p0, R0 = spec.get("at") or rests[spec["of"]]
+                entry |= {"H_rel": R0.T @ H, "W_rel": R0.T @ (W - p0), "at": (p0, R0)}
             self.grips[name] = entry
 
     # --- the part, and the left hand holding it still -----------------------------------------------------------
@@ -189,9 +203,11 @@ class BenchPlan:
         self.event("press", tc + 0.3, t_off - 0.4, side="L", normal=self.to_world([0, -1, 0], vec=True).tolist(),
                    force=STEADY_N, contact="part")
         self.fingers("L", t_off + 0.3, open_like(self.hand, g["q"], 0.3))
-        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 45], via=[W + [0, 0, 18]])
+        # well up before back past the bench's edge: the wrist rests over the calipers, and lifted 40 mm the relaxing
+        # fingers swept them 107 mm toward the operator and wedged them on the bench, which threw them
+        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 110], via=[W + [0, 0, 18]])
         self.fingers("L", t_off + 1.2, self.q_relax)
-        self.transit("L", t_off + 0.5, t_off + 1.6, REST, via=[W + [0, -230, 40]])     # back past the bench's edge first
+        self.transit("L", t_off + 0.5, t_off + 1.6, REST, via=[W + [0, -230, 110]])
         self.clip("steady", tc - 0.3, tc + 0.6, "STEADY  the left hand holds the part down on the bench")
 
     # --- building blocks ---------------------------------------------------------------------------------------
@@ -244,15 +260,20 @@ class BenchPlan:
         self.paths[name].append((t1, np.asarray(R, float), np.asarray(p, float)))
 
     def grip_pose(self, grip, t):
-        """The right hand on a carried object at t (world H, W)."""
+        """The hand on a carried object at t (H, W in the hand's planning world). A left hand's grip is solved in the
+        mirrored world, so the object's motion since it was solved is mirrored onto it there."""
         g = self.grips[grip]
         R, p = self.obj_at(g["of"], t)
-        return R @ g["H_rel"], p + R @ g["W_rel"]
+        if g["side"] == "R":
+            return R @ g["H_rel"], p + R @ g["W_rel"]
+        p0, R0 = g["at"]
+        D = R @ R0.T                                       # the object's turn since the grip was solved
+        return BM.mirror_frames(D) @ g["H"], mirror(p + D @ (mirror(g["W"]) - p0))
 
     def carry(self, grip, t0, t1, w=3.0, free=None, point=(0.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0)):
-        """The right hand on a carried object over [t0, t1]. Within each of free's (ta, tb) only a point of the object
-        and an axis through it are held to their plan, its turn about that axis the body's choice: nobody minds how a pen is
-        rolled, and a roll fixed by the plan took more wrist than the plan allows."""
+        """A hand on a carried object over [t0, t1]. Within each of free's (ta, tb) (the right hand's) only a point of
+        the object and an axis through it are held to their plan, its turn about that axis the body's choice: nobody
+        minds how a pen is rolled, and a roll fixed by the plan took more wrist than the plan allows."""
         g = self.grips[grip]
         ph = g["H_rel"].T @ (np.asarray(point, float) - g["W_rel"])          # the point in the hand's frame
         ah = g["H_rel"].T @ np.asarray(axis, float)
@@ -262,8 +283,8 @@ class BenchPlan:
             if any(a <= t < b for a, b in free or ()):
                 return [("tsr", ph, p + R @ np.asarray(point, float), ah, R @ np.asarray(axis, float), w)]
             return [("pose", *self.grip_pose(grip, t), w)]
-        self.add("R", t0, t1, fn)
-        self.wrist["R"] = self.grip_pose(grip, t1)[1]
+        self.add(g["side"], t0, t1, fn)
+        self.wrist[g["side"]] = self.grip_pose(grip, t1)[1]
 
     def fingers(self, side, t, q):
         self.fkeys[side].append((t, q))
@@ -320,14 +341,18 @@ class BenchPlan:
                             s.tsr(k, *con[1:5], w=con[5], side=side)
                         else:
                             s.pose(k, con[1], con[2], con[3], side=side)
-        r = next(g for g in self.grips.values() if g["side"] == "R")["theta"]
-        lt = next(g for g in self.grips.values() if g["side"] == "L")["theta"]
         t0 = time.time()
-        self.theta, self.dp, self.frames, terms = s.solve(np.r_[r[:12], lt[3:12]], iters=iters, lr=0.03)
+        self.theta, self.dp, self.frames, terms = s.solve(self.theta0(n), iters=iters, lr=0.03)
         self.left_frames = s.left_frames
         if self.verbose:
             print(f"body: {n} frames solved in {time.time() - t0:.0f} s; {({k: round(v, 1) for k, v in terms.items()})}",
                   flush=True)
+
+    def theta0(self, n) -> np.ndarray:
+        """The body solve's start, per frame (n, 21, deg): each arm as its first grip holds it."""
+        r = next(g for g in self.grips.values() if g["side"] == "R")["theta"]
+        lt = next(g for g in self.grips.values() if g["side"] == "L")["theta"]
+        return np.tile(np.r_[r[:12], lt[3:12]], (n, 1))
 
     def body_at(self, k):
         """Frame k's right arm (world) and left arm (mirrored world) frames."""

@@ -8,7 +8,10 @@ person.lift_off_mm above where it sat. The lifting force comes from the physics 
 
 A take that isn't the vise's is read from its record (moonshot/validate/objects.py): its right hand's grips, each on
 the object its grip event names, and only those on an object at rest: taking a tool from the other hand isn't a reach
-to grasp as people's were measured, nor a lift.
+to grasp as people's were measured, nor a lift. Its contact is the first frame a hand touches the object or carries
+it (a carried tool leaves the skin, so the carry can close before a finger meets it), as the cause check reads
+touching: validate/take.py gives every check the one `touching`, and with right-hand touches alone the cause check
+found the left hand's work uncaused.
 """
 from __future__ import annotations
 
@@ -80,7 +83,8 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
         grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
     lifted = [o for o in grasping if o in ck.get("load_N", {})]
     return {"fps": fps, "hand_speed_mm_s": hand_speed(rec["R_W"], fps).tolist(),
-            "touching": objects.touched(take, ck["touching_R"]), "grasping": {k: v.tolist() for k, v in grasping.items()},
+            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+            "grasping": {k: v.tolist() for k, v in grasping.items()},
             "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
             "load_N": ck.get("load_N", {})}
 

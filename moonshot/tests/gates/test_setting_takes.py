@@ -82,10 +82,18 @@ def test_the_record_is_complete(take):
     assert check(take) == []
 
 
+# not applicable to a pendant take (the user's decision, 2026-11-03): they measure a reach to grasp a part, the hand's
+# opening for it, and the card's footage, none of which a hand at the pendant's keys and handle makes; every other
+# per-frame check holds, nothing_moves_without_a_cause included
+NOT_APPLICABLE = ("grasp_timing", "hand_opening", "matches_its_footage")
+
+
 def test_every_per_frame_check_passes(take):
-    from moonshot.validate.take import run
-    failed = {k: v for k, v in run(take).items() if isinstance(v, str) or not v.passed}
-    assert not failed, failed
+    from moonshot.validate.take import load_all, run
+    assert set(NOT_APPLICABLE) <= set(load_all()), "a check named not applicable no longer exists"
+    failed = {k: v for k, v in run(take).items()
+              if k not in NOT_APPLICABLE and (isinstance(v, str) or not v.passed)}
+    assert not failed, "\n".join(f"{k}: {v}" for k, v in failed.items())        # each in full: pytest cuts a dict
 
 
 def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):
@@ -111,7 +119,7 @@ def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):
             tool = str(out["tool"])
             # with the tool commanded to work Z0 the gauge line stands at machine Z = G54 Z + the tool's length offset
             gauge = spindle[2] - head[2] + G54[2] + out["tool_length"][tool]
-            tip = gauge - tk["tool"]["length_mm"]
+            tip = gauge - tk["setup"]["tool"]["length_mm"]
             assert abs(tip - datum[2]) <= tol, f"z: the tool's tip {tip - datum[2]:+.4f} mm off the datum"
 
 
@@ -128,8 +136,11 @@ def test_every_planned_key_press_registers_and_no_other(take):
     planned = sorted((e for e in tk["events"] if e["kind"] == "press"), key=lambda e: e["t0"])
     got = out["pressed"]
     assert [k for _, k in got] == [e["key"] for e in planned]
+    # within the press, give or take the hand running ahead of its plan (0.05 s, the user's decision, 2026-11-03) or
+    # behind it (0.2 s)
     for (t, k), e in zip(got, planned):
-        assert e["t0"] <= t <= e["t1"] + 0.2, f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
+        assert e["t0"] - 0.05 <= t <= e["t1"] + 0.2, \
+            f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
 
 
 def test_the_needle_stays_put_through_a_sweep_up_the_side(square):

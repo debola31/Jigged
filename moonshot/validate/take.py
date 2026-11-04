@@ -75,6 +75,8 @@ def run(take: Path) -> dict[str, Result | str]:
             out[name] = c.run(data)
         except KeyError as e:
             out[name] = f"nothing to read: {e}"
+        except ValueError as e:                    # a check that can't judge this take fails alone, not every check
+            out[name] = f"can't judge: {e}"
     return out
 
 

@@ -6,6 +6,7 @@ Blender:
 
     blender -b --factory-startup --python moonshot/render/render_take.py -- --take <folder> --bake <folder>
         [--data <data root>] [--look <cc0 folder>] [--out <folder>] [--frames lo:hi] [--res 1920x1080]
+        [--eye x,y,z --look-at x,y,z]  (a still: this camera, world mm, and no motion blur)
         [--samples 48] [--device METAL] [--inspect <report.json>] [--save <scene.blend>]
 
 Frames are the bake's (24 fps), written as <out>/<k:05d>.png. A GLB's in_body places its raw stored coordinates, in
@@ -368,6 +369,16 @@ def main():
     settings(sc, w, h, take.fps, take.n, int(arg("--samples", "48")))
     report = arg("--inspect")
     take.keyframe(cam, range(lo, hi) if report else range(max(0, lo - 1), min(take.n, hi + 1)))
+    if arg("--eye"):                       # a still (a machine-only step's picture): a set camera, nothing blurred
+        e, lk = (Vector([float(v) for v in arg(k).split(",")]) * MM for k in ("--eye", "--look-at"))
+        zc = (e - lk).normalized()
+        xc = Vector((0.0, 0.0, 1.0)).cross(zc).normalized()
+        cam.animation_data_clear()
+        cam.data.animation_data_clear()
+        cam.rotation_mode = "QUATERNION"
+        cam.location, cam.rotation_quaternion = e, Matrix((xc, zc.cross(xc), zc)).transposed().to_quaternion()
+        cam.data.dof.focus_distance = (lk - e).length
+        sc.render.use_motion_blur = False
     if report:
         Path(report).write_text(json.dumps(inspect(take, cam, range(lo, hi))), encoding="utf-8")
         log(f"inspected frames {lo}:{hi} -> {report}")

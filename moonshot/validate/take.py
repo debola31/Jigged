@@ -58,7 +58,7 @@ def inputs(take: Path) -> dict:
     if "hand_wrench" in out:
         out |= muscle.measure(take)
     if posture.PRIOR.exists():
-        out |= posture.measure(np.load(take / "sim.npz")["theta"][:, :10])
+        out |= posture.measure_arms(np.load(take / "sim.npz"))
     for check_inputs in (cause.measure, grasp_timing.measure, hand_opening.measure, footage.measure):
         out |= check_inputs(take)
     return out

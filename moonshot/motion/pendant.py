@@ -191,7 +191,11 @@ class PendantTake(StepTake):
         q.update(ring_mcp_flex=60, ring_pip=70, little_mcp_flex=60, little_pip=70,
                  thumb_cmc_abd=30, thumb_cmc_flex=10, thumb_mcp_flex=20, thumb_ip=15)
         dial = dict(obj=DIAL_C.copy(), q0=q, colliders=colliders(), iters=1200, side="R",
-                    targets={"thumb": rim(150, 215), "index": rim(-40, 5), "middle": rim(0, 45)},
+                    # each pad 3 mm or more behind the rim's front: at 1 mm the thumb's tip rode onto the dial's face
+                    # as the hand moved along the axis, the one digit on the dial, pressed into it (op30-z, op50-check:
+                    # skin 6 mm deep, muscles over their maximum)
+                    targets={"thumb": rim(150, 215, depth=(3.0, 12.0)), "index": rim(-40, 5, depth=(3.0, 12.0)),
+                             "middle": rim(0, 45, depth=(3.0, 12.0))},
                     starts=[S(8, 0, r, 75, 50, -10, 85, p, 0, 0) for p in (0, 30, 60) for r in (0, 15)])
         c = key_at("cycle_start")
         button_l = dict(obj=c, q0=q, colliders=colliders(), iters=900, side="L",

@@ -17,6 +17,7 @@ from moonshot.motion import set_parallels as SP
 from moonshot.motion import set_stop as SS
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.door_cycle import _Cell
+from moonshot.sim.set_parallels import FirmGrip
 from moonshot.world import cell
 from moonshot.world import parallel_rack as RACK
 from moonshot.world import vise as V
@@ -27,9 +28,8 @@ EYE_RATE = 0.5                     # the eye steers the stop this much slower th
                                    # swung 5 mm either way all the way down, let go 3.3 mm off
 
 
-class SetStop(_Cell):
+class SetStop(FirmGrip, _Cell):
     doors_open_mm = 600.0          # fully open, as the vise take loads with them
-    grip_geoms = {SS.GRIP: "stop"}
     encloses = {SS.GRIP: "stop"}
     welded = {SS.GRIP}
 
@@ -44,8 +44,18 @@ class SetStop(_Cell):
         # the eye steers the stop (held_error) from when it is up off the table until it is let go, and leaves the hand
         # be from letting go until the hand is up off it, as setting the parallels
         self.steer = (self.keys[0][1], grip["t1"])
-        self.still = (grip["t1"], grip["t1"] + 0.8)
+        # ... and leaves the hand be while the stop is on the table, as the parallels' runner does in their slots
+        self.still = [(grip["t0"], self.keys[0][1]), (grip["t1"], grip["t1"] + 0.8)]
         self._now = 0.0
+        self.firm_setup()
+        # the stop's weight is fed forward where it hangs, at its middle between the pads, so the wrist is fed the
+        # turn it makes about it too: fed at the wrist, the wrist sagged 3 deg under it (sight held the stop up), and
+        # let go the hand sprang back 4 mm up and forward, the thumb into the stop
+        g = json.loads((self.folder / "grips.json").read_text(encoding="utf-8"))[SS.GRIP]
+        self.HAND_FORCE_AT = np.array(g["H"]).T @ (np.array(g["obj"]) - np.array(g["W"]))
+
+    def carry_of(self, grip_event: dict) -> dict:
+        return self.carry
 
     def planned_centre(self, t: float) -> np.ndarray:
         """Where the plan has the stop's middle (mm) at t (motion/set_stop.py, its keys)."""
@@ -72,7 +82,7 @@ class SetStop(_Cell):
         return np.r_[self.planned_centre(t) * 0.001 - d.xpos[b], upright] * EYE_RATE
 
     def touching(self, side: str) -> bool:
-        if side == "R" and self.still[0] <= self._now < self.still[1]:
+        if side == "R" and (any(a <= self._now < b for a, b in self.still) or self.fast(self._now)):
             return True
         return super().touching(side)
 
@@ -105,9 +115,9 @@ class SetStop(_Cell):
         return R_obj.T @ (d.xpos[hb] - (base + R_obj @ half)), R_rel
 
     def hand_force(self, side, t):
-        """The stop's weight, carried."""
+        """The stop's weight, carried: taken up over people's loading time, as the parallels' (sim/set_parallels.py)."""
         if side == "R" and self.carry["t0"] <= t < self.carry["t1"]:
-            return np.array([0.0, 0.0, V.STOP_KG * 9.81])
+            return np.array([0.0, 0.0, V.STOP_KG * 9.81 * min(1.0, (t - self.carry["t0"]) / SP.LOADING_S)])
         return None
 
     def meshes(self, folder):

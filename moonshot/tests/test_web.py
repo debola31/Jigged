@@ -17,16 +17,20 @@ def test_every_placed_item_has_its_asset_and_model():
         assert rec["model"] == f"models/{a}.glb"
 
 
-def test_each_step_has_its_own_video_and_a_place_in_the_shop():
-    """A step's video plays only once the upload has recorded it in published.json."""
+def test_each_step_has_its_own_media_and_a_place_in_the_shop():
+    """People's work is shown as video and a machine cycle as one still; either shows only once the upload has
+    recorded it in published.json."""
     items = {i["item"] for i in build()["shop"]["items"]}
-    published = set(_json(PUBLISHED)["videos"])
+    published = set(_json(PUBLISHED)["media"])
     for part in build()["parts"]:
         steps = part.get("steps", [])
-        assert len({s["video"] for s in steps}) == len(steps)
+        assert len({s["media"]["path"] for s in steps}) == len(steps)
         for s in steps:
-            assert s["video"] == f"video/{part['id']}/{s['id']}.mp4"
-            assert s["published"] == (s["video"] in published)
+            if s["kind"] == "cycle":
+                assert s["media"] == {"type": "still", "path": f"still/{part['id']}/{s['id']}.webp"}
+            else:
+                assert s["media"] == {"type": "video", "path": f"video/{part['id']}/{s['id']}.mp4"}
+            assert s["published"] == (s["media"]["path"] in published)
             if "item" in s["where"]:
                 assert s["where"]["item"] in items
             assert s["group"] in {g["id"] for g in part["groups"]}

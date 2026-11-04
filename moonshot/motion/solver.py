@@ -84,6 +84,10 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
+RANGE_MARGIN_DEG = 2.0       # the range cost starts this far inside people's range: from its edge, the plans settled
+                             # 0.5-3 deg past it wherever another cost pulled outward (op30-z: 87.8% in range, 93.3%)
+
+
 def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range=0.5):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
@@ -108,7 +112,7 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
     if prior is not None:
         c = c + w_prior * prior.nll(th[:, 3:10])
         plo, phi = (torch.as_tensor(prior.pct[:, i], dtype=th.dtype) for i in (0, -1))
-        out = torch.relu(plo - th[:, :10]) + torch.relu(th[:, :10] - phi)          # degrees outside people's range
+        out = torch.relu(plo + RANGE_MARGIN_DEG - th[:, :10]) + torch.relu(th[:, :10] - phi + RANGE_MARGIN_DEG)
         c = c + w_range * ((out if trunk else out[:, 3:]) ** 2).sum(-1)
     return c
 

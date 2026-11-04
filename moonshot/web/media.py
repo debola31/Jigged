@@ -2,20 +2,23 @@
 serve it (plan §1: "videos and published models in Supabase Storage, never the Next build"):
 
     models/<asset>.glb             light copies of the library's GLBs for the shop view
-    video/<part>/<step>.mp4        each step's final render
+    video/<part>/<step>.mp4        a person's step: its final render, takes/<part>-<step>/final.mp4
+    still/<part>/<step>.webp       a machine cycle: one still of the part after it, from takes/<part>-<step>/still.png
 
     python -m moonshot.web.media models            # decimate every asset the layout places (gltf-transform, via npx)
-    python -m moonshot.web.media videos            # copy each live step's takes/<part>-<step>/final.mp4; lists the missing
+    python -m moonshot.web.media stage             # stage every live step's final or still that exists; lists the missing
     python -m moonshot.web.media serve [--draft takes/setup-take/draft.mp4]
-    SUPABASE_SECRET_KEY=... python -m moonshot.web.media upload --url https://<ref>.supabase.co
+    SUPABASE_SECRET_KEY=... python -m moonshot.web.media upload --url https://<ref>.supabase.co op10-face op10-seat ...
 
 `serve` is for development only: it serves the folder on http://localhost:8787 with CORS, so `pnpm dev` can run with
 NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787. With --draft, a step video not staged yet is answered with that
 draft, so the player can be built before the finals exist; drafts are never staged, so never uploaded.
 
-`upload` publishes everything staged to the public `showcase` bucket (supabase/migrations/*_showcase_storage_bucket.sql):
-anyone can then fetch it. It takes the project's URL explicitly and the secret key only from the environment, so it
-can't publish to a project by accident through .env.local.
+`upload` publishes the named steps' media (and, with --models, the models) to the public `showcase` bucket
+(supabase/migrations/*_showcase_storage_bucket.sql): anyone can then fetch it. Steps are named one by one because a
+person's step is published only once the user has reviewed its draft; nothing is published for being staged. It takes
+the project's URL explicitly and the secret key only from the environment, so it can't publish to a project by
+accident through .env.local.
 """
 from __future__ import annotations
 
@@ -29,6 +32,8 @@ import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from PIL import Image
+
 from moonshot.config import data_root
 from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, shop_assets
 
@@ -39,7 +44,8 @@ BUDGET_DEFAULT = 1_500
 SIMPLIFY_ERROR = 0.02                      # a fraction of the mesh's extent; invisible at shop scale
 PORT = 8787
 BUCKET = "showcase"
-CONTENT_TYPES = {".glb": "model/gltf-binary", ".mp4": "video/mp4"}
+CONTENT_TYPES = {".glb": "model/gltf-binary", ".mp4": "video/mp4", ".webp": "image/webp"}
+STILL_QUALITY = 85                         # WebP: a 1080p still in a few hundred kB, for phones on cellular
 
 
 def web_root() -> Path:
@@ -67,41 +73,61 @@ def build_models(force: bool = False) -> None:
     print(f"models: {total_in / 1e6:.1f} MB -> {total_out / 1e6:.1f} MB in {out}")
 
 
-def stage_videos() -> None:
-    missing = []
-    for part in build()["parts"]:
-        for s in part.get("steps", []):
-            src = data_root() / "takes" / f"{part['id']}-{s['id']}" / "final.mp4"
-            dst = web_root() / s["video"]
-            if not src.exists():
-                missing.append(s["id"])
-                continue
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
-                shutil.copy2(src, dst)
-    print(f"videos: {'all staged' if not missing else f'{len(missing)} steps have no final yet: ' + ', '.join(missing)}")
+def live_steps() -> dict[str, tuple[str, dict]]:
+    """Each live step by id, with its part: "op10-face" -> ("nist-ftc-10", step)."""
+    return {s["id"]: (part["id"], s) for part in build()["parts"] for s in part.get("steps", [])}
 
 
-def upload(url: str) -> None:
+def stage_step(part: str, step: dict) -> bool:
+    """Stage one step's media from its take; False if the take has no final (or still) yet."""
+    still = step["media"]["type"] == "still"
+    src = data_root() / "takes" / f"{part}-{step['id']}" / ("still.png" if still else "final.mp4")
+    dst = web_root() / step["media"]["path"]
+    if not src.exists():
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
+        if still:
+            Image.open(src).convert("RGB").save(dst, "WEBP", quality=STILL_QUALITY, method=6)
+        else:
+            shutil.copy2(src, dst)
+    return True
+
+
+def stage() -> None:
+    missing = [s["id"] for part, s in live_steps().values() if not stage_step(part, s)]
+    print(f"staged: {'every step' if not missing else f'all but {len(missing)} steps, with no final yet: ' + ', '.join(missing)}")
+
+
+def upload(url: str, step_ids: list[str], models: bool) -> None:
     key = os.environ["SUPABASE_SECRET_KEY"]
-    files = sorted(p for p in web_root().rglob("*") if p.is_file() and p.suffix in CONTENT_TYPES)
+    steps = live_steps()
+    unknown = [i for i in step_ids if i not in steps]
+    if unknown:
+        raise SystemExit(f"no live step {', '.join(unknown)}")
+    missing = [i for i in step_ids if not stage_step(*steps[i])]
+    if missing:
+        raise SystemExit(f"nothing to publish yet for {', '.join(missing)}: no final in takes/")
+    paths = [steps[i][1]["media"]["path"] for i in step_ids]
+    if models:
+        paths += [f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))]
     total = 0
-    for p in files:
-        path = p.relative_to(web_root()).as_posix()
+    for path in paths:
+        p = web_root() / path
+        # The key goes in apikey only: a secret key (sb_secret_...) isn't a JWT, and is refused as a bearer token.
         req = urllib.request.Request(
             f"{url.rstrip('/')}/storage/v1/object/{BUCKET}/{path}", data=p.read_bytes(), method="POST",
-            headers={"Authorization": f"Bearer {key}", "apikey": key, "Content-Type": CONTENT_TYPES[p.suffix],
-                     "x-upsert": "true", "Cache-Control": "max-age=3600"})
+            headers={"apikey": key, "Content-Type": CONTENT_TYPES[p.suffix], "x-upsert": "true",
+                     "Cache-Control": "max-age=3600"})
         with urllib.request.urlopen(req, timeout=300):
             pass
         total += p.stat().st_size
-    print(f"uploaded {len(files)} files, {total / 1e6:.1f} MB, to {url}/storage/v1/object/public/{BUCKET}/")
-    # Only now is a video the page's to play: record it, then re-export and commit the page's data.
+    print(f"uploaded {len(paths)} files, {total / 1e6:.1f} MB, to {url}/storage/v1/object/public/{BUCKET}/")
+    # Only now is a step's media the page's to show: record it, then re-export and commit the page's data.
     record = _json(PUBLISHED)
-    videos = {p.relative_to(web_root()).as_posix() for p in files if p.suffix == ".mp4"}
-    record["videos"] = sorted(set(record["videos"]) | videos)
+    record["media"] = sorted(set(record["media"]) | {steps[i][1]["media"]["path"] for i in step_ids})
     PUBLISHED.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8", newline="\n")
-    print(f"{PUBLISHED.name}: {len(record['videos'])} videos; now run python -m moonshot.web.export")
+    print(f"{PUBLISHED.name}: {len(record['media'])} steps published; now run python -m moonshot.web.export")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -128,19 +154,21 @@ def serve(draft: Path | None) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["models", "videos", "serve", "upload"])
+    ap.add_argument("command", choices=["models", "stage", "serve", "upload"])
+    ap.add_argument("steps", nargs="*", help="upload: the live steps to publish, by id (op10-face ...)")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--models", action="store_true", help="upload: the shop's models too")
     ap.add_argument("--draft", type=Path, help="serve: a video for every step not staged yet (relative to the data root)")
     ap.add_argument("--url", help="upload: the Supabase project, https://<ref>.supabase.co")
     a = ap.parse_args()
     if a.command == "models":
         build_models(a.force)
-    elif a.command == "videos":
-        stage_videos()
+    elif a.command == "stage":
+        stage()
     elif a.command == "upload":
-        if not a.url:
-            ap.error("upload needs --url")
-        upload(a.url)
+        if not a.url or not (a.steps or a.models):
+            ap.error("upload needs --url, and the steps to publish (or --models)")
+        upload(a.url, a.steps, a.models)
     else:
         serve(data_root() / a.draft if a.draft else None)
 

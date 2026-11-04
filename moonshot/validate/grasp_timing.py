@@ -6,9 +6,11 @@ first contact with the object a grasp closes on. A lift's phases start at that c
 hand's lifting force passes person.force_onset_frac of the object's weight, and ends at lift-off, the object
 person.lift_off_mm above where it sat. The lifting force comes from the physics run (checks.json load_N).
 
-A take that isn't the vise's is read from its record (moonshot/validate/objects.py): its right hand's grips, each on
-the object its grip event names, and only those on an object at rest: taking a tool from the other hand isn't a reach
-to grasp as people's were measured, nor a lift. Its contact is the first frame a hand touches the object or carries
+A take that isn't the vise's is read from its record (moonshot/validate/objects.py): either hand's grips, each on
+the object its grip event names, and only those that take it up (the hand carries it) from rest: a steadying hand's
+press on the part, as the vise take's presses, and taking a tool from the other hand, aren't reaches to grasp as
+people's were measured, nor lifts. A left hand's reach is held to people's left hands
+(person.reach_to_grasp_left_s): both arms are checked (your decision, 2026-11-03). Its contact is the first frame a hand touches the object or carries
 it (a carried tool leaves the skin, so the carry can close before a finger meets it), as the cause check reads
 touching: validate/take.py gives every check the one `touching`, and with right-hand touches alone the cause check
 found the left hand's work uncaused.
@@ -72,21 +74,28 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
     fps, t, at = float(rec["fps"]), rec["t"], objects.positions(take)
     lift = threshold("person.lift_off_mm").value
     grasping: dict[str, np.ndarray] = {}
+    hand: dict[str, str] = {}
+    carried = {(e["obj"], e.get("side", "R")) for e in tk["events"] if e["kind"] == "carry"}
     for e in intervals(tk["events"], "grip"):
-        obj = e.get("on")
-        if e.get("side") != "R" or obj not in at:
+        obj, side = e.get("on"), e.get("side")
+        if side not in ("R", "L") or obj not in at or (obj, side) not in carried:   # a press holding the part down
             continue
         k0 = min(len(t) - 1, int(round(e["t0"] * fps)))
         if at[obj][k0, 2] > at[obj][0, 2] + lift:                   # already up: taken from the other hand
             continue
         t1 = e["t1"] if e["t1"] is not None else t[-1]
         grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
+        hand[obj] = side
     lifted = [o for o in grasping if o in ck.get("load_N", {})]
-    return {"fps": fps, "hand_speed_mm_s": hand_speed(rec["R_W"], fps).tolist(),
-            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
-            "grasping": {k: v.tolist() for k, v in grasping.items()},
-            "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
-            "load_N": ck.get("load_N", {})}
+    out = {"fps": fps, "hand_speed_mm_s": hand_speed(rec["R_W"], fps).tolist(),
+           "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+           "grasping": {k: v.tolist() for k, v in grasping.items()},
+           "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
+           "load_N": ck.get("load_N", {})}
+    if "L" in hand.values():
+        out |= {"hand": {o: s for o, s in hand.items() if s == "L"},
+                "hand_speed_L_mm_s": hand_speed(rec["L_W"], fps).tolist()}
+    return out
 
 
 def measure(take: Path) -> dict:
@@ -112,23 +121,34 @@ def measure(take: Path) -> dict:
     return out
 
 
+def hand_of(take: dict, obj: str) -> tuple[str, np.ndarray]:
+    """The hand a grasp is the work of (take's `hand`: {object: "L"}; the right when absent), and its speed."""
+    side = take.get("hand", {}).get(obj, "R")
+    return side, np.asarray(take["hand_speed_mm_s" if side == "R" else "hand_speed_L_mm_s"], float)
+
+
 @check("grasp_timing",
-       good=["good/grasp_timing_people.json"],
-       bad=["bad/grasp_timing_slow_reach.json", "bad/grasp_timing_long_preload.json"])
+       good=["good/grasp_timing_people.json", "good/grasp_timing_left_hand.json"],
+       bad=["bad/grasp_timing_slow_reach.json", "bad/grasp_timing_long_preload.json",
+            "bad/grasp_timing_left_slow_reach.json"])
 def grasp_timing(take: dict) -> Result:
     """take: {"fps", "hand_speed_mm_s", "touching": per frame, "grasping": {object: per frame, a grasp planned},
-    "height_mm": {lifted object: per frame}, "load_N": {lifted object: per-frame lifting force}, "weight_N"}."""
-    fps, speed = float(take["fps"]), np.asarray(take["hand_speed_mm_s"], float)
-    if not len(speed):
+    "height_mm": {lifted object: per frame}, "load_N": {lifted object: per-frame lifting force}, "weight_N"}, and
+    for the left hand's grasps "hand" ({object: "L"}) and "hand_speed_L_mm_s": each reach is held to its own hand's
+    people (person.reach_to_grasp_left_s, _right_s), the lift's phases to everyone's."""
+    fps = float(take["fps"])
+    if not len(take["hand_speed_mm_s"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
-    bands = {"reach_s": threshold("person.reach_to_grasp_right_s").band,
-             "preload_ms": threshold("person.grasp_preload_ms").band,
-             "loading_ms": threshold("person.grasp_loading_ms").band}
+    reach = {"R": threshold("person.reach_to_grasp_right_s").band, "L": threshold("person.reach_to_grasp_left_s").band}
+    phases = {"preload_ms": threshold("person.grasp_preload_ms").band,
+              "loading_ms": threshold("person.grasp_loading_ms").band}
     onset, lift = threshold("person.force_onset_frac").value, threshold("person.lift_off_mm").value
     found, outside = [], []
     for obj, grasping in take["grasping"].items():
+        side, speed = hand_of(take, obj)
+        bands = {"reach_s": reach[side]} | phases
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
-            g = {"object": obj, "contact_frame": contact, "reach_s": round((contact - start) / fps, 3)}
+            g = {"object": obj, "hand": side, "contact_frame": contact, "reach_s": round((contact - start) / fps, 3)}
             if obj in take["height_mm"]:
                 z = np.asarray(take["height_mm"][obj], float)[contact:]
                 lifted = np.flatnonzero(z > z[0] + lift)

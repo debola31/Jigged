@@ -402,23 +402,25 @@ class BenchRun:
         rel_plan = (Rhp.T @ Rp, Rhp.T @ (po - p.xpos[hb]))
         # the hand's own correction C, in its frame, so that hand_plan * C * rel_act = hand_plan * rel_plan
         Rc = rel_plan[0] @ rel_act[0].T
-        self.correction[e["obj"]] = (side, Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"])
+        self.correction[e["obj"]] = (side, Rc, rel_plan[1] - Rc @ rel_act[1], tt, e["t1"], e.get("ease_in", 0.0))
 
     def carry_offset(self, tt: float) -> np.ndarray:
         """Joint offsets moving each hand from its planned pose by its carries' corrections, whole until the tool is
         let go and eased out over 0.4 s after: what the tool really sits like in the hand, fixed by sight. It starts
         whole, as it is where the hand already is when it closes; eased out while still held, it swung the tool off
-        its rest as it was set down. The right hand's touch guide adds to it. Through the arm's 9 joints at the planned
-        pose, position and turn together (damped least squares)."""
+        its rest as it was set down. A carry that lifts a tool off the bench eases it in over its `ease_in` (s): whole
+        at once, it let go of the press the plan's pads made into the tool, which sprang the deburring tool 1 mm up as
+        the carry closed. The right hand's touch guide adds to it. Through the arm's 9 joints at the planned pose,
+        position and turn together (damped least squares)."""
         m, p = self.model, self.plan
         dq = np.zeros(m.nv)
         for side in ("R", "L"):
             hb = m.body(f"{side}_hand").id
             err = np.r_[self.touch_guide(side, tt), self.turn_guide(side, tt)]
-            for s_, Rc, pc, t0, t1 in self.correction.values():
+            for s_, Rc, pc, t0, t1, ease in self.correction.values():
                 if s_ != side or not t0 <= tt < t1 + EASE_OUT_S:
                     continue
-                w = 1 - min_jerk((tt - t1) / EASE_OUT_S)
+                w = (1 - min_jerk((tt - t1) / EASE_OUT_S)) * (min_jerk((tt - t0) / ease) if ease else 1.0)
                 Rh = p.xmat[hb].reshape(3, 3)
                 rv = np.zeros(3)
                 q = np.zeros(4)
@@ -563,9 +565,14 @@ class BenchRun:
         t0w = time.time()
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
-            # the lifting force over the frame, not at its end: a hand closing on a 170 g tool chatters +-2 N step to
-            # step, and one sample of that dated the load's onset by chance
+            # the lifting force and the hand's load over the frame, not at its end: a hand closing on a 170 g tool
+            # chatters +-2 N step to step, and one sample of that dated the load's onset by chance; the deburring tool
+            # set down on the bench put 55 N on the hand for one step, which the muscle replay took for the frame's.
+            # And what was touched during it: the calipers set down brushed the part within a frame and were off it at
+            # its end
             load = dict.fromkeys(self.lifted, 0.0)
+            wrench = np.zeros(6)
+            touched: set[str] = set()
             for s in range(spf):
                 tt = (k + s / spf) / self.fps
                 self.switch_carries(tt)
@@ -587,16 +594,16 @@ class BenchRun:
                             self.press_i[i] = float(np.clip(self.press_i.get(i, 0.0) + PRESS_KI * err * m.opt.timestep,
                                                             -e["force"], 2 * e["force"]))
                 self.step(tt)
-                if self.lifted:
-                    mujoco.mj_rnePostConstraint(m, d)
-                    for b in self.lifted:
-                        load[b] += self.lifting_force(b) / spf
+                touched |= set(self.touching("R", tt)) | set(self.touching("L", tt))
+                wrench += np.asarray(hand_wrench(m, d, "R_hand")) / spf    # after mj_rnePostConstraint, which it calls
+                for b in self.lifted:
+                    load[b] += self.lifting_force(b) / spf
             pose = self.pose_record()
             self.rec["pose"].append(pose)
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
-            self.rec["touching"].append(sorted(set(self.touching("R", tt)) | set(self.touching("L", tt))))
-            self.rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))      # the muscle check replays the right arm
+            self.rec["touching"].append(sorted(touched))
+            self.rec["hand_wrench"].append([round(float(x), 5) for x in wrench])  # the muscle check replays the right arm
             for b in self.lifted:
                 self.rec["load_N"][b].append(round(load[b], 3))
             self.rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])

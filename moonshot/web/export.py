@@ -3,8 +3,9 @@
 The page reads only this file: the 20 parts in plan order, each live part's steps exactly as the plan expands them
 (title and caption included, so a caption can only name the plan's facts, plan §2 O8), and the shop as laid out by
 layout.json and shop.json. moonshot/ never reaches a Vercel build, so the data is copied out rather than imported.
-Videos and models aren't in it: it names their paths in Supabase Storage (`media.py`), and marks a step `published`
-only once its video is in published.json, which the upload writes; the page shows the others as coming.
+Videos, stills and models aren't in it: it names their paths in Supabase Storage (`media.py`), and marks a step
+`published` only once its media is in published.json, which the upload writes; the page shows the others as coming.
+Only people's work is rendered as video: a machine cycle is shown by one still of the part after the cut.
 
     python -m moonshot.web.export          # rewrites the file; the gate test_web_steps.py checks it
 """
@@ -75,9 +76,16 @@ def where_zone(zone_id: str, layout: dict) -> dict:
     return {"name": z["name"], "x": (x0 + x1) / 2, "y": (y0 + y1) / 2}
 
 
+def step_media(part: str, step: dict) -> dict:
+    """What the page shows for a step: people's work as a video, a machine cycle as a still of the part after it."""
+    if step["kind"] == "cycle":
+        return {"type": "still", "path": f"still/{part}/{step['id']}.webp"}
+    return {"type": "video", "path": f"video/{part}/{step['id']}.mp4"}
+
+
 def live_part(part: str, layout: dict, shop_json: dict) -> dict:
     plan = load_plan(part)
-    published = set(_json(PUBLISHED)["videos"])
+    published = set(_json(PUBLISHED)["media"])
     machine = {s["id"]: s["machine"] for s in plan["setups"]}
     groups = [{"id": s["id"], "title": s["title"]} for s in plan["setups"]]
     if plan.get("finish"):
@@ -86,10 +94,10 @@ def live_part(part: str, layout: dict, shop_json: dict) -> dict:
     for s in expand(plan):
         where = (where_machine(machine[s["setup"]], layout, shop_json) if "setup" in s
                  else where_zone(STATION_ZONES[s["station"]], layout))
-        video = f"video/{part}/{s['id']}.mp4"
+        media = step_media(part, s)
         steps.append({"id": s["id"], "title": s["title"], "caption": s["caption"], "kind": s["kind"],
-                      "group": s.get("setup", "finish"), "where": where, "video": video,
-                      "published": video in published})
+                      "group": s.get("setup", "finish"), "where": where, "media": media,
+                      "published": media["path"] in published})
     return {"material": plan["stock"]["material"], "groups": groups, "steps": steps}
 
 

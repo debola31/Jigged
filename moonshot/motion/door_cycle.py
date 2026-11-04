@@ -47,8 +47,11 @@ LEFT_AFTER_S = 2.8                                    # the left hand sets off t
 # front, the skin clear of its door (4 mm) and the other bar (36 mm), at most 3 mm into the bar itself. The hand is
 # level: tilted up as first solved (13 deg), it needed the wrist bent up past its range, and the planned hand pitched
 # down 20 deg instead, its fingertips onto the bar's front corner
-GRIP_Z = 1050.0                                       # where on the bar (it runs 680-1160 mm up), the wrist ~26 mm
-                                                      # above: at the elbow, the forearm level (the affordance's height)
+GRIP_Z = 1000.0                                       # where on the bar (it runs 680-1160 mm up), the wrist ~26 mm
+                                                      # above: just under the elbow, 50 mm below the affordance's height,
+                                                      # where the forearm reaching the right bar at its stop passes under
+                                                      # the pendant (its underside 1090 mm up; at 1050 the forearm met it
+                                                      # and the hand never reached the bar)
 WRAP_Q = {"index_mcp_abd": -0.5, "index_mcp_flex": 55.1, "index_pip": 62.6, "index_dip": 49.2,
           "middle_mcp_abd": -5.1, "middle_mcp_flex": 46.9, "middle_pip": 69.2, "middle_dip": 38.9,
           "cmc4_flex": 3.0, "ring_mcp_abd": 7.2, "ring_mcp_flex": 31.2, "ring_pip": 76.9, "ring_dip": 26.7,
@@ -68,6 +71,8 @@ VIA = (30.0, -70.0, -20.0)                            # by way of this far furth
 # planner turn the arm in (31 deg, at people's limit, likelihood 32)
 REST_POSE = [5.0, 0.0, 0.0, 20.0, 7.0, -20.0, 12.0, -3.0, 0.0, -3.0]
 REST_W = 0.1
+PENDANT_CLEAR_MM = 30.0       # the arm planned this much further off the pendant: on the way out to the right door at
+                              # its stop, the forearm trailing its plan caught the pendant's corner and stopped the hand
 CLOSE_LUMBAR = ORIGIN + np.array([0.0, -1100.0, 955.0])   # in the doorway, centred, the chest 130 mm off the bars
 START_LUMBAR = np.array([70.0, -1470.0, 955.0])           # in front of the pendant, the button by the right shoulder
 SCREEN = ORIGIN + np.array([850.0, -1030.0, 1550.0])      # the pendant's screen, where the program name shows
@@ -160,10 +165,11 @@ class _Doors(StepTake):
         self.rest, self.rest_H = f["W"], f["H"]             # the same in the mirrored world for the left hand
         for s in self.side.values():
             s["wrist"] = self.rest.copy()
-        # the pendant hangs in front of the right door's bar near full open: the right arm reaches in under it
+        # the pendant hangs in front of the right door's bar near full open: the right arm reaches in under it, kept
+        # PENDANT_CLEAR_MM further off it than the plan needs, as the arm trails its plan in the physics
         c = vf2.record()["colliders"]["pendant_face"]
         lo, hi = np.array(c["box_min_mm"], float), np.array(c["box_max_mm"], float)
-        self.boxes = [(ORIGIN + (lo + hi) / 2, (hi - lo) / 2)]
+        self.boxes = [(ORIGIN + (lo + hi) / 2, (hi - lo) / 2 + PENDANT_CLEAR_MM)]
 
     def solve(self, theta0=None, iters=3000):
         """Planned from both arms hanging at rest (REST_POSE), where they start and end."""

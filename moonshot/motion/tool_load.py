@@ -54,7 +54,16 @@ BELOW_MM = 115.0                                         # the holder carried in
                                                          # goes up: at 80, its knob up in the nose's bore, a holder
                                                          # arriving 40 mm off the axis met the nose from below
 LINE_UP_S = 0.8                                          # lined up under the spindle, by eye, this long
-TRANSPORT_S = 1.2                                        # up from the stand to under the spindle
+TRANSPORT_S = 1.2                                        # up from the stand to under the spindle ...
+TRANSPORT_MM = 430.0                                     # ... this far or less (from fork 0), longer farther
+STANCE_MM_PER_FORK = 72.0                                # the stance moves this far right for each fork further right,
+                                                         # the stand's pitch: the reach to each holder is the first's
+                                                         # (moving half as far, the right hand reached a fork 3
+                                                         # forks right 54 mm further and 0.07 s later, still moving as
+                                                         # the fingers closed: the grip's load passed 5% of the weight
+                                                         # within 0.03-0.13 s)
+BACK_MM = 880.0                                          # back to rest from the spindle in 0.85 s from this far, longer
+                                                         # farther
 # the grasp's timing (Guillery 2013, thresholds.toml person.grasp_*): the fingers close, the grip firms with no load
 # yet (preload, the middle of people's band), the hand takes the holder's weight (loading) and the holder comes off
 # the tines as the weight is taken, about 0.2 s later, as people's 0.16-0.27 s
@@ -68,6 +77,7 @@ LOAD_RAMP_S = 0.26                                       # the holder's weight f
 # fingers' contact): from rest to in front of the holder in REACH_S, the approach onto the grip starting APPROACH_AT
 # into it and lasting APPROACH_S, overlapping, and the fingers on the holder TOUCH_S after the hand is on its grip
 REACH_S = 0.46
+REACH_MM = 340.0                                         # ... for a reach this long or shorter (fork 0's)
 APPROACH_AT = 0.32
 APPROACH_S = 0.24
 TOUCH_S = 0.03
@@ -93,7 +103,7 @@ START_RAMP_S = 0.6                                       # the start blends from
                                                          # as the arm leaves rest, and back as it returns: switched
                                                          # at once, the solve swung the shoulder out past people's
                                                          # 31 deg on the way between
-OPEN_AT = 0.76                                           # the hand opens widest this far into its reach, as people's
+OPEN_AT = 0.785                                          # the hand opens widest this far into its reach, as people's
                                                          # do at 71-77% (person.peak_aperture_reach_frac): measured
                                                          # 0.714 at a planned 0.736, the fingers peaking early
 ONSET_LEAD_S = 0.07                                      # the solved reach starts this long before its transit's
@@ -105,8 +115,16 @@ EASE_MM = 1.5                                            # the hand eases this f
 LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
-SPINDLE_YAW_DEG = 0.0                                    # the grip turned this far about the holder's axis (from
-                                                         # above, anticlockwise) by the time it is under the spindle
+YAW_DEG_PER_FORK = 10.0                                  # the grip turned this far about the holder's axis (from
+                                                         # above, anticlockwise) by the time it is under the spindle,
+                                                         # for each fork right of the first: from a stance further
+                                                         # right the arm reaches further across to the spindle, and
+                                                         # the wrist, kept turned as for the first fork, bent back
+                                                         # 45-50 deg (from fork 3, a median negative log-likelihood of
+                                                         # 29.9 unturned, 28.2 turned 15 deg, 27.2 turned 30)
+CLEAR_STAND_MM = np.array([0.0, -420.0, -130.0])         # back to rest by way of this far from the spindle, toward
+                                                         # the body: straight down to a stance further right, the hand
+                                                         # swept through the holders still on the stand
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
 
 
@@ -245,6 +263,11 @@ class InRange(BS.BodySolver):
         return terms
 
 
+def door_lumbar(fork: int) -> np.ndarray:
+    """Where the body stands to take a holder from fork `fork` and seat it."""
+    return DOOR_LUMBAR + [STANCE_MM_PER_FORK * fork, 0.0, 0.0]
+
+
 def rest_at(take: StepTake) -> None:
     """The take's hands hang at rest at REST_MM from its lumbar (the left's mirrored, as the planner has it)."""
     take.rest = take.lumbar + REST_MM
@@ -263,7 +286,7 @@ class Seat(StepTake):
     body_solver = InRange
 
     def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True):
-        super().__init__(out, DOOR_LUMBAR, verbose)
+        super().__init__(out, door_lumbar(fork), verbose)
         rest_at(self)
         self.tool, self.fork, self.n = tool_id, fork, n_forks
         boxes = []
@@ -317,7 +340,11 @@ class Seat(StepTake):
         # moves one after the other, the first crossed its 330 mm in 0.22 s, and the plan's hand, at 31 m/s^2, outran
         # the acceleration the cause check allows (physics.acceleration_spike_m_s2) and the arm, after it, twice that
         t_on = 0.2
-        t_app = t_on + APPROACH_AT
+        # farther reaches take longer, their peak acceleration kept (a minimum-jerk move's grows as its length over its
+        # duration squared), the approach onto the grip as long as ever
+        reach_s = REACH_S * math.sqrt(max(1.0, np.linalg.norm(Wg + [15.0, -60.0, -12.0] - self.side["R"]["wrist"])
+                                          / REACH_MM))
+        t_app = t_on + APPROACH_AT + reach_s - REACH_S
         t_c = t_app + APPROACH_S                          # on the grip
         t_touch = t_c + TOUCH_S                           # the fingers on it: the carry takes it (moonshot/sim/
         # tool_load.py: the hand and the holder don't collide from the final approach on, as a welded tool's grip, so
@@ -327,7 +354,7 @@ class Seat(StepTake):
         self.look(0.0, P0 + [0, 0, -30.0])
 
         def reach(t, W0=W0, pre=pre, Wg=Wg, H=H):
-            W = W0 + (pre - W0) * min_jerk((t - t_on) / REACH_S) + (Wg - pre) * min_jerk((t - t_app) / APPROACH_S)
+            W = W0 + (pre - W0) * min_jerk((t - t_on) / reach_s) + (Wg - pre) * min_jerk((t - t_app) / APPROACH_S)
             w = min_jerk((t - t_on) / (t_app + 0.1 - t_on))
             return [("pos", W, 1.0)] + ([("pose", H, W, 2.0 * w)] if w > 0 else [])
         self.add("R", t_on, t_c + 0.05, reach)
@@ -347,10 +374,12 @@ class Seat(StepTake):
         t1 = tl + LIFT_S
         t2 = t1 + 0.43
         t2b = t2 + 0.5
-        t3 = t2b + TRANSPORT_S
         slid = P0 + [0, -SLIDE_MM, LIFT_MM]
+        lifted = slid + [0, 0, CLEAR_UP_MM]
+        # the carry in under the spindle, longer from a farther fork
+        t3 = t2b + TRANSPORT_S * math.sqrt(max(1.0, np.linalg.norm(SPINDLE - [0, 0, BELOW_MM] - lifted) / TRANSPORT_MM))
         keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid),
-                 (t2b, slid + [0, 0, CLEAR_UP_MM]), (t3, SPINDLE - [0, 0, BELOW_MM])]
+                 (t2b, lifted), (t3, SPINDLE - [0, 0, BELOW_MM])]
         self.look(t2, SPINDLE - [0, 0, 60.0])
         t4 = t3 + LINE_UP_S                                 # lined up under it, by eye
         t5 = t4 + 0.6
@@ -397,7 +426,7 @@ class Seat(StepTake):
         t9 = t8 + 0.25
         keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, SPINDLE - [0, 0, EASE_MM])]
         def turned(t):                                      # the grip turned about the holder's axis on the way in
-            a = math.radians(SPINDLE_YAW_DEG) * min_jerk((t - t2b) / (t3 - t2b))
+            a = math.radians(YAW_DEG_PER_FORK * self.fork) * min_jerk((t - t2b) / (t3 - t2b))
             return np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
         self.follow("R", t_c + 0.05, t9, "holder", at, turned)
         self.load("R", tw0, t8, kg)
@@ -412,15 +441,18 @@ class Seat(StepTake):
         out = W9 + turned(t9) @ [35.0, -15.0, -20.0]
         self.add("R", t9, t9 + 0.55, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t9 - 0.15) / 0.4), 2.0)])
         self.side["R"]["wrist"] = out
-        self.transit("R", t9 + 0.55, t9 + 1.4, self.rest)
-        self.fingers("R", t9 + 1.2, self.q_relax)
+        clear = SPINDLE + CLEAR_STAND_MM
+        back_s = 0.85 * math.sqrt(max(1.0, (np.linalg.norm(clear - out) + np.linalg.norm(self.rest - clear)) / BACK_MM))
+        self.transit("R", t9 + 0.55, t9 + 0.55 + back_s, self.rest, via=[clear])
+        t10 = t9 + 0.55 + back_s                            # at rest
+        self.fingers("R", t10 - 0.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
         self.event("grip", round(t_c, 3), round(t9, 3), side="R", grip="holder", on="holder")
         self.event("carry", round(t_touch, 3), round(t8, 3), side="R", obj="holder", kg=round(kg, 4),
                    loading=[round(tw0, 3), round(tw0 + LOAD_RAMP_S, 3)])
         self.event("seat", round(t5, 3), round(t8, 3), tool=self.tool)
-        self.clip("Load the tools", 0.0, t9 + 1.4, f"Load {self.tool}")
-        self.t = t9 + 1.6
+        self.clip("Load the tools", 0.0, t10, f"Load {self.tool}")
+        self.t = t10 + 0.2
         self.keys = keys
         return {"path": [[round(t, 3), *np.round(p, 3).tolist()] for t, p in keys]}
 
@@ -494,7 +526,10 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
     root = data_root() / "takes" / part / step_id
     p = part_in_vise(plan, step["setup"])
     seq = sequence(plan, step)
-    shared = {"seat": root / "seat-grips.json", "pendant": root / "pendant-grips.json"}
+    # the grips the takes share: the pendant's, and Tool Release's for each fork, which the body reaches from where it
+    # stands for that fork (door_lumbar)
+    shared = {"pendant": root / "pendant-grips.json"} | {
+        f"seat{s['fork']}": root / f"seat-grips-fork{s['fork']}.json" for s in seq if s["kind"] == "seat"}
     for f in shared.values():               # every step's takes stand and grip alike: a grip another step solved
         if not f.exists():                  # serves (the cache's key says whether it still does)
             other = sorted(root.parent.glob(f"*/{f.name}"))
@@ -510,10 +545,11 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
         out.mkdir(parents=True, exist_ok=True)
         extra = {}
         if s["kind"] == "seat":
-            if shared["seat"].exists():
-                own.write_bytes(shared["seat"].read_bytes())
+            seat = shared[f"seat{s['fork']}"]
+            if seat.exists():
+                own.write_bytes(seat.read_bytes())
             take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose)
-            shared["seat"].write_bytes(own.read_bytes())
+            seat.write_bytes(own.read_bytes())
             extra = take.plan()
         else:
             if shared["pendant"].exists():

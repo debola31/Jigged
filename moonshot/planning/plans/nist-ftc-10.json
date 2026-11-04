@@ -58,7 +58,7 @@
    ]}
  ],
  "finish": [
-  {"id": "deburr", "station": "bench", "what": "Deburr every edge, break the sharp corners of the pocket and the cross holes"},
+  {"id": "deburr", "station": "bench", "what": "Deburr every edge: scrape off the sharp slivers of metal (burrs) the cutters leave on the edges, with a hooked blade drawn along each one, so the part is safe to handle. Break the sharp corners of the pocket and the cross holes"},
   {"id": "inspect", "station": "inspection", "what": "Check the pocket depth, the 31 mm height, the Ø3.5 G6 pins with gauge pins, the M3 threads with a go/no-go gauge, and the Ø7 bores",
    "tools": ["cal6", "mic1", "hgauge", "thread"]}
  ],

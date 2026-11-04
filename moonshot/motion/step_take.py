@@ -39,7 +39,8 @@ KEY = "__source_hash__"
 
 
 class StepTake:
-    PLANNER_W: dict[str, float] = {}         # a step's own weights for the body solver's terms (solver.BodySolver.W)
+    SOLVER_W: dict = {}          # a take's own weights over the body solver's (BodySolver.W): the pendant's keys weigh
+                                 # people's range more ("range"), where the bench's calipers can't spare the accuracy
 
     def __init__(self, out, lumbar, verbose=True):
         self.out, self.lumbar, self.verbose = Path(out), np.asarray(lumbar, float), verbose
@@ -176,7 +177,7 @@ class StepTake:
         self.T = self.t + 0.3
         self.n = n = int(self.T * FPS) + 1
         s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.boxes, arms=SIDES)
-        s.W = s.W | self.PLANNER_W
+        s.W = BS.BodySolver.W | self.SOLVER_W
         for side in SIDES:
             for k in range(n):
                 t = k / FPS

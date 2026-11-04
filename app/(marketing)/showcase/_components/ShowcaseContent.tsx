@@ -60,9 +60,9 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
         </Typography>
         <Typography sx={{ mt: 3, maxWidth: 760, color: 'rgba(255, 255, 255, 0.78)', fontSize: { xs: '1.05rem', md: '1.2rem' }, lineHeight: 1.6 }}>
           This is a mock-up of what Jigged would hand a machinist: a plan for each part, broken into steps, with a video
-          of every step being done. We made all of it ahead of time, for {data.parts.length} real parts in one shop, so
-          nothing here is generated when you click. Every motion in the videos is simulated on a model of the human
-          arm and hand.
+          of every step a person does and a picture of the part after each cut. We made all of it ahead of time, for{' '}
+          {data.parts.length} real parts in one shop, so nothing here is generated when you click. Every motion in the
+          videos is simulated on a model of the human arm and hand.
         </Typography>
       </Section>
 
@@ -85,7 +85,7 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
         <SectionHeading
           index="02"
           eyebrow={part.name}
-          heading={`${part.steps.length} steps, each one shown being done.`}
+          heading={`${part.steps.length} steps: people's work on video, the machine's cuts as pictures.`}
           subhead={`${part.size} · ${part.material} · ${[...new Set(part.steps.map((s) => s.where.name))].join(' → ')}`}
         />
         <Box sx={{ mt: { xs: 4, md: 6 }, display: 'grid', gap: { xs: 4, md: 5 }, gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: '7fr 5fr' } }}>

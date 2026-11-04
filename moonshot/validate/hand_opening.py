@@ -4,7 +4,10 @@ the way through (person.peak_aperture_reach_frac), and wider for a bigger object
 judged on timing alone.
 
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
-(sim.npz q) on the body model's hand. Reaches are grasp_timing's.
+(sim.npz q) on the body model's hand. Reaches are grasp_timing's. A take that isn't the vise's has each grasped
+object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm), and a left hand's reach is read
+from the left hand's aperture (sim.npz L_q; q_L in a run with the vise's keys, as the door takes', whose bars are sized
+across their width).
 """
 from __future__ import annotations
 
@@ -15,29 +18,32 @@ import numpy as np
 
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
-from moonshot.validate.grasp_timing import BARS, measure as grasp_inputs, reaches, side_inputs
+from moonshot.validate import objects
+from moonshot.validate.grasp_timing import BARS, hand_of, measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
 def measure(take: Path) -> dict:
-    """What the check reads, from a physics run with the vise's keys in its sim.npz: the grasp-timing inputs, the
-    aperture (a two-handed run's left hand's too, sim.npz q_L), and each grasped object's size across the grip (the
-    blank's near-to-far faces, the knob's diameter, a door's handle bar's width)."""
+    """What the check reads, from a physics run: the grasp-timing inputs, the aperture, and each grasped object's size
+    across the grip (a vise take's: the blank's near-to-far faces, the knob's diameter, a door's handle bar's width)."""
     from moonshot.world import vf2
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
-    tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
-    load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     g = grasp_inputs(take)
+    if objects.is_vise(sim):
+        tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
+        load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
+        bars = {geom: vf2.record()["colliders"][geom[len("vf2_"):]] for geom in set(BARS.values())}
+        size = ({"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
+                | {geom: c["box_max_mm"][0] - c["box_min_mm"][0] for geom, c in bars.items()})
+    else:
+        size = {o: objects.thinnest_mm(take, o) for o in g["grasping"]}
     names = [str(n) for n in sim["names"]]
-    bars = {geom: vf2.record()["colliders"][geom[len("vf2_"):]] for geom in set(BARS.values())}
     out = {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
-           "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], names).tolist(),
-           "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
-           | {geom: c["box_max_mm"][0] - c["box_min_mm"][0] for geom, c in bars.items()}}
-    if "left_hand" in g:
-        out |= {"left_hand": g["left_hand"], "hand_speed_mm_s_L": g["hand_speed_mm_s_L"],
-                "aperture_mm_L": aperture_mm(sim["q_L"], names).tolist()}
+           "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], names).tolist(), "size_mm": size}
+    if "hand" in g:
+        out |= {"hand": g["hand"], "hand_speed_L_mm_s": g["hand_speed_L_mm_s"],
+                "aperture_L_mm": aperture_mm(sim["q_L" if objects.is_vise(sim) else "L_q"], names).tolist()}
     return out
 
 
@@ -46,23 +52,25 @@ MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart 
 
 
 @check("hand_opening",
-       good=["good/hand_opening_people.json"],
-       bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json"])
+       good=["good/hand_opening_people.json", "good/hand_opening_left_hand.json"],
+       bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json",
+            "bad/hand_opening_left_early_peak.json"])
 def hand_opening(take: dict) -> Result:
     """take: {"fps", "hand_speed_mm_s", "aperture_mm", "touching": per frame, "grasping": {object: per frame},
-    "size_mm": {object: its size across the grip}}; a two-handed take adds "left_hand", the objects the left hand
-    grasps, and its "hand_speed_mm_s_L" and "aperture_mm_L", so each reach is measured on its own hand."""
+    "size_mm": {object: its size across the grip}}, and for the left hand's grasps "hand" ({object: "L"}),
+    "hand_speed_L_mm_s" and "aperture_L_mm"."""
     fps = float(take["fps"])
     if not len(take["aperture_mm"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
     when, slope = threshold("person.peak_aperture_reach_frac").band, threshold("person.aperture_per_object_mm").band
     found, outside, peaks = [], [], {}
     for obj, grasping in take["grasping"].items():
-        speed, ap = side_inputs(take, obj, "hand_speed_mm_s")[0], side_inputs(take, obj, "aperture_mm")[0]
+        side, speed = hand_of(take, obj)
+        ap = np.asarray(take["aperture_mm" if side == "R" else "aperture_L_mm"], float)
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
             k = start + int(np.argmax(ap[start:contact + 1]))
             frac = (k - start) / max(1, contact - start)
-            found.append({"object": obj, "contact_frame": contact, "peak_frac": round(frac, 3),
+            found.append({"object": obj, "hand": side, "contact_frame": contact, "peak_frac": round(frac, 3),
                           "peak_mm": round(float(ap[k]), 1)})
             peaks.setdefault(obj, []).append(float(ap[k]))
             if not when[0] <= frac <= when[1]:

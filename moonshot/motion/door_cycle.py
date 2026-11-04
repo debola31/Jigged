@@ -150,9 +150,9 @@ class _Doors(StepTake):
     movement, as people reach to grasp, the hand opening on the way and closing round the bar; running the door along
     its track to the stop; letting go and backing off the bar before the hand comes back to rest. Standing in the
     doorway, the operator can't step toward a door at its stop, so the reach out to it leans on people's range; the
-    planner holds the body to their posture harder than at a bench (PLANNER_W): at its weights the trunk leant past
+    planner holds the body to their posture harder than at a bench (SOLVER_W): at its weights the trunk leant past
     their side-bend 46 of 260 frames, and the arm reached the stop turned out past their likeliest (likelihood 44)."""
-    PLANNER_W = {"prior": 1.0, "range": 5.0}
+    SOLVER_W = {"prior": 1.0, "range": 5.0}
 
     def __init__(self, out, verbose=True):
         super().__init__(out, CLOSE_LUMBAR, verbose)

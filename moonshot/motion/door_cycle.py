@@ -54,20 +54,22 @@ OPEN_START_S = 0.6                                    # door-open's (its reach s
 FRONT_Q = {"index_mcp_flex": -20.0, "index_pip": 0.0, "middle_mcp_flex": -20.0, "middle_pip": 0.0,
            "ring_mcp_flex": -20.0, "ring_pip": 0.0, "little_mcp_flex": -20.0, "little_pip": 0.0,
            "thumb_cmc_abd": 32.0, "thumb_cmc_flex": -20.0, "thumb_mcp_flex": -8.0, "thumb_ip": -15.0}
-FRONT_IN = np.array([6.0, 0.0, 0.0])                  # the reach ends this far out of the wrap's place
+FRONT_IN = np.array([4.0, -14.0, 0.0])               # the reach ends this far out of and in front of the wrap's place:
+                                                      # the hand's colliders fit its skin, and nearer, the thumb's side
+                                                      # met the bar's front inner side as the hand came on (68 N)
 FRONT_FROM = np.array([0.0, -50.0, 0.0])              # and comes this far straight in onto it,
 LEAVE_FRONT = 1.8                                     # and backs off that much further letting go, the fingers clear of
                                                       # the bar before the arm drops back to rest past it
 FRONT_SLIDE_S = 0.13                                  # in this long: the reach out to the stop is the longest (420 mm),
                                                       # so its rise gets the most of REACH_S, at 17 m/s^2 at most
-FRONT_EARLY_S = 0.067                                 # the hand starts closing this long before it stops: the bar is
-                                                      # met by the thumb closing onto it, the same frame for either hand
-                                                      # (the palm, stopping short of it, met it a frame early on the left
-                                                      # and not at all on the right), and within people's reach
-PEAK_AT = {"beside": 0.847, "front": 0.8}              # the hand opens widest this far into the planned reach, by the
+FRONT_EARLY_S = 0.0                                   # the hand starts closing this long before it stops
+PEAK_AT = {"beside": 0.66, "front": 0.778}            # the hand opens widest this far into the planned reach, by the
                                                       # way it comes onto the bar: ~74% of the reach the hand-opening
                                                       # check measures, which starts a frame before the plan's and ends
                                                       # as the hand meets the bar
+FRONT_PEAK_RIGHT = 0.095                              # and the right hand that much later from in front: held off the
+                                                      # pendant, it meets the bar 1.5 frames later in its reach than the
+                                                      # left (0.63 s against 0.57)
 # the index's spread on the reach's last part, at its widest, and meeting the bar (index_mcp_abd; the hook opens 84 mm to
 # 77): from in front the hand meets the bar a frame after its widest, and a 20 deg swing that fast took the index's
 # extensor past its maximum
@@ -240,7 +242,8 @@ class _Doors(StepTake):
         spread = lambda deg: self.hand.clamp(came | {"index_mcp_abd": deg})     # noqa: E731
         self.fingers(side, t0, self.finger_at(side, t0))
         self.fingers(side, t_in, spread(SPREAD_DEG[way][0]))
-        self.fingers(side, t0 + PEAK_AT[way] * REACH_S, spread(SPREAD_DEG[way][1]))
+        peak = PEAK_AT[way] + (FRONT_PEAK_RIGHT if way == "front" and side == "R" else 0.0)
+        self.fingers(side, t0 + peak * REACH_S, spread(SPREAD_DEG[way][1]))
         self.fingers(side, t_c, spread(SPREAD_DEG[way][2]))
 
     def beside(self, side, g, H, W, t0, t_c, t_on) -> tuple[dict, float]:
@@ -374,6 +377,11 @@ class DoorOpen(_Doors):
 
 
 class CycleStart(StepTake):
+    """Check the program on the pendant's screen and press Cycle Start. The arm held to people's range as the door
+    takes' are (SOLVER_W): at the solver's own weights the shoulder turned out past it (33 deg against their 30.9) on
+    the way to the button."""
+    SOLVER_W = {"prior": 1.0, "range": 20.0}
+
     def __init__(self, out=TAKES / "cycle-start", verbose=True):
         super().__init__(out, START_LUMBAR, verbose)
         self.button = ORIGIN + np.array(vf2.record()["affordances"]["cycle_start"]["at_mm"], float)

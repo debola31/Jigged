@@ -238,7 +238,9 @@ class Take:
             # on the near face opposite them; side by side at one depth, the index couldn't reach round the corner and
             # pressed it with its middle segment, unregulated (the fingers' side 23.5 N); four side by side ran off
             # the 31 mm face and knocked the part over, and a grip across its ends had the fingers where the stop is
-            d = sum(depth) / 2
+            # just above its centre of mass: held by two of its edges, it swings in the pinch as the hand moves, and
+            # pinched 19 mm above it (halfway down what stands proud) it slipped 2.1-2.3 mm in the hand
+            d = hz - 4
             far = lambda lo, hi, x: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=(d + lo, d + hi), x=x))  # noqa: E731
             targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=(d - 6, d + 6), x=(-8, 8))),
                        "index": far(-14, -4, (-4, 12)), "middle": far(2, 12, (-10, 6))}
@@ -429,6 +431,10 @@ class Take:
         g = self.grips[grip]
         Hg, Wg = self.grip_pose(grip, t0)
         self.look(t0, self.stage + [0, 0, self.half[2]])
+        # a part stood on end is held from its end, and the thumb meets its near face as the hand arrives, 0.16 s before
+        # the close, and it rises off the table 0.09 s after the plan lifts it: timed from the other loads' touch and
+        # rise, op50's preload and loading measured 300 and 267 ms
+        lead, rise = (TOUCH_LEAD_S, 0.0) if self.half[0] >= 30 else (0.16, 0.06)
         if self.start == "vise":       # high over the crank's disc (the knob up to z 1040), then down onto the part
             reach = 1.27 if reach is None else reach
             t_reach = t0 + 0.35
@@ -445,16 +451,18 @@ class Take:
             # point is set from the grip, so the reach is the same length whatever the load and wherever the operator
             # stands
             reach = REACH_S if reach is None else reach
-            ready = Wg + READY_FROM_GRIP
+            # a part on end stands above the reach planned for the shorter ones (op50's, pinched 75 mm under its top):
+            # the hand pauses 40 mm over its top and comes in 75 mm over it; from the shorter ones' pause, level with
+            # its top, the hand rising behind the plan swept its fingers into it, and with the shorter ones' approach
+            # the opening fingers, 42 mm under the hand, went 17 mm into it; from 110 mm over it, the hand came down
+            # onto it at 0.54 m/s, early, and the lift's phases ran long
+            top = self.stage[2] + self.half[2]
+            ready = Wg + READY_FROM_GRIP + [0, 0, max(0.0, top + 40 - (Wg[2] + READY_FROM_GRIP[2]))]
             t_ready = t0 + 0.35 + raise_s
             self.transit(t0 + 0.35, t_ready, ready)
             self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
             t_reach = t_ready + settle_s
-            # over a part on end with the hand 110 mm above its top, as the open fingers reach 95 mm below the hand:
-            # op50's, pinched 57 mm under its top, stood above the approach planned for the shorter ones, and the
-            # fingers met its top and knocked it over
-            top = self.stage[2] + self.half[2]
-            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, max(62.0, top + 110 - Wg[2])]], fade=(Hg, 1.0))
+            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, max(62.0, top + 75 - Wg[2])]], fade=(Hg, 1.0))
             # widest at ~74% of the reach as the hand-opening check measures it, from the pause to the first touch; the
             # physics hand is widest ~0.03 s before the key
             t_peak = t_reach + REACH_PEAK * reach
@@ -476,8 +484,8 @@ class Take:
             # take's effort sets the load the arm lifts with as well as the squeeze, so the preload (grip rising, no
             # load yet) stays under the loading's onset, 5% of the weight (person.force_onset_frac); at 0.25 there
             # the load rose from the first touch and the loading phase measured 367 ms
-            t_load = t_contact - TOUCH_LEAD_S + ga["preload_s"]
-            t_lift = t_load + ga["loading_s"]
+            t_load = t_contact - lead + ga["preload_s"]
+            t_lift = t_load + ga["loading_s"] - rise
             self.effort(t_contact, 0.0, grip)
             self.effort(t_load, PRELOAD_EFFORT, grip)
         self.effort(t_lift, 1.0, grip)
@@ -647,11 +655,17 @@ class Take:
         the plan carries it most of the way and the press closes the last few mm."""
         t0 = self.t
         self.look(t0, self.home + [0, self.half[1], self.half[2]])
+        # set down leaning in the pinch, the grip eases so it stands up on its foot before it is slid: op50's, turned
+        # 2.7 deg about the pinch as it was lifted, stood on its edge on the vise's floor, and eased to 0.3 stood
+        # only to 1.5 deg
+        self.effort(t0 + 0.1, 0.1, grip)
+        ts = t0 + 0.35
+        self.effort(ts, 0.1, grip)
         # nearly all its weight still carried, so it skims the floor: eased to 0.4, the floor's drag on its foot held
         # the foot back as the hand pushed 101 mm up, and it leaned on the stop's top with its foot 2.6 mm off it
-        self.effort(t0 + 0.1, 0.9, grip)
-        t1 = t0 + 0.1 + dur
-        self.move_blank(t0 + 0.1, t1, np.eye(3), np.array([self.set_down[0], self.home[1], self.home[2]]))
+        self.effort(ts + 0.1, 0.9, grip)
+        t1 = ts + 0.1 + dur
+        self.move_blank(ts + 0.1, t1, np.eye(3), np.array([self.set_down[0], self.home[1], self.home[2]]))
         self.event("press", t1 - 0.25, t1 + 0.1, normal=[0, -1.0, 0], force=push_N, contact="blank")
         t2 = t1 + 0.1 + dur
         self.move_blank(t1 + 0.1, t2, np.eye(3), self.home)

@@ -21,7 +21,7 @@ def run(replan: bool = False, seconds: float | None = None) -> dict:
     if replan or not (plan.OUT / "reference.npz").exists():
         plan.build()
     r = BenchRun(plan.OUT, plan.loose(), carried=("insp_cal6_slider", ("L", "insp_cal6")), skip=("cal6",),
-                 grip_objects={"cal": ("insp_cal6_slider",), "slider": ("insp_cal6_slider",), "beam": ("insp_cal6",)})
+                 grip_objects={"slider": ("insp_cal6_slider",), "beam": ("insp_cal6",)})
     r.run(seconds)
     seat = [i for i, e in enumerate(r.presses) if e.get("at") == "cal6_rod"]
     beam = [i for i, e in enumerate(r.presses) if e.get("at") == "cal6_beam"]

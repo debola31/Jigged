@@ -28,7 +28,7 @@ from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import PART_AT, REST, BenchPlan, bands, bench_box, box, mirror, oriented_box, settle
+from moonshot.motion.bench import LIFT_S, PART_AT, BenchPlan, bands, bench_box, box, oriented_box, settle
 from moonshot.motion.primitives import FPS, min_jerk, open_like
 from moonshot.world import bench_cell as BC
 
@@ -36,8 +36,10 @@ OUT = data_root() / "takes" / "nist-ftc-10-inspect"
 CAL_YAW = 0.0               # the station's: beam along X, jaws to the left; face down, the roller faces the operator
 SEAT_N = 2.0                 # the push that seats the rod on the floor (proposed: light, as the manual asks)
 LIFT_N = 4.0                 # the thumb's push closing the slider again, up its 2 N drag and its weight (proposed)
-BEAM_N = 4.0                 # the left hand's push holding the beam's end on the face (proposed): firmer than the
-                             # slider's 2 N drag, or the slider, its rod on the floor, holds the beam 0.06 mm off it
+BEAM_N = 5.0                 # the left hand's push holding the beam's end on the face (proposed): firmer than the
+                             # slider's 2 N drag, or the slider, its rod on the floor, holds the beam 0.06 mm off it;
+                             # at 4 N the right hand's seat press, trimmed to 2-4 N, lifted it for a frame (0.039 mm)
+                             # in one run of three
 SHUT_MM = 1.0                # the slider is closed this far into its stop, closing it from wherever it was taken
 OVERTRAVEL = 0.3             # the slider is planned this far past the floor; the rod stops it
 ROD_FROM_WALL = 2.6          # the rod's near face this far past the pocket's near wall (mm): clear of the floor's
@@ -52,6 +54,7 @@ SLIDER_GRIP = np.array([-60.0, 5.0, 6.0])   # the right hand's grip on the slide
 BEAM_GRIP = np.array([80.0, 9.75, 4.25])     # the left hand's pinch across the beam, in the calipers' frame (mm): 36 mm
                                              # above its end, clear of the part
 GRIP_AT = {"cal": SLIDER_GRIP, "slider": SLIDER_GRIP, "beam": BEAM_GRIP}
+CAL_EASE_S = 0.15            # the carry's correction of the hand eases in this fast as it lifts the calipers
 CARD = "caliper-measure-bore"                # the usage card the take plays (moonshot/cards), whose footage it is held to
 
 
@@ -60,6 +63,9 @@ def loose() -> str:
 
 
 class InspectPlan(BenchPlan):
+    # where the deburr stands: 60 mm to its left, the calipers less across the body, the trunk bent sideways instead
+    # (to -11 deg, people's -8) and the take was 0.51 in people's range, 0.70 here
+
     def __init__(self, out=OUT, verbose=True):
         super().__init__(out, verbose)
         rest = settle(loose(), skip=("cal6",))
@@ -179,7 +185,7 @@ class InspectPlan(BenchPlan):
         _, W = self.grip_pose(grip, t)
         R, p = self.obj_at(g["of"], t)
         c = p + R @ GRIP_AT[grip]
-        back = W - (mirror(c) if g["side"] == "L" else c)
+        back = W - (self.mirror(c) if g["side"] == "L" else c)
         return back / np.linalg.norm(back), W
 
     def take(self, grip, t_from, t_on, via=()):
@@ -199,10 +205,11 @@ class InspectPlan(BenchPlan):
         self.effort(side, t_on, 0.0, grip)
         self.effort(side, t_on + 0.2, 0.3, grip)
 
-    def let_go(self, grip, t_on, t_off, **carry):
+    def let_go(self, grip, t_on, t_off, lifted=None, **carry):
         """A hand holding a grip from t_on lets go at t_off and goes back along its forearm, relaxing only as it goes:
         relaxed first, the arm sagged with the tool still in it, opening the calipers 1 mm, and let go, sank 5.8 mm
-        into their slider. Its carry and events."""
+        into their slider. Its carry and events: the carry from 0.1 s into the grip, or from when the hand lifted
+        the tool off the bench (lifted)."""
         g = self.grips[grip]
         side = g["side"]
         self.carry(grip, t_on, t_off, **carry)
@@ -210,7 +217,8 @@ class InspectPlan(BenchPlan):
         self.effort(side, t_off + 0.1, 0.3, grip)
         self.effort(side, t_off + 0.3, 0.0, grip)
         self.event("grip", t_on, t_off, side=side, grip=grip, on=g["of"])   # its squeeze ends with its hold: on after,
-        self.event("carry", t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side)   # it sank the fingers 6 mm in
+        self.event("carry", lifted or t_on + 0.1, t_off, obj=g["of"], grip=grip, side=side,   # it sank the fingers 6 mm in
+                   **({"ease_in": CAL_EASE_S} if lifted else {}))
         self.fingers(side, t_off, g["q"])
         self.fingers(side, t_off + 0.3, open_like(self.hand, g["q"], 0.5))
         self.transit(side, t_off + 0.02, t_off + 0.5, W + back * PRE_MM)
@@ -220,19 +228,22 @@ class InspectPlan(BenchPlan):
     # --- the verbs ------------------------------------------------------------------------------------------------
     def pick_up(self):
         t0 = self.t
-        g = self.grips["cal"]
-        Hg, Wg = self.grip_pose("cal", t0)
-        tc = t0 + 1.3
+        _, Wg = self.grip_pose("cal", t0)
         self.look(t0, self.cal_point([-60.0, 10.0, 0.0]))
-        self.transit("R", t0, tc, Wg, via=[self.wrist["R"] + [-60, 80, 150], Wg + [15, -10, 55]], fade=(Hg, 1.0))
-        self.fingers("R", t0 + 0.3, self.q_relax)
-        self.fingers("R", t0 + 0.95, open_like(self.hand, g["q"], 0.7))
-        self.fingers("R", tc, g["q"])
-        self.effort("R", tc, 0.0, "cal")
-        self.effort("R", tc + 0.25, 0.3, "cal")
+        # ready in front of the body, over the bench's edge toward them
+        # widest 0.12 s before the hand came to rest, it was widest 78% of the way through its 0.6 s reach
+        tg = self.reach("R", "cal", t0, ready=Wg + [130, -120, 110], approach=Wg + [15, -10, 55], opened=0.7,
+                        lead=0.13)
+        self.effort("R", tg, 0.0, "cal")
+        self.effort("R", tg + 0.25, 0.3, "cal")
         p0, R0 = self.cal0
-        self.move_cal(tc + 0.3, tc + 0.7, R0, p0 + [0, 0, 30])
-        self.t_grab, self.t = tc, tc + 0.7
+        # the calipers' own lift: at once, the hand releasing its press into them as the carry eases in (CAL_EASE_S),
+        # and 3 mm to take their weight, as the arm gives under their 1.7 N. Lifted as the deburring tool, the load
+        # came 0.4 s after contact and took 0.4 s more to lift them
+        self.t_lift = tg
+        self.move_cal(self.t_lift, self.t_lift + 0.45, R0, p0 + [0, 0, 3.0])
+        self.move_cal(self.t_lift + 0.45, self.t_lift + LIFT_S, R0, p0 + [0, 0, 30])
+        self.t_grab, self.t = tg, self.t_lift + LIFT_S
         self.clip("pick up", t0, self.t, "PICK UP  the calipers by the slider, as a phone is held")
 
     def present(self):
@@ -243,10 +254,11 @@ class InspectPlan(BenchPlan):
         self.look(t0, Pp + Rp @ BEAM_GRIP)
         self.move_cal(t0, t_at, Rp, Pp)
         tL = t_at + 1.0
-        self.take("beam", t0 + 0.6, tL, via=[REST + [0, 60, 160]])
+        self.take("beam", t0 + 0.6, tL, via=[self.rest + [0, 60, 160]])
         self.t_beam = tL
         t_off = tL + 0.1                     # as the left's hold starts: both holding, the right's slips slid the slider 3 mm
-        self.let_go("cal", self.t_grab, t_off, free=[(self.t_grab + 0.7, t_off)], point=SLIDER_GRIP)
+        self.let_go("cal", self.t_grab, t_off, lifted=self.t_lift, free=[(self.t_lift + LIFT_S, t_off)],
+                    point=SLIDER_GRIP)
         self.t = t_off + 0.25
         self.clip("present", t0, self.t, "HAND OVER  the calipers to the left hand, on the beam")
 
@@ -310,7 +322,7 @@ class InspectPlan(BenchPlan):
         self.t_grab = tC
         t_off = tC + 0.1                     # as the right's hold starts
         W = self.let_go("beam", self.t_beam, t_off)
-        self.transit("L", t_off + 0.7, t_off + 1.85, REST, via=[W + [0, -230, 60]])   # past the bench's edge first
+        self.transit("L", t_off + 0.7, t_off + 1.85, self.rest, via=[W + [0, -230, 60]])   # past the bench's edge first
         self.t = t_off
         self.clip("hand back", t0, self.t, "HAND BACK  the calipers to the right hand")
 
@@ -325,7 +337,7 @@ class InspectPlan(BenchPlan):
         self.move_cal(t1 + 1.6, t_down, R0, p0 + [0, 0, 0.3])
         t_off = t_down + 0.1
         W = self.let_go("cal", self.t_grab, t_off, free=[(self.t_grab + 0.3, t1 + 1.3)], point=SLIDER_GRIP)
-        self.transit("R", t_off + 0.7, t_off + 1.85, REST, via=[W + [0, -230, 60]])   # back past the bench's edge first
+        self.transit("R", t_off + 0.7, t_off + 1.85, self.rest, via=[W + [0, -230, 60]])   # back past the bench's edge first
         self.t = t_off + 1.85
         self.clip("put back", t0, self.t, "PUT BACK  the calipers, closed, where they lay")
 

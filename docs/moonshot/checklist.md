@@ -171,8 +171,14 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   and the planner plans with it too. Held to the other people, people themselves sit a median 82.9% inside (5th
   percentile 50.3%: nobody meets the proposed 95%), so the bar is their median, 0.83, your decision; the likelihood
   limit, people's own 95th percentile, 24.2. The vise takes, on today's plans: 51-65% inside, likelihood 34-38,
-  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg);
-  the planner's prior weight is being raised to pull it toward people's. Which checks a take is held to, your
+  posture like seated work (the elbow bent 70 deg at the median against people's 20, the trunk turned 12 deg). AnDy's
+  people never hold a part up close, grasp palm down or crank, so posture is held to people seated or standing
+  together (your decision; `moonshot/validate/people_prior.py`, GRAB/ARCTIC and AnDy evenly, 694 trials): range 0.93
+  (people's median), likelihood 28.7 (their 95th percentile). The vise operator stands 120 mm further back and holds
+  the part 80 mm lower to look at it; the planner's prior weight stays 0.3 (at 5 the bench takes' hands missed their
+  targets and their caliper and deburr gates failed). op10 and op20 on it: likelihood 25.6 and 24.9, pass; in range
+  92.8% and 92.9%, shoulder rotation the only joint out; but the new stance presses the fingers into the crank's knob
+  (skin 7.3-7.6 mm), with the vise-timing agent. Which checks a take is held to, your
   decision: the pendant takes are exempt from grasp timing, hand opening and footage (no reach to lift a part),
   not from nothing moving without a cause; a take at a station with no machine passes machines inside spec.
   Since the body-checks merge every check runs before a render, so no vise take
@@ -253,9 +259,9 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
 | C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and is merged (2026-11-03); the pocket-depth inspect take in progress (inspect session); no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
-| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`); its cycles and stock (cycle session, `test_cycle_takes.py`, `test_cycle_stock.py`) | [x] 2026-11-02 | [ ] its 15 cutting takes pass their gate (26 of 26) and are merged (2026-11-03); the finished stock is within 0.03 mm except three plan gaps no tool in the plan reaches (§6). Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session) |
+| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session) |
 | F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; publishing waits on the finals and your approval |
-| G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 34 of nist-ftc-10's 61 steps (2026-11-03): the five Cycle Start steps, the cutting steps, op10's and op20's load, seat and check, op20's and op40's unload, every setup's clean, and deburr; finals of the door and cycle-start takes and 6 cutting takes, the other 9 queued behind the drafts |
+| G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 39 of nist-ftc-10's 61 steps (2026-11-03). Its 15 machine-only (cutting) steps show their caption and one still each on the page (your decision), not a video. No final renders before you've reviewed its draft |
 
 ## 6. Milestones
 
@@ -280,8 +286,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   op50's check (an indicator swept up its side) is the setting session's. Your decisions (2026-11-03): posture
   gates against a standing-work range (§3b); the G1 cards' proposed values approved; the AngLock's push on the
   moving jaw declared a vise mechanism; the stock's three plan gaps (the +Z side slot 2.64 mm, the boss's V flanks
-  2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The stock gate then still fails on
-  the part's bottom face, 1.98 mm left near x 10 (face 213), which the plan should reach. The bench's carry welds
+  2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The bench's carry welds
   declared a grip assist; Load the tools shows every tool loaded in full. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
 - [ ] Nov 4: render queue live; `nist-ftc-10` finals

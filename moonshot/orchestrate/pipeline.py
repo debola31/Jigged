@@ -4,13 +4,16 @@ check passed. Runs on the hub; the jobs show on the dashboard like any other.
     python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--lift-out] [--no-render]
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
     python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
+    python -m moonshot.orchestrate.pipeline <take> --still
 
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
 baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
 draws the take record at 24 fps with moonshot's renderer (moonshot/render/), or with --trainual the sim.npz at the
 take's own rate with trainual's scripts. --final renders at 1080p instead of the draft's 960x540.
 
---assemble makes each step's video of a part, from its takes' videos, for every step whose takes all have one
+--still renders one 1080p picture of a machine-only step's take, its last frame, close on the part from in front and
+above, nothing blurred: the web shows it in place of a video (your decision, 2026-11-03: the machine's own work isn't
+rendered as video). --assemble makes each step's video of a part, from its takes' videos, for every step whose takes all have one
 (moonshot/render/step_video.py): drafts, or finals with --final.
 """
 from __future__ import annotations
@@ -64,6 +67,8 @@ def main(argv: list[str]) -> int:
     opt = lambda flag: argv[argv.index(flag) + 1] if flag in argv else None   # noqa: E731
     if "--render-only" in argv:
         return render(take, final="--final" in argv, trainual="--trainual" in argv)
+    if "--still" in argv:
+        return still(take)
     if "--assemble" in argv:
         from moonshot.render.step_video import assemble
         state = assemble(take, "final" if "--final" in argv else "draft")
@@ -107,6 +112,41 @@ def stored(path) -> str:
     if not (blob_dir(data_root()) / digest).exists():
         shutil.copyfile(path, blob_dir(data_root()) / digest)
     return digest
+
+
+STILL_FROM_MM = (120.0, -330.0, 230.0)                    # the camera from the part: in front, a little right, above
+
+
+def still(take: str) -> int:
+    """One picture of the take's last frame, close on the part (its blank), at final quality: takes/<take>/still.png."""
+    import io
+    import tarfile
+
+    import numpy as np
+    from moonshot.render.pack import look_pack, take_pack
+    folder = data_root() / "takes" / take
+    rec = np.load(folder / "take.npz")
+    part = rec["pos"][-1, [str(b) for b in rec["bodies"]].index("blank")]
+    camera = {"eye": (part + STILL_FROM_MM).round(1).tolist(), "look": part.round(1).tolist()}
+    packs = data_root() / "packs" / "render"
+    pack = stored(take_pack(folder, packs / f"{take}.tar"))
+    look = stored(look_pack(packs / "look.tar"))
+    bake = wait(submit("take_bake", {"take": take}, [pack], group=f"{take}-still"))
+    if bake["state"] != "done":
+        print(f"[pipeline] {take}: the bake failed: {bake.get('error')}", flush=True)
+        return 1
+    n = bake["result"]["frames"]
+    job = wait(submit("take_render", {"take": take, "frames": [n - 1, n], "camera": camera, "res": FINAL["res"],
+                                      "samples": 2 * FINAL["samples"]}, [pack, bake["result"]["bake"], look],
+                      group=f"{take}-still"))
+    if job["state"] != "done":
+        print(f"[pipeline] {take}: the still failed: {job.get('error')}", flush=True)
+        return 1
+    with tarfile.open(fileobj=io.BytesIO((blob_dir(data_root()) / job["result"]["png"]).read_bytes())) as tar:
+        png = next(m for m in tar.getmembers() if m.name.endswith(".png"))
+        (folder / "still.png").write_bytes(tar.extractfile(png).read())
+    print(f"[pipeline] {take}: still -> {folder / 'still.png'}", flush=True)
+    return 0
 
 
 def render(take: str, final: bool, trainual: bool = False, chunk: int = 48) -> int:

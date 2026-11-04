@@ -1099,8 +1099,8 @@
     },
     {
      "id": "deburr",
-     "title": "Deburr every edge",
-     "caption": "Deburr every edge, break the sharp corners of the pocket and the cross holes.",
+     "title": "Deburr every edge: scrape off the sharp slivers of metal (burrs) the cutters leave on the edges",
+     "caption": "Deburr every edge: scrape off the sharp slivers of metal (burrs) the cutters leave on the edges, with a hooked blade drawn along each one, so the part is safe to handle. Break the sharp corners of the pocket and the cross holes.",
      "kind": "human",
      "group": "finish",
      "where": {

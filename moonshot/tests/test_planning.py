@@ -53,8 +53,22 @@ def test_stock_short_along_one_axis_is_refused():
 def test_stock_wider_than_the_vise_opens_is_refused():
     needs_step("ll-1007223")
     plan = copy.deepcopy(load_plan("ll-1007223"))
-    plan["stock"]["size_mm"][0] = 120.0                    # across the jaws in Op 10; the 6 in vise opens 101.6 mm
+    plan["stock"]["size_mm"][0] = 250.0                    # across the jaws in Op 10; the D688 opens 223.5 mm
     assert any("across the jaws" in p for p in check(plan)["problems"])
+
+
+@pytest.mark.data_root
+def test_a_tool_with_a_record_but_no_model_is_pending_not_missing():
+    needs_step("ll-1007223")
+    out = check(load_plan("ll-1007223"))
+    assert "tap-m4" in out["pending_tools"] and "tap-m4" not in out["missing_tools"]
+
+
+def test_a_plate_slid_between_setups_stays_clamped_in_between():
+    steps = {s["id"]: s for s in expand(load_plan("ll-1005337"))}
+    assert "lift" not in steps["op10-unload"]["caption"]
+    assert steps["op20-shift"]["facts"]["shift"] in steps["op20-shift"]["caption"]
+    assert "op20-load" not in steps and "op20-clean" not in steps
 
 
 @pytest.mark.data_root

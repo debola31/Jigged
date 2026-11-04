@@ -1,7 +1,8 @@
 """A process plan's written instruction steps, one per video (plan §4, §6).
 
 Deterministic: every mill setup expands to the shop's setup pattern for how the part is held (in the vise on
-parallels, standing on the vise floor against a stop, or a plate clamped to the table), a band saw setup to the
+parallels, standing on the vise floor against a stop, or a plate clamped to the table, which the next setup may
+slide along it to reach what the machine's travel didn't), a band saw setup to the
 saw's, each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
 from its `facts`, so it can't name a tool, size or setting the plan doesn't contain (plan §2, O8; checked by
 `caption_names_only_facts`).
@@ -19,7 +20,7 @@ import sys
 
 from moonshot.planning.validate import load_plan
 
-VISE_NAMES = {"vise6": "the 6 in vise"}
+VISE_NAMES = {"d688": "the 6 in vise"}             # the Kurt D688 on the VF-2, the vise that's simulated and filmed
 # nist-ftc-10's faces; a plan names its own in "faces"
 FACE_UP = {"-Y": "pocket side up", "+Y": "scalloped side up", "+Z": "on its F65 side", "-Z": "on its F81 side",
            "+X": "standing on one end", "-X": "standing on the other end"}
@@ -31,7 +32,9 @@ TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em3
               "chamf": "the 1/2 in chamfer mill", "bandsaw": "the band saw",
               # not in the catalogue yet (python -m moonshot.planning.validate lists them)
               "drill-3p3": "the 3.3 mm drill", "drill-6p5": "the 6.5 mm drill", "drill-11": "the 11 mm drill",
-              "tap-m4": "the M4 tap", "ream-8": "the 8 mm reamer", "dovetail-20": "the 20 deg dovetail cutter"}
+              "tap-m4": "the M4 tap", "ream-8": "the 8 mm reamer", "dovetail-20": "the 20 deg dovetail cutter",
+              "drill-5-32": "the 5/32 in drill", "ream-1-4": "the 1/4 in reamer", "em18": "the 1/8 in end mill",
+              "em132": "the 1/32 in end mill"}
 # Where each mill's tools go. The VF-2 measures its own on its tool setter; the shop's other mills have none
 # (shop.json puts the only tool setter and probe on the VF-2), so their tools are measured on the presetter first.
 CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool changer"}
@@ -67,6 +70,14 @@ def saw(plan: dict, s: dict) -> list[dict]:
 def held(s: dict, faces: dict) -> list[dict]:
     """Clean, load, seat and check: how the part goes into this setup's workholding."""
     w, p, m = s["workholding"], s["id"], s["machine"]
+    if "shift" in w:                               # the last setup's plate, slid along the table to reach the rest
+        f = {"setup": s["title"], "clamps": w["clamps"], "on": w["on"], "shift": w["shift"]}
+        return [
+            step(f"{p}-shift", "Shift the plate", "Loosen the clamps, slide the plate {shift} and clamp it again.", f,
+                 setup=p, machine=m),
+            step(f"{p}-check", "Check it's straight",
+                 "Sweep the indicator along its finished long edge: the needle should stay put.", f, setup=p, machine=m),
+        ]
     if "clamps" in w:                              # a plate clamped down on the table
         f = {"setup": s["title"], "up": faces[s["face_up"]], "clamps": w["clamps"], "on": w["on"]}
         return [
@@ -97,8 +108,10 @@ def expand(plan: dict) -> list[dict]:
     out = []
     faces = plan.get("faces", FACE_UP)
     loaded: dict[str, set[str]] = {}               # the tools already in each machine
-    for s in plan["setups"]:
+    for i, s in enumerate(plan["setups"]):
         p, m = s["id"], s["machine"]
+        nxt = plan["setups"][i + 1] if i + 1 < len(plan["setups"]) else {}
+        stays = "shift" in nxt.get("workholding", {})      # the next setup slides this plate rather than reloading it
         if m == "bandsaw":
             out += saw(plan, s)
             continue
@@ -128,11 +141,15 @@ def expand(plan: dict) -> list[dict]:
         out.append(step(f"{p}-start", "Close the door and start the cycle",
                         "Close the door, check the program is {setup}, and press Cycle Start.", f, setup=p, machine=m))
         out += cycles(s)
-        out.append(step(f"{p}-unload", "Blow off the chips and unload",
-                        "Open the door, blow the chips off, loosen the clamps and lift the plate off."
-                        if "clamps" in s["workholding"] else
-                        "Open the door, blow the chips off, loosen the vise and lift the part out.", f, setup=p,
-                        machine=m))
+        if stays:
+            out.append(step(f"{p}-unload", "Open the door and blow off the chips",
+                            "Open the door and blow the chips off; the plate stays clamped.", f, setup=p, machine=m))
+        else:
+            out.append(step(f"{p}-unload", "Blow off the chips and unload",
+                            "Open the door, blow the chips off, loosen the clamps and lift the plate off."
+                            if "clamps" in s["workholding"] else
+                            "Open the door, blow the chips off, loosen the vise and lift the part out.", f, setup=p,
+                            machine=m))
     for fin in plan.get("finish", []):
         out.append(step(fin["id"], fin.get("title", fin["what"].split(",")[0]), "{what}.", {"what": fin["what"]},
                         kind="cycle" if fin.get("machine_only") else "human", station=fin["station"]))

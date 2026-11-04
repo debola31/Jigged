@@ -81,6 +81,12 @@ def catalogue() -> set[str]:
     return {p.stem for p in RECORDS.glob("*/*/*.json") if not p.stem.endswith("_rig")}
 
 
+def pending() -> set[str]:
+    """Catalogue entries with no model built yet (their record's "pending" says why)."""
+    return {p.stem for p in RECORDS.glob("*/*/*.json")
+            if "pending" in json.loads(p.read_text(encoding="utf-8"))}
+
+
 def fits(setup: dict, stock: dict) -> list[str]:
     """What keeps the stock out of this setup's machine or vise. The stock's size_mm is along the model's x, y, z."""
     sid, machine, size = setup["id"], setup["machine"], stock["size_mm"]
@@ -104,8 +110,8 @@ def fits(setup: dict, stock: dict) -> list[str]:
 
 
 def check(plan: dict, step_path: Path | None = None) -> dict:
-    """{"problems": [...], "missing_tools": [...]}: problems are errors in the plan; missing tools are catalogue
-    work (track B), not plan errors."""
+    """{"problems": [...], "missing_tools": [...], "pending_tools": [...]}: problems are errors in the plan; missing
+    tools (no record) and pending ones (a record, no model yet) are catalogue work (track B), not plan errors."""
     step_path = step_path or data_root() / "parts" / plan["part"] / "part.step"
     meas = measure(str(step_path))
     problems = []
@@ -129,7 +135,7 @@ def check(plan: dict, step_path: Path | None = None) -> dict:
     have = catalogue()
     tools = {op["tool"] for s in plan["setups"] for op in s["operations"]}
     tools |= {t for f in plan.get("finish", []) for t in f.get("tools", [])}
-    return {"problems": problems, "missing_tools": sorted(tools - have)}
+    return {"problems": problems, "missing_tools": sorted(tools - have), "pending_tools": sorted(tools & pending())}
 
 
 def main(argv: list[str]) -> int:

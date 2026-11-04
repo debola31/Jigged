@@ -45,7 +45,7 @@ def spans(part: str, step: dict) -> list[Span]:
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
     start = [shared(step, "door-close"), shared(step, "cycle-start")]
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
-        return {"clean": own, "load": own, "seat": own, "check": own, "xy": setting, "z": setting,
+        return {"clean": own, "load": own, "seat": own, "check": own, "shift": own, "xy": setting, "z": setting,
                 "tools": setting, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
     if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":

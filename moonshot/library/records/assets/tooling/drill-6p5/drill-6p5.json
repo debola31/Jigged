@@ -1,0 +1,46 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill-6p5",
+  "name": "6.5 mm cobalt jobber drill",
+  "category": "tooling",
+  "make": "Chicago-Latrobe",
+  "model": "47875",
+  "description": "6.50 mm cobalt jobber drill, 135 degree split point, DIN 338.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 6.5,
+      "unit": "mm"
+    },
+    {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+    },
+    {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+    }
+  ],
+  "source_urls": [
+    "https://www.walmart.com/ip/305161976",
+    "https://benchmarktooling.com/products/ch1147875"
+  ],
+  "source_files": [
+    "47875 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1007223's two Ø6.5 clearance holes (Op 30).",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "drill-6p5.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/47875.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

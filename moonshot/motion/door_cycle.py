@@ -5,10 +5,14 @@ record's affordances, moonshot/library/stations/vf2.json; the vf2-controls card)
 first take: the same, the other way, out to the stops, so everything between them works with both doors fully open
 (your decision 2026-11-03).
 
-Each hand holds its bar as an operator does (your decision 2026-11-03): it comes at the bar from the front, the palm
-on the bar's outer face, the fingers round its back through the gap between bar and door and onto its inner face, the
-thumb across its front; nothing of the hand past the door's edge or round outside it. So the hand moves the door by
-contact alone, either way: the fingers behind the bar draw it open, the palm pushes it shut.
+Each hand holds its bar as an operator does (your decision 2026-11-03): the palm on the bar's outer face, the fingers
+round its back through the gap between bar and door and onto its inner face, the thumb across its front; nothing of
+the hand past the door's edge or round outside it. So the hand moves the door by contact alone, either way: the
+fingers behind the bar draw it open, the palm pushes it shut. The wrap goes on two ways, as the gap lets it: to a shut
+door's bar the hand comes up beside its outer side and slides its fingers in along the gap (beside); to the bar of a
+door at its stop, where the hand is turned round the bar so its thumb ends by the bar's inner face, it comes on from
+in front, open, the bar between the thumb and the fingers, which close round the bar's outer side into the gap
+(in_front).
 
     python -m moonshot.motion.door_cycle            # plans all three into the data root's takes/door-close,
                                                     # cycle-start, door-open
@@ -34,24 +38,56 @@ OPEN_MM = 600.0                                       # how far the doors stand 
 SLIDE_S = 2.4                                         # a door's 600 mm along its track: 0.47 m/s at most
 SEAT_MM = 8.0                                         # the hand runs the door this far past the track's end, into its
 SEAT_S = 0.25                                         # stop, and holds it there this long before letting go
-REACH_S = 0.62                                        # movement onset to the hand on the bar, as people reach to grasp
-                                                      # (person.reach_to_grasp_*_s: 0.26-0.67 s),
-APPROACH_S = 0.2                                      # its last part from beside the bar onto it
-PEAK_AT = 0.6                                         # the hand opens widest this far into the planned reach: ~74% of
-                                                      # the reach the hand-opening check measures (setup_take.grab)
+REACH_S = 0.5                                         # movement onset to the hand on the bar, as people reach to grasp
+                                                      # (person.reach_to_grasp_*_s: 0.26-0.62 s left, 0.32-0.67 right):
+                                                      # the run's hand sets off a frame or two early and meets the bar
+                                                      # just after, so 0.62 measured 0.70
+START_S = 0.583                                       # the first reach sets off once the hanging arm has settled (it
+                                                      # starts 12 mm off its plan and comes to it over 0.3 s). The
+                                                      # hand-opening check's band is a frame wide: at 0.6 the run's
+                                                      # right hand met the bar a frame later in its reach than the left
+# With the door at its stop the hand, turned round the bar (roll), can't slide in along the gap: its thumb, which ends
+# by the bar's inner face, would pass through the bar. It comes on from in front instead, open (FRONT_Q: the fingers
+# straight, the thumb swung out), the bar between the thumb and the fingers, the palm onto the bar's front outer
+# corner; then the fingers close round the bar's outer side into the gap as far as it lets them.
+FRONT_Q = {"index_mcp_flex": -20.0, "index_pip": 0.0, "middle_mcp_flex": -20.0, "middle_pip": 0.0,
+           "ring_mcp_flex": -20.0, "ring_pip": 0.0, "little_mcp_flex": -20.0, "little_pip": 0.0,
+           "thumb_cmc_abd": 32.0, "thumb_cmc_flex": -20.0, "thumb_mcp_flex": -8.0, "thumb_ip": -15.0}
+FRONT_IN = np.array([6.0, 0.0, 0.0])                  # the reach ends this far out of the wrap's place
+FRONT_FROM = np.array([0.0, -50.0, 0.0])              # and comes this far straight in onto it,
+FRONT_SLIDE_S = 0.13                                  # in this long: the reach out to the stop is the longest (420 mm),
+                                                      # so its rise gets the most of REACH_S, at 17 m/s^2 at most
+FRONT_EARLY_S = 0.067                                 # the hand starts closing this long before it stops: the bar is
+                                                      # met by the thumb closing onto it, the same frame for either hand
+                                                      # (the palm, stopping short of it, met it a frame early on the left
+                                                      # and not at all on the right), and within people's reach
+PEAK_AT = {"beside": 0.78, "front": 0.8}              # the hand opens widest this far into the planned reach, by the
+                                                      # way it comes onto the bar: ~74% of the reach the hand-opening
+                                                      # check measures, which starts a frame before the plan's and ends
+                                                      # as the hand meets the bar
+SPREAD_DEG = (-5.0, -10.0, 10.0)                      # the index's spread on the reach's last part, at its widest, and
+                                                      # meeting the bar (index_mcp_abd; the hook opens 84 mm to 77)
 CLOSE_S = 0.2                                         # the fingers close round the bar
-AIM_EFFORT = 0.3                                      # co-contraction on the way to the bar (runner.STIFFEN_ARM)
-LEFT_AFTER_S = 2.8                                    # the left hand sets off this long after the right door starts
+AIM_EFFORT = 1.0                                      # co-contraction on the way to the bar (runner.STIFFEN_ARM): the
+                                                      # fingers slide into the gap with 3.5-7 mm to spare, at 0.3 the
+                                                      # arm trailed its plan by 8 mm and 3-4 deg
+GRIP_EFFORT = 0.5                                     # the grip's effort holding the bar (runner squeeze and stiffening)
+LEFT_AFTER_S = 2.79                                   # the left hand sets off this long after the right door starts
+                                                      # (at 2.8 it met the bar a frame early in its reach, door-close)
 # the wrap, placed rather than solved: the hand's shape and its place on the bar, as the grip solver (grasp.Problem)
 # found it against the skin with the doors shut, the fingers' pads on the bar's inner face and the thumb's toward its
 # front, the skin clear of its door (4 mm) and the other bar (36 mm), at most 3 mm into the bar itself. The hand is
 # level: tilted up as first solved (13 deg), it needed the wrist bent up past its range, and the planned hand pitched
 # down 20 deg instead, its fingertips onto the bar's front corner
-GRIP_Z = 1000.0                                       # where on the bar (it runs 680-1160 mm up), the wrist ~26 mm
-                                                      # above: just under the elbow, 50 mm below the affordance's height,
-                                                      # where the forearm reaching the right bar at its stop passes under
+GRIP_Z_SHUT, GRIP_Z_OPEN = 1050.0, 1000.0            # where on the bar (it runs 680-1160 mm up) the hand holds it, the
+                                                      # wrist ~26 mm above, the door shut and at its stop (grip_z): at
+                                                      # the elbow, the forearm level (the affordance's height) by the
+                                                      # chest, where at 1000 the hand had to pitch down 10-12 deg (the
+                                                      # wrist can't bend up that far) and its thumb met the bar's front
+                                                      # corner; 50 mm lower at the stop, where the forearm passes under
                                                       # the pendant (its underside 1090 mm up; at 1050 the forearm met it
-                                                      # and the hand never reached the bar)
+                                                      # and the hand never reached the bar). The hand slides down the bar
+                                                      # as it runs the door out, as an arm reaching out lowers its hand
 WRAP_Q = {"index_mcp_abd": -0.5, "index_mcp_flex": 55.1, "index_pip": 62.6, "index_dip": 49.2,
           "middle_mcp_abd": -5.1, "middle_mcp_flex": 46.9, "middle_pip": 69.2, "middle_dip": 38.9,
           "cmc4_flex": 3.0, "ring_mcp_abd": 7.2, "ring_mcp_flex": 31.2, "ring_pip": 76.9, "ring_dip": 26.7,
@@ -61,11 +97,20 @@ WRAP_Q = {"index_mcp_abd": -0.5, "index_mcp_flex": 55.1, "index_pip": 62.6, "ind
 WRAP_TURN, WRAP_TILT = -4.0, -1.8                     # the hand frame's turn about the bar and tilt (wrap_frame)
 WRAP_OUT, WRAP_BACK, WRAP_UP = 40.1, 83.3, 25.9       # the wrist from the bar's middle: out, in front of it, above
 ROLL_SHUT, ROLL_OPEN = 20.0, -40.0                    # the hand's turn round the bar, door shut and at its stop (roll)
-PRE_OUT, PRE_BACK = 30.0, 10.0                        # the reach comes onto the bar from this far out and in front
-                                                      # of the grip, the fingers half uncurled (preshape)
-VIA = (30.0, -70.0, -20.0)                            # by way of this far further out, in front and below that
-# Not yet enough in the physics (2026-11-03): the arm trails its plan on the way out, and the half-curled fingers, which
-# reach ~100 mm across from the wrist, catch the bar's outer front corner before the hand is beside it
+# With the door shut, the hand slides its fingers into the gap from the bar's outer side, along it: the wrap can't be
+# put on by curling round the bar, which needs more room behind it than the 36 mm gap, and the half-curled fingers
+# coming at it from in front caught its outer front corner. Each digit is shaped to slide in clear (HOOK_Q, found on
+# the physics hand's capsules, moonshot/body/skeleton.py): the index and middle hooked at the knuckles and nearly
+# straight, the ring half curled, the little finger straight at the knuckle and bent at its middle joint (its knuckle
+# sits in front of the bar's back), the thumb swung out straight across the bar's front; the end joints and the thumb's
+# roll follow as the hand couples them (body.hand.couple, which the physics holds). 3.5-7 mm clear of the bar and door.
+HOOK_Q = {"index_mcp_flex": 52.0, "index_pip": 20.0, "middle_mcp_flex": 52.0, "middle_pip": 20.0,
+          "ring_mcp_flex": 28.0, "ring_pip": 35.0, "little_mcp_flex": -14.0, "little_pip": 65.0,
+          "thumb_cmc_abd": 32.0, "thumb_cmc_flex": -20.0, "thumb_mcp_flex": -8.0, "thumb_ip": 0.0}
+HOOK_IN = np.array([4.0, 4.0, 0.0])                   # the slide ends this far out and deeper than the wrap's place
+HOOK_OUT = 90.0                                       # and starts this much further out
+ONTO_W = 2.0                                          # how hard the plan holds the hand to its pose onto the bar
+HOOK_SLIDE_S = 0.18                                   # the slide, the reach's last part
 # a hand at rest: the arm hanging straight down by the thigh, palm to it, as people stand (their likeliest arm,
 # validate/posture.py, likelihood 18.5), the trunk nearly upright; held by its pose, as a position alone let the
 # planner turn the arm in (31 deg, at people's limit, likelihood 32)
@@ -101,12 +146,17 @@ def bands(c, **lims):
     return f
 
 
+def grip_z(open_mm: float) -> float:
+    """The height the hand holds the bar at with the door open_mm (GRIP_Z_SHUT to GRIP_Z_OPEN)."""
+    return GRIP_Z_SHUT + (GRIP_Z_OPEN - GRIP_Z_SHUT) * float(np.clip(open_mm / OPEN_MM, 0.0, 1.0))
+
+
 def bar_centre(door: str, open_mm: float, z: float | None = None) -> np.ndarray:
-    """The middle of the door's handle bar at the height the hand takes it (GRIP_Z), with the door open_mm, world."""
+    """The middle of the door's handle bar at the height the hand takes it (grip_z), with the door open_mm, world."""
     rec = vf2.record()
     c, a = rec["colliders"][f"{door}_pull"], rec["affordances"][f"{door}_handle"]
     mid = (np.array(c["box_min_mm"], float) + np.array(c["box_max_mm"], float)) / 2
-    return ORIGIN + np.r_[mid[:2], GRIP_Z if z is None else z] + np.array(a["pull"], float) * open_mm
+    return ORIGIN + np.r_[mid[:2], grip_z(open_mm) if z is None else z] + np.array(a["pull"], float) * open_mm
 
 
 def wrap_frame() -> np.ndarray:
@@ -133,31 +183,16 @@ def Rz(deg: float) -> np.ndarray:
     return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
-def preshape(hand, q: dict) -> dict:
-    """The wrap half uncurled, as the hand comes onto the bar and leaves it: the knuckles as wrapped, the fingers'
-    middle and end joints half straightened, the thumb swung out off the bar's front."""
-    p = dict(q)
-    for n in ("index", "middle", "ring", "little"):
-        p[f"{n}_pip"], p[f"{n}_dip"] = 0.5 * q[f"{n}_pip"], 0.5 * q[f"{n}_dip"]
-    p.update(thumb_cmc_abd=45.0, thumb_mcp_flex=0.5 * q["thumb_mcp_flex"], thumb_ip=0.5 * q["thumb_ip"])
-    return hand.clamp(p)
-
-
-def widest(hand, q: dict) -> dict:
-    """The hand at its widest on the way to the bar: the preshape with the thumb swung fully out, so it opens wider
-    than the bar without straightening the fingers toward the door."""
-    return hand.clamp(dict(q) | {"thumb_cmc_abd": hand.hi[hand.index["thumb_cmc_abd"]] - 2, "thumb_cmc_flex": -15.0,
-                                 "thumb_mcp_flex": 5.0, "thumb_ip": 0.0})
-
-
 class _Doors(StepTake):
     """What opening and closing the doors share: one door at a time, each hand reaching for its own bar in one
     movement, as people reach to grasp, the hand opening on the way and closing round the bar; running the door along
     its track to the stop; letting go and backing off the bar before the hand comes back to rest. Standing in the
     doorway, the operator can't step toward a door at its stop, so the reach out to it leans on people's range; the
     planner holds the body to their posture harder than at a bench (SOLVER_W): at its weights the trunk leant past
-    their side-bend 46 of 260 frames, and the arm reached the stop turned out past their likeliest (likelihood 44)."""
-    SOLVER_W = {"prior": 1.0, "range": 5.0}
+    their side-bend 46 of 260 frames, and the arm reached the stop turned out past their likeliest (likelihood 44);
+    and at people's range 5 the plan's trunk side-bent to 1 deg inside their range, which the run's trunk, pushed by
+    the door, passed (8.5-9.4 deg against their 8.4)."""
+    SOLVER_W = {"prior": 1.0, "range": 20.0}
 
     def __init__(self, out, verbose=True):
         super().__init__(out, CLOSE_LUMBAR, verbose)
@@ -190,53 +225,94 @@ class _Doors(StepTake):
         q = self.hand.clamp(self.hand.neutral() | WRAP_Q)
         return {"q": q, "H": H, "W": W, "obj": obj, "side": side, "W_rel": W - obj, "theta": np.array(THETA0)}
 
+    def shape(self, q: dict, change: dict) -> dict:
+        """The wrap q changed by `change`, the end joints, the palm's cupping and the thumb's roll coupled to it."""
+        given = {k for k in q if not k.endswith("_dip") and not k.startswith("cmc") and k != "thumb_cmc_roll"}
+        return self.hand.couple(self.hand.clamp(q | change), set_=given)
+
+    def opening(self, side, came, t0, t_in, t_c, way) -> None:
+        """The hand's opening on a reach: it takes the shape it comes in with (came) by the reach's last part (t_in),
+        its index spread away from the thumb (SPREAD_DEG), and opens on to its widest at PEAK_AT of the reach, the
+        index spread further; then the index draws in to the thumb as the hand meets the bar (t_c), so the hand is
+        widest where people's is (person.peak_aperture_reach_frac). The index's spread moves it along the bar, so
+        it keeps the shape's clearance in the gap; straightening the thumb instead swung its tip onto the bar."""
+        spread = lambda deg: self.hand.clamp(came | {"index_mcp_abd": deg})     # noqa: E731
+        self.fingers(side, t0, self.finger_at(side, t0))
+        self.fingers(side, t_in, spread(SPREAD_DEG[0]))
+        self.fingers(side, t0 + PEAK_AT[way] * REACH_S, spread(SPREAD_DEG[1]))
+        self.fingers(side, t_c, spread(SPREAD_DEG[2]))
+
+    def beside(self, side, g, H, W, t0, t_c, t_on) -> tuple[dict, float]:
+        """The reach to a shut door's bar (the side's world): up beside the bar's outer side, the fingers hooked
+        (HOOK_Q) at the gap's depth and HOOK_OUT out; then slid in along the gap (HOOK_SLIDE_S, ending at t_c), the
+        hand opening widest PEAK_AT of the way; then the fingers close round the bar (CLOSE_S) as the hand settles
+        onto the wrap's place, held there to t_on. Returns the hook and when the fingers start to close."""
+        hook = self.shape(g["q"], HOOK_Q)
+        Wi = W + HOOK_IN
+        pre = Wi + np.array([HOOK_OUT, 0.0, 0.0])
+        t_in = t_c - HOOK_SLIDE_S
+        self.transit(side, t0, t_in, self.at(side, pre), fade=(H, 2.0))
+        self.add(side, t_in, t_on, lambda t: [("pose", H, pre + (Wi - pre) * min_jerk((t - t_in) / HOOK_SLIDE_S)
+                                               + (W - Wi) * min_jerk((t - t_c) / CLOSE_S), ONTO_W)])
+        self.opening(side, hook, t0, t_in, t_c, "beside")
+        return hook, t_c
+
+    def in_front(self, side, g, H, W, from_mm, t0, t_c, t_on) -> tuple[dict, float]:
+        """The reach to the bar of a door at its stop (the side's world), from in front: up in front of the bar, the
+        hand open (FRONT_Q), then straight in onto it (FRONT_SLIDE_S, ending at t_c), the bar between the thumb and the
+        fingers; then the fingers close round it (CLOSE_S) as the hand settles onto the wrap's place, held there to
+        t_on. Returns the open hand and when the fingers start to close, just before it stops."""
+        came = self.shape(g["q"], FRONT_Q)
+        We = W + FRONT_IN
+        pre = We + FRONT_FROM
+        t_in = t_c - FRONT_SLIDE_S
+        self.transit(side, t0, t_in, self.at(side, pre), fade=(H, 2.0))
+        self.add(side, t_in, t_on, lambda t: [("pose", H, pre + (We - pre) * min_jerk((t - t_in) / FRONT_SLIDE_S)
+                                               + (W - We) * min_jerk((t - t_c) / CLOSE_S), ONTO_W)])
+        self.opening(side, came, t0, t_in, t_c - FRONT_EARLY_S, "front")
+        return came, t_c - FRONT_EARLY_S
+
     def slide(self, side: str, door: str, grip: str, from_mm: float, to_mm: float, t0: float) -> float:
-        """The side's hand reaches at t0 for its door's bar, in one movement (REACH_S) that comes onto the bar from
-        outside it and in front, the fingers into the gap; opening widest PEAK_AT of the way and closing round the bar
+        """The side's hand reaches at t0 for its door's bar, in one movement (REACH_S) onto it, beside it when the door
+        is shut and from in front when it's at its stop, opening widest PEAK_AT of the way and closing round the bar
         as it arrives. Then it runs the door from from_mm to to_mm, turning round the bar as it goes (roll), past the
         track's end by SEAT_MM, so the door is pressed into its stop as a hand runs a sliding door home, held there
-        SEAT_S; lets go, backs off the bar the way it came and comes back to rest. Returns when the door starts to
-        move."""
+        SEAT_S; lets go, backs off the bar the way a reach to it so placed comes and comes back to rest. Returns when
+        the door starts to move."""
         g = self.grips[grip]
         turned = lambda mm: Rz(roll(mm) if side == "R" else -roll(mm))     # noqa: E731  in the world, round the bar
         H, W = self.grip_pose(grip, bar_centre(door, from_mm), turned(from_mm))        # in the side's world
-        pre = W + Rz(roll(from_mm)) @ np.array([PRE_OUT, -PRE_BACK, 0.0])
         t_c = t0 + REACH_S
-        t_in = t_c - APPROACH_S                         # out beside the bar, the fingers as deep as its back
         t_pull = t_c + CLOSE_S + 0.1
         t_end = t_pull + SLIDE_S + SEAT_S
-        # out to the bar from in front of it, the fingers turning forward on the way, so they don't sweep its corner
-        via = pre + Rz(roll(from_mm)) @ np.array(VIA, float)
-        self.transit(side, t0, t_in, self.at(side, pre), via=[self.at(side, via)], fade=(H, 2.0))
-        # onto the bar: the hand stopped short of it out to the side, so an arm trailing its plan (18 mm in the
-        # physics) comes in beside the bar, not onto its front corner
-        self.add(side, t_in, t_pull, lambda t, H=H, W=W, pre=pre, t_in=t_in: [
-            ("pose", H, pre + (W - pre) * min_jerk((t - t_in) / APPROACH_S), 2.0)])
-        came = preshape(self.hand, g["q"])
-        self.fingers(side, t0, self.finger_at(side, t0))
-        self.fingers(side, t0 + PEAK_AT * REACH_S, widest(self.hand, came))
-        self.fingers(side, t_in + 0.1, came)
-        self.fingers(side, t_c, came)
-        self.fingers(side, t_c + CLOSE_S, g["q"])
+        if from_mm < OPEN_MM / 2:
+            came, t_shut = self.beside(side, g, H, W, t0, t_c, t_pull)
+        else:
+            came, t_shut = self.in_front(side, g, H, W, from_mm, t0, t_c, t_pull)
+        self.fingers(side, t_shut + CLOSE_S, g["q"])
         # the arm braced as the hand homes in on the bar, so it keeps to its path (unbraced it trailed by 25 mm and
         # 15 deg and its fingers caught the bar's front corner); then the grip's effort as the fingers close
         self.effort(side, t0, 0.0, None)
         self.effort(side, t0 + 0.15, AIM_EFFORT, None)
-        self.effort(side, t_c, AIM_EFFORT, None)
-        self.effort(side, t_c + CLOSE_S, AIM_EFFORT, grip)
-        self.effort(side, t_pull, 0.5, grip)
+        self.effort(side, t_shut, AIM_EFFORT, None)
+        self.effort(side, t_shut + CLOSE_S, GRIP_EFFORT, grip)
+        self.effort(side, t_pull, GRIP_EFFORT, grip)
         self.event("grip", t_c, t_end + 0.1, side=side, grip=grip)
         mm = lambda t: from_mm + (to_mm - from_mm) * min_jerk((t - t_pull) / SLIDE_S)     # noqa: E731
         self.follow(side, t_pull, t_end, grip, lambda t: bar_centre(door, mm(t)), lambda t: turned(mm(t)))
         self.event("pull_door", t_pull, t_end, side=side, door=door, from_mm=from_mm, to_mm=to_mm, move_s=SLIDE_S)
-        self.effort(side, t_end, 0.5, grip)
+        self.effort(side, t_end, GRIP_EFFORT, grip)
         self.effort(side, t_end + 0.15, 0.0, None)
-        # letting go: the fingers open to the shape they came in with and the hand backs off the way it came
+        # letting go: the fingers open to the shape they come onto a bar so placed with, and the hand backs off the way
+        # such a reach comes: out along the gap from a shut door, back toward the body from one at its stop
         He, We = self.grip_pose(grip, bar_centre(door, to_mm), turned(to_mm))
-        off = Rz(roll(to_mm)) @ np.array([PRE_OUT, -PRE_BACK, 0.0])
+        if to_mm < OPEN_MM / 2:
+            came, off = self.shape(g["q"], HOOK_Q), HOOK_IN + np.array([HOOK_OUT, 0.0, 0.0])
+        else:
+            came, off = self.shape(g["q"], FRONT_Q), FRONT_IN + FRONT_FROM
         self.fingers(side, t_end + 0.1, g["q"])
         self.fingers(side, t_end + 0.3, came)
-        self.add(side, t_end, t_end + 0.45, lambda t, He=He, We=We: [
+        self.add(side, t_end, t_end + 0.45, lambda t, He=He, We=We, off=off: [
             ("pose", He, We + off * min_jerk((t - t_end - 0.15) / 0.3), 2.0)])
         self.side[side]["wrist"] = We + off
         self.transit(side, t_end + 0.45, t_end + 1.45, self.rest_of(side), fade=(self.rest_H, REST_W))
@@ -258,8 +334,8 @@ class DoorClose(_Doors):
 
     def plan(self):
         self.look(0.0, bar_centre("door_right", OPEN_MM))
-        self.hang("R", 0.0, 0.3)
-        t_pull = self.slide("R", "door_right", "door_right", OPEN_MM, -SEAT_MM, 0.3)
+        self.hang("R", 0.0, START_S)
+        t_pull = self.slide("R", "door_right", "door_right", OPEN_MM, -SEAT_MM, START_S)
         self.look(t_pull + 0.4 * SLIDE_S, bar_centre("door_right", 0.0))
         t_left = t_pull + LEFT_AFTER_S
         self.hang("L", 0.0, t_left)
@@ -282,8 +358,8 @@ class DoorOpen(_Doors):
 
     def plan(self):
         self.look(0.0, bar_centre("door_right", 0.0))
-        self.hang("R", 0.0, 0.3)
-        t_pull = self.slide("R", "door_right", "open_right", 0.0, OPEN_MM + SEAT_MM, 0.3)
+        self.hang("R", 0.0, START_S)
+        t_pull = self.slide("R", "door_right", "open_right", 0.0, OPEN_MM + SEAT_MM, START_S)
         self.look(t_pull + 0.4 * SLIDE_S, bar_centre("door_right", OPEN_MM))
         t_left = t_pull + LEFT_AFTER_S
         self.hang("L", 0.0, t_left)

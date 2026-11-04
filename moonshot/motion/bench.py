@@ -9,8 +9,9 @@ the grip, solved once at the object's rest.
 
     plan = BenchPlan(out)                 # then a step's verbs, then plan.solve(); plan.save()
 
-A step may stand elsewhere at the bench (`lumbar`), and solve its grips weighing people's posture more than the
-shared solver does (`grip_weights`, or one grip's own: its spec's `weights`).
+A step may stand elsewhere at the bench (`lumbar`), solve its grips weighing people's posture more than the
+shared solver does (`grip_weights`, or one grip's own: its spec's `weights`), and its body with its own weights
+(`solver_w`).
 """
 from __future__ import annotations
 
@@ -130,6 +131,7 @@ class BenchPlan:
     lumbar = LUMBAR                 # where the body stands
     grip_weights: tuple[float, float] | None = None   # (people's posture, the pads' contact) for its grip solves, or
                                                       # the shared solver's (posture_cost's, 1)
+    solver_w: dict = {}             # its own weights over the body solver's (BodySolver.W), as a step take's SOLVER_W
 
     def __init__(self, out: Path, verbose: bool = True):
         torch.set_num_threads(8)
@@ -276,7 +278,8 @@ class BenchPlan:
         self.add(side, t0, t1, lambda t: [("pose", H, W, w)])
         self.wrist[side] = np.asarray(W, float)
 
-    def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S):
+    def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S, above=0.0,
+              open_s=None):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
@@ -284,18 +287,26 @@ class BenchPlan:
         (person.peak_aperture_reach_frac): run as one movement from the thigh, the calipers' reach measured 1.1 s,
         widest at 85% of it. Closing as the hand arrived, the fingers struck the tool: they threw the deburring tool
         13 mm up and shoved the calipers 6 mm. The grip is where the tool is when the hand comes to rest on it: the
-        calipers' slider is still being stood on end as the right hand rises for it. Returns when the grip has
-        closed."""
+        calipers' slider is still being stood on end as the right hand rises for it. A hand whose opened fingers
+        reach below its closed ones comes to rest `above` (mm) the grip and closes as it comes down onto it: the
+        left hand's on the calipers lying on the bench struck the bench, bounced 15 mm and closed on nothing. A hand
+        opening only a little opens over the last `open_s` of the way: opened over all of it, its last 0.15 s were
+        level to 0.3 mm, and its widest came where the noise put it.
+        Returns when the grip has closed."""
         g = self.grips[grip]
         t_ready = t0 + RISE_S
         t_go = t_ready + STILL_S
         tc = t_go + reach_s
         H, W = self.grip_pose(grip, tc)
+        up = np.array([0.0, 0.0, above])
         self.transit(side, t0, t_ready, ready)
         self.transit(side, t_ready, t_go, ready)
-        self.transit(side, t_go, tc, W, via=[approach], fade=(H, 1.0))
-        self.hold(side, tc, tc + CLOSE_S, H, W)
+        self.transit(side, t_go, tc, W + up, via=[approach], fade=(H, 1.0))
+        self.add(side, tc, tc + CLOSE_S, lambda t: [("pose", H, W + up * (1 - min_jerk((t - tc) / CLOSE_S)), 3.0)])
+        self.wrist[side] = W
         self.fingers(side, t0 + 0.3, self.q_relax)
+        if open_s is not None:
+            self.fingers(side, tc - lead - open_s, self.q_relax)
         self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
         self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
         self.fingers(side, tc + CLOSE_S, g["q"])
@@ -337,16 +348,18 @@ class BenchPlan:
     def carry(self, grip, t0, t1, w=3.0, free=None, point=(0.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0)):
         """A hand on a carried object over [t0, t1]. Within each of free's (ta, tb) (the right hand's) only a point of
         the object and an axis through it are held to their plan, its turn about that axis the body's choice: nobody
-        minds how a pen is rolled, and a roll fixed by the plan took more wrist than the plan allows."""
+        minds how a pen is rolled, and a roll fixed by the plan took more wrist than the plan allows. w may vary with
+        t (a function of it)."""
         g = self.grips[grip]
         ph = g["H_rel"].T @ (np.asarray(point, float) - g["W_rel"])          # the point in the hand's frame
         ah = g["H_rel"].T @ np.asarray(axis, float)
 
         def fn(t):
             R, p = self.obj_at(g["of"], t)
+            wt = w(t) if callable(w) else w
             if any(a <= t < b for a, b in free or ()):
-                return [("tsr", ph, p + R @ np.asarray(point, float), ah, R @ np.asarray(axis, float), w)]
-            return [("pose", *self.grip_pose(grip, t), w)]
+                return [("tsr", ph, p + R @ np.asarray(point, float), ah, R @ np.asarray(axis, float), wt)]
+            return [("pose", *self.grip_pose(grip, t), wt)]
         self.add(g["side"], t0, t1, fn)
         self.wrist[g["side"]] = self.grip_pose(grip, t1)[1]
 
@@ -389,6 +402,7 @@ class BenchPlan:
         n = self.n = int(self.T * FPS) + 1
         c, h = bench_box()
         s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
+        s.W = BS.BodySolver.W | self.solver_w
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)
             last = max((x[1] for x in self.cons[side]), default=0.0)

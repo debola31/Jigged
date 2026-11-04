@@ -50,7 +50,8 @@ SKIN_BACK_S = 0.5         # a tool let go meets the skin again this long after, 
                           # fingers still in the calipers' slider kicked it 2.6 mm open
 EASE_OUT_S = 0.8          # a hand's carry correction eases out over this long after it lets go, as it draws back: over
                           # 0.4 s it took the hand back to its plan before it was clear, 6 mm into the calipers' slider
-TURN_MAX = 0.1            # a pressed tool's turn is kept as planned by sight by at most this much (rad)
+TURN_MAX = 0.2            # a pressed tool's turn is kept as planned by sight by at most this much (rad): at 0.1 the
+                          # calipers the left hand stood on the rim 9 deg off stayed 2 deg off
 DIGITS = {"thumb": ["met1", "pro1", "dis1"], "index": ["pro2", "int2", "dis2"], "middle": ["pro3", "int3", "dis3"],
           "ring": ["pro4", "int4", "dis4"], "little": ["pro5", "int5", "dis5"],
           "palm": ["palm", "met2", "met3", "met4", "met5"]}
@@ -114,6 +115,7 @@ class BenchRun:
         self.correction: dict[str, tuple] = {}
         self.guide = {"R": np.zeros(3), "L": np.zeros(3)}
         self.turn = {"R": np.zeros(3), "L": np.zeros(3)}
+        self.pivot: dict[str, np.ndarray | None] = {"R": None, "L": None}
         self.anchors: dict[int, np.ndarray] = {}
         self.released: dict[str, float] = {}
         self.contact_bits = {g: (int(m.geom_contype[g]), int(m.geom_conaffinity[g])) for g in range(m.ngeom)}
@@ -416,7 +418,10 @@ class BenchRun:
         dq = np.zeros(m.nv)
         for side in ("R", "L"):
             hb = m.body(f"{side}_hand").id
-            err = np.r_[self.touch_guide(side, tt), self.turn_guide(side, tt)]
+            turn = self.turn_guide(side, tt)
+            err = np.r_[self.touch_guide(side, tt), turn]
+            if self.pivot[side] is not None:     # the turn about the pressed point, which the hand moves round it
+                err[:3] += np.cross(turn, p.xpos[hb] - self.pivot[side])
             for s_, Rc, pc, t0, t1, ease in self.correction.values():
                 if s_ != side or not t0 <= tt < t1 + EASE_OUT_S:
                     continue
@@ -467,7 +472,10 @@ class BenchRun:
         has it by sight, within SIGHT_TAU, and lets that go over TOUCH_RELEASE_S after: the calipers' beam held on the
         face 3.4 deg off upright stood on one edge of its end and read 0.25 mm long. With `square_to` (a body, and
         `square_R`, its turn as planned), as the plan has it to that body as it now lies: the part on its mat sat 0.5
-        deg off its planned rest, and the beam square to the plan read 0.03 mm short. A turn of the hand, world frame."""
+        deg off its planned rest, and the beam square to the plan read 0.03 mm short. A turn of the hand, world frame,
+        about the press's point where it has one (`pivot`, where the plan has it): turned about the wrist, the beam's
+        end, held on the rim, couldn't follow, and the beam stood 2 deg off on the pocket wall's edge and read 0.15 mm
+        short."""
         m, d, dt = self.model, self.data, self.model.opt.timestep
         e = next((e for e in self.presses if e.get("upright") and e.get("side", "R") == side
                   and e["t0"] <= tt < e["t1"]), None)
@@ -475,6 +483,8 @@ class BenchRun:
         if e is None:
             g *= 1 - dt / TOUCH_RELEASE_S
             return g
+        if e.get("point"):
+            self.pivot[side] = self.planned_point(e, tt)
         k = min(len(self.t) - 1, int(round(tt * self.fps)))
         want = self.rd[f"obj_{e['upright']}_R"][k]
         if e.get("square_to"):

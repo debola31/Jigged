@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation
 
 from moonshot.body.skeleton import H0, build
 from moonshot.motion import kinematics as BM
-from moonshot.sim.record import Recorder, hand_wrench
+from moonshot.sim.record import Recorder, TouchOnsets, hand_wrench
 from moonshot.sim.reference import ARM as REF_ARM
 
 SIDES = ("R", "L")
@@ -123,6 +123,7 @@ class TakeRunner:
         self.side_bodies = {s: {b for b in range(m.nbody) if m.body(b).name.startswith(f"{s}_")} for s in SIDES}
         self.visual = {s: np.zeros(6) for s in SIDES}
         self._touch, self._steps = {s: False for s in SIDES}, 0
+        self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
 
     # --- for a step to fill in ---------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
@@ -282,6 +283,8 @@ class TakeRunner:
         d.ctrl[self.acts] = target[self.act_q] + (tau + kv * p.qvel[self.act_dof]) / (self.kp0 * k)
         self.before_step(t)
         mujoco.mj_step(m, d)
+        if self.onsets is not None:
+            self.onsets.step(d)
 
     def touching(self, side: str) -> bool:
         """Does the side's arm touch anything but the person and what it holds by a constraint?"""
@@ -370,7 +373,12 @@ class TakeRunner:
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, SIDES)
         self.theta = {s: [] for s in SIDES}
-        self.checks = {k: [] for k in ("touching", "hand_wrench", "hand_wrench_L", "active_constraints", "applied_forces")}
+        self.checks = {k: [] for k in ("touching", "touch_lead", "hand_wrench", "hand_wrench_L", "active_constraints",
+                                       "applied_forces")}
+        self.person_ids = {m.body(nm).id for nm in self.person}
+        arms = self.side_bodies["R"] | self.side_bodies["L"]
+        self.onsets = TouchOnsets(m, np.isin(m.geom_bodyid, list(arms)),
+                                  ~np.isin(m.geom_bodyid, list(self.person_ids)))
         self.machine_q = {a: m.jnt_qposadr[m.joint(f"vf2_{a}").id] for a in ("x", "y", "z")
                           if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"vf2_{a}") >= 0}
         self.checks["machine_axes"] = {f"vf2_{a}": [] for a in self.machine_q}
@@ -407,9 +415,10 @@ class TakeRunner:
             g1, g2 = d.contact[i].geom1, d.contact[i].geom2
             if (m.geom_bodyid[g1] in mine) != (m.geom_bodyid[g2] in mine):
                 other = g2 if m.geom_bodyid[g1] in mine else g1
-                if m.geom_bodyid[other] not in self.person:
+                if m.geom_bodyid[other] not in self.person_ids:
                     touched.add(m.geom(other).name)
         c["touching"].append(sorted(touched))
+        c["touch_lead"].append(self.onsets.frame())
         c["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
         f, tq = np.array(hand_wrench(m, d, "L_hand")).reshape(2, 3)
         c["hand_wrench_L"].append([-f[0], f[1], f[2], tq[0], -tq[1], -tq[2]])         # a reflection in x
@@ -425,7 +434,7 @@ class TakeRunner:
             for i in range(d.ncon):
                 g1, g2 = d.contact[i].geom1, d.contact[i].geom2
                 b1, b2 = m.geom_bodyid[g1], m.geom_bodyid[g2]
-                if b in (b1, b2) and (b2 if b1 == b else b1) not in self.person:
+                if b in (b1, b2) and (b2 if b1 == b else b1) not in self.person_ids:
                     mujoco.mj_contactForce(m, d, i, f6)
                     fw = d.contact[i].frame.reshape(3, 3).T @ f6[:3]
                     others += float(fw[2] if b2 == b else -fw[2])

@@ -222,8 +222,9 @@ class StepTake:
             first = min(t0 for t0, _, _ in cons)
             t_last, _, fn = max(cons, key=lambda c: c[1])
             last = max(t1 for _, t1, _ in cons)
-            # after its last task the hand holds where that task left it: hanging only if that's by the thigh
-            rests = np.linalg.norm(self.target_of(fn, last - 1e-6) - self.rest_of(side)) < REST_NEAR_MM
+            # after its last task the hand holds where that task left it: hanging only if that's by the thigh. A
+            # left hand's targets are in the mirrored world, where its rest is self.rest too (rest_of is the world's)
+            rests = np.linalg.norm(self.target_of(fn, last - 1e-6) - self.rest) < REST_NEAR_MM
             for k in range(n):
                 if k / FPS < first or (rests and k / FPS >= last):
                     th[k, cols] = HANGING

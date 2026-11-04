@@ -94,7 +94,7 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
            "grasping": {k: v.tolist() for k, v in grasping.items()},
            "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
-           "load_N": ck.get("load_N", {})}
+           "load_N": ck.get("load_N", {}), "touch_lead": objects.touch_leads(take, ck["touch_lead"])}
     if "L" in hand.values():
         out |= {"hand": {o: s for o, s in hand.items() if s == "L"},
                 "hand_speed_L_mm_s": hand_speed(rec["L_W"], fps).tolist()}
@@ -123,7 +123,7 @@ def measure(take: Path) -> dict:
     load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     out = {"fps": fps, "hand_speed_mm_s": hand_speed(sim["W"], fps).tolist(), "touching": ck["touching"],
            "grasping": {k: v.tolist() for k, v in grasping.items()}, "height_mm": {"blank": sim["blank"][:, 2].tolist()},
-           "weight_N": {"blank": load.mass_kg * 9.81}}
+           "weight_N": {"blank": load.mass_kg * 9.81}, "touch_lead": ck["touch_lead"]}
     if left:
         out |= {"hand": left, "hand_speed_L_mm_s": hand_speed(sim["W_L"], fps).tolist()}
     if "load_N" in ck:

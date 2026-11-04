@@ -261,14 +261,16 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
     dofs_at = {}
     for d in hand["dofs"]:
         dofs_at.setdefault(d["joint"], []).append(d)
+    # the colliders fitted to the skin (moonshot/body/derive_hand.py fit_colliders): a capsule per fingertip, a
+    # convex shell (a mesh) per other bone, the palm's the carpal bone's
     vols = {}
     for nm, c in hand["capsules"].items():
         r, ln = c["radius_mm"] * M, np.linalg.norm(np.subtract(c["to_mm"], c["from_mm"])) * M
         vols[nm] = math.pi * r * r * ln + 4 / 3 * math.pi * r ** 3
-    palm_r = 0.016
-    palm_len = np.linalg.norm((J[5] + J[20]) / 2 - J[0]) * M
-    vols["_palm"] = math.pi * palm_r ** 2 * palm_len + 4 / 3 * math.pi * palm_r ** 3
+    for nm, sh in hand["shells"].items():
+        vols[nm] = sh["volume_mm3"] * M ** 3
     hand_density = frac["hand"] * mass / sum(vols.values())
+    meshes = []
 
     def hand_xml(side, T, indent):
         R = T @ attach
@@ -286,15 +288,18 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
             if names[j] in hand["capsules"]:
                 c = hand["capsules"][names[j]]
                 a, b = (R @ np.array(c["from_mm"]) - P[j]) * M, (R @ np.array(c["to_mm"]) - P[j]) * M
-                pad = names[j].startswith("dis")
-                fr = ' condim="4" friction="0.6 0.012 0.0001"' if pad else ' condim="3" friction="0.6 0.004 0.0001"'
                 out.append(f'{ind}  <geom name="{side}_g_{names[j]}" class="skin" type="capsule" '
                            f'size="{c["radius_mm"] * M:.5f}" fromto="{_f(a)} {_f(b)}" '
-                           f'mass="{hand_density * vols[names[j]]:.6f}"{fr}/>')
+                           f'mass="{hand_density * vols[names[j]]:.6f}" condim="4" friction="0.6 0.012 0.0001"/>')
+            if names[j] in hand["shells"]:
+                v = (np.array(hand["shells"][names[j]]["vertices_mm"]) @ R.T - P[j]) * M
+                mesh = f"{side}_{names[j]}"
+                meshes.append(f'    <mesh name="{mesh}" vertex="{" ".join(_f(x) for x in v)}"/>')
+                geom = "palm" if j == 0 else names[j]            # the carpal bone's shell is the palm
+                out.append(f'{ind}  <geom name="{side}_g_{geom}" class="skin" type="mesh" mesh="{mesh}" '
+                           f'mass="{hand_density * vols[names[j]]:.6f}" condim="3" friction="0.6 0.004 0.0001"/>')
             if j == 0:
                 tip = (P[5] + P[20]) / 2 * M
-                out.append(f'{ind}  <geom name="{side}_g_palm" class="skin" type="capsule" size="{palm_r}" '
-                           f'fromto="0 0 0 {_f(tip)}" mass="{hand_density * vols["_palm"]:.6f}"/>')
                 if side == "R" and load_kg > 0:
                     out.append(f'{ind}  <body name="load" pos="{_f(tip * 0.8)}"><geom name="load" type="box" '
                                f'size="0.02 0.02 0.02" mass="{load_kg}" contype="0" conaffinity="0"/></body>')
@@ -373,6 +378,9 @@ def build(load_kg: float = 0.0, pelvis_mm: tuple[float, float, float] | None = N
       <geom contype="2" conaffinity="1" priority="2" solref="0.006 1" solimp="0.9 0.99 0.003 0.5 2" rgba="0.9 0.7 0.6 1"/>
     </default>
   </default>
+  <asset>
+{chr(10).join(meshes)}
+  </asset>
   <worldbody>
     <body name="pelvis" pos="{_f(np.array(pelvis_mm or (0, 0, segs["length_mm"]["lumbar_height"])) * M)}">
 {chr(10).join("      " + p for p in pelvis)}

@@ -24,7 +24,7 @@ import numpy as np
 
 from moonshot.body.skeleton import H0, MIRROR, build, set_finger_contact
 from moonshot.motion import kinematics as BM
-from moonshot.sim.record import Recorder, hand_wrench
+from moonshot.sim.record import Recorder, TouchOnsets, hand_wrench
 from moonshot.sim.reference import ARM, ReferenceTake
 from moonshot.world import bench_cell as BC
 
@@ -67,6 +67,7 @@ class BenchRun:
     def __init__(self, folder: Path, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = (),
                  grip_objects: dict[str, tuple[str, ...]] | None = None):
         """grip_objects: each grip's name -> the bodies its digits squeeze into."""
+        self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
         self.folder = Path(folder)
         self.tk = json.loads((self.folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(self.folder / "reference.npz")
@@ -333,6 +334,8 @@ class BenchRun:
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
         d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
         mujoco.mj_step(m, d)
+        if self.onsets is not None:
+            self.onsets.step(d)
 
     def grip_span(self, side, tt):
         """Which of the side's grip events tt falls in: its squeeze directions are measured once per grip."""
@@ -560,8 +563,11 @@ class BenchRun:
         spf = int(round(1.0 / (self.fps * m.opt.timestep)))
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * self.fps))
         self.recorder = Recorder(m, self.person, arms=("R", "L"))
-        self.rec = {"pose": [], "touching": [], "press": [], "lag": [], "hand_wrench": [],
+        self.rec = {"pose": [], "touching": [], "touch_lead": [], "press": [], "lag": [], "hand_wrench": [],
                     "active_constraints": [], "applied_forces": [], "load_N": {b: [] for b in self.lifted}}
+        person = [m.body(nm).id for nm in self.person]
+        arms = np.array([m.geom(g).name.startswith(("R_", "L_")) for g in range(m.ngeom)])
+        self.onsets = TouchOnsets(m, arms, ~np.isin(m.geom_bodyid, person))
         t0w = time.time()
         for k in range(n):
             frame_f: dict[int, list[float]] = {}
@@ -603,6 +609,7 @@ class BenchRun:
             self.recorder.frame(d, {"R": pose["R"], "L": pose["L"]}, self.rd["eye"][k], self.rd["look"][k],
                                 self.rd["up"][k])
             self.rec["touching"].append(sorted(touched))
+            self.rec["touch_lead"].append(self.onsets.frame())
             self.rec["hand_wrench"].append([round(float(x), 5) for x in wrench])  # the muscle check replays the right arm
             for b in self.lifted:
                 self.rec["load_N"][b].append(round(load[b], 3))
@@ -642,7 +649,8 @@ class BenchRun:
         m = self.model
         weight = {b: round(float(sum(m.body_mass[i] for i in self.tree(b))) * 9.81, 4) for b in self.lifted}
         (out / "checks.json").write_text(json.dumps(
-            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "load_N")} |
+            {k: rec[k] for k in ("touching", "touch_lead", "hand_wrench", "active_constraints", "applied_forces",
+                                 "load_N")} |
             {"weight_N": weight, "moves_with": self.moves_with, "machine_axes": {}, "never_held": never_held,
              "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
         self.recorder.write(out, self.fps, self.tk["lumbar"][0], {s: [str(x) for x in rd["names"]] for s in ("R", "L")},

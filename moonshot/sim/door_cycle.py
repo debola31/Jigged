@@ -44,6 +44,8 @@ class _Cell(TakeRunner):
     station = "vf2"
     doors_open_mm = 0.0
     never_held = NEVER_HELD
+    vise_keys = False          # the door takes' runs carry the vise's keys in sim.npz, which the checks read as a vise
+                               # take's (the part and parallels sit clamped); the other cell takes' work is elsewhere
 
     def __init__(self, folder):
         super().__init__(folder)
@@ -82,8 +84,11 @@ class _Cell(TakeRunner):
         return V.render_meshes(V.REFERENCE, folder)
 
     def record_checks(self) -> None:
-        """TakeRunner's checks this frame, and the vise's part, parallels and jaw opening, sim.npz's vise keys."""
+        """TakeRunner's checks this frame, and for a door take the vise's part, parallels and jaw opening, sim.npz's
+        vise keys."""
         super().record_checks()
+        if not self.vise_keys:
+            return
         m, d = self.model, self.data
         self.vise["blank"].append(d.body("blank").xpos * 1000)
         self.vise["para"].append(np.array([d.body(p).xpos * 1000 for p in ("para_a", "para_b")]))
@@ -116,6 +121,7 @@ class _Cell(TakeRunner):
 
 class DoorClose(_Cell):
     """Closing, the palm on the bar's outer face pushes it along: contact alone moves the door."""
+    vise_keys = True
     doors_open_mm = DC.OPEN_MM
     grip_geoms = {"door_left": "vf2_door_left_pull", "door_right": "vf2_door_right_pull",
                   "open_left": "vf2_door_left_pull", "open_right": "vf2_door_right_pull"}
@@ -231,6 +237,7 @@ class DoorOpen(DoorClose):
 
 
 class CycleStart(_Cell):
+    vise_keys = True
     grip_geoms = {"cycle_start": "vf2_cycle_start_button"}
     RELEASE_N = 0.5                 # a button lets go below this, well under its actuation force,
     DEBOUNCE_S = 0.05               # and only once it has stayed below it this long, as controls debounce a switch

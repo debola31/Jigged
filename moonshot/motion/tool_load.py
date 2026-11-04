@@ -2,7 +2,8 @@
 carousel through the spindle, as Haas's manual has it for the umbrella changer. The step is a run of takes cut
 together, as the body model doesn't walk (the declared cut of moonshot/motion/door_cycle.py): at the pendant, MDI,
 T<n> and ATC FWD put the probe away and bring pocket n to the spindle, empty; then, for each tool, standing in the
-doorway the right hand takes its holder off the tool stand on the table, carries it in under the spindle and pushes it
+doorway (one fork's pitch further right for each fork further right, across the cut: `door_lumbar`) the right hand
+takes its holder off the tool stand on the table, carries it in under the spindle and pushes it
 up into the spindle while the left holds the head's Tool Release button, lets go of the button so the drawbar clamps,
 and lets go of the holder (`Seat`); and at the pendant ATC FWD puts it in its pocket and brings the next one
 (`ToolChange`).
@@ -75,6 +76,8 @@ OPEN_OFF = 0.9                                           # the fingers open this
 # the tines as the weight is taken, about 0.2 s later, as people's 0.16-0.27 s
 CLOSE_S = 0.12
 PRELOAD_S = 0.23
+LIFT_LEAD_S_PER_KG = 0.33                                # the lift planned this much sooner per kg the holder weighs
+HOLDER_KG_LIGHT = 1.2                                    # past this (every drill, reamer, tap and end mill weighs less)
 LIFT_S = 0.2                                             # the lift off the tines, 2.5 mm from 0.1 s after the
                                                          # loading starts: planned 1 mm up 0.19 s into it
 LOAD_RAMP_S = 0.26                                       # the holder's weight fed forward, and the grip firmed, over
@@ -392,7 +395,9 @@ class Seat(ToolTake):
         # the weight taken (moonshot/sim/tool_load.py feeds it forward) and the holder lifted off the tines as it is
         # taken
         tw0 = t_touch + PRELOAD_S
-        tl = tw0 + 0.14
+        # a heavier holder lifted sooner: the arm, taking its weight, comes up to it later (the face mill's, 0.4 kg
+        # more than a drill's, came off the tines 0.13 s later than the plan)
+        tl = tw0 + 0.14 - LIFT_LEAD_S_PER_KG * max(0.0, kg - HOLDER_KG_LIGHT)
         # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
         t1 = tl + LIFT_S
         t2 = t1 + 0.43

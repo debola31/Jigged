@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 
 import numpy as np
@@ -24,6 +25,16 @@ class Unload(_Cell):
     doors_open_mm = 600.0          # fully open, as the vise take loads with them: at 300 the forearm meets the right one
     grip_geoms = {"knob": "knob"}
     encloses = {"knob": "knob"}
+    vise_keys = True               # the run carries the vise's keys, so the checks read it as the vise take's: the jaw
+                                   # opening is what moves the part and the parallels, and the knob is grasped as there
+
+    def eq_name(self, grip: str) -> str:
+        """The knob is held by the vise take's own declared constraint, `enclose` (declared-shortcuts.json)."""
+        return "enclose"
+
+    def scene(self, body_xml: str) -> str:
+        """The cell's, less the vise's own `enclose`: TakeRunner adds the one this take drives, by the same name."""
+        return re.sub(r'\s*<connect name="enclose"[^>]*/>', "", super().scene(body_xml), count=1)
 
     def __init__(self, folder=UL.TAKES / "loosen"):
         super().__init__(folder)

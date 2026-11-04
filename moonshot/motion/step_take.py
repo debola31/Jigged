@@ -114,16 +114,24 @@ class StepTake:
         about it free (moonshot/motion/solver.py)."""
         self.side[side]["cons"].append((t0, t1, fn))
 
-    def transit(self, side, t0, t1, W_to, via=(), fade=None):
+    def transit(self, side, t0, t1, W_to, via=(), fade=None, paced=False):
         """Free motion of the wrist to W_to (world) through via points, min-jerk submovements that overlap; the body
-        chooses the orientation; fade=(H, w_end) fades in a grip's orientation over the last 0.5 s."""
+        chooses the orientation; fade=(H, w_end) fades in a grip's orientation over the last 0.5 s. The submovements
+        share the time equally, or, paced, each in proportion to the square root of its length, as the vise take's
+        (moonshot/motion/setup_take.py Take.transit)."""
         s = self.side[side]
         pts = [s["wrist"]] + [self.at(side, v) for v in via] + [self.at(side, W_to)]
         n = len(pts) - 1
-        span = (t1 - t0) / n
+        if paced:
+            w = np.sqrt([max(float(np.linalg.norm(b - a)), 1.0) for a, b in zip(pts, pts[1:])])
+            spans = list((t1 - t0) * w / w.sum())
+            starts = list(t0 + 0.85 * np.r_[0.0, np.cumsum(spans[:-1])])
+        else:
+            span = (t1 - t0) / n
+            spans, starts = [span] * n, [t0 + i * span * 0.85 for i in range(n)]
         path = PosePath(np.eye(3), pts[0])
         for i in range(n):
-            path.to(t0 + i * span * 0.85, span * 1.15 if i < n - 1 else span, np.eye(3), pts[i + 1])
+            path.to(starts[i], spans[i] * 1.15 if i < n - 1 else spans[i], np.eye(3), pts[i + 1])
 
         def fn(t, path=path):
             out = [("pos", path.at(t)[1], 1.0)]

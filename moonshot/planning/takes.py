@@ -30,6 +30,16 @@ def shared(step: dict, take: str) -> Span:
     return (take if m == "vf2" else f"{m}-{take}", None, None)
 
 
+def tool_takes(step: dict) -> list[str]:
+    """A Load the tools step's takes, in order, by their folders under the step's own (moonshot/motion/tool_load.py):
+    the change at the pendant that empties the spindle, then for each tool its seat in the doorway and its ATC FWD at
+    the pendant, cut together as the body doesn't walk."""
+    out = ["00-change"]
+    for i, t in enumerate(step["facts"]["tool_ids"]):
+        out += [f"{2 * i + 1:02d}-seat-{t}", f"{2 * i + 2:02d}-atc-{t}"]
+    return out
+
+
 def spans(part: str, step: dict) -> list[Span]:
     """The takes, in order, that make one step of a part's plan."""
     sid, setup = step["id"], step.get("setup")
@@ -59,7 +69,7 @@ def spans(part: str, step: dict) -> list[Span]:
         "check": [(vise, "measure", "measure")],
         "xy": setting,
         "z": setting,
-        "tools": setting,
+        "tools": [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else [],
         "start": start,
         "unload": [shared(step, "door-open"), shared(step, "blow-off"), shared(step, "loosen"),
                    (f"lift-out-{vise}", None, None)],

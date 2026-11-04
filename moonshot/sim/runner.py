@@ -374,6 +374,10 @@ class TakeRunner:
         self.machine_q = {a: m.jnt_qposadr[m.joint(f"vf2_{a}").id] for a in ("x", "y", "z")
                           if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"vf2_{a}") >= 0}
         self.checks["machine_axes"] = {f"vf2_{a}": [] for a in self.machine_q}
+        self.spindle = (m.jnt_dofadr[m.joint("vf2_spindle").id]
+                        if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "vf2_spindle") >= 0 else None)
+        if self.spindle is not None:
+            self.checks["machine_axes"]["vf2_spindle"] = []
         carried = {e["obj"] for e in self.tk["events"] if e["kind"] == "carry" and e.get("obj")}
         self.carried = {o: m.body(o).id for o in carried if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, o) >= 0}
         self.checks["load_N"] = {o: [] for o in self.carried}
@@ -393,8 +397,8 @@ class TakeRunner:
     def record_checks(self) -> None:
         """This frame of what the per-frame checks read that the take record doesn't carry (moonshot/validate/take.py),
         as the vise take's run writes it: what the arms touch, each hand's wrench (the left's reflected into the right's
-        frame), the active constraints and the bodies pushed from outside the physics, the VF-2's axes where the scene
-        has it, and each carried object's lifting force (its upward force from the person: all its outside force less
+        frame), the active constraints and the bodies pushed from outside the physics, the VF-2's axes (and its
+        spindle's rpm) where the scene has it, and each carried object's lifting force (its upward force from the person: all its outside force less
         what anything else's contact puts on it)."""
         m, d, c = self.model, self.data, self.checks
         mine = self.side_bodies["R"] | self.side_bodies["L"]
@@ -413,6 +417,8 @@ class TakeRunner:
         c["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
         for a, q in self.machine_q.items():
             c["machine_axes"][f"vf2_{a}"].append(round(float(d.qpos[q]) * 1000, 4))
+        if self.spindle is not None:                                                  # rpm
+            c["machine_axes"]["vf2_spindle"].append(round(float(d.qvel[self.spindle]) * 60 / (2 * math.pi), 1))
         f6 = np.zeros(6)
         for name, b in self.carried.items():
             others = 0.0

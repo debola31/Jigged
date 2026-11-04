@@ -8,16 +8,14 @@ holds a hand to a bar. The arm is fed what moving the door along its planned pat
 damping and its inertia), where the hand meets the bar, and more as the door trails its path, as people lean into a
 door that is slow to move.
 
-The run writes, beside the take record, checks.json (per frame, what the arms touch, each hand's wrench, the active
-constraints and the bodies pushed from outside the physics, the VF-2's axes; the never-held E-stop) and the vise's
-keys in sim.npz, which moonshot/validate/take.py reads.
+The run writes, beside the take record, checks.json (TakeRunner's; the never-held E-stop) and the vise's keys in
+sim.npz, which moonshot/validate/take.py reads.
 
     python -m moonshot.sim.door_cycle           # runs the three takes in the data root and writes their records
 """
 from __future__ import annotations
 
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -26,7 +24,7 @@ import numpy as np
 
 from moonshot.motion import door_cycle as DC
 from moonshot.motion.primitives import min_jerk
-from moonshot.sim.record import glbs_in_bodies, hand_wrench
+from moonshot.sim.record import glbs_in_bodies
 from moonshot.sim.runner import SIDES, TakeRunner
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
@@ -49,9 +47,6 @@ class _Cell(TakeRunner):
 
     def __init__(self, folder):
         super().__init__(folder)
-        self.checks = {k: [] for k in ("touching", "hand_wrench", "hand_wrench_L", "active_constraints",
-                                       "applied_forces")}
-        self.checks["machine_axes"] = {f"vf2_{a}": [] for a in ("x", "y", "z", "spindle")}
         self.vise = {k: [] for k in ("blank", "para", "opening")}
 
     def scene(self, body_xml: str) -> str:
@@ -86,53 +81,24 @@ class _Cell(TakeRunner):
     def meshes(self, folder):
         return V.render_meshes(V.REFERENCE, folder)
 
-    def on_frame(self, k: int) -> None:
-        self.record_checks()
-
-    def touched(self) -> list[str]:
-        """Everything either arm touches this frame but the person, by geom name."""
-        m, d = self.model, self.data
-        arms = self.side_bodies["R"] | self.side_bodies["L"]
-        out = set()
-        for i in range(d.ncon):
-            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
-            for a, b in ((g1, g2), (g2, g1)):
-                if m.geom_bodyid[a] in arms and m.body(m.geom_bodyid[b]).name not in self.person:
-                    out.add(m.geom(b).name)
-        return sorted(out)
-
     def record_checks(self) -> None:
-        """This frame of what the per-frame checks read that the take record doesn't carry (as the vise take's
-        export_sim): what the arms touch, each hand's wrench (the left's in the mirrored world, as sim.npz has the
-        left arm), the active constraints and the bodies pushed from outside the physics, the VF-2's axes; and the
-        vise's part, parallels and jaw opening, sim.npz's vise keys."""
-        m, d, c = self.model, self.data, self.checks
-        c["touching"].append(self.touched())
-        c["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
-        f, tq = np.array(hand_wrench(m, d, "L_hand")).reshape(2, 3)
-        c["hand_wrench_L"].append([-f[0], f[1], f[2], tq[0], -tq[1], -tq[2]])      # a reflection in x
-        c["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
-        c["applied_forces"].append([m.body(b).name for b in range(m.nbody) if d.xfrc_applied[b].any()])
-        for a in ("x", "y", "z"):
-            c["machine_axes"][f"vf2_{a}"].append(round(float(d.qpos[self.ctl.q[a]]) * 1000, 4))
-        spindle = m.jnt_dofadr[m.joint("vf2_spindle").id]
-        c["machine_axes"]["vf2_spindle"].append(round(float(d.qvel[spindle]) * 60 / (2 * math.pi), 1))
+        """TakeRunner's checks this frame, and the vise's part, parallels and jaw opening, sim.npz's vise keys."""
+        super().record_checks()
+        m, d = self.model, self.data
         self.vise["blank"].append(d.body("blank").xpos * 1000)
         self.vise["para"].append(np.array([d.body(p).xpos * 1000 for p in ("para_a", "para_b")]))
         jaw = d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]]
         self.vise["opening"].append(V.REFERENCE.opening0 - jaw * 1000)
 
     def export(self, folder: Path | None = None) -> None:
-        """The take record and sim.npz (TakeRunner.export); with the frames record_checks kept, also the vise's keys
-        in sim.npz and checks.json, which moonshot/validate/take.py reads. Nothing is lifted, so load_N is empty."""
+        """The take record, sim.npz and checks.json (TakeRunner.export), and the vise's keys in sim.npz, which
+        moonshot/validate/take.py reads."""
         folder = Path(folder or self.folder)
         super().export(folder)
-        if not self.checks["touching"]:
+        if not self.vise["blank"]:
             return
         sim = dict(np.load(folder / "sim.npz"))
         np.savez(folder / "sim.npz", **sim, **{k: np.array(v) for k, v in self.vise.items()})
-        (folder / "checks.json").write_text(json.dumps(self.checks | {"load_N": {}, "never_held": self.never_held}),
-                                            encoding="utf-8")
 
     def force_on(self, geom: str) -> dict[str, float]:
         """Each hand's normal force on a geom now (N)."""

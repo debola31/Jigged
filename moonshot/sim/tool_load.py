@@ -36,7 +36,7 @@ from scipy.spatial.transform import Rotation
 from moonshot.config import data_root
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.pendant import PendantRunner
-from moonshot.sim.runner import APPROACH_S, TakeRunner
+from moonshot.sim.runner import APPROACH_S, H0, RELEASE_S, TakeRunner
 from moonshot.world import tooling as TL
 from moonshot.world import vise as V
 from moonshot.world.vise import Load
@@ -54,7 +54,7 @@ CARRY_SOLIMP = (0.9, 0.95)  # ... and its impedance
 PRELOAD_SOLREF_S = 0.3      # before the hand takes the holder's weight, soft, and giving: at the carry's impedance the
 PRELOAD_SOLIMP = (0.02, 0.05)  # weld passes 90% of the hand's own tremor and drift to the resting holder whatever its
                             # stiffness, 0.4-0.54 N of it, near the 0.55 N that starts the loading
-R_OUT_S = 0.55             # the right hand off the holder this long after its grip ends (motion/tool_load.py)
+R_OUT_S = 0.8              # the right hand off the holder this long after its grip ends (motion/tool_load.py)
 R_SIGHT_EASE_S = 0.8        # ... and its carry's correction eases out this fast as it goes back, as the bench's
 
 
@@ -90,8 +90,12 @@ class ToolLoadRun(PendantRunner):
         self.rec |= {"holder": [], "holder_quat": [], "load_N": [], "touching_R": [], "fingers": [], "clamp_N": [],
                      "released": []}
         self.weld = m.equality("carry_holder").id if self.loose is not None else None
+        if self.loose is not None:              # the planned grip's hand (its body's frame) in the holder's, upright
+            from moonshot.motion.tool_load import holder_grip
+            self.grip_in_holder = np.array(holder_grip(ld["tool"])["H"], float) @ H0.T
         self._pivoting = False
         self._pivot_R = np.eye(3)
+        self._hold, self._hold_q = None, None
         self._stiff = False
         self._apart_on = False
         self.holder_kg_model = float(m.body_subtreemass[self.loose]) if self.loose is not None else 0.0
@@ -147,8 +151,23 @@ class ToolLoadRun(PendantRunner):
         return p
 
     def at(self, t: float):
+        """The plan; and from when the carry ends, the right arm held where the weld left it, the plan's own motion
+        from then on added to that (`let_go`), eased back onto the plan as the hand goes back to rest."""
         self._t = t                                # the plan's time this step, for what reads it without being given it
-        return super().at(t)
+        q, v, a = super().at(t)
+        if self._hold is not None:
+            q[self._hold_q] += self._hold * (1.0 - min_jerk((t - self.grip["t1"] - R_OUT_S) / R_SIGHT_EASE_S))
+        return q, v, a
+
+    def let_go(self, t: float) -> None:
+        """As the weld lets go of the holder, the drawbar holding it: the right arm's targets set where the arm is,
+        and its sight's correction, which stood for where the holder sat in the hand, folded into them, so letting
+        go moves nothing. Held at the plan and its correction, the arm, pressed up against the seated holder through
+        the weld and freed of it, sprang 12 mm across into it, the palm 6 mm into its body."""
+        q, _, _ = super().at(t)
+        self._hold_q = self.r_q[self.r_arm]
+        self._hold = self.data.qpos[self._hold_q] - q[self._hold_q]
+        self.visual["R"][:] = 0.0
 
     def carrying(self, t: float) -> bool:
         return self.carry is not None and self.carry["t0"] <= t < self.carry["t1"]
@@ -258,17 +277,23 @@ class ToolLoadRun(PendantRunner):
             F += sign * (c.frame.reshape(3, 3).T @ f6[:3])
         return F
 
-    def anchor_weld(self, at_holder) -> None:
+    def anchor_weld(self, at_holder, turn_to_grip: bool = False) -> None:
         """Set carry_holder to hold the holder where it is in the hand now, at a point given in the holder's frame (mm):
-        no jump as it switches on or changes."""
+        no jump as it switches on or changes. turn_to_grip: and turned about its own axis to where the planned grip
+        has it in the hand, which only turns the holder in its fork (`carry_weld`)."""
         m, d = self.model, self.data
         hb = m.body("R_hand").id
         Ro, Rh = d.xmat[self.loose].reshape(3, 3), d.xmat[hb].reshape(3, 3)
         P = d.xpos[self.loose] + Ro @ (np.asarray(at_holder, float) * 0.001)
+        rel = Ro.T @ Rh                                                # the hand in the holder's frame
+        if turn_to_grip:
+            dR = self.grip_in_holder @ rel.T
+            a = np.arctan2(dR[1, 0] - dR[0, 1], dR[0, 0] + dR[1, 1])
+            rel = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]]) @ rel
         m.eq_data[self.weld, 0:3] = Rh.T @ (P - d.xpos[hb])          # the point in the hand (body2)
         m.eq_data[self.weld, 3:6] = Ro.T @ (P - d.xpos[self.loose])  # ... and in the holder (body1)
         qr = np.zeros(4)
-        mujoco.mju_mat2Quat(qr, np.ascontiguousarray(Ro.T @ Rh).reshape(-1))
+        mujoco.mju_mat2Quat(qr, np.ascontiguousarray(rel).reshape(-1))
         m.eq_data[self.weld, 6:10] = qr
 
     def carry_weld(self, t: float) -> None:
@@ -279,7 +304,8 @@ class ToolLoadRun(PendantRunner):
         turn (torquescale 0), at a point on the holder's own axis among the fingers, so the bore's rings stand it
         upright as it goes up, as a taper aligns a holder a hand guides: carried rigidly, a hand 7 deg off its grip
         jammed it in the bore, and held at the wrist, beside the holder, the push up through it tipped the holder until
-        its taper wedged across the rings. The hand's skin and the holder are apart while it's on."""
+        its taper wedged across the rings. The hand's skin and the holder are apart while it's on and until the hand
+        is well off it (the runner's RELEASE_S)."""
         m, d = self.model, self.data
         want = self.carry["t0"] <= t < self.carry["t1"]
         if want and not self._pivoting and d.eq_active[self.weld] and t >= self.seat_ev["t0"] and self.in_bore():
@@ -296,22 +322,26 @@ class ToolLoadRun(PendantRunner):
             self._stiff = False
         elif not want and d.eq_active[self.weld]:
             d.eq_active[self.weld] = 0
+            self.let_go(t)
         # soft while the grip firms and before the hand takes any weight, as the skin and the fingers give; set again
         # where the holder then sits in the hand as the hand starts to take its weight, so stiffening moves nothing;
         # and stiffened over the loading, as the grip firms with the load (Guillery 2013): stiff from the start, the
         # hand's tremor shook the resting holder against its tines at 1-2 N, past the 0.55 N that starts the loading,
         # and stiffened at once, the hand, held a few millimetres high by its sight, lifted it off in 0.13 s
         if want and loading and not self._stiff and not self._pivoting:
-            self.anchor_weld([0.0, 0.0, 0.0])
+            # turned about the holder's own axis onto the planned grip: the hand's turn lagged its reach, and the
+            # 13-18 deg it held the holder turned in it stayed to the end, where the fingers, wrapped round its
+            # front, dragged through it as the hand came away
+            self.anchor_weld([0.0, 0.0, 0.0], turn_to_grip=True)
             self._stiff = True
         f = float(np.clip((t - lo[0]) / max(lo[1] - lo[0], 1e-9), 0.0, 1.0)) if self._stiff else 0.0
         m.eq_solref[self.weld, 0] = PRELOAD_SOLREF_S * (CARRY_SOLREF_S / PRELOAD_SOLREF_S) ** f
         m.eq_solimp[self.weld, 0:2] = np.add(PRELOAD_SOLIMP, f * np.subtract(CARRY_SOLIMP, PRELOAD_SOLIMP))
         # apart from the final approach on, as the runner holds a welded tool's grip (APPROACH_S): a hand trailing its
-        # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork; and touching again
-        # once the weld lets go, the drawbar holding the holder: apart on into the release (the runner's RELEASE_S),
-        # the hand, pressed up against the seated holder and freed of it, sprang 12 mm across into it, the palm 6 mm
-        apart = self.grip["t0"] - APPROACH_S <= t < self.carry["t1"]
+        # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork; and on until the
+        # hand is well off it (the runner's RELEASE_S): touching again as the weld let go, the fingers round a face
+        # mill pulled its holder, 15 N of it, out of the drawbar's 18 N
+        apart = self.grip["t0"] - APPROACH_S <= t < self.carry["t1"] + RELEASE_S
         if apart != self._apart_on:
             self.hold_apart(self.loose, 1 if apart else 0)
             self._apart_on = apart

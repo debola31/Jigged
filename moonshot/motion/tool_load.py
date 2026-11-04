@@ -62,8 +62,12 @@ STANCE_MM_PER_FORK = 72.0                                # the stance moves this
                                                          # forks right 54 mm further and 0.07 s later, still moving as
                                                          # the fingers closed: the grip's load passed 5% of the weight
                                                          # within 0.03-0.13 s)
-BACK_MM = 880.0                                          # back to rest from the spindle in 0.85 s from this far, longer
-                                                         # farther
+BACK_S = 1.3                                             # back to rest from the spindle in this long ...
+BACK_MM = 900.0                                          # ... from this far, longer farther: in 0.85 s, 1 m from the
+                                                         # fifth fork's stance, the arm reached 30 m/s^2
+OPEN_OFF = 0.9                                           # the fingers open this far off the holder before the palm
+                                                         # comes away: at 0.7, with the hand turned 13 deg round the
+                                                         # holder from its planned grip, they dragged through it
 # the grasp's timing (Guillery 2013, thresholds.toml person.grasp_*): the fingers close, the grip firms with no load
 # yet (preload, the middle of people's band), the hand takes the holder's weight (loading) and the holder comes off
 # the tines as the weight is taken, about 0.2 s later, as people's 0.16-0.27 s
@@ -118,9 +122,11 @@ YAW_DEG_PER_FORK = 10.0                                  # the grip turned this 
                                                          # the wrist, kept turned as for the first fork, bent back
                                                          # 45-50 deg (from fork 3, a median negative log-likelihood of
                                                          # 29.9 unturned, 28.2 turned 15 deg, 27.2 turned 30)
-CLEAR_STAND_MM = np.array([0.0, -420.0, -130.0])         # back to rest by way of this far from the spindle, toward
-                                                         # the body: straight down to a stance further right, the hand
-                                                         # swept through the holders still on the stand
+CLEAR_STAND_MM = np.array([-50.0, 120.0, 270.0])         # back to rest by way of a point this far above and in front
+                                                         # of it: high over the holders still on the stand, and down in
+                                                         # front of the vise's crank (straight down to a stance further
+                                                         # right, the hand swept through the stand's holders; by way of
+                                                         # a point in front of the spindle, its fingers hit the crank)
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
 
 
@@ -447,18 +453,20 @@ class Seat(ToolTake):
         self.effort("R", t8, 0.6, "holder")
         self.effort("R", t9, 0.0, None)
         self.fingers("R", t9, g["q"])
-        open_q = open_like(self.hand, g["q"], 0.7)
-        self.fingers("R", t9 + 0.25, open_q)
+        open_q = open_like(self.hand, g["q"], OPEN_OFF)
+        t_open = t9 + self.shape_s(g["q"], open_q)
+        self.fingers("R", t_open, open_q)
         H9, W9 = self.grip_pose("holder", SPINDLE - [0, 0, EASE_MM], turned(t9))
         # the fingers open off it first, then the palm comes away to the right and down, and only then does the hand
         # draw back: drawn back with the fingers still round the holder's far side, they would pass through it
         out = W9 + turned(t9) @ [35.0, -15.0, -20.0]
-        self.add("R", t9, t9 + 0.55, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t9 - 0.15) / 0.4), 2.0)])
+        t_out = t_open - 0.1                                # the palm off it as the fingers finish opening
+        self.add("R", t9, t_out + 0.45, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t_out) / 0.45), 2.0)])
         self.side["R"]["wrist"] = out
-        clear = SPINDLE + CLEAR_STAND_MM
-        back_s = 0.85 * math.sqrt(max(1.0, (np.linalg.norm(clear - out) + np.linalg.norm(self.rest - clear)) / BACK_MM))
-        self.transit("R", t9 + 0.55, t9 + 0.55 + back_s, self.rest, via=[clear])
-        t10 = t9 + 0.55 + back_s                            # at rest
+        clear = self.rest + CLEAR_STAND_MM
+        back_s = BACK_S * math.sqrt(max(1.0, (np.linalg.norm(clear - out) + np.linalg.norm(self.rest - clear)) / BACK_MM))
+        self.transit("R", t_out + 0.45, t_out + 0.45 + back_s, self.rest, via=[clear])
+        t10 = t_out + 0.45 + back_s                         # at rest
         self.fingers("R", t10 - 0.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
         self.event("grip", round(t_c, 3), round(t9, 3), side="R", grip="holder", on="holder")

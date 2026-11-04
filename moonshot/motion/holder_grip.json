@@ -3,32 +3,32 @@
  "grips": {
   "drill-5p5": {
    "q": {
-    "cmc2_flex": 0.0019583434504929966,
-    "index_mcp_abd": -9.412892571589826,
-    "index_mcp_flex": 36.9100436562312,
-    "index_pip": 57.159070132425775,
-    "index_dip": 19.7458782781302,
-    "cmc3_flex": 2.7148710551528135,
-    "middle_mcp_abd": -0.8561861743300492,
-    "middle_mcp_flex": 40.291044475090764,
-    "middle_pip": 48.75714580588298,
-    "middle_dip": 54.720538928376186,
-    "cmc4_flex": 8.923463876172992,
-    "ring_mcp_abd": -0.24801375801433195,
-    "ring_mcp_flex": 48.53470664945716,
-    "ring_pip": 34.3614499338042,
-    "ring_dip": 17.705984083623065,
-    "cmc5_flex": 10.729358837447093,
-    "little_mcp_abd": -5.5374331013694125,
-    "little_mcp_flex": 57.8653560915791,
-    "little_pip": 26.76810769011967,
-    "little_dip": 20.958939113377024,
-    "thumb_cmc_abd": 31.938533618401735,
-    "thumb_cmc_flex": 19.79278676536733,
-    "thumb_cmc_roll": -7.558053900132424,
-    "thumb_mcp_abd": -3.1191224334766936,
-    "thumb_mcp_flex": 31.70520572677937,
-    "thumb_ip": -12.426127443133016
+    "cmc2_flex": 0.002,
+    "index_mcp_abd": -9.413,
+    "index_mcp_flex": 36.91,
+    "index_pip": 57.159,
+    "index_dip": 19.746,
+    "cmc3_flex": 2.715,
+    "middle_mcp_abd": -0.856,
+    "middle_mcp_flex": 10.291,
+    "middle_pip": 63.757,
+    "middle_dip": 54.721,
+    "cmc4_flex": 8.923,
+    "ring_mcp_abd": -0.248,
+    "ring_mcp_flex": 3.535,
+    "ring_pip": 49.361,
+    "ring_dip": 2.706,
+    "cmc5_flex": 10.729,
+    "little_mcp_abd": -5.537,
+    "little_mcp_flex": 57.865,
+    "little_pip": 56.768,
+    "little_dip": 20.959,
+    "thumb_cmc_abd": 31.939,
+    "thumb_cmc_flex": 19.793,
+    "thumb_cmc_roll": -7.558,
+    "thumb_mcp_abd": -3.119,
+    "thumb_mcp_flex": 31.705,
+    "thumb_ip": -12.426
    },
    "H": [
     [
@@ -60,68 +60,8 @@
     "penetration": 4.41,
     "prior": 1.78,
     "coupling": 12.18
-   }
-  },
-  "em12": {
-   "q": {
-    "cmc2_flex": 0.002862308724982344,
-    "index_mcp_abd": -11.004201777079862,
-    "index_mcp_flex": 33.68618661073389,
-    "index_pip": 58.45333694041617,
-    "index_dip": 21.01600219580752,
-    "cmc3_flex": 0.16667448823586223,
-    "middle_mcp_abd": 6.010728483535137,
-    "middle_mcp_flex": 36.56484267688123,
-    "middle_pip": 59.92198918727047,
-    "middle_dip": 29.78392024043667,
-    "cmc4_flex": 12.388638704013342,
-    "ring_mcp_abd": -4.352867546690729,
-    "ring_mcp_flex": 50.25355017946305,
-    "ring_pip": 2.7202679046476304,
-    "ring_dip": -9.045763475527911,
-    "cmc5_flex": 17.809094946028182,
-    "little_mcp_abd": 7.953136598149375,
-    "little_mcp_flex": 58.75676581365565,
-    "little_pip": -4.745724266386136,
-    "little_dip": -6.2043078925554,
-    "thumb_cmc_abd": 27.744117251474343,
-    "thumb_cmc_flex": 6.02121187224256,
-    "thumb_cmc_roll": 4.23845393765146,
-    "thumb_mcp_abd": -3.536268627078489,
-    "thumb_mcp_flex": 35.8036322653309,
-    "thumb_ip": -14.342919490883643
    },
-   "H": [
-    [
-     0.24605457256780042,
-     0.09153206371123455,
-     0.964924364202314
-    ],
-    [
-     0.9578648597090987,
-     -0.17514189281647136,
-     -0.22764056737570376
-    ],
-    [
-     0.14816226865482898,
-     0.980279143251261,
-     -0.13076981094131834
-    ]
-   ],
-   "W_rel": [
-    34.68352509892699,
-    -107.26501577352332,
-    -69.29100537386395
-   ],
-   "loss": 215.15,
-   "terms": {
-    "pad_index": 0.9,
-    "pad_thumb": 2.3,
-    "pad_middle": 0.04,
-    "penetration": 208.05,
-    "prior": 1.61,
-    "coupling": 2.25
-   }
+   "from": "drill-5p5's grip, its middle, ring and little fingers flexed or straightened off the tool (skin {'flange': 0.0, 'body': 1.92, 'tool': 0.0} mm into the holder)"
   },
   "facem": {
    "q": {

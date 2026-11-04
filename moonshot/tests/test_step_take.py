@@ -19,7 +19,7 @@ def take(tmp_path_factory):
     t.transit("R", 0.1, 0.8, LUMBAR + np.array([250.0, 380.0, 150.0]))
     t.transit("L", 0.1, 0.8, LUMBAR + np.array([-250.0, 380.0, 150.0]))
     t.look(0.0, LUMBAR + np.array([0.0, 400.0, 100.0]))
-    t.t = 1.0
+    t.t = 1.6                     # held long enough after the reach from rest for the body to settle onto the plan
     t.solve(iters=300)
     t.save()
     return t

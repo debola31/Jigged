@@ -306,7 +306,14 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   were about 27 farm-hours), and the backlog's drafts are taken as approved; the bench's props drawn as what they are;
   parked until nist-ftc-10 is up: the band saw's takes, the G1 parts' takes, CI runs of the gates and the remaining
   strength curves. The skin check runs on Embree since (`embreex`), 200x faster with the same answer, so a take's
-  checks take minutes.
+  checks take minutes. Later the same morning (your decisions): each take renders on the machine that made it and
+  only its video goes to the hub (`pipeline --local`; the queue had sent every frame back as a PNG over a link
+  doing about 100 KB/s), with the M1 off the farm's renders; finals at 16 samples, denoised (39,000 frames, 26,000
+  of them the setting takes); Cycle Start and the tool inserts are exempt from grasp timing and hand opening, as the
+  pendant takes are (no grasp of their own; an insert's is checked in its pick); the vf2-tool-load card's proposed
+  values approved as written. At 10:30 every setting take (11), every tool take (29), the doors and Cycle Start,
+  deburr and inspect pass every check on the new body and are rendering; the vise loads, set-stop, blow-off,
+  loosen and the lift-outs are in progress.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

@@ -22,9 +22,9 @@ their pockets, and the VF-2's drawbar (moonshot/world/vf2.py SPINDLE_BORE) readi
 
     python -m moonshot.sim.tool_load nist-ftc-10 op50-tools [take]    # runs each take (or one) and writes its record
 
-Writes beside each take record: checks.json (as the pendant's, and touching_R, the holder's load_N and weight_N, which
-the grasp checks read) and outcome.json (the machine's pocket table and key presses; for a seat, where the holder
-ended in the spindle and what holds it). moonshot/tests/gates/test_setting_takes.py reads them.
+Writes beside each take record: checks.json (as the pendant's, and touching_R, and the runner's load_N and weight_N for
+the holder, which the grasp checks read) and outcome.json (the machine's pocket table and key presses; for a seat,
+where the holder ended in the spindle and what holds it). moonshot/tests/gates/test_setting_takes.py reads them.
 """
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ class ToolLoadRun(PendantRunner):
                             for s in ("R", "L")}
         self.path = [(k[0], np.array(k[1:], float)) for k in ld.get("path", [])]
         self.kg = TL.holder_kg(ld["tool"]) if self.kind in CARRIED else 0.0
-        self.rec |= {"holder": [], "holder_quat": [], "load_N": [], "touching_R": [], "fingers": [], "clamp_N": [],
+        self.rec |= {"holder": [], "holder_quat": [], "touching_R": [], "fingers": [], "clamp_N": [],
                      "released": []}
         self.weld = m.equality("carry_holder").id if self.loose is not None else None
         if self.loose is not None:              # the planned grip's hand (its body's frame) in the holder's, upright
@@ -107,7 +107,6 @@ class ToolLoadRun(PendantRunner):
         self._hold, self._hold_q = None, None
         self._stiff = False
         self._apart_on = False
-        self.holder_kg_model = float(m.body_subtreemass[self.loose]) if self.loose is not None else 0.0
 
     # --- the scene --------------------------------------------------------------------------------------------------
     def scene(self, body_xml: str) -> str:
@@ -407,14 +406,6 @@ class ToolLoadRun(PendantRunner):
                 and self._steps % 10 == 0 and self.seated()["clamped"]):
             self.machine.spindle_tool = self.tk["load"]["tool"]      # the machine now holds what the hand put in
 
-    def lift_N(self) -> float:
-        """The upward force the hand puts on the holder (N): through its contacts and the carry weld alike, from the
-        holder's own motion, m (a + g), less what everything else (the stand, the bore, the drawbar) pushes on it."""
-        m, d = self.model, self.data
-        dof = m.jnt_dofadr[m.body_jntadr[self.loose]]
-        others = set(range(m.ngeom)) - self.hand_geoms - self.holder_geoms
-        return float(self.holder_kg_model * (d.qacc[dof + 2] + G) - self.forces_on(self.holder_geoms, others)[2])
-
     def seated(self) -> dict:
         """Where the loose holder is against the spindle's gauge point, and what holds it."""
         d = self.data
@@ -440,7 +431,6 @@ class ToolLoadRun(PendantRunner):
         if self.loose is not None:
             self.rec["holder"].append((d.xpos[self.loose] * 1000).round(3).tolist())
             self.rec["holder_quat"].append(d.xquat[self.loose].round(6).tolist())
-            self.rec["load_N"].append(round(self.lift_N(), 3))
             self.rec["clamp_N"].append(round(self.seated()["clamp_N"], 3))
 
     def outcome(self) -> dict:
@@ -462,9 +452,8 @@ class ToolLoadRun(PendantRunner):
         folder = Path(folder or self.folder)
         ck = json.loads((folder / "checks.json").read_text(encoding="utf-8"))
         ck["touching_R"] = self.rec["touching_R"]
-        if self.loose is not None:
-            ck |= {"load_N": {"holder": self.rec["load_N"]}, "weight_N": {"holder": round(self.kg * G, 3)},
-                   "clamp_N": self.rec["clamp_N"]}
+        if self.loose is not None:              # the holder's lift and weight as the runner records a carried object's
+            ck |= {"load_N": self.checks["load_N"], "weight_N": self.checks["weight_N"], "clamp_N": self.rec["clamp_N"]}
         (folder / "checks.json").write_text(json.dumps(ck), encoding="utf-8")
 
 

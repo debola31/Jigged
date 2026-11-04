@@ -31,6 +31,22 @@
   "still/nist-ftc-10/op30-cbores.webp",
   "still/nist-ftc-10/op40-cbores.webp",
   "still/nist-ftc-10/op50-deep.webp",
-  "video/nist-ftc-10/deburr.mp4"
+  "video/nist-ftc-10/deburr.mp4",
+  "video/nist-ftc-10/op10-clean.mp4",
+  "video/nist-ftc-10/op10-start.mp4",
+  "video/nist-ftc-10/op10-unload.mp4",
+  "video/nist-ftc-10/op20-clean.mp4",
+  "video/nist-ftc-10/op20-start.mp4",
+  "video/nist-ftc-10/op20-unload.mp4",
+  "video/nist-ftc-10/op30-clean.mp4",
+  "video/nist-ftc-10/op30-start.mp4",
+  "video/nist-ftc-10/op30-unload.mp4",
+  "video/nist-ftc-10/op40-clean.mp4",
+  "video/nist-ftc-10/op40-start.mp4",
+  "video/nist-ftc-10/op40-unload.mp4",
+  "video/nist-ftc-10/op50-clean.mp4",
+  "video/nist-ftc-10/op50-start.mp4",
+  "video/nist-ftc-10/op50-unload.mp4",
+  "video/nist-ftc-10/op50-z.mp4"
  ]
 }

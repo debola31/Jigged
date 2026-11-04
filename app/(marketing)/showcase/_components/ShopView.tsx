@@ -6,18 +6,22 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { toError } from '@/lib/supabaseErrors';
-import { ShopScene, type LoadState } from './shopScene';
+import { ShopScene, type LoadState, type WalkState } from './shopScene';
 import type { Shop, Where } from './showcaseData';
+
+const overlaySx = { position: 'absolute', bgcolor: 'rgba(17, 20, 57, 0.7)' } as const;
 
 /**
  * The shop in 3D, with the current step's station outlined. The camera flies to each station as
- * the visitor moves through the steps; a mouse can also orbit it. Loaded only in the browser
- * (ShowcaseContent imports it with ssr: false), so three.js stays out of every other bundle.
+ * the visitor moves through the steps; a mouse can also orbit it, and "Walk the shop" walks the
+ * part's route at eye height. Loaded only in the browser (ShowcaseContent imports it with
+ * ssr: false), so three.js stays out of every other bundle.
  */
-export default function ShopView({ shop, where, fly }: { shop: Shop; where: Where; fly: number }) {
+export default function ShopView({ shop, where, route, fly }: { shop: Shop; where: Where; route: Where[]; fly: number }) {
   const container = useRef<HTMLDivElement>(null);
   const scene = useRef<ShopScene | null>(null);
   const [load, setLoad] = useState<LoadState>({ loaded: 0, failed: 0, total: Object.keys(shop.assets).length });
+  const [walk, setWalk] = useState<WalkState>({ walking: false });
 
   const [near, setNear] = useState(false);
 
@@ -39,6 +43,7 @@ export default function ShopView({ shop, where, fly }: { shop: Shop; where: Wher
         setLoad(state);
         if (error) Sentry.captureException(toError(error, `Showcase: ${state.failed} of ${state.total} shop models failed to load`));
       },
+      onWalk: setWalk,
     });
     scene.current = s;
     return () => {
@@ -72,14 +77,26 @@ export default function ShopView({ shop, where, fly }: { shop: Shop; where: Wher
           aria-label={`A 3D view of ${shop.name}, with ${where.name} outlined`}
           sx={{ position: 'absolute', inset: 0 }}
         />
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => scene.current?.showWholeShop()}
-          sx={{ position: 'absolute', top: 12, right: 12, bgcolor: 'rgba(17, 20, 57, 0.7)' }}
-        >
-          Whole shop
-        </Button>
+        <Box sx={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 1 }}>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() => (walk.walking ? scene.current?.flyToStation(where) : scene.current?.walk(route, where))}
+          >
+            {walk.walking ? 'Stop the walk' : 'Walk the shop'}
+          </Button>
+          <Button size="small" variant="outlined" onClick={() => scene.current?.showWholeShop()} sx={{ bgcolor: overlaySx.bgcolor }}>
+            Whole shop
+          </Button>
+        </Box>
+        {walk.walking && (
+          <Typography
+            role="status"
+            sx={{ ...overlaySx, top: 12, left: 12, px: 1.5, py: 0.75, borderRadius: 1, fontSize: '0.9rem', fontWeight: 600 }}
+          >
+            {walk.stop ?? 'Walking the shop'}
+          </Typography>
+        )}
         {(loading || load.failed > 0) && (
           <Typography
             role="status"

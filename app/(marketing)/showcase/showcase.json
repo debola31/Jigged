@@ -51,7 +51,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -177,7 +177,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-face",
@@ -290,7 +290,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-clean",
@@ -308,7 +308,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-load",
@@ -434,7 +434,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-face",
@@ -566,7 +566,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clean",
@@ -584,7 +584,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-load",
@@ -710,7 +710,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-bores",
@@ -766,7 +766,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-clean",
@@ -784,7 +784,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-load",
@@ -892,7 +892,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-cbores",
@@ -929,7 +929,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-clean",
@@ -947,7 +947,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-load",
@@ -1037,7 +1037,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-tools",
@@ -1073,7 +1073,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-deep",
@@ -1110,7 +1110,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",

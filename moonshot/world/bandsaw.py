@@ -113,7 +113,9 @@ def counterbalance() -> tuple[float, float]:
 
 def worldbody() -> tuple[str, str, str]:
     """(worldbody XML, actuator XML, equality XML). Each body's origin is the world origin at joint zero, so the
-    record's world coordinates are used directly."""
+    record's world coordinates are used directly; but the blade's, which is on the drive wheel's axis: it carries no
+    geometry, and an origin a metre off its axis swung round as the blade spun up, which a take record reads as the
+    body launched."""
     r = record()
     J, B = r["joints"], r["blade"]
     inner = {link: "" for link in r["links"]}
@@ -140,10 +142,10 @@ def worldbody() -> tuple[str, str, str]:
         <joint name="saw_head" type="hinge" pos="{_xyz(head['at_mm'])}" axis="{_xyz(head['axis'], 1)}"
                range="{lo} {hi:.5f}" stiffness="{k:.3f}" springref="{ref:.5f}"/>
         {_inertial('head')}
-  {inner['head']}{covers}        <body name="saw_blade">
-          <joint name="saw_blade" type="hinge" pos="{_xyz(bj['at_mm'])}" axis="{_xyz(bj['axis'], 1)}" limited="false"
+  {inner['head']}{covers}        <body name="saw_blade" pos="{_xyz(bj['at_mm'])}">
+          <joint name="saw_blade" type="hinge" pos="0 0 0" axis="{_xyz(bj['axis'], 1)}" limited="false"
                  armature="{B['inertia_kg_m2']}"/>
-          <inertial pos="{_xyz(bj['at_mm'])}" mass="0.01" diaginertia="1e-5 1e-5 1e-5"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-5 1e-5 1e-5"/>
         </body>
       </body>
       <body name="saw_jaw">
@@ -261,9 +263,12 @@ class Control:
         if self.state == "running" and d.qpos[self.q["head"]] >= self.end_of_cut:
             self.state = "idle"
             self.events.append("end_of_cut")
-        # the valve sets the edge's descent speed; the head turns at that over the edge's lever from the hinge
+        # the valve sets the edge's descent speed; the head turns at that over the edge's lever from the hinge: its
+        # horizontal distance across the hinge's axis, however a scene turns the saw
         mid = (d.site_xpos[self.edge[0]] + d.site_xpos[self.edge[1]]) / 2
-        lever = max(abs(mid[0] - d.xanchor[self.head][0]), 0.05)
+        r, axis = mid - d.xanchor[self.head], d.xaxis[self.head]
+        r = r - axis * (r @ axis)
+        lever = max(math.hypot(r[0], r[1]), 0.05)
         d.ctrl[self.act["feed"]] = self.feed_mm_s * M / lever
         running = self.state == "running"
         d.ctrl[self.act["blade"]] = self.speed_sfpm * SFPM / self.radius if running else 0.0

@@ -19,13 +19,31 @@ from moonshot.planning.validate import load_plan
 Span = tuple[str, str | None, str | None]           # (take, first clip, last clip); None: from the start / to the end
 
 
+SPLIT_FROM_FORK = 3        # a holder this many forks or more right of the stand's first, whose stance (motion/
+                           # tool_load.py door_lumbar) would stand the body past the table's right end, is taken in two
+                           # takes (your decision, 2026-11-04): picked off the stand standing in front of it, then, as
+                           # the operator steps over across the cut, pushed up into the spindle from the doorway. From
+                           # one stance far enough right to reach the holder, the left index missed Tool Release by
+                           # 20-23 mm
+
+
+def split(fork: int) -> bool:
+    """Is the holder in this fork (0 the stand's first, the stand filled from the right) taken in two takes?"""
+    return fork >= SPLIT_FROM_FORK
+
+
 def tool_takes(step: dict) -> list[str]:
     """A Load the tools step's takes, in order, by their folders under the step's own (moonshot/motion/tool_load.py):
-    the change at the pendant that empties the spindle, then for each tool its seat in the doorway and its ATC FWD at
-    the pendant, cut together as the body doesn't walk."""
-    out = ["00-change"]
-    for i, t in enumerate(step["facts"]["tool_ids"]):
-        out += [f"{2 * i + 1:02d}-seat-{t}", f"{2 * i + 2:02d}-atc-{t}"]
+    the change at the pendant that empties the spindle, then for each tool its seat in the doorway (or, from a far fork,
+    its pick at the stand and its insert in the doorway) and its ATC FWD at the pendant, cut together as the body doesn't
+    walk. The first tool waits in the stand's rightmost fork."""
+    tools = step["facts"]["tool_ids"]
+    out, k = ["00-change"], 1
+    for i, t in enumerate(tools):
+        names = ["pick", "insert"] if split(len(tools) - 1 - i) else ["seat"]
+        for name in names + ["atc"]:
+            out.append(f"{k:02d}-{name}-{t}")
+            k += 1
     return out
 
 

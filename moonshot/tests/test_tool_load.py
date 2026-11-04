@@ -10,7 +10,7 @@ import pytest
 
 from moonshot.motion import tool_load as T
 from moonshot.planning.steps import expand
-from moonshot.planning.takes import spans, tool_takes
+from moonshot.planning.takes import spans, split, tool_takes
 from moonshot.planning.validate import load_plan
 from moonshot.sim import cam
 from moonshot.world import tooling as TL
@@ -138,6 +138,20 @@ def test_the_drawbar_holds_a_holder_pushed_up_into_it():
     assert d.xpos[m.body("pusher").id][2] * 1000 < sp[2] + TL.FLANGE_BOTTOM[1] - 20.0   # the plate well clear of it
 
 
+def test_a_holder_in_a_far_fork_is_picked_then_inserted():
+    """The stand fills from the right, the first tool rightmost: a holder SPLIT_FROM_FORK forks or more from the first
+    is taken in a pick at the stand and an insert from the doorway, each other in one seat take."""
+    op10 = next(s for s in TOOLS if s["id"] == "op10-tools")
+    seq = T.sequence(PLAN, op10)
+    kinds = [(s["kind"], s.get("fork")) for s in seq if s["kind"] in ("seat", "pick", "insert")]
+    assert kinds == [("pick", 4), ("insert", 4), ("pick", 3), ("insert", 3), ("seat", 2), ("seat", 1), ("seat", 0)]
+    pick, insert = (s for s in seq if s["kind"] in ("pick", "insert") and s["tool"] == "facem")
+    table_end = (np.array(T.REC["colliders"]["table_top"]["box_max_mm"]) + T.OFFSET)[0]
+    for fork in range(5):                           # split where the one stance would run past the table's end
+        assert split(fork) == (T.door_lumbar(fork)[0] > table_end), fork
+    assert pick["stand"].get(4) == "facem" and 4 not in insert["stand"]     # on the stand to be picked, then in the hand
+
+
 @pytest.mark.parametrize("step", TOOLS, ids=lambda s: s["id"])
 def test_each_step_leaves_every_tool_in_its_numbered_pocket(step):
     seq = T.sequence(PLAN, step)
@@ -153,10 +167,10 @@ def test_each_step_leaves_every_tool_in_its_numbered_pocket(step):
         _key(c, k)
     for s in seq[1:]:
         assert c.current == s["current"]
-        if s["kind"] == "seat":
+        if s["kind"] in ("seat", "insert"):
             c.spindle_tool = s["tool"]
-        else:
-            _key(c, "atc_fwd")
+        elif s["kind"] == "atc":
+            _key(c, "atc_fwd")                     # a pick only takes the holder up, the machine untouched
     for t in step["facts"]["tool_ids"]:
         assert c.pockets[num[t]] == t
     assert c.pockets[T.PROBE_POCKET] == "probe" and c.spindle_tool is None

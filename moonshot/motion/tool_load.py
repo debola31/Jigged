@@ -6,7 +6,9 @@ doorway (one fork's pitch further right for each fork further right, across the 
 takes its holder off the tool stand on the table, carries it in under the spindle and pushes it
 up into the spindle while the left holds the head's Tool Release button, lets go of the button so the drawbar clamps,
 and lets go of the holder (`Seat`); and at the pendant ATC FWD puts it in its pocket and brings the next one
-(`ToolChange`).
+(`ToolChange`). Where that stance would stand past the table's end (a far fork, planning/takes.py split), the seat is
+two takes: standing in front of the holder, the hand takes it off the stand and holds it up (`Seat` part "pick"); then,
+across the cut, the operator has stepped over to the doorway with it, and carries it in from there (part "insert").
 
     python -m moonshot.motion.tool_load nist-ftc-10 op50-tools    # plans <data root>/takes/nist-ftc-10/op50-tools/*
 
@@ -37,7 +39,7 @@ from moonshot.motion.primitives import FPS, PosePath, min_jerk, open_for, open_l
 from moonshot.motion.setting import PROBE, SCREEN, part_in_vise
 from moonshot.motion.step_take import HANGING as STEP_HANGING, REST_NEAR_MM, StepTake
 from moonshot.planning.steps import expand
-from moonshot.planning.takes import tool_takes
+from moonshot.planning.takes import split, tool_takes
 from moonshot.planning.validate import load_plan
 from moonshot.world import tooling as TL
 from moonshot.world import vf2
@@ -123,6 +125,9 @@ EASE_MM = 1.5                                            # the hand eases this f
 LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
+PICK_HOLD_S = 0.6                                        # a pick ends holding it up there this long, as the operator
+                                                         # turns to step over to the doorway
+INSERT_STILL_S = 0.4                                     # and an insert starts from that hold, still this long
 YAW_DEG_PER_FORK = 10.0                                  # the grip turned this far about the holder's axis (from
                                                          # above, anticlockwise) by the time it is under the spindle,
                                                          # for each fork right of the first: from a stance further
@@ -158,13 +163,18 @@ def sequence(plan: dict, step: dict) -> list[dict]:
     out = [{"name": "00-change", "kind": "change", "to": num[tools[0]], "spindle": "probe", "current": PROBE_POCKET}
            | state()]
     carousel[PROBE_POCKET] = "probe"
+    names = iter(tool_takes(step)[1:])
     for i, t in enumerate(tools):
-        p = num[t]
-        out.append({"name": f"{2 * i + 1:02d}-seat-{t}", "kind": "seat", "tool": t, "fork": n - 1 - i, "pocket": p,
-                    "spindle": None, "current": p} | state())
-        stand.pop(n - 1 - i)
-        out.append({"name": f"{2 * i + 2:02d}-atc-{t}", "kind": "atc", "tool": t, "pocket": p, "spindle": t,
-                    "current": p} | state())
+        p, fork = num[t], n - 1 - i
+        take = {"tool": t, "fork": fork, "pocket": p, "spindle": None, "current": p}
+        if split(fork):                   # picked at the stand, then, across the cut, inserted from the doorway
+            out.append({"name": next(names), "kind": "pick"} | take | state())
+            stand.pop(fork)
+            out.append({"name": next(names), "kind": "insert"} | take | state())
+        else:
+            out.append({"name": next(names), "kind": "seat"} | take | state())
+            stand.pop(fork)
+        out.append({"name": next(names), "kind": "atc", "tool": t, "pocket": p, "spindle": t, "current": p} | state())
         carousel[p] = t
     assert [s["name"] for s in out] == tool_takes(step)     # the takes planning/takes.py joins into the step's video
     return out
@@ -222,6 +232,11 @@ def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
     if kept and tool_id != kept["default"]:  # from the default tool's grip, moved off this tool
         d = kept["grips"][kept["default"]]
         starts.append((d["q"], np.array(d["H"]), np.array(d["W_rel"])))
+        if tool["r"] > r:                    # and with the fingers under the index opened round the wider tool: from
+            q = dict(hand.clamp(d["q"]))     # the default's alone, they sank into the face mill's cutter, and the
+            for n in ("middle", "ring", "little"):  # solve held the index 17 mm off its place under the flange
+                q[f"{n}_mcp_flex"], q[f"{n}_pip"] = 0.7 * q[f"{n}_mcp_flex"], 0.7 * q[f"{n}_pip"]
+            starts.append((q, np.array(d["H"]), np.array(d["W_rel"])))
     else:
         for mcp, pip in ((55.0, 60.0), (70.0, 75.0)):
             q = hand.neutral()
@@ -311,10 +326,15 @@ def holder_grip(tool_id: str) -> dict:
 
 
 class Seat(ToolTake):
-    """One holder off the stand and into the spindle (the vf2-tool-load card's phases 2-7)."""
+    """One holder off the stand and into the spindle (the vf2-tool-load card's phases 2-7): the whole of it (part
+    "seat"), or, for a holder in a far fork (moonshot/planning/takes.py split), its first half, picked off the stand
+    standing in front of it and held up clear ("pick"), or its second, from that hold, standing in the doorway, as
+    the operator steps over across the cut ("insert")."""
 
-    def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True):
-        super().__init__(out, door_lumbar(fork), verbose)
+    def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True, part: str = "seat"):
+        self.part = part
+        self.stance_fork = 0 if part == "insert" else fork     # where the body stands: before the fork, or the doorway
+        super().__init__(out, door_lumbar(self.stance_fork), verbose)
         rest_at(self)
         self.tool, self.fork, self.n = tool_id, fork, n_forks
         boxes = []
@@ -324,7 +344,8 @@ class Seat(ToolTake):
                         TL.stand_axis(n_forks - 1) + [40.0, TL.STAND["plate_y"] + 8.0, 12.0])):
             boxes.append(((lo + hi) / 2, (hi - lo) / 2))
         self.boxes = boxes
-        self.solve_grips({"release": self.release_spec()}, source=Seat.release_spec)
+        if part != "pick":                                  # the pick doesn't press Tool Release
+            self.solve_grips({"release": self.release_spec()}, source=Seat.release_spec)
         g = holder_grip(tool_id)
         W_rel = np.array(g["W_rel"], float)
         self.grips["holder"] = {"q": self.hand.clamp(g["q"]), "H": np.array(g["H"], float), "W": W_rel, "obj": np.zeros(3),
@@ -361,6 +382,9 @@ class Seat(ToolTake):
                 if t >= t0:
                     p = a + (b - a) * min_jerk((t - t0) / max(t1 - t0, 1e-9))
             return p
+
+        if self.part == "insert":
+            return self.plan_insert(keys, at, g, kg)
 
         # the reach: from rest to in front of the holder, right of it and below its flange (the open fingers go past
         # its side, and the hand rises the last few millimetres to the flange's underside), and on to the grip, as two
@@ -412,11 +436,50 @@ class Seat(ToolTake):
         t2b = t2 + 0.5
         slid = P0 + [0, -SLIDE_MM, LIFT_MM]
         lifted = slid + [0, 0, CLEAR_UP_MM]
+        keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, lifted)]
+        if self.part == "pick":
+            return self.plan_pick(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted)
+        return self.into_spindle(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted)
+
+    def plan_pick(self, keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted) -> dict:
+        """The pick's end: the holder held up clear of the stand, as the operator turns to step over to the doorway."""
+        t_end = t2b + PICK_HOLD_S
+        keys += [(t_end, lifted)]
+        self.look(t2b - 0.5, lifted + [0, 0, -40.0])
+        self.follow("R", t_c + 0.05, t_end + 0.3, "holder", at)
+        self.load("R", tw0, t_end + 0.3, kg)
+        self.effort("R", t_end, 0.6, "holder")
+        self.event("grip", round(t_c, 3), round(t_end + 0.3, 3), side="R", grip="holder", on="holder")
+        self.event("carry", round(t_touch, 3), round(t_end + 0.3, 3), side="R", obj="holder", kg=round(kg, 4),
+                   loading=[round(tw0, 3), round(tw0 + LOAD_RAMP_S, 3)])
+        self.clip("Load the tools", 0.0, t_end, f"Pick up {self.tool}")
+        self.t = t_end
+        self.keys = keys
+        return {"path": [[round(t, 3), *np.round(p, 3).tolist()] for t, p in keys], "holds_mm": np.round(lifted, 3).tolist()}
+
+    def plan_insert(self, keys, at, g, kg) -> dict:
+        """The insert's start: standing in the doorway, the holder held up as the pick left it, where it stood from the
+        body then (the pick's lumbar to the doorway's: the operator stepped over, the holder in hand), still a moment
+        before the carry in under the spindle."""
+        lifted = (TL.on_stand(self.fork) + [0, -SLIDE_MM, LIFT_MM + CLEAR_UP_MM]
+                  + door_lumbar(0) - door_lumbar(self.fork))
+        H, W = self.grip_pose("holder", lifted)
+        self.side["R"]["wrist"] = W
+        self.side["R"]["fkeys"] = [(0.0, g["q"])]
+        self.side["R"]["ekeys"] = [(0.0, 0.6, "holder")]
+        t2b = INSERT_STILL_S
+        keys += [(0.0, lifted), (t2b, lifted)]
+        self.look(0.0, lifted + [0, 0, -40.0])
+        # the hand has had the holder's weight since the pick: its grip firm and the weight fed forward from the start
+        return self.into_spindle(keys, at, g, kg, -0.05, 0.0, -1.0, t2b, lifted)
+
+    def into_spindle(self, keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted) -> dict:
+        """From the holder held up clear, at t2b: in under the spindle and up into it, the left index on Tool Release,
+        and the hand off it and back to rest."""
         # the carry in under the spindle, longer from a farther fork
         t3 = t2b + TRANSPORT_S * math.sqrt(max(1.0, np.linalg.norm(SPINDLE - [0, 0, BELOW_MM] - lifted) / TRANSPORT_MM))
-        keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid),
-                 (t2b, lifted), (t3, SPINDLE - [0, 0, BELOW_MM])]
-        self.look(t2, SPINDLE - [0, 0, 60.0])
+        keys += [(t3, SPINDLE - [0, 0, BELOW_MM])]
+        self.look(t2b - 0.5 if self.part != "insert" else t2b, SPINDLE - [0, 0, 60.0])
         t4 = t3 + LINE_UP_S                                 # lined up under it, by eye
         t5 = t4 + PUSH_UP_S
         keys += [(t4, SPINDLE - [0, 0, BELOW_MM]), (t5, SPINDLE - [0, 0, SHORT_MM])]
@@ -462,7 +525,7 @@ class Seat(ToolTake):
         t9 = t8 + 0.25
         keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, SPINDLE - [0, 0, EASE_MM])]
         def turned(t):                                      # the grip turned about the holder's axis on the way in
-            a = math.radians(YAW_DEG_PER_FORK * self.fork) * min_jerk((t - t2b) / (t3 - t2b))
+            a = math.radians(YAW_DEG_PER_FORK * self.stance_fork) * min_jerk((t - t2b) / (t3 - t2b))
             return np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
         self.follow("R", t_c + 0.05, t9, "holder", at, turned)
         self.load("R", tw0, t8, kg)
@@ -549,8 +612,9 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
     seq = sequence(plan, step)
     # the grips the takes share: the pendant's, and Tool Release's for each fork, which the body reaches from where it
     # stands for that fork (door_lumbar)
+    stance = lambda s: 0 if s["kind"] == "insert" else s["fork"]         # noqa: E731  the fork the body stands for
     shared = {"pendant": root / "pendant-grips.json"} | {
-        f"seat{s['fork']}": root / f"seat-grips-fork{s['fork']}.json" for s in seq if s["kind"] == "seat"}
+        f"seat{stance(s)}": root / f"seat-grips-fork{stance(s)}.json" for s in seq if s["kind"] in ("seat", "insert")}
     for f in shared.values():               # every step's takes stand and grip alike: a grip another step solved
         if not f.exists():                  # serves (the cache's key says whether it still does)
             other = sorted(root.parent.glob(f"*/{f.name}"))
@@ -565,12 +629,15 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
         own = out / "grips.json"
         out.mkdir(parents=True, exist_ok=True)
         extra = {}
-        if s["kind"] == "seat":
-            seat = shared[f"seat{s['fork']}"]
+        if s["kind"] in ("seat", "insert"):
+            seat = shared[f"seat{stance(s)}"]
             if seat.exists():
                 own.write_bytes(seat.read_bytes())
-            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose)
+            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part=s["kind"])
             seat.write_bytes(own.read_bytes())
+            extra = take.plan()
+        elif s["kind"] == "pick":
+            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part="pick")
             extra = take.plan()
         else:
             if shared["pendant"].exists():

@@ -75,6 +75,14 @@ KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
 # the final pull: out over the disc, then the reach, sliding on along the knob's axis this far
 FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.7, 0.65, 0.72, 110.0
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
+# a lift-out's grab (start "vise"): the raise to the ready point, up over the crank's disc, 0.6 m, slower than the
+# reach; the hand there, still, LIFT_ARRIVE_EARLY_S before the fingers close: arriving as they closed (the stage's),
+# the fingers met the part 0.14-0.19 s early while the hand still came down, op10's on its top edges (it fell out of
+# them, 12 mm up) and the knock read as the load's onset 67-100 ms in. The fingers meet it that much sooner, so the
+# hand opens widest earlier in the reach (at the stage's 0.65 it measured 82-83%, at 0.52 74-77%) and the phases count
+# from a touch LIFT_TOUCH_LEAD_S before the close; the planned loading is shorter by the lift's lag off the parallels
+# (at 0.21 it measured 267-300 ms against people's 163-265)
+LIFT_RAISE_S, LIFT_ARRIVE_EARLY_S, LIFT_PEAK, LIFT_TOUCH_LEAD_S, LIFT_LOADING_S = 1.5, 0.12, 0.52, 0.22, 0.16
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 # letting go of the first crank: the fist eases open this much and slides off the knob's end along its axis, this long
 # and this far (the fist spans the 90 mm knob), held to the axis as it cranked, turning back to the grip's own
@@ -403,55 +411,51 @@ class Take:
         it, then a slower final approach from above) in as long as people's take (person.reach_to_grasp_right_s),
         the hand opening wider than the part with the peak at ~74% of the reach (Jeannerod; Bhatia 2022), closing
         at contact; then the lifting studies' preload (0.23 s) and loading (0.21 s) before lift-off, and a short
-        lift. A lift-out's grab (start "vise") is one slower reach, high over the crank's disc and down."""
+        lift. A lift-out's grab (start "vise") is the same reach from the same ready point, the hand raised to it
+        high over the crank's disc."""
         t0 = self.t
         ga = self.hand.spec["grip"]
         g = self.grips[grip]
         Hg, Wg = self.grip_pose(grip, t0)
-        self.look(t0, self.stage + [0, 0, self.half[2]])
-        if self.start == "vise":       # high over the crank's disc (the knob up to z 1040), then down onto the part
-            reach = 1.27 if reach is None else reach
-            t_reach = t0 + 0.35
-            via = [np.array([self.wrist[0] - 60, -760.0, 1160.0]), Wg + [0, -30, 120]]
-            self.transit(t_reach, t_reach + reach, Wg, via=via, fade=(Hg, 1.0))
-            # widest at ~74% of the reach as the hand-opening check measures it: 0.53 measured 0.571 there, 0.70 0.844
-            t_peak = t_reach + 0.63 * reach
+        self.look(t0, self.blank_at(t0)[1] + [0, 0, self.half[2]])
+        # from the thigh the whole 0.53 m in people's 0.32-0.67 s, the hand would peak near the nothing-moves check's
+        # 20 m/s^2 (5.77 d / T^2 per leg): it comes up beside the table first, slower than the reach (so the reach
+        # is the fastest move before the grasp, which is how the grasp-timing check finds its start), and the
+        # reach starts from there, still. Its two legs share the time, so the final approach from above is slow:
+        # paced, it touched the part at 0.3-0.5 m/s, and the knock read as the load's onset 67 ms in. The ready
+        # point is set from the grip, so the reach is the same length whatever the load and wherever the operator
+        # stands. A part in the vise is reached for over the crank: the hand is raised to the ready point high over
+        # its disc (the knob up to z 1040), paced and slower, so that raise stays slower than the reach. Reached for
+        # in one 1.27 s move from the thigh, the lift-outs' reaches measured 1.23-1.30 s against people's 0.67
+        reach = REACH_S if reach is None else reach
+        ready = Wg + READY_FROM_GRIP
+        if self.start == "vise":                  # the lift-out's own timing (LIFT_*)
+            raise_s, via = LIFT_RAISE_S, [np.array([self.wrist[0] - 60, -760.0, 1160.0])]
+            peak, touch_lead, early, loading_s = LIFT_PEAK, LIFT_TOUCH_LEAD_S, LIFT_ARRIVE_EARLY_S, LIFT_LOADING_S
         else:
-            # from the thigh the whole 0.53 m in people's 0.32-0.67 s, the hand would peak near the nothing-moves check's
-            # 20 m/s^2 (5.77 d / T^2 per leg): it comes up beside the table first, slower than the reach (so the reach
-            # is the fastest move before the grasp, which is how the grasp-timing check finds its start), and the
-            # reach starts from there, still. Its two legs share the time, so the final approach from above is slow:
-            # paced, it touched the part at 0.3-0.5 m/s, and the knock read as the load's onset 67 ms in. The ready
-            # point is set from the grip, so the reach is the same length whatever the load and wherever the operator
-            # stands
-            reach = REACH_S if reach is None else reach
-            ready = Wg + READY_FROM_GRIP
-            t_ready = t0 + 0.35 + raise_s
-            self.transit(t0 + 0.35, t_ready, ready)
-            self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
-            t_reach = t_ready + settle_s
-            self.transit(t_reach, t_reach + reach, Wg, via=[Wg + [0, -12, 62]], fade=(Hg, 1.0))
-            # widest at ~74% of the reach as the hand-opening check measures it, from the pause to the first touch; the
-            # physics hand is widest ~0.03 s before the key
-            t_peak = t_reach + REACH_PEAK * reach
+            via, peak, touch_lead, early, loading_s = [], REACH_PEAK, TOUCH_LEAD_S, 0.0, ga["loading_s"]
+        t_ready = t0 + 0.35 + raise_s
+        self.transit(t0 + 0.35, t_ready, ready, via=via, paced=bool(via))
+        self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
+        t_reach = t_ready + settle_s
+        self.transit(t_reach, t_reach + reach - early, Wg, via=[Wg + [0, -12, 62]], fade=(Hg, 1.0), paced=bool(early))
+        if early:                                 # there, still, as the fingers close
+            self.add(t_reach + reach - early, t_reach + reach, lambda t, H=Hg, W=Wg: [("pose", H, W, 3.0)])
+        # widest at ~74% of the reach as the hand-opening check measures it, from the pause to the first touch; the
+        # physics hand is widest ~0.03 s before the key
+        t_peak = t_reach + peak * reach
         t_contact = t_reach + reach
         self.fingers(t_reach, self.q_relax)
         self.fingers(t_peak, open_for(self.hand, g["q"], self.size[1]))
         self.fingers(t_contact, g["q"])
-        if self.start == "vise":
-            t_load = t_contact + ga["preload_s"]
-            t_lift = t_load + ga["loading_s"]
-            self.effort(t_contact, 0.0, grip)
-            self.effort(t_load, 0.25, grip)
-        else:
-            # the phases from the fingers' first touch on the faces, TOUCH_LEAD_S before the grip's planned close. The
-            # take's effort sets the load the arm lifts with as well as the squeeze, so the preload (grip rising, no
-            # load yet) stays under the loading's onset, 5% of the weight (person.force_onset_frac); at 0.25 there
-            # the load rose from the first touch and the loading phase measured 367 ms
-            t_load = t_contact - TOUCH_LEAD_S + ga["preload_s"]
-            t_lift = t_load + ga["loading_s"]
-            self.effort(t_contact, 0.0, grip)
-            self.effort(t_load, PRELOAD_EFFORT, grip)
+        # the phases from the fingers' first touch on the faces, TOUCH_LEAD_S before the grip's planned close. The
+        # take's effort sets the load the arm lifts with as well as the squeeze, so the preload (grip rising, no
+        # load yet) stays under the loading's onset, 5% of the weight (person.force_onset_frac); at 0.25 there
+        # the load rose from the first touch and the loading phase measured 367 ms
+        t_load = t_contact - touch_lead + ga["preload_s"]
+        t_lift = t_load + loading_s
+        self.effort(t_contact, 0.0, grip)
+        self.effort(t_load, PRELOAD_EFFORT, grip)
         self.effort(t_lift, 1.0, grip)
         R, p = self.blank_at(t_lift)
         self.move_blank(t_lift, t_lift + 0.45, R, p + [0, 0, lift_mm])

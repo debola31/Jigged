@@ -317,7 +317,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   lift-outs pass too, and 31 of 61 steps have their finals (the 15 cutting stills, deburr, and every setup's
   clean, start and unload steps). Your decisions: blow-off keeps the holster moved on its panel (rim at 870 mm,
   the gun turned 135 deg, handle toward the operator) and the aim 30 deg left, 50 deg down; a lift-out's set-down
-  on the table isn't held to the vise's 2 mm (op20's lands 2.8 mm off).
+  on the table isn't held to the vise's 2 mm (op20's lands 2.8 mm off). op20's vise load passes every per-frame
+  check and physics outcome, its grip margin 2.48 against people's 1.7-2.2: published as a recorded exception (your
+  decision); every load has over-gripped so since the colliders were fitted to the skin (the 5.5 deg base squeeze
+  was tuned for capsules 2.5 mm inside the pads), to bring back into the band after Nov 5.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

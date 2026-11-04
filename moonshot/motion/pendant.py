@@ -42,7 +42,10 @@ LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pend
 # a keypad grip per region of the keys, each solved at one key there: one hand pose can't reach every key without
 # pitching the curled fingers into the face
 KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi",
-             "keypad_inc": "inc_0.01"}           # the increment row's own: the mode grip's thumb fell on 4 and 5
+             "keypad_inc": "inc_0.01",           # the increment row's own: the mode grip's thumb fell on 4 and 5
+             "keypad_top": "reset"}              # the top left's own: in the letters' grip, solved 162 mm off, the
+                                                 # arm reached Reset so that a 1.4 deg lag at the elbow put the index
+                                                 # 8 mm across it, and it went unpressed (op10-xy)
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
 DIAL_EFFORT = 0.5                                         # a light grip on the jog handle, the least the run's pinch

@@ -29,6 +29,15 @@ OUT = Path(__file__).resolve().parent / "data" / "hand_rest.json"
 PAD_INSET_MM = 0.75     # a fingertip's capsule: its pad side this far inside the skin (the soft contact gives the rest)
 BULGE_MM = 0.5          # ... its back and sides at most this far outside it
 SHELL_INSET_MM = 1.0    # the palm's and the other bones' convex shells: this far inside the skin
+# the thumb's fingertip capsule, moved toward its pad by this vector (mm, NIMBLE's rest frame): fitted on the rest
+# skin, its pad sat 0.6-1.8 mm outside it, but bent round a part the thumb's pad stands out further, 2.1-2.5 mm at
+# the median (3.2-3.7 at the 90th percentile) in the vise loads' carry grips, planned and as run, so a carried part
+# read 3.6-3.9 mm of skin against the 3.5 mm bar (the user's decision, 2026-11-04: refit the thumb's tip). The
+# direction is where the pad's skin stood out in those grips, in the capsule's frame mapped back to the rest frame
+# (the grip solver's pad direction, motion/grasp.py _pads, is 38 deg off it). Moved 2.5 mm the pad is 1.0-1.9 mm
+# outside it at worst in those grips; in the knob's fist the capsule stands up to 4 mm proud of the pad, so the thumb
+# stops that far short of the knob
+THUMB_PAD_SHIFT = 2.5 * np.array([0.166, 0.83, 0.532]) / np.linalg.norm([0.166, 0.83, 0.532])
 SHELLS = ("carpal", "met", "pro", "int")
 
 
@@ -100,7 +109,10 @@ def fit_colliders(hand: AnatomicalHand, J: np.ndarray) -> tuple[dict, dict]:
         if sel.sum() < 10:
             continue
         if JOINTS[j].startswith("dis") and children[j]:
-            caps[j] = fingertip(skin[sel], J[j], J[children[j][0]])
+            a, b, r = fingertip(skin[sel], J[j], J[children[j][0]])
+            if JOINTS[j] == "dis1":
+                a, b = a + THUMB_PAD_SHIFT, b + THUMB_PAD_SHIFT
+            caps[j] = (a, b, r)
         elif JOINTS[j].startswith(SHELLS):
             shells[j] = shell(skin[sel])
     return caps, shells

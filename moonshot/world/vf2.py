@@ -3,7 +3,8 @@
 Bodies: the saddle (Y) carries the table (X); the head (Z) carries the spindle; the doors slide open by hand. The
 axes are position servos capped at the rapid speed, gravity-compensated as a real servo with its counterbalance
 holds its axis exactly; the spindle is a velocity servo; the doors are passive slides
-with friction, so a hand has to pull them. Colliders are the record's boxes (the CAD shells aren't closed); render
+with friction, so a hand has to pull them. Colliders are the record's boxes (the CAD shells aren't closed), the door
+bars' the cylinders in theirs (they're round tubes); render
 geometry is the per-link GLBs, drawn by Blender, not by MuJoCo.
 
 `Control` is the machine's state machine: Cycle Start runs the program only with both doors closed; opening a door
@@ -51,6 +52,17 @@ def _box(name, c_rec, cls="steel", extra=""):
             f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"{fr}{extra}/>')
 
 
+def _bar(name, c_rec, cls="steel", extra=""):
+    """A door's pull bar: a vertical cylinder of the record's radius_mm on its box's axis, its height the box's; the
+    box itself where the record gives no radius."""
+    if "radius_mm" not in c_rec:
+        return _box(name, c_rec, cls, extra)
+    lo, hi = np.array(c_rec["box_min_mm"], float), np.array(c_rec["box_max_mm"], float)
+    c, h = (lo + hi) / 2, (hi - lo) / 2
+    return (f'<geom name="{name}" class="{cls}" type="cylinder" size="{c_rec["radius_mm"] * M:.5f} {h[2] * M:.5f}" '
+            f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {c[2] * M:.5f}"{extra}/>')
+
+
 def _site(name, at, origin=(0, 0, 0)):
     p = (np.array(at, float) - np.array(origin, float)) * M
     return f'<site name="{name}" pos="{p[0]:.5f} {p[1]:.5f} {p[2]:.5f}" size="0.006"/>'
@@ -91,7 +103,7 @@ def worldbody(on_table: str = "") -> tuple[str, str]:
       <joint name="vf2_{d}" type="slide" axis="{ax(d)}" range="{rng(d)}" frictionloss="{J[d]['friction_n']}" damping="20"/>
       <inertial pos="0 -0.83 1.16" mass="{L[d]['mass_kg']}" diaginertia="2 2 2"/>
       {_box(f"vf2_{d}_panel", C[d], extra=DOOR)}
-      {_box(f"vf2_{d}_pull", C[f"{d}_pull"], extra=DOOR)}
+      {_bar(f"vf2_{d}_pull", C[f"{d}_pull"], extra=DOOR)}
       {_site(f"vf2_{d}_handle", A[f"{d}_handle"]["at_mm"])}
     </body>
 """

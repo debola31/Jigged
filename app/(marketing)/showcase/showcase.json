@@ -47,7 +47,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-clean.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-clean.mp4"
+     },
      "published": false
     },
     {
@@ -62,7 +65,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-load.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-load.mp4"
+     },
      "published": false
     },
     {
@@ -77,7 +83,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-seat.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-seat.mp4"
+     },
      "published": false
     },
     {
@@ -92,7 +101,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-check.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-check.mp4"
+     },
      "published": false
     },
     {
@@ -107,7 +119,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-xy.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-xy.mp4"
+     },
      "published": false
     },
     {
@@ -122,7 +137,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-z.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-z.mp4"
+     },
      "published": false
     },
     {
@@ -137,7 +155,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-tools.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-tools.mp4"
+     },
      "published": false
     },
     {
@@ -152,7 +173,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-start.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-start.mp4"
+     },
      "published": false
     },
     {
@@ -167,7 +191,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-face.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op10-face.webp"
+     },
      "published": false
     },
     {
@@ -182,7 +209,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-outline.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op10-outline.webp"
+     },
      "published": false
     },
     {
@@ -197,7 +227,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-pocket.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op10-pocket.webp"
+     },
      "published": false
     },
     {
@@ -212,7 +245,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-cross_drill.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op10-cross_drill.webp"
+     },
      "published": false
     },
     {
@@ -227,7 +263,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-ears.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op10-ears.webp"
+     },
      "published": false
     },
     {
@@ -242,7 +281,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op10-unload.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op10-unload.mp4"
+     },
      "published": false
     },
     {
@@ -257,7 +299,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-clean.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-clean.mp4"
+     },
      "published": false
     },
     {
@@ -272,7 +317,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-load.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-load.mp4"
+     },
      "published": false
     },
     {
@@ -287,7 +335,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-seat.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-seat.mp4"
+     },
      "published": false
     },
     {
@@ -302,7 +353,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-check.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-check.mp4"
+     },
      "published": false
     },
     {
@@ -317,7 +371,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-xy.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-xy.mp4"
+     },
      "published": false
     },
     {
@@ -332,7 +389,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-z.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-z.mp4"
+     },
      "published": false
     },
     {
@@ -347,7 +407,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-tools.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-tools.mp4"
+     },
      "published": false
     },
     {
@@ -362,7 +425,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-start.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-start.mp4"
+     },
      "published": false
     },
     {
@@ -377,7 +443,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-face.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-face.webp"
+     },
      "published": false
     },
     {
@@ -392,7 +461,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-scallops.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-scallops.webp"
+     },
      "published": false
     },
     {
@@ -407,7 +479,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-pads.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-pads.webp"
+     },
      "published": false
     },
     {
@@ -422,7 +497,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-pins.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-pins.webp"
+     },
      "published": false
     },
     {
@@ -437,7 +515,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-taps.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-taps.webp"
+     },
      "published": false
     },
     {
@@ -452,7 +533,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-ear_cbores.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op20-ear_cbores.webp"
+     },
      "published": false
     },
     {
@@ -467,7 +551,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op20-unload.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op20-unload.mp4"
+     },
      "published": false
     },
     {
@@ -482,7 +569,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-clean.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-clean.mp4"
+     },
      "published": false
     },
     {
@@ -497,7 +587,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-load.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-load.mp4"
+     },
      "published": false
     },
     {
@@ -512,7 +605,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-seat.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-seat.mp4"
+     },
      "published": false
     },
     {
@@ -527,7 +623,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-check.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-check.mp4"
+     },
      "published": false
     },
     {
@@ -542,7 +641,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-xy.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-xy.mp4"
+     },
      "published": false
     },
     {
@@ -557,7 +659,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-z.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-z.mp4"
+     },
      "published": false
     },
     {
@@ -572,7 +677,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-tools.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-tools.mp4"
+     },
      "published": false
     },
     {
@@ -587,7 +695,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-start.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-start.mp4"
+     },
      "published": false
     },
     {
@@ -602,7 +713,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-bores.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op30-bores.webp"
+     },
      "published": false
     },
     {
@@ -617,7 +731,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-cbores.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op30-cbores.webp"
+     },
      "published": false
     },
     {
@@ -632,7 +749,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op30-unload.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op30-unload.mp4"
+     },
      "published": false
     },
     {
@@ -647,7 +767,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-clean.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-clean.mp4"
+     },
      "published": false
     },
     {
@@ -662,7 +785,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-load.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-load.mp4"
+     },
      "published": false
     },
     {
@@ -677,7 +803,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-seat.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-seat.mp4"
+     },
      "published": false
     },
     {
@@ -692,7 +821,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-check.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-check.mp4"
+     },
      "published": false
     },
     {
@@ -707,7 +839,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-xy.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-xy.mp4"
+     },
      "published": false
     },
     {
@@ -722,7 +857,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-z.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-z.mp4"
+     },
      "published": false
     },
     {
@@ -737,7 +875,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-start.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-start.mp4"
+     },
      "published": false
     },
     {
@@ -752,7 +893,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-cbores.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op40-cbores.webp"
+     },
      "published": false
     },
     {
@@ -767,7 +911,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op40-unload.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op40-unload.mp4"
+     },
      "published": false
     },
     {
@@ -782,7 +929,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-clean.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-clean.mp4"
+     },
      "published": false
     },
     {
@@ -797,7 +947,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-load.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-load.mp4"
+     },
      "published": false
     },
     {
@@ -812,7 +965,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-seat.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-seat.mp4"
+     },
      "published": false
     },
     {
@@ -827,7 +983,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-check.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-check.mp4"
+     },
      "published": false
     },
     {
@@ -842,7 +1001,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-xy.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-xy.mp4"
+     },
      "published": false
     },
     {
@@ -857,7 +1019,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-z.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-z.mp4"
+     },
      "published": false
     },
     {
@@ -872,7 +1037,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-tools.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-tools.mp4"
+     },
      "published": false
     },
     {
@@ -887,7 +1055,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-start.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-start.mp4"
+     },
      "published": false
     },
     {
@@ -902,7 +1073,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-deep.mp4",
+     "media": {
+      "type": "still",
+      "path": "still/nist-ftc-10/op50-deep.webp"
+     },
      "published": false
     },
     {
@@ -917,7 +1091,10 @@
       "x": 11557.7,
       "y": 6975.3
      },
-     "video": "video/nist-ftc-10/op50-unload.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/op50-unload.mp4"
+     },
      "published": false
     },
     {
@@ -931,7 +1108,10 @@
       "x": 27750.0,
       "y": 4500.0
      },
-     "video": "video/nist-ftc-10/deburr.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/deburr.mp4"
+     },
      "published": false
     },
     {
@@ -945,7 +1125,10 @@
       "x": 50250.0,
       "y": 15500.0
      },
-     "video": "video/nist-ftc-10/inspect.mp4",
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-10/inspect.mp4"
+     },
      "published": false
     }
    ]

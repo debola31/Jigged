@@ -11,12 +11,12 @@ import ListItemText from '@mui/material/ListItemText';
 import ListSubheader from '@mui/material/ListSubheader';
 import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
-import { mediaUrl, playable, type LivePart, type Step } from './showcaseData';
+import { mediaUrl, ready, type LivePart, type Step } from './showcaseData';
 
 /**
- * One step at a time: its video, the plan's title and caption, and previous / next. The video
- * plays once the visitor has picked a step, never on page load. Playback is the only control:
- * nothing a visitor does changes the simulation.
+ * One step at a time: its video (or, for a machine cycle, a still of the part after the cut), the
+ * plan's title and caption, and previous / next. A video plays once the visitor has picked a step,
+ * never on page load. Playback is the only control: nothing a visitor does changes the simulation.
  */
 export function StepPlayer({
   part,
@@ -33,45 +33,56 @@ export function StepPlayer({
   const group = part.groups.find((g) => g.id === step.group);
   const [failed, setFailed] = useState<string | null>(null);
   const reported = useRef(false);
+  const what = step.media.type === 'still' ? 'picture' : 'video';
+  const onError = () => {
+    // Published media that won't load is a fault; unpublished media never gets here.
+    setFailed(step.id);
+    if (!reported.current) {
+      reported.current = true;
+      Sentry.captureException(new Error(`Showcase: the ${what} for ${part.id} ${step.id} failed to load`));
+    }
+  };
 
   return (
     <Box>
       <Box sx={{ position: 'relative', aspectRatio: '16 / 9', borderRadius: 2, overflow: 'hidden', bgcolor: 'common.black' }}>
-        {playable(step) ? (
+        {!ready(step) ? (
+          <Typography
+            role="status"
+            sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 3, textAlign: 'center', color: 'text.secondary' }}
+          >
+            This step&apos;s {what} is still being made. Its title and caption are below.
+          </Typography>
+        ) : step.media.type === 'still' ? (
+          <Box
+            component="img"
+            key={step.id}
+            src={mediaUrl(step.media.path)}
+            alt={`The part after this step: ${step.title}`}
+            onError={onError}
+            sx={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
+          />
+        ) : (
           <Box
             component="video"
             key={step.id}
-            src={mediaUrl(step.video)}
+            src={mediaUrl(step.media.path)}
             controls
             muted
             playsInline
             preload="metadata"
             autoPlay={autoPlay}
             aria-label={`Video: ${step.title}`}
-            onError={() => {
-              // A published video that won't load is a fault; an unpublished one never gets here.
-              setFailed(step.id);
-              if (!reported.current) {
-                reported.current = true;
-                Sentry.captureException(new Error(`Showcase: the video for ${part.id} ${step.id} failed to load`));
-              }
-            }}
+            onError={onError}
             sx={{ width: '100%', height: '100%', display: 'block' }}
           />
-        ) : (
-          <Typography
-            role="status"
-            sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 3, textAlign: 'center', color: 'text.secondary' }}
-          >
-            This step&apos;s video is still being made. Its title and caption are below.
-          </Typography>
         )}
         {failed === step.id && (
           <Typography
             role="status"
             sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 3, textAlign: 'center', color: 'text.secondary' }}
           >
-            This step&apos;s video couldn&apos;t be loaded. Its title and caption are below.
+            This step&apos;s {what} couldn&apos;t be loaded. Its title and caption are below.
           </Typography>
         )}
       </Box>
@@ -105,7 +116,8 @@ export function StepPlayer({
 }
 
 function stepNote(s: Step): string | undefined {
-  const notes = [s.kind === 'cycle' && 'Machine cycle', !playable(s) && 'Video coming'].filter(Boolean);
+  const coming = s.media.type === 'still' ? 'Picture coming' : 'Video coming';
+  const notes = [s.kind === 'cycle' && 'Machine cycle', !ready(s) && coming].filter(Boolean);
   return notes.length ? notes.join(' · ') : undefined;
 }
 

@@ -24,10 +24,11 @@ http://desktop-4hvjqis:8765/). Each machine runs `python -m moonshot.orchestrate
 `python -m moonshot.orchestrate.hub put <file>`; jobs name their inputs by that sha256.
 
 **The web page** is `/showcase`, in `app/(marketing)/showcase/`. It reads one generated file, `showcase.json`, which
-`python -m moonshot.web.export` writes from the plans and records (gate: `tests/gates/test_web_steps.py`). Its models
-and videos come from Supabase Storage, staged first in `<data root>/web/` by `python -m moonshot.web.media models` and
-`videos`, then published to the public `showcase` bucket by `upload`, which records each video in
-`web/published.json`; the page plays only those. For development, `python -m moonshot.web.media serve --draft
+`python -m moonshot.web.export` writes from the plans and records (gate: `tests/gates/test_web_steps.py`). A person's
+step is shown as its video, a machine cycle as one still of the part after the cut. Models, videos and stills come
+from Supabase Storage, staged first in `<data root>/web/` by `python -m moonshot.web.media models` and `stage`, then
+published to the public `showcase` bucket by `upload <step> ...`, one named step at a time (a person's step only once
+its draft is reviewed), which records each in `web/published.json`; the page shows only those. For development, `python -m moonshot.web.media serve --draft
 takes/setup-take/draft.mp4` serves that folder, and `.env.development.local` sets
 `NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787` and `NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED=1`.
 

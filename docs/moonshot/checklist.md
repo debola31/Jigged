@@ -313,7 +313,11 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   pendant takes are (no grasp of their own; an insert's is checked in its pick); the vf2-tool-load card's proposed
   values approved as written. At 10:30 every setting take (11), every tool take (29), the doors and Cycle Start,
   deburr and inspect pass every check on the new body and are rendering; the vise loads, set-stop, blow-off,
-  loosen and the lift-outs are in progress.
+  loosen and the lift-outs are in progress. By 12:30 set-parallels, set-stop, blow-off, loosen and all five
+  lift-outs pass too, and 31 of 61 steps have their finals (the 15 cutting stills, deburr, and every setup's
+  clean, start and unload steps). Your decisions: blow-off keeps the holster moved on its panel (rim at 870 mm,
+  the gun turned 135 deg, handle toward the operator) and the aim 30 deg left, 50 deg down; a lift-out's set-down
+  on the table isn't held to the vise's 2 mm (op20's lands 2.8 mm off).
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

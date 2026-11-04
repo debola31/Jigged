@@ -541,7 +541,10 @@ class PendantRunner(TakeRunner):
         driven = [n for n in objects if n.startswith("vf2") or n == "tool"]
         checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
                                            "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
-        checks |= {"driven": driven, "rides_on": {n: "vf2_table" for n in objects if n not in driven},
-                   "touch_lead": self.checks["touch_lead"]}
+        # the drawbar's fingers turn with the spindle, off its axis: judged as the table's riders are, by their motion
+        # in it; seen 30 times a second at 1200 rpm, their path round the axis read as acceleration spikes (op10-xy)
+        rides = {n: "vf2_table" for n in objects if n not in driven}
+        rides |= {n: "vf2_spindle" for n in driven if n.startswith("vf2_finger_")}
+        checks |= {"driven": driven, "rides_on": rides, "touch_lead": self.checks["touch_lead"]}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

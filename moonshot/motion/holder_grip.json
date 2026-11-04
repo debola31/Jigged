@@ -183,6 +183,130 @@
     "coupling": 12.18
    },
    "from": "em12's grip, its middle, ring and little fingers flexed or straightened off the tool (skin {'flange': 0.0, 'body': 1.97, 'tool': 0.0} mm into the holder)"
+  },
+  "em38": {
+   "q": {
+    "cmc2_flex": 0.002,
+    "index_mcp_abd": -9.413,
+    "index_mcp_flex": 36.91,
+    "index_pip": 57.159,
+    "index_dip": 19.746,
+    "cmc3_flex": 2.715,
+    "middle_mcp_abd": -0.856,
+    "middle_mcp_flex": 10.291,
+    "middle_pip": 63.757,
+    "middle_dip": 54.721,
+    "cmc4_flex": 8.923,
+    "ring_mcp_abd": -0.248,
+    "ring_mcp_flex": 3.535,
+    "ring_pip": 49.361,
+    "ring_dip": 2.706,
+    "cmc5_flex": 10.729,
+    "little_mcp_abd": -5.537,
+    "little_mcp_flex": 57.865,
+    "little_pip": 56.768,
+    "little_dip": 20.959,
+    "thumb_cmc_abd": 31.939,
+    "thumb_cmc_flex": 19.793,
+    "thumb_cmc_roll": -7.558,
+    "thumb_mcp_abd": -3.119,
+    "thumb_mcp_flex": 31.705,
+    "thumb_ip": -12.426
+   },
+   "H": [
+    [
+     0.22492091200502956,
+     0.22521689766173075,
+     0.9479915254634144
+    ],
+    [
+     0.9743767139402842,
+     -0.05276322318165888,
+     -0.21864597323165114
+    ],
+    [
+     0.0007763206548851397,
+     0.9728789191297692,
+     -0.23131365294580614
+    ]
+   ],
+   "W_rel": [
+    34.85109203887485,
+    -108.28028505906276,
+    -56.30281641893658
+   ],
+   "loss": 23.34,
+   "terms": {
+    "pad_index": 1.18,
+    "pad_middle": 0.01,
+    "pad_thumb": 3.77,
+    "penetration": 4.41,
+    "prior": 1.78,
+    "coupling": 12.18
+   },
+   "from": "drill-5p5's grip, its middle, ring and little fingers flexed or straightened off the tool (skin {'flange': 0.0, 'body': 1.92, 'tool': 0.0} mm into the holder)"
+  },
+  "tap-m3": {
+   "q": {
+    "cmc2_flex": 0.002,
+    "index_mcp_abd": -9.413,
+    "index_mcp_flex": 36.91,
+    "index_pip": 57.159,
+    "index_dip": 19.746,
+    "cmc3_flex": 2.715,
+    "middle_mcp_abd": -0.856,
+    "middle_mcp_flex": 10.291,
+    "middle_pip": 63.757,
+    "middle_dip": 54.721,
+    "cmc4_flex": 8.923,
+    "ring_mcp_abd": -0.248,
+    "ring_mcp_flex": 3.535,
+    "ring_pip": 49.361,
+    "ring_dip": 2.706,
+    "cmc5_flex": 10.729,
+    "little_mcp_abd": -5.537,
+    "little_mcp_flex": 57.865,
+    "little_pip": 56.768,
+    "little_dip": 20.959,
+    "thumb_cmc_abd": 31.939,
+    "thumb_cmc_flex": 19.793,
+    "thumb_cmc_roll": -7.558,
+    "thumb_mcp_abd": -3.119,
+    "thumb_mcp_flex": 31.705,
+    "thumb_ip": -12.426
+   },
+   "H": [
+    [
+     0.22492091200502956,
+     0.22521689766173075,
+     0.9479915254634144
+    ],
+    [
+     0.9743767139402842,
+     -0.05276322318165888,
+     -0.21864597323165114
+    ],
+    [
+     0.0007763206548851397,
+     0.9728789191297692,
+     -0.23131365294580614
+    ]
+   ],
+   "W_rel": [
+    34.85109203887485,
+    -108.28028505906276,
+    -56.30281641893658
+   ],
+   "loss": 23.34,
+   "terms": {
+    "pad_index": 1.18,
+    "pad_middle": 0.01,
+    "pad_thumb": 3.77,
+    "penetration": 4.41,
+    "prior": 1.78,
+    "coupling": 12.18
+   },
+   "from": "drill-5p5's grip, its middle, ring and little fingers flexed or straightened off the tool (skin {'flange': 0.0, 'body': 1.92, 'tool': 0.0} mm into the holder)"
   }
  }
 }

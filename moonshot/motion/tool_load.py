@@ -135,11 +135,13 @@ YAW_DEG_PER_FORK = 10.0                                  # the grip turned this 
                                                          # the wrist, kept turned as for the first fork, bent back
                                                          # 45-50 deg (from fork 3, a median negative log-likelihood of
                                                          # 29.9 unturned, 28.2 turned 15 deg, 27.2 turned 30)
-CLEAR_STAND_MM = np.array([-50.0, 120.0, 270.0])         # back to rest by way of a point this far above and in front
+CLEAR_STAND_MM = np.array([0.0, 120.0, 270.0])           # back to rest by way of a point this far above and in front
                                                          # of it: high over the holders still on the stand, and down in
-                                                         # front of the vise's crank (straight down to a stance further
-                                                         # right, the hand swept through the stand's holders; by way of
-                                                         # a point in front of the spindle, its fingers hit the crank)
+                                                         # front of the vise's crank, right of its knob (straight down
+                                                         # to a stance further right, the hand swept through the stand's
+                                                         # holders; by way of a point in front of the spindle, its
+                                                         # fingers hit the crank; by way of one 50 mm left of the rest,
+                                                         # the index came down on the crank's knob)
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
 
 

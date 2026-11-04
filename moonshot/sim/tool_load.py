@@ -60,6 +60,8 @@ PRELOAD_SOLIMP = (0.02, 0.05)  # weld passes 90% of the hand's own tremor and dr
 R_OUT_S = 0.8              # the right hand off the holder this long after its grip ends (motion/tool_load.py)
 R_SIGHT_EASE_S = 0.8        # ... and its carry's correction eases out this fast as it goes back, as the bench's
 CARRIED = ("seat", "pick", "insert")    # the takes a hand carries a holder in: a whole seat, or its pick and its insert
+SEATED_SOLREF_S = 0.03      # the weld's time constant once the holder is seated and the drawbar takes it ...
+SEATED_LEAD_S = 0.05        # ... from this long before Tool Release is let go
 HOLD_DAMP_S = 0.3           # the eye on a carried holder weighs how fast it moves off its path (s) beside how far: on
                             # its place alone, the holder swayed 20 mm each side of the spindle's axis (30 mm the face
                             # mill's) as it was lined up under it, every 1.2 s, and the face mill's knob landed on the
@@ -90,6 +92,7 @@ class ToolLoadRun(PendantRunner):
         self.grip, self.carry, self.seat_ev = ev.get("grip"), ev.get("carry"), ev.get("seat")
         self.seat_t0 = self.seat_ev["t0"] if self.seat_ev else float("inf")      # a pick never seats it
         reach = [e for e in self.presses if e["side"] == "L" and "reach_t0" in e]
+        self.release_t = reach[0]["t1"] if reach else float("inf")             # Tool Release let go
         self.l_sight = (reach[0]["reach_t0"], reach[0]["t1"] + 0.2) if reach else None
         self._r_out = None
         self.wrist_speed = {s: np.linalg.norm(np.gradient(self.rd[f"{s}_W"], 1.0 / self.fps, axis=0), axis=1)
@@ -152,21 +155,33 @@ class ToolLoadRun(PendantRunner):
         return V.render_meshes(Load.from_json(self.tk["setup"]["load"]), folder)
 
     def start(self) -> None:
-        """An insert's holder in the hand as its grip has it, where the hand stands at the first frame: placed on its
-        planned path instead, it sat in a hand a few millimetres off its planned grip, and the weld, holding it so for
-        the whole carry, held the skin 4.5 mm into it."""
+        """An insert's holder in the hand where its pick (the take before it, planning/takes.py tool_takes) left it
+        there, the hand standing where the plan has it at the first frame: placed on its planned path, or in the hand
+        as its planned grip has it, it sat a few millimetres deeper than the pick's hand had closed on it, and the
+        weld, holding it so for the whole carry, held the skin 4.1-6 mm into it, where the pick's was 1.3-2.7."""
         super().start()
         if self.kind != "insert":
             return
+        from moonshot.planning.takes import tool_takes
+        names = tool_takes(self.tk["step"])
+        pick = self.folder.parent / names[names.index(self.folder.name) - 1]
+        rec = np.load(pick / "take.npz")                   # the pick must have run first: its record is the start
+        bodies = [str(b) for b in rec["bodies"]]
+
+        def pose(body):
+            R = np.zeros(9)
+            mujoco.mju_quat2Mat(R, np.asarray(rec["quat"][-1, bodies.index(body)], float))
+            return R.reshape(3, 3), rec["pos"][-1, bodies.index(body)] * 0.001
+
+        (Rh, ph), (Ro, po) = pose("R_hand"), pose("holder")
         m, d = self.model, self.data
         mujoco.mj_kinematics(m, d)
         hb = m.body("R_hand").id
-        from moonshot.motion.tool_load import holder_grip
-        W_rel = np.array(holder_grip(self.tk["load"]["tool"])["W_rel"], float) * 0.001
-        Ro = d.xmat[hb].reshape(3, 3) @ self.grip_in_holder.T              # the holder's frame in the world
+        Rn = d.xmat[hb].reshape(3, 3)
+        R = Rn @ Rh.T @ Ro                                  # the holder's frame now, as it was in the hand
         adr = m.jnt_qposadr[m.body_jntadr[self.loose]]
-        d.qpos[adr:adr + 3] = d.xpos[hb] - Ro @ W_rel
-        mujoco.mju_mat2Quat(d.qpos[adr + 3:adr + 7], np.ascontiguousarray(Ro).reshape(-1))
+        d.qpos[adr:adr + 3] = d.xpos[hb] + Rn @ Rh.T @ (po - ph)
+        mujoco.mju_mat2Quat(d.qpos[adr + 3:adr + 7], np.ascontiguousarray(R).reshape(-1))
 
     # --- the hand and the holder ------------------------------------------------------------------------------------
     def planned_holder(self, t: float) -> np.ndarray:
@@ -367,6 +382,11 @@ class ToolLoadRun(PendantRunner):
         f = float(np.clip((t - lo[0]) / max(lo[1] - lo[0], 1e-9), 0.0, 1.0)) if self._stiff else 0.0
         m.eq_solref[self.weld, 0] = PRELOAD_SOLREF_S * (CARRY_SOLREF_S / PRELOAD_SOLREF_S) ** f
         m.eq_solimp[self.weld, 0:2] = np.add(PRELOAD_SOLIMP, f * np.subtract(CARRY_SOLIMP, PRELOAD_SOLIMP))
+        if self._pivoting and t >= self.release_t - SEATED_LEAD_S:
+            # seated, as Tool Release is let go and the drawbar pulls the holder in: the hand's hold gives, as a hand
+            # does to a pull it feels coming; held as stiffly as it was carried, the drawbar's snap went through the
+            # weld into the hand in one 65 N step, and the wrist's extensor past its maximum
+            m.eq_solref[self.weld, 0] = SEATED_SOLREF_S
         # apart from the final approach on, as the runner holds a welded tool's grip (APPROACH_S): a hand trailing its
         # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork; and on until the
         # hand is well off it (the runner's RELEASE_S): touching again as the weld let go, the fingers round a face

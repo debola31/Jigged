@@ -202,13 +202,20 @@ def cyl_target(axis_pt, r, z_band, phi_band, comp=2.0, w=1.0):
     return f
 
 
-def holder_colliders(at, tool_id: str) -> list:
-    """A holder's solids for the grip solver (world mm), its gauge line at `at`."""
+TOOL_CLEAR_MM = 5.0         # a tool wider than the holder's body (the face mill) kept this far off the grip's fingers:
+                            # the hand closes a few millimetres and degrees off its planned grip, and the middle finger,
+                            # solved to lie on the cutter's top, sank 6 mm into it as the holder was carried
+
+
+def holder_colliders(at, tool_id: str, tool_clear_mm: float = 0.0) -> list:
+    """A holder's solids for the grip solver (world mm), its gauge line at `at`; the tool grown by tool_clear_mm all
+    round, for a grip kept that far off it."""
     at = np.asarray(at, float)
     t = TL.cutter(tool_id)
     cyl = lambda r, z0, z1: (lambda p, r=r, a=at + [0, 0, z0], b=at + [0, 0, z1]: G.sdf_cyl(p, a, b, r))  # noqa: E731
+    c = tool_clear_mm
     return [cyl(TL.FLANGE_TOP[0], TL.FLANGE_BOTTOM[1], TL.FLANGE_TOP[2]), cyl(*TL.BODY),
-            cyl(t["r"], -t["length"], -TL.GAUGE_MM), cyl(TL.TAPER["r"], -4.5, 68.5)]
+            cyl(t["r"] + c, -t["length"] - c, -TL.GAUGE_MM + c), cyl(TL.TAPER["r"], -4.5, 68.5)]
 
 
 def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
@@ -222,8 +229,8 @@ def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
     from moonshot.body.nimble import Nimble
     hand = AnatomicalHand(Nimble(data_root() / "hand-model" / "nimble"))
     th, at, r = G.TorchHand(hand), np.zeros(3), TL.BODY[0]
-    cols = holder_colliders(at, tool_id)
     tool = TL.cutter(tool_id)
+    cols = holder_colliders(at, tool_id, TOOL_CLEAR_MM if tool["r"] > r else 0.0)
     targets = {"index": cyl_target(at, r, (-31.0, -23.0), (60.0, 175.0)),
                "thumb": cyl_target(at, r, (-34.0, -22.0), (-150.0, -50.0))}
     if tool["r"] <= r:                       # a tool wider than the body (the face mill): the middle rests on its top
@@ -414,7 +421,9 @@ class Seat(ToolTake):
             return [("pos", W, 1.0)] + ([("pose", H, W, 2.0 * w)] if w > 0 else [])
         self.add("R", t_on, t_c + 0.05, reach)
         self.side["R"]["wrist"] = Wg
-        size = 2 * TL.BODY[0]
+        # opened round the holder's body, or round a wider tool kept clear of (the face mill's: opened for the body,
+        # the fingers closed into its cutter as the hand came in)
+        size = 2 * max(TL.BODY[0], TL.cutter(self.tool)["r"] + TOOL_CLEAR_MM)
         # the hand opens for the reach as for the default grip where its own is the default's with fingers moved
         # ("from"): an end mill's grip, its middle and ring fingers straightened off the cutter, opened so, put them on
         # the table's front edge as the hand rose
@@ -448,11 +457,14 @@ class Seat(ToolTake):
         t_end = t2b + PICK_HOLD_S
         keys += [(t_end, lifted)]
         self.look(t2b - 0.5, lifted + [0, 0, -40.0])
-        self.follow("R", t_c + 0.05, t_end + 0.3, "holder", at)
-        self.load("R", tw0, t_end + 0.3, kg)
+        # held on past the take's end (StepTake ends it 0.3 s after self.t): ended with it, the carry let go in the
+        # last frame
+        held = t_end + 0.6
+        self.follow("R", t_c + 0.05, held, "holder", at)
+        self.load("R", tw0, held, kg)
         self.effort("R", t_end, 0.6, "holder")
-        self.event("grip", round(t_c, 3), round(t_end + 0.3, 3), side="R", grip="holder", on="holder")
-        self.event("carry", round(t_touch, 3), round(t_end + 0.3, 3), side="R", obj="holder", kg=round(kg, 4),
+        self.event("grip", round(t_c, 3), round(held, 3), side="R", grip="holder", on="holder")
+        self.event("carry", round(t_touch, 3), round(held, 3), side="R", obj="holder", kg=round(kg, 4),
                    loading=[round(tw0, 3), round(tw0 + LOAD_RAMP_S, 3)])
         self.clip("Load the tools", 0.0, t_end, f"Pick up {self.tool}")
         self.t = t_end

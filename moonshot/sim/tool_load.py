@@ -105,6 +105,11 @@ class ToolLoadRun(PendantRunner):
         if self.loose is not None:              # the planned grip's hand (its body's frame) in the holder's, upright
             from moonshot.motion.tool_load import holder_grip
             self.grip_in_holder = np.array(holder_grip(ld["tool"])["H"], float) @ H0.T
+            self.grip_W_m = np.array(holder_grip(ld["tool"])["W_rel"], float) * 0.001     # the wrist, holder's frame
+        # a tool wider than the holder's body (the face mill) leaves the fingers no slack round it: as the hand takes the
+        # weight, the weld sets it wholly on its planned grip, not just turned to it about the holder's axis (held
+        # where it closed, a few millimetres and degrees off, the fingers sat 6 mm into the cutter as it was carried)
+        self.wide = self.loose is not None and TL.cutter(ld["tool"])["r"] > TL.BODY[0]
         self._pivoting = False
         self._pivot_R = np.eye(3)
         self._hold, self._hold_q = None, None
@@ -337,6 +342,11 @@ class ToolLoadRun(PendantRunner):
             rel = np.array([[np.cos(a), -np.sin(a), 0.0], [np.sin(a), np.cos(a), 0.0], [0.0, 0.0, 1.0]]) @ rel
         m.eq_data[self.weld, 0:3] = Rh.T @ (P - d.xpos[hb])          # the point in the hand (body2)
         m.eq_data[self.weld, 3:6] = Ro.T @ (P - d.xpos[self.loose])  # ... and in the holder (body1)
+        if turn_to_grip and self.wide:             # the hand where its planned grip has it on the holder, wholly
+            rel = self.grip_in_holder
+            a = np.asarray(at_holder, float) * 0.001
+            m.eq_data[self.weld, 0:3] = rel.T @ (a - self.grip_W_m)
+            m.eq_data[self.weld, 3:6] = a
         qr = np.zeros(4)
         mujoco.mju_mat2Quat(qr, np.ascontiguousarray(rel).reshape(-1))
         m.eq_data[self.weld, 6:10] = qr

@@ -2,8 +2,9 @@
 jaw closing on it, or gravity; no frame of the run is non-finite; nothing recorded accelerates like a solver
 blowing up.
 
-Judged from the run's recorded poses (sim.npz) and what the hand touches (checks.json), never from MuJoCo's contact
-forces, which would offer a solver's spurious contact as the cause of the launch it produces (plan §6, rule 2).
+Judged from the run's recorded poses (sim.npz, or for a take that isn't the vise's, its take record) and what the
+hands touch or carry (checks.json), never from MuJoCo's contact forces, which would offer a solver's spurious contact as
+the cause of the launch it produces (plan §6, rule 2).
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from moonshot.contracts.thresholds import threshold
+from moonshot.validate import objects
 from moonshot.validate.registry import Result, check
 from moonshot.world import vise as V
 
@@ -20,15 +22,32 @@ LOOSE = ("blank", "para_a", "para_b")
 G = 9.81
 
 
+def _finite(arrays, n: int) -> list[bool]:
+    finite = np.ones(n, bool)
+    for k in arrays.files:
+        if arrays[k].dtype.kind == "f" and arrays[k].ndim and len(arrays[k]) == n:
+            finite &= np.isfinite(arrays[k].reshape(n, -1)).all(1)
+    return finite.tolist()
+
+
 def measure(take: Path) -> dict:
-    """What the check reads, from a vise take's physics run."""
+    """What the check reads, from a physics run: a vise take's own keys, or any other take's record, where every object
+    is loose and its cause the hands touching or carrying it (there are no jaws). Unless the run says otherwise in
+    checks.json: `driven`, the bodies a machine moves (its table, head, doors), which aren't loose and are only held
+    to being finite and never launched; and `rides_on` ({object: what it rides on}), each such object judged by its
+    motion on that, so stock clamped to a table moves with a jog without a cause but not within the vise."""
     sim = np.load(take / "sim.npz")
-    touching = json.loads((take / "checks.json").read_text(encoding="utf-8"))["touching"]
-    finite = np.ones(len(sim["t"]), bool)
-    for k in sim.files:
-        if sim[k].dtype.kind == "f" and sim[k].ndim and len(sim[k]) == len(finite):
-            finite &= np.isfinite(sim[k].reshape(len(finite), -1)).all(1)
-    return {"fps": float(sim["fps"]), "touching": touching, "finite": finite.tolist(),
+    ck = json.loads((take / "checks.json").read_text(encoding="utf-8"))
+    if not objects.is_vise(sim):
+        rec = np.load(take / "take.npz")
+        at = objects.positions(take) | {o: objects.riding(take, o, on) for o, on in ck.get("rides_on", {}).items()}
+        driven = set(ck.get("driven", ()))
+        return {"fps": float(rec["fps"]), "finite": _finite(rec, len(rec["t"])), "opening_mm": [0.0] * len(rec["t"]),
+                "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+                "bodies_mm": {k: v.tolist() for k, v in at.items()} | {"hand": rec["R_W"].tolist(),
+                                                                       "hand_L": rec["L_W"].tolist()},
+                "loose": [o for o in at if o not in driven]}
+    return {"fps": float(sim["fps"]), "touching": ck["touching"], "finite": _finite(sim, len(sim["t"])),
             "opening_mm": sim["opening"].tolist(),
             "bodies_mm": {"blank": sim["blank"].tolist(), "para_a": sim["para"][:, 0].tolist(),
                           "para_b": sim["para"][:, 1].tolist(), "hand": sim["W"].tolist()}}
@@ -60,7 +79,8 @@ def _held(cause: np.ndarray, frames: int) -> np.ndarray:
        bad=["bad/nothing_moves_drift.json", "bad/nothing_moves_launch.json", "bad/nothing_moves_nan.json"])
 def nothing_moves_without_a_cause(take: dict) -> Result:
     """take: {"fps", "bodies_mm": {"blank", "para_a", "para_b", "hand": per-frame [x, y, z]}, "touching": per-frame
-    names the hand touches, "opening_mm": the vise's jaw opening per frame, "finite": per-frame bool}."""
+    names the hand touches, "opening_mm": the vise's jaw opening per frame, "finite": per-frame bool, and optionally
+    "loose": the bodies whose motion needs a cause (the vise's blank and parallels when absent)}."""
     fps, finite = float(take["fps"]), np.asarray(take["finite"], bool)
     if not len(finite):
         raise ValueError("a take with no frames can't pass a per-frame check")
@@ -78,7 +98,7 @@ def nothing_moves_without_a_cause(take: dict) -> Result:
         over = np.flatnonzero(np.linalg.norm(a, axis=1) > spike)
         if over.size:
             spikes[name] = int(over[0])
-        if name not in LOOSE:
+        if name not in take.get("loose", LOOSE):
             continue
         moving = np.linalg.norm(v, axis=1) > still
         touched = _held(np.array([name in t for t in take["touching"]]), settle)

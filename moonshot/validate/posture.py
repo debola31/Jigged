@@ -63,41 +63,75 @@ class Prior:
 
 
 def measure(theta: np.ndarray, prior: Prior | None = None) -> dict:
-    """What the posture checks read, from a run's trunk-to-wrist angles (sim.npz theta[:, :10])."""
+    """What the posture checks read, from one arm's trunk-to-wrist angles (sim.npz theta[:, :10])."""
     prior = prior or Prior.load()
     return {"posture_outside": prior.outside(theta), "posture_nll": prior.nll(theta).tolist()}
 
 
+def left_arm(sim) -> np.ndarray | None:
+    """A two-handed run's left arm as people's right (the trunk mirrored, as the planner plans it: motion/kinematics.py
+    mirror_trunk), from either record: a step take's sim.npz theta_L (its 9 arm angles), or a bench take's theta
+    columns 12-20; None for a one-handed run."""
+    from moonshot.motion.kinematics import mirror_trunk
+    th = sim["theta"]
+    if "theta_L" in sim:
+        arm = sim["theta_L"][:, :7]
+    elif th.shape[1] >= 19:
+        arm = th[:, 12:19]
+    else:
+        return None
+    return np.concatenate([mirror_trunk(th[:, :3]), arm], 1)
+
+
+def measure_arms(sim, prior: Prior | None = None) -> dict:
+    """Both arms of a run, the left's under keys ending _L. People's limits are one arm's, so each arm is held to
+    them (your decision, 2026-11-03: in two-handed takes the left arm had gone unchecked)."""
+    prior = prior or Prior.load()
+    out = measure(sim["theta"][:, :10], prior)
+    left = left_arm(sim)
+    if left is not None:
+        out |= {f"{k}_L": v for k, v in measure(left, prior).items()}
+    return out
+
+
 @check("posture_like_people",
        good=["good/posture_like_people_within.json"],
-       bad=["bad/posture_like_people_reference.json"])
+       bad=["bad/posture_like_people_reference.json", "bad/posture_like_people_left_arm.json"])
 def posture_like_people(take: dict) -> Result:
-    """take: {"posture_outside": per-frame joints outside people's 1st-99th percentile}. Enough frames have every
-    trunk-to-wrist angle inside it (body.posture_frames_in_range_frac)."""
-    frames = take["posture_outside"]
-    if not frames:
+    """take: {"posture_outside": per-frame joints outside people's 1st-99th percentile} and, for a two-handed take,
+    "posture_outside_L", the left arm's. Each arm has enough frames with every trunk-to-wrist angle inside it
+    (body.posture_frames_in_range_frac)."""
+    arms = {"R": take["posture_outside"]} | ({"L": take["posture_outside_L"]} if "posture_outside_L" in take else {})
+    if not arms["R"]:
         raise ValueError("a take with no frames can't pass a per-frame check")
-    inside = sum(1 for f in frames if not f) / len(frames)
-    per_joint: dict[str, int] = {}
-    for f in frames:
-        for j in f:
-            per_joint[j] = per_joint.get(j, 0) + 1
+    detail = {}
+    for arm, frames in arms.items():
+        per_joint: dict[str, int] = {}
+        for f in frames:
+            for j in f:
+                per_joint[j] = per_joint.get(j, 0) + 1
+        detail[arm] = {"frames_inside_frac": round(sum(1 for f in frames if not f) / len(frames), 4),
+                       "frames_outside_by_joint": per_joint}
+    inside = min(d["frames_inside_frac"] for d in detail.values())
     return Result(passed=inside >= threshold("body.posture_frames_in_range_frac").value, worst=1.0 - inside,
-                  detail={"frames_inside_frac": round(inside, 4), "frames_outside_by_joint": per_joint})
+                  detail=detail["R"] if len(detail) == 1 else detail)
 
 
 @check("posture_likelihood",
        good=["good/posture_likelihood_person.json"],
-       bad=["bad/posture_likelihood_rotated.json"])
+       bad=["bad/posture_likelihood_rotated.json", "bad/posture_likelihood_left_arm.json"])
 def posture_likelihood(take: dict) -> Result:
-    """take: {"posture_nll": per-frame negative log-likelihood under people's posture mixture}. The median is no
-    more unlikely than people's own 95th percentile (body.posture_nll_median_max)."""
-    nll = np.asarray(take["posture_nll"], float)
-    if not len(nll):
+    """take: {"posture_nll": per-frame negative log-likelihood under people's posture mixture} and, for a two-handed
+    take, "posture_nll_L", the left arm's. Each arm's median is no more unlikely than people's own 95th percentile
+    (body.posture_nll_median_max)."""
+    arms = {"R": take["posture_nll"]} | ({"L": take["posture_nll_L"]} if "posture_nll_L" in take else {})
+    if not len(arms["R"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
-    median = float(np.median(nll))
-    return Result(passed=median <= threshold("body.posture_nll_median_max").value, worst=median,
-                  detail={"median": round(median, 2), "max": round(float(nll.max()), 2)})
+    detail = {arm: {"median": round(float(np.median(v)), 2), "max": round(float(np.max(v)), 2)}
+              for arm, v in arms.items()}
+    worst = max(d["median"] for d in detail.values())
+    return Result(passed=worst <= threshold("body.posture_nll_median_max").value, worst=worst,
+                  detail=detail["R"] if len(detail) == 1 else detail)
 
 
 def main(argv: list[str]) -> int:

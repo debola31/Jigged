@@ -60,12 +60,10 @@ TRANSPORT_S = 1.2                                        # up from the stand to 
 # the tines as the weight is taken, about 0.2 s later, as people's 0.16-0.27 s
 CLOSE_S = 0.12
 PRELOAD_S = 0.23
-LIFT_S = 0.2                                             # the lift off the tines, 2.5 mm from just after the loading
-                                                         # starts: planned 1 mm up 0.1 s into it, the arm lagging
-LOAD_RAMP_S = 0.12                                       # the holder's weight fed forward over this, from the
-                                                         # loading's start (moonshot/sim/tool_load.py): over the whole
-                                                         # loading time, the arm only had the weight at its end, and
-                                                         # the holder came off the tines 0.37 s after the load began
+LIFT_S = 0.2                                             # the lift off the tines, 2.5 mm from 0.1 s after the
+                                                         # loading starts: planned 1 mm up 0.19 s into it
+LOAD_RAMP_S = 0.26                                       # the holder's weight fed forward, and the grip firmed, over
+                                                         # this from the loading's start (moonshot/sim/tool_load.py)
 # the reach to the holder (people's reach to grasp, person.reach_to_grasp_right_s, 0.32-0.67 s from its onset to the
 # fingers' contact): from rest to in front of the holder in REACH_S, the approach onto the grip starting APPROACH_AT
 # into it and lasting APPROACH_S, overlapping, and the fingers on the holder TOUCH_S after the hand is on its grip
@@ -79,6 +77,9 @@ HOVER_L_MM = 30.0                                        # the left index waits 
                                                          # Start (motion/pendant.py HOVER_DWELL_S), then presses ...
 PRESS_IN_S = 0.3                                         # ... coming in this slowly: from 50 mm in 0.15 s it struck
                                                          # the button at 22 N, bounced off and pressed it twice
+PRESS_LEAD_S = 0.15                                      # the press starts this long before the pad is planned on it
+PRESS_AFTER_S = 0.4                                      # and the pad is on it this long after the holder stops under
+                                                         # the drawbar
 # where a hand at rest hangs, from the lumbar pivot, and the arm hanging there, the body solve's start where it has no
 # task: people standing at work (the posture prior's standing components) hang their arms near straight, the elbow
 # a few degrees bent, the shoulder neither turned in nor out across the body. At the planners' usual place
@@ -225,6 +226,10 @@ class InRange(BS.BodySolver):
     down from Tool Release, turned its shoulder out 34 deg (30.9): out of an arm's range in 13-20% of the frames, where
     the checks allow 7%."""
     W_RANGE = 30.0                                       # per squared degree past the range less RANGE_MARGIN_DEG
+    # people's posture prior weighed 1.5, not every take's 0.3: holding the holder up under the spindle, the right arm
+    # was as unlike people as a median 28.1-28.3 negative log-likelihood, a few tenths inside their 28.7; at 1.0 27.7,
+    # at 2.0 27.2, the hands on their targets as before
+    W = dict(BS.BodySolver.W, prior=1.5)
 
     def _arm_terms(self, th, L, packed, side, boxes, trunk):
         terms = super()._arm_terms(th, L, packed, side, boxes, trunk)
@@ -337,7 +342,7 @@ class Seat(StepTake):
         # the weight taken (moonshot/sim/tool_load.py feeds it forward) and the holder lifted off the tines as it is
         # taken
         tw0 = t_touch + PRELOAD_S
-        tl = tw0 + 0.02
+        tl = tw0 + 0.14
         # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
         t1 = tl + LIFT_S
         t2 = t1 + 0.43
@@ -366,14 +371,19 @@ class Seat(StepTake):
         # the button
         self.fingers("L", tl0, self.q_relax)
         self.fingers("L", tl0 + self.shape_s(self.q_relax, gl["q"]), gl["q"])
-        tp = t5 + 0.05                                      # the index on the button, from the hover in PRESS_IN_S
+        # the index on the button, from the hover in PRESS_IN_S, once the right hand has stopped the holder under the
+        # drawbar: pressed while the right pushed it up there, the trunk carried the left hand 20 mm across the head and
+        # the index struck the button's edge, bounced and pressed it twice
+        tp = t5 + PRESS_AFTER_S
         t6 = tp + 0.35                                      # the drawbar open: pushed up past the seat
         t7 = t6 + 0.45
         keys += [(t6, SPINDLE + [0, 0, OVER_MM]), (t7, SPINDLE + [0, 0, OVER_MM])]
         tr = t7 + 0.05                                      # Tool Release let go: the drawbar clamps
         path = PosePath(HL, hover).to(tp - PRESS_IN_S, PRESS_IN_S, HL, WL_on).to(tr, 0.15, HL, hover)
         self.add("L", tl1, tr + 0.15, lambda t, path=path: [("pose", *path.at(t), 3.0)])
-        self.event("press", round(tp, 3), round(tr, 3), side="L", key="tool_release_head",
+        # the press from PRESS_LEAD_S before the pad is planned on the button, as a key's (moonshot/motion/pendant.py
+        # press): from then the physics pushes, once the pad is over it
+        self.event("press", round(tp - PRESS_LEAD_S, 3), round(tr, 3), side="L", key="tool_release_head",
                    force=REC["affordances"]["tool_release_head"]["force_n"], normal=[0.0, 1.0, 0.0], hold=True,
                    reach_t0=round(tl0, 3))
         self.look(tl1, BUTTON)

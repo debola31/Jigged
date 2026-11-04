@@ -40,6 +40,8 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
   const [moves, setMoves] = useState(0);
   const part = live.find((p) => p.id === partId) ?? live[0];
   const step = part.steps[index];
+  // The part's stations in the order its steps visit them, for the shop walk.
+  const route = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()];
 
   const select = (i: number) => {
     setIndex(i);
@@ -102,7 +104,7 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
         <Box sx={{ mt: { xs: 4, md: 6 }, display: 'grid', gap: { xs: 4, md: 5 }, gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: '7fr 5fr' } }}>
           <StepPlayer part={part} index={index} autoPlay={moves > 0} onSelect={select} />
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-            <ShopView shop={data.shop} where={step.where} fly={moves} />
+            <ShopView shop={data.shop} where={step.where} route={route} fly={moves} />
             <StepList part={part} index={index} onSelect={select} />
           </Box>
         </Box>

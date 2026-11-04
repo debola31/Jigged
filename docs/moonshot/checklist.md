@@ -301,7 +301,12 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   cutting stills, deburr). The other 45 are people's steps, and every take they need re-runs on the new body:
   setting (3e), Load the tools (agent), the vise loads (agent; op50, a7), doors and Cycle Start (agent), inspect
   (66), and set-parallels, set-stop, blow-off, loosen and the lift-outs (here). A step goes up once all its takes
-  pass, you've reviewed its draft and its final is rendered.
+  pass, you've reviewed its draft and its final is rendered. Your decisions at 08:00, to have it all up tonight: no
+  drafts and no review wait, so a take whose checks pass renders its final at once, at 720p (31,000 frames at 1080p
+  were about 27 farm-hours), and the backlog's drafts are taken as approved; the bench's props drawn as what they are;
+  parked until nist-ftc-10 is up: the band saw's takes, the G1 parts' takes, CI runs of the gates and the remaining
+  strength curves. The skin check runs on Embree since (`embreex`), 200x faster with the same answer, so a take's
+  checks take minutes.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

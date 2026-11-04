@@ -6,7 +6,8 @@ judged on timing alone.
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
 (sim.npz q) on the body model's hand. Reaches are grasp_timing's. A take that isn't the vise's has each grasped
 object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm), and a left hand's reach is read
-from the left hand's aperture (sim.npz L_q).
+from the left hand's aperture (sim.npz L_q; q_L in a run with the vise's keys, as the door takes', whose bars are sized
+across their width).
 """
 from __future__ import annotations
 
@@ -18,20 +19,23 @@ import numpy as np
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate import objects
-from moonshot.validate.grasp_timing import hand_of, measure as grasp_inputs, reaches
+from moonshot.validate.grasp_timing import BARS, hand_of, measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
 def measure(take: Path) -> dict:
     """What the check reads, from a physics run: the grasp-timing inputs, the aperture, and each grasped object's size
-    across the grip (a vise take's: the blank's near-to-far faces, the knob's diameter)."""
+    across the grip (a vise take's: the blank's near-to-far faces, the knob's diameter, a door's handle bar's width)."""
+    from moonshot.world import vf2
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
     g = grasp_inputs(take)
     if objects.is_vise(sim):
         tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
         load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
-        size = {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
+        bars = {geom: vf2.record()["colliders"][geom[len("vf2_"):]] for geom in set(BARS.values())}
+        size = ({"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
+                | {geom: c["box_max_mm"][0] - c["box_min_mm"][0] for geom, c in bars.items()})
     else:
         size = {o: objects.thinnest_mm(take, o) for o in g["grasping"]}
     names = [str(n) for n in sim["names"]]
@@ -39,7 +43,7 @@ def measure(take: Path) -> dict:
            "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], names).tolist(), "size_mm": size}
     if "hand" in g:
         out |= {"hand": g["hand"], "hand_speed_L_mm_s": g["hand_speed_L_mm_s"],
-                "aperture_L_mm": aperture_mm(sim["L_q"], names).tolist()}
+                "aperture_L_mm": aperture_mm(sim["q_L" if objects.is_vise(sim) else "L_q"], names).tolist()}
     return out
 
 

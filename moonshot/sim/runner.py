@@ -60,6 +60,9 @@ class TakeRunner:
     welded: set[str] = set()
     controls: set[str] = set()               # a welded tool's geoms the fingers still touch (its trigger)
     never_held: tuple[str, ...] = ()         # mechanism parts the take's hands never touch (never_held_parts)
+    # where hand_force acts, in the hand frame (long, radial, dorsal; mm from the wrist): None, at the wrist, so the
+    # arm is fed it but the wrist isn't; a point on the hand, so the wrist is fed the torque the force makes about it
+    HAND_FORCE_AT: np.ndarray | None = None
 
     def eq_name(self, grip: str) -> str:
         """A grip's constraint: a welded one is the carry of what it holds (carry_<object>, the declared grip assist
@@ -249,8 +252,14 @@ class TakeRunner:
         for side in SIDES:
             F = self.hand_force(side, t)
             if F is not None:
-                jacp = np.zeros((3, m.nv))
-                mujoco.mj_jacBody(m, p, jacp, None, m.body(f"{side}_hand").id)
+                jacp, hb = np.zeros((3, m.nv)), m.body(f"{side}_hand").id
+                if self.HAND_FORCE_AT is None:
+                    mujoco.mj_jacBody(m, p, jacp, None, hb)
+                else:                                       # where the hand meets what it works: the wrist's load too
+                    # the left hand's body is the right's mirrored: its frame's dorsal axis points palmar
+                    v = self.HAND_FORCE_AT * (1.0 if side == "R" else np.array([1.0, 1.0, -1.0]))
+                    at = p.xpos[hb] + p.xmat[hb].reshape(3, 3) @ H0 @ v * 0.001
+                    mujoco.mj_jac(m, p, jacp, None, at, hb)
                 tau += (jacp.T @ F)[self.act_dof]
         target = p.qpos.copy()
         k = np.ones(len(self.acts))

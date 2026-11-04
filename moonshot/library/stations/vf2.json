@@ -42,10 +42,10 @@
                          "reason": "The CAD's lower-left button, 31.5 mm across, 10 mm proud of the face"},
   "feed_hold_button": {"link": "pendant", "cylinder": {"centre_mm": [705.5, -991.35, 1300.0], "radius_mm": 15.75, "half_mm": 5.05},
                        "reason": "The CAD's lower-right button, beside Cycle Start"},
-  "door_left_pull": {"link": "door_left", "box_min_mm": [-58.8, -845, 680], "box_max_mm": [-27.0, -811, 1160],
-    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height"},
-  "door_right_pull": {"link": "door_right", "box_min_mm": [27.0, -845, 680], "box_max_mm": [58.8, -811, 1160],
-    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height"}
+  "door_left_pull": {"link": "door_left", "box_min_mm": [-58.8, -845, 680], "box_max_mm": [-27.0, -811, 1160], "radius_mm": 16.0,
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height. A round tube (the GLB's vertices 15.9-17.2 mm from its axis), so its collider is a vertical cylinder in its box: the box's corners stood 6 mm proud of the tube, into the palm of a hand wrapped round it"},
+  "door_right_pull": {"link": "door_right", "box_min_mm": [27.0, -845, 680], "box_max_mm": [58.8, -811, 1160], "radius_mm": 16.0,
+    "reason": "the vertical pull bar by the door's leading edge, standing 34 mm off the door on two posts, measured from its link GLB; gripped round at elbow height. A round tube (the GLB's vertices 15.9-17.2 mm from its axis), so its collider is a vertical cylinder in its box: the box's corners stood 6 mm proud of the tube, into the palm of a hand wrapped round it"}
  },
  "affordances": {
   "door_left_handle": {"link": "door_left", "at_mm": [-58.8, -828, 1050], "grip": "power", "pull": [-1, 0, 0],

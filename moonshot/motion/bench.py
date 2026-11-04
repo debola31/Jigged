@@ -63,12 +63,13 @@ PRELOAD_S = 0.0                                   # a lift, and the carry bearin
                                                   # calipers 3.4 N into the bench and loaded the deburring tool at once
 CARRY_EASE_S = 0.3                                # ... the carry's correction of the hand easing in over this long
                                                   # (moonshot/sim/bench.py carry_offset)
-TAKE_MM, TAKE_S = 2.5, 0.55                       # a lift first takes the tool's weight, so the load comes on over
+TAKE_MM, TAKE_S = 2.5, 0.65                       # a lift first takes the tool's weight, so the load comes on over
                                                   # people's loading time (anatomy.json grip loading_s) before it
                                                   # leaves the bench: lifted straight off, the load took 33 and 100 ms
                                                   # to lift the tools; taking 1.5 mm over 0.6 s, the hand's give left
                                                   # the deburring tool down until the lift went on (533 ms); 2 mm
-                                                  # over 0.5 s, 400 ms; 2.5 mm over 0.45 s, 100 ms
+                                                  # over 0.5 s, 400 ms; 2.5 mm over 0.45 s, 100 ms, over 0.55 s,
+                                                  # 133-167 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
 HANGING = [30.0, 10.0, 5.0, 15.0, 15.0, -10.0, -5.0, 0.0, 0.0]   # an arm hanging relaxed, the body solve's start where
                                                                  # it has no task: sh_plane .. wr_dev, the girdle
@@ -275,19 +276,21 @@ class BenchPlan:
         self.add(side, t0, t1, lambda t: [("pose", H, W, w)])
         self.wrist[side] = np.asarray(W, float)
 
-    def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S):
+    def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
         hand's onset (person.reach_to_grasp_right_s) and open widest 71-77% of the way
         (person.peak_aperture_reach_frac): run as one movement from the thigh, the calipers' reach measured 1.1 s,
         widest at 85% of it. Closing as the hand arrived, the fingers struck the tool: they threw the deburring tool
-        13 mm up and shoved the calipers 6 mm. Returns when the grip has closed."""
+        13 mm up and shoved the calipers 6 mm. The grip is where the tool is when the hand comes to rest on it: the
+        calipers' slider is still being stood on end as the right hand rises for it. Returns when the grip has
+        closed."""
         g = self.grips[grip]
-        H, W = self.grip_pose(grip, t0)
         t_ready = t0 + RISE_S
         t_go = t_ready + STILL_S
-        tc = t_go + REACH_S
+        tc = t_go + reach_s
+        H, W = self.grip_pose(grip, tc)
         self.transit(side, t0, t_ready, ready)
         self.transit(side, t_ready, t_go, ready)
         self.transit(side, t_go, tc, W, via=[approach], fade=(H, 1.0))

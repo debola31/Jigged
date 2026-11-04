@@ -38,6 +38,8 @@ from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
 SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for capsules 4-5 mm inside them
+KNOB_SQUEEZE_DEG = 0.0    # the fist's squeeze on the crank's knob: none past its grip, which the colliders now meet (0.75 mm
+                          # inside the skin), and the weld holds the knob; at 5.5 the fingers pressed it 2.7 mm in
 STIFFEN = 4.0              # the hand's co-contraction at full effort, for the reference part; heavier parts brace more
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
@@ -53,10 +55,12 @@ TOUCH_TAU = 0.07          # while pressing, sideways slip under the fingertip is
                           # tactile slip responses take ~70 ms (Johansson & Westling 1984)
 ENCLOSE_BLEND_S = 0.12    # the knob's hold in the fist eases from where it is to where it was planned this long (s),
                           # done before the crank turns (it starts 0.15 s after the hold)
+KNOB_MIDDLE = np.array([0.0, -0.045, 0.0])   # the knob's middle in its own frame (m): where the fist holds it
 TOUCH_MAX = 0.004         # ... by at most this much (m): a slip is millimetres; up to VISUAL_MAX, held by the part's
                           # friction the correction wound up through the 30 N push and pushed the hand 15 N sideways
 LEAD_MAX_DEG = 8.0
-TIGHTEN_LEAD_DEG = 4.0
+TIGHTEN_LEAD_DEG = 3.2    # the final pull leads the knob this far, its push growing at CRANK_KI per degree: at 4
+                          # the pull overshot the clamp (5,400-5,700 N) and the shoulder saturated
 ANGLOCK = 0.05            # Kurt's AngLock: a downward push on the moving jaw of this fraction of the clamp force
 SNUG_GAIN = 0.01          # snug force loop: lead (deg/s) per newton short of the snug clamp force
 PRESS_KI = 20.0           # press: the pushed force grows 20 N/s per newton it falls short of the target
@@ -326,7 +330,7 @@ class ViseTake:
             self.squeeze[grip] = self.grip_squeeze(grip)
             self.grip_scale[grip] = {}
         dirs, scale = self.squeeze[grip], self.grip_scale[grip]
-        base = math.radians(SQUEEZE_DEG) * effort
+        base = math.radians(KNOB_SQUEEZE_DEG if grip == "knob" else SQUEEZE_DEG) * effort
         if grip not in CARRYING:
             return sum(dirs[dg] * base for dg in dirs)
         force, _, _ = self.contacts()
@@ -639,19 +643,21 @@ class ViseTake:
                 kb, hb, p = self.body_id["knob"], self.body_id["R_hand"], self.plan
                 self.set_plan(self.plan_time(tk))
                 mujoco.mj_kinematics(m, p)
-                pk = p.xpos[kb] + p.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
-                planned = p.xmat[hb].reshape(3, 3).T @ (pk - p.xpos[hb])
                 # taken from where the knob really is in the hand to where it was planned, smoothly, before the crank
                 # turns: set there at once, the constraint snapped the hand onto it, 180 N and 48 N m at the final
                 # pull's grasp, and the hand's muscles saturated
-                pk = d.xpos[kb] + d.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
-                self.enc_blend = (tk, d.xmat[hb].reshape(3, 3).T @ (pk - d.xpos[hb]), planned)
+                self.enc_blend = (tk, self.knob_in_hand(d), self.knob_in_hand(p))
+                m.eq_data[enc, 3:6] = KNOB_MIDDLE
                 d.eq_active[enc] = 1
             elif not want_enc and d.eq_active[enc]:
                 d.eq_active[enc] = 0
             if d.eq_active[enc]:
-                t_a, real, planned = self.enc_blend
-                m.eq_data[enc, 3:6] = real + (planned - real) * min_jerk((tk - t_a) / ENCLOSE_BLEND_S)
+                t_a, (real, rq), (planned, pq) = self.enc_blend
+                w = min_jerk((tk - t_a) / ENCLOSE_BLEND_S)
+                m.eq_data[enc, 0:3] = real + (planned - real) * w
+                m.eq_data[enc, 6:10] = (Rotation.from_quat(rq[[1, 2, 3, 0]]) * Rotation.from_rotvec(
+                    w * (Rotation.from_quat(rq[[1, 2, 3, 0]]).inv() * Rotation.from_quat(pq[[1, 2, 3, 0]])).as_rotvec())
+                ).as_quat()[[3, 0, 1, 2]]
             driven = any(e["t0"] - 0.15 <= tk < e["t1"] for e in self.cranks)
             if not driven and not d.eq_active[lock]:
                 m.eq_data[lock, 0] = d.qpos[self.q_crank]
@@ -748,6 +754,16 @@ class ViseTake:
                     f"hand {sum(f.values()):.1f} N clamp {clamp:.0f} N")
         self.rec = rec
         return self.report(n)
+
+    def knob_in_hand(self, data) -> tuple[np.ndarray, np.ndarray]:
+        """The weld's terms for the knob held as it is in data: its middle in the hand's frame (m), and the knob's
+        frame turned onto the hand's (wxyz), as MuJoCo's weld reads them (body1 the knob, body2 the hand)."""
+        kb, hb = self.body_id["knob"], self.body_id["R_hand"]
+        pk = data.xpos[kb] + data.xmat[kb].reshape(3, 3) @ KNOB_MIDDLE
+        q = np.zeros(4)
+        mujoco.mju_negQuat(q, data.xquat[kb])
+        mujoco.mju_mulQuat(q, q, data.xquat[hb])
+        return data.xmat[hb].reshape(3, 3).T @ (pk - data.xpos[hb]), q
 
     def pose_record(self) -> dict:
         """The body's pose this frame, in trainual's take terms (motion/body_model.py), for rendering."""

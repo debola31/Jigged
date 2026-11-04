@@ -24,6 +24,7 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             screw_axis=np.array([-381.5, -636.4, 892.29]), lever=120.0, knob_r=13.5, knob_len=90.0, knob_grip=58.0,
             lead=6.35)
 CRANK0_DEG = 55.0
+ENCLOSE_SOLREF_S = 0.02     # the knob weld's time constant (s): how stiffly the fist holds the knob
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
 # the stop a part stood on the vise's floor is set against (nist-ftc-10 op50): a steel block (x along the jaws, y
 # across, z up; mm), tall enough to be pinched by its top over the jaws, narrower across than such a part, so the jaws
@@ -205,7 +206,10 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     if stop_mm is not None:
         eq += (f'    <weld name="keep_stop" body1="stop" body2="{table_body}" '
                f'anchor="{f(np.asarray(stop_mm) + [0, 0, STOP_MM[2] / 2])}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n')
-    eq += f"""    <connect name="enclose" body1="knob" body2="{hand_body}" anchor="0 -0.045 0" active="false" solref="0.02 1"
+    # the knob held in the fist by its middle and its axis (a weld; the knob spins on the lever as the fist turns): held by a
+    # point only, the fist's tilt off the knob's axis under the final pull went into the fingers, 155 N on the little
+    # finger's tip and 2.7 mm into the knob. Its pose in the hand is set by the take runner as the fist closes
+    eq += f"""    <weld name="enclose" body1="knob" body2="{hand_body}" active="false" solref="{ENCLOSE_SOLREF_S} 1"
              solimp="0.9 0.95 0.002"/>
     <joint name="screw_lock" joint1="crank" polycoef="0 0 0 0 0" active="false" solref="0.002 1" solimp="0.9999 0.9999 0.0001"/>
     <joint name="lead_screw" joint1="jaw_slide" joint2="crank" polycoef="0 {V['lead'] * M / (2 * math.pi):.7f} 0 0 0"

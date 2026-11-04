@@ -72,14 +72,14 @@ JAW_TOP = VISE["jaw_top_z"]
 
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
-REACH_S, REACH_PEAK = 0.66, 0.65
+REACH_S, REACH_PEAK = 0.66, 0.62
 KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
 # the final pull: out over the disc (slower than the reach, so the reach is the fastest move before the grasp), a
 # moment's pause, then the reach, onto the knob from the back of the hand as the first crank's comes on, from this far
 # out along the knob's axis (straight from behind, op40's fingers swept the lever for 17 frames). FINAL_AXIAL slides
 # the hand on along the knob's axis instead (3e2b0545), by FINAL_SLIDE_MM, the opening's key at KNOB_PEAK_FINAL
-FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.9, 0.5, 0.72, 110.0
-FINAL_APPROACH_OUT_MM, FINAL_AXIAL = 60.0, False
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 1.1, 0.65, 0.56, 110.0
+FINAL_APPROACH_OUT_MM, FINAL_AXIAL = 30.0, False
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 # a lift-out's grab (start "vise"): the raise to the ready point, up over the crank's disc, 0.6 m, slower than the
 # reach; the hand there, still, LIFT_ARRIVE_EARLY_S before the fingers close: arriving as they closed (the stage's),
@@ -107,10 +107,23 @@ LIFT_END_PEAK, LIFT_END_EFFORT = 0.50, 0.95
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 # letting go of the first crank: the fist eases open this much and slides off the knob's end along its axis, this long
 # and this far (the fist spans the 90 mm knob), held to the axis as it cranked, turning back to the grip's own
-# orientation as it goes (the pose's weight rising to SLIDE_POSE_W). The final pull's release is as it was: slid off
-# that way too, the reference's fingertip then missed para_b (0 N) and its part's parallel a moved 0.56-1.1 mm
-LETGO_OPEN, SLIDE_OFF_S, SLIDE_OFF_MM, SLIDE_POSE_W = 0.5, 0.45, 100.0, 8.0
-PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
+# orientation as it goes (the pose's weight rising to SLIDE_POSE_W); the final pull's release slides off the same
+# way (FINAL_SLIDE_OFF_S). Then the hand opens to LETGO_WIDE (open_like): at 0.9 the 1 mm knob grip opened 126 mm,
+# wider than the push's reach that follows, and that reach's widest fell at its start (the footage check)
+LETGO_OPEN, SLIDE_OFF_S, SLIDE_OFF_MM, SLIDE_POSE_W = 0.3, 0.45, 100.0, 8.0
+FINAL_SLIDE_OFF_S = SLIDE_OFF_S
+LETGO_WIDE = 0.75
+PRELOAD_FROM_TOUCH, PRELOAD_PRESS_N, PRELOAD_PRESS_LEAD_S, KNOB_LAG_MM = True, 1.5, 0.1, 4.0
+KNOB_HOLD_OPEN = 0.0
+FINAL_CLOSE_AT, FINAL_CLOSE_MM = 0.7, 8.0
+SLIDE_OPEN_AT, PUSH_LEAVE_OPEN, FINAL_OVER_OPEN, SLIDE_LEAVE_OPEN, LEAVE_OPEN_AT = 0.22, 0.4, 0.4, 0.3, 1.0
+FINAL_PULL_EFFORT = 1.0
+# how far into the knob the knob grip's pads are solved (mm), fingers and thumb: at 2 the index hooked round behind the
+# knob, any opening of it went 6-11 mm through the knob, the physics hand was stopped 24 mm short on the final reach,
+# and the hold's weld then pulled it on, shoving the thumb 12 deg and 3.6 mm into the knob (op20)
+KNOB_GRIP_COMP_MM = 1.0
+KNOB_THUMB_COMP_MM = 0.5
+PRELOAD_EFFORT = 0.15       # the grip's effort the preload ends on, the arm not yet lifting
 
 
 # --- colliders for the grip solver (world mm) ------------------------------------------------------
@@ -219,6 +232,10 @@ class Take:
             (MOONSHOT / f).read_text(encoding="utf-8") for f in ("motion/grasp.py", "body/hand.py", "motion/kinematics.py",
                                                                   "motion/solver.py"))
         src += inspect.getsource(Take._grip_specs) + json.dumps(list(LUMBAR)) + json.dumps(self.load.to_json())
+        # and the module's constants the specs read (the knob's interference, ...): a value changed alone left the
+        # source the same, and the cache served grips solved with the old one
+        src += repr([(n, repr(globals()[n])) for n in sorted(set(Take._grip_specs.__code__.co_names))
+                     if n.isupper() and n in globals()])
         key = hashlib.sha1(src.encode()).hexdigest()
         if self.grips_from is not None:
             data = json.loads(Path(self.grips_from).read_text(encoding="utf-8"))
@@ -338,7 +355,7 @@ class Take:
         A, U, R = torch.as_tensor(a0), torch.as_tensor(KNOB_AXIS), VISE["knob_r"]
         sc = VISE["screw_axis"]
 
-        def on_knob(lo, hi, comp=2.0, w=1.0):
+        def on_knob(lo, hi, comp=KNOB_GRIP_COMP_MM, w=1.0):
             def f(cc, n):
                 rel = cc - A
                 t = rel @ U
@@ -364,9 +381,9 @@ class Take:
             # index and thumb settle onto it lightly. Solved all at once, the five fall into poorer optima (pads off
             # the knob, fingers out of order), so the second stage refines from the first
             targets={"middle": on_knob(26, 38), "ring": on_knob(46, 58), "little": on_knob(66, 80),
-                     "thumb": on_knob(10, 50, w=0.2)},
+                     "thumb": on_knob(10, 50, comp=KNOB_THUMB_COMP_MM, w=0.2)},
             refine={"middle": on_knob(36, 52), "ring": on_knob(52, 68), "little": on_knob(68, 86),
-                    "index": on_knob(8, 40, w=0.3), "thumb": on_knob(10, 60, w=0.5)},
+                    "index": on_knob(8, 40, w=0.3), "thumb": on_knob(10, 60, comp=KNOB_THUMB_COMP_MM, w=0.5)},
             iters=1500,
             starts=[S(8, 0, 5, pl, 25, 0, 70, p, wf, 0) for p in (-20, 10) for wf in (-10, 15) for pl in (30, 60)])
         # 5. measure: the index pad on a parallel's exposed end (beyond the blank's end, between the jaws); the other
@@ -528,20 +545,29 @@ class Take:
             opened.update({n: v for n, v in g["q"].items() if n.split("_")[0] in ("ring", "little", "cmc4", "cmc5")})
         self.fingers(t_peak, opened)
         self.fingers(t_contact, g["q"])
-        # the phases from the fingers' first touch on the faces, TOUCH_LEAD_S before the grip's planned close. The
+        # the phases from the fingers' first touch on the faces, touch_lead before the grip's planned close. The
         # take's effort sets the load the arm lifts with as well as the squeeze, so the preload (grip rising, no
         # load yet) stays under the loading's onset, 5% of the weight (person.force_onset_frac); at 0.25 there
         # the load rose from the first touch and the loading phase measured 367 ms
-        t_load = t_contact - touch_lead + ga["preload_s"]
+        t_touch = t_contact - touch_lead
+        t_load = t_touch + ga["preload_s"]
         t_lift = t_load + loading_s
-        self.effort(t_contact, 0.0, grip)
+        if self.start == "vise":                  # a lift-out's grab, as its own timing passed (LIFT_*)
+            self.effort(t_contact, 0.0, grip)
+            t_hold = t_contact
+        else:
+            self.effort(t_touch if PRELOAD_FROM_TOUCH else t_contact, 0.0, grip)
+            if PRELOAD_PRESS_N:
+                self.event("press", t_touch - PRELOAD_PRESS_LEAD_S, t_load, normal=[0, 0, 1.0], force=PRELOAD_PRESS_N,
+                           contact="blank")
+            t_hold = t_load if PRELOAD_FROM_TOUCH else t_contact
         self.effort(t_load, PRELOAD_EFFORT, grip)
         self.effort(t_lift, LIFT_END_EFFORT if self.end_lift else 1.0, grip)
         R, p = self.blank_at(t_lift)
         self.move_blank(t_lift, t_lift + 0.45, R, p + [0, 0, lift_mm])
         self.add(t_contact, t_lift + 0.6, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.event("grip", t_contact, None, grip=grip)
-        self.event("hold_object", t_contact, None, obj="blank")
+        self.event("hold_object", t_hold, None, obj="blank")
         self.event("place_correct", t_lift + 0.3, None)
         self.t = t_lift + 0.6
         self.wrist = self.grip_pose(grip, self.t)[1]
@@ -669,7 +695,7 @@ class Take:
         Hs, Ws = g["H_rel"], self.set_down + g["W_rel"]
         self.look(t0, self.set_down + [0, self.half[1], self.half[2]])
         self.transit(t0, t0 + approach, Ws, via=[Ws + [0, -25, 40]], fade=(Hs, 1.0))
-        self.fingers(t0 + 0.2, open_like(self.hand, g["q"], 0.5))
+        self.fingers(t0 + SLIDE_OPEN_AT * approach, open_like(self.hand, g["q"], 0.5))
         tc = t0 + approach
         self.fingers(tc, g["q"])
         self.move_blank(tc + 0.15, tc + 0.15 + dur, np.eye(3), self.set_down + [0, mm, 0])
@@ -689,6 +715,8 @@ class Take:
         # not opened as it comes off: the hand relaxes in the pause before the knob's reach, and a hand still open from
         # here (102 mm) was widest at the start of that reach, not 74% into it (the hand-opening check)
         self.transit(t1, t1 + 0.4, W_end + [0, -30, 45])
+        if SLIDE_LEAVE_OPEN:                                 # the fingers lift off the part as the hand does
+            self.fingers(t1 + 0.4 * LEAVE_OPEN_AT, open_like(self.hand, g["q"], SLIDE_LEAVE_OPEN))
         self.t = t1 + 0.4
         self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  the thumb pushes the part along the parallels onto the fixed jaw")
 
@@ -750,6 +778,8 @@ class Take:
         # off, and relax in the pause before the knob's reach (relaxing as they came off, they curled into the part)
         self.wrist = Wp
         self.transit(t1, t1 + 0.45, Wp + [0, -30, 50], via=[Wp + [0, 0, 22]])     # off the part straight up first
+        if PUSH_LEAVE_OPEN:                                  # the fingers lift off the part as the hand does
+            self.fingers(t1 + 0.45 * LEAVE_OPEN_AT, open_like(self.hand, g["q"], PUSH_LEAVE_OPEN))
         self.t = t1 + 0.45
         self.clip("push", t0 - 0.2, self.t + 0.2, f"PUSH  flat fingers press the part down onto the parallels ({force_N:.0f} N)")
 
@@ -790,6 +820,8 @@ class Take:
             reach = FINAL_REACH_S if reach is None else reach
             t_over = t0 + FINAL_OVER_S
             self.transit(t0, t_over, over)
+            if FINAL_OVER_OPEN:                              # opening on the way over, relaxed again for the reach
+                self.fingers(t0 + LEAVE_OPEN_AT * FINAL_OVER_S, open_like(self.hand, g["q"], FINAL_OVER_OPEN))
             self.add(t_over, t_over + 0.3, lambda t, W=over: [("pose", Hk, W, 1.0)])
             t0 = t_over + 0.3
             if FINAL_AXIAL:
@@ -803,19 +835,28 @@ class Take:
                 # axis, the open index's base met the knob's end, and blocked there the hand was 90 mm and 14 deg off
                 # its grip when the fist closed on the knob, which snapped it on (180 N)
                 via = [Wk + Hk[:, 2] * 45 + [0, -10, 15] + KNOB_AXIS * FINAL_APPROACH_OUT_MM]
+                # relaxed as the reach starts, so the hand opens during it: opening through the 1.4 s out over the disc
+                # and the pause, it reached its widest (78 mm) before the reach began and stayed there, and the reach's
+                # widest point fell anywhere along it
+                self.fingers(t0, self.q_relax)
         else:
             reach = KNOB_REACH_S if reach is None else reach
             via = [over, Wk + Hk[:, 2] * 45 + [0, -10, 15]]
         self.transit(t0, t0 + reach, Wk, via=via, fade=(Hk, 1.0), paced=True)
-        ko = open_like(self.hand, g["q"], 0.9)
+        ko = open_like(self.hand, g["q"], LETGO_WIDE)
         # widest ~74% into the reach as the check measures it: from the hand leaving the pause to its first touch on
         # the knob (before tg), with the fingers ~0.1 s behind their keys
         # the fingers, opening out of the fist's shape, reach ~10 mm short of it before closing on the knob (67 of 77);
         # at 12 op10's part and the knob opened only 0.73 mm apart per mm
-        self.fingers(t0 + (KNOB_PEAK_FINAL if final and FINAL_AXIAL else KNOB_PEAK) * reach,
-                     open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=10.0))
+        self.fingers(t0 + (KNOB_PEAK_FINAL if final else KNOB_PEAK) * reach,
+                     open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=KNOB_LAG_MM))
+        if final and FINAL_CLOSE_AT:
+            # closing before it touches: the touch's knock opened the hand 3-4 mm at the touch, past its widest
+            self.fingers(t0 + FINAL_CLOSE_AT * reach,
+                         open_for(self.hand, g["q"], 2 * VISE["knob_r"], lag_mm=KNOB_LAG_MM - FINAL_CLOSE_MM))
         tg = t0 + reach
-        self.fingers(tg, g["q"])
+        q_fist = open_like(self.hand, g["q"], KNOB_HOLD_OPEN) if KNOB_HOLD_OPEN else g["q"]
+        self.fingers(tg, q_fist)
         t_c0 = tg + 0.25
         if final:
             t_c1, t_t1 = t_c0, t_c0 + 0.75
@@ -834,7 +875,9 @@ class Take:
         # and op10's index sank 7.25 mm into the knob
         ax = Hk.T @ KNOB_AXIS
         tl = t_t1 + 0.35
-        slide_s = 0.0 if final else SLIDE_OFF_S
+        # the final pull's let-go slides off too: moved straight off to the side, the planned index's base went 13 mm
+        # into the knob and op20's 5.8 in the physics
+        slide_s = FINAL_SLIDE_OFF_S if final else SLIDE_OFF_S
 
         def on_knob(t):
             # let go, the fist slides off the knob's end along its axis as it held it, turning back to the grip's own
@@ -853,12 +896,12 @@ class Take:
                   + 0.5 * np.array([VISE["x"], sc[1] - 40, sc[2] + 20]))
         self.effort(tg, 0.6, grip)
         self.effort(t_c1, 0.6, grip)
-        self.effort(t_c1 + 0.1, 1.0 if final else 0.7, grip)
+        self.effort(t_c1 + 0.1, FINAL_PULL_EFFORT if final else 0.7, grip)
         self.effort(t_t1 + 0.35, 0.0, grip)
         self.event("grip", tg, t_t1 + 0.35, grip=grip)
         self.event("enclose", tg + 0.1, t_t1 + 0.35)
         self.event("crank", t_c0, t_t1 + 0.35, plan=dict(plan))
-        self.fingers(tl, g["q"])
+        self.fingers(tl, q_fist)
         # eased, so the hand slides off the knob
         self.fingers(tl + 0.12, open_like(self.hand, g["q"], LETGO_OPEN if slide_s else 0.25))
         self.fingers(tl + 0.35, ko)

@@ -76,6 +76,11 @@ KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
 FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.7, 0.65, 0.72, 110.0
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
+# letting go of the first crank: the fist eases open this much and slides off the knob's end along its axis, this long
+# and this far (the fist spans the 90 mm knob), held to the axis as it cranked, turning back to the grip's own
+# orientation as it goes (the pose's weight rising to SLIDE_POSE_W). The final pull's release is as it was: slid off
+# that way too, the reference's fingertip then missed para_b (0 N) and its part's parallel a moved 0.56-1.1 mm
+LETGO_OPEN, SLIDE_OFF_S, SLIDE_OFF_MM, SLIDE_POSE_W = 0.5, 0.45, 100.0, 8.0
 PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
 
 
@@ -695,10 +700,22 @@ class Take:
         # operator standing 120 mm further back tilted the planned fist 15-17 deg off its grip at two places a turn,
         # and op10's index sank 7.25 mm into the knob
         ax = Hk.T @ KNOB_AXIS
+        tl = t_t1 + 0.35
+        slide_s = 0.0 if final else SLIDE_OFF_S
+
         def on_knob(t):
+            # let go, the fist slides off the knob's end along its axis as it held it, turning back to the grip's own
+            # orientation as it goes: moved off from the grip's orientation, wherever the crank had left the fist
+            # turned about the axis, the fingers still round the knob were dragged through it (the index's skin 7.0-7.2
+            # mm into it after every load's first crank; slid off, 2.3-3.0)
             c = knob_center(self.crank_angle(t))
-            return [("pose", Hk, c - Hk @ pt, 1.0), ("tsr", pt, c, ax, KNOB_AXIS, 6.0)]
-        self.add(tg, t_t1 + 0.35, on_knob)
+            w = 1.0
+            if t > tl and slide_s:
+                u = min_jerk((t - tl) / slide_s)
+                c = c + KNOB_AXIS * SLIDE_OFF_MM * u
+                w = 1.0 + (SLIDE_POSE_W - 1.0) * u
+            return [("pose", Hk, c - Hk @ pt, w), ("tsr", pt, c, ax, KNOB_AXIS, 6.0)]
+        self.add(tg, tl + slide_s, on_knob)
         self.look(t_c0 + 0.3, 0.5 * np.array([VISE["x"], VISE["fixed_face_y"] - 52, JAW_TOP])
                   + 0.5 * np.array([VISE["x"], sc[1] - 40, sc[2] + 20]))
         self.effort(tg, 0.6, grip)
@@ -708,23 +725,29 @@ class Take:
         self.event("grip", tg, t_t1 + 0.35, grip=grip)
         self.event("enclose", tg + 0.1, t_t1 + 0.35)
         self.event("crank", t_c0, t_t1 + 0.35, plan=dict(plan))
-        tl = t_t1 + 0.35
         self.fingers(tl, g["q"])
-        self.fingers(tl + 0.12, open_like(self.hand, g["q"], 0.25))      # eased, so the hand slides off the knob
+        # eased, so the hand slides off the knob
+        self.fingers(tl + 0.12, open_like(self.hand, g["q"], LETGO_OPEN if slide_s else 0.25))
         self.fingers(tl + 0.35, ko)
         Wend = knob_center(plan["phi_t"]) - Hk @ pt
         self.wrist = Wend
         box_c, box_h = np.array([sc[0], sc[1] - VISE["knob_grip"], sc[2]]), np.array([140.0, 55.0, 140.0])
         # clear of the crank's sweep until the hand is out over its disc, 0.42 of the way into the reach
         self.hand_boxes.append((box_c, box_h, self._knob_free_from, t0 + 0.42 * reach))
-        self._knob_free_from = tl + 0.35
+        self._knob_free_from = tl + (slide_s + 0.1 if slide_s else 0.35)
         # off the knob's end along its axis first, then away: let go and moved off it out to the right and up, the
         # fingers swept across the lever wherever the crank stopped with the lever that way (op30's and op40's turns)
         off = Wend + [0, -60, 10]
         away = np.array([sc[0] + 175, -820, 990]) if final else over
-        self.transit(tl, tl + 0.9, away, via=[off, off + [60, -10, 40]])
-        self.fingers(tl + 0.9, self.q_relax)
-        self.t = tl + 0.9
+        if slide_s:
+            t_away = tl + slide_s + 0.6
+            self.wrist = Wend + KNOB_AXIS * SLIDE_OFF_MM
+            self.transit(tl + slide_s, t_away, away, via=[off + [60, -10, 40]])
+        else:
+            t_away = tl + 0.9
+            self.transit(tl, t_away, away, via=[off, off + [60, -10, 40]])
+        self.fingers(t_away, self.q_relax)
+        self.t = t_away
         if not final:
             self.clip("rotate", t0 - 0.2, self.t, "ROTATE  crank the jaw onto the part until snug: the fist keeps its orientation, the knob spins in it")
 

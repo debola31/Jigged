@@ -5,7 +5,8 @@ judged on timing alone.
 
 The aperture is the distance between the thumb's and the index's fingertips, posed from the run's own hand angles
 (sim.npz q) on the body model's hand. Reaches are grasp_timing's. A take that isn't the vise's has each grasped
-object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm).
+object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm), and a left hand's reach is read
+from the left hand's aperture (sim.npz L_q).
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import numpy as np
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate import objects
-from moonshot.validate.grasp_timing import measure as grasp_inputs, reaches
+from moonshot.validate.grasp_timing import hand_of, measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
@@ -33,9 +34,13 @@ def measure(take: Path) -> dict:
         size = {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
     else:
         size = {o: objects.thinnest_mm(take, o) for o in g["grasping"]}
-    return {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
-            "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], [str(n) for n in sim["names"]]).tolist(),
-            "size_mm": size}
+    names = [str(n) for n in sim["names"]]
+    out = {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
+           "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], names).tolist(), "size_mm": size}
+    if "hand" in g:
+        out |= {"hand": g["hand"], "hand_speed_L_mm_s": g["hand_speed_L_mm_s"],
+                "aperture_L_mm": aperture_mm(sim["L_q"], names).tolist()}
+    return out
 
 
 MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart or more: op30's 31 mm part and the 27 mm
@@ -43,22 +48,25 @@ MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart 
 
 
 @check("hand_opening",
-       good=["good/hand_opening_people.json"],
-       bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json"])
+       good=["good/hand_opening_people.json", "good/hand_opening_left_hand.json"],
+       bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json",
+            "bad/hand_opening_left_early_peak.json"])
 def hand_opening(take: dict) -> Result:
     """take: {"fps", "hand_speed_mm_s", "aperture_mm", "touching": per frame, "grasping": {object: per frame},
-    "size_mm": {object: its size across the grip}}."""
+    "size_mm": {object: its size across the grip}}, and for the left hand's grasps "hand" ({object: "L"}),
+    "hand_speed_L_mm_s" and "aperture_L_mm"."""
     fps = float(take["fps"])
-    speed, ap = np.asarray(take["hand_speed_mm_s"], float), np.asarray(take["aperture_mm"], float)
-    if not len(ap):
+    if not len(take["aperture_mm"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
     when, slope = threshold("person.peak_aperture_reach_frac").band, threshold("person.aperture_per_object_mm").band
     found, outside, peaks = [], [], {}
     for obj, grasping in take["grasping"].items():
+        side, speed = hand_of(take, obj)
+        ap = np.asarray(take["aperture_mm" if side == "R" else "aperture_L_mm"], float)
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
             k = start + int(np.argmax(ap[start:contact + 1]))
             frac = (k - start) / max(1, contact - start)
-            found.append({"object": obj, "contact_frame": contact, "peak_frac": round(frac, 3),
+            found.append({"object": obj, "hand": side, "contact_frame": contact, "peak_frac": round(frac, 3),
                           "peak_mm": round(float(ap[k]), 1)})
             peaks.setdefault(obj, []).append(float(ap[k]))
             if not when[0] <= frac <= when[1]:

@@ -219,17 +219,21 @@ class Take:
             targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=tx)),
                        "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)}
         else:                   # too short along the jaws for four fingers side by side (op50's 31 mm, standing on
-            # end): thumb on the near face, index and middle side by side on the far one; the four fingers' bands ran
-            # off a 31 mm face and knocked the part over, and a grip across its ends had the fingers where the stop is
-            far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(lo, hi)))  # noqa: E731
-            targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(-8, 8))),
-                       "index": far(-13, -2), "middle": far(2, 13)}
+            # end): held from its +x end, the index and middle round onto the far face one above the other, the thumb
+            # on the near face opposite them; side by side at one depth, the index couldn't reach round the corner and
+            # pressed it with its middle segment, unregulated (the fingers' side 23.5 N); four side by side ran off
+            # the 31 mm face and knocked the part over, and a grip across its ends had the fingers where the stop is
+            d = sum(depth) / 2
+            far = lambda lo, hi, x: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=(d + lo, d + hi), x=x))  # noqa: E731
+            targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=(d - 6, d + 6), x=(-8, 8))),
+                       "index": far(-14, -4, (-4, 12)), "middle": far(2, 12, (-10, 6))}
             # the ring and little tucked, as in a three-finger pinch: hanging straight along the far face, they pressed
-            # it 4 N each outside the grip's regulation, and the fingers' side 2.4 times the slip force; tucked, they
-            # lie over its top, so its top is 2.5 mm higher to them, as the jaws are bigger (the ring's knuckle rested
-            # 0.4 mm into it, pressing it down as the hand lifted)
+            # it 4 N each outside the grip's regulation; tucked, they lie against its +x end below the fingers, so that
+            # end is 6.5 mm further out to them: the physics hand carries the part about 7 mm nearer that end than
+            # planned, and 2.5 mm further out left the ring on it at 3 N
             q0 = dict(q0, ring_mcp_flex=60.0, ring_pip=80.0, little_mcp_flex=65.0, little_pip=85.0)
-            cols.append(box(c + [0, 0, hz + 1.25], [hx, hy, 1.25]))
+            low = (2 * hz - d - 14) / 2                  # half its height, from its foot to 2 mm under the middle's band
+            cols.append(box(c + [hx + 3.25, 0, -hz + low], [3.25, hy, low]))
         specs["blank_faces"] = dict(obj=c, colliders=cols, q0=q0, load=self.kg, targets=targets,
                                     starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
         # 2. slide: the thumb pad on the near face (above the moving jaw) pushes the part toward the fixed jaw, index
@@ -895,6 +899,7 @@ class Take:
             "parallels": {k: v.tolist() for k, v in self.parallels.items()}, "home": self.home.tolist(), "set": self.set_down.tolist(),
             "crank_plans": self.crank_plans, "knob_pt_hand": getattr(self, "knob_pt_hand", np.zeros(3)).tolist(),
             "opening0": self.opening0, "start": self.start,
+            "grip_digits": {name: list(spec["targets"]) for name, spec in self._grip_specs().items()},
             "load": self.load.to_json()} | CARD.get(self.start, {}), indent=1),
             encoding="utf-8")
 
@@ -962,7 +967,6 @@ def build(verbose=True, solve=True, load: Load = REFERENCE, out=OUT, grips_from=
     else:                           # on the vise's floor: no parallels to try; it is checked square by indicator
         take.to_rest()
         take.clip("measure", t_final - 0.2, take.t, "TIGHTEN  the last pull on the crank, ending on feel")
-    take.grip_digits = {name: list(spec["targets"]) for name, spec in take._grip_specs().items()}
     if not solve:
         take.load_solution()
         return take

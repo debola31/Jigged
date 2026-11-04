@@ -264,12 +264,17 @@ class ViseTake:
 
     # --- control -------------------------------------------------------------------------------------
     def grip_squeeze(self, label) -> dict[str, np.ndarray]:
-        """Per gripping digit: the unit joint direction that drives its pad into the gripped object (its Jacobian)."""
+        """Per gripping digit: the unit joint direction that drives its pad into the gripped object (its Jacobian).
+        A carrying grip's digits are those it was planned with: op50's ring, tucked out of the way within 25 mm of the
+        part, was squeezed onto its end and regulated to a third of the fingers' force."""
         m, d = self.model, self.data
         obj = self.geom[GRIP_OBJECT[label]]
+        planned = (self.tk.get("grip_digits") or {}).get(label) if label in CARRYING else None
         out = {}
         ft = np.zeros(6)
         for dg, seg in PAD.items():
+            if planned is not None and dg not in planned:
+                continue
             g = m.geom(f"R_g_{seg}").id
             dist = mujoco.mj_geomDistance(m, d, g, obj, 0.025, ft)
             if dist >= 0.025:

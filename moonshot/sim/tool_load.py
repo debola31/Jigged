@@ -85,7 +85,7 @@ class ToolLoadRun(PendantRunner):
         self.knob = m.geom("holder_knob_head").id if self.loose is not None else None
         self.finger_geoms = {m.geom(f"vf2_finger_{k}").id for k in range(3)}
         self.finger_q = [m.jnt_qposadr[m.joint(f"vf2_finger_{k}").id] for k in range(3)]
-        self.spindle = m.body("vf2_spindle").id
+        self.spindle_body = m.body("vf2_spindle").id      # (the runner's spindle is its joint's dof)
         ev = {e["kind"]: e for e in self.tk["events"]}
         self.grip, self.carry, self.seat_ev = ev.get("grip"), ev.get("carry"), ev.get("seat")
         self.seat_t0 = self.seat_ev["t0"] if self.seat_ev else float("inf")      # a pick never seats it
@@ -409,7 +409,7 @@ class ToolLoadRun(PendantRunner):
     def seated(self) -> dict:
         """Where the loose holder is against the spindle's gauge point, and what holds it."""
         d = self.data
-        rel = (d.xpos[self.loose] - d.xpos[self.spindle]) * 1000
+        rel = (d.xpos[self.loose] - d.xpos[self.spindle_body]) * 1000
         R = d.xmat[self.loose].reshape(3, 3)
         clamp = float(np.linalg.norm(self.forces_on({self.knob}, self.finger_geoms))) if self.knob is not None else 0.0
         return {"offset_mm": float(np.hypot(*rel[:2])), "s_mm": float(rel[2]),

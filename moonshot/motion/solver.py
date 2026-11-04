@@ -84,6 +84,10 @@ class ArmPrior:
         return -torch.logsumexp(logp, -1)
 
 
+RANGE_MARGIN_DEG = 2.0       # the range cost starts this far inside people's range: from its edge, the plans settled
+                             # 0.5-3 deg past it wherever another cost pulled outward (op30-z: 87.8% in range, 93.3%)
+
+
 def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range=0.5):
     """The one posture cost every solver uses (grips and trajectories): range-normalised comfort around
     research-based centres, extra cost for pronation far from its centre, a barrier near every limit, and the
@@ -108,7 +112,7 @@ def posture_cost(th, prior=None, w_comfort=1.0, w_prior=0.3, trunk=True, w_range
     if prior is not None:
         c = c + w_prior * prior.nll(th[:, 3:10])
         plo, phi = (torch.as_tensor(prior.pct[:, i], dtype=th.dtype) for i in (0, -1))
-        out = torch.relu(plo - th[:, :10]) + torch.relu(th[:, :10] - phi)          # degrees outside people's range
+        out = torch.relu(plo + RANGE_MARGIN_DEG - th[:, :10]) + torch.relu(th[:, :10] - phi + RANGE_MARGIN_DEG)
         c = c + w_range * ((out if trunk else out[:, 3:]) ** 2).sum(-1)
     return c
 
@@ -123,7 +127,7 @@ def ranges():
 class BodySolver:
     W = {"pose_pos": 2.0, "pose_rot": 400.0, "tsr_pos": 2.0, "tsr_axis": 400.0, "pos": 0.5,
          "comfort": 1.0, "prior": 0.3, "effort": 1e-6, "accel": 0.4, "speed": 0.2,
-         "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0}
+         "clear": 1.0, "pelvis": 0.02, "hand_rot": 0.0, "range": 0.5}
     # prior 0.3 (2026-11-03): against people seated or standing, the vise take plans inside their range (0.936) and
     # likelihood (24.6) at 0.3, and 1.5 adds little (0.941, 23.6) while its hands miss more; at 5 the bench takes'
     # hands missed by up to 118 mm and their caliper and deburr gates failed, and the grip solver's pads came off
@@ -207,7 +211,7 @@ class BodySolver:
         if "pos" in packed:
             ks, (QW,), Qw = packed["pos"]
             terms["pos"] = (Qw * W["pos"] * ((Wp[ks] - QW) ** 2).sum(-1)).sum()
-        terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"], trunk=trunk).sum()
+        terms["posture"] = posture_cost(th, self.prior, W["comfort"], W["prior"], trunk=trunk, w_range=W["range"]).sum()
         # gravity moment at the shoulder: arm segments (upper 2.1 kg, forearm 1.2, hand 0.5) + load
         S = f["S"]
         mom = lambda m, p: m * torch.linalg.norm((p - S)[:, :2], dim=-1)   # noqa: E731

@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
 import Typography from '@mui/material/Typography';
 import { BRAND } from '@/components/marketing/marketingStyles';
-import { playable, type Part } from './showcaseData';
+import { ready, type Part } from './showcaseData';
 
 const cardSx = {
   flex: '0 0 auto',
@@ -23,8 +23,8 @@ const cardSx = {
 
 function status(p: Part): string {
   if (p.status === 'coming') return 'Coming soon';
-  const ready = p.steps.filter(playable).length;
-  return ready === p.steps.length ? 'Ready to watch' : `Steps ready, videos coming (${ready} of ${p.steps.length})`;
+  const shown = p.steps.filter(ready).length;
+  return shown === p.steps.length ? 'Ready to watch' : `Steps ready, ${shown} of ${p.steps.length} shown so far`;
 }
 
 /**

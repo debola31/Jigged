@@ -20,14 +20,14 @@ SOLIDS = ["part", "insp_cal6", "insp_cal6_slider"]     # what the skin is measur
 def run(replan: bool = False, seconds: float | None = None) -> dict:
     if replan or not (plan.OUT / "reference.npz").exists():
         plan.build()
-    r = BenchRun(plan.OUT, plan.loose(), carried=("insp_cal6_slider",), skip=("cal6",),
-                 grip_objects={"cal": ("insp_cal6_slider",), "steady": ("part",)})
+    r = BenchRun(plan.OUT, plan.loose(), carried=("insp_cal6_slider", ("L", "insp_cal6")), skip=("cal6",),
+                 grip_objects={"cal": ("insp_cal6_slider",), "slider": ("insp_cal6_slider",), "beam": ("insp_cal6",)})
     r.run(seconds)
     seat = [i for i, e in enumerate(r.presses) if e.get("at") == "cal6_rod"]
-    steady = [i for i, e in enumerate(r.presses) if e["side"] == "L"]
+    beam = [i for i, e in enumerate(r.presses) if e.get("at") == "cal6_beam"]
     slide = r.model.jnt_qposadr[r.model.joint("cal6_slide").id]
     report = {"seat": {"press_N_median": r.press_median(seat[0]) if seat else 0.0},
-              "steady": {"press_N_median": r.press_median(steady[0]) if steady else 0.0},
+              "beam": {"press_N_median": r.press_median(beam[0]) if beam else 0.0},
               "slide_end_mm": round(float(r.data.qpos[slide]) * 1000, 4)}
     r.export("inspection_bench", NEVER_HELD, SOLIDS, BC.render_glbs(r.model), report)
     return json.loads((plan.OUT / "report.json").read_text(encoding="utf-8"))

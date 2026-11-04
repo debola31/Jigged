@@ -62,12 +62,13 @@ LEAVE_FRONT = 1.8                                     # and backs off that much 
                                                       # the bar before the arm drops back to rest past it
 FRONT_SLIDE_S = 0.13                                  # in this long: the reach out to the stop is the longest (420 mm),
                                                       # so its rise gets the most of REACH_S, at 17 m/s^2 at most
+CLOSE_THUMB = 0.65                                    # (DoorClose)
 FRONT_EARLY_S = 0.0                                   # the hand starts closing this long before it stops
 PEAK_AT = {"beside": 0.66, "front": 0.778}            # the hand opens widest this far into the planned reach, by the
                                                       # way it comes onto the bar: ~74% of the reach the hand-opening
                                                       # check measures, which starts a frame before the plan's and ends
                                                       # as the hand meets the bar
-FRONT_PEAK_RIGHT = 0.095                              # and the right hand that much later from in front: held off the
+FRONT_PEAK_RIGHT = 0.12                               # and the right hand that much later from in front: held off the
                                                       # pendant, it meets the bar 1.5 frames later in its reach than the
                                                       # left (0.63 s against 0.57)
 # the index's spread on the reach's last part, at its widest, and meeting the bar (index_mcp_abd; the hook opens 84 mm to
@@ -264,15 +265,16 @@ class _Doors(StepTake):
     def in_front(self, side, g, H, W, from_mm, t0, t_c, t_on) -> tuple[dict, float]:
         """The reach to the bar of a door at its stop (the side's world), from in front: up in front of the bar, the
         hand open (FRONT_Q), then straight in onto it (FRONT_SLIDE_S, ending at t_c), the bar between the thumb and the
-        fingers; then the fingers close round it (CLOSE_S) as the hand settles onto the wrap's place, held there to
-        t_on. Returns the open hand and when the fingers start to close, just before it stops."""
+        fingers; then the fingers close round it (CLOSE_S) as the hand settles onto the wrap's place, slowly, until t_on
+        (settling in CLOSE_S, its thumb struck the bar's inner face and its skin sank 4.3 mm in for a frame). Returns
+        the open hand and when the fingers start to close."""
         came = self.shape(g["q"], FRONT_Q)
         We = W + FRONT_IN
         pre = We + FRONT_FROM
         t_in = t_c - FRONT_SLIDE_S
         self.transit(side, t0, t_in, self.at(side, pre), fade=(H, 2.0))
         self.add(side, t_in, t_on, lambda t: [("pose", H, pre + (We - pre) * min_jerk((t - t_in) / FRONT_SLIDE_S)
-                                               + (W - We) * min_jerk((t - t_c) / CLOSE_S), ONTO_W)])
+                                               + (W - We) * min_jerk((t - t_c) / (t_on - t_c)), ONTO_W)])
         self.opening(side, came, t0, t_in, t_c - FRONT_EARLY_S, "front")
         return came, t_c - FRONT_EARLY_S
 
@@ -337,6 +339,12 @@ class DoorClose(_Doors):
         super().__init__(out, verbose)
         self.grips = {"door_right": self.bar_grip("door_right", "R", OPEN_MM),
                       "door_left": self.bar_grip("door_left", "L", OPEN_MM)}
+        # taken at the stop, the wrap's thumb closes CLOSE_THUMB of the way from the open hand's: the wrap rolled to
+        # the stop has its thumb's skin 4.3 mm into the bar's inner face, and the thumb closing onto it sank so in
+        for g in self.grips.values():
+            front = self.shape(g["q"], FRONT_Q)
+            g["q"] = self.hand.clamp(g["q"] | {k: front[k] + (g["q"][k] - front[k]) * CLOSE_THUMB
+                                               for k in g["q"] if k.startswith("thumb")})
 
     def plan(self):
         self.look(0.0, bar_centre("door_right", OPEN_MM))

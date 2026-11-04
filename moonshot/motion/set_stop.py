@@ -17,7 +17,7 @@ from moonshot.config import data_root
 from moonshot.motion import loads
 from moonshot.motion import set_parallels as SP
 from moonshot.motion import setup_take as ST
-from moonshot.motion.primitives import min_jerk, open_for, open_like
+from moonshot.motion.primitives import min_jerk, open_like
 from moonshot.motion.setup_take import plane, vise_boxes
 from moonshot.motion.step_take import StepTake
 from moonshot.planning.validate import load_plan
@@ -30,6 +30,9 @@ GRIP = "pinch_stop"
 YAW = RACK.YAW                     # it waits on the table (vise.STOP_HOME) turned as the parallels' rack is, square
                                    # to the right forearm reaching there
 CLEAR_MM = 30.0                    # carried with its foot this high over the jaws' tops
+LET_GO_OVER_MM = 2.0
+LIFT_DELAY_S = 0.12               # the stop, four times a parallel's weight, comes off later after the hand starts up:
+                                   # at the parallels' 0.16 s its loading measured 267 ms
 JAWS_OVER_SEAT_MM = SP.JAWS_OVER_SEAT_MM
 
 
@@ -72,7 +75,10 @@ class SetStop(StepTake):
                  for f in vise_boxes({}, 0.0, self.vload.opening0, include_table=False)]
         S = lambda *a: list(a) + [0.0, 0.0]                                                          # noqa: E731
         return dict(obj=self.centre(self.home), side="R", q0=q0, colliders=cols, load=self.kg,
-                    targets={"thumb": plane(near, Rh @ [0, -1, 0], 1.5, SP.local_bands(top, Rh, x=(-8, 8), depth=(3, 8))),
+                    # the thumb's pad planned 4.5 mm off the near face (the fingers' 1.5 mm into the far one): its tip
+                    # turns in past the pad, and planned 1.5 mm in the thumb's skin went 6-7 mm into the stop, planned
+                    # 2.5 mm off it 2.4-2.8 mm in (3.3 in the run)
+                    targets={"thumb": plane(near, Rh @ [0, -1, 0], -4.5, SP.local_bands(top, Rh, x=(-8, 8), depth=(3, 8))),
                              "index": plane(far, Rh @ [0, 1, 0], 1.5, SP.local_bands(top, Rh, x=(-16, -5), depth=(3, 8))),
                              "middle": plane(far, Rh @ [0, 1, 0], 1.5, SP.local_bands(top, Rh, x=(5, 16), depth=(3, 8)))},
                     iters=1500,
@@ -81,31 +87,23 @@ class SetStop(StepTake):
     def plan(self):
         t = 0.3
         g = self.grips[GRIP]
-        H, W = self.grip_pose(GRIP)
-        above = W + np.array([0.0, -15.0, 80.0])
         c0, c1 = self.centre(self.home), self.centre(self.dest)
         self.look(t, c0)
-        self.transit("R", t, t + 1.2, above, fade=(H, 2.0))
-        self.fingers("R", t + 0.2, self.q_relax)
-        self.fingers("R", t + 0.85, open_for(self.hand, g["q"], V.STOP_MM[1]))
-        hover = W + np.array([0.0, -4.0, 20.0])
-        t_on = t + 2.4
-        self.add("R", t + 1.2, t + 1.6, lambda tt, t1=t + 1.2, a=above, b=hover:
-                 [("pose", H, a + (b - a) * min_jerk((tt - t1) / 0.4), 2.0)])
-        self.add("R", t + 1.6, t_on, lambda tt, t1=t + 2.05, b=hover:
-                 [("pose", H, b + (W - b) * min_jerk((tt - t1) / 0.35), 2.0)])
-        self.fingers("R", t_on, g["q"])
-        self.effort("R", t_on, 0.0, GRIP)
-        self.effort("R", t_on + 0.2, 0.6, GRIP)
+        # the reach as the parallels' (motion/set_parallels.py reach): up to a ready point, a pause, the paced reach
+        t_c = SP.reach(self, GRIP, t, V.STOP_MM[1])
+        t_on = t_c - 0.1                                 # the grip's start: its carry closes 0.1 s after it
+        self.effort("R", t_c, 0.0, GRIP)
+        self.effort("R", t_c + 0.2, 0.6, GRIP)
         # its planned path, as a parallel's: straight up to the height it is carried at, across, turned square to the
         # jaws on the way, over its spot, down until its foot is level with the jaws' tops, a pause while the eye lines
         # it up, and slowly down onto the floor
-        t_up, t_over = t_on + 1.1, t_on + 2.9
-        t_near, t_down = t_over + 0.5, t_over + 1.9
         over = c1 + np.array([0.0, 0.0, JAWS_OVER_SEAT_MM + CLEAR_MM])
         up, near = np.array([c0[0], c0[1], over[2]]), c1 + np.array([0.0, 0.0, JAWS_OVER_SEAT_MM])
-        self.keys = [(t_on + 0.3, c0), (t_up, up), (t_up + 0.3, up), (t_over, over), (t_near, near),
-                     (t_near + 0.4, near), (t_down, c1)]
+        # let go just over the floor, so it drops onto it: set down hard on it, the arm held the hand pressed into it,
+        # and let go the hand sprang 5 mm up and forward, the thumb into the stop
+        c1 = c1 + np.array([0.0, 0.0, LET_GO_OVER_MM])
+        self.keys, t_load, t_up, t_down = SP.lift_keys(t_c, c0, up, over, near, c1, lift_delay=LIFT_DELAY_S)
+        t_over, t_near = self.keys[3][0], self.keys[4][0]
 
         def obj_at(tt, keys=self.keys):
             if tt <= keys[0][0]:
@@ -120,13 +118,20 @@ class SetStop(StepTake):
         self.look(t_up, c1)
         # the hand stays put on the floor until the fingers are just off it, and opens the rest of the way once up
         t_lift = t_down + 0.6
-        self.follow("R", t_on, t_lift, GRIP, obj_at, R_at)
+        self.follow("R", t_c, t_lift, GRIP, obj_at, R_at)
         self.add("R", t_near - 0.2, t_lift, lambda tt: [("pose", *self.grip_pose(GRIP, obj_at(tt), R_at(tt)), 4.0)])
-        self.load("R", t_on + 0.3, t_down, self.kg)
+        # carried until let go (the carry closes as the weld lets go, t_down + 0.2): let go 2 mm over the floor, the
+        # hand still bears its weight after it is down; with the carry's pull ended at t_down the hand sagged 3 mm onto
+        # the floor with it, and let go it sprang back up and forward, the thumb into the stop
+        t_carried = t_down + 0.2
+        self.load("R", t_load, t_carried, self.kg)
         self.event("grip", t_on, t_down + 0.25, side="R", grip=GRIP, on="stop")
-        self.event("carry", t_on + 0.3, t_down, side="R", obj="stop")
+        self.event("carry", t_load, t_carried, side="R", obj="stop")
+        # the arm stays braced until the hand is up off it: eased at once as the weld let go, the hand settled 2-7 mm
+        # and the thumb, no longer meeting the stop, went 5 mm into it
         self.effort("R", t_down - 0.1, 0.6, GRIP)
-        self.effort("R", t_down + 0.2, 0.0, None)
+        self.effort("R", t_lift, 0.6, None)
+        self.effort("R", t_lift + 0.3, 0.0, None)
         self.fingers("R", t_down + 0.25, g["q"])
         self.fingers("R", t_down + 0.55, open_like(self.hand, g["q"], 0.06))
         self.fingers("R", t_down + 0.8, open_like(self.hand, g["q"], 0.06))
@@ -137,10 +142,10 @@ class SetStop(StepTake):
                  [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.45), 2.0)])
         self.side["R"]["wrist"] = off
         t = t_lift + 0.45
-        self.transit("R", t, t + 1.1, self.rest_of("R"))
-        self.fingers("R", t + 1.1, self.q_relax)
+        self.transit("R", t, t + 1.6, self.rest_of("R"), via=[SP.CLEAR_CRANK])   # round the crank's knob
+        self.fingers("R", t + 1.6, self.q_relax)
         self.clip("set_stop", 0.0, t + 0.6, "Set the stop")
-        self.t = t + 1.3
+        self.t = t + 1.8
 
 
 def build(verbose=True):

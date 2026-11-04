@@ -7,8 +7,9 @@ hand's lifting force passes person.force_onset_frac of the object's weight, and 
 person.lift_off_mm above where it sat. The lifting force comes from the physics run (checks.json load_N).
 
 A take that isn't the vise's is read from its record (moonshot/validate/objects.py): either hand's grips, each on
-the object its grip event names, and only those on an object at rest: taking a tool from the other hand isn't a reach
-to grasp as people's were measured, nor a lift. A left hand's reach is held to people's left hands
+the object its grip event names, and only those that take it up (the hand carries it) from rest: a steadying hand's
+press on the part, as the vise take's presses, and taking a tool from the other hand, aren't reaches to grasp as
+people's were measured, nor lifts. A left hand's reach is held to people's left hands
 (person.reach_to_grasp_left_s): both arms are checked (your decision, 2026-11-03). Its contact is the first frame a hand touches the object or carries
 it (a carried tool leaves the skin, so the carry can close before a finger meets it), as the cause check reads
 touching: validate/take.py gives every check the one `touching`, and with right-hand touches alone the cause check
@@ -74,9 +75,10 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
     lift = threshold("person.lift_off_mm").value
     grasping: dict[str, np.ndarray] = {}
     hand: dict[str, str] = {}
+    carried = {(e["obj"], e.get("side", "R")) for e in tk["events"] if e["kind"] == "carry"}
     for e in intervals(tk["events"], "grip"):
         obj, side = e.get("on"), e.get("side")
-        if side not in ("R", "L") or obj not in at:
+        if side not in ("R", "L") or obj not in at or (obj, side) not in carried:   # a press holding the part down
             continue
         k0 = min(len(t) - 1, int(round(e["t0"] * fps)))
         if at[obj][k0, 2] > at[obj][0, 2] + lift:                   # already up: taken from the other hand

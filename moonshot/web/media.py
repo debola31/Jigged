@@ -4,6 +4,7 @@ serve it (plan §1: "videos and published models in Supabase Storage, never the 
     models/<asset>.glb             light copies of the library's GLBs for the shop view
     video/<part>/<step>.mp4        a person's step: its final render, takes/<part>-<step>/final.mp4
     still/<part>/<step>.webp       a machine cycle: one still of the part after it, from takes/<part>-<step>/still.png
+    cut/<part>/<step>.glb          ... and the part itself, the take's last stock mesh, for a desktop to turn
 
     python -m moonshot.web.media models            # decimate every asset the layout places (gltf-transform, via npx)
     python -m moonshot.web.media stage             # stage every live step's final or still that exists; lists the missing
@@ -35,7 +36,7 @@ from pathlib import Path
 from PIL import Image
 
 from moonshot.config import data_root
-from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, shop_assets
+from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, media_paths, shop_assets
 
 GLTF_TRANSFORM = "@gltf-transform/cli@4.5.1"
 # Triangle budgets for the shop view, where a machine is a few hundred pixels across and a tool a few.
@@ -78,19 +79,37 @@ def live_steps() -> dict[str, tuple[str, dict]]:
     return {s["id"]: (part["id"], s) for part in build()["parts"] for s in part.get("steps", [])}
 
 
+def _stale(src: Path, dst: Path) -> bool:
+    return not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime
+
+
 def stage_step(part: str, step: dict) -> bool:
-    """Stage one step's media from its take; False if the take has no final (or still) yet."""
-    still = step["media"]["type"] == "still"
-    src = data_root() / "takes" / f"{part}-{step['id']}" / ("still.png" if still else "final.mp4")
-    dst = web_root() / step["media"]["path"]
-    if not src.exists():
-        return False
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime:
-        if still:
-            Image.open(src).convert("RGB").save(dst, "WEBP", quality=STILL_QUALITY, method=6)
-        else:
+    """Stage one step's media from its take; False if the take has no final (or still and stock) yet."""
+    take = data_root() / "takes" / f"{part}-{step['id']}"
+    media = step["media"]
+    if media["type"] == "video":
+        src, dst = take / "final.mp4", web_root() / media["path"]
+        if not src.exists():
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if _stale(src, dst):
             shutil.copy2(src, dst)
+        return True
+    still, stock = take / "still.png", sorted((take / "stock").glob("*.glb"), key=lambda p: int(p.stem))
+    if not still.exists() or not stock:
+        return False
+    dst = web_root() / media["still"]
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if _stale(still, dst):
+        Image.open(still).convert("RGB").save(dst, "WEBP", quality=STILL_QUALITY, method=6)
+    # The stock as the cut leaves it: its last mesh (named by frame), meshopt-compressed but not simplified, so the
+    # model shows the cut exactly.
+    dst = web_root() / media["model"]
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if _stale(stock[-1], dst):
+        subprocess.run([shutil.which("npx"), "--yes", GLTF_TRANSFORM, "optimize", str(stock[-1]), str(dst),
+                        "--simplify", "false", "--texture-compress", "false", "--palette", "false"],
+                       check=True, capture_output=True, text=True)
     return True
 
 
@@ -108,7 +127,7 @@ def upload(url: str, step_ids: list[str], models: bool) -> None:
     missing = [i for i in step_ids if not stage_step(*steps[i])]
     if missing:
         raise SystemExit(f"nothing to publish yet for {', '.join(missing)}: no final in takes/")
-    paths = [steps[i][1]["media"]["path"] for i in step_ids]
+    paths = [p for i in step_ids for p in media_paths(steps[i][1]["media"])]
     if models:
         paths += [f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))]
     total = 0
@@ -125,7 +144,7 @@ def upload(url: str, step_ids: list[str], models: bool) -> None:
     print(f"uploaded {len(paths)} files, {total / 1e6:.1f} MB, to {url}/storage/v1/object/public/{BUCKET}/")
     # Only now is a step's media the page's to show: record it, then re-export and commit the page's data.
     record = _json(PUBLISHED)
-    record["media"] = sorted(set(record["media"]) | {steps[i][1]["media"]["path"] for i in step_ids})
+    record["media"] = sorted(set(record["media"]) | {p for i in step_ids for p in media_paths(steps[i][1]["media"])})
     PUBLISHED.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8", newline="\n")
     print(f"{PUBLISHED.name}: {len(record['media'])} steps published; now run python -m moonshot.web.export")
 

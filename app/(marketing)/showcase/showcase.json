@@ -192,8 +192,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op10-face.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op10-face.webp",
+      "model": "cut/nist-ftc-10/op10-face.glb"
      },
      "published": true
     },
@@ -210,8 +211,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op10-outline.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op10-outline.webp",
+      "model": "cut/nist-ftc-10/op10-outline.glb"
      },
      "published": true
     },
@@ -228,8 +230,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op10-pocket.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op10-pocket.webp",
+      "model": "cut/nist-ftc-10/op10-pocket.glb"
      },
      "published": true
     },
@@ -246,8 +249,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op10-cross_drill.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op10-cross_drill.webp",
+      "model": "cut/nist-ftc-10/op10-cross_drill.glb"
      },
      "published": true
     },
@@ -264,8 +268,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op10-ears.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op10-ears.webp",
+      "model": "cut/nist-ftc-10/op10-ears.glb"
      },
      "published": true
     },
@@ -444,8 +449,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-face.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-face.webp",
+      "model": "cut/nist-ftc-10/op20-face.glb"
      },
      "published": true
     },
@@ -462,8 +468,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-scallops.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-scallops.webp",
+      "model": "cut/nist-ftc-10/op20-scallops.glb"
      },
      "published": true
     },
@@ -480,8 +487,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-pads.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-pads.webp",
+      "model": "cut/nist-ftc-10/op20-pads.glb"
      },
      "published": true
     },
@@ -498,8 +506,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-pins.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-pins.webp",
+      "model": "cut/nist-ftc-10/op20-pins.glb"
      },
      "published": true
     },
@@ -516,8 +525,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-taps.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-taps.webp",
+      "model": "cut/nist-ftc-10/op20-taps.glb"
      },
      "published": true
     },
@@ -534,8 +544,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op20-ear_cbores.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op20-ear_cbores.webp",
+      "model": "cut/nist-ftc-10/op20-ear_cbores.glb"
      },
      "published": true
     },
@@ -714,8 +725,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op30-bores.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op30-bores.webp",
+      "model": "cut/nist-ftc-10/op30-bores.glb"
      },
      "published": true
     },
@@ -732,8 +744,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op30-cbores.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op30-cbores.webp",
+      "model": "cut/nist-ftc-10/op30-cbores.glb"
      },
      "published": true
     },
@@ -894,8 +907,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op40-cbores.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op40-cbores.webp",
+      "model": "cut/nist-ftc-10/op40-cbores.glb"
      },
      "published": true
     },
@@ -1074,8 +1088,9 @@
       "y": 6975.3
      },
      "media": {
-      "type": "still",
-      "path": "still/nist-ftc-10/op50-deep.webp"
+      "type": "cut",
+      "still": "still/nist-ftc-10/op50-deep.webp",
+      "model": "cut/nist-ftc-10/op50-deep.glb"
      },
      "published": true
     },

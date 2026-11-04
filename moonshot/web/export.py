@@ -5,7 +5,8 @@ The page reads only this file: the 20 parts in plan order, each live part's step
 layout.json and shop.json. moonshot/ never reaches a Vercel build, so the data is copied out rather than imported.
 Videos, stills and models aren't in it: it names their paths in Supabase Storage (`media.py`), and marks a step
 `published` only once its media is in published.json, which the upload writes; the page shows the others as coming.
-Only people's work is rendered as video: a machine cycle is shown by one still of the part after the cut.
+Only people's work is rendered as video: a machine cycle is shown by the part after the cut, as one still and, on a
+desktop, as its 3D model.
 
     python -m moonshot.web.export          # rewrites the file; the gate test_web_steps.py checks it
 """
@@ -77,10 +78,15 @@ def where_zone(zone_id: str, layout: dict) -> dict:
 
 
 def step_media(part: str, step: dict) -> dict:
-    """What the page shows for a step: people's work as a video, a machine cycle as a still of the part after it."""
+    """What the page shows for a step: people's work as a video, a machine cycle as the part after it (a still,
+    and the model a desktop can turn)."""
     if step["kind"] == "cycle":
-        return {"type": "still", "path": f"still/{part}/{step['id']}.webp"}
+        return {"type": "cut", "still": f"still/{part}/{step['id']}.webp", "model": f"cut/{part}/{step['id']}.glb"}
     return {"type": "video", "path": f"video/{part}/{step['id']}.mp4"}
+
+
+def media_paths(media: dict) -> list[str]:
+    return [media["still"], media["model"]] if media["type"] == "cut" else [media["path"]]
 
 
 def live_part(part: str, layout: dict, shop_json: dict) -> dict:
@@ -97,7 +103,7 @@ def live_part(part: str, layout: dict, shop_json: dict) -> dict:
         media = step_media(part, s)
         steps.append({"id": s["id"], "title": s["title"], "caption": s["caption"], "kind": s["kind"],
                       "group": s.get("setup", "finish"), "where": where, "media": media,
-                      "published": media["path"] in published})
+                      "published": all(p in published for p in media_paths(media))})
     return {"material": plan["stock"]["material"], "groups": groups, "steps": steps}
 
 

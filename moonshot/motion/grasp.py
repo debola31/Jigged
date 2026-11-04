@@ -374,7 +374,7 @@ class Problem:
             qn = (q - torch.as_tensor(self.q0, dtype=dt)) / 40.0
             terms["prior"] = 0.6 * (qn ** 2).sum()
             terms["coupling"] = self._coupling(q)
-            terms["posture"] = BSV.posture_cost(tb[None], b["prior"], **{k: b[k] for k in ("w_prior",) if k in b})[0]
+            terms["posture"] = BSV.posture_cost(tb[None], b["prior"], **{k: b[k] for k in ("w_prior", "w_range") if k in b})[0]
             S = f["S"][0]
             mom = lambda m, p: m * torch.linalg.norm((p - S)[:2])
             Mo = mom(2.1, (S + f["E"][0]) / 2) + mom(1.2, (f["E"][0] + W) / 2) + mom(0.5 + b.get("load_kg", 0.0), W)
@@ -440,8 +440,8 @@ def mirrored(colliders, targets, lumbar):
 
 def solve_spec(th: "TorchHand", spec: dict, lumbar, prior) -> dict:
     """A grip from its spec: colliders, targets, q0, obj and body starts, and optionally iters, load (kg), refine (a
-    second stage's targets, solved from the first's best), side, and w_prior (people's posture's weight, posture_cost's
-    own when absent). A left grip (side "L") is solved mirrored and stays in the mirrored world, H, W, theta and obj
+    second stage's targets, solved from the first's best), side, and w_prior and w_range (people's posture's and their
+    range's weights, posture_cost's own when absent). A left grip (side "L") is solved mirrored and stays in the mirrored world, H, W, theta and obj
     alike, as the body solver takes a left hand's tasks."""
     cols, tgts, ref = spec["colliders"], spec["targets"], spec.get("refine")
     obj = np.asarray(spec["obj"], float)
@@ -449,8 +449,8 @@ def solve_spec(th: "TorchHand", spec: dict, lumbar, prior) -> dict:
         cols, tgts = mirrored(cols, tgts, lumbar)
         ref = mirrored([], ref, lumbar)[1] if ref else None
         obj = np.r_[2 * float(np.asarray(lumbar, float)[0]) - obj[0], obj[1:]]
-    body = dict(lumbar=lumbar, prior=prior, load_kg=spec.get("load", 0.0)) | (
-        {"w_prior": spec["w_prior"]} if "w_prior" in spec else {})
+    body = dict(lumbar=lumbar, prior=prior, load_kg=spec.get("load", 0.0)) | {
+        k: spec[k] for k in ("w_prior", "w_range") if k in spec}
     P = Problem(th, cols, tgts, spec["q0"], body=body)
     best = None
     for th0 in spec["starts"]:

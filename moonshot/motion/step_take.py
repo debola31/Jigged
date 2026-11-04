@@ -39,6 +39,8 @@ KEY = "__source_hash__"
 
 
 class StepTake:
+    PLANNER_W: dict[str, float] = {}         # a step's own weights for the body solver's terms (solver.BodySolver.W)
+
     def __init__(self, out, lumbar, verbose=True):
         self.out, self.lumbar, self.verbose = Path(out), np.asarray(lumbar, float), verbose
         self.out.mkdir(parents=True, exist_ok=True)
@@ -174,6 +176,7 @@ class StepTake:
         self.T = self.t + 0.3
         self.n = n = int(self.T * FPS) + 1
         s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.boxes, arms=SIDES)
+        s.W = s.W | self.PLANNER_W
         for side in SIDES:
             for k in range(n):
                 t = k / FPS

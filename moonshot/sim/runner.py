@@ -249,7 +249,9 @@ class TakeRunner:
                 if self.HAND_FORCE_AT is None:
                     mujoco.mj_jacBody(m, p, jacp, None, hb)
                 else:                                       # where the hand meets what it works: the wrist's load too
-                    at = p.xpos[hb] + p.xmat[hb].reshape(3, 3) @ H0 @ self.HAND_FORCE_AT * 0.001
+                    # the left hand's body is the right's mirrored: its frame's dorsal axis points palmar
+                    v = self.HAND_FORCE_AT * (1.0 if side == "R" else np.array([1.0, 1.0, -1.0]))
+                    at = p.xpos[hb] + p.xmat[hb].reshape(3, 3) @ H0 @ v * 0.001
                     mujoco.mj_jac(m, p, jacp, None, at, hb)
                 tau += (jacp.T @ F)[self.act_dof]
         target = p.qpos.copy()

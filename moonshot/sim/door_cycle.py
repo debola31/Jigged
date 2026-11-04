@@ -2,11 +2,11 @@
 the VF-2 cell with the part in the vise; the doors are passive slides with friction and damping, so only the hands
 move them, and Cycle Start registers from the index's force on the button (vf2.Control.touch).
 
-Closing, each hand's hooked fingers push its door's bar along by contact alone. Opening, the fingers draw the bar out,
-and as capsule fingers can't conform to it the closed hand is held to the bar by a soft constraint,
-enclose_open_<side> (TakeRunner.encloses). The arm is fed what moving the door along its planned path takes (its
-friction, its track's damping and its inertia), and more as the door trails its path, as people lean into a door that
-is slow to move.
+Each hand holds its door's bar wrapped round it (motion/door_cycle.py), so contact alone moves the door either way:
+opening, the fingers behind the bar draw it out; closing, the palm on its outer face pushes it home. No constraint
+holds a hand to a bar. The arm is fed what moving the door along its planned path takes (its friction, its track's
+damping and its inertia), where the hand meets the bar, and more as the door trails its path, as people lean into a
+door that is slow to move.
 
 The run writes, beside the take record, checks.json (per frame, what the arms touch, each hand's wrench, the active
 constraints and the bodies pushed from outside the physics, the VF-2's axes; the never-held E-stop) and the vise's
@@ -149,14 +149,14 @@ class _Cell(TakeRunner):
 
 
 class DoorClose(_Cell):
-    """Closing, the palm pushes the bar along: contact alone moves the door, so no grip holds the hand to it."""
+    """Closing, the palm on the bar's outer face pushes it along: contact alone moves the door."""
     doors_open_mm = DC.OPEN_MM
     grip_geoms = {"door_left": "vf2_door_left_pull", "door_right": "vf2_door_right_pull",
                   "open_left": "vf2_door_left_pull", "open_right": "vf2_door_right_pull"}
     encloses: dict[str, str] = {}
-    # the door's load acts where the hook meets the bar's outer face, not at the wrist: the wrist is fed its torque
-    # too, where unfed it gave 18 deg under the pull and the replayed arm's ECU went past its maximum
-    HAND_FORCE_AT = np.array([DC.GRIP_BACK * math.cos(math.radians(DC.GRIP_TILT)), 0.0, -DC.GRIP_OUT])
+    # the door's load acts where the hand meets the bar, round its middle, not at the wrist: the wrist is fed its
+    # torque too, where unfed it gave 18 deg under the pull and the replayed arm's ECU went past its maximum
+    HAND_FORCE_AT = DC.wrap_frame().T @ -np.array([DC.WRAP_OUT, -DC.WRAP_BACK, 0.0])
 
     def __init__(self, folder=DC.TAKES / "door-close"):
         super().__init__(folder)
@@ -257,9 +257,8 @@ class DoorClose(_Cell):
 
 
 class DoorOpen(DoorClose):
-    """Opening, the fingers draw the bar out, held to it by the grip's constraint (TakeRunner.encloses)."""
+    """Opening, the fingers behind the bar draw it out: contact alone moves the door."""
     doors_open_mm = 0.0
-    encloses = {"open_left": "vf2_door_left", "open_right": "vf2_door_right"}
 
     def __init__(self, folder=DC.TAKES / "door-open"):
         super().__init__(folder)

@@ -17,8 +17,11 @@ import numpy as np
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate.registry import Result, check
 
-# the grips that close the hand round an object, and that object; presses and fingertip touches aren't grasps
-GRASPS = {"blank_faces": "blank", "knob": "knob"}
+# the grips that close the hand round an object, and that object; presses and fingertip touches aren't grasps. A door
+# take's hand wraps its door's handle bar (moonshot/motion/door_cycle.py), closing it or opening it
+BARS = {"door_left": "vf2_door_left_pull", "door_right": "vf2_door_right_pull",
+        "open_left": "vf2_door_left_pull", "open_right": "vf2_door_right_pull"}
+GRASPS = {"blank_faces": "blank", "knob": "knob"} | BARS
 LIFTED = {"blank"}
 LEAD_S = 0.5                    # a grasp's contact may come this long before its planned grip starts
 
@@ -61,24 +64,38 @@ def intervals(events: list[dict], kind: str) -> list[dict]:
 
 
 def measure(take: Path) -> dict:
-    """What the check reads, from a vise take's physics run."""
+    """What the check reads, from a physics run with the vise's keys in its sim.npz. A two-handed run's left hand
+    (sim.npz W_L) times the reaches to what it grasps (its grip events' side)."""
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
     tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
     ck = json.loads((take / "checks.json").read_text(encoding="utf-8"))
     fps, t = float(sim["fps"]), sim["t"]
     grasping: dict[str, np.ndarray] = {}
+    left = set()
     for e in intervals(tk["events"], "grip"):
         if e.get("grip") in GRASPS:
             obj, t1 = GRASPS[e["grip"]], e["t1"] if e["t1"] is not None else t[-1]
             grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
+            if e.get("side") == "L":
+                left.add(obj)
     load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     out = {"fps": fps, "hand_speed_mm_s": hand_speed(sim["W"], fps).tolist(), "touching": ck["touching"],
            "grasping": {k: v.tolist() for k, v in grasping.items()}, "height_mm": {"blank": sim["blank"][:, 2].tolist()},
            "weight_N": {"blank": load.mass_kg * 9.81}}
+    if left:
+        out |= {"left_hand": sorted(left), "hand_speed_mm_s_L": hand_speed(sim["W_L"], fps).tolist()}
     if "load_N" in ck:
         out["load_N"] = ck["load_N"]
     return out
+
+
+def side_inputs(take: dict, obj: str, key: str) -> tuple[np.ndarray, str]:
+    """The per-frame series key (hand_speed_mm_s, aperture_mm) of the hand that grasps obj, and that hand: the left's
+    (key_L) for what take["left_hand"] lists, else the right's."""
+    if obj in take.get("left_hand", ()):
+        return np.asarray(take[f"{key}_L"], float), "left"
+    return np.asarray(take[key], float), "right"
 
 
 @check("grasp_timing",
@@ -86,16 +103,19 @@ def measure(take: Path) -> dict:
        bad=["bad/grasp_timing_slow_reach.json", "bad/grasp_timing_long_preload.json"])
 def grasp_timing(take: dict) -> Result:
     """take: {"fps", "hand_speed_mm_s", "touching": per frame, "grasping": {object: per frame, a grasp planned},
-    "height_mm": {lifted object: per frame}, "load_N": {lifted object: per-frame lifting force}, "weight_N"}."""
-    fps, speed = float(take["fps"]), np.asarray(take["hand_speed_mm_s"], float)
-    if not len(speed):
+    "height_mm": {lifted object: per frame}, "load_N": {lifted object: per-frame lifting force}, "weight_N"}; a
+    two-handed take adds "left_hand", the objects the left hand grasps, and "hand_speed_mm_s_L", its speed, so each
+    reach is timed on its own hand and held to its own hand's band."""
+    fps = float(take["fps"])
+    if not len(take["hand_speed_mm_s"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
-    bands = {"reach_s": threshold("person.reach_to_grasp_right_s").band,
-             "preload_ms": threshold("person.grasp_preload_ms").band,
+    bands = {"preload_ms": threshold("person.grasp_preload_ms").band,
              "loading_ms": threshold("person.grasp_loading_ms").band}
     onset, lift = threshold("person.force_onset_frac").value, threshold("person.lift_off_mm").value
     found, outside = [], []
     for obj, grasping in take["grasping"].items():
+        speed, hand = side_inputs(take, obj, "hand_speed_mm_s")
+        bands["reach_s"] = threshold(f"person.reach_to_grasp_{hand}_s").band
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
             g = {"object": obj, "contact_frame": contact, "reach_s": round((contact - start) / fps, 3)}
             if obj in take["height_mm"]:

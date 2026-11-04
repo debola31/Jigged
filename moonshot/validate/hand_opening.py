@@ -15,21 +15,30 @@ import numpy as np
 
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
-from moonshot.validate.grasp_timing import measure as grasp_inputs, reaches
+from moonshot.validate.grasp_timing import BARS, measure as grasp_inputs, reaches, side_inputs
 from moonshot.validate.registry import Result, check
 
 
 def measure(take: Path) -> dict:
-    """What the check reads, from a vise take's physics run: the grasp-timing inputs, the aperture, and each grasped
-    object's size across the grip (the blank's near-to-far faces, the knob's diameter)."""
+    """What the check reads, from a physics run with the vise's keys in its sim.npz: the grasp-timing inputs, the
+    aperture (a two-handed run's left hand's too, sim.npz q_L), and each grasped object's size across the grip (the
+    blank's near-to-far faces, the knob's diameter, a door's handle bar's width)."""
+    from moonshot.world import vf2
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
     tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
     load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     g = grasp_inputs(take)
-    return {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
-            "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], [str(n) for n in sim["names"]]).tolist(),
-            "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}}
+    names = [str(n) for n in sim["names"]]
+    bars = {geom: vf2.record()["colliders"][geom[len("vf2_"):]] for geom in set(BARS.values())}
+    out = {"fps": g["fps"], "hand_speed_mm_s": g["hand_speed_mm_s"], "touching": g["touching"],
+           "grasping": g["grasping"], "aperture_mm": aperture_mm(sim["q"], names).tolist(),
+           "size_mm": {"blank": float(load.size_mm[1]), "knob": 2 * V.VISE["knob_r"]}
+           | {geom: c["box_max_mm"][0] - c["box_min_mm"][0] for geom, c in bars.items()}}
+    if "left_hand" in g:
+        out |= {"left_hand": g["left_hand"], "hand_speed_mm_s_L": g["hand_speed_mm_s_L"],
+                "aperture_mm_L": aperture_mm(sim["q_L"], names).tolist()}
+    return out
 
 
 MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart or more: op30's 31 mm part and the 27 mm
@@ -41,14 +50,15 @@ MIN_SPREAD_MM = 20.0   # the size rule's slope, fitted on grasps this far apart 
        bad=["bad/hand_opening_early_peak.json", "bad/hand_opening_one_size_fits_all.json"])
 def hand_opening(take: dict) -> Result:
     """take: {"fps", "hand_speed_mm_s", "aperture_mm", "touching": per frame, "grasping": {object: per frame},
-    "size_mm": {object: its size across the grip}}."""
+    "size_mm": {object: its size across the grip}}; a two-handed take adds "left_hand", the objects the left hand
+    grasps, and its "hand_speed_mm_s_L" and "aperture_mm_L", so each reach is measured on its own hand."""
     fps = float(take["fps"])
-    speed, ap = np.asarray(take["hand_speed_mm_s"], float), np.asarray(take["aperture_mm"], float)
-    if not len(ap):
+    if not len(take["aperture_mm"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
     when, slope = threshold("person.peak_aperture_reach_frac").band, threshold("person.aperture_per_object_mm").band
     found, outside, peaks = [], [], {}
     for obj, grasping in take["grasping"].items():
+        speed, ap = side_inputs(take, obj, "hand_speed_mm_s")[0], side_inputs(take, obj, "aperture_mm")[0]
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
             k = start + int(np.argmax(ap[start:contact + 1]))
             frac = (k - start) / max(1, contact - start)

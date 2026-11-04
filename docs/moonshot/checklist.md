@@ -187,17 +187,21 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   not from nothing moving without a cause; a take at a station with no machine passes machines inside spec.
   Since the body-checks merge every check runs before a render, so no vise take
   renders on its own; their review drafts render regardless (`pipeline --render-only`). The reference's skin is
-  3.57 mm for one frame at the end of the 30 N push, against 3.5. Open: joint ranges and the per-verb physics are
-  gates only.
+  3.57 mm for one frame at the end of the 30 N push, against 3.5. Since 2026-11-04 the hand's colliders fit its
+  skin (your decision): skin read 3.1-3.4 mm at any firm fingertip touch and 8 mm at a palm push, because the
+  colliders sat 2-3 mm inside the pads and 10-18 mm inside the palm. Now the fingertips' pads are 0.75 mm inside, and
+  the palm and the other bones are convex shells 1 mm inside (`moonshot/body/derive_hand.py`); set-parallels' skin
+  went from 8.3 to 2.5 mm. Every take re-runs on it. Open: joint ranges and the per-verb physics are gates only.
 - [x] Add the new checks: nothing moves without a cause; machines inside spec; shortcuts declared; grasp timing;
   hand opening; matches its footage (cards with footage only). Each registered with its good and bad takes
   (`moonshot/validate/`, `test_checks_prove_themselves.py`, 2026-11-02). On the re-planned vise take nothing moves
   without a cause. Hand opening passes on the reference since 2026-11-03 (widest at 72%, 74% and 72% of its three
   reaches, 0.81 mm wider per mm), the hand opened for the object (`motion/primitives.py` `open_for`) and pausing
-  before the knob; op10 and op20 miss it by a hair (78% against 77%, 69% against 71%). The other four have nothing
-  to read, which fails them, until the physics run records machine axes, active constraints and applied forces,
-  and the lifting force, and `take.json` names its card: being added (2026-11-03, handed over from the body-checks
-  session).
+  before the knob; op10 and op20 miss it by a hair (78% against 77%, 69% against 71%). Since 2026-11-04 every
+  physics run records what the checks read (the step takes' `TakeRunner` too), and hand opening is timed between
+  frames (your decision): at 30 fps one frame is 7% of a half-second reach, wider than the 6% band, so a reach had
+  one passing frame. The band is unchanged. Declared the same day (your decisions): the step takes' carry welds as
+  the `carry_*` grip assist, and the band saw's vise screw as a mechanism.
 - [x] The new core reproduces the reference take's per-verb outcomes (`C:\jigged-data\reference\setup-take\`).
   Done 2026-11-02, on the take the ported planner (`moonshot/motion/`) writes, since trainual's stopped being the bar
   on review (`docs/moonshot/physics.md`): in the VF-2 cell, lifted by friction with a 13.0 / 14.0 N grip, 1.76 mm
@@ -256,15 +260,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 |---|---|---|---|
 | A. Core | [ ] | [ ] | [ ] |
 | B. Catalogue | [ ] | [ ] | [ ] |
-| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); the pendant's conformance passes and is merged (setting session, 2026-11-03); the 11 setting takes (Find X and Y, Set Z, op50's square check) re-planned on the posture changes and in their per-frame checks, op30-z and op50-check passing all but skin (2026-11-03); doors going fully open with the grip you confirmed, and Load the tools' 26 takes (every tool in full), in progress; no CI run |
+| C1 (VF-2, Hurco VM1, …) | [ ] VF-2: doors and Cycle Start (`test_door_cycle_take.py`), the pendant, probe and tool setter (setting session) | [x] 2026-11-02 | [ ] doors close and open, Cycle Start runs (M4, 2026-11-02); the pendant's conformance passes and is merged (setting session, 2026-11-03); the 11 setting takes (Find X and Y, Set Z, op50's square check): op40-z passes everything, the other ten all but skin on the old body, re-running on the new (2026-11-04); door-open passed every check on the old body, door-close all but the palm's skin, both re-running on the new; Load the tools: 23 of 26 passed on the old body, op10's far-fork seats split into a pick and an insert (your decision, 2026-11-04), re-running; no CI run |
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
 | C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
-| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and every per-frame check, and you approved its draft (2026-11-03); the pocket-depth inspect take in progress, the left hand fetching the calipers (your decision); no CI run |
+| C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and every per-frame check, you approved its draft (2026-11-03), and its final is on the web (2026-11-04); the pocket-depth inspect take in progress (the calipers regrasped on end), re-running with deburr on the new body; no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
-| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session) |
-| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; the 15 cutting steps' stills published (2026-11-03); each person's step publishes once you've reviewed its draft and its final is rendered, deburr first |
+| E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session). 2026-11-04, on the new body: the vise loads re-running; set-parallels passes skin, posture and shortcuts. G1's five plans written (your decisions): nist-ftc-09, an 11 ga sheet clamped to the table, for nist-ctc-01, which fits no machine; ct-slbeam on the VF-2; ll-1005337 in two setups; the Kurt D688 named |
+| F. Web | [x] every nist-ftc-10 step on the page with the plan's caption (web session, 2026-11-02) | [x] 2026-11-02 | [ ] the page merged; the 15 cutting steps' stills published (2026-11-03), each with the part as the cut leaves it in 3D on a desktop (2026-11-04); deburr's final published (2026-11-04): 16 of 61 steps; each person's step publishes once you've reviewed its draft and its final is rendered |
 | G. Render production | [x] `test_render_take.py`, `test_vise_render.py`, `test_step_video.py` (2026-11-02) | [x] 2026-11-02 | [ ] the ported renderer draws any take record, both hands, and joins each step's video from its takes (`moonshot/planning/takes.py`); tuned to 4.65 s per 1080p frame on the M4 (48 samples, adaptive 0.03), 47% under untuned. Drafts of 39 of nist-ftc-10's 61 steps (2026-11-03). Its 15 machine-only (cutting) steps show their caption and one still each on the page (your decision), not a video. No final renders before you've reviewed its draft |
 
 ## 6. Milestones
@@ -293,7 +297,16 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The bench's carry welds
   declared a grip assist; Load the tools shows every tool loaded in full. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
-- [ ] Nov 4: render queue live; `nist-ftc-10` finals
+- [ ] Nov 4: render queue live; `nist-ftc-10` finals. As of 2026-11-04 07:30: 16 of 61 steps on the web (the 15
+  cutting stills, deburr). The other 45 are people's steps, and every take they need re-runs on the new body:
+  setting (3e), Load the tools (agent), the vise loads (agent; op50, a7), doors and Cycle Start (agent), inspect
+  (66), and set-parallels, set-stop, blow-off, loosen and the lift-outs (here). A step goes up once all its takes
+  pass, you've reviewed its draft and its final is rendered. Your decisions at 08:00, to have it all up tonight: no
+  drafts and no review wait, so a take whose checks pass renders its final at once, at 720p (31,000 frames at 1080p
+  were about 27 farm-hours), and the backlog's drafts are taken as approved; the bench's props drawn as what they are;
+  parked until nist-ftc-10 is up: the band saw's takes, the G1 parts' takes, CI runs of the gates and the remaining
+  strength curves. The skin check runs on Embree since (`embreex`), 200x faster with the same answer, so a take's
+  checks take minutes.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

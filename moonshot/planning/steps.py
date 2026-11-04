@@ -1,8 +1,14 @@
 """A process plan's written instruction steps, one per video (plan §4, §6).
 
-Deterministic: every VF-2 setup expands to the shop's setup pattern, each operation becomes a short cycle step, and
-the finishing work follows. Each step's caption is built only from its `facts`, so it can't name a tool, size or
-setting the plan doesn't contain (plan §2, O8; checked by `caption_names_only_facts`).
+Deterministic: every mill setup expands to the shop's setup pattern for how the part is held (in the vise on
+parallels, standing on the vise floor against a stop, or a plate clamped to the table), a band saw setup to the
+saw's, each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
+from its `facts`, so it can't name a tool, size or setting the plan doesn't contain (plan §2, O8; checked by
+`caption_names_only_facts`).
+
+A `cycle` step is machine-only: the mill's or the saw's own cut, or an outside vendor's process (a finishing step
+with `machine_only`). Only people's work is rendered (your decision, 2026-11-03); a cycle step is shown on the web
+as its caption and a still, or in three.js. It keeps its place in the sequence.
 
     python -m moonshot.planning.steps nist-ftc-10          # prints the steps as a numbered list
 """
@@ -14,57 +20,122 @@ import sys
 from moonshot.planning.validate import load_plan
 
 VISE_NAMES = {"vise6": "the 6 in vise"}
+# nist-ftc-10's faces; a plan names its own in "faces"
 FACE_UP = {"-Y": "pocket side up", "+Y": "scalloped side up", "+Z": "on its F65 side", "-Z": "on its F81 side",
            "+X": "standing on one end", "-X": "standing on the other end"}
 TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em38": "the 3/8 in end mill",
               "em14": "the 1/4 in end mill", "bem14": "the 1/4 in ball end mill", "drill-2p5": "the 2.5 mm drill",
               "drill-6": "the 6 mm drill", "drill-7": "the 7 mm drill", "drill-5p5": "the 5.5 mm drill",
-              "ream-3p5": "the 3.5 mm reamer", "tap-m3": "the M3 tap"}
+              "ream-3p5": "the 3.5 mm reamer", "tap-m3": "the M3 tap", "spot": "the 1/2 in spot drill",
+              "drill": "the #7 drill", "drillk": "the K drill", "drillh": "the H drill", "tap": "the 1/4-20 tap",
+              "chamf": "the 1/2 in chamfer mill", "bandsaw": "the band saw",
+              # not in the catalogue yet (python -m moonshot.planning.validate lists them)
+              "drill-3p3": "the 3.3 mm drill", "drill-6p5": "the 6.5 mm drill", "drill-11": "the 11 mm drill",
+              "tap-m4": "the M4 tap", "ream-8": "the 8 mm reamer", "dovetail-20": "the 20 deg dovetail cutter"}
+# Where each mill's tools go. The VF-2 measures its own on its tool setter; the shop's other mills have none
+# (shop.json puts the only tool setter and probe on the VF-2), so their tools are measured on the presetter first.
+CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool changer"}
+PRESET = {"vf3", "hurco"}
 
 
 def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", **extra) -> dict:
     return {"id": sid, "title": title, "caption": caption.format(**facts), "facts": facts, "kind": kind, **extra}
 
 
+def cycles(s: dict) -> list[dict]:
+    return [step(f"{s['id']}-{op['id']}", op["what"].split(":")[0], "{what}, with {tool}.",
+                 {"what": op["what"], "tool": TOOL_NAMES.get(op["tool"], op["tool"])},
+                 kind="cycle", setup=s["id"], operation=op["id"], machine=s["machine"]) for op in s["operations"]]
+
+
+def saw(plan: dict, s: dict) -> list[dict]:
+    """The band saw: load the bar to the stop and clamp it, start the cut, the cut itself, lift the blank off."""
+    p, m = s["id"], s["machine"]
+    f = {"setup": s["title"], "bar": plan["stock"]["bar"], "length": plan["stock"]["length"]}
+    return [
+        step(f"{p}-load", "Load the bar",
+             "Raise the bow, open the vise, slide the {bar} through to the stop for a {length} blank, and clamp it.",
+             f, setup=p, machine=m),
+        step(f"{p}-start", "Start the cut", "Press Start, switch the coolant on and let the bow down.", f,
+             setup=p, machine=m),
+        *cycles(s),
+        step(f"{p}-unload", "Lift the blank off",
+             "Lift the {length} blank off the bed, clear of the blade, and set it on the bench.", f, setup=p, machine=m),
+    ]
+
+
+def held(s: dict, faces: dict) -> list[dict]:
+    """Clean, load, seat and check: how the part goes into this setup's workholding."""
+    w, p, m = s["workholding"], s["id"], s["machine"]
+    if "clamps" in w:                              # a plate clamped down on the table
+        f = {"setup": s["title"], "up": faces[s["face_up"]], "clamps": w["clamps"], "on": w["on"]}
+        return [
+            step(f"{p}-clean", "Clean the table", "Blow the chips off {on} and wipe it.", f, setup=p, machine=m),
+            step(f"{p}-load", "Lay the plate down", "Lay the plate on {on}, {up}.", f, setup=p, machine=m),
+            step(f"{p}-seat", "Clamp it down", "Set {clamps} step clamps on its margin and tighten each nut.", f,
+                 setup=p, machine=m),
+            step(f"{p}-check", "Check it's straight",
+                 "Sweep the indicator along its long edge: the needle should stay put.", f, setup=p, machine=m),
+        ]
+    f = {"setup": s["title"], "vise": VISE_NAMES[w["vise"]], "up": faces[s["face_up"]],
+         "parallels": f"{w['parallels_in']:g} in parallels" if w["parallels_in"] else "the vise floor and a stop"}
+    stop = not w["parallels_in"]               # standing on the vise floor against a stop: no parallels to set or check
+    return [
+        step(f"{p}-clean", "Clean the vise and set the stop" if stop else "Clean the vise and set the parallels",
+             "Blow out {vise} and wipe the jaws and its floor, then set the stop." if stop else
+             "Blow out {vise} and wipe the jaws, then set {parallels}.", f, setup=p, machine=m),
+        step(f"{p}-load", "Load the part", "Set the part in {vise}, {up}, on {parallels}.", f, setup=p, machine=m),
+        step(f"{p}-seat", "Seat it and tighten the vise",
+             "Close the jaw until it touches, tap the part down, then tighten the handle.", f, setup=p, machine=m),
+        step(f"{p}-check", "Check it's square" if stop else "Check the parallels are pinched",
+             "Sweep the indicator up its side: the needle should stay put." if stop else
+             "Try each parallel with a fingertip: neither should move.", f, setup=p, machine=m),
+    ]
+
+
 def expand(plan: dict) -> list[dict]:
     out = []
-    loaded: set[str] = set()
+    faces = plan.get("faces", FACE_UP)
+    loaded: dict[str, set[str]] = {}               # the tools already in each machine
     for s in plan["setups"]:
-        w = s["workholding"]
-        f = {"setup": s["title"], "vise": VISE_NAMES[w["vise"]], "up": FACE_UP[s["face_up"]],
-             "parallels": f"{w['parallels_in']:g} in parallels" if w["parallels_in"] else "the vise floor and a stop"}
-        p = s["id"]
-        stop = not w["parallels_in"]               # standing on the vise floor against a stop: no parallels to set or check
+        p, m = s["id"], s["machine"]
+        if m == "bandsaw":
+            out += saw(plan, s)
+            continue
+        out += held(s, faces)
+        f = out[-1]["facts"]
         out += [
-            step(f"{p}-clean", "Clean the vise and set the stop" if stop else "Clean the vise and set the parallels",
-                 "Blow out {vise} and wipe the jaws and its floor, then set the stop." if stop else
-                 "Blow out {vise} and wipe the jaws, then set {parallels}.", f, setup=p),
-            step(f"{p}-load", "Load the part", "Set the part in {vise}, {up}, on {parallels}.", f, setup=p),
-            step(f"{p}-seat", "Seat it and tighten the vise",
-                 "Close the jaw until it touches, tap the part down, then tighten the handle.", f, setup=p),
-            step(f"{p}-check", "Check it's square" if stop else "Check the parallels are pinched",
-                 "Sweep the indicator up its side: the needle should stay put." if stop else
-                 "Try each parallel with a fingertip: neither should move.", f, setup=p),
             step(f"{p}-xy", "Find X and Y", "Set {wcs} X at {x} and Y at {y}.",
-                 f | {"wcs": s["wcs"]["code"], "x": s["wcs"]["x"], "y": s["wcs"]["y"]}, setup=p),
-            step(f"{p}-z", "Set Z", "Set {wcs} Z at {z}.", f | {"wcs": s["wcs"]["code"], "z": s["wcs"]["z"]}, setup=p),
+                 f | {"wcs": s["wcs"]["code"], "x": s["wcs"]["x"], "y": s["wcs"]["y"]}, setup=p, machine=m),
+            step(f"{p}-z", "Set Z", "Set {wcs} Z at {z}.", f | {"wcs": s["wcs"]["code"], "z": s["wcs"]["z"]},
+                 setup=p, machine=m),
         ]
-        new = [op["tool"] for op in s["operations"] if op["tool"] not in loaded]
+        have = loaded.setdefault(m, set())
+        new = [op["tool"] for op in s["operations"] if op["tool"] not in have]
         if new:
-            names = ", ".join(dict.fromkeys(TOOL_NAMES.get(t, t) for t in new))
-            out.append(step(f"{p}-tools", "Load the tools", "Load {tools} into the carousel.",
-                            f | {"tools": names, "tool_ids": list(dict.fromkeys(new))}, setup=p))
-            loaded |= set(new)
+            new = list(dict.fromkeys(new))
+            names = ", ".join(TOOL_NAMES.get(t, t) for t in new)
+            tf = f | {"tools": names, "tool_ids": new, "changer": CHANGERS[m]}
+            if m in PRESET:
+                which = "its length, and load it" if len(new) == 1 else "their lengths, and load them"
+                out.append(step(f"{p}-tools", "Measure and load the tools",
+                                "Measure {tools} on the presetter, enter " + which + " into {changer}.", tf, setup=p,
+                                machine=m))
+            else:
+                out.append(step(f"{p}-tools", "Load the tools", "Load {tools} into {changer}.", tf, setup=p,
+                                machine=m))
+            have |= set(new)
         out.append(step(f"{p}-start", "Close the door and start the cycle",
-                        "Close the door, check the program is {setup}, and press Cycle Start.", f, setup=p))
-        for op in s["operations"]:
-            out.append(step(f"{p}-{op['id']}", op["what"].split(":")[0], "{what}, with {tool}.",
-                            {"what": op["what"], "tool": TOOL_NAMES.get(op["tool"], op["tool"])},
-                            kind="cycle", setup=p, operation=op["id"]))
+                        "Close the door, check the program is {setup}, and press Cycle Start.", f, setup=p, machine=m))
+        out += cycles(s)
         out.append(step(f"{p}-unload", "Blow off the chips and unload",
-                        "Open the door, blow the chips off, loosen the vise and lift the part out.", f, setup=p))
+                        "Open the door, blow the chips off, loosen the clamps and lift the plate off."
+                        if "clamps" in s["workholding"] else
+                        "Open the door, blow the chips off, loosen the vise and lift the part out.", f, setup=p,
+                        machine=m))
     for fin in plan.get("finish", []):
-        out.append(step(fin["id"], fin["what"].split(",")[0], "{what}.", {"what": fin["what"]}, station=fin["station"]))
+        out.append(step(fin["id"], fin.get("title", fin["what"].split(",")[0]), "{what}.", {"what": fin["what"]},
+                        kind="cycle" if fin.get("machine_only") else "human", station=fin["station"]))
     return out
 
 

@@ -28,7 +28,7 @@ PARTS = ["nist-ftc-10", "nist-ctc-01", "ll-1005337", "ct-slbeam", "ll-1007223", 
          "ll-1011443", "ll-1011604", "ct-brmb0143", "ct-107w-ngd-3r", "ll-1006941", "ct-10004-bcrm"]
 LIVE = {"nist-ftc-10"}
 # Where a finishing station's steps happen: its zone in layout.json.
-STATION_ZONES = {"bench": "benches", "inspection": "inspection"}
+STATION_ZONES = {"bench": "benches", "inspection": "inspection", "outside": "shipping"}
 
 
 def _json(path: Path):

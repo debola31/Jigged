@@ -34,7 +34,7 @@ from moonshot.motion.pendant import (FINGER_DEG_S, LUMBAR as PENDANT_LUMBAR, OFF
                                      fingertip_in_hand, key_at)
 from moonshot.motion.primitives import FPS, PosePath, min_jerk, open_for, open_like
 from moonshot.motion.setting import PROBE, SCREEN, part_in_vise
-from moonshot.motion.step_take import THETA0, StepTake
+from moonshot.motion.step_take import HANGING as STEP_HANGING, REST_NEAR_MM, StepTake
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import tool_takes
 from moonshot.planning.validate import load_plan
@@ -95,14 +95,10 @@ PRESS_AFTER_S = 0.4                                      # and the pad is on it 
 # a few degrees bent, the shoulder neither turned in nor out across the body. At the planners' usual place
 # (moonshot/motion/step_take.py REST_OFFSET, 20 mm higher and 60 mm further in) the solver kept the elbow bent 15 deg
 # and the shoulder up to hold the hand there, and a hand at rest scored a negative log-likelihood of 26-28 started
-# hanging (moonshot/motion/bench.py HANGING) and 34-40 started where it works: past people's 28.7, and a pendant take's
+# hanging (moonshot/motion/step_take.py HANGING) and 34-40 started where it works: past people's 28.7, and a pendant take's
 # left hand rests through it all. Here, started from this arm, the solver settles at 19-20
 REST_MM = np.array([270.0, 55.0, -125.0])
 HANGING = [11.0, 9.0, -2.0, 13.0, 12.0, -5.0, 0.0, -6.0, -6.0]
-START_RAMP_S = 0.6                                       # the start blends from hanging to working over this long
-                                                         # as the arm leaves rest, and back as it returns: switched
-                                                         # at once, the solve swung the shoulder out past people's
-                                                         # 31 deg on the way between
 OPEN_AT = 0.785                                          # the hand opens widest this far into its reach, as people's
                                                          # do at 71-77% (person.peak_aperture_reach_frac): measured
                                                          # 0.714 at a planned 0.736, the fingers peaking early
@@ -235,32 +231,51 @@ def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
 
 
 class InRange(BS.BodySolver):
-    """The body solver, every trunk-to-wrist angle held firmly inside people's range, as the posture checks hold each
-    arm of the take to it, and the trunk as both arms' people see it: the left arm's see it mirrored
+    """The body solver, the trunk also held inside people's range as the left arm's people see it: mirrored
     (moonshot/validate/posture.py left_arm), so its lateral bend and rotation must lie inside the range turned about
-    zero too. The solver's own range cost counts the trunk once, against the right arm's people, and lightly, as it is
-    every take's: here the holder held out under the spindle turned the trunk 16-19 deg (people's 1st percentile is
-    13.9) to bring the shoulder nearer, at the keypad the trunk bent 10 deg sideways (8.4), and the left arm, coming
-    down from Tool Release, turned its shoulder out 34 deg (30.9): out of an arm's range in 13-20% of the frames, where
-    the checks allow 7%."""
-    W_RANGE = 30.0                                       # per squared degree past the range less RANGE_MARGIN_DEG
-    # people's posture prior weighed 1.5, not every take's 0.3: holding the holder up under the spindle, the right arm
-    # was as unlike people as a median 28.1-28.3 negative log-likelihood, a few tenths inside their 28.7; at 1.0 27.7,
-    # at 2.0 27.2, the hands on their targets as before
-    W = dict(BS.BodySolver.W, prior=1.5)
+    zero too. The solver's own range cost (posture_cost) counts the trunk once, against the right arm's people."""
 
     def _arm_terms(self, th, L, packed, side, boxes, trunk):
         terms = super()._arm_terms(th, L, packed, side, boxes, trunk)
-        lo, hi = (torch.as_tensor(self.prior.pct[:10, i], dtype=th.dtype) for i in (0, -1))
         if trunk:
-            flip = torch.as_tensor([1.0, -1.0, -1.0] + [1.0] * 7, dtype=th.dtype)
-            a, b = lo * flip, hi * flip
-            lo, hi = torch.maximum(lo, torch.minimum(a, b)), torch.minimum(hi, torch.maximum(a, b))
-        m = BS.RANGE_MARGIN_DEG
-        cols = slice(0, 10) if trunk else slice(3, 10)
-        out = torch.relu(lo[cols] + m - th[:, cols]) + torch.relu(th[:, cols] - hi[cols] + m)
-        terms["range"] = self.W_RANGE * (out ** 2).sum()
+            lo, hi = (torch.as_tensor(self.prior.pct[1:3, i], dtype=th.dtype) for i in (0, -1))
+            m = BS.RANGE_MARGIN_DEG
+            out = torch.relu(-hi + m - th[:, 1:3]) + torch.relu(th[:, 1:3] + lo + m)
+            terms["range_mirrored"] = self.W["range"] * (out ** 2).sum()
         return terms
+
+
+class ToolTake(StepTake):
+    """What the Load the tools takes plan alike, at the pendant and in the doorway.
+
+    Every trunk-to-wrist angle held firmly inside people's range (`SOLVER_W` range, InRange for the trunk as the left
+    arm's people see it), as the posture checks hold each arm to it: at the solver's own 0.5 the holder held out under
+    the spindle turned the trunk 16-19 deg (people's 1st percentile is 13.9) to bring the shoulder nearer, at the keypad
+    the trunk bent 10 deg sideways (8.4), and the left arm, coming down from Tool Release, turned its shoulder out
+    34 deg (30.9): out of an arm's range in 13-20% of the frames, where the checks allow 7%. People's posture prior
+    weighed 1.5, not every take's 0.3: holding the holder up under the spindle, the right arm was as unlike people as a
+    median 28.1-28.3 negative log-likelihood, a few tenths inside their 28.7; at 1.0 27.7, at 2.0 27.2, the hands on
+    their targets as before.
+
+    The hands rest at REST_MM, and an arm with no task starts the body solve hanging there (HANGING, on top of
+    StepTake.theta0's start, which hangs it at the planners' usual place)."""
+    SOLVER_W = {"prior": 1.5, "range": 30.0}
+    body_solver = InRange
+
+    def theta0(self, n) -> np.ndarray:
+        """StepTake.theta0, each arm hanging as HANGING where it hangs there; and the left after its last task too
+        when that task brings it back to rest: StepTake.theta0 compares the left's target, in the mirrored world as
+        the planner has it, with its rest in the world, 540 mm apart, so a left hand back at rest started working."""
+        th = super().theta0(n)
+        for side, cols in (("R", slice(3, 12)), ("L", slice(12, 21))):
+            hung = np.all(np.isclose(th[:, cols], STEP_HANGING), axis=1)
+            th[hung, cols] = HANGING
+            cons = self.side[side]["cons"]
+            if cons:
+                _, last, fn = max(cons, key=lambda c: c[1])
+                if np.linalg.norm(self.target_of(fn, last - 1e-6) - self.rest) < REST_NEAR_MM:
+                    th[np.arange(n) / FPS >= last, cols] = HANGING
+        return th
 
 
 def door_lumbar(fork: int) -> np.ndarray:
@@ -281,9 +296,8 @@ def holder_grip(tool_id: str) -> dict:
     return kept["grips"].get(tool_id, kept["grips"][kept["default"]])
 
 
-class Seat(StepTake):
+class Seat(ToolTake):
     """One holder off the stand and into the spindle (the vf2-tool-load card's phases 2-7)."""
-    body_solver = InRange
 
     def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True):
         super().__init__(out, door_lumbar(fork), verbose)
@@ -457,9 +471,8 @@ class Seat(StepTake):
         return {"path": [[round(t, 3), *np.round(p, 3).tolist()] for t, p in keys]}
 
 
-class ToolChange(PendantTake):
+class ToolChange(ToolTake, PendantTake):
     """At the pendant, the right index: MDI, T<n> and ATC FWD (`plan_change`), or ATC FWD alone (`plan_atc`)."""
-    body_solver = InRange
 
     def __init__(self, out, verbose=True, shared: Path | None = None):
         super().__init__(out, PENDANT_LUMBAR, verbose, shared=shared or Path(out) / "grips.json",
@@ -498,23 +511,6 @@ class ToolChange(PendantTake):
         self.look(self.t, SPINDLE - [0, 0, 60.0])
         self.rest_hand()
         self.wait(0.6)
-
-
-def start(take: StepTake) -> np.ndarray:
-    """The body solve's start, per frame (n, 21, deg), as moonshot/motion/bench.py's: each arm hanging relaxed
-    (HANGING) before its first task and after its last, the default start (moonshot/motion/step_take.py THETA0) between,
-    blended over START_RAMP_S at each end; an arm with no task hangs throughout."""
-    n = int((take.t + 0.3) * FPS) + 1
-    th = np.tile(np.r_[THETA0[:12], THETA0[3:12]], (n, 1)).astype(float)
-    hang, work = np.array(HANGING, float), np.array(THETA0[3:12], float)
-    for side, cols in (("R", slice(3, 12)), ("L", slice(12, 21))):
-        cons = take.side[side]["cons"]
-        first, last = min((c[0] for c in cons), default=math.inf), max((c[1] for c in cons), default=-math.inf)
-        for k in range(n):
-            t = k / FPS
-            w = float(np.clip((t - first) / START_RAMP_S, 0, 1) * np.clip((last - t) / START_RAMP_S, 0, 1))
-            th[k, cols] = hang + (work - hang) * w
-    return th
 
 
 def build(part: str, step_id: str, only: str | None = None, verbose: bool = True) -> list[Path]:
@@ -556,7 +552,7 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
                 own.write_bytes(shared["pendant"].read_bytes())
             take = ToolChange(out, verbose, shared=shared["pendant"])
             take.plan_change(s["to"]) if s["kind"] == "change" else take.plan_atc()
-        take.solve(start(take))
+        take.solve()
         take.save()
         tk = json.loads((out / "take.json").read_text(encoding="utf-8"))
         spindle_tool = PROBE if s["spindle"] == "probe" else None

@@ -446,9 +446,10 @@ class Take:
     def hold(self, grip="blank_faces", dur=2.6, tilt_deg=None):
         """Hold the part up in front and turn it to look at a face, steady (tremor only), and back. The reference
         part turns 28 deg; a heavier or longer one turns less, no further than the wrist torque that took (its
-        weight times its length), as a part held one-handed is turned only so far."""
+        weight times its length), as a part held one-handed is turned only so far. Its length is its longest side:
+        op50's part, on end, turned as far as its 31 mm length allowed, 28 deg, slipped 2.2 mm in the hand."""
         if tilt_deg is None:
-            torque, ref = self.load.mass_kg * self.size[0], REFERENCE.mass_kg * REFERENCE.size[0]
+            torque, ref = self.load.mass_kg * max(self.size), REFERENCE.mass_kg * REFERENCE.size[0]
             tilt_deg = 28.0 * min(1.0, ref / torque)
         t0 = self.t
         R0, p0 = self.blank_at(t0)
@@ -586,7 +587,9 @@ class Take:
         stops it, then let go. Pushed by the thumb near its top, as a shorter part is, op50's 158 mm part tipped over
         onto the fixed jaw; carried there by the plan alone, it stopped 4 mm short of the jaw; pushed onto both at
         once, it met the jaw first, and the 2 N left along the jaw didn't move it the 4 mm onto the stop. Pushed at
-        9 N, where its 0.25 friction on the floor takes 2.4, it lurched onto the jaw and leaned 8 deg."""
+        9 N, where its 0.25 friction on the floor takes 2.4, it lurched onto the jaw and leaned 8 deg; pressed at 5 N
+        from 15 mm off, it covered 17 mm in 0.2 s, leaned 3.5 deg over the jaw's top and stood up 2.2 mm off it, so
+        the plan carries it most of the way and the press closes the last few mm."""
         t0 = self.t
         self.look(t0, self.home + [0, self.half[1], self.half[2]])
         # nearly all its weight still carried, so it skims the floor: eased to 0.4, the floor's drag on its foot held
@@ -594,7 +597,7 @@ class Take:
         self.effort(t0 + 0.1, 0.9, grip)
         t1 = t0 + 0.1 + dur
         self.move_blank(t0 + 0.1, t1, np.eye(3), np.array([self.set_down[0], self.home[1], self.home[2]]))
-        self.event("press", t0 + 0.2, t1, normal=[0, -1.0, 0], force=push_N, contact="blank")
+        self.event("press", t1 - 0.25, t1 + 0.1, normal=[0, -1.0, 0], force=push_N, contact="blank")
         t2 = t1 + 0.1 + dur
         self.move_blank(t1 + 0.1, t2, np.eye(3), self.home)
         t_rel = t2 + 0.2

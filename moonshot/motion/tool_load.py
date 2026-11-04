@@ -54,6 +54,9 @@ BELOW_MM = 115.0                                         # the holder carried in
                                                          # 20 mm under the spindle's nose, and lined up there before it
                                                          # goes up: at 80, its knob up in the nose's bore, a holder
                                                          # arriving 40 mm off the axis met the nose from below
+PUSH_UP_S = 0.85                                         # pushed up to under the drawbar in this long: in 0.6 s, the
+                                                         # front of the shoulder (anterior deltoid) worked past its
+                                                         # maximum at 105% as the push stopped, from the second fork
 LINE_UP_S = 0.8                                          # lined up under the spindle, by eye, this long
 TRANSPORT_S = 1.2                                        # up from the stand to under the spindle ...
 TRANSPORT_MM = 430.0                                     # ... this far or less (from fork 0), longer farther
@@ -415,7 +418,7 @@ class Seat(ToolTake):
                  (t2b, lifted), (t3, SPINDLE - [0, 0, BELOW_MM])]
         self.look(t2, SPINDLE - [0, 0, 60.0])
         t4 = t3 + LINE_UP_S                                 # lined up under it, by eye
-        t5 = t4 + 0.6
+        t5 = t4 + PUSH_UP_S
         keys += [(t4, SPINDLE - [0, 0, BELOW_MM]), (t5, SPINDLE - [0, 0, SHORT_MM])]
         # the left hand to the button, pressed and held while the right pushes the holder home
         gl = self.grips["release"]

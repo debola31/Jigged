@@ -71,8 +71,9 @@ JAW_TOP = VISE["jaw_top_z"]
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
 REACH_S, REACH_PEAK = 0.66, 0.65
-KNOB_REACH_S, KNOB_PEAK = 0.68, 0.665
-FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL = 0.7, 0.6, 0.7    # the final pull: out over the disc, then the reach
+KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
+# the final pull: out over the disc, then the reach, sliding on along the knob's axis this far
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 0.7, 0.65, 0.72, 110.0
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 TOUCH_LEAD_S = 0.12         # the fingers meet the blank's faces this long before the grip's planned close
 PRELOAD_EFFORT = 0.05       # the effort the preload ends on: the onset of loading, 5% of the weight
@@ -644,13 +645,20 @@ class Take:
             # on, as the hand backs off it: across it from the side along the hand's own axis, at op40's crank angle the
             # fingers swept over the lever on the way in. That way round is 0.55 m from the part, so the hand goes out
             # over the crank disc first and pauses there, turned to the grip, and the reach starts from there (as the
-            # blank's does): the whole way in people's 0.67 s it planned 28 m/s^2
+            # blank's does): the whole way in people's 0.67 s it planned 28 m/s^2. It stays high until the whole hand is
+            # out past the knob's end, then comes down onto its axis and slides on, open: the fist spans the knob's
+            # length (index 8-40 mm from its root, little finger 66-80), so 60 mm out its index side was still over the
+            # 90 mm knob, and coming down there the open fingers met it 0.2-0.3 s into the reach
             reach = FINAL_REACH_S if reach is None else reach
             t_over = t0 + FINAL_OVER_S
             self.transit(t0, t_over, over)
             self.add(t_over, t_over + 0.3, lambda t, W=over: [("pose", Hk, W, 1.0)])
             t0 = t_over + 0.3
-            via = [Wk + KNOB_AXIS * 60 + [0, 0, 10]]
+            on = Wk + KNOB_AXIS * FINAL_SLIDE_MM + [0, 0, 10]
+            via = [on + [0, 0, 60], on]
+            # open before it slides on, less than the opening's peak (open_like isn't: 0.6 was 104 mm on the reference's
+            # grip and 42 on op10's)
+            self.fingers(t0 + 0.55 * reach, open_for(self.hand, g["q"], 2 * VISE["knob_r"]))
         else:
             reach = KNOB_REACH_S if reach is None else reach
             via = [over, Wk + Hk[:, 2] * 45 + [0, -10, 15]]

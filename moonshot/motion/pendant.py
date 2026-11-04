@@ -59,6 +59,10 @@ TURN_BACK_S = 0.4                                         # off the rim, back ov
                                                           # peaked at 990 mm/s, the run's hand fell 30 mm behind and
                                                           # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
+FINGER_DEG_S = 300.0                                      # a change of the hand's shape, at its quickest joint: the
+                                                          # key grip curled the middle finger 82 deg in 0.14 s off
+                                                          # the dial, 710 deg/s at its peak, and its deep flexor went
+                                                          # past its maximum (op20-xy)
 HOVER_MM = 40.0
 HOVER_DWELL_S = 0.4                                       # the left index waits over Cycle Start before pressing it:
                                                           # pressed on arrival from the side, it was 45 mm short and
@@ -218,6 +222,14 @@ class PendantTake(StepTake):
                         starts=[S(8, 0, r, 75, 50, -10, 80, p, 0, 0) for p in (40, 75) for r in (-15, 0)])
         return specs | {"dial": dial, "button_L": button_l}
 
+    def shape_now(self, side: str, t: float) -> dict:
+        """The hand's shape as last set at or before t."""
+        return max((k for k in self.side[side]["fkeys"] if k[0] <= t), key=lambda k: k[0])[1]
+
+    def shape_s(self, a: dict, b: dict) -> float:
+        """How long the hand takes from one shape to another, its quickest joint at FINGER_DEG_S at the blend's peak."""
+        return 1.875 * max(abs(a[n] - b[n]) for n in a) / FINGER_DEG_S
+
     # --- the keys ----------------------------------------------------------------------------------------
     def key_grip(self, name: str) -> str:
         """The keypad grip solved nearest a key."""
@@ -250,16 +262,18 @@ class PendantTake(StepTake):
             if self.where == "dial":              # open round the rim until the hand is off it: closed into the
                 # key's grip 0.1 s into the move, the thumb and middle pinched the rim 20-29 N as the hand pulled
                 # away, until the middle snapped off (op30-z, a finger flexor past its maximum)
-                self.fingers("R", t0 + 0.35 * dur, dial_open(self.hand, self.grips["dial"]["q"]))
-                self.fingers("R", t0 + 0.6 * dur, q)
+                opened = dial_open(self.hand, self.grips["dial"]["q"])
+                self.fingers("R", t0 + 0.35 * dur, opened)
+                shaped = t0 + 0.35 * dur + self.shape_s(opened, q)
             else:
-                self.fingers("R", t0 + 0.1, q)
+                shaped = t0 + max(0.1, self.shape_s(self.shape_now("R", t0), q))
             t0 += dur
             move_s = 0.05
         else:                                     # Fitts: farther keys take longer, about 0.6 m/s on average
             move_s = max(move_s, 0.12 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 600.0)
+            shaped = t0 + max(move_s * 0.5, self.shape_s(self.shape_now("R", t0), q))
         start = self.side["R"]["wrist"]
-        self.fingers("R", t0 + move_s * 0.5, q)
+        self.fingers("R", shaped, q)
         # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
         # settle on its target
         dwell = 0.6 if reached else 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
@@ -365,13 +379,16 @@ class PendantTake(StepTake):
                 self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
                 # the hand opens for the dial late in the reach, widest about 75% of the way, as people's do: opened
                 # at its start, over the keys, the middle finger reached 4.7 mm off them and pressed a digit
-                shape = max(self.side["R"]["fkeys"], key=lambda k: k[0])[1]
+                shape, opened = self.shape_now("R", t0), dial_open(self.hand, g["q"])
                 self.fingers("R", t0 + 0.4 * dur, shape)
-                self.fingers("R", t0 + 0.75 * dur, dial_open(self.hand, g["q"]))
+                shaped = t0 + max(0.75 * dur, 0.4 * dur + self.shape_s(shape, opened))
+                self.fingers("R", shaped, opened)
                 t0 += dur
-                # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
-                self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
-                t0 += SETTLE_S
+                # settled off the rim before the first stroke, the hand opened: a grip closing on a hand still
+                # arriving misses
+                settle = max(SETTLE_S, shaped + 0.1 - t0)
+                self.add("R", t0, t0 + settle, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
+                t0 += settle
             else:                                     # turn back, off the rim, from the last stroke's end
                 back = self.dial_deg
                 self.add("R", t0, t0 + TURN_BACK_S, lambda t, b=back, t0=t0, a0=a0: [
@@ -430,7 +447,7 @@ class PendantTake(StepTake):
     def release_left(self, dur: float = 0.9) -> None:
         """The left hand back to the side; the right hand off its hover, onto the keys again."""
         self.hold.pop("L", None)
-        self.fingers("L", self.t + 0.2, self.q_relax)
+        self.fingers("L", self.t + max(0.2, self.shape_s(self.shape_now("L", self.t), self.q_relax)), self.q_relax)
         self.transit("L", self.t, self.t + dur, self.at("L", self.rest))
         if self.hold.pop("R", None) is not None:
             self.where = "keys"
@@ -438,7 +455,9 @@ class PendantTake(StepTake):
     def rest_hand(self, dur: float = 1.0) -> None:
         """The right hand back to the side."""
         self.leave_keys(self.t)
-        self.fingers("R", self.t + 0.2, self.q_relax)
+        shape = self.shape_now("R", self.t)                  # held till the hand is off the keys, then relaxed
+        self.fingers("R", self.t + 0.25 * dur, shape)
+        self.fingers("R", self.t + 0.25 * dur + max(0.2, self.shape_s(shape, self.q_relax)), self.q_relax)
         self.transit("R", self.t, self.t + dur, self.rest, via=self.clear_of_face(self.rest))
         self.t += dur
         self.where = "rest"

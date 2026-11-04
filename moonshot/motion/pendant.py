@@ -51,7 +51,13 @@ DIAL_EFFORT = 0.5                                         # a light grip on the 
                                                           # muscles overloaded
 OVERTURN = 1.15                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
-OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
+OFF_RIM_MM = 25.0                                         # the pads sit within 12 mm of the rim's front: at 15 the
+                                                          # opened hand's pose, turning back, came 5-7 mm into the
+                                                          # handle (op30-z)
+ON_RIM_S = 0.16                                           # onto the rim from there, and off it
+TURN_BACK_S = 0.4                                         # off the rim, back over a stroke: in 0.22 s the wrist's arc
+                                                          # peaked at 990 mm/s, the run's hand fell 30 mm behind and
+                                                          # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
 HOVER_MM = 40.0
 HOVER_DWELL_S = 0.4                                       # the left index waits over Cycle Start before pressing it:
@@ -139,6 +145,14 @@ def rim(lo_deg: float, hi_deg: float, comp: float = 1.5, depth=(1.0, 12.0), w: f
                     + 0.5 * (torch.relu(depth[0] - t) ** 2 + torch.relu(t - depth[1]) ** 2)
                     + 0.05 * (torch.relu(lo_deg - ang) ** 2 + torch.relu(ang - hi_deg) ** 2))
     return f
+
+
+def dial_open(hand, q: dict) -> dict:
+    """The dial grip opened halfway, onto and off the rim: the thumb, index and middle, which hold it; the ring and
+    little stay curled as they grip, in front of the dial's face. Opened too, they straightened into it: the ring 18-21
+    mm inside the handle in the plan's own pose off the rim, and the run's hand, pushed back 14 mm, closed on the rim
+    off its plan, the index and middle on it before the thumb (op30-z, the muscles past their maximum)."""
+    return open_like(hand, q, 0.5) | {n: q[n] for n in q if n.startswith(("ring", "little", "cmc4", "cmc5"))}
 
 
 class PendantTake(StepTake):
@@ -233,7 +247,13 @@ class PendantTake(StepTake):
             self.transit("R", t0, t0 + dur, hover, via=via, fade=(H, 1.0))
             self.effort("R", t0, 0.0, "keypad")
             self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
-            self.fingers("R", t0 + 0.1, q)
+            if self.where == "dial":              # open round the rim until the hand is off it: closed into the
+                # key's grip 0.1 s into the move, the thumb and middle pinched the rim 20-29 N as the hand pulled
+                # away, until the middle snapped off (op30-z, a finger flexor past its maximum)
+                self.fingers("R", t0 + 0.35 * dur, dial_open(self.hand, self.grips["dial"]["q"]))
+                self.fingers("R", t0 + 0.6 * dur, q)
+            else:
+                self.fingers("R", t0 + 0.1, q)
             t0 += dur
             move_s = 0.05
         else:                                     # Fitts: farther keys take longer, about 0.6 m/s on average
@@ -347,21 +367,21 @@ class PendantTake(StepTake):
                 # at its start, over the keys, the middle finger reached 4.7 mm off them and pressed a digit
                 shape = max(self.side["R"]["fkeys"], key=lambda k: k[0])[1]
                 self.fingers("R", t0 + 0.4 * dur, shape)
-                self.fingers("R", t0 + 0.75 * dur, open_like(self.hand, g["q"], 0.5))
+                self.fingers("R", t0 + 0.75 * dur, dial_open(self.hand, g["q"]))
                 t0 += dur
                 # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
                 self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
                 t0 += SETTLE_S
             else:                                     # turn back, off the rim, from the last stroke's end
                 back = self.dial_deg
-                self.add("R", t0, t0 + 0.22, lambda t, b=back, t0=t0, a0=a0: [
-                    ("pose", *self.dial_pose(b + (a0 - b) * min_jerk((t - t0) / 0.22), OFF_RIM_MM), 3.0)])
-                t0 += 0.22
+                self.add("R", t0, t0 + TURN_BACK_S, lambda t, b=back, t0=t0, a0=a0: [
+                    ("pose", *self.dial_pose(b + (a0 - b) * min_jerk((t - t0) / TURN_BACK_S), OFF_RIM_MM), 3.0)])
+                t0 += TURN_BACK_S
             # onto the rim, close, turn, let go, back off
-            tc, dur = t0 + 0.12, max(0.25, abs(d) / deg_s)
+            tc, dur = t0 + ON_RIM_S, max(0.25, abs(d) / deg_s)
             self.add("R", t0, tc, lambda t, t0=t0, a0=a0: [
-                ("pose", *self.dial_pose(a0, OFF_RIM_MM * (1 - min_jerk((t - t0) / 0.12))), 3.0)])
-            self.fingers("R", t0, open_like(self.hand, g["q"], 0.5))
+                ("pose", *self.dial_pose(a0, OFF_RIM_MM * (1 - min_jerk((t - t0) / ON_RIM_S))), 3.0)])
+            self.fingers("R", t0, dial_open(self.hand, g["q"]))
             self.fingers("R", tc + 0.08, g["q"])
             self.effort("R", tc, 0.0, "dial")
             self.effort("R", tc + 0.1, DIAL_EFFORT, "dial")
@@ -375,10 +395,10 @@ class PendantTake(StepTake):
             self.effort("R", te, DIAL_EFFORT, "dial")
             self.effort("R", te + 0.06, 0.0, "dial")
             self.fingers("R", te, g["q"])
-            self.fingers("R", te + 0.12, open_like(self.hand, g["q"], 0.5))
-            self.add("R", te, te + 0.12, lambda t, te=te, a1=a1: [
-                ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / 0.12)), 3.0)])
-            self.dial_deg, self.t, self.where = a1, te + 0.12, "dial"
+            self.fingers("R", te + 0.12, dial_open(self.hand, g["q"]))
+            self.add("R", te, te + ON_RIM_S, lambda t, te=te, a1=a1: [
+                ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / ON_RIM_S)), 3.0)])
+            self.dial_deg, self.t, self.where = a1, te + ON_RIM_S, "dial"
             self.side["R"]["wrist"] = self.dial_pose(a1, OFF_RIM_MM)[1]
             self.axis_mm[i] += sign * c * self.inc_mm
 

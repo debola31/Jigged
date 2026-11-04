@@ -1127,7 +1127,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",

@@ -146,7 +146,7 @@ def upload(url: str, step_ids: list[str], models: bool) -> None:
     record = _json(PUBLISHED)
     record["media"] = sorted(set(record["media"]) | {p for i in step_ids for p in media_paths(steps[i][1]["media"])})
     PUBLISHED.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8", newline="\n")
-    print(f"{PUBLISHED.name}: {len(record['media'])} steps published; now run python -m moonshot.web.export")
+    print(f"{PUBLISHED.name}: {len(record['media'])} files published; now run python -m moonshot.web.export")
 
 
 class Handler(SimpleHTTPRequestHandler):

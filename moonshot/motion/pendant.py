@@ -59,7 +59,9 @@ TURN_BACK_S = 0.4                                         # off the rim, back ov
                                                           # peaked at 990 mm/s, the run's hand fell 30 mm behind and
                                                           # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
-RANGE_W = 2.0                                             # people's range weighed this much in the pendant's grips and
+DIAL_COMP_MM = -1.0                                       # the dial grip's pads planned this far into the rim (out)
+TUCK_DEG = 30.0                                          # the dial grip's ring and little, curled tighter than solved
+RANGE_W = 2.0                                            # people's range weighed this much in the pendant's grips and
                                                           # plans (the solver's 0.5): at 0.5 the trunk leaned 9 deg to
                                                           # reach the high keys and op10-z ran 92.6% in range; at 2,
                                                           # 97.7%, with every pad still on its key
@@ -187,6 +189,14 @@ class PendantTake(StepTake):
         # at +1, its pad 2-3 mm from where the plan aimed it, and at op10-xy's +Y 6-7 mm across: held off, unpressed
         for name in KEY_GRIPS:
             self.grips[name]["q"] = self.hand.couple(self.grips[name]["q"])
+        # the dial grip's ring and little tucked TUCK_DEG tighter, into the palm: as solved, the ring lay along the rim
+        # beside the middle and its skin, bulkier than the run's capsule, sank 4.1 mm into it (op50-check); and its
+        # fingers bent as the run bends them at the handle, the index and middle the contact way (dial_coupling)
+        q = dict(self.grips["dial"]["q"])
+        for f in ("ring", "little"):
+            for j in ("mcp_flex", "pip"):
+                q[f"{f}_{j}"] += TUCK_DEG
+        self.grips["dial"]["q"] = self.hand.couple(self.hand.clamp(q), contact={"index", "middle"})
         # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
         # direction
         self.pad_in_hand = {}
@@ -226,8 +236,11 @@ class PendantTake(StepTake):
                     # each pad 3 mm or more behind the rim's front: at 1 mm the thumb's tip rode onto the dial's face
                     # as the hand moved along the axis, the one digit on the dial, pressed into it (op30-z, op50-check:
                     # skin 6 mm deep, muscles over their maximum)
-                    targets={"thumb": rim(150, 215, depth=(3.0, 12.0)), "index": rim(-40, 5, depth=(3.0, 12.0)),
-                             "middle": rim(0, 45, depth=(3.0, 12.0))},
+                    # and DIAL_COMP_MM into it: planned 1.5 mm in, the solved grip's own skin sat 2.6 mm inside the
+                    # handle and the run's 3.1-3.8 (op50-check's skin, past its 3.5); the squeeze closes the gap
+                    targets={"thumb": rim(150, 215, comp=DIAL_COMP_MM, depth=(3.0, 12.0)),
+                             "index": rim(-40, 5, comp=DIAL_COMP_MM, depth=(3.0, 12.0)),
+                             "middle": rim(0, 45, comp=DIAL_COMP_MM, depth=(3.0, 12.0))},
                     starts=[S(8, 0, r, 75, 50, -10, 85, p, 0, 0) for p in (0, 30, 60) for r in (0, 15)])
         c = key_at("cycle_start")
         button_l = dict(obj=c, q0=q, colliders=colliders(), iters=900, side="L",

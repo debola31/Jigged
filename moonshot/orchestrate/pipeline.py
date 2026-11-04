@@ -41,9 +41,10 @@ from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
 
 DRAFT = {"res": "960x540", "samples": 32}
-FINAL = {"res": "1280x720", "samples": 48}               # tuned: moonshot/render/render_take.py settings(); 720p, not
-                                                          # 1080p, so nist-ftc-10's 31,000 frames fit a night (your
-                                                          # decision, 2026-11-04)
+FINAL = {"res": "1280x720", "samples": 16}               # moonshot/render/render_take.py settings(): 720p and 16
+                                                          # samples, denoised, so nist-ftc-10's 39,000 frames render in
+                                                          # a night on the M4 and the M1 (your decisions, 2026-11-04;
+                                                          # 48 samples took 2.1 s a frame on the M4, 16 take 1.1)
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:

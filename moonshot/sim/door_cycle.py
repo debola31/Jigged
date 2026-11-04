@@ -156,7 +156,7 @@ class DoorClose(_Cell):
     encloses: dict[str, str] = {}
     # the door's load acts where the hand meets the bar, round its middle, not at the wrist: the wrist is fed its
     # torque too, where unfed it gave 18 deg under the pull and the replayed arm's ECU went past its maximum
-    HAND_FORCE_AT = DC.wrap_frame().T @ -np.array([DC.WRAP_OUT, -DC.WRAP_BACK, 0.0])
+    HAND_FORCE_AT = DC.wrap_frame().T @ -np.array([DC.WRAP_OUT, -DC.WRAP_BACK, DC.WRAP_UP])
 
     def __init__(self, folder=DC.TAKES / "door-close"):
         super().__init__(folder)

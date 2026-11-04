@@ -40,25 +40,29 @@ APPROACH_S = 0.2                                      # its last part from besid
 PEAK_AT = 0.6                                         # the hand opens widest this far into the planned reach: ~74% of
                                                       # the reach the hand-opening check measures (setup_take.grab)
 CLOSE_S = 0.2                                         # the fingers close round the bar
+AIM_EFFORT = 0.3                                      # co-contraction on the way to the bar (runner.STIFFEN_ARM)
 LEFT_AFTER_S = 2.8                                    # the left hand sets off this long after the right door starts
 # the wrap, placed rather than solved: the hand's shape and its place on the bar, as the grip solver (grasp.Problem)
 # found it against the skin with the doors shut, the fingers' pads on the bar's inner face and the thumb's toward its
-# front, the skin clear of its door (5 mm) and the other bar (30 mm), at most 3 mm into the bar itself
-GRIP_Z = 1000.0                                       # where on the bar (it runs 680-1160 mm up): a little below the
-                                                      # elbow, so the arm reaching out to a door at its stop hangs lower
-WRAP_Q = {"index_mcp_abd": -6.3, "index_mcp_flex": 42.1, "index_pip": 72.9, "index_dip": 31.1,
-          "middle_mcp_flex": 46.4, "middle_pip": 74.6, "middle_dip": 22.6,
-          "cmc4_flex": 6.3, "ring_mcp_abd": 1.2, "ring_mcp_flex": 30.8, "ring_pip": 80.6, "ring_dip": 30.5,
-          "cmc5_flex": 10.3, "little_mcp_abd": 5.1, "little_mcp_flex": 14.9, "little_pip": 71.5, "little_dip": 19.1,
-          "thumb_cmc_abd": 31.8, "thumb_cmc_flex": 24.9, "thumb_cmc_roll": 12.2, "thumb_mcp_abd": 2.1,
-          "thumb_mcp_flex": 42.3, "thumb_ip": 69.9}
-WRAP_TURN, WRAP_TILT = -7.0, 13.1                     # the hand frame's turn about the bar and tilt (wrap_frame)
-WRAP_OUT, WRAP_BACK = 35.6, 83.8                      # the wrist from the bar's middle: out from it, in front of it
+# front, the skin clear of its door (4 mm) and the other bar (36 mm), at most 3 mm into the bar itself. The hand is
+# level: tilted up as first solved (13 deg), it needed the wrist bent up past its range, and the planned hand pitched
+# down 20 deg instead, its fingertips onto the bar's front corner
+GRIP_Z = 1050.0                                       # where on the bar (it runs 680-1160 mm up), the wrist ~26 mm
+                                                      # above: at the elbow, the forearm level (the affordance's height)
+WRAP_Q = {"index_mcp_abd": -0.5, "index_mcp_flex": 55.1, "index_pip": 62.6, "index_dip": 49.2,
+          "middle_mcp_abd": -5.1, "middle_mcp_flex": 46.9, "middle_pip": 69.2, "middle_dip": 38.9,
+          "cmc4_flex": 3.0, "ring_mcp_abd": 7.2, "ring_mcp_flex": 31.2, "ring_pip": 76.9, "ring_dip": 26.7,
+          "cmc5_flex": 7.5, "little_mcp_abd": 10.3, "little_mcp_flex": 7.3, "little_pip": 61.1, "little_dip": 36.6,
+          "thumb_cmc_abd": 31.9, "thumb_cmc_flex": 25.0, "thumb_cmc_roll": 11.2, "thumb_mcp_abd": 2.6,
+          "thumb_mcp_flex": 54.5, "thumb_ip": 15.8}
+WRAP_TURN, WRAP_TILT = -4.0, -1.8                     # the hand frame's turn about the bar and tilt (wrap_frame)
+WRAP_OUT, WRAP_BACK, WRAP_UP = 40.1, 83.3, 25.9       # the wrist from the bar's middle: out, in front of it, above
 ROLL_SHUT, ROLL_OPEN = 20.0, -40.0                    # the hand's turn round the bar, door shut and at its stop (roll)
-VIA = (25.0, -70.0, -20.0)                            # ... by way of this far further out, in front and below
-PRE_OUT, PRE_BACK = 20.0, 16.0                        # the reach comes onto the bar from this far out and in front,
-                                                      # the fingers half uncurled (preshape): the skin 3 mm into the
-                                                      # bar at most on the way in, 2.4 as they close
+PRE_OUT, PRE_BACK = 30.0, 10.0                        # the reach comes onto the bar from this far out and in front
+                                                      # of the grip, the fingers half uncurled (preshape)
+VIA = (30.0, -70.0, -20.0)                            # by way of this far further out, in front and below that
+# Not yet enough in the physics (2026-11-03): the arm trails its plan on the way out, and the half-curled fingers, which
+# reach ~100 mm across from the wrist, catch the bar's outer front corner before the hand is beside it
 # a hand at rest: the arm hanging straight down by the thigh, palm to it, as people stand (their likeliest arm,
 # validate/posture.py, likelihood 18.5), the trunk nearly upright; held by its pose, as a position alone let the
 # planner turn the arm in (31 deg, at people's limit, likelihood 32)
@@ -176,7 +180,7 @@ class _Doors(StepTake):
         and onto its inner face, the thumb across its front."""
         obj = self.at(side, bar_centre(door, open_mm))
         H = wrap_frame()
-        W = obj + np.array([WRAP_OUT, -WRAP_BACK, 0.0])
+        W = obj + np.array([WRAP_OUT, -WRAP_BACK, WRAP_UP])
         q = self.hand.clamp(self.hand.neutral() | WRAP_Q)
         return {"q": q, "H": H, "W": W, "obj": obj, "side": side, "W_rel": W - obj, "theta": np.array(THETA0)}
 
@@ -208,7 +212,12 @@ class _Doors(StepTake):
         self.fingers(side, t_in + 0.1, came)
         self.fingers(side, t_c, came)
         self.fingers(side, t_c + CLOSE_S, g["q"])
-        self.effort(side, t_c + CLOSE_S, 0.0, grip)
+        # the arm braced as the hand homes in on the bar, so it keeps to its path (unbraced it trailed by 25 mm and
+        # 15 deg and its fingers caught the bar's front corner); then the grip's effort as the fingers close
+        self.effort(side, t0, 0.0, None)
+        self.effort(side, t0 + 0.15, AIM_EFFORT, None)
+        self.effort(side, t_c, AIM_EFFORT, None)
+        self.effort(side, t_c + CLOSE_S, AIM_EFFORT, grip)
         self.effort(side, t_pull, 0.5, grip)
         self.event("grip", t_c, t_end + 0.1, side=side, grip=grip)
         mm = lambda t: from_mm + (to_mm - from_mm) * min_jerk((t - t_pull) / SLIDE_S)     # noqa: E731

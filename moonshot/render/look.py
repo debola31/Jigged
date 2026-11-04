@@ -1,7 +1,7 @@
 """The approved look (the vise take's third draft, 2026-11-02): materials by name, the VF-2's CAD colours replaced by
-what the parts are made of, NIMBLE's skin with subsurface scattering, a work shirt, a CC0 HDRI shop and the work
-lights. Ported from trainual's blender/lib/look.py, blender/showcase_physics.py and blender/showcase_load.py. Runs
-inside Blender, from render_take.py.
+what the parts are made of, the library's placeholder props drawn as what they stand for, NIMBLE's skin with
+subsurface scattering, a work shirt, a CC0 HDRI shop and the work lights. Ported from trainual's blender/lib/look.py,
+blender/showcase_physics.py and blender/showcase_load.py. Runs inside Blender, from render_take.py.
 
 `cc0` is the folder of CC0 textures and the HDRI (<data root>/cc0); `textures` the bake's skin maps.
 """
@@ -10,8 +10,9 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 MM = 0.001
 # VF-2 CAD materials, by what an ID render showed them to be (vf2.glb's names carry no meaning)
@@ -24,6 +25,81 @@ VF2 = {
     "mat_3": "spindle_head",
     "mat_0": "enclosure",       # inside of the enclosure
 }
+# The library's placeholder props (each asset record says "self-made placeholder"): boxes in flat CAD colours, their
+# materials mat_N, which render_take.import_glb renames <GLB stem>_mat_N. Each drawn as what its record says it is,
+# keyed by the node it colours. Only their look: their colliders are the station's own boxes (moonshot/world/).
+PROPS = {
+    # library/inspection/rough: a Mitutoyo SJ-210 class surface roughness tester
+    "rough_mat_0": "sj210_case",    # display_unit: the display unit
+    "rough_drive": "sj210_drive",   # ... the drive unit beside it (dress)
+    "rough_key": "sj210_key",       # ... and the display unit's keys (dress)
+    "rough_start": "sj210_start",
+    "rough_mat_1": "lcd",           # screen
+    "rough_mat_2": "sj210_steel",   # stylus_arm: the detector, its tip on the roughness specimen
+    # library/support/bench: the workbench, its drawer cabinet and the rolling tool cart beside it
+    "bench_mat_4": "cart_red",      # cart_shelf_4: the cart's two shelves
+    "bench_mat_1": "frame_black",   # leg_1: the bench's legs and the cart's corner posts
+    "bench_mat_5": "caster",        # caster_1: the cart's casters
+}
+
+
+def _box(bm, lo_mm, hi_mm, index: int) -> None:
+    lo, hi = Vector(lo_mm) * MM, Vector(hi_mm) * MM
+    M = Matrix.Translation((lo + hi) / 2) @ Matrix.Diagonal((*(hi - lo), 1.0))
+    for f in {f for v in bmesh.ops.create_cube(bm, size=1.0, matrix=M)["verts"] for f in v.link_faces}:
+        f.material_index = index
+
+
+def _material(me, name: str) -> int:
+    me.materials.append(bpy.data.materials.get(name) or bpy.data.materials.new(name))
+    return len(me.materials) - 1
+
+
+def _cart_shelves(bm, me) -> None:
+    """Each shelf's lip: a 3 mm rim round its top raised 38 mm (1.5 in), as a sheet-steel cart shelf is formed."""
+    bm.normal_update()
+    rim = bmesh.ops.inset_region(bm, faces=[f for f in bm.faces if f.normal.z > 0.99], thickness=3.0 * MM,
+                                 use_even_offset=True)["faces"]
+    up = bmesh.ops.extrude_face_region(bm, geom=rim)["geom"]
+    bmesh.ops.translate(bm, vec=(0.0, 0.0, 38.0 * MM), verts=[v for v in up if isinstance(v, bmesh.types.BMVert)])
+    bmesh.ops.delete(bm, geom=rim, context="FACES_ONLY")
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+
+def _sj210(bm, me) -> None:
+    """The drive unit in its own dark finish, and the display unit's keys on its top (z = 50.8 mm) right of the
+    screen, which ends at x = 12.1: a cursor pad, three function keys and the blue start key."""
+    drive = _material(me, "rough_drive")
+    for f in bm.faces:
+        if f.calc_center_median().y < 0:                  # the drive unit lies in front of the display unit
+            f.material_index = drive
+    key, start, top = _material(me, "rough_key"), _material(me, "rough_start"), 50.8
+    for dx, dy in ((0, 0), (-10, 0), (10, 0), (0, -10), (0, 10)):
+        _box(bm, (34 + dx, 30.3 + dy, top), (42 + dx, 38.3 + dy, top + 1.5), key)
+    for y in (21.0, 34.3, 47.6):
+        _box(bm, (56, y - 3.5, top), (68, y + 3.5, top + 1.5), key)
+    _box(bm, (76, 25.3, top), (90, 43.3, top + 2.0), start)
+
+
+DRESS = {("bench", "cart_shelf_4"): _cart_shelves, ("rough", "display_unit"): _sj210}
+
+
+def dress(stem: str, ob) -> None:
+    """A placeholder prop's render mesh given what its boxes lack (DRESS, by its GLB's stem and node), in the GLB's
+    frame. Only what is drawn: every collider is the station's own (moonshot/world/), and nothing rests on these."""
+    fn = DRESS.get((stem, ob.name.split(".")[0]))
+    if fn is None or ob.type != "MESH":
+        return
+    ob.data.transform(ob.matrix_basis)                   # the node's (quantised) scale into the mesh: metres
+    ob.matrix_basis = Matrix()
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+    fn(bm, ob.data)
+    for f in bm.faces:                                   # flat boxes: the Bevel in their material rounds the edges
+        f.smooth = False
+    bm.to_mesh(ob.data)
+    bm.free()
 
 
 class Nodes:
@@ -102,6 +178,25 @@ class Nodes:
         self.link(self.coords(1.0), n.inputs["Vector"])
         return self.ramp(n.outputs["Fac"], base - spread, base + spread)
 
+    def mottled(self, rgb, amount: float, scale: float = 3.0):
+        """A colour that darkens by up to `amount` in broad patches (fading, handling, shop dust): no real finish is
+        one flat colour."""
+        n = self.node("ShaderNodeTexNoise")
+        n.inputs["Scale"].default_value = scale
+        n.inputs["Detail"].default_value = 4
+        self.link(self.coords(1.0), n.inputs["Vector"])
+        return self.tint(self.ramp(n.outputs["Fac"], 1.0 - amount, 1.0), rgb)
+
+    def rounded(self, edge_mm: float, coat: bool = False):
+        """Edges rounded to edge_mm in the shading (Cycles' Bevel), the mesh untouched: a placeholder's sharp boxes
+        catch the light along their edges as a moulding or a folded sheet does."""
+        bv = self.node("ShaderNodeBevel", samples=8)
+        bv.inputs["Radius"].default_value = edge_mm * MM
+        self.link(bv.outputs["Normal"], self.bsdf.inputs["Normal"])
+        if coat:
+            self.link(bv.outputs["Normal"], self.bsdf.inputs["Coat Normal"])
+        return self
+
     def pbr(self, cc0: Path, asset: str, scale: float, tint=None, rough=(0.0, 1.0), normal=1.0, metal=None):
         """An ambientCG material, box-projected."""
         d = cc0 / asset
@@ -125,15 +220,22 @@ def sock(sockets, ident):
     return next(x for x in sockets if x.identifier == ident)
 
 
-def paint(mat, rgb, rough, coat=0.0, coat_rough=0.3, wear=0.06):
+def paint(mat, rgb, rough, coat=0.0, coat_rough=0.3, wear=0.06, edge_mm=0.0, mottle=0.0):
+    """Paint, powder coat or moulded plastic; edge_mm rounds a modelled box's edges, mottle varies its colour."""
     n = Nodes(mat).set(**{"Base Color": (*rgb, 1), "Metallic": 0.0, "Coat Weight": coat, "Coat Roughness": coat_rough})
     n.link(n.noise_rough(rough, wear, 6.0), n.bsdf.inputs["Roughness"])
+    if mottle:
+        n.link(n.mottled(rgb, mottle), n.bsdf.inputs["Base Color"])
+    if edge_mm:
+        n.rounded(edge_mm, coat=coat > 0)
     return n
 
 
-def metal(mat, rgb, rough, spread=0.05, aniso=0.0):
+def metal(mat, rgb, rough, spread=0.05, aniso=0.0, edge_mm=0.0):
     n = Nodes(mat).set(**{"Base Color": (*rgb, 1), "Metallic": 1.0, "Anisotropic": aniso})
     n.link(n.noise_rough(rough, spread, 18.0), n.bsdf.inputs["Roughness"])
+    if edge_mm:
+        n.rounded(edge_mm)
     return n
 
 
@@ -175,7 +277,7 @@ def apply_look(cc0: Path) -> None:
     done = set()
     for m in list(bpy.data.materials):
         name = m.name.split(".")[0]
-        role = VF2.get(name)
+        role = VF2.get(name) or PROPS.get(name)
         if role == "table":
             # ground cast iron: grey, with grinding marks, a little oil
             Nodes(m).pbr(cc0, "Metal054A", 3.0, tint=(0.95, 0.96, 1.0), rough=(0.32, 0.58), normal=0.6, metal=1.0)
@@ -191,6 +293,28 @@ def apply_look(cc0: Path) -> None:
             paint(m, (0.05, 0.05, 0.055), 0.45, coat=0.3)
         elif role == "enclosure":
             paint(m, (0.55, 0.56, 0.57), 0.55, wear=0.12)
+        elif role == "sj210_case":
+            # moulded light grey ABS, satin, its edges radiused as a moulding's are
+            paint(m, (0.36, 0.37, 0.37), 0.4, wear=0.08, edge_mm=3.0, mottle=0.06)
+        elif role == "sj210_drive":
+            paint(m, (0.035, 0.036, 0.04), 0.42, wear=0.08, edge_mm=2.5)
+        elif role == "sj210_key":
+            paint(m, (0.06, 0.062, 0.068), 0.55, edge_mm=1.0)
+        elif role == "sj210_start":
+            paint(m, (0.012, 0.06, 0.28), 0.4, coat=0.3, edge_mm=1.5)
+        elif role == "lcd":
+            # the display's glass over a dark (sleeping) panel: glossy, it shows the shop's lights
+            paint(m, (0.004, 0.005, 0.007), 0.3, coat=1.0, coat_rough=0.03, wear=0.03, edge_mm=0.6)
+        elif role == "sj210_steel":
+            # the detector's stainless barrel and the lapped steel specimen
+            metal(m, (0.62, 0.63, 0.65), 0.22, aniso=0.3, edge_mm=0.6)
+        elif role == "cart_red":
+            # red powder-coated sheet steel: semi-gloss, folded edges, faded and scuffed in patches
+            paint(m, (0.15, 0.013, 0.01), 0.42, coat=0.3, coat_rough=0.25, wear=0.1, edge_mm=1.5, mottle=0.25)
+        elif role == "frame_black":
+            paint(m, (0.02, 0.02, 0.022), 0.45, coat=0.2, coat_rough=0.3, wear=0.1, edge_mm=2.0)
+        elif role == "caster":
+            paint(m, (0.012, 0.012, 0.013), 0.65, edge_mm=1.5)
         elif name.startswith("mat_"):
             # the rest of the machine's CAD colours: painted sheet metal, light or dark as drawn
             b = next((x for x in m.node_tree.nodes if x.type == "BSDF_PRINCIPLED"), None) if m.node_tree else None

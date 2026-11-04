@@ -23,8 +23,8 @@ OUT = REPO / "app" / "(marketing)" / "showcase" / "showcase.json"
 PUBLISHED = Path(__file__).resolve().parent / "published.json"
 
 # Plan §7, in order. A part is live once its steps are rendered, checked and published.
-PARTS = ["nist-ftc-10", "nist-ctc-01", "ll-1005337", "ct-slbeam", "ll-1007223", "ct-tpg322", "ll-1011439",
-         "ll-1007224", "mcm-8017t3", "nist-ctc-05", "mcm-8492a054", "mcm-91259a544", "ct-8848hn", "nist-ftc-09",
+PARTS = ["nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223", "ct-tpg322", "ll-1011439",
+         "ll-1007224", "mcm-8017t3", "nist-ctc-05", "mcm-8492a054", "mcm-91259a544", "ct-8848hn", "nist-ctc-01",
          "ll-1011443", "ll-1011604", "ct-brmb0143", "ct-107w-ngd-3r", "ll-1006941", "ct-10004-bcrm"]
 LIVE = {"nist-ftc-10"}
 # Where a finishing station's steps happen: its zone in layout.json.

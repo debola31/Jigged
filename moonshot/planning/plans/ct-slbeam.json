@@ -1,7 +1,7 @@
 {
  "schema": "jigged.plan/1",
  "part": "ct-slbeam",
- "about": "Process plan for the Contour SLBEAM L-block on the shop's Hurco VM1 with a 6 in vise, following the shop's real routing (saw, Hurco mill, black oxide outside, QC). Written by Claude from the drawing (a modelled lookalike, in inches) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: X is length (the X=0 face is the back of the short leg), Y is width (1.500), Z is height (the Z=0 face is the bottom). The long leg is the 3.000 base and the short leg the 2.000 upright, each .750 thick. The bottom and both ends are faced while the blank is still a block, so the last setup cuts the L from finished faces: the back for X, the bottom for Z. The Hurco has no probe or tool setter in the shop record, so its X and Y are found with the edge finder and its tools measured on the presetter.",
+ "about": "Process plan for the Contour SLBEAM L-block on the shop's Haas VF-2 with its 6 in Kurt D688: saw, mill, black oxide outside, QC. The shop's real routing mills it on the Hurco VM1, which has no station; the VF-2 stands in for it (your decision, 2026-11-04). Written by Claude from the drawing (a modelled lookalike, in inches) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: X is length (the X=0 face is the back of the short leg), Y is width (1.500), Z is height (the Z=0 face is the bottom). The long leg is the 3.000 base and the short leg the 2.000 upright, each .750 thick. The bottom and both ends are faced while the blank is still a block, so the last setup cuts the L from finished faces: the back for X, the bottom for Z.",
  "stock": {"material": "4140 alloy steel, pre-hardened 28-32 HRC",
            "material_note": "As the drawing. The 1.500 width is left as the bar's own, cold-finished 1-1/2 in bar inside the drawing's ±.005; that is an assumption: squaring it from 1-3/4 in bar adds two setups",
            "bar": "1-1/2 x 2-1/4 in 4140 PH flat bar", "bar_mm": [38.1, 57.15], "length": "3-1/4 in",
@@ -12,23 +12,23 @@
    "operations": [
     {"id": "cut", "kind": "saw", "tool": "bandsaw", "what": "Cut the 3-1/4 in blank from the bar"}
    ]},
-  {"id": "op10", "title": "Op 10: bottom", "machine": "hurco", "face_up": "-Z",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "The blank on 1 in parallels, 38 mm proud of the jaws; its sawn ends are free. The faced bottom is what both legs are measured from"},
-   "wcs": {"code": "G54", "x": "the centre of the blank's length", "y": "the centre of its width", "z": "the top of the blank", "by": "edge finder in X and Y; Z touched off the top with the face mill"},
+  {"id": "op10", "title": "Op 10: bottom", "machine": "vf2", "face_up": "-Z",
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "The blank on 1 in parallels, 38 mm proud of the jaws; its sawn ends are free. The faced bottom is what both legs are measured from"},
+   "wcs": {"code": "G54", "x": "the centre of the blank's length", "y": "the centre of its width", "z": "the top of the blank", "by": "edge finder in X and Y; tool setter for Z"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the bottom flat",
      "features": [{"type": "plane", "normal": "-Z", "at_mm": 0.0}]}
    ]},
-  {"id": "op20", "title": "Op 20: end of the long leg", "machine": "hurco", "face_up": "+X",
-   "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Y faces", "note": "Standing on its sawn back against the stop, still a full 57 x 38 mm block; check it's square with the indicator"},
-   "wcs": {"code": "G54", "x": "the faced bottom (edge finder)", "y": "the side (edge finder)", "z": "the top of the end"},
+  {"id": "op20", "title": "Op 20: end of the long leg", "machine": "vf2", "face_up": "+X",
+   "workholding": {"vise": "d688", "parallels_in": 0, "jaw_on": "Y faces", "note": "Standing on its sawn back against the stop, still a full 57 x 38 mm block; check it's square with the indicator"},
+   "wcs": {"code": "G54", "x": "the faced bottom (probe)", "y": "the side (probe)", "z": "the top of the end"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the long leg's end flat",
      "features": [{"type": "plane", "normal": "+X", "at_mm": 76.2}]}
    ]},
-  {"id": "op30", "title": "Op 30: back and threads", "machine": "hurco", "face_up": "-X",
-   "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Y faces", "note": "Standing on the faced end against the stop; the threads are drilled from the back before the L is cut, past the short leg into stock the L removes, so the spiral-point tap pushes its chips into scrap"},
-   "wcs": {"code": "G54", "x": "the faced bottom (edge finder)", "y": "the side (edge finder)", "z": "the vise floor, plus 3.000 in"},
+  {"id": "op30", "title": "Op 30: back and threads", "machine": "vf2", "face_up": "-X",
+   "workholding": {"vise": "d688", "parallels_in": 0, "jaw_on": "Y faces", "note": "Standing on the faced end against the stop; the threads are drilled from the back before the L is cut, past the short leg into stock the L removes, so the spiral-point tap pushes its chips into scrap"},
+   "wcs": {"code": "G54", "x": "the faced bottom (probe)", "y": "the side (probe)", "z": "the vise floor, plus 3.000 in"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the back to the 3.000 length",
      "features": [{"type": "plane", "normal": "-X", "at_mm": 0.0}]},
@@ -37,9 +37,9 @@
      "features": [{"type": "hole", "dia_mm": 5.11, "axis": "X", "count": 2}]},
     {"id": "tap", "kind": "tap", "tool": "tap", "what": "Tap both 1/4-20 through the short leg"}
    ]},
-  {"id": "op40", "title": "Op 40: the L", "machine": "hurco", "face_up": "+Z",
-   "workholding": {"vise": "vise6", "parallels_in": 1.25, "jaw_on": "Y faces", "note": "On the faced bottom, on 1.25 in parallels so the L's floor stands 6.7 mm above the jaws; they hold 12 mm of the long leg"},
-   "wcs": {"code": "G54", "x": "the back (edge finder)", "y": "the side (edge finder)", "z": "the bottom on the parallels, plus 2.000 in"},
+  {"id": "op40", "title": "Op 40: the L", "machine": "vf2", "face_up": "+Z",
+   "workholding": {"vise": "d688", "parallels_in": 1.25, "jaw_on": "Y faces", "note": "On the faced bottom, on 1.25 in parallels so the L's floor stands 6.7 mm above the jaws; they hold 12 mm of the long leg"},
+   "wcs": {"code": "G54", "x": "the back (probe)", "y": "the side (probe)", "z": "the bottom on the parallels, plus 2.000 in"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the top of the short leg to the 2.000 height",
      "features": [{"type": "plane", "normal": "+Z", "at_mm": 50.8}]},

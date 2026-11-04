@@ -1,0 +1,42 @@
+{
+ "schema": "jigged.plan/1",
+ "part": "nist-ftc-09",
+ "about": "Process plan for NIST FTC-09 on the shop's Haas VF-2, the sheet clamped to its table: it takes nist-ctc-01's place in G1 (your decision, 2026-11-04). It is an 11 ga stainless sheet, 279.4 x 190.5 x 3.04 mm, which the plan doc routes through the sheet laser; that station isn't built, so every hole, slot, the window and the outline are milled. A 3 mm sheet can't be held by its edges in a vise while its outline is cut, so it sits on a spoilboard under step clamps on its margin, and the outline leaves tabs. Written by Claude from the drawing (nist_ftc_09_asme1_rd) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: Y is thickness (the Y=0 face is datum A, the bottom; the lettering is engraved into the top), X is width (190.5, centred), Z is length (279.4, centred).",
+ "stock": {"material": "304 stainless steel sheet, 11 ga (.1195 thick), ASTM A240", "material_note": "As the drawing; its two faces left as bought",
+           "size_mm": [254.0, 3.04, 342.9], "size_in": "10 x 0.1195 x 13.5", "from": "11 ga sheet sheared to 10 x 13-1/2 in by the supplier"},
+ "faces": {"+Y": "lettered side up"},
+ "setups": [
+  {"id": "op10", "title": "Op 10: holes, slots and outline", "machine": "vf2", "face_up": "+Y",
+   "workholding": {"clamps": 6, "on": "the spoilboard", "note": "On a 3/4 in MDF spoilboard bolted to the table, which the through cuts run into; six step clamps on the sheet's 32 mm margin, clear of the outline's cutter path. The outline leaves four 1 mm tabs so the part stays put; they're cut at the bench"},
+   "wcs": {"code": "G54", "x": "the centre of the sheet's length", "y": "the centre of its width", "z": "the top of the sheet", "by": "probe in X, Y and Z; tool setter for the tools' lengths"},
+   "operations": [
+    {"id": "spot", "kind": "spot", "tool": "spot", "what": "Spot every drilled hole"},
+    {"id": "small", "kind": "drill", "tool": "drill-5-32", "what": "Drill 7X Ø.156 ±.008",
+     "features": [{"type": "hole", "dia_mm": 3.97, "axis": "Y", "count": 7}]},
+    {"id": "e_holes", "kind": "drill", "tool": "drill-5p5", "what": "Drill 2X Ø.221 ±.008", "note": "5.5 mm is .2165, inside the ±.008",
+     "features": [{"type": "hole", "dia_mm": 5.61, "axis": "Y", "count": 2}]},
+    {"id": "datum_holes", "kind": "drill", "tool": "drill-6", "what": "Drill 4X Ø.234 ±.008, and the six holes to be reamed", "note": "6 mm is .2362, inside the ±.008, and leaves the reamer .014",
+     "features": [{"type": "hole", "dia_mm": 5.94, "axis": "Y", "count": 4}]},
+    {"id": "k_holes", "kind": "drill", "tool": "drillk", "what": "Drill 3X Ø.281 ±.008",
+     "features": [{"type": "hole", "dia_mm": 7.14, "axis": "Y", "count": 3}]},
+    {"id": "ream", "kind": "ream", "tool": "ream-1-4", "what": "Ream 6X Ø.250 +.003/-.000"},
+    {"id": "holes", "kind": "pocket", "tool": "em14", "what": "Plunge the four Ø.250 ±.008 holes and mill the two Ø.315 [8 ±0.2] and the Ø.750 ±.008",
+     "features": [{"type": "hole", "dia_mm": 8.0, "axis": "Y", "count": 2}, {"type": "hole", "dia_mm": 19.05, "axis": "Y", "count": 1}]},
+    {"id": "slots", "kind": "pocket", "tool": "em14", "what": "Mill the three slots, the keyhole's Ø.375 and the window with its four scallops",
+     "features": [{"type": "hole", "dia_mm": 9.52, "axis": "Y", "count": 3}]},
+    {"id": "keyhole", "kind": "pocket", "tool": "em18", "what": "Mill the keyhole's .140 ±.008 slot",
+     "features": [{"type": "hole", "dia_mm": 3.56, "axis": "Y", "count": 1}]},
+    {"id": "lettering", "kind": "engrave", "tool": "em132", "what": "Engrave the lettering 1.2 mm deep, as the model has it",
+     "features": [{"type": "plane", "normal": "+Y", "at_mm": 1.8}]},
+    {"id": "chamfer", "kind": "chamfer", "tool": "chamf", "what": "Chamfer the four Ø.234 holes .03 x .03"},
+    {"id": "outline", "kind": "profile", "tool": "em38", "what": "Profile the 11.00 x 7.50 outline with its corners and notches, leaving four tabs",
+     "features": [{"type": "plane", "normal": "-X", "at_mm": -95.2}, {"type": "plane", "normal": "+X", "at_mm": 95.2},
+                  {"type": "plane", "normal": "-Z", "at_mm": -139.7}, {"type": "plane", "normal": "+Z", "at_mm": 139.7}]}
+   ]}
+ ],
+ "finish": [
+  {"id": "deburr", "station": "bench", "title": "Cut the tabs and deburr", "what": "Cut the four tabs and file them flush, then deburr every edge and hole with a hooked blade drawn along it, so the sheet is safe to handle"},
+  {"id": "inspect", "station": "inspection", "title": "Check the holes, slots and flatness", "what": "Check the 11.00 x 7.50 outline with the long calipers, the six reamed Ø.250 holes with gauge pins, the other holes and slots with the calipers, and the .01 flatness to A on the granite plate with the indicator",
+   "tools": ["cal24", "cal6", "gblock", "hgauge", "dti"]}
+ ]
+}

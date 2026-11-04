@@ -1,7 +1,7 @@
 {
  "schema": "jigged.plan/1",
  "part": "ll-1007223",
- "about": "Process plan for the L&L gripper jaw (Greiferbacke, 1007223) on the shop's Haas VF-2 with a 6 in vise. Written by Claude from the drawing (314-092-59983-10) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: X is width (49), Y is height (the Y=40 face is the top, with the dowel counterbores), Z is length (75, centred). In section it is a T: a 10 mm flange on top, the stem (X 24 to 35) down to Y=0, an R10 between the flange and the stem's left side, and steps at Y 20 and 27 under the flange's right side. The top and the flange's outline are cut first, so Op 20 can hold the part by its flange in soft jaws while it cuts everything underneath.",
+ "about": "Process plan for the L&L gripper jaw (Greiferbacke, 1007223) on the shop's Haas VF-2 with its 6 in Kurt D688. Written by Claude from the drawing (314-092-59983-10) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: X is width (49), Y is height (the Y=40 face is the top, with the dowel counterbores), Z is length (75, centred). In section it is a T: a 10 mm flange on top, the stem (X 24 to 35) down to Y=0, an R10 between the flange and the stem's left side, and steps at Y 20 and 27 under the flange's right side. The top and the flange's outline are cut first, so Op 20 can hold the part by its flange in soft jaws while it cuts everything underneath.",
  "stock": {"material": "AISI 4140 PHT (pre-hardened)", "material_note": "As the drawing",
            "bar": "1-3/4 x 2-1/4 in 4140 PH flat bar", "bar_mm": [44.45, 57.15], "length": "3-1/4 in",
            "size_mm": [57.15, 44.45, 82.55], "size_in": "2.25 x 1.75 x 3.25", "from": "sawn from the bar on the band saw"},
@@ -12,7 +12,7 @@
     {"id": "cut", "kind": "saw", "tool": "bandsaw", "what": "Cut the 3-1/4 in blank from the bar"}
    ]},
   {"id": "op10", "title": "Op 10: top", "machine": "vf2", "face_up": "+Y",
-   "workholding": {"vise": "vise6", "parallels_in": 1.0, "jaw_on": "X faces", "note": "The blank on 1 in parallels; the jaws hold its lowest 18.7 mm, so the flange's edges and the ends are profiled down to 1 mm above them and Op 20 cuts the rest"},
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "X faces", "note": "The blank on 1 in parallels; the jaws hold its lowest 18.7 mm, so the flange's edges and the ends are profiled down to 1 mm above them and Op 20 cuts the rest"},
    "wcs": {"code": "G54", "x": "the centre of the blank's length", "y": "the centre of its width", "z": "top of the faced stock", "by": "edge finder in X and Y; tool setter for Z"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the top flat",
@@ -27,7 +27,7 @@
     {"id": "chamfer", "kind": "chamfer", "tool": "chamf", "what": "Chamfer the three top edges 5 x 45° and the counterbores 0.5 x 45°"}
    ]},
   {"id": "op20", "title": "Op 20: underside", "machine": "vf2", "face_up": "-Y",
-   "workholding": {"vise": "vise6", "parallels_in": 1.375, "jaw_on": "X faces", "note": "Flipped onto the faced top, on 1.375 in parallels, in soft jaws cut to the flange's two edges: they hold its top 9 mm, so the flange's underside stands 0.9 mm above them. Cutting the soft jaws to the flange isn't a step yet, as for nist-ftc-10's Op 30"},
+   "workholding": {"vise": "d688", "parallels_in": 1.375, "jaw_on": "X faces", "note": "Flipped onto the faced top, on 1.375 in parallels, in soft jaws cut to the flange's two edges: they hold its top 9 mm, so the flange's underside stands 0.9 mm above them. Cutting the soft jaws to the flange isn't a step yet, as for nist-ftc-10's Op 30"},
    "wcs": {"code": "G54", "x": "the finished end (probe)", "y": "the flange's edge (probe)", "z": "the top on the parallels, plus 40 mm"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the stem to the 40 mm height",
@@ -42,7 +42,7 @@
      "features": [{"type": "hole", "dia_mm": 11.0, "axis": "Y", "count": 1}]}
    ]},
   {"id": "op30", "title": "Op 30: side of the stem", "machine": "vf2", "face_up": "-X",
-   "workholding": {"vise": "vise6", "parallels_in": 0, "jaw_on": "Z faces", "note": "On the flange's 8 mm edge on the vise floor against the stop, the jaws on its finished ends; check the stem's side is square with the indicator"},
+   "workholding": {"vise": "d688", "parallels_in": 0, "jaw_on": "Z faces", "note": "On the flange's 8 mm edge on the vise floor against the stop, the jaws on its finished ends; check the stem's side is square with the indicator"},
    "wcs": {"code": "G54", "x": "the top (probe)", "y": "the end (probe)", "z": "the stem's side (probe)"},
    "operations": [
     {"id": "spot", "kind": "spot", "tool": "spot", "what": "Spot the four holes and countersink the two clearance holes Ø9.5 x 90°"},

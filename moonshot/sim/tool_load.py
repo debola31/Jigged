@@ -50,7 +50,8 @@ FAST_MM_S = 250.0           # while the plan moves the right hand faster than th
                             # in a movement's slow end (corrected through the fast reach to the holder, the eye wound
                             # up 22 mm of lag and threw the hand 30 mm past its grip as the reach slowed)
 CARRY_SOLREF_S = 0.004      # the carry weld's time constant, holding the holder stiffly in the hand
-PRELOAD_SOLREF_S = 0.05     # ... and before the hand takes the holder's weight
+PRELOAD_SOLREF_S = 0.3      # ... and before the hand takes the holder's weight: under 0.1 N for the 2 mm a hand
+                            # drifts on its grip (at 0.15 s, 0.5 N, near the 0.55 N that starts the loading)
 R_OUT_S = 0.55             # the right hand off the holder this long after its grip ends (motion/tool_load.py)
 R_SIGHT_EASE_S = 0.8        # ... and its carry's correction eases out this fast as it goes back, as the bench's
 
@@ -86,6 +87,7 @@ class ToolLoadRun(PendantRunner):
                      "released": []}
         self.weld = m.equality("carry_holder").id if self.loose is not None else None
         self._pivoting = False
+        self._stiff = False
         self._apart_on = False
         self.holder_kg_model = float(m.body_subtreemass[self.loose]) if self.loose is not None else 0.0
 
@@ -268,16 +270,22 @@ class ToolLoadRun(PendantRunner):
             self.anchor_weld([0.0, 0.0, GRIP_Z_MM])
             m.eq_data[self.weld, 10] = 0.0
             self._pivoting = True
+        loading = t >= self.carry.get("loading", (self.carry["t0"],))[0]
         if want and not d.eq_active[self.weld]:
             self.anchor_weld([0.0, 0.0, 0.0])
             m.eq_data[self.weld, 10] = 1.0
             d.eq_active[self.weld] = 1
+            self._stiff = False
         elif not want and d.eq_active[self.weld]:
             d.eq_active[self.weld] = 0
-        # soft while the grip firms and before the hand takes any weight, as the skin and the fingers give: stiff, the
-        # hand's tremor shook the resting holder against its tines at 1-2 N, past the 0.6 N that starts the loading
-        loading = t >= self.carry.get("loading", (self.carry["t0"],))[0]
-        m.eq_solref[self.weld, 0] = CARRY_SOLREF_S if loading else PRELOAD_SOLREF_S
+        # soft while the grip firms and before the hand takes any weight, as the skin and the fingers give, and set
+        # again where the holder then sits in the hand as the hand takes its weight, so stiffening moves nothing: stiff
+        # from the start, the hand's tremor shook the resting holder against its tines at 1-2 N, past the 0.55 N that
+        # starts the loading, and at 0.05 s still 1.7 N
+        if want and loading and not self._stiff and not self._pivoting:
+            self.anchor_weld([0.0, 0.0, 0.0])
+            self._stiff = True
+        m.eq_solref[self.weld, 0] = CARRY_SOLREF_S if self._stiff else PRELOAD_SOLREF_S
         # apart from the final approach on, as the runner holds a welded tool's grip (APPROACH_S): a hand trailing its
         # plan by 15 mm, its open fingers just under the flange, knocked the holder out of its fork
         apart = self.grip["t0"] - APPROACH_S <= t < self.carry["t1"] + RELEASE_S

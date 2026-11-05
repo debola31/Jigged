@@ -44,11 +44,28 @@ def cuts(part: str, step: dict, name: str = "final", takes: Path | None = None) 
     return out
 
 
+def lone_whole(cuts: list[Cut]) -> bool:
+    """Is the step one whole take, so its video is that take's own?"""
+    return len(cuts) == 1 and cuts[0][1] == 0 and cuts[0][2] is None
+
+
+def refuse_feeding_itself(cuts: list[Cut], out: Path) -> None:
+    """Raises if the step's video would be written over one of the videos it is cut from: a take whose folder is the
+    step's (<part>-<step id>) would lose its own video to the joined one, and the next assemble would cut that in
+    again (ll-1005337 op10's unload, 2026-11-05). A step that is one whole take, the step's own, is that video already
+    (a lone whole take is copied, and onto itself is nothing)."""
+    out = Path(out).resolve()
+    if not lone_whole(cuts) and any(Path(v).resolve() == out for v, _, _ in cuts):
+        raise ValueError(f"{out}: the step's video is one of its own takes' videos; name that take apart from the "
+                         "step (moonshot/planning/takes.py)")
+
+
 def make(cuts: list[Cut], out: Path, blender: str) -> Path:
     """The cuts joined into one video at out."""
     out = Path(out)
+    refuse_feeding_itself(cuts, out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if len(cuts) == 1 and cuts[0][1] == 0 and cuts[0][2] is None:          # a lone whole take: its own video
+    if lone_whole(cuts):                                                     # a lone whole take: its own video
         if Path(cuts[0][0]).resolve() != out.resolve():
             shutil.copyfile(cuts[0][0], out)
         return out
@@ -73,7 +90,9 @@ def assemble(part: str, name: str = "final", blender: str | None = None, takes: 
         out = takes / f"{part}-{s['id']}" / f"{name}.mp4"
         if c is None:
             state[s["id"]] = "waiting"
-        elif out.exists() and all(out.stat().st_mtime >= v.stat().st_mtime for v, _, _ in c):
+            continue
+        refuse_feeding_itself(c, out)                    # before "unchanged": a step fed by its own video is newer
+        if out.exists() and all(out.stat().st_mtime >= v.stat().st_mtime for v, _, _ in c):
             state[s["id"]] = "unchanged"
         else:
             make(c, out, blender or blender_exe())

@@ -45,6 +45,7 @@ OVER_GRIP = np.array([0.0, -10.0, 45.0])   # the last of it down onto the block:
                                            # s the physics hand ran 10 mm low coming down, and knocked parallel b
 NEIGHBOUR_CLEAR_MM = 4.0           # the grip keeps this clear of the parallel left in the rack: its curled ring and
                                    # little fingers rested 1.5 mm into it
+NEAR_SET_MM = 30.0                 # ... and of a parallel already set nearer than this to where it lands (pinch_spec)
 # after the touch, the lifting studies' phases (Guillery 2013; person.grasp_preload_ms 139-321, grasp_loading_ms
 # 163-265): the grip firms while the hand stays put, then the hand takes the weight (the carry's pull ramps in over
 # LOADING_S, moonshot/sim/set_parallels.py) and starts up LIFT_DELAY_S after the carry starts, the block coming off
@@ -183,8 +184,15 @@ class SetParallels(StepTake):
         cols += [obox(c, Rr, hh) for c, hh in RACK.boxes()]
         cols += vise_boxes({}, self.vload.parallel_h, self.vload.opening0)
         set_before = {b: self.dest[b] for b in ORDER[:ORDER.index(name)]}
-        cols += self.at_landing(name, vise_boxes(set_before, self.vload.parallel_h, self.vload.opening0,
-                                                 include_table=False))
+        # a parallel already set within NEAR_SET_MM of this one's spot is kept NEIGHBOUR_CLEAR_MM clear of, as the one
+        # left in the rack is: with ll-1007223's 24 mm between them the run's fingers, letting go of parallel b, met
+        # parallel a and set it rocking (2.4 mm off); the reference's stand 43 mm apart
+        close = {b: p for b, p in set_before.items()
+                 if abs(float(p[1] - self.dest[name][1])) - V.PARALLEL_T < NEAR_SET_MM}
+        cols += self.at_landing(name, vise_boxes({b: p for b, p in set_before.items() if b not in close},
+                                                 self.vload.parallel_h, self.vload.opening0, include_table=False))
+        cols += self.at_landing(name, [obox(self.centre(p), np.eye(3), np.add(half, NEIGHBOUR_CLEAR_MM))
+                                       for p in close.values()])
         S = lambda *a: list(a) + [0.0, 0.0]                                                          # noqa: E731
         return dict(obj=self.centre(self.rack[name]), side="R", q0=q0, colliders=cols, load=self.kg,
                     targets={"thumb": plane(near, Rr @ [0, -1, 0], 1.5, local_bands(top, Rr, x=(-10, 10), depth=(3, 6))),

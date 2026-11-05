@@ -11,6 +11,7 @@ the index on the trigger and the thumb round the far side; solved in two stages,
 """
 from __future__ import annotations
 
+import shutil
 import sys
 
 import numpy as np
@@ -292,7 +293,12 @@ def build(verbose=True, part: str | None = None, setup: str | None = None, step:
     what the physics finds on the table (loads.scene_spec): for the clean, the vise open, its parallels in their rack
     and the part as it enters the setup waiting on the table; for the unload, the part as it leaves the setup clamped
     in the vise. The gun's path is the shared take's: it blows between the jaws, over whatever stands there."""
-    take = BlowOff(out=TAKES / (f"{part}-{setup}-{step}-blow-off" if part else "blow-off"), verbose=verbose)
+    out = TAKES / (f"{part}-{setup}-{step}-blow-off" if part else "blow-off")
+    shared = TAKES / "blow-off" / "grips.json"     # the same grip on the same gun from the same stance, as the plates'
+    if part and not (out / "grips.json").exists() and shared.exists():      # (plate_blow_off.py): its cache key
+        out.mkdir(parents=True, exist_ok=True)                                # still decides whether it holds
+        shutil.copy(shared, out / "grips.json")
+    take = BlowOff(out=out, verbose=verbose)
     if part:
         take.extra = scene_spec(part, setup, stock="in" if step == "clean" else "out",
                                 vise="open" if step == "clean" else "clamped")

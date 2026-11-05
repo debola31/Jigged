@@ -228,7 +228,7 @@ class ViseTake:
         keep = np.concatenate([[True], np.diff(ang) > 1e-6])
         return float(np.interp(self.crank_cmd(tt, i, e), ang[keep], ts[keep]))
 
-    def aim_fingertip(self, parallel: str, normal) -> np.ndarray:
+    def aim_fingertip(self, parallel: str, normal, tt: float, t_press: float) -> np.ndarray:
         """Aim the index pad onto the face of the parallel a fingertip check presses: the shift (m) that brings the
         pad's nearest point onto the face's centre line across the 3.1 mm strip, clear of the top's ends (pressing
         down) or of the end face's edges (pushing along it). The press itself owns its own direction."""
@@ -248,11 +248,16 @@ class ViseTake:
         else:                                              # its end face: clear of the top and bottom edges, and low
             # on it beside a neighbour, under the part's overhang (the plan's tip grip)
             shared = abs(goal[1]) > 1e-4
-            goal[2] = np.clip(local[2], -half[2] + 0.004, -0.003 if shared else half[2] - 0.004)
             if shared:
-                # across the strips by the pad's middle, which noses onto the end: its nearest point, on its side
-                # where it already pressed the neighbour, moved op40's pad 2 mm of the 8 to para_b, and it read 0 N
-                local[1] = (R.T @ (d.geom_xpos[m.geom("R_g_dis2").id] - c))[1]
+                # judged where the pad will be at the press, not where the hand is on its way there, and across the
+                # strips by the pad's middle, which noses onto the end, not its nearest point, on its side: aimed from
+                # 17 mm high and 6 mm off on the way, op40's pad went onto para_a's edge through para_b's check, and
+                # para_b read 0 N
+                g = m.geom("R_g_dis2").id
+                ahead = self.ref_pose(self.plan_time(t_press)).geom_xpos[g] - self.ref_pose(self.plan_time(tt)).geom_xpos[g]
+                local = R.T @ (ft[:3] + ahead - c)
+                local[1] = (R.T @ (d.geom_xpos[g] + ahead - c))[1]
+            goal[2] = np.clip(local[2], -half[2] + 0.004, -0.003 if shared else half[2] - 0.004)
         shift = R @ (goal - local)
         return shift - n * (n @ shift)
 
@@ -269,7 +274,7 @@ class ViseTake:
         for i, e in enumerate(self.iv["press"]):
             if e["contact"] in ("para_a", "para_b") and e["t0"] - AIM_LEAD_S <= tt < e["t1"] + 0.3:
                 if i not in self.aim:
-                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"])
+                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"], tt, e["t0"])
                 off += self.aim[i] * min_jerk((tt - (e["t0"] - AIM_LEAD_S)) / 0.25) * (1 - min_jerk((tt - e["t1"]) / 0.3))
         for j, e in enumerate(self.cranks):
             if tt >= e["t1"] and j in self.letgo:
@@ -820,12 +825,16 @@ class ViseTake:
         return float(np.interp(phi, ang[keep], ts[keep]))
 
     def ref_wrist(self, tp):
+        return self.ref_pose(tp).body("R_hand").xpos.copy()
+
+    def ref_pose(self, tp) -> mujoco.MjData:
+        """A scratch copy of the run's state with the body in the plan's pose at plan time tp (positions only)."""
         q, _, _ = self.ref.at(tp)
         scratch = mujoco.MjData(self.model)
         scratch.qpos[:] = self.data.qpos
         scratch.qpos[self.body_q] = q[self.body_q]
         mujoco.mj_kinematics(self.model, scratch)
-        return scratch.body("R_hand").xpos.copy()
+        return scratch
 
     def measure_offset(self, k):
         """Where the blank really sits in the hand vs the plan, as a wrist correction in world metres."""

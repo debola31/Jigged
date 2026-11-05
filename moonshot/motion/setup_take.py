@@ -73,7 +73,7 @@ JAW_TOP = VISE["jaw_top_z"]
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
 REACH_S, REACH_PEAK = 0.66, 0.62
-KNOB_REACH_S, KNOB_PEAK = 0.62, 0.66
+KNOB_REACH_S, KNOB_PEAK = 0.62, 0.645
 # the final pull: out over the disc (slower than the reach, so the reach is the fastest move before the grasp), a
 # moment's pause, then the reach, onto the knob from the back of the hand as the first crank's comes on, from this far
 # out along the knob's axis (straight from behind, op40's fingers swept the lever for 17 frames). FINAL_AXIAL slides
@@ -120,6 +120,7 @@ PRELOAD_FROM_TOUCH, PRELOAD_PRESS_N, PRELOAD_PRESS_LEAD_S, KNOB_LAG_MM = True, 1
 KNOB_HOLD_OPEN = 0.0
 STAND_MARGIN_MM = 3.0       # a part set down stands if its middle is this far inside the parallels under it
 TALL_TOP_CLEAR_MM = 4.0     # a tall part's grip keeps the hand this far over its top (_grip_specs)
+TALL_RISE_S = 0.04          # ... and it rises off the table this long after the plan lifts it (grab)
 # a part standing far proud of the jaws is let go of (open_like PROUD_RELEASE_OPEN) PROUD_RELEASE_S before the hand
 # lifts off it (let_go)
 PROUD_RELEASE_S, PROUD_RELEASE_OPEN = 0.25, 0.25
@@ -421,16 +422,24 @@ class Take:
         for name in [n for n in ("para_b", "para_a") if n in self.parallels]:
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
             pc[1] = tip_y(self.parallels, name)
+            shared = pc[1] != self.parallels[name][1]
+            keep_off = []
             if covered:                          # the pad on the parallel's end face, under the part's overhang
                 end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
                 # low on it beside a neighbour (tip_y), under the part's overhang: aimed at the end's middle, the pad
                 # caught on the bottom edge of op40's part, 2.8 mm over the parallels' ends
-                shared = pc[1] != self.parallels[name][1]
                 target = plane(end, [1, 0, 0], 1.5, bands(end, y=(-1.0, 1.0), z=(-9.0, -3.0) if shared else (-4.0, 4.0)))
+                if shared:
+                    # and the finger kept off the neighbour's end: pointing over it, the index's tip pressed op40's
+                    # para_a, 4.6 mm into its end, through para_b's check, and para_b read 0 N
+                    for other, p in self.parallels.items():
+                        if other != name:
+                            keep_off.append(box([VISE["x"] + PAR_L / 2 + 8, p[1], p[2] + self.par_h / 2],
+                                                [8, PAR_T / 2, self.par_h / 2]))
             else:
                 target = plane([x_end, pc[1], pc[2]], [0, 0, 1], 1.5, bands([x_end, pc[1], pc[2]], x=(-6, 6), y=(-1.0, 1.0)))
             specs[f"tip_{name}"] = dict(obj=self.parallels[name].copy(), q0=q0,
-                                        colliders=[box(self.home, self.half + 4)]
+                                        colliders=[box(self.home, self.half + 4)] + keep_off
                                         + vise_boxes(self.parallels, self.par_h, self.size[1], margin=6.0),
                                         targets={"index": target},
                                         iters=1200,
@@ -554,6 +563,10 @@ class Take:
             # before the close, and it rises off the table 0.09 s after the plan lifts it: timed from the other loads'
             # touch and rise, op50's preload and loading measured 300 and 267 ms
             lead, rise = (TOUCH_LEAD_S, 0.0) if self.half[0] >= 30 else (0.16, 0.06)
+            if self.half[0] >= 30 and self.set_down[2] + self.half[2] - JAW_TOP >= 30:
+                # a part pinched halfway down rises a frame later than a shorter one pinched near its top: op40's
+                # loading measured 267 ms (people 163-265)
+                rise = TALL_RISE_S
             via, peak, touch_lead, early, loading_s = [], REACH_PEAK, lead, 0.0, ga["loading_s"] - rise
         t_ready = t0 + 0.35 + raise_s
         self.transit(t0 + 0.35, t_ready, ready, via=via, paced=bool(via))

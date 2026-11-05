@@ -135,7 +135,8 @@ def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
 
 
 TIP_SHARE_MM = 16.0     # a parallel this near another (a fingertip's width) is pressed on its far side from it
-TIP_OUT_MM = 1.0        # ... this far off its centre line, still on its 3.1 mm end
+TIP_OUT_MM = 2.5        # ... this far off its centre line (the pad's middle; a 14 mm pad there still covers its
+                        # 3.1 mm end, and its side stands clear of the neighbour's)
 
 
 def tip_y(parallels: dict, name: str, share: float = TIP_SHARE_MM, out: float = TIP_OUT_MM) -> float:

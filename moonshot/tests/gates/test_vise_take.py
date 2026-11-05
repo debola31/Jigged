@@ -1,7 +1,8 @@
 """The new core's vise take, verb by verb, on the full body (plan §5.4, step 1, stage 2), meets the outcomes trainual's
 accepted take met. That take itself stopped being the bar on 2026-11-01's review: it bends the wrist past its
 ellipse and grips the crank round the lever's joint (docs/moonshot/physics.md). The take run here is the one the
-ported planner writes to the data root (takes/setup-take), and nist-ftc-10's first setup (takes/nist-ftc-10-op10).
+ported planner writes to the data root (takes/setup-take), nist-ftc-10's first setup (takes/nist-ftc-10-op10), and
+its last (takes/nist-ftc-10-op50): the part stood on end on the vise's floor against the stop, with no parallels.
 Physics tier: farm and hub only (`pytest moonshot -m farm`).
 
 Known gap, not asserted here: free-motion wrist lag still exceeds the tracking-lag threshold at a few moments
@@ -14,8 +15,10 @@ from moonshot.contracts.thresholds import threshold
 from moonshot.world import vise as V
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-# the reference load, and nist-ftc-10's first setup: its stock, 1.4 kg and 165 mm long, on 1 in parallels
-TAKES = {"reference": data_root() / "takes" / "setup-take", "nist-ftc-10-op10": data_root() / "takes" / "nist-ftc-10-op10"}
+# the reference load; nist-ftc-10's first setup, its stock, 1.4 kg and 165 mm long, on 1 in parallels; and its last,
+# 158 mm tall on end against the stop
+TAKES = {"reference": data_root() / "takes" / "setup-take", "nist-ftc-10-op10": data_root() / "takes" / "nist-ftc-10-op10",
+         "nist-ftc-10-op50": data_root() / "takes" / "nist-ftc-10-op50"}
 
 
 @pytest.fixture(scope="module", params=sorted(TAKES))
@@ -53,6 +56,12 @@ def test_slide_seats_it_against_the_fixed_jaw(report):
     assert abs(report["slide"]["gap_to_fixed_jaw_after_mm"]) < threshold("physics.placement_mm").value
 
 
+def test_slide_seats_it_against_the_stop(report):
+    if report["_load"].stop() is None:
+        pytest.skip("on parallels: no stop")
+    assert abs(report["slide"]["gap_to_stop_after_mm"]) < threshold("physics.placement_mm").value
+
+
 def test_push_reaches_its_force(report):
     p = report["push"]
     assert abs(p["press_N_median"] - p["target_N"]) <= threshold("physics.force_target_frac").value * p["target_N"]
@@ -68,6 +77,8 @@ def test_rotate_closes_the_vise_by_the_screws_ratio(report):
 
 
 def test_measure_finds_both_parallels_pinched(report):
+    if not report["_load"].parallels_y:
+        pytest.skip("on the vise's floor: no parallels to try")
     for m in report["measure"]:
         assert abs(m["press_N_median"] - 3.0) <= threshold("physics.force_target_frac").value * 3.0, m
         assert m["parallel_moved_mm"] < threshold("physics.parallel_pinched_mm").value, m

@@ -79,6 +79,9 @@ class DeburrPlan(BenchPlan):
     # the shoulder to 53 deg of rotation (people's 31); at 5 alone the pads came off it, and at (5, 5) the forearm
     # turned to 77 deg of pronation (0.72 in people's range, 0.91 at (3, 3))
     grip_weights = (3.0, 3.0)
+    # and its body people's range at 3.5, as inspect's (BodySolver.W["range"], 0.5): on the body whose colliders fit
+    # its skin, both arms held to people's, the left steadying hand's shoulder turned past theirs for 34 frames
+    solver_w = {"range": 3.5}
 
     def __init__(self, out=OUT, verbose=True):
         super().__init__(out, verbose)
@@ -148,8 +151,12 @@ class DeburrPlan(BenchPlan):
         self.look(t0, self.tool0[0] + self.tool0[1] @ [110, 0, 0])
         # ready in front of the bench's edge and high enough that the hanging fingers clear its top: 4 mm in front and
         # 110 mm up, they caught its edge and held the hand 115 mm off the tool as the carry closed
-        # widest 0.08 s before the hand came to rest, it was widest 82% of the way through its reach; 0.13 s, 67%
-        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -10, 55], opened=0.8, lead=0.105)
+        # widest 0.08 s before the hand came to rest, it was widest 82% of the way through its reach; 0.13 s, 67%;
+        # 0.105 s, 72%, and on the body whose colliders fit its skin, 69%. Its fingers closing from 0.5 open sweep 4 mm
+        # into the bench under the handle (closed, 1 mm; opened 0.8, 7 mm over it), and closing at the grip they shoved
+        # the tool 12 mm: it comes in shallower and to rest 5 mm over the grip, closing as it comes down
+        tg = self.reach("R", "tool", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -30, 45], opened=0.8, lead=0.09,
+                        above=5.0)
         self.effort("R", tg, 0.0, "tool")
         self.effort("R", tg + 0.25, 0.3, "tool")
         self.t_grab = tg

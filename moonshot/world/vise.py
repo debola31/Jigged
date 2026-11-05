@@ -24,6 +24,8 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             screw_axis=np.array([-381.5, -636.4, 892.29]), lever=120.0, knob_r=13.5, knob_len=90.0, knob_grip=58.0,
             lead=6.35)
 CRANK0_DEG = 55.0
+ENCLOSE_SOLREF_S = 0.005    # the knob weld's time constant (s): how stiffly the fist holds the knob; at 0.02 the final
+                            # pull's push moved the knob 2-3 mm in the fist, onto the index (skin 3.9 mm, op10)
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
 # the stop a part stood on the vise's floor is set against (nist-ftc-10 op50): a steel block (x along the jaws, y
 # across, z up; mm), tall enough to be pinched by its top over the jaws, narrower across than such a part, so the jaws
@@ -132,6 +134,22 @@ def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
     return {body: {"dir": body, "frames": [0]} for body in boxes}
 
 
+TIP_SHARE_MM = 16.0     # a parallel this near another (a fingertip's width) is pressed on its far side from it
+TIP_OUT_MM = 2.5        # ... this far off its centre line (the pad's middle; a 14 mm pad there still covers its
+                        # 3.1 mm end, and its side stands clear of the neighbour's)
+
+
+def tip_y(parallels: dict, name: str, share: float = TIP_SHARE_MM, out: float = TIP_OUT_MM) -> float:
+    """Where across the vise a fingertip check on parallel `name` presses (parallels: name -> centre; share and out in
+    their unit): its centre line, or, with a neighbour nearer than a fingertip is wide, off it away from the
+    neighbour. op30's and op40's parallels stand 6.8 mm apart under their 31 mm part: the 14 mm pad aimed at para_b's
+    centre pressed para_a, 4 mm into its end, and para_b read 0 N; aimed between them it nosed into the gap and
+    pressed neither."""
+    y = float(parallels[name][1])
+    near = [float(p[1]) for n, p in parallels.items() if n != name and abs(float(p[1]) - y) < share]
+    return y + float(np.sign(y - near[0])) * out if near else y
+
+
 def knob_center(phi_deg: float) -> np.ndarray:
     """Middle of the knob's grip (mm) at crank angle phi (0 = top, + = clockwise from the operator, closing)."""
     p = math.radians(phi_deg)
@@ -205,7 +223,10 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     if stop_mm is not None:
         eq += (f'    <weld name="keep_stop" body1="stop" body2="{table_body}" '
                f'anchor="{f(np.asarray(stop_mm) + [0, 0, STOP_MM[2] / 2])}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n')
-    eq += f"""    <connect name="enclose" body1="knob" body2="{hand_body}" anchor="0 -0.045 0" active="false" solref="0.02 1"
+    # the knob held in the fist by its middle and its axis (a weld; the knob spins on the lever as the fist turns): held by a
+    # point only, the fist's tilt off the knob's axis under the final pull went into the fingers, 155 N on the little
+    # finger's tip and 2.7 mm into the knob. Its pose in the hand is set by the take runner as the fist closes
+    eq += f"""    <weld name="enclose" body1="knob" body2="{hand_body}" active="false" solref="{ENCLOSE_SOLREF_S} 1"
              solimp="0.9 0.95 0.002"/>
     <joint name="screw_lock" joint1="crank" polycoef="0 0 0 0 0" active="false" solref="0.002 1" solimp="0.9999 0.9999 0.0001"/>
     <joint name="lead_screw" joint1="jaw_slide" joint2="crank" polycoef="0 {V['lead'] * M / (2 * math.pi):.7f} 0 0 0"

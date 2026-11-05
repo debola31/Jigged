@@ -133,7 +133,7 @@ class SawPlan(BenchPlan):
     lumbar_station = FRONT_LUMBAR
     # people's range weighed more than the shared 0.5: rising from the thigh over the work stop, the plan turned the
     # shoulder out to 53 deg (people's 99th percentile, 31), 92% of the load take's frames in their range
-    SOLVER_W = {"range": 3.0}
+    solver_w = {"range": 3.0}
 
     def __init__(self, out, state: dict | None = None, verbose: bool = True):
         self.lumbar = self.place.world(self.lumbar_station)

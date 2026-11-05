@@ -97,7 +97,8 @@ def matches_its_footage(take: dict) -> Result:
     lo, hi = footage["dur_iqr"]
     outside = [] if lo <= med["dur_s"] <= hi else [f"median segment {med['dur_s']:.2f} s, the footage's {lo}-{hi} s"]
     for k in ("peak_speed_frac", "peak_aperture_frac"):
-        if abs(med[k] - footage[f"{k}_median"]) > band:
+        # rounded: a median on the band's edge (op50's 0.65 against 0.5 +/- 0.15) differed by 0.15000000000000002
+        if round(abs(med[k] - footage[f"{k}_median"]), 9) > band:
             outside.append(f"median {k} {med[k]:.2f}, the footage's {footage[f'{k}_median']}")
     return Result(passed=not outside, worst=float(len(outside)),
                   detail={"segments": len(segs), "median": med, "outside": outside})

@@ -42,15 +42,48 @@ LUMBAR = np.array([200.0, -1430.0, 955.0])                # in front of the pend
 # a keypad grip per region of the keys, each solved at one key there: one hand pose can't reach every key without
 # pitching the curled fingers into the face
 KEY_GRIPS = {"keypad": "offset", "keypad_num": "0", "keypad_alpha": "m", "keypad_jog": "+x", "keypad_mode": "mdi",
-             "keypad_inc": "inc_0.01"}           # the increment row's own: the mode grip's thumb fell on 4 and 5
+             "keypad_inc": "inc_0.01",           # the increment row's own: the mode grip's thumb fell on 4 and 5
+             "keypad_top": "reset"}              # the top left's own: in the letters' grip, solved 162 mm off, the
+                                                 # arm reached Reset so that a 1.4 deg lag at the elbow put the index
+                                                 # 8 mm across it, and it went unpressed (op10-xy)
 KEY_EFFORT = 0.5                                          # the arm braced while it works the keys, as people
                                                           # co-contract for precise aiming (Gribble et al. 2003)
+DIAL_EFFORT = 0.5                                         # a light grip on the jog handle, the least the run's pinch
+                                                          # takes: at full effort the squeeze pressed the thumb into
+                                                          # the handle's face, 8-16 N along its axis, and op30-z's
+                                                          # muscles overloaded
 OVERTURN = 1.15                                           # a stroke turns the hand this much farther than its clicks;
                                                           # the grip lets go when the dial reads right (sim/pendant.py)
-OFF_RIM_MM = 15.0                                         # the pads sit within 12 mm of the rim's front
+OFF_RIM_MM = 25.0                                         # the pads sit within 12 mm of the rim's front: at 15 the
+                                                          # opened hand's pose, turning back, came 5-7 mm into the
+                                                          # handle (op30-z)
+ON_RIM_S = 0.16                                           # onto the rim from there, and off it
+TURN_BACK_S = 0.4                                         # off the rim, back over a stroke: in 0.22 s the wrist's arc
+                                                          # peaked at 990 mm/s, the run's hand fell 30 mm behind and
+                                                          # overshot 40, and was still 12-23 mm off as the grip closed
 AXIAL_MM = 40.0                                           # onto and off the dial straight along its axis, this far
+DIAL_COMP_MM = -1.0                                       # the dial grip's pads planned this far into the rim (out)
+TUCK_DEG = 30.0                                          # the dial grip's ring and little, curled tighter than solved
+RANGE_W = 2.0                                            # people's range weighed this much in the pendant's grips and
+                                                          # plans (the solver's 0.5): at 0.5 the trunk leaned 9 deg to
+                                                          # reach the high keys and op10-z ran 92.6% in range; at 2,
+                                                          # 97.7%, with every pad still on its key
+STROKE_DEG_S = 200.0                                     # a stroke turns the handle this fast: at 300 the wrist's arc
+                                                          # ran 900 mm/s, the run's hand 24-40 mm behind it pulled
+                                                          # the grip off the rim's centre, and op50-z's pronator went
+                                                          # past its maximum mid-stroke
+FINGER_DEG_S = 300.0                                     # a change of the hand's shape, at its quickest joint: the
+                                                          # key grip curled the middle finger 82 deg in 0.14 s off
+                                                          # the dial, 710 deg/s at its peak, and its deep flexor went
+                                                          # past its maximum (op20-xy)
 HOVER_MM = 40.0
-HOVER_RIGHT_MM = 40.0                                     # the right index ready over Feed Hold, not resting on it:
+GO_IN_S = 0.35                                            # from the hover onto the key: in 0.25 s the index came in at
+                                                          # 480 mm/s, and as it stopped at Reset, the keypad's top left
+                                                          # corner, the run's wrist swung 7-8 mm across (op10-xy)
+HOVER_DWELL_S = 0.4                                       # the left index waits over Cycle Start before pressing it:
+                                                          # pressed on arrival from the side, it was 45 mm short and
+                                                          # 17 mm across at the press, and slid past (op20-z, op30-xy)
+HOVER_RIGHT_MM = 40.0                                    # the right index ready over Feed Hold, not resting on it:
                                                           # held 15 mm off, its hand's sway of 10 mm pressed it
 SETTLE_S = 0.3                                            # off the rim, before a jog's first stroke
 CLEAR_MM = 60.0                                           # moves between the keys and the dial pass this far out
@@ -134,28 +167,56 @@ def rim(lo_deg: float, hi_deg: float, comp: float = 1.5, depth=(1.0, 12.0), w: f
     return f
 
 
+def dial_open(hand, q: dict) -> dict:
+    """The dial grip opened halfway, onto and off the rim: the thumb, index and middle, which hold it; the ring and
+    little stay curled as they grip, in front of the dial's face. Opened too, they straightened into it: the ring 18-21
+    mm inside the handle in the plan's own pose off the rim, and the run's hand, pushed back 14 mm, closed on the rim
+    off its plan, the index and middle on it before the thumb (op30-z, the muscles past their maximum)."""
+    return open_like(hand, q, 0.5) | {n: q[n] for n in q if n.startswith(("ring", "little", "cmc4", "cmc5"))}
+
+
 class PendantTake(StepTake):
     """A step at the pendant. The machine's handle state is followed as the step presses keys, so a stroke knows the
     axis and increment it jogs: `axis_mm` is where the plan expects the machine (Haas's machine mm) after it."""
+    SOLVER_W = {"range": RANGE_W}
 
-    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0)):
+    def __init__(self, out, lumbar=LUMBAR, verbose=True, start_mm=(0.0, 0.0, 0.0), shared=SHARED_GRIPS,
+                 grip_source=None):
+        """shared: the grips file pendant takes share (they stand and grip alike); grip_source: what the grips'
+        cache is keyed on (default: the take's class, moonshot/motion/step_take.py solve_grips)."""
         super().__init__(out, lumbar, verbose)
         lo, hi = (np.array(C["pendant_face"][k], float) + OFFSET for k in ("box_min_mm", "box_max_mm"))
         self.boxes = [((lo + hi) / 2, (hi - lo) / 2)]
         own = self.out / "grips.json"
-        if SHARED_GRIPS.exists() and not own.exists():
-            shutil.copy(SHARED_GRIPS, own)
-        self.solve_grips(self._grip_specs())
-        SHARED_GRIPS.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(own, SHARED_GRIPS)
+        if shared.exists() and not own.exists():
+            shutil.copy(shared, own)
+        self.solve_grips(self._grip_specs(), source=grip_source)
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        if shared.resolve() != own.resolve():
+            shutil.copy(own, shared)
+        # the keypad grips' fingers as the run holds them: its body couples each DIP to its PIP, the palm to the ring
+        # and the thumb's roll to its flexion, which the grip solver only weighs; the index's DIP solved at -8 deg ran
+        # at +1, its pad 2-3 mm from where the plan aimed it, and at op10-xy's +Y 6-7 mm across: held off, unpressed
+        for name in (n for n in KEY_GRIPS if n in self.grips):
+            self.grips[name]["q"] = self.hand.couple(self.grips[name]["q"])
+        # the dial grip's ring and little tucked TUCK_DEG tighter, into the palm: as solved, the ring lay along the rim
+        # beside the middle and its skin, bulkier than the run's capsule, sank 4.1 mm into it (op50-check); and its
+        # fingers bent as the run bends them at the handle, the index and middle the contact way (dial_coupling)
+        if "dial" in self.grips:
+            q = dict(self.grips["dial"]["q"])
+            for f in ("ring", "little"):
+                for j in ("mcp_flex", "pip"):
+                    q[f"{f}_{j}"] += TUCK_DEG
+            self.grips["dial"]["q"] = self.hand.couple(self.hand.clamp(q), contact={"index", "middle"})
         # per keypad grip: where the index meets the face, in the hand's frame (fingertip_in_hand), and the press
         # direction
         self.pad_in_hand = {}
-        for name in KEY_GRIPS:
+        for name in (n for n in KEY_GRIPS if n in self.grips):      # a take may solve only the regions it uses
             g = self.grips[name]
             ax = g["H"].T @ np.array([0.0, 1.0, 0.0])
             self.pad_in_hand[name] = (fingertip_in_hand(g["q"], ax), ax)
-        self.key_H = self.grips["keypad"]["H"]    # the keypad grip's hand frame the hand last pressed with
+        self.key_H = self.grips[next(iter(self.pad_in_hand))]["H"]    # the keypad grip's hand frame the hand last
+                                                                      # pressed with
         self.key_grip_last = ""                   # ... and its name
         self.where = "rest"                       # the right hand: "rest", "keys", "dial" or "hover"
         self.hold: dict[str, tuple] = {}          # a hand held where it is while the machine works: (H, W)
@@ -184,20 +245,36 @@ class PendantTake(StepTake):
         q.update(ring_mcp_flex=60, ring_pip=70, little_mcp_flex=60, little_pip=70,
                  thumb_cmc_abd=30, thumb_cmc_flex=10, thumb_mcp_flex=20, thumb_ip=15)
         dial = dict(obj=DIAL_C.copy(), q0=q, colliders=colliders(), iters=1200, side="R",
-                    targets={"thumb": rim(150, 215), "index": rim(-40, 5), "middle": rim(0, 45)},
+                    # each pad 3 mm or more behind the rim's front: at 1 mm the thumb's tip rode onto the dial's face
+                    # as the hand moved along the axis, the one digit on the dial, pressed into it (op30-z, op50-check:
+                    # skin 6 mm deep, muscles over their maximum)
+                    # and DIAL_COMP_MM into it: planned 1.5 mm in, the solved grip's own skin sat 2.6 mm inside the
+                    # handle and the run's 3.1-3.8 (op50-check's skin, past its 3.5); the squeeze closes the gap
+                    targets={"thumb": rim(150, 215, comp=DIAL_COMP_MM, depth=(3.0, 12.0)),
+                             "index": rim(-40, 5, comp=DIAL_COMP_MM, depth=(3.0, 12.0)),
+                             "middle": rim(0, 45, comp=DIAL_COMP_MM, depth=(3.0, 12.0))},
                     starts=[S(8, 0, r, 75, 50, -10, 85, p, 0, 0) for p in (0, 30, 60) for r in (0, 15)])
         c = key_at("cycle_start")
         button_l = dict(obj=c, q0=q, colliders=colliders(), iters=900, side="L",
                         targets={"index": G.plane_target(c, [0, -1.0, 0], 1.0,
                                                          lambda p: 0.5 * ((p[0] - c[0]) ** 2 + (p[2] - c[2]) ** 2))},
                         starts=[S(8, 0, r, 75, 50, -10, 80, p, 0, 0) for p in (40, 75) for r in (-15, 0)])
-        return specs | {"dial": dial, "button_L": button_l}
+        return {k: v | {"w_range": RANGE_W} for k, v in (specs | {"dial": dial, "button_L": button_l}).items()}
+
+    def shape_now(self, side: str, t: float) -> dict:
+        """The hand's shape as last set at or before t."""
+        return max((k for k in self.side[side]["fkeys"] if k[0] <= t), key=lambda k: k[0])[1]
+
+    def shape_s(self, a: dict, b: dict) -> float:
+        """How long the hand takes from one shape to another, its quickest joint at FINGER_DEG_S at the blend's peak."""
+        return 1.875 * max(abs(a[n] - b[n]) for n in a) / FINGER_DEG_S
 
     # --- the keys ----------------------------------------------------------------------------------------
     def key_grip(self, name: str) -> str:
         """The keypad grip solved nearest a key."""
         k = key_at(name)
-        return min(KEY_GRIPS, key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
+        return min((g for g in KEY_GRIPS if g in self.pad_in_hand),
+                   key=lambda g: np.linalg.norm((key_at(KEY_GRIPS[g]) - k)[[0, 2]]))
 
     def key_pose(self, name: str, lift: float = 0.0):
         """The hand frame and wrist with the fingertip `lift` mm off a key, in its region's grip."""
@@ -222,27 +299,44 @@ class PendantTake(StepTake):
             self.transit("R", t0, t0 + dur, hover, via=via, fade=(H, 1.0))
             self.effort("R", t0, 0.0, "keypad")
             self.effort("R", t0 + dur, KEY_EFFORT, "keypad")
-            self.fingers("R", t0 + 0.1, q)
+            if self.where == "dial":              # open round the rim until the hand is off it: closed into the
+                # key's grip 0.1 s into the move, the thumb and middle pinched the rim 20-29 N as the hand pulled
+                # away, until the middle snapped off (op30-z, a finger flexor past its maximum)
+                opened = dial_open(self.hand, self.grips["dial"]["q"])
+                self.fingers("R", t0 + 0.35 * dur, opened)
+                shaped = t0 + 0.35 * dur + self.shape_s(opened, q)
+            else:
+                shaped = t0 + max(0.1, self.shape_s(self.shape_now("R", t0), q))
             t0 += dur
             move_s = 0.05
         else:                                     # Fitts: farther keys take longer, about 0.6 m/s on average
             move_s = max(move_s, 0.12 + np.linalg.norm(hover - self.side["R"]["wrist"]) / 600.0)
+            shaped = t0 + max(move_s * 0.5, self.shape_s(self.shape_now("R", t0), q))
         start = self.side["R"]["wrist"]
-        self.fingers("R", t0 + move_s * 0.5, q)
+        self.fingers("R", shaped, q)
         # over the key, lined up by sight, before going in: longer after a longer move, as the hand takes longer to
         # settle on its target
         dwell = 0.6 if reached else 0.15 + min(0.45, np.linalg.norm(hover - start) / 400.0)
         if grip != self.key_grip_last:            # a new region's grip: the hand turns to it before it presses
             dwell += 0.4
         move_s += dwell
-        path = PosePath(self.key_H, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, 0.25, H, W_on).to(
-            t0 + move_s + 0.25 + hold_s, 0.12, H, hover)
-        t1 = t0 + move_s + 0.37 + hold_s
-        # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the grip's
-        # own orientation only as a preference, as one hand pose can't reach every key
-        self.add("R", t0, t1, lambda t, path=path, H=H: [
-            ("pose", H, path.at(t)[1], 1.0), ("tsr", pt, path.at(t)[1] + H @ pt, ax, [0.0, 1.0, 0.0], 6.0)])
-        self.event("press", round(t0 + move_s + 0.1, 3), round(t0 + move_s + 0.25 + hold_s, 3), side="R",
+        # from the keys, the hand turns from the last key's grip to this one's on the way (a reach from elsewhere has
+        # turned already), its pad blending from where it sat in the last grip: the new grip's frame and pad held from
+        # the move's start jumped the fingertip's target, 16 mm in a frame from op30-z's Edit to Down
+        H0 = H if reached else self.key_H
+        pt0 = pt if reached or not self.key_grip_last else self.pad_in_hand[self.key_grip_last][0]
+        path = PosePath(H0, start).to(t0, move_s - dwell, H, hover).to(t0 + move_s, GO_IN_S, H, W_on).to(
+            t0 + move_s + GO_IN_S + hold_s, 0.12, H, hover)
+        t1 = t0 + move_s + GO_IN_S + 0.12 + hold_s
+
+        def cons(t, path=path, pt0=pt0, pt=pt, ax=ax, t0=t0, turn_s=move_s - dwell):
+            # the fingertip on its path and pressing along the face's normal, the hand free to roll about it; the
+            # grip's own orientation only as a preference, as one hand pose can't reach every key
+            Ht, Wt = path.at(t)
+            p = pt0 + (pt - pt0) * min_jerk((t - t0) / turn_s)
+            return [("pose", Ht, Wt, 1.0), ("tsr", p, Wt + Ht @ p, ax, [0.0, 1.0, 0.0], 6.0)]
+        self.add("R", t0, t1, cons)
+        self.event("press", round(t0 + move_s + 0.4 * GO_IN_S, 3), round(t0 + move_s + GO_IN_S + hold_s, 3), side="R",
                    key=name, force=force, normal=[0.0, 1.0, 0.0])
         self.effort("R", t1, KEY_EFFORT, "keypad")
         self.fingers("R", t1, q)                  # the press's shape held to its end: what comes next changes it after
@@ -296,7 +390,7 @@ class PendantTake(StepTake):
         R = _rot(deg)
         return R @ g["H"], DIAL_C + R @ (g["W"] - g["obj"]) - DIAL_U * off
 
-    def turn(self, clicks: int, deg_s: float = 300.0) -> None:
+    def turn(self, clicks: int, deg_s: float = STROKE_DEG_S) -> None:
         """Turn the handle `clicks` detents (+ clockwise) in strokes of at most STROKE_CLICKS, and a spare one: the run
         stops the hand once the machine reads where this jog takes it (`to_mm`, from where the take starts the axis:
         moonshot/sim/pendant.py), so a stroke whose grip slipped is made up by the spare, and an unneeded spare is a
@@ -323,24 +417,31 @@ class PendantTake(StepTake):
                 via = self.clear_of_face(W_off, to_dial=True)
                 dur = self.travel_s([self.side["R"]["wrist"], *via, W_off])
                 self.transit("R", t0, t0 + dur, W_off, via=via, fade=(H0_, 1.0))
-                self.fingers("R", t0 + 0.1, open_like(self.hand, g["q"], 0.5))
+                # the hand opens for the dial late in the reach, widest about 75% of the way, as people's do: opened
+                # at its start, over the keys, the middle finger reached 4.7 mm off them and pressed a digit
+                shape, opened = self.shape_now("R", t0), dial_open(self.hand, g["q"])
+                self.fingers("R", t0 + 0.4 * dur, shape)
+                shaped = t0 + max(0.75 * dur, 0.4 * dur + self.shape_s(shape, opened))
+                self.fingers("R", shaped, opened)
                 t0 += dur
-                # settled off the rim before the first stroke: a grip closing on a hand still arriving misses
-                self.add("R", t0, t0 + SETTLE_S, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
-                t0 += SETTLE_S
+                # settled off the rim before the first stroke, the hand opened: a grip closing on a hand still
+                # arriving misses
+                settle = max(SETTLE_S, shaped + 0.1 - t0)
+                self.add("R", t0, t0 + settle, lambda t, H=H0_, W=W_off: [("pose", H, W, 3.0)])
+                t0 += settle
             else:                                     # turn back, off the rim, from the last stroke's end
                 back = self.dial_deg
-                self.add("R", t0, t0 + 0.22, lambda t, b=back, t0=t0, a0=a0: [
-                    ("pose", *self.dial_pose(b + (a0 - b) * min_jerk((t - t0) / 0.22), OFF_RIM_MM), 3.0)])
-                t0 += 0.22
+                self.add("R", t0, t0 + TURN_BACK_S, lambda t, b=back, t0=t0, a0=a0: [
+                    ("pose", *self.dial_pose(b + (a0 - b) * min_jerk((t - t0) / TURN_BACK_S), OFF_RIM_MM), 3.0)])
+                t0 += TURN_BACK_S
             # onto the rim, close, turn, let go, back off
-            tc, dur = t0 + 0.12, max(0.25, abs(d) / deg_s)
+            tc, dur = t0 + ON_RIM_S, max(0.25, abs(d) / deg_s)
             self.add("R", t0, tc, lambda t, t0=t0, a0=a0: [
-                ("pose", *self.dial_pose(a0, OFF_RIM_MM * (1 - min_jerk((t - t0) / 0.12))), 3.0)])
-            self.fingers("R", t0, open_like(self.hand, g["q"], 0.5))
+                ("pose", *self.dial_pose(a0, OFF_RIM_MM * (1 - min_jerk((t - t0) / ON_RIM_S))), 3.0)])
+            self.fingers("R", t0, dial_open(self.hand, g["q"]))
             self.fingers("R", tc + 0.08, g["q"])
             self.effort("R", tc, 0.0, "dial")
-            self.effort("R", tc + 0.1, 1.0, "dial")
+            self.effort("R", tc + 0.1, DIAL_EFFORT, "dial")
             ts = tc + 0.12
             self.add("R", tc, ts + dur + 0.08, lambda t, ts=ts, dur=dur, a0=a0, a1=a1: [
                 ("pose", *self.dial_pose(a0 + (a1 - a0) * min_jerk((t - ts) / dur)), 3.0)])
@@ -348,13 +449,13 @@ class PendantTake(StepTake):
                        inc_mm=self.inc_mm, jog=self.jogs, to_mm=to)
             self.event("grip", round(tc, 3), round(ts + dur + 0.1, 3), side="R", grip="dial")
             te = ts + dur + 0.08
-            self.effort("R", te, 1.0, "dial")
+            self.effort("R", te, DIAL_EFFORT, "dial")
             self.effort("R", te + 0.06, 0.0, "dial")
             self.fingers("R", te, g["q"])
-            self.fingers("R", te + 0.12, open_like(self.hand, g["q"], 0.5))
-            self.add("R", te, te + 0.12, lambda t, te=te, a1=a1: [
-                ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / 0.12)), 3.0)])
-            self.dial_deg, self.t, self.where = a1, te + 0.12, "dial"
+            self.fingers("R", te + 0.12, dial_open(self.hand, g["q"]))
+            self.add("R", te, te + ON_RIM_S, lambda t, te=te, a1=a1: [
+                ("pose", *self.dial_pose(a1, OFF_RIM_MM * min_jerk((t - te) / ON_RIM_S)), 3.0)])
+            self.dial_deg, self.t, self.where = a1, te + ON_RIM_S, "dial"
             self.side["R"]["wrist"] = self.dial_pose(a1, OFF_RIM_MM)[1]
             self.axis_mm[i] += sign * c * self.inc_mm
 
@@ -374,9 +475,9 @@ class PendantTake(StepTake):
         hover = W_on + [0, -HOVER_MM, 0]
         self.transit("L", t0, t0 + 0.7, self.at("L", hover), fade=(H, 1.0))   # transit takes world points
         self.fingers("L", t0 + 0.1, g["q"])
-        tp = t0 + 0.7
+        tp = t0 + 0.7 + HOVER_DWELL_S
         path = PosePath(H, hover).to(tp, 0.08, H, W_on).to(tp + 0.2, 0.08, H, hover)
-        self.add("L", tp, tp + 0.28, lambda t, path=path: [("pose", *path.at(t), 3.0)])
+        self.add("L", t0 + 0.7, tp + 0.28, lambda t, path=path: [("pose", *path.at(t), 3.0)])
         self.event("press", round(tp + 0.04, 3), round(tp + 0.2, 3), side="L", key=name, force=A[name]["force_n"],
                    normal=[0.0, 1.0, 0.0])
         self.look(t0, key_at(name))
@@ -386,7 +487,7 @@ class PendantTake(StepTake):
     def release_left(self, dur: float = 0.9) -> None:
         """The left hand back to the side; the right hand off its hover, onto the keys again."""
         self.hold.pop("L", None)
-        self.fingers("L", self.t + 0.2, self.q_relax)
+        self.fingers("L", self.t + max(0.2, self.shape_s(self.shape_now("L", self.t), self.q_relax)), self.q_relax)
         self.transit("L", self.t, self.t + dur, self.at("L", self.rest))
         if self.hold.pop("R", None) is not None:
             self.where = "keys"
@@ -394,7 +495,9 @@ class PendantTake(StepTake):
     def rest_hand(self, dur: float = 1.0) -> None:
         """The right hand back to the side."""
         self.leave_keys(self.t)
-        self.fingers("R", self.t + 0.2, self.q_relax)
+        shape = self.shape_now("R", self.t)                  # held till the hand is off the keys, then relaxed
+        self.fingers("R", self.t + 0.25 * dur, shape)
+        self.fingers("R", self.t + 0.25 * dur + max(0.2, self.shape_s(shape, self.q_relax)), self.q_relax)
         self.transit("R", self.t, self.t + dur, self.rest, via=self.clear_of_face(self.rest))
         self.t += dur
         self.where = "rest"

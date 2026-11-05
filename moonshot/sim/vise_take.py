@@ -32,12 +32,14 @@ from scipy.spatial.transform import Rotation
 from moonshot.body.controller import StrengthCaps
 from moonshot.body.skeleton import H0, build, set_finger_contact
 from moonshot.contracts.thresholds import threshold
-from moonshot.sim.record import Recorder, glbs_in_bodies, hand_wrench
+from moonshot.sim.record import Recorder, TouchOnsets, glbs_in_bodies, hand_wrench
 from moonshot.sim.reference import ReferenceTake, take_dir
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
 SQUEEZE_DEG = 5.5        # with capsules 2.5 mm inside the pads; 7.5 was for capsules 4-5 mm inside them
+KNOB_SQUEEZE_DEG = 0.0    # the fist's squeeze on the crank's knob: none past its grip, which the colliders now meet (0.75 mm
+                          # inside the skin), and the weld holds the knob; at 5.5 the fingers pressed it 2.7 mm in
 STIFFEN = 4.0              # the hand's co-contraction at full effort, for the reference part; heavier parts brace more
 STIFFEN_ARM = 3.0         # the arm co-contracts too during effortful manipulation: up to 4x its resting stiffness
 VISUAL_TAU = 0.3          # visual correction: steady wrist error is corrected with this time constant (s)
@@ -51,8 +53,14 @@ SQUARE_MAX = 0.6          # by turning the hand about the part, by at most this 
 TOUCH_RELEASE_S = 0.2     # after a press, its touch correction fades with this time constant (s)
 TOUCH_TAU = 0.07          # while pressing, sideways slip under the fingertip is felt and corrected this fast (s);
                           # tactile slip responses take ~70 ms (Johansson & Westling 1984)
+ENCLOSE_BLEND_S = 0.12    # the knob's hold in the fist eases from where it is to where it was planned this long (s),
+                          # done before the crank turns (it starts 0.15 s after the hold)
+KNOB_MIDDLE = np.array([0.0, -0.045, 0.0])   # the knob's middle in its own frame (m): where the fist holds it
+TOUCH_MAX = 0.004         # ... by at most this much (m): a slip is millimetres; up to VISUAL_MAX, held by the part's
+                          # friction the correction wound up through the 30 N push and pushed the hand 15 N sideways
 LEAD_MAX_DEG = 8.0
-TIGHTEN_LEAD_DEG = 4.0
+TIGHTEN_LEAD_DEG = 3.2    # the final pull leads the knob this far, its push growing at CRANK_KI per degree: at 4
+                          # the pull overshot the clamp (5,400-5,700 N) and the shoulder saturated
 ANGLOCK = 0.05            # Kurt's AngLock: a downward push on the moving jaw of this fraction of the clamp force
 SNUG_GAIN = 0.01          # snug force loop: lead (deg/s) per newton short of the snug clamp force
 PRESS_KI = 20.0           # press: the pushed force grows 20 N/s per newton it falls short of the target
@@ -83,6 +91,7 @@ def min_jerk(x: float) -> float:
 
 class ViseTake:
     def __init__(self, folder: Path | None = None):
+        self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
         folder = folder or take_dir()
         self.tk = json.loads((folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(folder / "reference.npz")
@@ -98,7 +107,7 @@ class ViseTake:
         # a lift-out take starts with the part in the vise, the jaw a turn open (moonshot/motion/setup_take.py start)
         self.in_vise = self.tk.get("start") == "vise"
         self.start_p = np.array(self.tk["home"]) if self.in_vise else self.load.stage
-        self.xml = cell.with_body(self.body.xml, self.start_p, parallels, "R_hand", self.load)
+        self.xml = cell.with_body(self.body.xml, self.start_p, parallels, "R_hand", self.load, self.load.stop())
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.machine = cell.start(m, self.data)          # idle: holds the table, and the vise on it, where it is
@@ -219,7 +228,7 @@ class ViseTake:
         keep = np.concatenate([[True], np.diff(ang) > 1e-6])
         return float(np.interp(self.crank_cmd(tt, i, e), ang[keep], ts[keep]))
 
-    def aim_fingertip(self, parallel: str, normal) -> np.ndarray:
+    def aim_fingertip(self, parallel: str, normal, tt: float, t_press: float) -> np.ndarray:
         """Aim the index pad onto the face of the parallel a fingertip check presses: the shift (m) that brings the
         pad's nearest point onto the face's centre line across the 3.1 mm strip, clear of the top's ends (pressing
         down) or of the end face's edges (pushing along it). The press itself owns its own direction."""
@@ -230,11 +239,25 @@ class ViseTake:
         half = m.geom(parallel).size
         n = np.asarray(normal, float)
         goal = local.copy()
-        goal[1] = 0.0
+        # on the strip's centre line, or off it away from a neighbour too near to press apart (world/vise.tip_y)
+        at = {p: d.body(p).xpos for p in self.paras}
+        y = V.tip_y(at, parallel, V.TIP_SHARE_MM * 0.001, V.TIP_OUT_MM * 0.001)
+        goal[1] = (R.T @ (np.array([c[0], y, c[2]]) - c))[1]
         if abs(n[2]) > 0.5:                                # its top: clear of the strip's ends
             goal[0] = np.clip(local[0], -half[0] + 0.015, half[0] - 0.015)
-        else:                                              # its end face: clear of the top and bottom edges
-            goal[2] = np.clip(local[2], -half[2] + 0.004, half[2] - 0.004)
+        else:                                              # its end face: clear of the top and bottom edges, and low
+            # on it beside a neighbour, under the part's overhang (the plan's tip grip)
+            shared = abs(goal[1]) > 1e-4
+            if shared:
+                # judged where the pad will be at the press, not where the hand is on its way there, and across the
+                # strips by the pad's middle, which noses onto the end, not its nearest point, on its side: aimed from
+                # 17 mm high and 6 mm off on the way, op40's pad went onto para_a's edge through para_b's check, and
+                # para_b read 0 N
+                g = m.geom("R_g_dis2").id
+                ahead = self.ref_pose(self.plan_time(t_press)).geom_xpos[g] - self.ref_pose(self.plan_time(tt)).geom_xpos[g]
+                local = R.T @ (ft[:3] + ahead - c)
+                local[1] = (R.T @ (d.geom_xpos[g] + ahead - c))[1]
+            goal[2] = np.clip(local[2], -half[2] + 0.004, -0.003 if shared else half[2] - 0.004)
         shift = R @ (goal - local)
         return shift - n * (n @ shift)
 
@@ -251,7 +274,7 @@ class ViseTake:
         for i, e in enumerate(self.iv["press"]):
             if e["contact"] in ("para_a", "para_b") and e["t0"] - AIM_LEAD_S <= tt < e["t1"] + 0.3:
                 if i not in self.aim:
-                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"])
+                    self.aim[i] = self.aim_fingertip(e["contact"], e["normal"], tt, e["t0"])
                 off += self.aim[i] * min_jerk((tt - (e["t0"] - AIM_LEAD_S)) / 0.25) * (1 - min_jerk((tt - e["t1"]) / 0.3))
         for j, e in enumerate(self.cranks):
             if tt >= e["t1"] and j in self.letgo:
@@ -264,12 +287,17 @@ class ViseTake:
 
     # --- control -------------------------------------------------------------------------------------
     def grip_squeeze(self, label) -> dict[str, np.ndarray]:
-        """Per gripping digit: the unit joint direction that drives its pad into the gripped object (its Jacobian)."""
+        """Per gripping digit: the unit joint direction that drives its pad into the gripped object (its Jacobian).
+        A carrying grip's digits are those it was planned with: op50's ring, tucked out of the way within 25 mm of the
+        part, was squeezed onto its end and regulated to a third of the fingers' force."""
         m, d = self.model, self.data
         obj = self.geom[GRIP_OBJECT[label]]
+        planned = (self.tk.get("grip_digits") or {}).get(label) if label in CARRYING else None
         out = {}
         ft = np.zeros(6)
         for dg, seg in PAD.items():
+            if planned is not None and dg not in planned:
+                continue
             g = m.geom(f"R_g_{seg}").id
             dist = mujoco.mj_geomDistance(m, d, g, obj, 0.025, ft)
             if dist >= 0.025:
@@ -316,7 +344,7 @@ class ViseTake:
             self.squeeze[grip] = self.grip_squeeze(grip)
             self.grip_scale[grip] = {}
         dirs, scale = self.squeeze[grip], self.grip_scale[grip]
-        base = math.radians(SQUEEZE_DEG) * effort
+        base = math.radians(KNOB_SQUEEZE_DEG if grip == "knob" else SQUEEZE_DEG) * effort
         if grip not in CARRYING:
             return sum(dirs[dg] * base for dg in dirs)
         force, _, _ = self.contacts()
@@ -417,14 +445,21 @@ class ViseTake:
         carrying = (self.t_lift + 0.2 <= tt < self.t_down - 0.2
                     and any(e["t0"] <= tt < e["t1"] for e in self.iv["hold_object"]))
         if carrying:                           # carrying the part: the eye is on the part, where it goes, not the hand
+            # on the vise's floor, on its foot, where it will stand: a part leaning in the hand lands on its foot and
+            # stands up about it (op50's, 158 mm tall, leaned 1.5 deg, and aimed by its middle stood up 3 mm off where
+            # it was set down); on parallels, by its middle, as it lands across them (aimed by its foot, op10's landed
+            # 2.1 mm off, not 1.4)
             k = min(len(self.rd["blank"]) - 1, int(round(self.plan_time(tt) * self.fps)))
-            self.visual += (self.rd["blank"][k] * 0.001 - self.data.body("blank").xpos) * dt / CARRY_TAU
+            down = np.array([0.0, 0.0, 0.0 if self.paras else self.load.half[2] * 0.001])
+            b = self.data.body("blank")
+            foot, planned = b.xpos - b.xmat.reshape(3, 3) @ down, self.rd["blank"][k] * 0.001 - self.rd["blank_R"][k] @ down
+            self.visual += (planned - foot) * dt / CARRY_TAU
         elif press is None and not cranking and not self.hand_touching():
             self.visual += err * dt / VISUAL_TAU
-        for v in (self.visual, self.touch):
+        for v, most in ((self.visual, VISUAL_MAX), (self.touch, TOUCH_MAX)):
             n = np.linalg.norm(v)
-            if n > VISUAL_MAX:
-                v *= VISUAL_MAX / n
+            if n > most:
+                v *= most / n
         return self.visual + self.touch
 
     def hand_forces(self, tt: float) -> np.ndarray:
@@ -535,6 +570,8 @@ class ViseTake:
         self.caps.apply(d)
         self.machine.apply()
         mujoco.mj_step(m, d)
+        if self.onsets is not None:
+            self.onsets.step(d)
 
     # --- measurement ---------------------------------------------------------------------------------
     def contacts(self):
@@ -598,10 +635,13 @@ class ViseTake:
         dt = m.opt.timestep
         n = len(self.t) if seconds is None else min(len(self.t), int(seconds * fps))
         enc, lock = m.equality("enclose").id, m.equality("screw_lock").id
+        jc = m.joint("crank").id
         keep = {nm: m.equality(f"keep_{nm}").id for nm in self.paras}
         rec = {k: [] for k in ("blank", "blank_R", "crank", "opening", "force", "clamp", "depth", "para", "press",
-                               "slip", "lag", "pushing", "stray", "touching", "pose", "hand_wrench", "load_N",
-                               "active_constraints", "applied_forces")}
+                               "slip", "lag", "pushing", "stray", "touching", "touch_lead", "pose", "hand_wrench",
+                               "load_N", "active_constraints", "applied_forces")}
+        right = np.array([m.geom(g).name.startswith("R_") for g in range(m.ngeom)])
+        self.onsets = TouchOnsets(m, right, ~right)
         rec["machine_axes"] = {f"vf2_{a}": [] for a in ("x", "y", "z", "spindle")}
         spindle = m.jnt_dofadr[m.joint("vf2_spindle").id]
         hold_rel, t0w = None, time.time()
@@ -617,17 +657,34 @@ class ViseTake:
                 kb, hb, p = self.body_id["knob"], self.body_id["R_hand"], self.plan
                 self.set_plan(self.plan_time(tk))
                 mujoco.mj_kinematics(m, p)
-                pk = p.xpos[kb] + p.xmat[kb].reshape(3, 3) @ m.eq_data[enc, 0:3]
-                m.eq_data[enc, 3:6] = p.xmat[hb].reshape(3, 3).T @ (pk - p.xpos[hb])
+                # taken from where the knob really is in the hand to where it was planned, smoothly, before the crank
+                # turns: set there at once, the constraint snapped the hand onto it, 180 N and 48 N m at the final
+                # pull's grasp, and the hand's muscles saturated
+                self.enc_blend = (tk, self.knob_in_hand(d), self.knob_in_hand(p))
+                m.eq_data[enc, 3:6] = KNOB_MIDDLE
                 d.eq_active[enc] = 1
             elif not want_enc and d.eq_active[enc]:
                 d.eq_active[enc] = 0
+            if d.eq_active[enc]:
+                t_a, (real, rq), (planned, pq) = self.enc_blend
+                w = min_jerk((tk - t_a) / ENCLOSE_BLEND_S)
+                m.eq_data[enc, 0:3] = real + (planned - real) * w
+                m.eq_data[enc, 6:10] = (Rotation.from_quat(rq[[1, 2, 3, 0]]) * Rotation.from_rotvec(
+                    w * (Rotation.from_quat(rq[[1, 2, 3, 0]]).inv() * Rotation.from_quat(pq[[1, 2, 3, 0]])).as_rotvec())
+                ).as_quat()[[3, 0, 1, 2]]
             driven = any(e["t0"] - 0.15 <= tk < e["t1"] for e in self.cranks)
             if not driven and not d.eq_active[lock]:
                 m.eq_data[lock, 0] = d.qpos[self.q_crank]
                 d.eq_active[lock] = 1
+                m.jnt_limited[jc] = 0
             elif driven and d.eq_active[lock]:
+                # unlocked to be turned, the screw still can't be turned back by the clamp it holds: a lead screw's
+                # friction self-locks it, which MuJoCo's constant friction can't. Free both ways, the final pull's
+                # snug clamp (400-450 N) spun the crank back 125 degrees as it was unlocked, flinging the hand
+                # (24-28 m/s^2) and losing the clamp; it is turned on as a ratchet, its stop following it
                 d.eq_active[lock] = 0
+                m.jnt_limited[jc] = 1
+                m.jnt_range[jc] = [d.qpos[self.q_crank], d.qpos[self.q_crank] + 1e3]
             for e in self.iv["free_parallel"]:
                 if tk >= e["t0"] and d.eq_active[keep[e["name"]]]:
                     d.eq_active[keep[e["name"]]] = 0
@@ -648,6 +705,8 @@ class ViseTake:
             # 1 ms ran the plan 1% slow against the body
             for s in range(round(k / (fps * dt)), round((k + 1) / (fps * dt))):
                 tt = s * dt
+                if m.jnt_limited[jc]:                      # the ratchet's stop follows the crank as it is turned on
+                    m.jnt_range[jc, 0] = max(m.jnt_range[jc, 0], d.qpos[self.q_crank])
                 for i, e in enumerate(self.iv["press"]):
                     if e["t0"] <= tt < e["t1"]:
                         F = self.press_force(self.geom[e["contact"]], e["normal"])
@@ -680,6 +739,7 @@ class ViseTake:
             rec["lag"].append(float(np.linalg.norm(d.body("R_hand").xpos - self.intended) * 1000))
             rec["stray"].append(self.stray_contacts(grip, tk))
             rec["touching"].append(self.touching())
+            rec["touch_lead"].append(self.onsets.frame())
             rec["hand_wrench"].append(hand_wrench(m, d, "R_hand"))
             rec["load_N"].append(round(self.lifting_force(), 3))
             rec["active_constraints"].append([m.equality(i).name for i in range(m.neq) if d.eq_active[i]])
@@ -708,6 +768,16 @@ class ViseTake:
                     f"hand {sum(f.values()):.1f} N clamp {clamp:.0f} N")
         self.rec = rec
         return self.report(n)
+
+    def knob_in_hand(self, data) -> tuple[np.ndarray, np.ndarray]:
+        """The weld's terms for the knob held as it is in data: its middle in the hand's frame (m), and the knob's
+        frame turned onto the hand's (wxyz), as MuJoCo's weld reads them (body1 the knob, body2 the hand)."""
+        kb, hb = self.body_id["knob"], self.body_id["R_hand"]
+        pk = data.xpos[kb] + data.xmat[kb].reshape(3, 3) @ KNOB_MIDDLE
+        q = np.zeros(4)
+        mujoco.mju_negQuat(q, data.xquat[kb])
+        mujoco.mju_mulQuat(q, q, data.xquat[hb])
+        return data.xmat[hb].reshape(3, 3).T @ (pk - data.xpos[hb]), q
 
     def pose_record(self) -> dict:
         """The body's pose this frame, in trainual's take terms (motion/body_model.py), for rendering."""
@@ -739,7 +809,8 @@ class ViseTake:
                  grip=rd["grip"][:n], clamp=np.array(rec["clamp"]), slip=np.array(rec["slip"]),
                  eye=rd["eye"][:n], look=rd["look"][:n], up=rd["up"][:n], names=rd["names"], fps=rd["fps"])
         (Path(path).parent / "checks.json").write_text(json.dumps(
-            {k: rec[k] for k in ("touching", "hand_wrench", "active_constraints", "applied_forces", "machine_axes")} |
+            {k: rec[k] for k in ("touching", "touch_lead", "hand_wrench", "active_constraints", "applied_forces",
+                                 "machine_axes")} |
             {"load_N": {"blank": rec["load_N"]}, "never_held": NEVER_HELD}), encoding="utf-8")
         glbs = glbs_in_bodies(self.model, "vf2", vf2.render_links())
         for body, entries in V.render_glbs().items():
@@ -754,12 +825,16 @@ class ViseTake:
         return float(np.interp(phi, ang[keep], ts[keep]))
 
     def ref_wrist(self, tp):
+        return self.ref_pose(tp).body("R_hand").xpos.copy()
+
+    def ref_pose(self, tp) -> mujoco.MjData:
+        """A scratch copy of the run's state with the body in the plan's pose at plan time tp (positions only)."""
         q, _, _ = self.ref.at(tp)
         scratch = mujoco.MjData(self.model)
         scratch.qpos[:] = self.data.qpos
         scratch.qpos[self.body_q] = q[self.body_q]
         mujoco.mj_kinematics(self.model, scratch)
-        return scratch.body("R_hand").xpos.copy()
+        return scratch
 
     def measure_offset(self, k):
         """Where the blank really sits in the hand vs the plan, as a wrist correction in world metres."""
@@ -811,6 +886,9 @@ class ViseTake:
             out["slide"] = {"moved_mm": round(float(B[int(sl["t1"] * fps) - 1][1] - B[int(sl["t0"] * fps)][1]), 2),
                             "gap_to_fixed_jaw_after_mm": round(float(V.VISE["fixed_face_y"] -
                                                                      (B[int(sl["t1"] * fps) - 1][1] + self.load.half[1])), 2)}
+            if self.load.stop() is not None:              # the part's -x end to the stop's face
+                out["slide"]["gap_to_stop_after_mm"] = round(float(B[int(sl["t1"] * fps) - 1][0] - self.load.half[0] -
+                                                                   (self.load.stop()[0] + V.STOP_MM[0] / 2)), 2)
         press = [e for e in self.iv["press"] if e["contact"] == "blank"
                  and clips["push"]["t0"] <= e["t0"] < clips["push"]["t1"]][0]
         pm = (t >= press["t0"] + 0.3) & (t < press["t1"])

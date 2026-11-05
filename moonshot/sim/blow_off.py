@@ -16,17 +16,24 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from moonshot.motion import blow_off as BO
+from moonshot.motion import set_parallels as SP
 from moonshot.sim.door_cycle import _Cell
+from moonshot.sim.runner import APPROACH_S
+from moonshot.sim.set_parallels import FirmGrip
 from moonshot.world import air_gun as AG
 from moonshot.world.vise import VISE
 
 TRIGGER_N = 3.0
+TRIGGER_LEAD_S = 0.4       # the trigger touches the hand again this long before the blow starts
 SETTLE_S = 0.3
 
 
-class BlowOff(_Cell):
+class BlowOff(FirmGrip, _Cell):
+    """As the pinches' (moonshot/sim/set_parallels.py FirmGrip): the weld soft while the grip firms, set again where the
+    gun sits in the hand as the carry starts, and the hand keeping its grip's shape while it holds it. Only the trigger
+    is squeezed: squeezing the handle drove the fingers into it, the weld holding it."""
     doors_open_mm = BO.DOORS_OPEN_MM
-    grip_geoms = {"gun": "air_gun_handle", "gun_fire": "air_gun_trigger"}
+    grip_geoms = {"gun_fire": "air_gun_trigger"}
     encloses = {"gun": "air_gun"}
     welded = {"gun"}
     controls = {"air_gun_trigger"}
@@ -37,6 +44,44 @@ class BlowOff(_Cell):
         k = np.load(self.folder / "gun_keys.npz")
         self.gun_keys = list(zip(k["t"], k["R"], k["p"]))
         self.gun_at, self.hand_at, self.trigger_N, self.tip = [], [], [], []
+        self.firm_setup()
+        self._trigger_saved = None
+        self._now = 0.0
+        blow = next(e for e in self.tk["events"] if e["kind"] == "blow")
+        self.trigger_from = blow["t0"] - TRIGGER_LEAD_S
+
+    def carry_of(self, grip_event: dict) -> dict:
+        return self.carry
+
+    def squeeze_dirs(self, side: str, grip: str) -> dict[str, np.ndarray]:
+        """As the runner's, the index alone: the middle finger is near the trigger too, and squeezed it went 9 mm into
+        the handle, which the weld holds apart from it."""
+        return {dg: v for dg, v in super().squeeze_dirs(side, grip).items() if dg == "index"}
+
+    def touching(self, side: str) -> bool:
+        """As the runner's, and sight leaves the hand be through a fast move, as the pinches' (sim/set_parallels.py
+        FirmGrip.fast): corrected through the reach the hand closed 12 mm off its grip, its skin 8 mm into the handle."""
+        if side == "R" and self.fast(self._now):
+            return True
+        return super().touching(side)
+
+    def enclose(self, t: float) -> None:
+        """As the runner holds a welded tool, and the trigger apart from the hand too until just before the index pulls
+        it: the index closes onto it with the hand, and pressing the gun on the weld still soft while the grip firms,
+        it pushed the gun 49 N into its holster's walls; touching again as the carry started, it knocked the gun up
+        off its rim 33 ms into the loading."""
+        self._now = t
+        super().enclose(t)
+        m = self.model
+        g = m.geom("air_gun_trigger").id
+        e = self.grip_events[0]
+        firming = e["t0"] - APPROACH_S <= t < self.trigger_from
+        if firming and self._trigger_saved is None:
+            self._trigger_saved = (int(m.geom_contype[g]), int(m.geom_conaffinity[g]))
+            m.geom_contype[g], m.geom_conaffinity[g] = 4, 1
+        elif not firming and self._trigger_saved is not None:
+            m.geom_contype[g], m.geom_conaffinity[g] = self._trigger_saved
+            self._trigger_saved = None
 
     def scene(self, body_xml: str) -> str:
         xml = super().scene(body_xml)
@@ -58,16 +103,17 @@ class BlowOff(_Cell):
     def held_error(self, side, t):
         """While the gun is in the hand, the eye is on the gun: its planned pose (gun_keys.npz) against where it is."""
         m, d = self.model, self.data
-        if side != "R" or not d.eq_active[m.equality("enclose_gun").id]:
+        if side != "R" or not d.eq_active[m.equality(self.eq_name("gun")).id]:
             return None
         R, p = BO.BlowOff.pose_at(None, t, self.gun_keys)
         b = m.body("air_gun").id
         return np.r_[(p * 0.001 - d.xpos[b]), Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
 
     def hand_force(self, side, t):
-        """The gun's weight, carried."""
+        """The gun's weight, carried: taken up over people's loading time, as the pinches' (sim/set_parallels.py). All
+        at once, the hand pulled the gun 2.5 mm up out of its rim in 33 ms."""
         if side == "R" and self.carry["t0"] <= t < self.carry["t1"]:
-            return np.array([0.0, 0.0, AG.GUN_KG * 9.81])
+            return np.array([0.0, 0.0, AG.GUN_KG * 9.81 * min(1.0, (t - self.carry["t0"]) / SP.LOADING_S)])
         return None
 
     def on_frame(self, k: int) -> None:

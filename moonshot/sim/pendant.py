@@ -39,16 +39,24 @@ from pathlib import Path
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
-from moonshot.sim.runner import ARM, SETTLE_STEPS, TakeRunner
+from moonshot.body.skeleton import set_finger_contact
+from moonshot.sim.runner import ARM, PAD, SETTLE_STEPS, TakeRunner
 from moonshot.world import cell, vf2
 from moonshot.world.vise import Load
 
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
 TOUCH_N = 0.2               # less than this on a key isn't touching it
 ALIGNED_MM = 6.0            # a press pushes only once the fingertip is this close to the key's centre (keys are 14 mm)
+GOING_IN_S = 0.15           # before a press's start, the index going in: sight leaves the depth to the press
+APPROACH_PAST_MM = 2.0     # a lined-up finger is steered in, until its key clicks, to this far past the key's face,
+APPROACH_TAU = 0.1          # what stays short taken up at this rate (s), up to APPROACH_MAX_MM: steered by the error
+APPROACH_MAX_MM = 15.0     # alone, the sagging arm stopped 2.3-6.5 mm short of a target 2 mm past it
+PUSH_NEAR_MM = 1.0          # within this of the face, or touching, it's pushed too: steered in, the index came to
+                            # rest on keys at under 0.2 N
 AIM_GAIN = 0.6              # of the fingertip's error, steered out at once: under 1, so the arm's lag can't make it ring
 AIM_TAU = 0.5               # s: what stays off is taken up this slowly
 AIM_MAX = 0.03              # m
@@ -59,15 +67,19 @@ FREEZE_EASE_S = 0.4         # a held hand, its jog's last stroke over, comes rou
 DEBOUNCE_S = 0.05           # a key reads as held until its force has stayed low this long, as a keypad debounces a
                             # finger bouncing on it (as moonshot/sim/door_cycle.py's Cycle Start)
 NEVER_HELD = ["vf2_estop"]  # pressing it would stop the machine
+DIAL_FINGERS = ("index", "middle")    # the dial grip's fingers with targets (motion/pendant.py), the thumb aside
+NEAR_M = 0.02               # one this close to the handle bends the contact way (as moonshot/sim/vise_take.py's)
 
 
 def tool_xml(tool: dict) -> str:
     """A tool in its holder, hanging from the spindle's gauge line; it turns with the spindle. It doesn't collide:
     an edge finder's, probe's or indicator's touch is the machine's sensing, or the needle's, read from the geometry.
-    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus."""
+    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus.
+    Its weight is carried by the head's counterbalance, as the spindle's is: uncompensated, its 1.2 kg sagged the Z
+    servo 5.7 um below its setpoint, past the 5 um a probing cycle waits for, and op30-z's cycle never ended."""
     hl, st, tip = tool["holder_mm"], tool["stickout_mm"], tool["tip_mm"]
     f = lambda v: f"{v / 1000:.5f}"                      # noqa: E731
-    body = (f'\n        <body name="tool">'
+    body = (f'\n        <body name="tool" gravcomp="1">'
             f'<geom name="tool_holder" type="cylinder" size="{f(tool["holder_r"])} {f(hl / 2)}" pos="0 0 {f(-hl / 2)}" '
             f'contype="0" conaffinity="0" mass="1.1" rgba="0.6 0.6 0.62 1"/>'
             f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip) / 2)}" '
@@ -93,13 +105,13 @@ class PendantRunner(TakeRunner):
         self.machine = cell.start(m, d)
         self.machine0 = self.machine.machine_mm()  # the plan counts the axes from where the take starts them
         self.machine.setup_mode = bool(s.get("setup_mode"))
-        self.machine.tool = int(s["tool"].get("number", 0))
+        self.machine.tool = int((s.get("tool") or {}).get("number", 0))
         self.machine.tool_length = {int(k): v for k, v in s.get("tool_length", {}).items()}
         self.machine.vps_queue = [dict(v) for v in s.get("vps", [])]
         c0 = np.array(s["centre_mm"], float)
         self.bores = [{"rel": (np.array(b["centre_mm"], float) - c0[:2]) / 1000, "r": b["r_mm"] / 1000,
                        "top": (b["top_z_mm"] - c0[2]) / 1000} for b in s.get("bores", [])]
-        if s["tool"].get("ball"):
+        if (s.get("tool") or {}).get("ball"):
             self.machine.sensor = self.probe_touch
         # the vise clamped on the part: the jaw at its width, the screw locked
         load = Load.from_json(s["load"])
@@ -116,12 +128,14 @@ class PendantRunner(TakeRunner):
         self.hand_geoms = {g for g in range(m.ngeom) if m.geom(g).name[:2] in ("R_", "L_")}
         self.face = m.geom("vf2_pendant_face").id
         self.buttons = {m.geom(f"vf2_{b}_button").id: b for b in ("cycle_start", "feed_hold")}
+        self.buttons[m.geom("vf2_tool_release_button").id] = "tool_release_head"     # on the head
         keys = vf2.record()["affordances"]["keys"]
         self.key_half = keys["half_mm"] / 1000
         self.key_names = list(keys["at_mm"])
         self.key_xz = np.array([d.site(f"vf2_key_{k}").xpos[[0, 2]] for k in self.key_names])
         self.key_at = {k: d.site(f"vf2_key_{k}").xpos.copy() for k in self.key_names}
         self.key_at |= {b: d.site(f"vf2_{b}").xpos.copy() for b in ("cycle_start", "feed_hold")}
+        self.key_at["tool_release_head"] = d.site("vf2_tool_release").xpos.copy()
         self.index_pad = {s: m.geom(f"{s}_g_dis2").id for s in ("R", "L")}
         self.rec = {"touching": [], "handle_deg": [], "hand_wrench": [], "machine_mm": [], "key_n": [],
                     "active_constraints": [], "applied_forces": [], "machine_axes": {f"vf2_{a}": [] for a in
@@ -135,7 +149,11 @@ class PendantRunner(TakeRunner):
         self.arm_act = {s: np.array([act_of_dof[int(v)] for v in self.arm_dofs[s]]) for s in ("R", "L")}
         self._last_on: dict[str, float] = {}
         self.aim_i = {s: np.zeros(3) for s in ("R", "L")}
-        self.turns = sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
+        self.approach_i = {s: 0.0 for s in ("R", "L")}       # the steering in onto a key taken up so far (aim), m
+        self.press_t0: dict[str, float | None] = {"R": None, "L": None}   # the press the aim is on, its start
+        self.lifting = {s: False for s in ("R", "L")}
+        self.press_n: dict[str, np.ndarray | None] = {s: None for s in ("R", "L")}
+        self.turns =sorted((e for e in self.tk["events"] if e["kind"] == "turn"), key=lambda e: e["t0"])
         self.jog_ev = {e["jog"]: e for e in self.turns}                  # its last stroke: the target, axis and step
         self.jog_dir = {j: np.sign(sum(e["clicks"] for e in self.turns if e["jog"] == j)) for j in self.jog_ev}
         self.jog_t0 = {e["jog"]: e["t0"] - 0.25 for e in reversed(self.turns)}  # counted from its first stroke
@@ -151,6 +169,14 @@ class PendantRunner(TakeRunner):
         self.pinch = m.equality("dial_pinch").id
         self.lock = m.equality("dial_lock").id
         self.dial_geom = m.geom("vf2_jog_handle").id
+        self._dial_contact: set[str] = set()        # the fingers bending their fingertips the contact way (dial_coupling)
+        # the dial's axis and a basis across it (its own frame), and the angle about it the pinch holds the hand at
+        a = m.jnt_axis[m.joint("vf2_jog").id] / np.linalg.norm(m.jnt_axis[m.joint("vf2_jog").id])
+        e1 = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
+        e1 /= np.linalg.norm(e1)
+        self.dial_basis = (a, e1, np.cross(a, e1))
+        rim = m.eq_data[self.pinch, 0:3]
+        self.pinch_angle = math.atan2(rim @ self.dial_basis[2], rim @ e1)
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
@@ -165,6 +191,8 @@ class PendantRunner(TakeRunner):
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
                           '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '
                           'solref="0.005 1"/>\n', 1)
+        if not s.get("tool"):
+            return xml                                     # the spindle empty
         gauge = re.search(r'<geom name="vf2_spindle_gauge"[^>]*/>', xml).group(0)
         return xml.replace(gauge, gauge + tool_xml(s["tool"]), 1)
 
@@ -216,14 +244,14 @@ class PendantRunner(TakeRunner):
         for i, e in enumerate(self.presses):
             if not e["t0"] - 0.05 <= t < e["t1"] + 0.08 or i in self.press_done:
                 continue
-            if e["key"] in self.machine._down:                 # it clicked: ease off, as people do
+            if e["key"] in self.machine._down and not e.get("hold"):   # it clicked: ease off, as people do
                 self.press_done.add(i)
                 continue
             F = self._key_n.get(e["key"], 0.0)
             n = np.asarray(e["normal"], float)
             off = self.key_at[e["key"]] - self.fingertip(e["side"], n)
-            if F < TOUCH_N and np.linalg.norm(off - n * (off @ n)) > ALIGNED_MM / 1000:
-                continue                                       # not over the key yet: sight first, then press
+            if F < TOUCH_N and off @ n > PUSH_NEAR_MM / 1000:
+                continue                                       # not at the key yet: the aim brings it (aim)
             ramp = min(1.0, (t - (e["t0"] - 0.05)) / 0.05)
             fade = 1.0 - min(1.0, max(0.0, (t - e["t1"]) / 0.08))
             if e["t0"] <= t < e["t1"]:                         # pushing until the key is felt, then holding its force
@@ -251,25 +279,75 @@ class PendantRunner(TakeRunner):
         m, d, dt = self.model, self.data, self.model.opt.timestep
         for s in ("R", "L"):
             # the next press within reach in time: the hand works toward it from the last one's end
-            near = [e for e in self.presses if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
+            near = [(j, e) for j, e in enumerate(self.presses) if e["side"] == s and e["t0"] - 0.9 <= t <= e["t1"]][:1]
             i = self.aim_i[s]
+            self.press_n[s] = np.asarray(near[0][1]["normal"], float) if near else None
+            self.press_t0[s] = near[0][1]["t0"] if near else None
+            self.lifting[s] = bool(near) and near[0][0] in self.press_done
             if not near:
                 i *= 1 - dt / 0.2
+                self.approach_i[s] = 0.0
                 continue
-            n = np.asarray(near[0]["normal"], float)
-            err = self.key_at[near[0]["key"]] - self.fingertip(s, n)
+            j, e = near[0]
+            n = np.asarray(e["normal"], float)
+            err = self.key_at[e["key"]] - self.fingertip(s, n)
             across = err - n * (err @ n)
             i += across * dt / AIM_TAU
             if np.linalg.norm(i) > AIM_MAX:
                 i *= AIM_MAX / np.linalg.norm(i)
             c = AIM_GAIN * across + i
-            if np.linalg.norm(across) > ALIGNED_MM / 1000 and self._key_n.get(near[0]["key"], 0.0) < TOUCH_N:
-                c = c + n * min(0.0, err @ n - STANDOFF_MM / 1000)      # off the face until over the key
             g = self.index_pad[s]
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, self.fingertip(s, [0, 1.0, 0]), m.geom_bodyid[g])
             J = jacp[:, self.arm_dofs[s]]
-            d.ctrl[self.acts[self.arm_act[s]]] += J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+            dq = J.T @ np.linalg.solve(J @ J.T + DAMPING ** 2 * np.eye(3), c)
+            # off the face until over the key; and once it has clicked, lifted off it: a finger left resting on the
+            # key, as the plan has it until the press ends, bounces about its release force and clicks it again. The
+            # whole hand moves straight back, its turn held: moved back by the index's tip alone, the arm pitched the
+            # hand about it, and as the index lifted off Offset the thumb pressed J (op10-xy)
+            touching = self._key_n.get(e["key"], 0.0) >= TOUCH_N
+            if self.lifting[s] or (np.linalg.norm(across) > ALIGNED_MM / 1000 and not touching):
+                move = n * min(0.0, err @ n - STANDOFF_MM / 1000)
+            elif t >= e["t0"] - 0.05:
+                # lined up, the plan's index on its key: in straight the same way to just past the key's face. Pushed
+                # there by force through the body, the run's index swung 4-7 mm across +Y, out of line, and never
+                # pressed it (op10-xy, op30-xy, op40-xy, op50-xy); steered through the plan's quick go-in as well, after
+                # a hand lagging it by up to 20 mm, the arm kicked it 7-11 mm across +Y and Reset
+                planned = (self.key_at[e["key"]] - self.fingertip(s, n, data=self.plan)) @ n
+                if planned < 0.003:
+                    short = max(0.0, err @ n - planned + APPROACH_PAST_MM / 1000)
+                    self.approach_i[s] = min(APPROACH_MAX_MM / 1000, self.approach_i[s] + short * dt / APPROACH_TAU)
+                    move = n * (short + self.approach_i[s])
+                else:
+                    move = None
+            else:
+                move = None
+            if move is None or self.lifting[s]:
+                self.approach_i[s] = 0.0
+            if move is not None:
+                jp, jr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, d, jp, jr, m.body(f"{s}_hand").id)
+                J6 = np.vstack([jp, jr])[:, self.arm_dofs[s]]
+                dq += J6.T @ np.linalg.solve(J6 @ J6.T + DAMPING ** 2 * np.eye(6), np.r_[move, 0.0, 0.0, 0.0])
+            d.ctrl[self.acts[self.arm_act[s]]] += dq
+
+    def held_error(self, side: str, t: float) -> np.ndarray | None:
+        """While a press is under way, sight corrects the hand across the key's face only: how deep the index stands
+        is the press's, which holds it off the face until it's over the key, pushes, and lifts it once it has
+        clicked, all meant to leave the plan. Sight, correcting the depth too, wound up 10 mm into the keypad by
+        op20-xy's 11th second, and the middle finger pressed 2 as the hand left for the dial; held still through
+        the press altogether, it let the hand drift onto other keys. Until the index goes in (GOING_IN_S before the
+        press), sight corrects the depth as well: left to the press from the hover on, the arm's sag held the index
+        14 mm farther off than the plan over +Y after a jog, and it reached the key only as the press ended (op30-xy)."""
+        n = self.press_n[side]
+        if n is None or t < self.press_t0[side] - GOING_IN_S:
+            return None
+        m, d, p = self.model, self.data, self.plan
+        hb = m.body(f"{side}_hand").id
+        Rp, Ra = p.xmat[hb].reshape(3, 3), d.xmat[hb].reshape(3, 3)
+        err = np.r_[p.xpos[hb] - d.xpos[hb], Rotation.from_matrix(Rp @ Ra.T).as_rotvec()]
+        err[:3] -= n * (err[:3] @ n)
+        return err
 
     def correction(self, t: float) -> np.ndarray:
         """The runner's correction by sight, for the right hand only: the left only presses Cycle Start, aimed by its
@@ -324,22 +402,34 @@ class PendantRunner(TakeRunner):
     def hold_dial(self, t: float) -> None:
         """The dial_pinch shortcut: on while a stroke of a jog not yet done turns the dial (not while the grip closes
         on it, while the hand still settles) and a finger touches its rim, its anchor set where the hand is then, so
-        switching it on moves nothing; and dial_lock whenever it is
-        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there."""
+        switching it on moves nothing; off the moment no finger touches it (left on, it turned the dial under a hand
+        gone off the rim, and back 7 clicks as the hand went back: op10-z); and dial_lock whenever it is
+        off, at the dial's nearest detent, so only the grip turns it and the jog's last click stops it there.
+        The pinch turns the dial and does nothing else: each step its dial-side point is moved to the hand's own depth
+        along the axis and distance from it, keeping only its angle about the axis, so it pulls only round the rim.
+        Held as a point, it held the hand where it first touched the rim while the plan carried it on along the axis,
+        12 N median into the dial and 23 N at the 95th percentile, and op30-z's muscles overloaded."""
         m, d = self.model, self.data
+        hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
         e, grip = self.effort("R", t)
         stroke = any(ev["t0"] - 0.02 <= t <= ev["t1"] + 0.1 for ev in self.turns)
-        want = grip == "dial" and e >= 0.5 and stroke and self.frozen(t) is None
-        if want and not d.eq_active[self.pinch]:
-            touching = any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
-                           for c in d.contact[:d.ncon])
-            if touching:
-                hb, gb = m.body("R_hand").id, m.body("vf2_jog_handle").id
-                p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
-                m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
-                d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
-        elif not want and d.eq_active[self.pinch]:
+        # the grip closed: half the plan's light grip on the handle (motion/pendant.py DIAL_EFFORT)
+        want = grip == "dial" and e >= 0.25 and stroke and self.frozen(t) is None
+        touching = want and any(self.dial_geom in (c.geom1, c.geom2) and ({c.geom1, c.geom2} & self.hand_geoms)
+                                for c in d.contact[:d.ncon])
+        if touching and not d.eq_active[self.pinch]:
+            p = d.xpos[gb] + d.xmat[gb].reshape(3, 3) @ m.eq_data[self.pinch, 0:3]
+            m.eq_data[self.pinch, 3:6] = d.xmat[hb].reshape(3, 3).T @ (p - d.xpos[hb])
+            d.eq_active[self.pinch], d.eq_active[self.lock] = 1, 0
+        elif not touching and d.eq_active[self.pinch]:
             d.eq_active[self.pinch] = 0
+        if d.eq_active[self.pinch]:
+            a, e1, e2 = self.dial_basis
+            hand = d.xpos[hb] + d.xmat[hb].reshape(3, 3) @ m.eq_data[self.pinch, 3:6]
+            b = d.xmat[gb].reshape(3, 3).T @ (hand - d.xpos[gb])            # the hand's point, in the dial's frame
+            h = b @ a
+            r = np.linalg.norm(b - h * a)
+            m.eq_data[self.pinch, 0:3] = h * a + r * (math.cos(self.pinch_angle) * e1 + math.sin(self.pinch_angle) * e2)
         if not d.eq_active[self.pinch] and not d.eq_active[self.lock]:
             n = self.machine.detents
             m.eq_data[self.lock, 0] = round(d.qpos[self.machine.q["jog"]] * n / (2 * math.pi)) * 2 * math.pi / n
@@ -364,7 +454,23 @@ class PendantRunner(TakeRunner):
         self.push(t)
         self.aim(t)
         self.hold_dial(t)
+        self.dial_coupling(t)
         self.machine.apply()
+
+    def dial_coupling(self, t: float) -> None:
+        """In the dial's grip, its fingers near the handle bend their fingertip joints the contact way (dip = k pip + c),
+        as the grip solver solved them (motion/grasp.py's coupling for a finger with a target); the rest, and every
+        finger elsewhere, freely, as the vise take switches its own. Free throughout, the index's DIP ran 11 deg more
+        bent than its grip was solved with, and its tip sank 3.1-3.8 mm into the handle at every grip (op50-check)."""
+        m, d = self.model, self.data
+        near, ft = set(), np.zeros(6)
+        if self.effort("R", t)[1] == "dial":
+            near = {f for f in DIAL_FINGERS if mujoco.mj_geomDistance(
+                m, d, m.geom(f"R_g_{PAD[f]}").id, self.dial_geom, NEAR_M, ft) < NEAR_M}
+        if near != self._dial_contact:
+            for f in ("index", "middle", "ring", "little"):
+                set_finger_contact(m, self.body, "R", f, f in near)
+            self._dial_contact = near
 
     # --- each frame --------------------------------------------------------------------------------------
     def hand_wrench(self) -> list[float]:
@@ -409,7 +515,7 @@ class PendantRunner(TakeRunner):
         c = self.machine
         return {"work": {k: v.round(4).tolist() for k, v in c.work.items()}, "tool": c.tool,
                 "tool_length": {str(k): round(v, 4) for k, v in c.tool_length.items()},
-                "pressed": [[round(t - self.settle_s, 3), key] for t, key in c.pressed], "events": c.events,
+                "pressed": [[round(self.plan_time(t), 3), key] for t, key in c.pressed], "events": c.events,
                 "machine_mm": c.machine_mm().round(4).tolist(),
                 "press_n_max": {e["key"] + f"@{e['t0']}": round(max((f.get(e["key"], 0.0) for f in
                                 self.rec["key_n"][int(e["t0"] * self.fps):int(e["t1"] * self.fps) + 2]), default=0.0), 2)
@@ -419,10 +525,26 @@ class PendantRunner(TakeRunner):
     def settle_s(self) -> float:
         return SETTLE_STEPS * self.model.opt.timestep
 
+    def plan_time(self, sim_t: float) -> float:
+        """The plan's time at a simulation time: after the settle, each frame steps a whole number of timesteps (33 of
+        1 ms at 30 fps), so the simulation runs at 0.99 of the plan's clock, 0.85 s behind by the end of an 85 s take."""
+        spf = round(1.0 / (self.fps * self.model.opt.timestep))
+        return (sim_t - self.settle_s) / (spf * self.model.opt.timestep * self.fps)
+
     def export(self, folder: Path | None = None) -> None:
         folder = Path(folder or self.folder)
         super().export(folder)
+        # for nothing_moves_without_a_cause: the machine's own bodies move by its servos, not a hand; the rest, the
+        # stock, the parallels and the vise's jaw, crank and knob, sit on its table and are judged by how they move on it
+        scene = json.loads((folder / "scene.json").read_text(encoding="utf-8"))["bodies"]
+        objects = [n for n, b in scene.items() if b["role"] == "object"]
+        driven = [n for n in objects if n.startswith("vf2") or n == "tool"]
         checks = {k: self.rec[k] for k in ("touching", "handle_deg", "hand_wrench", "active_constraints",
                                            "applied_forces", "machine_axes")} | {"never_held": NEVER_HELD}
+        # the drawbar's fingers turn with the spindle, off its axis: judged as the table's riders are, by their motion
+        # in it; seen 30 times a second at 1200 rpm, their path round the axis read as acceleration spikes (op10-xy)
+        rides = {n: "vf2_table" for n in objects if n not in driven}
+        rides |= {n: "vf2_spindle" for n in driven if n.startswith("vf2_finger_")}
+        checks |= {"driven": driven, "rides_on": rides, "touch_lead": self.checks["touch_lead"]}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")

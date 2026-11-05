@@ -47,10 +47,11 @@ def measure(take: Path) -> dict:
                 "bodies_mm": {k: v.tolist() for k, v in at.items()} | {"hand": rec["R_W"].tolist(),
                                                                        "hand_L": rec["L_W"].tolist()},
                 "loose": [o for o in at if o not in driven]}
+    paras = ("para_a", "para_b")[:sim["para"].shape[1]]      # none for a part stood on the vise's floor (op50)
     return {"fps": float(sim["fps"]), "touching": ck["touching"], "finite": _finite(sim, len(sim["t"])),
             "opening_mm": sim["opening"].tolist(),
-            "bodies_mm": {"blank": sim["blank"].tolist(), "para_a": sim["para"][:, 0].tolist(),
-                          "para_b": sim["para"][:, 1].tolist(), "hand": sim["W"].tolist()}}
+            "bodies_mm": {"blank": sim["blank"].tolist(), **{n: sim["para"][:, i].tolist() for i, n in enumerate(paras)},
+                          "hand": sim["W"].tolist()}}
 
 
 def _between_the_jaws(p: np.ndarray, opening: np.ndarray) -> np.ndarray:

@@ -209,6 +209,9 @@ def muscle_activation(take: dict) -> Result:
     still = np.asarray(take["arm_speed_deg_s"], float) < threshold("body.muscle_hold_joint_speed_deg_s").value
     if not len(act):
         raise ValueError("a take with no frames can't pass a per-frame check")
+    if not np.isfinite(act).all():                 # a nan compares false with the bar, so it passed unseen
+        bad = np.flatnonzero(~np.isfinite(act))
+        raise ValueError(f"{bad.size} frames have no activation (the muscle solve failed), the first at {int(bad[0])}")
     over = np.flatnonzero(act > threshold("body.muscle_activation_max").value)
     shortest = threshold("body.muscle_hold_min_s").value * float(take["fps"])
     holds, heavy, k = [], [], 0

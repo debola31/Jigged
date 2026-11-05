@@ -3,13 +3,22 @@ check passed. Runs on the hub; the jobs show on the dashboard like any other.
 
     python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--lift-out] [--no-render]
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
+    python -m moonshot.orchestrate.pipeline <take> --local [--final] [--data <dir>] [--look <dir>]
     python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
     python -m moonshot.orchestrate.pipeline <take> --still
 
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
 baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
 draws the take record at 24 fps with moonshot's renderer (moonshot/render/), or with --trainual the sim.npz at the
-take's own rate with trainual's scripts. --final renders at 1080p instead of the draft's 960x540.
+take's own rate with trainual's scripts. A take whose checks pass renders its final straight away, at 720p, with no
+draft before it (your decision, 2026-11-04: nist-ftc-10 on the web tonight, its backlog's drafts taken as approved);
+--render-only renders a draft (960x540) unless --final.
+
+--local renders the take on this machine, start to end, outside the queue, into takes/<take>/: render each take where
+it was made and send only its video to the hub, the page's source (your decision, 2026-11-04: the queue split a take's
+frames across machines and sent each frame back to the hub as a PNG, 70 MB a range over a link doing 100 KB/s, which
+cost five times the rendering). --data is where its scene's GLBs are (default the data root; a Mac has them in its
+worker's unpacked packs), --look the CC0 textures (default <data root>/cc0).
 
 --still renders one 1080p picture of a machine-only step's take, its last frame, close on the part from in front and
 above, nothing blurred: the web shows it in place of a video (your decision, 2026-11-03: the machine's own work isn't
@@ -21,16 +30,21 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 from moonshot.config import data_root, hub_url
 from moonshot.orchestrate.hub import blob_dir, queue_dir, token_for
 from moonshot.orchestrate.queue import Queue
 
 DRAFT = {"res": "960x540", "samples": 32}
-FINAL = {"res": "1920x1080", "samples": 48}              # tuned: moonshot/render/render_take.py settings()
+FINAL = {"res": "1280x720", "samples": 16}               # moonshot/render/render_take.py settings(): 720p and 16
+                                                          # samples, denoised, so nist-ftc-10's 39,000 frames render in
+                                                          # a night on the M4 and the M1 (your decisions, 2026-11-04;
+                                                          # 48 samples took 2.1 s a frame on the M4, 16 take 1.1)
 
 
 def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:
@@ -67,6 +81,8 @@ def main(argv: list[str]) -> int:
     opt = lambda flag: argv[argv.index(flag) + 1] if flag in argv else None   # noqa: E731
     if "--render-only" in argv:
         return render(take, final="--final" in argv, trainual="--trainual" in argv)
+    if "--local" in argv:
+        return local(take, final="--final" in argv, data=opt("--data"), look=opt("--look"))
     if "--still" in argv:
         return still(take)
     if "--assemble" in argv:
@@ -95,7 +111,7 @@ def main(argv: list[str]) -> int:
         return 1
     if "--no-render" in argv:
         return 0
-    return render(take, final=False)
+    return render(take, final=True)
 
 
 def stored(path) -> str:
@@ -146,6 +162,51 @@ def still(take: str) -> int:
         png = next(m for m in tar.getmembers() if m.name.endswith(".png"))
         (folder / "still.png").write_bytes(tar.extractfile(png).read())
     print(f"[pipeline] {take}: still -> {folder / 'still.png'}", flush=True)
+    return 0
+
+
+def local(take: str, final: bool, data: str | None = None, look: str | None = None) -> int:
+    """The take baked, rendered and encoded on this machine, its video in takes/<take>/ (see --local above)."""
+    import numpy as np
+
+    from moonshot.config import blender
+    from moonshot.render.pack import take_pack, unpack
+    repo = Path(__file__).resolve().parents[2]
+    folder = data_root() / "takes" / take
+    quality, name = (FINAL, "final") if final else (DRAFT, "draft")
+    work = data_root() / "render-local" / take.replace("/", "--")
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    t0 = time.time()
+    pack = unpack(take_pack(folder, work / "take.tar", data=Path(data) if data else None), work / "take")
+    look = Path(look) if look else data_root() / "cc0"
+
+    def run(cmd, log_name):
+        with open(work / log_name, "w") as log:
+            r = subprocess.run([str(c) for c in cmd], cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            print(f"[pipeline] {take}: {log_name} exited {r.returncode}: "
+                  f"{(work / log_name).read_text(errors='replace')[-1500:]}", flush=True)
+        return r.returncode
+
+    if run([sys.executable, "-m", "moonshot.render.bake", pack, "--out", work / "bake"], "bake.log"):
+        return 1
+    n = int(np.load(work / "bake" / "bake.npz")["n"])
+    t1 = time.time()
+    device = "METAL" if sys.platform == "darwin" else "CUDA"
+    if run([blender(), "-b", "--factory-startup", "--python", repo / "moonshot" / "render" / "render_take.py", "--",
+            "--take", pack, "--bake", work / "bake", "--data", pack / "data", "--look", look, "--out",
+            work / "frames", "--frames", f"0:{n}", "--res", quality["res"], "--samples", quality["samples"],
+            "--device", device], "render.log"):
+        return 1
+    t2 = time.time()
+    if run([blender(), "-b", "--python", repo / "moonshot" / "render" / "encode.py", "--", "--dir", work / "frames",
+            "--out", folder / f"{name}.mp4", "--fps", 24], "encode.log"):
+        return 1
+    shutil.rmtree(work / "frames", ignore_errors=True)
+    print(f"[pipeline] {take}: {n} frames at {quality['res']} on this machine: bake {t1 - t0:.0f} s, render "
+          f"{t2 - t1:.0f} s ({(t2 - t1) / n:.1f} s a frame), encode {time.time() - t2:.0f} s -> {folder / name}.mp4",
+          flush=True)
     return 0
 
 

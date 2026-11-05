@@ -2,14 +2,10 @@
 // on the floor, and the station of the current step outlined. Nothing in it moves except the
 // camera, so it draws on demand rather than every frame.
 import {
-  ACESFilmicToneMapping,
   BoxGeometry,
   CanvasTexture,
-  Color,
   EdgesGeometry,
   Group,
-  HemisphereLight,
-  DirectionalLight,
   LineBasicMaterial,
   LineSegments,
   Mesh,
@@ -18,23 +14,19 @@ import {
   Object3D,
   PerspectiveCamera,
   PlaneGeometry,
-  PMREMGenerator,
   Scene,
   SRGBColorSpace,
   Vector3,
-  WebGLRenderer,
+  type WebGLRenderer,
 } from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { BRAND } from '@/components/marketing/marketingStyles';
+import { createRenderer, gltfLoader, light } from './sceneBasics';
 import { mediaUrl, type Rect, type Shop, type Where } from './showcaseData';
 
 // Scene colours. three.js takes literal colours, so they are named here once; the accents are
 // the marketing palette's.
 const COLOURS = {
-  background: BRAND.indigo,
   floor: '#3a3f55',
   wall: '#565c74',
   furniture: '#6b7186',
@@ -54,6 +46,11 @@ const ZONE_TINT: Record<string, string> = {
 };
 const LOADS_AT_ONCE = 6;
 const FLY_MS = 1100;
+// The walk: eye height, a brisk glide down the aisle, and how long it stops to face each station.
+const EYE_MM = 1600;
+const WALK_MM_S = 4000;
+const TURN_MS = 900;
+const HOLD_MS = 1800;
 
 type Vec3 = [number, number, number];
 
@@ -74,6 +71,23 @@ interface View {
   target: Vector3;
 }
 
+/** One stretch of a camera move. Under reduced motion a move is a cut, and only a hold takes time. */
+interface Leg {
+  to: View;
+  ms: number;
+  hold?: boolean;
+  /** The station outlined from this leg on. */
+  outline?: Where;
+  /** On the walk: the station the camera is facing, named over the view. */
+  stop?: string;
+}
+
+/** Whether the walk is under way, and the station it is stopped at. */
+export interface WalkState {
+  walking: boolean;
+  stop?: string;
+}
+
 export interface LoadState {
   loaded: number;
   failed: number;
@@ -89,22 +103,22 @@ export class ShopScene {
   private resize: ResizeObserver;
   private frame = 0;
   private flight: { from: View; to: View; start: number } | null = null;
+  /** The legs still to fly after the current one. */
+  private legs: Leg[] = [];
+  private walking = false;
   /** The point the camera looks at. */
   private target = new Vector3();
   private disposed = false;
+  private onWalk: (state: WalkState) => void;
   readonly overview: View;
 
   constructor(
     private container: HTMLElement,
     private shop: Shop,
-    options: { orbit: boolean; onLoad(state: LoadState, error?: unknown): void },
+    options: { orbit: boolean; onLoad(state: LoadState, error?: unknown): void; onWalk(state: WalkState): void },
   ) {
-    this.renderer = new WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.domElement.style.display = 'block';
-    container.appendChild(this.renderer.domElement);
+    this.onWalk = options.onWalk;
+    this.renderer = createRenderer(container);
 
     this.camera = new PerspectiveCamera(40, 1, 0.1, 400);
     const [w, d] = shop.building.size;
@@ -119,15 +133,7 @@ export class ShopScene {
     this.target.copy(this.overview.target);
     this.camera.lookAt(this.target);
 
-    this.scene.background = new Color(COLOURS.background);
-    const pmrem = new PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-    this.scene.environmentIntensity = 0.6;
-    this.scene.add(new HemisphereLight('#ffffff', '#30344a', 1.4));
-    const sun = new DirectionalLight('#ffffff', 1.6);
-    sun.position.set(-20, 40, 25);
-    this.scene.add(sun);
+    light(this.scene, this.renderer);
 
     this.addBuilding();
     this.scene.add(this.outline);
@@ -144,7 +150,8 @@ export class ShopScene {
       this.controls.enableZoom = false;
       this.controls.maxPolarAngle = deg(85);
       this.controls.addEventListener('change', () => this.render());
-      this.controls.addEventListener('start', () => (this.flight = null));
+      // A drag takes the camera back from any flight or walk.
+      this.controls.addEventListener('start', () => this.play([]));
       this.controls.update();
     }
 
@@ -184,27 +191,76 @@ export class ShopScene {
 
   /** Fly to where a step happens: a machine seen from its operator side, or a zone from the south. */
   flyToStation(where: Where): void {
+    this.flyTo(this.stationView(where));
+  }
+
+  showWholeShop(): void {
+    this.flyTo(this.overview);
+  }
+
+  /**
+   * Walk the shop at eye height: in at the west end of the main aisle (the front door), along it to
+   * each station of the part's route in turn, stopping to face it, then back to `back`, the current
+   * step's station. Every zone of the shop opens onto the main aisle, which runs east-west.
+   */
+  walk(route: Where[], back: Where): void {
+    const [x0, y0, x1, y1] = this.shop.aisles.reduce((a, b) => (b.rect[2] - b.rect[0] > a.rect[2] - a.rect[0] ? b : a)).rect;
+    const eye = (x: number, y: number) => new Vector3(...toScene(x, y, EYE_MM));
+    const ahead = (x: number, y: number, dir: number) => new Vector3(...toScene(x + dir * 8000, y, EYE_MM));
+    let [x, y] = [x0 + 1500, (y0 + y1) / 2];
+    const legs: Leg[] = [{ to: { position: eye(x, y), target: ahead(x, y, 1) }, ms: 1600 }];
+    for (const where of route) {
+      const [px, py] = where.item ? [where.x, where.y] : this.zoneCentre(where);
+      // Stopped across the aisle from the station, so a whole machine or bench is in view.
+      const [sx, sy] = [Math.min(x1 - 1500, Math.max(x0 + 1500, px)), py < (y0 + y1) / 2 ? y1 - 500 : y0 + 500];
+      const dir = Math.sign(sx - x) || 1;
+      const facing = { position: eye(sx, sy), target: this.stationPoint(where) };
+      legs.push(
+        { to: { position: eye(sx, sy), target: ahead(sx, sy, dir) }, ms: Math.max(800, (Math.hypot(sx - x, sy - y) / WALK_MM_S) * 1000) },
+        { to: facing, ms: TURN_MS, outline: where, stop: where.name },
+        { to: facing, ms: HOLD_MS, hold: true, stop: where.name },
+      );
+      [x, y] = [sx, sy];
+    }
+    legs.push({ to: this.stationView(back), ms: 1600, outline: back });
+    this.play(legs, true);
+  }
+
+  /** The middle of a station: a machine's box half-way up, or a zone's things at bench height. */
+  private stationPoint(where: Where): Vector3 {
+    const station = this.station(where);
+    if (station.item) {
+      const { item, size } = station.item;
+      const point = new Vector3(...toScene(item.x, item.y, item.z));
+      point.y += size[1] * 0.45;
+      return point;
+    }
+    return new Vector3(...toScene(...this.zoneCentre(where), 900));
+  }
+
+  /** Where a zone's things stand (plan mm): the middle of its items and furniture, which can sit off its centre. */
+  private zoneCentre(where: Where): [number, number] {
+    const rect = this.station(where).zone;
+    const inside = rect
+      ? [...this.shop.items, ...this.shop.furniture].filter((t) => t.x >= rect[0] && t.x <= rect[2] && t.y >= rect[1] && t.y <= rect[3])
+      : [];
+    if (!inside.length) return [where.x, where.y];
+    return [inside.reduce((s, t) => s + t.x, 0) / inside.length, inside.reduce((s, t) => s + t.y, 0) / inside.length];
+  }
+
+  private stationView(where: Where): View {
     const station = this.station(where);
     if (station.item) {
       const { item, size } = station.item;
       const radius = Math.max(...size) / 2;
       const [fx, fy] = front(item.rot);
-      const target = new Vector3(...toScene(item.x, item.y, item.z));
-      target.y += size[1] * 0.45;
+      const target = this.stationPoint(where);
       const away = radius * 2.6 + 1.5;
-      this.flyTo({
-        target,
-        position: target.clone().add(new Vector3(fx * away + away * 0.35, radius * 1.3 + 1.2, -fy * away)),
-      });
-      return;
+      return { target, position: target.clone().add(new Vector3(fx * away + away * 0.35, radius * 1.3 + 1.2, -fy * away)) };
     }
-    // A zone is seen from the south, the way its floor label reads.
-    const target = new Vector3(...toScene(where.x, where.y, 0));
-    this.flyTo({ target, position: target.clone().add(new Vector3(0, 10, 13)) });
-  }
-
-  showWholeShop(): void {
-    this.flyTo(this.overview);
+    // A zone is seen from the south, the way its floor label reads, centred on its things.
+    const target = new Vector3(...toScene(...this.zoneCentre(where), 0));
+    return { target, position: target.clone().add(new Vector3(0, 10, 13)) };
   }
 
   private station(where: Where) {
@@ -250,26 +306,49 @@ export class ShopScene {
   }
 
   private flyTo(to: View): void {
-    const from = { position: this.camera.position.clone(), target: this.target.clone() };
-    this.flight = { from, to, start: performance.now() };
+    this.play([{ to, ms: FLY_MS }]);
+  }
+
+  /** Fly these legs in turn, replacing whatever was flying; a walk ends when its legs do or anything replaces them. */
+  private play(legs: Leg[], walk = false): void {
+    if (this.walking && !walk) this.onWalk({ walking: false });
+    this.walking = walk;
+    this.legs = legs;
+    this.next();
+  }
+
+  private next(): void {
     cancelAnimationFrame(this.frame);
+    const leg = this.legs.shift();
+    if (!leg) {
+      this.flight = null;
+      if (this.walking) {
+        this.walking = false;
+        this.onWalk({ walking: false });
+      }
+      return;
+    }
+    if (this.walking) this.onWalk({ walking: true, stop: leg.stop });
+    if (leg.outline) this.highlight(leg.outline);
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches && !leg.hold ? 0 : leg.ms;
+    const from = { position: this.camera.position.clone(), target: this.target.clone() };
+    this.flight = { from, to: leg.to, start: performance.now() };
     const step = (now: number) => {
       if (!this.flight) return;
-      const t = Math.min(1, (now - this.flight.start) / FLY_MS);
+      const t = ms ? Math.min(1, (now - this.flight.start) / ms) : 1;
       const e = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
       this.camera.position.lerpVectors(this.flight.from.position, this.flight.to.position, e);
       this.target.lerpVectors(this.flight.from.target, this.flight.to.target, e);
       this.camera.lookAt(this.target);
       this.render();
       if (t < 1) this.frame = requestAnimationFrame(step);
-      else this.flight = null;
+      else this.next();
     };
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) step(this.flight.start + FLY_MS);
-    else this.frame = requestAnimationFrame(step);
+    this.frame = requestAnimationFrame(step);
   }
 
   private async loadModels(onLoad: (state: LoadState, error?: unknown) => void): Promise<void> {
-    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    const loader = gltfLoader();
     const assets = Object.keys(this.shop.assets);
     const state: LoadState = { loaded: 0, failed: 0, total: assets.length };
     let firstError: unknown;

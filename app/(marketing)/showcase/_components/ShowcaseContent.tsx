@@ -10,7 +10,7 @@ import SectionHeading from '@/components/marketing/SectionHeading';
 import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
 import PartPicker from './PartPicker';
 import { StepList, StepPlayer } from './StepPlayer';
-import type { LivePart, Showcase } from './showcaseData';
+import { ready, type LivePart, type Showcase } from './showcaseData';
 
 // three.js only loads in the browser, and only on this page.
 const ShopView = dynamic(() => import('./ShopView'), {
@@ -19,18 +19,29 @@ const ShopView = dynamic(() => import('./ShopView'), {
 });
 
 /**
- * The showcase (plan §1 "Website"): the shop in 3D, a part picker, and a step player for the
- * picked part. Everything on it was made ahead of time; nothing a visitor does generates anything
- * or changes the simulation.
+ * A part opens on its first step with a video to play, or else its first with anything to show,
+ * rather than on a "coming" placeholder.
+ */
+function firstShown(part: LivePart): number {
+  const video = part.steps.findIndex((s) => ready(s) && s.media.type === 'video');
+  return video >= 0 ? video : Math.max(0, part.steps.findIndex(ready));
+}
+
+/**
+ * The showcase (plan §1 "Website"): the shop in 3D, a part picker once more than one part is live,
+ * and a step player for the picked part. Everything on it was made ahead of time; nothing a
+ * visitor does generates anything or changes the simulation.
  */
 export default function ShowcaseContent({ data }: { data: Showcase }) {
   const live = data.parts.filter((p): p is LivePart => p.status === 'live');
   const [partId, setPartId] = useState(live[0].id);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => firstShown(live[0]));
   // How many steps the visitor has moved to: the shop flies and the video plays only after the first.
   const [moves, setMoves] = useState(0);
   const part = live.find((p) => p.id === partId) ?? live[0];
   const step = part.steps[index];
+  // The part's stations in the order its steps visit them, for the shop walk.
+  const route = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()];
 
   const select = (i: number) => {
     setIndex(i);
@@ -58,40 +69,42 @@ export default function ShowcaseContent({ data }: { data: Showcase }) {
         >
           Work instructions you can watch, one step at a time.
         </Typography>
-        <Typography sx={{ mt: 3, maxWidth: 760, color: 'rgba(255, 255, 255, 0.78)', fontSize: { xs: '1.05rem', md: '1.2rem' }, lineHeight: 1.6 }}>
-          This is a mock-up of what Jigged would hand a machinist: a plan for each part, broken into steps, with a video
-          of every step a person does and a picture of the part after each cut. We made all of it ahead of time, for{' '}
-          {data.parts.length} real parts in one shop, so nothing here is generated when you click. Every motion in the
-          videos is simulated on a model of the human arm and hand.
+        <Typography sx={{ mt: 3, maxWidth: 680, color: 'rgba(255, 255, 255, 0.78)', fontSize: { xs: '1.05rem', md: '1.2rem' }, lineHeight: 1.6 }}>
+          A mock-up of what Jigged would hand a machinist: a real part&apos;s plan, step by step, each step shown being
+          done. Every motion is simulated on a model of the human hand.
         </Typography>
       </Section>
 
-      <Section size="minor">
-        <SectionHeading index="01" eyebrow="Pick a part" heading="Start with the first part." subhead={`The other ${data.parts.length - live.length} follow as their videos are finished.`} />
-        <Box sx={{ mt: 4 }}>
-          <PartPicker
-            parts={data.parts}
-            selected={part.id}
-            onSelect={(id) => {
-              if (id === part.id) return;
-              setPartId(id);
-              setIndex(0);
-            }}
-          />
-        </Box>
-      </Section>
+      {/* Only the parts that are on the page; a picker once there is more than one. */}
+      {live.length > 1 && (
+        <Section size="minor">
+          <SectionHeading index="01" eyebrow="Pick a part" heading="Pick a part." />
+          <Box sx={{ mt: 4 }}>
+            <PartPicker
+              parts={live}
+              selected={part.id}
+              onSelect={(id) => {
+                if (id === part.id) return;
+                const next = live.find((p) => p.id === id) ?? live[0];
+                setPartId(id);
+                setIndex(firstShown(next));
+              }}
+            />
+          </Box>
+        </Section>
+      )}
 
       <Section size="major" surface="raised">
         <SectionHeading
-          index="02"
+          index={live.length > 1 ? '02' : '01'}
           eyebrow={part.name}
-          heading={`${part.steps.length} steps: people's work on video, the machine's cuts as pictures.`}
+          heading={`${part.steps.length} steps, start to finish.`}
           subhead={`${part.size} · ${part.material} · ${[...new Set(part.steps.map((s) => s.where.name))].join(' → ')}`}
         />
         <Box sx={{ mt: { xs: 4, md: 6 }, display: 'grid', gap: { xs: 4, md: 5 }, gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: '7fr 5fr' } }}>
           <StepPlayer part={part} index={index} autoPlay={moves > 0} onSelect={select} />
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-            <ShopView shop={data.shop} where={step.where} fly={moves} />
+            <ShopView shop={data.shop} where={step.where} route={route} fly={moves} />
             <StepList part={part} index={index} onSelect={select} />
           </Box>
         </Box>

@@ -1,0 +1,50 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill-3p3",
+  "name": "3.3 mm cobalt jobber drill",
+  "category": "tooling",
+  "make": "Chicago-Latrobe",
+  "model": "47843",
+  "description": "3.30 mm cobalt jobber drill, 135 degree split point: the tap drill for M4x0.7.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 3.3,
+      "unit": "mm"
+    },
+    {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+    },
+    {
+      "name": "Overall length",
+      "value": 65,
+      "unit": "mm"
+    },
+    {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+    }
+  ],
+  "source_urls": [
+    "https://zoro.com/chicago-latrobe-135-heavy-duty-cobalt-jobber-length-drill-chicago-latrobe-550asp-straw-hss-co-5-m35-rhsrhc-330mm-47843/i/G1208337"
+  ],
+  "source_files": [
+    "47843 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1007223's M4 tap drill (Op 30).",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "drill-3p3.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/47843.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

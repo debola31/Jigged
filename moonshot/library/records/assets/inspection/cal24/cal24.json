@@ -1,0 +1,50 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "cal24",
+  "name": "24 in digital caliper",
+  "category": "inspection",
+  "make": "Mitutoyo",
+  "model": "500-506-10",
+  "description": "ABSOLUTE Digimatic caliper, 0-24 in / 0-600 mm, with SPC output and no thumb roller.",
+  "generic": false,
+  "key_specs": [
+    {
+      "name": "Range",
+      "value": [
+        0.0,
+        24.0
+      ],
+      "unit": "in"
+    },
+    {
+      "name": "Resolution",
+      "value": 0.0005,
+      "unit": "in"
+    },
+    {
+      "name": "Accuracy",
+      "value": 0.002,
+      "unit": "in",
+      "note": "plus or minus"
+    }
+  ],
+  "source_urls": [
+    "https://www.msi-viking.com/Mitutoyo-500-506-10-Absolute-Caliper-0-24-600mm",
+    "https://www.lighttoolsupply.com/500-506-10"
+  ],
+  "source_files": [
+    "500-506-10 STEP from the vendor, not downloaded yet"
+  ],
+  "license": "vendor catalogue entry; no CAD downloaded yet",
+  "notes": "ll-1005337's 600 x 400 outline and nist-ftc-09's 11.00 x 7.50; the 6 in caliper (cal6) can't span them.",
+  "pending": "No model yet: the vendor's STEP isn't downloaded (moonshot.library.generators could stand in for a drill, reamer or tap); no take can show it until one is built",
+  "file": "cal24.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [],
+  "build": {
+    "from": "source/500-506-10.step",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

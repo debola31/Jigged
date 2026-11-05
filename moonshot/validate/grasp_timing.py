@@ -26,8 +26,11 @@ from moonshot.contracts.thresholds import threshold
 from moonshot.validate import objects
 from moonshot.validate.registry import Result, check
 
-# the grips that close the hand round an object, and that object; presses and fingertip touches aren't grasps
-GRASPS = {"blank_faces": "blank", "knob": "knob"}
+# the grips that close the hand round an object, and that object; presses and fingertip touches aren't grasps. A door
+# take's hand wraps its door's handle bar (moonshot/motion/door_cycle.py), closing it or opening it
+BARS = {"door_left": "vf2_door_left_pull", "door_right": "vf2_door_right_pull",
+        "open_left": "vf2_door_left_pull", "open_right": "vf2_door_right_pull"}
+GRASPS = {"blank_faces": "blank", "knob": "knob"} | BARS
 LIFTED = {"blank"}
 LEAD_S = 0.5                    # a grasp's contact may come this long before its planned grip starts
 
@@ -91,7 +94,7 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
            "grasping": {k: v.tolist() for k, v in grasping.items()},
            "height_mm": {o: at[o][:, 2].tolist() for o in lifted}, "weight_N": {o: ck["weight_N"][o] for o in lifted},
-           "load_N": ck.get("load_N", {})}
+           "load_N": ck.get("load_N", {}), "touch_lead": objects.touch_leads(take, ck["touch_lead"])}
     if "L" in hand.values():
         out |= {"hand": {o: s for o, s in hand.items() if s == "L"},
                 "hand_speed_L_mm_s": hand_speed(rec["L_W"], fps).tolist()}
@@ -99,7 +102,9 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
 
 
 def measure(take: Path) -> dict:
-    """What the check reads, from a physics run: a vise take's own keys, or any other take's record."""
+    """What the check reads, from a physics run: a vise take's own keys, or any other take's record. A run with the
+    vise's keys and two hands (the door takes') times the left hand's reaches (its grip events' side) on its own
+    speed (sim.npz W_L)."""
     from moonshot.world import vise as V
     sim = np.load(take / "sim.npz")
     tk = json.loads((take / "take.json").read_text(encoding="utf-8"))
@@ -108,14 +113,19 @@ def measure(take: Path) -> dict:
         return _from_record(take, tk, ck)
     fps, t = float(sim["fps"]), sim["t"]
     grasping: dict[str, np.ndarray] = {}
+    left = {}
     for e in intervals(tk["events"], "grip"):
         if e.get("grip") in GRASPS:
             obj, t1 = GRASPS[e["grip"]], e["t1"] if e["t1"] is not None else t[-1]
             grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
+            if e.get("side") == "L":
+                left[obj] = "L"
     load = V.Load.from_json(tk["load"]) if "load" in tk else V.REFERENCE
     out = {"fps": fps, "hand_speed_mm_s": hand_speed(sim["W"], fps).tolist(), "touching": ck["touching"],
            "grasping": {k: v.tolist() for k, v in grasping.items()}, "height_mm": {"blank": sim["blank"][:, 2].tolist()},
-           "weight_N": {"blank": load.mass_kg * 9.81}}
+           "weight_N": {"blank": load.mass_kg * 9.81}, "touch_lead": ck["touch_lead"]}
+    if left:
+        out |= {"hand": left, "hand_speed_L_mm_s": hand_speed(sim["W_L"], fps).tolist()}
     if "load_N" in ck:
         out["load_N"] = ck["load_N"]
     return out

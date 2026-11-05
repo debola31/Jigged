@@ -23,10 +23,11 @@ export interface Step {
   group: string;
   where: Where;
   /**
-   * What the step is shown with, by path under the media root: a person's step is a video, a
-   * machine cycle one still of the part after the cut (only people's work is rendered).
+   * What the step is shown with, by path under the media root: a person's step is a video; a
+   * machine cycle is the part after the cut, as a still and as the model a desktop can turn (only
+   * people's work is rendered).
    */
-  media: { type: 'video' | 'still'; path: string };
+  media: { type: 'video'; path: string } | { type: 'cut'; still: string; model: string };
   /** The media is in the bucket (moonshot/web/published.json). Until then the step shows as coming. */
   published: boolean;
 }
@@ -89,10 +90,13 @@ export interface Showcase {
 }
 
 // Videos, stills and models are served from Supabase Storage, never from the Next build (plan §1).
-// NEXT_PUBLIC_SHOWCASE_MEDIA_URL points development at `python -m moonshot.web.media serve`.
+// They are published to production's bucket only (`python -m moonshot.web.media upload`), so every
+// deployment reads from there: a preview's NEXT_PUBLIC_SUPABASE_URL is its Supabase preview branch,
+// whose bucket is empty. NEXT_PUBLIC_SHOWCASE_MEDIA_URL points development at
+// `python -m moonshot.web.media serve`.
 const MEDIA_ROOT =
   process.env.NEXT_PUBLIC_SHOWCASE_MEDIA_URL ??
-  `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/showcase`;
+  'https://mayuquvexmqjvwkfasxg.supabase.co/storage/v1/object/public/showcase';
 
 export function mediaUrl(path: string): string {
   return `${MEDIA_ROOT.replace(/\/$/, '')}/${path}`;

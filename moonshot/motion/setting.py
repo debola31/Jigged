@@ -22,7 +22,7 @@ import numpy as np
 
 from moonshot.config import data_root
 from moonshot.motion.loads import FACE_A_MM, part_pose, vise_load
-from moonshot.motion.pendant import PendantTake, key_at
+from moonshot.motion.pendant import STROKE_DEG_S, PendantTake, key_at
 from moonshot.planning.steps import expand
 from moonshot.planning.validate import load_plan
 from moonshot.world import vf2
@@ -91,7 +91,7 @@ class XYEdgeFinder:
         keys = ([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc])
         k.keys(keys)
         k.look(k.t, self.tip_world())
-        k.turn(clicks(mm, inc), 150.0 if inc == "inc_0.001" else 300.0)
+        k.turn(clicks(mm, inc), 150.0 if inc == "inc_0.001" else STROKE_DEG_S)
 
     def tip_world(self):
         x, y, z = self.where()
@@ -165,7 +165,7 @@ class Probing:
         k = self.k
         k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
         k.look(k.t, self.ball() * [1, 1, 1])
-        k.turn(clicks(mm, inc), 300.0)
+        k.turn(clicks(mm, inc), STROKE_DEG_S)
 
     def to(self, target, fine: bool = False) -> None:
         """The ball over to a point: up clear of the part first if it has to cross it, across in X and Y, then down."""
@@ -265,7 +265,7 @@ class SquareCheck:
         """The ball's centre among the part's frame-0 positions, as machine X, Y and Z move it."""
         return self.ball0 + self.k.axis_mm
 
-    def jog(self, axis: str, mm: float, inc: str, deg_s: float = 300.0) -> None:
+    def jog(self, axis: str, mm: float, inc: str, deg_s: float = STROKE_DEG_S) -> None:
         k = self.k
         k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
         k.look(k.t, self.ball())

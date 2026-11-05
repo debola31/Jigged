@@ -1900,7 +1900,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/op10-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-spot",
@@ -2518,7 +2518,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-dowels",
@@ -2818,7 +2818,7 @@
       "type": "video",
       "path": "video/ll-1005337/op20-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-far_edge",
@@ -5061,7 +5061,7 @@
       "type": "video",
       "path": "video/ll-1007223/op20-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-face",
@@ -5412,7 +5412,7 @@
       "type": "video",
       "path": "video/ll-1007223/op30-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-spot",

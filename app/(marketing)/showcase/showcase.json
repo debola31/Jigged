@@ -3458,7 +3458,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op20-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-start",

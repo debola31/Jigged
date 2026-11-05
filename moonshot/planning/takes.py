@@ -22,6 +22,7 @@ import sys
 from moonshot.config import data_root
 from moonshot.planning.steps import expand
 from moonshot.planning.validate import load_plan
+from moonshot.world import tooling as TL
 
 Span = tuple[str, str | None, str | None]           # (take, first clip, last clip); None: from the start / to the end
 
@@ -34,9 +35,36 @@ SPLIT_FROM_FORK = 3        # a holder this many forks or more right of the stand
                            # 20-23 mm
 
 
-def split(fork: int) -> bool:
-    """Is the holder in this fork (0 the stand's first, the stand filled from the right) taken in two takes?"""
-    return fork >= SPLIT_FROM_FORK
+def split(fork: int, layout: TL.Layout = TL.ONE_ROW) -> bool:
+    """Is the holder in this fork (0 the stand's first, the stand filled from the right) taken in two takes? By the
+    reach, not the fork's number (your decision, 2026-11-05): where the one stance in the doorway that reaches Tool
+    Release can't also take the holder as people do, it is picked standing where the reach to it is the vise setups'
+    first fork's, then inserted from the doorway. On the vise setups' stand that is a holder further right than their
+    fork SPLIT_FROM_FORK - 1 (standing right of where the left index still reaches Tool Release), as before. On a plate's
+    bracket (moonshot/world/tooling.py BRACKET), every holder: from the doorway it stands 245-270 mm in front of the
+    body, low at its right, where the arm can't hold the grip level (the plan's hand missed it by 12 deg, the fingers
+    in the tool) and, its holders lifted over the back row near the chest, the right arm's posture was unlike people's
+    (a median negative log-likelihood of 30.5, against their 28.7)."""
+    if layout.bracket:
+        return True
+    return bool(TL.stand_axis(fork, layout)[0] > TL.stand_axis(SPLIT_FROM_FORK - 1)[0] + 1e-6)
+
+
+def stand(step: dict) -> TL.Layout:
+    """The stand a Load the tools step's holders wait on (moonshot/world/tooling.py): a vise setup's, one row on the
+    table right of the vise; a plate setup's, whose spoilboard covers the table, two rows on a bracket in front of it."""
+    if "clamps" in step["facts"]:
+        return TL.bracket_layout(step["facts"]["tool_ids"])
+    return TL.ONE_ROW
+
+
+def forks(step: dict) -> list[int]:
+    """Each of the step's tools' fork on its stand, in the order they go in: the first in the front row's rightmost
+    fork, the front row filled leftward with the next and emptied first, then the back row the same way."""
+    n, layout = len(step["facts"]["tool_ids"]), stand(step)
+    m = layout.per_row or n
+    front, back = min(n, m), n - min(n, m)
+    return [front - 1 - i for i in range(front)] + [m + back - 1 - j for j in range(back)]
 
 
 # the parts whose clean, start and unload play the cell's shared takes (`shared`), each drawing nist-ftc-10's stock and
@@ -87,10 +115,10 @@ def tool_takes(step: dict) -> list[str]:
     the change at the pendant that empties the spindle, then for each tool its seat in the doorway (or, from a far fork,
     its pick at the stand and its insert in the doorway) and its ATC FWD at the pendant, cut together as the body doesn't
     walk. The first tool waits in the stand's rightmost fork."""
-    tools = step["facts"]["tool_ids"]
+    tools, layout = step["facts"]["tool_ids"], stand(step)
     out, k = ["00-change"], 1
-    for i, t in enumerate(tools):
-        names = ["pick", "insert"] if split(len(tools) - 1 - i) else ["seat"]
+    for t, fork in zip(tools, forks(step)):
+        names = ["pick", "insert"] if split(fork, layout) else ["seat"]
         for name in names + ["atc"]:
             out.append(f"{k:02d}-{name}-{t}")
             k += 1

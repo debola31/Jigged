@@ -526,8 +526,8 @@ class ClampPlan(SawPlan):
                              # from a deeper lean, the arm raised and the elbow bent, as people's arms work in front
                              # of them: from the arm hanging nearly straight under a 35 deg lean, the turn was still
                              # less likely than people's (30.7)
-                             starts=[S(f, 0, 0, pl, el, -30, eb, 20, -10, 0) for f in (45, 55) for pl in (50, 70)
-                                     for el in (45, 60) for eb in (45, 70)])
+                             starts=[S(f, 0, 0, pl, el, -30, eb, pr, -10, 0) for f in (45, 55) for pl in (50, 70)
+                                     for el in (45, 60) for eb in (45, 70) for pr in (5, 35)])
         return specs
 
     def compose(self):

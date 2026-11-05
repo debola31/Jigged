@@ -139,16 +139,16 @@ JOBS["ct-slbeam"] = Job(
     at_xy=(-118.0, -122.0))
 JOBS["nist-ftc-09"] = Job(
     BC.NIST_FTC_09,
-    # the near long side's top edge, toward the right; the sheet overhangs the mat 25 mm all round, so the hook's
-    # lower arm clears the rubber below the 3 mm edge. Right of the micrometer: where nist-ftc-10's first stroke runs,
-    # 27 mm lower, the hand holding the tool came down on it and held the tool 14 mm over the edge
-    # two strokes along it, one after the other: with one, the take's start (the trunk's sway as the body settles,
-    # common to the bench's takes) was 7% of its frames, past people's for the left arm
-    # the hand trailing 100 mm right of the blade clear of the rough-surface block (52 mm tall) at the second's end
-    strokes=(((-95.25, 3.04, 10.0), (-95.25, 3.04, 60.0)), ((-95.25, 3.04, 61.0), (-95.25, 3.04, 111.0))),
+    # the near long side's top edge, twice, one stroke after the other, toward the right; the sheet overhangs the mat
+    # 25 mm all round, so the hook's lower arm clears the rubber below the 3 mm edge. With one stroke, the take's start
+    # (the trunk's sway as the body settles, common to the bench's takes) was 7% of its frames, past people's for the
+    # left arm. From 55 mm left of the body's middle: further left (where nist-ftc-10's first stroke runs, 27 mm lower)
+    # the hand holding the tool, its curled little finger 100 mm right of the blade, came down on the micrometer. To 46
+    # mm right: ending 91 mm right, the hand put the tool back with its side 4 mm into the rough-surface block beside
+    # the tool's rest (the skin's 3.5)
+    strokes=(((-95.25, 3.04, -35.0), (-95.25, 3.04, 15.0)), ((-95.25, 3.04, 16.0), (-95.25, 3.04, 66.0))),
     face_out=(-1.0, 0.0, 0.0), up=(0.0, 1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
-    # flat on the sheet, fingers forward, nearer the body and its middle than nist-ftc-10's hand on its rim: there,
-    # 27 mm lower, the trunk leant to the left past people's for 25 frames
+    # flat on the sheet, fingers forward
     steady=Steady(at=(-75.0, 3.04, -101.0), push=(0.0, 1.0, 0.0), rise=G1_RISE, away=G1_AWAY,
                   pads=tuple((f, (-75.0, 3.04, -101.0), (0.0, 1.0, 0.0), (("x", b), ("y", (-12, 14))))
                              for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))),

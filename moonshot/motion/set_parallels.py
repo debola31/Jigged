@@ -145,12 +145,16 @@ def local_bands(c, R, **lims):
 LUMBAR = ST.LUMBAR + np.array([-90.0, 140.0, 0.0])
 
 class SetParallels(StepTake):
-    def __init__(self, out=TAKES / "set-parallels", load: V.Load = V.REFERENCE, verbose=True):
+    def __init__(self, out=TAKES / "set-parallels", load: V.Load = V.REFERENCE, verbose=True, grips_from=None):
+        """grips_from: a take's grips.json to take the pinches from (StepTake.take_grips), not solved again."""
         super().__init__(out, LUMBAR, verbose)
         self.vload = load
         self.rack, self.dest = RACK.slots(load), load.parallels()
         self.kg = STEEL * V.PARALLEL_L * V.PARALLEL_T * load.parallel_h * 1e-9
-        self.solve_grips({GRIP[n]: self.pinch_spec(n) for n in ORDER}, source=self.pinch_spec, depends=(RACK,))
+        if grips_from:
+            self.take_grips(grips_from, [GRIP[n] for n in ORDER])
+        else:
+            self.solve_grips({GRIP[n]: self.pinch_spec(n) for n in ORDER}, source=self.pinch_spec, depends=(RACK,))
 
     def centre(self, base) -> np.ndarray:
         return np.asarray(base, float) + np.array([0.0, 0.0, self.vload.parallel_h / 2])
@@ -280,7 +284,14 @@ def build(verbose=True, part: str | None = None, setup: str | None = None):
     its part, as it enters the setup, waiting on the table (take.json "scene", loads.scene_spec)."""
     if part:
         load = vise_load(load_plan(part), setup)
-        take = SetParallels(out=TAKES / f"{part}-{setup}-set-parallels", load=load, verbose=verbose)
+        # parallels of the reference's height stand in the rack as the published take's do and are taken from the same
+        # stance, so they are pinched as it pinches them: solved again against ll-1007223 op10's narrower vise, the
+        # solver settled on another pinch for parallel a (its penetration term 53.6 against 23.0), which set it down
+        # 2.43 mm off where the published one sets it 0.8 mm off
+        published = TAKES / "set-parallels" / "grips.json"
+        same = abs(load.parallel_h - V.REFERENCE.parallel_h) < 1e-6 and published.exists()
+        take = SetParallels(out=TAKES / f"{part}-{setup}-set-parallels", load=load, verbose=verbose,
+                            grips_from=published if same else None)
         take.extra = scene_spec(part, setup, stock="in", vise="open")
     else:
         take = SetParallels(verbose=verbose)

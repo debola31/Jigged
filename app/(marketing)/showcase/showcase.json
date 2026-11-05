@@ -2137,7 +2137,7 @@
       "still": "still/ct-slbeam/saw-cut.webp",
       "model": "cut/ct-slbeam/saw-cut.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-unload",
@@ -2863,7 +2863,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op40-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-start",
@@ -3168,7 +3168,7 @@
       "still": "still/ll-1007223/saw-cut.webp",
       "model": "cut/ll-1007223/saw-cut.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-unload",

@@ -66,8 +66,9 @@ def spans(part: str, step: dict) -> list[Span]:
     facts = step.get("facts", {})
     if step["kind"] == "cycle":
         return [(f"{part}-{sid}", None, None)]              # the cycle's own simulation, one per operation
-    if step.get("machine") == "bandsaw":                    # one load take and one lift-out per part's bar
-        return {"load": [(vise, None, None)], "start": [("saw-start", None, None)],
+    if step.get("machine") == "bandsaw":                    # per part's bar: its load (the slide to the stop, then
+        # the vise's handwheel, at the saw's other end: moonshot/motion/bandsaw.py) and its lift-out
+        return {"load": [(vise, None, None), (f"{vise}-clamp", None, None)], "start": [("saw-start", None, None)],
                 "unload": [(f"lift-out-{vise}", None, None)]}[kind]
     own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/

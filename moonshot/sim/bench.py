@@ -68,23 +68,30 @@ def min_jerk(x: float) -> float:
 
 
 class BenchRun:
+    # a carried tool's contact bits: it meets what has contype 1 (the bench, the part), not the skin (contype 2)
+    CARRIED_BITS = (0, 1)
+
     def __init__(self, folder: Path, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = (),
-                 grip_objects: dict[str, tuple[str, ...]] | None = None, cell=BC, anticipate: tuple[str, ...] = ()):
+                 grip_objects: dict[str, tuple[str, ...]] | None = None, cell=BC, anticipate: tuple[str, ...] = (),
+                 lifted: tuple[str, ...] | None = None):
         """grip_objects: each grip's name -> the bodies its digits squeeze into. cell: the scene, a module with
         bench_cell's with_body (the inspection bench's, unless another's). anticipate: the carried objects whose
-        weight the carrying arm takes on as it lifts them (carry_load)."""
+        weight the carrying arm takes on as it lifts them (carry_load). lifted: the carried bodies a hand lifts, whose
+        lifting force the grasp checks time (every carried body when None)."""
         self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
         self.anticipate = tuple(anticipate)
         self.folder = Path(folder)
         self.tk = json.loads((self.folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(self.folder / "reference.npz")
         self.body = build(pelvis_mm=tuple(self.tk["lumbar"]))
-        self.xml = cell.with_body(self.body.xml, loose, carried, skip)
+        self.cell = cell
+        self.xml = self.scene(loose, carried, skip)
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.ref = ReferenceTake(self.body, m, self.folder)
         self.t, self.fps = self.rd["t"], int(self.rd["fps"])
-        self.acts = np.arange(m.nu)
+        body_joints = {m.joint(n).id for n in self.body.joints}
+        self.acts = np.array([a for a in range(m.nu) if m.actuator_trnid[a, 0] in body_joints])   # a machine's aren't
         jid = m.actuator_trnid[self.acts, 0]
         self.act_dof, self.act_q = m.jnt_dofadr[jid], m.jnt_qposadr[jid]
         self.kp0 = m.actuator_gainprm[self.acts, 0].copy()
@@ -102,7 +109,7 @@ class BenchRun:
         self.body_q = np.array([m.jnt_qposadr[m.joint(n).id] for n in self.body.joints])
         self.body_dof = np.array([m.jnt_dofadr[m.joint(n).id] for n in self.body.joints])
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == m.body("pelvis").id}
-        self.lifted = sorted({c if isinstance(c, str) else c[1] for c in carried})      # what the hands pick up
+        self.lifted = sorted({c if isinstance(c, str) else c[1] for c in carried} if lifted is None else lifted)
         trees: dict[int, list[str]] = {}
         for b in range(1, m.nbody):
             if m.body(b).name not in self.person:
@@ -131,6 +138,17 @@ class BenchRun:
         for j in range(m.njnt):
             if m.jnt_type[j] in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
                 self.dof_q[m.jnt_dofadr[j]] = m.jnt_qposadr[j]
+
+    # --- for a take elsewhere to fill in --------------------------------------------------------------------------
+    def scene(self, loose: str, carried: tuple, skip: tuple[str, ...]) -> str:
+        """The MJCF: the body model in its cell (the inspection bench's, unless the run was given another)."""
+        return self.cell.with_body(self.body.xml, loose, carried, skip)
+
+    def start(self) -> None:
+        """The scene's state before the take starts (the body is already at its first pose)."""
+
+    def before_step(self, tt: float) -> None:
+        """Before each physics step, after the body's controls are set: a machine's own control."""
 
     # --- the plan ------------------------------------------------------------------------------------------------
     def set_plan(self, tt: float) -> np.ndarray:
@@ -363,6 +381,7 @@ class BenchRun:
         m.actuator_gainprm[self.acts, 0] = self.kp0 * k
         m.actuator_biasprm[self.acts, 1] = -self.kp0 * k
         d.ctrl[self.acts] = target[self.act_q] + (tau + self.kv * v[self.act_dof]) / (self.kp0 * k)
+        self.before_step(tt)
         mujoco.mj_step(m, d)
         if self.onsets is not None:
             self.onsets.step(d)
@@ -389,7 +408,7 @@ class BenchRun:
                 # on it only twist it in the weld (10 deg at the tip of the deburring tool). It still meets the bench
                 # and the part; the skin's depth in it is checked (moonshot/validate/skin.py)
                 for g in self.body_geoms[obj]:
-                    m.geom_contype[g], m.geom_conaffinity[g] = 0, 1
+                    m.geom_contype[g], m.geom_conaffinity[g] = self.CARRIED_BITS
             elif now is None and d.eq_active[eq]:
                 d.eq_active[eq] = 0
                 self.released[obj] = tt
@@ -595,6 +614,7 @@ class BenchRun:
         m, d = self.model, self.data
         for qadr, dof, s in self.ref.splines:
             d.qpos[qadr], d.qvel[dof] = s(0.0), s(0.0, 1)
+        self.start()
         mujoco.mj_forward(m, d)
         for _ in range(500):                                  # the objects settle, and the body at its start
             self.step(0.0)
@@ -673,9 +693,10 @@ class BenchRun:
         return round(float(np.median(vals)), 2) if vals else 0.0
 
     def export(self, station: str, never_held: list[str], solids: list[str], glbs: dict[str, list[dict]],
-               report: dict) -> None:
+               report: dict, checks: dict | None = None) -> None:
         """sim.npz (the vise take's keys for the right arm, L_* for the left, theta with both arms), checks.json (what
-        moonshot/validate/take.py reads), the take record, and report.json (the run's measured outcomes)."""
+        moonshot/validate/take.py reads; checks: what a station with a machine adds or replaces, its machine_axes and
+        the bodies it drives), the take record, and report.json (the run's measured outcomes)."""
         rec, rd, n, out = self.rec, self.rd, self.n, self.folder
         P = rec["pose"]
         arrays = {"t": rd["t"][:n], "theta": np.array([p["theta"] for p in P]), "dp": np.array([p["dp"] for p in P]),
@@ -690,7 +711,7 @@ class BenchRun:
             {k: rec[k] for k in ("touching", "touch_lead", "hand_wrench", "active_constraints", "applied_forces",
                                  "load_N")} |
             {"weight_N": weight, "moves_with": self.moves_with, "machine_axes": {}, "never_held": never_held,
-             "solids": solids, "arms": ["R", "L"]}), encoding="utf-8")
+             "solids": solids, "arms": ["R", "L"]} | (checks or {})), encoding="utf-8")
         self.recorder.write(out, self.fps, self.tk["lumbar"][0], {s: [str(x) for x in rd["names"]] for s in ("R", "L")},
                             station, glbs)
         lag = np.array(rec["lag"])

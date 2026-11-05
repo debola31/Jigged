@@ -350,14 +350,16 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
     if out.exists():
         shutil.rmtree(out)
     (out / "stock").mkdir(parents=True)
-    R_last = np.asarray(part_pose(plan, last["id"])["R"], float)        # as the mill last held it, on the shelf
+    # set down on the shelf as the mill held it in its flattest setup (the last of those as flat)
+    poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
+    R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
     sb = cam.Frame(R_last, np.zeros(3)).to_world(stock).BoundingBox()
     origin = np.array([-(sb.xmin + sb.xmax) / 2, -(sb.ymin + sb.ymax) / 2, SHELF_Z - sb.zmin])
     f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
     xml = f"""<mujoco model="finish">
   <worldbody>
 {cell.FLOOR}    <body name="shelf" pos="0 0 {(SHELF_Z - 10) * M:.4f}">
-      <geom name="shelf" type="box" size="0.3 0.2 0.01" contype="0" conaffinity="0" rgba="0.42 0.43 0.45 1"/>
+      <geom name="shelf" type="box" size="0.25 0.15 0.01" contype="0" conaffinity="0" rgba="0.04 0.045 0.05 1"/>
     </body>
     <body name="blank" pos="{f(origin)}" quat="{" ".join(f"{v:.7f}" for v in _quat(R_last))}">
       <geom name="blank" type="box" size="0.001 0.001 0.001" contype="0" conaffinity="0" rgba="0.8 0.8 0.82 1"/>
@@ -374,8 +376,10 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
         rec.frame(d, {}, look + np.array(STILL_FROM_MM), look, [0, 0, 1])
     write_glb(stock, out / "stock" / "0.glb", finish)
     rec.write(out, FPS, 0.0, {}, "outside", {}, meshes={"blank": {"dir": "stock", "frames": [0]}})
-    (out / "still.json").write_text(json.dumps({
-        "look_off_mm": (look - origin).round(1).tolist(), "from_mm": still_from(max(sb.xlen, sb.ylen), False).round(1).tolist(),
+    size = max(sb.xlen, sb.ylen, sb.zlen)                   # close on the part: it fills the view as nist-ftc-10's
+    (out / "still.json").write_text(json.dumps({            # blank does in the vise
+        "look_off_mm": (look - origin).round(1).tolist(),
+        "from_mm": (np.array(STILL_FROM_MM) * size / 165.1 * 0.8).round(1).tolist(),
         "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's origin "
                  "plus look_off_mm (world axes: the part's centre), from from_mm off that"}, indent=1), encoding="utf-8")
     log(f"[cycle] {step['id']}: the finished part from {end.parent.name}, in {finish}")

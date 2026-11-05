@@ -1326,7 +1326,7 @@
       "still": "still/nist-ftc-09/op10-spot.webp",
       "model": "cut/nist-ftc-09/op10-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-small",
@@ -1345,7 +1345,7 @@
       "still": "still/nist-ftc-09/op10-small.webp",
       "model": "cut/nist-ftc-09/op10-small.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-e_holes",
@@ -1364,7 +1364,7 @@
       "still": "still/nist-ftc-09/op10-e_holes.webp",
       "model": "cut/nist-ftc-09/op10-e_holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-datum_holes",
@@ -1383,7 +1383,7 @@
       "still": "still/nist-ftc-09/op10-datum_holes.webp",
       "model": "cut/nist-ftc-09/op10-datum_holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-k_holes",
@@ -1402,7 +1402,7 @@
       "still": "still/nist-ftc-09/op10-k_holes.webp",
       "model": "cut/nist-ftc-09/op10-k_holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-ream",
@@ -1421,7 +1421,7 @@
       "still": "still/nist-ftc-09/op10-ream.webp",
       "model": "cut/nist-ftc-09/op10-ream.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-holes",
@@ -1440,7 +1440,7 @@
       "still": "still/nist-ftc-09/op10-holes.webp",
       "model": "cut/nist-ftc-09/op10-holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-slots",
@@ -1459,7 +1459,7 @@
       "still": "still/nist-ftc-09/op10-slots.webp",
       "model": "cut/nist-ftc-09/op10-slots.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-keyhole",
@@ -1478,7 +1478,7 @@
       "still": "still/nist-ftc-09/op10-keyhole.webp",
       "model": "cut/nist-ftc-09/op10-keyhole.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-lettering",
@@ -1497,7 +1497,7 @@
       "still": "still/nist-ftc-09/op10-lettering.webp",
       "model": "cut/nist-ftc-09/op10-lettering.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-chamfer",
@@ -1516,7 +1516,7 @@
       "still": "still/nist-ftc-09/op10-chamfer.webp",
       "model": "cut/nist-ftc-09/op10-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-outline",
@@ -1535,7 +1535,7 @@
       "still": "still/nist-ftc-09/op10-outline.webp",
       "model": "cut/nist-ftc-09/op10-outline.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -1570,7 +1570,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -1773,7 +1773,7 @@
       "still": "still/ll-1005337/op10-dowels.webp",
       "model": "cut/ll-1005337/op10-dowels.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-recesses",
@@ -1792,7 +1792,7 @@
       "still": "still/ll-1005337/op10-recesses.webp",
       "model": "cut/ll-1005337/op10-recesses.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-nests",
@@ -1811,7 +1811,7 @@
       "still": "still/ll-1005337/op10-nests.webp",
       "model": "cut/ll-1005337/op10-nests.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-chamfer",
@@ -1830,7 +1830,7 @@
       "still": "still/ll-1005337/op10-chamfer.webp",
       "model": "cut/ll-1005337/op10-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-outline",
@@ -1849,7 +1849,7 @@
       "still": "still/ll-1005337/op10-outline.webp",
       "model": "cut/ll-1005337/op10-outline.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-undercut",
@@ -1868,7 +1868,7 @@
       "still": "still/ll-1005337/op10-undercut.webp",
       "model": "cut/ll-1005337/op10-undercut.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -1995,7 +1995,7 @@
       "still": "still/ll-1005337/op20-far_edge.webp",
       "model": "cut/ll-1005337/op20-far_edge.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -3569,7 +3569,7 @@
       "type": "video",
       "path": "video/ll-1007223/op20-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-start",

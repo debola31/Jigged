@@ -3,7 +3,7 @@ in the vise, on both parallels whether set down short or slid home."""
 import numpy as np
 import pytest
 
-from moonshot.motion.loads import part_pose, vise_load
+from moonshot.motion.loads import envelope, part_pose, vise_load
 from moonshot.motion.setup_take import PLACE_GAP
 from moonshot.planning.validate import load_plan
 from moonshot.world.vise import PARALLEL_T, REFERENCE, VISE
@@ -48,9 +48,52 @@ def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
     assert part_pose(load_plan("nist-ftc-10"), setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + 79.0)
 
 
-@pytest.mark.parametrize("setup", ["op10", "op20", "op30", "op40", "op50"])
-def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(setup):
-    plan = load_plan("nist-ftc-10")
+# the bar parts' vise setups, and their finished parts' boxes in their models' frames (their STEP models' bounding boxes)
+BARS = {"ll-1007223": ("op10", "op20", "op30"), "ct-slbeam": ("op10", "op20", "op30", "op40")}
+FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8))}
+VISE_SETUPS = [("nist-ftc-10", s) for s in ("op10", "op20", "op30", "op40", "op50")]
+VISE_SETUPS += [(p, s) for p, ss in BARS.items() for s in ss]
+
+
+def contains(outer, inner) -> bool:
+    outer, inner = np.asarray(outer, float), np.asarray(inner, float)
+    return bool(np.all(outer[:, 0] <= inner[:, 0] + 1e-9) and np.all(inner[:, 1] <= outer[:, 1] + 1e-9))
+
+
+@pytest.mark.parametrize("part", list(BARS))
+def test_a_bar_part_comes_off_the_saw_and_onto_the_mill_as_its_stock(part):
+    plan = load_plan(part)
+    for setup in ("saw", BARS[part][0]):
+        env = envelope(plan, setup)
+        assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
+        assert contains(env, FINISHED[part]), f"{setup}: the stock doesn't hold the part"
+
+
+@pytest.mark.parametrize("part", list(BARS))
+def test_each_setup_holds_the_finished_part_inside_the_last_setups_box(part):
+    plan = load_plan(part)
+    boxes = [envelope(plan, s) for s in BARS[part]]
+    for setup, box in zip(BARS[part], boxes):
+        assert contains(box, FINISHED[part]), f"{setup}: the box doesn't hold the finished part"
+    for setup, a, b in zip(BARS[part][1:], boxes, boxes[1:]):
+        assert contains(a, b), f"{setup}: the box grew from the last setup's"
+
+
+@pytest.mark.parametrize("part, setup", [(p, s) for p, s in VISE_SETUPS if p in BARS])
+def test_a_bar_part_sits_on_both_parallels_or_on_the_vise_floor(part, setup):
+    plan = load_plan(part)
+    load = vise_load(plan, setup)
+    if load.parallel_h:
+        assert on_both(load, 0.0) and on_both(load, PLACE_GAP)
+    else:
+        assert not load.parallels_y
+        assert part_pose(plan, setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + load.size_mm[2] / 2)
+    assert load.opening0 > load.size_mm[1]
+
+
+@pytest.mark.parametrize("part, setup", VISE_SETUPS)
+def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(part, setup):
+    plan = load_plan(part)
     s = next(x for x in plan["setups"] if x["id"] == setup)
     p = part_pose(plan, setup)
     R = p["R"]
@@ -68,3 +111,50 @@ def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(setup):
 def test_datum_a_sits_against_the_fixed_jaw_when_the_jaws_close_on_it(setup):
     R = part_pose(load_plan("nist-ftc-10"), setup)["R"]
     assert R @ [0, -1.0, 0] == pytest.approx([0, 1.0, 0])
+
+
+def test_a_given_box_poses_the_part_as_the_default_does():
+    plan = load_plan("nist-ftc-10")
+    for setup in ("op10", "op20", "op50"):
+        a, b = part_pose(plan, setup), part_pose(plan, setup, env=part_pose(plan, setup)["envelope_mm"])
+        assert all(np.array_equal(a[k], b[k]) for k in ("R", "centre_mm", "size_mm", "origin_mm"))
+
+
+def box_in_world(p) -> tuple[np.ndarray, np.ndarray]:
+    corners = np.array(np.meshgrid(*p["envelope_mm"])).reshape(3, -1).T
+    world = p["origin_mm"] + corners @ p["R"].T
+    return world.min(0), world.max(0)
+
+
+@pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
+def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(part):
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z
+    plan = load_plan(part)
+    s = plan["setups"][0]
+    p = part_pose(plan, s["id"])
+    R = p["R"]
+    assert R @ R.T == pytest.approx(np.eye(3)) and np.linalg.det(R) == pytest.approx(1.0)
+    up = np.eye(3)["XYZ".index(s["face_up"][1])] * (1 if s["face_up"][0] == "+" else -1)
+    assert R @ up == pytest.approx([0, 0, 1])
+    lo, hi = box_in_world(p)
+    assert lo[2] == pytest.approx(SPOILBOARD_TOP_Z)
+    assert hi[0] - lo[0] >= hi[1] - lo[1], "its longer side along the table"
+    assert (lo[0] + hi[0]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[0])
+
+
+def test_nist_ftc_09_is_centred_on_the_spoilboard():
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY
+    lo, hi = box_in_world(part_pose(load_plan("nist-ftc-09"), "op10"))
+    assert (lo[1] + hi[1]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[1])
+
+
+def test_ll_1005337_sits_by_its_near_edge_then_slides_10_mm_toward_you():
+    from moonshot.motion.loads import PLATE_NEAR_Y_MM, Y_TRAVEL_FRONT
+    plan = load_plan("ll-1005337")
+    p10, p20 = part_pose(plan, "op10"), part_pose(plan, "op20")
+    assert box_in_world(p10)[0][1] == pytest.approx(PLATE_NEAR_Y_MM["ll-1005337"])
+    assert PLATE_NEAR_Y_MM["ll-1005337"] + 3.2 - 6.35 == pytest.approx(Y_TRAVEL_FRONT + 0.5)
+    assert np.array_equal(p20["R"], p10["R"])
+    assert p20["origin_mm"] - p10["origin_mm"] == pytest.approx([0, -10.0, 0])
+    # the model's X = -400 edge is the near one (plan)
+    assert (p10["R"] @ [1.0, 0, 0]) == pytest.approx([0, 1.0, 0])

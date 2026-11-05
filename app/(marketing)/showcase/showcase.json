@@ -398,7 +398,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-tools",
@@ -1152,25 +1152,2845 @@
    "id": "nist-ftc-09",
    "name": "NIST FTC-09 (Fully-Toleranced Test Case 9)",
    "size": "279.4 x 190.5 x 3.0 mm",
-   "status": "coming"
+   "status": "live",
+   "material": "304 stainless steel sheet, 11 ga (.1195 thick), ASTM A240",
+   "groups": [
+    {
+     "id": "op10",
+     "title": "Op 10: holes, slots and outline"
+    },
+    {
+     "id": "finish",
+     "title": "Finishing"
+    }
+   ],
+   "steps": [
+    {
+     "id": "op10-clean",
+     "title": "Clean the table",
+     "caption": "Blow the chips off the spoilboard and wipe it.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-load",
+     "title": "Lay the plate down",
+     "caption": "Lay the plate on the spoilboard, lettered side up.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-seat",
+     "title": "Clamp it down",
+     "caption": "Set 6 step clamps on its margin and tighten each nut.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-check",
+     "title": "Check it's straight",
+     "caption": "Sweep the indicator along its long edge: the needle should stay put.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the centre of the sheet's length and Y at the centre of its width.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top of the sheet.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-tools",
+     "title": "Load the tools",
+     "caption": "Load the 1/2 in spot drill, the 5/32 in drill, the 5.5 mm drill, the 6 mm drill, the K drill, the 1/4 in reamer, the 1/4 in end mill, the 1/8 in end mill, the 1/32 in end mill, the 1/2 in chamfer mill, the 3/8 in end mill into the carousel.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 10: holes, slots and outline, and press Cycle Start.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-spot",
+     "title": "Spot every drilled hole",
+     "caption": "Spot every drilled hole, with the 1/2 in spot drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-spot.webp",
+      "model": "cut/nist-ftc-09/op10-spot.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-small",
+     "title": "Drill 7X Ø.156 ±.008",
+     "caption": "Drill 7X Ø.156 ±.008, with the 5/32 in drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-small.webp",
+      "model": "cut/nist-ftc-09/op10-small.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-e_holes",
+     "title": "Drill 2X Ø.221 ±.008",
+     "caption": "Drill 2X Ø.221 ±.008, with the 5.5 mm drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-e_holes.webp",
+      "model": "cut/nist-ftc-09/op10-e_holes.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-datum_holes",
+     "title": "Drill 4X Ø.234 ±.008, and the six holes to be reamed",
+     "caption": "Drill 4X Ø.234 ±.008, and the six holes to be reamed, with the 6 mm drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-datum_holes.webp",
+      "model": "cut/nist-ftc-09/op10-datum_holes.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-k_holes",
+     "title": "Drill 3X Ø.281 ±.008",
+     "caption": "Drill 3X Ø.281 ±.008, with the K drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-k_holes.webp",
+      "model": "cut/nist-ftc-09/op10-k_holes.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-ream",
+     "title": "Ream 6X Ø.250 +.003/-.000",
+     "caption": "Ream 6X Ø.250 +.003/-.000, with the 1/4 in reamer.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-ream.webp",
+      "model": "cut/nist-ftc-09/op10-ream.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-holes",
+     "title": "Plunge the four Ø.250 ±.008 holes and mill the two Ø.315 [8 ±0.2] and the Ø.750 ±.008",
+     "caption": "Plunge the four Ø.250 ±.008 holes and mill the two Ø.315 [8 ±0.2] and the Ø.750 ±.008, with the 1/4 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-holes.webp",
+      "model": "cut/nist-ftc-09/op10-holes.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-slots",
+     "title": "Mill the three slots, the keyhole's Ø.375 and the window with its four scallops",
+     "caption": "Mill the three slots, the keyhole's Ø.375 and the window with its four scallops, with the 1/4 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-slots.webp",
+      "model": "cut/nist-ftc-09/op10-slots.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-keyhole",
+     "title": "Mill the keyhole's .140 ±.008 slot",
+     "caption": "Mill the keyhole's .140 ±.008 slot, with the 1/8 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-keyhole.webp",
+      "model": "cut/nist-ftc-09/op10-keyhole.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-lettering",
+     "title": "Engrave the lettering 1.2 mm deep, as the model has it",
+     "caption": "Engrave the lettering 1.2 mm deep, as the model has it, with the 1/32 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-lettering.webp",
+      "model": "cut/nist-ftc-09/op10-lettering.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-chamfer",
+     "title": "Chamfer the four Ø.234 holes .03 x .03",
+     "caption": "Chamfer the four Ø.234 holes .03 x .03, with the 1/2 in chamfer mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-chamfer.webp",
+      "model": "cut/nist-ftc-09/op10-chamfer.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-outline",
+     "title": "Profile the 11.00 x 7.50 outline with its corners and notches, leaving four tabs",
+     "caption": "Profile the 11.00 x 7.50 outline with its corners and notches, leaving four tabs, with the 3/8 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/nist-ftc-09/op10-outline.webp",
+      "model": "cut/nist-ftc-09/op10-outline.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the clamps and lift the plate off.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/op10-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "deburr",
+     "title": "Cut the tabs and deburr",
+     "caption": "Cut the four tabs and file them flush, then deburr every edge and hole with a hooked blade drawn along it, so the sheet is safe to handle.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Benches",
+      "x": 27750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/deburr.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "inspect",
+     "title": "Check the holes, slots and flatness",
+     "caption": "Check the 11.00 x 7.50 outline with the long calipers, the six reamed Ø.250 holes with gauge pins, the other holes and slots with the calipers, and the .01 flatness to A on the granite plate with the indicator.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Inspection",
+      "x": 50250.0,
+      "y": 15500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/nist-ftc-09/inspect.mp4"
+     },
+     "published": false
+    }
+   ]
   },
   {
    "id": "ll-1005337",
    "name": "Pallet inlay (Paletteneinlage)",
    "size": "600 x 400 x 19.1 mm",
-   "status": "coming"
+   "status": "live",
+   "material": "Delrin (acetal), black",
+   "groups": [
+    {
+     "id": "op10",
+     "title": "Op 10: nests and near edge"
+    },
+    {
+     "id": "op20",
+     "title": "Op 20: far edge"
+    },
+    {
+     "id": "finish",
+     "title": "Finishing"
+    }
+   ],
+   "steps": [
+    {
+     "id": "op10-clean",
+     "title": "Clean the table",
+     "caption": "Blow the chips off the spoilboard and wipe it.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-load",
+     "title": "Lay the plate down",
+     "caption": "Lay the plate on the spoilboard, nests side up.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-seat",
+     "title": "Clamp it down",
+     "caption": "Set 4 step clamps on its margin and tighten each nut.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-check",
+     "title": "Check it's straight",
+     "caption": "Sweep the indicator along its long edge: the needle should stay put.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the centre of the plate's length and Y at the centre of its width.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top of the plate.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-tools",
+     "title": "Load the tools",
+     "caption": "Load the 8 mm reamer, the 1/2 in end mill, the 3/8 in end mill, the 1/2 in chamfer mill, the 20 deg dovetail cutter into the carousel.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 10: nests and near edge, and press Cycle Start.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-dowels",
+     "title": "Drill and ream 2X Ø8.000 slip fit for the dowels",
+     "caption": "Drill and ream 2X Ø8.000 slip fit for the dowels, with the 8 mm reamer.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-dowels.webp",
+      "model": "cut/ll-1005337/op10-dowels.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-recesses",
+     "title": "Rough and finish the 12 nest recesses 12 deep",
+     "caption": "Rough and finish the 12 nest recesses 12 deep, with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-recesses.webp",
+      "model": "cut/ll-1005337/op10-recesses.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-nests",
+     "title": "Finish the 12 nests 25.70 x 159.00 (+0.10/0) through and their R6.4 corners, parallel 0.2 to A",
+     "caption": "Finish the 12 nests 25.70 x 159.00 (+0.10/0) through and their R6.4 corners, parallel 0.2 to A, with the 3/8 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-nests.webp",
+      "model": "cut/ll-1005337/op10-nests.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-chamfer",
+     "title": "Chamfer the nests' openings 3.0 x 45°",
+     "caption": "Chamfer the nests' openings 3.0 x 45°, with the 1/2 in chamfer mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-chamfer.webp",
+      "model": "cut/ll-1005337/op10-chamfer.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-outline",
+     "title": "Profile the near long edge, both 400 (-0.3/-0.5) ends with their notches and the two near 45° corners, leaving tabs",
+     "caption": "Profile the near long edge, both 400 (-0.3/-0.5) ends with their notches and the two near 45° corners, leaving tabs, with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-outline.webp",
+      "model": "cut/ll-1005337/op10-outline.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-undercut",
+     "title": "Undercut the two end notches' walls 20° with their R15 corners",
+     "caption": "Undercut the two end notches' walls 20° with their R15 corners, with the 20 deg dovetail cutter.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op10-undercut.webp",
+      "model": "cut/ll-1005337/op10-undercut.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-unload",
+     "title": "Open the door and blow off the chips",
+     "caption": "Open the door and blow the chips off; the plate stays clamped.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op10-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-shift",
+     "title": "Shift the plate",
+     "caption": "Loosen the clamps, slide the plate 10 mm toward you and clamp it again.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-shift.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-check",
+     "title": "Check it's straight",
+     "caption": "Sweep the indicator along its finished long edge: the needle should stay put.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the finished end (probe) and Y at the finished near edge (probe).",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top of the plate.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 20: far edge, and press Cycle Start.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-far_edge",
+     "title": "Profile the far long edge to the 600 x 400 (-0.3/-0.5) outline and its two 45° corners, leaving tabs",
+     "caption": "Profile the far long edge to the 600 x 400 (-0.3/-0.5) outline and its two 45° corners, leaving tabs, with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1005337/op20-far_edge.webp",
+      "model": "cut/ll-1005337/op20-far_edge.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the clamps and lift the plate off.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/op20-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "deburr",
+     "title": "Cut the tabs and deburr",
+     "caption": "Cut the four tabs and file them flush, break every sharp corner 0.2 x 45° (note 1), and countersink the back of the two dowel holes 3.0 x 45° by hand.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Benches",
+      "x": 27750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/deburr.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "inspect",
+     "title": "Check the outline, nests and dowel holes",
+     "caption": "Check the 600 and 400 outline, the 25.70 and 159.00 nests and their 12 depth, and the Ø8.000 dowel holes with gauge pins.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Inspection",
+      "x": 50250.0,
+      "y": 15500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1005337/inspect.mp4"
+     },
+     "published": false
+    }
+   ]
   },
   {
    "id": "ct-slbeam",
    "name": "SLBEAM l-block",
    "size": "3.00 x 1.50 x 2.00 in, 0.75 legs",
-   "status": "coming"
+   "status": "live",
+   "material": "4140 alloy steel, pre-hardened 28-32 HRC",
+   "groups": [
+    {
+     "id": "saw",
+     "title": "Saw: cut the blank"
+    },
+    {
+     "id": "op10",
+     "title": "Op 10: bottom"
+    },
+    {
+     "id": "op20",
+     "title": "Op 20: end of the long leg"
+    },
+    {
+     "id": "op30",
+     "title": "Op 30: back and threads"
+    },
+    {
+     "id": "op40",
+     "title": "Op 40: the L"
+    },
+    {
+     "id": "finish",
+     "title": "Finishing"
+    }
+   ],
+   "steps": [
+    {
+     "id": "saw-load",
+     "title": "Load the bar",
+     "caption": "Raise the bow, open the vise, slide the 1-1/2 x 2-1/4 in 4140 PH flat bar through to the stop for a 3-1/4 in blank, and clamp it.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/saw-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-start",
+     "title": "Start the cut",
+     "caption": "Press Start, switch the coolant on and let the bow down.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/saw-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-cut",
+     "title": "Cut the 3-1/4 in blank from the bar",
+     "caption": "Cut the 3-1/4 in blank from the bar, with the band saw.",
+     "kind": "cycle",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/saw-cut.webp",
+      "model": "cut/ct-slbeam/saw-cut.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-unload",
+     "title": "Lift the blank off",
+     "caption": "Lift the 3-1/4 in blank off the bed, clear of the blade, and set it on the bench.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/saw-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-clean",
+     "title": "Clean the vise and set the parallels",
+     "caption": "Blow out the 6 in vise and wipe the jaws, then set 1 in parallels.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, bottom up, on 1 in parallels.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-check",
+     "title": "Check the parallels are pinched",
+     "caption": "Try each parallel with a fingertip: neither should move.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the centre of the blank's length and Y at the centre of its width.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top of the blank.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-tools",
+     "title": "Load the tools",
+     "caption": "Load the 2 in face mill into the carousel.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 10: bottom, and press Cycle Start.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-face",
+     "title": "Face the bottom flat",
+     "caption": "Face the bottom flat, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op10-face.webp",
+      "model": "cut/ct-slbeam/op10-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op10-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-clean",
+     "title": "Clean the vise and set the stop",
+     "caption": "Blow out the 6 in vise and wipe the jaws and its floor, then set the stop.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, standing on its back, on the vise floor and a stop.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-check",
+     "title": "Check it's square",
+     "caption": "Sweep the indicator up its side: the needle should stay put.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the faced bottom (probe) and Y at the side (probe).",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top of the end.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 20: end of the long leg, and press Cycle Start.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-face",
+     "title": "Face the long leg's end flat",
+     "caption": "Face the long leg's end flat, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op20-face.webp",
+      "model": "cut/ct-slbeam/op20-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op20-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-clean",
+     "title": "Clean the vise and set the stop",
+     "caption": "Blow out the 6 in vise and wipe the jaws and its floor, then set the stop.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, standing on the end of its long leg, on the vise floor and a stop.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-check",
+     "title": "Check it's square",
+     "caption": "Sweep the indicator up its side: the needle should stay put.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the faced bottom (probe) and Y at the side (probe).",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the vise floor, plus 3.000 in.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-tools",
+     "title": "Load the tools",
+     "caption": "Load the 1/2 in spot drill, the #7 drill, the 1/4-20 tap into the carousel.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 30: back and threads, and press Cycle Start.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-face",
+     "title": "Face the back to the 3.000 length",
+     "caption": "Face the back to the 3.000 length, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op30-face.webp",
+      "model": "cut/ct-slbeam/op30-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-spot",
+     "title": "Spot the two thread holes",
+     "caption": "Spot the two thread holes, with the 1/2 in spot drill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op30-spot.webp",
+      "model": "cut/ct-slbeam/op30-spot.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-drill",
+     "title": "Drill 2X #7 (Ø.201) 1 in deep, through the short leg into stock the L removes",
+     "caption": "Drill 2X #7 (Ø.201) 1 in deep, through the short leg into stock the L removes, with the #7 drill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op30-drill.webp",
+      "model": "cut/ct-slbeam/op30-drill.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-tap",
+     "title": "Tap both 1/4-20 through the short leg",
+     "caption": "Tap both 1/4-20 through the short leg, with the 1/4-20 tap.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op30-tap.webp",
+      "model": "cut/ct-slbeam/op30-tap.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op30-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-clean",
+     "title": "Clean the vise and set the parallels",
+     "caption": "Blow out the 6 in vise and wipe the jaws, then set 1.25 in parallels.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, short leg up, on 1.25 in parallels.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-check",
+     "title": "Check the parallels are pinched",
+     "caption": "Try each parallel with a fingertip: neither should move.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the back (probe) and Y at the side (probe).",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the bottom on the parallels, plus 2.000 in.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-tools",
+     "title": "Load the tools",
+     "caption": "Load the 1/2 in end mill, the K drill, the 3/8 in end mill, the 1/2 in chamfer mill into the carousel.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 40: the L, and press Cycle Start.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-face",
+     "title": "Face the top of the short leg to the 2.000 height",
+     "caption": "Face the top of the short leg to the 2.000 height, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-face.webp",
+      "model": "cut/ct-slbeam/op40-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-notch",
+     "title": "Rough out the L and finish both legs to .750 ±.002, the inside corner square (90° ±0°10')",
+     "caption": "Rough out the L and finish both legs to .750 ±.002, the inside corner square (90° ±0°10'), with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-notch.webp",
+      "model": "cut/ct-slbeam/op40-notch.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-spot",
+     "title": "Spot the two Ø.281 holes",
+     "caption": "Spot the two Ø.281 holes, with the 1/2 in spot drill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-spot.webp",
+      "model": "cut/ct-slbeam/op40-spot.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-drill",
+     "title": "Drill 2X K (Ø.281) through the long leg",
+     "caption": "Drill 2X K (Ø.281) through the long leg, with the K drill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-drill.webp",
+      "model": "cut/ct-slbeam/op40-drill.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-cbores",
+     "title": "Counterbore both Ø.44, .30 deep",
+     "caption": "Counterbore both Ø.44, .30 deep, with the 3/8 in end mill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-cbores.webp",
+      "model": "cut/ct-slbeam/op40-cbores.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-chamfer",
+     "title": "Chamfer the short leg's two top edges",
+     "caption": "Chamfer the short leg's two top edges, with the 1/2 in chamfer mill.",
+     "kind": "cycle",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/op40-chamfer.webp",
+      "model": "cut/ct-slbeam/op40-chamfer.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op40-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op40",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/op40-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "deburr",
+     "title": "Deburr every edge",
+     "caption": "Deburr every edge, breaking each one .005-.010 (note 1) with a hooked blade drawn along it, and clean the thread holes' exits into the L.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Benches",
+      "x": 27750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/deburr.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "send-out",
+     "title": "Send it out for black oxide",
+     "caption": "Tag the part for black oxide and set it on the outside-process rack's coating shelf for the vendor.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Shipping and outside processes",
+      "x": 52750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/send-out.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "black-oxide",
+     "title": "Black oxide all over",
+     "caption": "Black oxide all over, by the outside vendor, after machining (note 2).",
+     "kind": "cycle",
+     "group": "finish",
+     "where": {
+      "name": "Shipping and outside processes",
+      "x": 52750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ct-slbeam/black-oxide.webp",
+      "model": "cut/ct-slbeam/black-oxide.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "inspect",
+     "title": "Check the legs, holes and threads",
+     "caption": "Check both legs .750 ±.002 with the micrometer, the 3.000, 2.000 and 1.500 with the calipers, the inside corner square with the indicator on the height gauge, the Ø.281 holes with gauge pins, the 1/4-20 threads with a go/no-go gauge, and the black oxide all over.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Inspection",
+      "x": 50250.0,
+      "y": 15500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ct-slbeam/inspect.mp4"
+     },
+     "published": false
+    }
+   ]
   },
   {
    "id": "ll-1007223",
    "name": "Gripper jaw (Greiferbacke)",
    "size": "75.0 x 49.0 x 40.0 mm",
-   "status": "coming"
+   "status": "live",
+   "material": "AISI 4140 PHT (pre-hardened)",
+   "groups": [
+    {
+     "id": "saw",
+     "title": "Saw: cut the blank"
+    },
+    {
+     "id": "op10",
+     "title": "Op 10: top"
+    },
+    {
+     "id": "op20",
+     "title": "Op 20: underside"
+    },
+    {
+     "id": "op30",
+     "title": "Op 30: side of the stem"
+    },
+    {
+     "id": "finish",
+     "title": "Finishing"
+    }
+   ],
+   "steps": [
+    {
+     "id": "saw-load",
+     "title": "Load the bar",
+     "caption": "Raise the bow, open the vise, slide the 1-3/4 x 2-1/4 in 4140 PH flat bar through to the stop for a 3-1/4 in blank, and clamp it.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/saw-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-start",
+     "title": "Start the cut",
+     "caption": "Press Start, switch the coolant on and let the bow down.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/saw-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-cut",
+     "title": "Cut the 3-1/4 in blank from the bar",
+     "caption": "Cut the 3-1/4 in blank from the bar, with the band saw.",
+     "kind": "cycle",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/saw-cut.webp",
+      "model": "cut/ll-1007223/saw-cut.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "saw-unload",
+     "title": "Lift the blank off",
+     "caption": "Lift the 3-1/4 in blank off the bed, clear of the blade, and set it on the bench.",
+     "kind": "human",
+     "group": "saw",
+     "where": {
+      "name": "McMaster-Carr 8962N13 horizontal band saw",
+      "item": "saw-1",
+      "x": 34445.5,
+      "y": 7505.8
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/saw-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-clean",
+     "title": "Clean the vise and set the parallels",
+     "caption": "Blow out the 6 in vise and wipe the jaws, then set 1 in parallels.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, top up, on 1 in parallels.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-check",
+     "title": "Check the parallels are pinched",
+     "caption": "Try each parallel with a fingertip: neither should move.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the centre of the blank's length and Y at the centre of its width.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at top of the faced stock.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-tools",
+     "title": "Load the tools",
+     "caption": "Load the 2 in face mill, the 1/2 in end mill, the H drill, the 3/8 in end mill, the 1/2 in chamfer mill into the carousel.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 10: top, and press Cycle Start.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-face",
+     "title": "Face the top flat",
+     "caption": "Face the top flat, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op10-face.webp",
+      "model": "cut/ll-1007223/op10-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-outline",
+     "title": "Profile the flange's two edges and both ends to 49 x 75, down to the jaws",
+     "caption": "Profile the flange's two edges and both ends to 49 x 75, down to the jaws, with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op10-outline.webp",
+      "model": "cut/ll-1007223/op10-outline.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-holes",
+     "title": "Drill 2X Ø6.6 through the flange",
+     "caption": "Drill 2X Ø6.6 through the flange, with the H drill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op10-holes.webp",
+      "model": "cut/ll-1007223/op10-holes.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-cbores",
+     "title": "Mill the two Ø10.000 H7 (+0.015/0) counterbores 3.2 deep",
+     "caption": "Mill the two Ø10.000 H7 (+0.015/0) counterbores 3.2 deep, with the 3/8 in end mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op10-cbores.webp",
+      "model": "cut/ll-1007223/op10-cbores.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-chamfer",
+     "title": "Chamfer the three top edges 5 x 45° and the counterbores 0.5 x 45°",
+     "caption": "Chamfer the three top edges 5 x 45° and the counterbores 0.5 x 45°, with the 1/2 in chamfer mill.",
+     "kind": "cycle",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op10-chamfer.webp",
+      "model": "cut/ll-1007223/op10-chamfer.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op10-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op10",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op10-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-clean",
+     "title": "Clean the vise and set the parallels",
+     "caption": "Blow out the 6 in vise and wipe the jaws, then set 1.375 in parallels.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, stem up, on 1.375 in parallels.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-check",
+     "title": "Check the parallels are pinched",
+     "caption": "Try each parallel with a fingertip: neither should move.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the finished end (probe) and Y at the flange's edge (probe).",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the top on the parallels, plus 40 mm.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-tools",
+     "title": "Load the tools",
+     "caption": "Load the 1/4 in ball end mill, the 11 mm drill into the carousel.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 20: underside, and press Cycle Start.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-face",
+     "title": "Face the stem to the 40 mm height",
+     "caption": "Face the stem to the 40 mm height, with the 2 in face mill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op20-face.webp",
+      "model": "cut/ll-1007223/op20-face.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-underside",
+     "title": "Rough and finish the stem's sides, the steps at 20 and 27 mm, the flange's underside at 30 mm and the rest of both ends",
+     "caption": "Rough and finish the stem's sides, the steps at 20 and 27 mm, the flange's underside at 30 mm and the rest of both ends, with the 1/2 in end mill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op20-underside.webp",
+      "model": "cut/ll-1007223/op20-underside.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-radius",
+     "title": "Mill the R10 between the stem and the flange",
+     "caption": "Mill the R10 between the stem and the flange, with the 1/4 in ball end mill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op20-radius.webp",
+      "model": "cut/ll-1007223/op20-radius.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-cbore",
+     "title": "Drill the flat-bottomed Ø11 up the stem, 30 deep, to meet the Ø6.6",
+     "caption": "Drill the flat-bottomed Ø11 up the stem, 30 deep, to meet the Ø6.6, with the 11 mm drill.",
+     "kind": "cycle",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op20-cbore.webp",
+      "model": "cut/ll-1007223/op20-cbore.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op20-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op20",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op20-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-clean",
+     "title": "Clean the vise and set the stop",
+     "caption": "Blow out the 6 in vise and wipe the jaws and its floor, then set the stop.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-clean.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-load",
+     "title": "Load the part",
+     "caption": "Set the part in the 6 in vise, on its edge, the stem's side up, on the vise floor and a stop.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-load.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-seat",
+     "title": "Seat it and tighten the vise",
+     "caption": "Close the jaw until it touches, tap the part down, then tighten the handle.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-seat.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-check",
+     "title": "Check it's square",
+     "caption": "Sweep the indicator up its side: the needle should stay put.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-check.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-xy",
+     "title": "Find X and Y",
+     "caption": "Set G54 X at the top (probe) and Y at the end (probe).",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-xy.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-z",
+     "title": "Set Z",
+     "caption": "Set G54 Z at the stem's side (probe).",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-z.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-tools",
+     "title": "Load the tools",
+     "caption": "Load the 1/2 in spot drill, the 6.5 mm drill, the 3.3 mm drill, the M4 tap into the carousel.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-tools.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-start",
+     "title": "Close the door and start the cycle",
+     "caption": "Close the door, check the program is Op 30: side of the stem, and press Cycle Start.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-start.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-spot",
+     "title": "Spot the four holes and countersink the two clearance holes Ø9.5 x 90°",
+     "caption": "Spot the four holes and countersink the two clearance holes Ø9.5 x 90°, with the 1/2 in spot drill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op30-spot.webp",
+      "model": "cut/ll-1007223/op30-spot.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-clearance",
+     "title": "Drill 2X Ø6.5 through the stem",
+     "caption": "Drill 2X Ø6.5 through the stem, with the 6.5 mm drill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op30-clearance.webp",
+      "model": "cut/ll-1007223/op30-clearance.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-tap_drill",
+     "title": "Drill 2X Ø3.3 through the stem",
+     "caption": "Drill 2X Ø3.3 through the stem, with the 3.3 mm drill.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op30-tap_drill.webp",
+      "model": "cut/ll-1007223/op30-tap_drill.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-tap",
+     "title": "Tap both M4x0.7-6H through",
+     "caption": "Tap both M4x0.7-6H through, with the M4 tap.",
+     "kind": "cycle",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/op30-tap.webp",
+      "model": "cut/ll-1007223/op30-tap.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "op30-unload",
+     "title": "Blow off the chips and unload",
+     "caption": "Open the door, blow the chips off, loosen the vise and lift the part out.",
+     "kind": "human",
+     "group": "op30",
+     "where": {
+      "name": "Haas VF-2 (bay 1)",
+      "item": "vf2-1",
+      "x": 11557.7,
+      "y": 6975.3
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/op30-unload.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "deburr",
+     "title": "Deburr every edge",
+     "caption": "Deburr every edge, breaking each sharp corner 0.2 x 45° (note 1) with a hooked blade drawn along it, and clean the M4 threads' exits.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Benches",
+      "x": 27750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/deburr.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "send-out",
+     "title": "Send it out for zinc plating",
+     "caption": "Tag the part for zinc and trivalent chromate with the two Ø10 H7 bores and the M4 threads masked, so the plating can't close them, and set it on the outside-process rack's coating shelf for the vendor.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Shipping and outside processes",
+      "x": 52750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/send-out.mp4"
+     },
+     "published": false
+    },
+    {
+     "id": "zinc",
+     "title": "Zinc plate with a trivalent chromate",
+     "caption": "Zinc plate with a trivalent chromate, all over but the masked bores and threads, by the outside vendor.",
+     "kind": "cycle",
+     "group": "finish",
+     "where": {
+      "name": "Shipping and outside processes",
+      "x": 52750.0,
+      "y": 4500.0
+     },
+     "media": {
+      "type": "cut",
+      "still": "still/ll-1007223/zinc.webp",
+      "model": "cut/ll-1007223/zinc.glb"
+     },
+     "published": false
+    },
+    {
+     "id": "inspect",
+     "title": "Check the bores, threads and plating",
+     "caption": "Check the 75, 49 and 40 sizes with the calipers, the Ø10.000 H7 counterbores with gauge pins, the M4 threads with a go/no-go gauge, and the plating all over.",
+     "kind": "human",
+     "group": "finish",
+     "where": {
+      "name": "Inspection",
+      "x": 50250.0,
+      "y": 15500.0
+     },
+     "media": {
+      "type": "video",
+      "path": "video/ll-1007223/inspect.mp4"
+     },
+     "published": false
+    }
+   ]
   },
   {
    "id": "ct-tpg322",

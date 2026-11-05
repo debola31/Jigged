@@ -319,7 +319,9 @@ class LoadPlan(SawPlan):
         # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
         # 0.15 s before it comes to rest (at the bar's front, contact 0.18 s late and the hand widest 0.21 s before it
         # was planned to stop, it was widest 41% of the way)
-        tg = self.reach("R", "bar", self.t, ready=Wg + up * 70 + back * 110, approach=Wg + up * 10 + back * 35,
+        # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
+        # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
+        tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
                         opened=0.6, lead=0.15, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
@@ -341,7 +343,10 @@ class LoadPlan(SawPlan):
         self.event("drag", t_held - 0.1, t_off - 0.05, side="R", direction=(self.place.vec(hold) / np.linalg.norm(hold)).tolist(),
                    force=round(float(np.linalg.norm(hold)), 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="bar", on="bar")
-        self.event("carry", tg + 0.1, t_off, obj="bar", grip="bar", side="R")
+        self.event("carry", tg + 0.05, t_off, obj="bar", grip="bar", side="R")
+        # pushed by its end, the bar keeps its own turn, which the bed and the jaws square: held to the hand's, a
+        # degree's roll and yaw from the fingers' touch wedged it between the jaws, 2.3 mm wider than it
+        self.event("loose", tg + 0.05, t_off, obj="bar")
         self.effort("R", t_off - 0.1, 0.3, "bar")
         self.effort("R", t_off + 0.1, 0.0, "bar")
         _, W = self.grip_pose("bar", t_off)

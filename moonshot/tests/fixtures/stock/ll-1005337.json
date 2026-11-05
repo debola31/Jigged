@@ -1,0 +1,20 @@
+{
+ "part": "ll-1005337",
+ "about": "What O2 (plan §2) holds ll-1005337's finished stock to: every face of the STEP within physics.stock_deviation_mm, except the six below, whose deviation is reported, not gated (the user's decision, 2026-11-05: exempt both, noted). Each is one face of the STEP, picked by its centre (OCC's, the part's frame); no band round them. Read as moonshot/tests/gates/test_cycle_stock.py reads nist-ftc-10's. Protected (plan §6, rule 1): an exemption added here is a decision, made visibly.",
+ "exempt": [
+  {"what": "bench countersink", "types": ["CONE"], "within_mm": [[-21.0, 20.0, -19.2], [-20.0, 21.0, -18.1]],
+   "why": "The dowel hole at (-20.5, 20.5)'s 3 x 45 deg back countersink: the plan cuts it by hand at the bench (finish, deburr), not on the mill. The cycle reams the Ø8 through."},
+  {"what": "bench countersink", "types": ["CONE"], "within_mm": [[-41.0, 579.0, -19.2], [-40.0, 580.0, -18.1]],
+   "why": "The dowel hole at (-40.5, 579.5)'s back countersink, as the one above."},
+  {"what": "leaned R15", "types": ["CYLINDER"], "within_mm": [[-245.1, 577.2, -11.0], [-244.0, 578.2, -10.0]],
+   "why": "The undercut notch's R15 corner above the wall's foot: the model leans it with the 20 deg wall, and a vertical dovetail cutter leaves R15 at the foot narrowing to R8.1 at the top face. R15 isn't on the drawing."},
+  {"what": "leaned R15", "types": ["CYLINDER"], "within_mm": [[-156.0, 577.2, -11.0], [-154.9, 578.2, -10.0]],
+   "why": "As above, the same notch's other corner."},
+  {"what": "leaned R15", "types": ["CYLINDER"], "within_mm": [[-156.0, 21.8, -11.0], [-154.9, 22.8, -10.0]],
+   "why": "As above, the other end's notch."},
+  {"what": "leaned R15", "types": ["CYLINDER"], "within_mm": [[-245.1, 21.8, -11.0], [-244.0, 22.8, -10.0]],
+   "why": "As above, the other end's notch, its other corner."}
+ ],
+ "band_mm": 0.0,
+ "band_why": "None: only the faces above are exempt (the user's decision, 2026-11-05)."
+}

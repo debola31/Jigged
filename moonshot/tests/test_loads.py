@@ -111,3 +111,50 @@ def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(part, setup):
 def test_datum_a_sits_against_the_fixed_jaw_when_the_jaws_close_on_it(setup):
     R = part_pose(load_plan("nist-ftc-10"), setup)["R"]
     assert R @ [0, -1.0, 0] == pytest.approx([0, 1.0, 0])
+
+
+def test_a_given_box_poses_the_part_as_the_default_does():
+    plan = load_plan("nist-ftc-10")
+    for setup in ("op10", "op20", "op50"):
+        a, b = part_pose(plan, setup), part_pose(plan, setup, env=part_pose(plan, setup)["envelope_mm"])
+        assert all(np.array_equal(a[k], b[k]) for k in ("R", "centre_mm", "size_mm", "origin_mm"))
+
+
+def box_in_world(p) -> tuple[np.ndarray, np.ndarray]:
+    corners = np.array(np.meshgrid(*p["envelope_mm"])).reshape(3, -1).T
+    world = p["origin_mm"] + corners @ p["R"].T
+    return world.min(0), world.max(0)
+
+
+@pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
+def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(part):
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z
+    plan = load_plan(part)
+    s = plan["setups"][0]
+    p = part_pose(plan, s["id"])
+    R = p["R"]
+    assert R @ R.T == pytest.approx(np.eye(3)) and np.linalg.det(R) == pytest.approx(1.0)
+    up = np.eye(3)["XYZ".index(s["face_up"][1])] * (1 if s["face_up"][0] == "+" else -1)
+    assert R @ up == pytest.approx([0, 0, 1])
+    lo, hi = box_in_world(p)
+    assert lo[2] == pytest.approx(SPOILBOARD_TOP_Z)
+    assert hi[0] - lo[0] >= hi[1] - lo[1], "its longer side along the table"
+    assert (lo[0] + hi[0]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[0])
+
+
+def test_nist_ftc_09_is_centred_on_the_spoilboard():
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY
+    lo, hi = box_in_world(part_pose(load_plan("nist-ftc-09"), "op10"))
+    assert (lo[1] + hi[1]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[1])
+
+
+def test_ll_1005337_sits_by_its_near_edge_then_slides_10_mm_toward_you():
+    from moonshot.motion.loads import PLATE_NEAR_Y_MM, Y_TRAVEL_FRONT
+    plan = load_plan("ll-1005337")
+    p10, p20 = part_pose(plan, "op10"), part_pose(plan, "op20")
+    assert box_in_world(p10)[0][1] == pytest.approx(PLATE_NEAR_Y_MM["ll-1005337"])
+    assert PLATE_NEAR_Y_MM["ll-1005337"] + 3.2 - 6.35 == pytest.approx(Y_TRAVEL_FRONT + 0.5)
+    assert np.array_equal(p20["R"], p10["R"])
+    assert p20["origin_mm"] - p10["origin_mm"] == pytest.approx([0, -10.0, 0])
+    # the model's X = -400 edge is the near one (plan)
+    assert (p10["R"] @ [1.0, 0, 0]) == pytest.approx([0, 1.0, 0])

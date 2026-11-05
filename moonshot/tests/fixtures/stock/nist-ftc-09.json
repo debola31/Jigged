@@ -1,0 +1,331 @@
+{
+ "part": "nist-ftc-09",
+ "about": "What O2 (plan §2) holds nist-ftc-09's finished stock to: every face of the STEP within physics.stock_deviation_mm, except the faces below, whose deviation is reported, not gated (the user's decision, 2026-11-05: exempt, named). Each is one face of the STEP, picked by its centre (OCC's, the part's frame); no band round them. The finished stock is the part cut out of its skeleton (moonshot/sim/cam.py part_of). Protected (plan §6, rule 1): an exemption added here is a decision, made visibly.",
+ "exempt": [
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     34.431,
+     2.353,
+     108.462
+    ],
+    [
+     34.531,
+     2.453,
+     108.562
+    ]
+   ],
+   "why": "The lettering's walls and floors where they meet in square inside corners: the 1/32 in end mill (em132, the smallest planned tool) leaves its radius in each, 0.394 x (2^0.5 - 1) = 0.16 mm at a 90 deg corner (0.156 measured). No round tool makes a square inside corner."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     35.997,
+     2.353,
+     103.06
+    ],
+    [
+     36.097,
+     2.453,
+     103.16
+    ]
+   ],
+   "why": "As above: the lettering's face 125."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     37.563,
+     2.353,
+     108.462
+    ],
+    [
+     37.663,
+     2.453,
+     108.562
+    ]
+   ],
+   "why": "As above: the lettering's face 126."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     56.716,
+     2.353,
+     103.06
+    ],
+    [
+     56.816,
+     2.453,
+     103.16
+    ]
+   ],
+   "why": "As above: the lettering's face 132."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     69.517,
+     2.353,
+     104.641
+    ],
+    [
+     69.617,
+     2.453,
+     104.741
+    ]
+   ],
+   "why": "As above: the lettering's face 133."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     66.313,
+     2.353,
+     106.221
+    ],
+    [
+     66.413,
+     2.453,
+     106.321
+    ]
+   ],
+   "why": "As above: the lettering's face 134."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     63.108,
+     2.353,
+     112.141
+    ],
+    [
+     63.208,
+     2.453,
+     112.241
+    ]
+   ],
+   "why": "As above: the lettering's face 135."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     61.557,
+     2.353,
+     118.06
+    ],
+    [
+     61.657,
+     2.453,
+     118.16
+    ]
+   ],
+   "why": "As above: the lettering's face 136."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     60.006,
+     2.353,
+     112.141
+    ],
+    [
+     60.106,
+     2.453,
+     112.241
+    ]
+   ],
+   "why": "As above: the lettering's face 137."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     50.008,
+     1.718,
+     110.028
+    ],
+    [
+     50.108,
+     1.818,
+     110.128
+    ]
+   ],
+   "why": "As above: the lettering's face 144."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     22.428,
+     1.718,
+     110.433
+    ],
+    [
+     22.528,
+     1.818,
+     110.533
+    ]
+   ],
+   "why": "As above: the lettering's face 145."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     15.752,
+     2.353,
+     112.438
+    ],
+    [
+     15.852,
+     2.453,
+     112.538
+    ]
+   ],
+   "why": "As above: the lettering's face 149."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     14.201,
+     2.353,
+     118.06
+    ],
+    [
+     14.301,
+     2.453,
+     118.16
+    ]
+   ],
+   "why": "As above: the lettering's face 150."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     12.65,
+     2.353,
+     111.979
+    ],
+    [
+     12.75,
+     2.453,
+     112.079
+    ]
+   ],
+   "why": "As above: the lettering's face 151."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     29.288,
+     2.353,
+     108.764
+    ],
+    [
+     29.388,
+     2.453,
+     108.864
+    ]
+   ],
+   "why": "As above: the lettering's face 155."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     30.854,
+     2.353,
+     103.06
+    ],
+    [
+     30.954,
+     2.453,
+     103.16
+    ]
+   ],
+   "why": "As above: the lettering's face 156."
+  },
+  {
+   "what": "letter corner",
+   "types": [
+    "PLANE"
+   ],
+   "within_mm": [
+    [
+     32.42,
+     2.353,
+     108.801
+    ],
+    [
+     32.52,
+     2.453,
+     108.901
+    ]
+   ],
+   "why": "As above: the lettering's face 157."
+  }
+ ],
+ "band_mm": 0.0,
+ "band_why": "None: only the faces above are exempt (the user's decision, 2026-11-05)."
+}

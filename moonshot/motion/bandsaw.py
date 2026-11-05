@@ -125,6 +125,7 @@ VALVE_TURN_S = 0.9          # ... over this long
 SLIDE_OFF_MM = 35.0         # the cut piece slid this far off the fixed jaw's plate before it is taken: its far side lies
                             # against the plate its whole length, and the index and middle need the gap
 SLIDE_OFF_S = 1.0           # ... over this long
+PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried (welded, off the skin)
 
 
 def saw_box(place: SC.Place, name: str, grow: float = 0.0, q_head: float = 0.0):
@@ -773,7 +774,7 @@ class UnloadPlan(SawPlan):
         tg = self.reach("R", "top", self.t, ready=Wg + up * 40 + back * 120, approach=Wg + up * 20 + back * 30,
                         opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "top")
-        self.effort("R", tg + 0.25, 0.3, "top")
+        self.effort("R", tg + 0.25, PUSH_EFFORT, "top")
         t_slide = tg + 0.3
         self.move("piece", t_slide, t_slide + SLIDE_OFF_S, R0, p1)
         t_off = t_slide + SLIDE_OFF_S + 0.15
@@ -785,8 +786,9 @@ class UnloadPlan(SawPlan):
         self.event("drag", t_slide - 0.1, t_off - 0.05, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                    force=round(float(np.linalg.norm(along)) * friction, 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="top")
-        self.event("carry", tg + 0.1, t_off, obj="piece", grip="top", side="R")
-        self.effort("R", t_off - 0.1, 0.3, "top")
+        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`)
+        self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
+        self.effort("R", t_off - 0.1, PUSH_EFFORT, "top")
         self.effort("R", t_off + 0.1, 0.0, "top")
         _, W = self.grip_pose("top", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.4)
@@ -800,7 +802,7 @@ class UnloadPlan(SawPlan):
         tg = self.reach("R", "pinch", t0, ready=Wg + up * 70, approach=Wg + up * 30, opened=0.8, lead=0.21,
                         rise_s=0.5, still_s=0.3, reach_s=0.5)
         self.effort("R", tg, 0.0, "pinch")
-        self.effort("R", tg + 0.25, 0.5, "pinch")
+        self.effort("R", tg + 0.25, PINCH_EFFORT, "pinch")
         self.t_lift = tg + PRELOAD_S
         self.move("piece", self.t_lift, self.t_lift + TAKE_S, R0, p1 + up * TAKE_MM)
         self.move("piece", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p1 + up * 50)    # over the stop block
@@ -819,7 +821,7 @@ class UnloadPlan(SawPlan):
         # alone, a 1.5 kg piece sagged the hand 116 mm and was let go in the air)
         self.event("drag", self.t_lift, t_down - 0.05, side="R", direction=[0.0, 0.0, 1.0],
                    force=round(SC.stock_kg(self.length) * 9.81, 2))
-        self.effort("R", t_off - 0.1, 0.5, "pinch")
+        self.effort("R", t_off - 0.1, PINCH_EFFORT, "pinch")
         self.effort("R", t_off + 0.1, 0.0, "pinch")
         _, W = self.grip_pose("pinch", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.5)

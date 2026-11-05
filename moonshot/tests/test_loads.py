@@ -159,7 +159,7 @@ def box_in_world(p) -> tuple[np.ndarray, np.ndarray]:
 
 @pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
 def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(part):
-    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, plate_board_top
     plan = load_plan(part)
     s = plan["setups"][0]
     p = part_pose(plan, s["id"])
@@ -168,9 +168,20 @@ def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(p
     up = np.eye(3)["XYZ".index(s["face_up"][1])] * (1 if s["face_up"][0] == "+" else -1)
     assert R @ up == pytest.approx([0, 0, 1])
     lo, hi = box_in_world(p)
-    assert lo[2] == pytest.approx(SPOILBOARD_TOP_Z)
+    assert lo[2] == pytest.approx(plate_board_top(part))
     assert hi[0] - lo[0] >= hi[1] - lo[1], "its longer side along the table"
     assert (lo[0] + hi[0]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[0])
+
+
+@pytest.mark.parametrize("part,setup,bottom,top", [
+    ("nist-ftc-09", "op10", 853.0 + 19.05 + 25.4, 853.0 + 19.05 + 25.4 + 3.04),   # on the 1 in riser (2026-11-05)
+    ("ll-1005337", "op10", 853.0 + 19.05, 853.0 + 19.05 + 19.05),                 # on the spoilboard on the table
+    ("ll-1005337", "op20", 853.0 + 19.05, 853.0 + 19.05 + 19.05)])
+def test_each_plate_lies_on_its_own_spoilboards_top(part, setup, bottom, top):
+    """nist-ftc-09's sheet stands on its spoilboard on a 1.000 in riser, so its miniature end mills reach it;
+    ll-1005337's plate on the spoilboard on the table, as before (table top 853, the MDF 3/4 in)."""
+    lo, hi = box_in_world(part_pose(load_plan(part), setup))
+    assert lo[2] == pytest.approx(bottom) and hi[2] == pytest.approx(top)
 
 
 def test_nist_ftc_09_is_centred_on_the_spoilboard():

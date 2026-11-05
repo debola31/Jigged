@@ -44,7 +44,7 @@ class PlateBlowOff(BO.BlowOff):
     def __init__(self, part: str, step_id: str, verbose=True):
         self.table = table(part, step_id)
         p = plates.plate(part, self.table["setup"])
-        surface = p.top if self.table["plate"] else SB.TOP_Z
+        surface = p.top if self.table["plate"] else p.bottom          # the plate, or the spoilboard it will lie on
         self.TIP_OVER = np.array([SB.TABLE_MID[0] + RIGHT_MM, SB.TABLE_MID[1] - NEAR_MM, surface + OVER_MM])
         out = BO.TAKES / f"{part}-{step_id}"
         out.mkdir(parents=True, exist_ok=True)

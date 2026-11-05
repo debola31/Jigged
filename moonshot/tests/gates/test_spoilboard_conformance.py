@@ -56,15 +56,35 @@ def margin_clear_mm(part, setup) -> float:
     return (plates.plate(part, setup).size[0] - PART_LONG_MM[part]) / 2 - CUTTER_MM[part]
 
 
-def test_the_spoilboard_is_36_x_14_x_3_4_in_mdf_level_where_the_plates_pose_expects_it():
-    m, d, _, _ = build(*SETUPS[0])
+@pytest.mark.parametrize("part,setup", SETUPS)
+def test_the_spoilboard_is_36_x_14_x_3_4_in_mdf_level_where_the_plates_pose_expects_it(part, setup):
+    """On the table, or on its riser: nist-ftc-09's on a 1.000 in aluminium sub-plate its size, bolted to the table
+    (the user's decision, 2026-11-05), so its miniature end mills reach the sheet."""
+    m, d, _, _ = build(part, setup)
     c = corners_mm(m, d, m.geom("spoilboard").id)
     assert sorted(np.ptp(c, axis=0)) == pytest.approx(sorted([0.75 * IN, 14 * IN, 36 * IN]), abs=0.01)
     top = c[c[:, 2] > c[:, 2].mean()]
     assert np.ptp(top[:, 2]) < 1e-6
-    assert top[:, 2].max() == pytest.approx(loads.SPOILBOARD_TOP_Z, abs=0.01)
-    assert c[:, 2].min() == pytest.approx(SB.TABLE_Z, abs=0.01)                  # on the table's top
+    assert top[:, 2].max() == pytest.approx(loads.plate_board_top(part), abs=0.01)
+    riser = loads.RISER_MM.get(part, 0.0)
+    assert c[:, 2].min() == pytest.approx(SB.TABLE_Z + riser, abs=0.01)          # on the table's top, or the riser's
     assert c[:, :2].mean(0) == pytest.approx(loads.SPOILBOARD_CENTRE_XY, abs=0.01)
+    if riser:
+        r = corners_mm(m, d, m.geom("riser").id)
+        assert sorted(np.ptp(r, axis=0)) == pytest.approx(sorted([riser, 14 * IN, 36 * IN]), abs=0.01)
+        assert r[:, 2].min() == pytest.approx(SB.TABLE_Z, abs=0.01) and r[:, 2].max() == pytest.approx(
+            SB.TABLE_Z + riser, abs=0.01)
+    else:
+        assert mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "riser") < 0
+
+
+@pytest.mark.parametrize("part,setup", SETUPS)
+def test_each_stud_is_a_kit_stud_long_enough_to_take_its_nut_run_up(part, setup):
+    """The kit's 3-8 in studs: the shortest that stands 3 mm over its nut run up to park, through the riser too."""
+    for k in plates.clamps(part, setup):
+        z0, z1 = k.stud_z()
+        assert round((z1 - z0) / IN, 6) in SB.STUD_LENGTHS_IN
+        assert z1 - (k.nut_z("parked") + SB.FLANGE_T + SB.NUT_HEX_H) >= SB.STUD_OVER_NUT_MM - 1e-6
 
 
 @pytest.mark.parametrize("part,setup", SETUPS)
@@ -74,7 +94,7 @@ def test_the_plate_rests_on_the_spoilboard_at_its_true_height_and_stays(part, se
                                                         abs=0.01)
     settle(m, d, 1.0)
     rest = d.body("blank").xpos * 1000
-    assert rest[2] - p.size[2] / 2 == pytest.approx(SB.TOP_Z, abs=0.05)
+    assert rest[2] - p.size[2] / 2 == pytest.approx(loads.plate_board_top(part), abs=0.05)
     settle(m, d, 1.0)
     assert np.linalg.norm(d.body("blank").xpos * 1000 - rest) < 0.01
     assert m.body_mass[m.body("blank").id] == pytest.approx(p.mass_kg, rel=1e-3)
@@ -116,7 +136,7 @@ def test_each_clamped_nose_bears_on_the_margin_clear_of_the_cutter_heel_on_its_b
         block = np.vstack([corners_mm(m, d, g) for g in geoms(m, f"heel_block_{i}_")])
         step = corners_mm(m, d, m.geom(f"heel_block_{i}_0").id)
         assert heel[:, 2].min() == pytest.approx(step[:, 2].max(), abs=0.2), k.name   # the heel on its step
-        assert block[:, 2].min() == pytest.approx(SB.TOP_Z, abs=1e-3)
+        assert block[:, 2].min() == pytest.approx(k.board_z, abs=1e-3)
         tilt = math.degrees(math.asin(abs(heel[:, 2].min() - nose[:, 2].min()) / np.linalg.norm(
             heel[:, :2].mean(0) - nose[:, :2].mean(0))))
         assert tilt < 0.5, (k.name, tilt)
@@ -135,7 +155,7 @@ def test_a_parked_clamp_rests_still_tipped_onto_the_spoilboard_clear_of_the_plat
     for i, k in enumerate(cl):
         c = np.vstack([corners_mm(m, d, g) for g in geoms(m, f"{k.name}_") if "nut" not in m.geom(g).name])
         nose = corners_mm(m, d, m.geom(f"{k.name}_nose").id)
-        assert nose[:, 2].min() == pytest.approx(SB.TOP_Z, abs=0.2), k.name            # on the spoilboard
+        assert nose[:, 2].min() == pytest.approx(k.board_z, abs=0.2), k.name           # on the spoilboard
         on = {(m.geom(x.geom1).name, m.geom(x.geom2).name) for x in d.contact[:d.ncon]}
         assert any(f"heel_block_{i}_0" in pair and any(n.startswith(f"{k.name}_") for n in pair) for pair in on), \
             k.name                                                                     # and on its block

@@ -8,6 +8,7 @@ checks.json (moonshot/sim/bench.py): which objects ride on which (moves_with: th
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -62,16 +63,22 @@ def touch_leads(take: Path, leads: list[dict[str, float]]) -> list[dict[str, flo
     for frame in leads:
         f: dict[str, float] = {}
         for name, lead in frame.items():
-            obj = owner.get(name) or (name[len("carry_"):] if name.startswith("carry_") else None)
+            obj = owner.get(name) or (CARRY_BY_HAND.sub("", name[len("carry_"):]) if name.startswith("carry_") else None)
             for o in ([obj, *moves_with.get(obj, ())] if obj else ()):
                 f[o] = max(f.get(o, 0.0), lead)
         out.append(f)
     return out
 
 
+CARRY_BY_HAND = re.compile(r"_(R|L)$")
+
+
 def carried(active_constraints: list[list[str]]) -> list[list[str]]:
-    """Per frame, the objects welded to a hand by its carry (moonshot/world/bench_cell.py carry_<object>)."""
-    return [[c[len("carry_"):] for c in frame if c.startswith("carry_")] for frame in active_constraints]
+    """Per frame, the objects welded to a hand by its carry (moonshot/world/bench_cell.py carry_<object>). An object
+    both hands carry is welded to each, carry_<object>_R and carry_<object>_L (a plate laid on the table,
+    moonshot/sim/plate_load.py): either is the object's carry."""
+    return [sorted({CARRY_BY_HAND.sub("", c[len("carry_"):]) for c in frame if c.startswith("carry_")})
+            for frame in active_constraints]
 
 
 def _quat_R(q) -> np.ndarray:

@@ -19,7 +19,8 @@ simulation hands part_pose that box itself (`env`): the stock the setup before l
 
 A plate clamped to the table (a setup whose workholding has "clamps") lies on a 3/4 in MDF spoilboard bolted to the
 VF-2's table at its loading position, centred on the table where the vise stands (the vise comes off for it), its top
-at SPOILBOARD_TOP_Z. The plate lies flat on it, face_up up, its longer side along the table (world x) and the other
+at SPOILBOARD_TOP_Z, or RISER_MM higher on a riser for a part whose short tools need the plate higher
+(plate_board_top). The plate lies flat on it, face_up up, its longer side along the table (world x) and the other
 pointing +y, so its low edge in the model is the near one; x completes the rotation. It is centred on the spoilboard,
 unless PLATE_NEAR_Y_MM places its near edge (a plate as wide as the Y travel, placed so its near edge's cutter path
 starts at the front of it). A setup whose workholding has "shift" is the same plate, still on the spoilboard, slid
@@ -71,7 +72,16 @@ ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.
                 ("ct-slbeam", "op40"): ((0.0, 76.2), (0.0, 38.1), (0.0, 53.975))}
 # a plate on the table: the spoilboard is 3/4 in MDF, centred on the table (its top collider's box, world mm at loading)
 SPOILBOARD_MM = 0.75 * INCH
-SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05
+SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05, on the table itself
+# a part whose short tools can't reach its plate down there has the spoilboard raised on a riser bolted to the table
+# (moonshot/world/spoilboard.py): nist-ftc-09's 1-1/2 in miniature end mills (keyhole em18, lettering em132) stop 4.6
+# and 2.4 mm short of the sheet in Z, so it stands on a 1.000 in aluminium sub-plate (the user's decision, 2026-11-05)
+RISER_MM = {"nist-ftc-09": 1.0 * INCH}
+
+
+def plate_board_top(part: str | None) -> float:
+    """The top of the spoilboard a part's plate lies on (world mm, the table at loading): on its riser if it has one."""
+    return SPOILBOARD_TOP_Z + RISER_MM.get(part, 0.0)
 _TABLE = vf2.record()["colliders"]["table_top"]
 SPOILBOARD_CENTRE_XY = ((_TABLE["box_min_mm"][0] + _TABLE["box_max_mm"][0]) / 2,       # -381.5, the vise's x
                         (_TABLE["box_min_mm"][1] + _TABLE["box_max_mm"][1]) / 2)       # -340.5
@@ -177,7 +187,7 @@ def plate_pose(plan: dict, setup_id: str, env=None) -> dict:
     cy = SPOILBOARD_CENTRE_XY[1]
     if plan.get("part") in PLATE_NEAR_Y_MM:
         cy = PLATE_NEAR_Y_MM[plan["part"]] + size[1] / 2
-    centre = np.array([SPOILBOARD_CENTRE_XY[0], cy, SPOILBOARD_TOP_Z + size[2] / 2])
+    centre = np.array([SPOILBOARD_CENTRE_XY[0], cy, plate_board_top(plan.get("part")) + size[2] / 2])
     return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
 
 

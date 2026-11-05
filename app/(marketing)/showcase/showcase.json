@@ -3520,7 +3520,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the flange's edge (probe).",
+     "caption": "Set G54 X at the finished end, off the fixed soft jaw's end (probe) and Y at the flange's edge, off the fixed soft jaw's face (probe).",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -5043,6 +5043,14 @@
     "rot": 0
    },
    {
+    "item": "dovetail-30-20",
+    "asset": "dovetail-20",
+    "x": 42167.2,
+    "y": 12465,
+    "z": 1000,
+    "rot": 0
+   },
+   {
     "item": "height-gauge-1",
     "asset": "hgauge",
     "x": 45548.6,
@@ -5497,6 +5505,22 @@
       203.2,
       130.2,
       35.6
+     ]
+    }
+   },
+   "dovetail-20": {
+    "name": "20 deg dovetail cutter",
+    "model": "models/dovetail-20.glb",
+    "bbox": {
+     "min": [
+      -14.77,
+      -15.03,
+      -0.04
+     ],
+     "max": [
+      14.77,
+      15.03,
+      70.0
      ]
     }
    },

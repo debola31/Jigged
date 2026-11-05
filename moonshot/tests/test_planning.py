@@ -76,11 +76,10 @@ def test_a_tool_with_a_record_but_no_model_is_pending_not_missing(tmp_path, monk
 @pytest.mark.data_root
 @pytest.mark.parametrize("part", ["ll-1007223", "ll-1005337", "nist-ftc-09"])
 def test_every_tool_a_g1_plan_names_has_a_model(part):
-    """Track B's catalogue work for G1: only the 20 deg dovetail cutter has no record yet (Harvey's 10 vs 20 deg
-    wall isn't settled), and nothing is left pending."""
+    """Track B's catalogue work for G1: every tool has a record, and none is left pending."""
     needs_step(part)
     out = check(load_plan(part))
-    assert out["pending_tools"] == [] and set(out["missing_tools"]) <= {"dovetail-20"}
+    assert out["pending_tools"] == [] and out["missing_tools"] == []
 
 
 def test_a_plate_slid_between_setups_stays_clamped_in_between():

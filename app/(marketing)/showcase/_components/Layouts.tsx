@@ -222,7 +222,8 @@ export default function ShopLayout(props: ShopProps) {
 
   return (
     <Box sx={{ position: 'relative', height: '100%' }}>
-      <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0 }}>
+      {/* Its own stacking context, so the labels over the shop (z-index 0-20) stay under the cards. */}
+      <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
         <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
       </Box>
       <ShopButtons cat={cat} part={part} />

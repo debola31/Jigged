@@ -508,10 +508,13 @@ class Planner:
         if self.plan["part"] not in AS_PUBLISHED:             # the other parts: by the operation's kind and its OPS
             self._stock_world = ps.frame.to_world(stock)
             c.passes = self.operation(ps, sw, setup, op, OPS.get(key, {}))
-            if c.passes:                                       # the program ends sending Z home (G28 G91 Z0)
-                p = c.passes[-1]
-                home = vf2.record()["joints"]["spindle"]["centre_mm"][2] - p.tool.length
+            if c.passes:                                       # the program ends sending Z home (G28 G91 Z0), then
+                p = c.passes[-1]                               # the table out to unload: X at its far end, so the
+                J = vf2.record()["joints"]                     # head stands past the part's left end (over table
+                s = J["spindle"]["centre_mm"]                  # x = -762), and Y0, the table toward the operator
+                home = s[2] - p.tool.length
                 p.to([*p.moves[-1][0][:2], home])
+                p.to([s[0] - J["x"]["range_mm"][1], s[1] - J["y"]["range_mm"][0], home])
             return c
         if kind == "face":
             c.passes = [self.face(ps, sw, tool(op["tool"]))]

@@ -375,8 +375,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
     blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
     re-run per G1 setup with its own part, or its plate on the spoilboard.
-  - The band saw's clamp: the gate takes the lower jaw force the cut shows holds the bar (it snugs at 44-50 N; the
-    gate asked 82.5, which the arm can't give at a knob by the thigh).
+  - The band saw's clamp: the gate may take the lower jaw force the cut shows holds the bar (it snugged at 44-50 N
+    against the gate's 82.5). Since met in full: both clamps snug at about 150 N, and the gate is back at 82.5.
+  - The band saw's model is fixed so that opening the feed valve only lets the bow descend: the blade motor's
+    reaction lifted it a few degrees first. The gate keeps its assertion that the bow comes down.
   - The G1 deburrs' tool pickup, loading in 100-133 ms against people's 163-265, is a recorded exception; each take
     passes every other check.
   - G1's four inspect steps (all but nist-ftc-10's) stay caption and still.

@@ -187,12 +187,12 @@ class SetParallels(StepTake):
         # a parallel already set within NEAR_SET_MM of this one's spot is kept NEIGHBOUR_CLEAR_MM clear of, as the one
         # left in the rack is: with ll-1007223's 24 mm between them the run's fingers, letting go of parallel b, met
         # parallel a and set it rocking (2.4 mm off); the reference's stand 43 mm apart
-        near = {b: p for b, p in set_before.items()
-                if abs(float(p[1] - self.dest[name][1])) - V.PARALLEL_T < NEAR_SET_MM}
-        cols += self.at_landing(name, vise_boxes({b: p for b, p in set_before.items() if b not in near},
+        close = {b: p for b, p in set_before.items()
+                 if abs(float(p[1] - self.dest[name][1])) - V.PARALLEL_T < NEAR_SET_MM}
+        cols += self.at_landing(name, vise_boxes({b: p for b, p in set_before.items() if b not in close},
                                                  self.vload.parallel_h, self.vload.opening0, include_table=False))
         cols += self.at_landing(name, [obox(self.centre(p), np.eye(3), np.add(half, NEIGHBOUR_CLEAR_MM))
-                                       for p in near.values()])
+                                       for p in close.values()])
         S = lambda *a: list(a) + [0.0, 0.0]                                                          # noqa: E731
         return dict(obj=self.centre(self.rack[name]), side="R", q0=q0, colliders=cols, load=self.kg,
                     targets={"thumb": plane(near, Rr @ [0, -1, 0], 1.5, local_bands(top, Rr, x=(-10, 10), depth=(3, 6))),

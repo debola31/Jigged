@@ -71,7 +71,7 @@ REGIONS = {
 # model frame (mm). A box is [[x, y, z] low, [x, y, z] high].
 # - holes: which holes it cuts, by diameter and, where only some of that size are this operation's, their axes'
 #   points (the coordinate along the setup's up axis is ignored); by default every hole of the operation's diameter
-#   that opens upward, or for a tap the holes of the drill before it
+#   that opens upward, or for a tap the holes of the drill before it; through_plate: on through the stock's bottom
 # - voids: the openings in the part's section (its inner wires) whose centre lies in a box, sectioned at the box's
 #   middle: a pocket or engraving clears them level by level; `through` takes it on through the plate
 # - in: the box the tool's centre stays inside (a profile a side at a time); to_jaws: a profile goes down to this far
@@ -96,6 +96,9 @@ OPS = {                                                                     # it
         [[-62.5, 0.0, -98.5], [1.0, 3.04, -4.5]]]},                                              # the window
     ("nist-ftc-09", "op10", "keyhole"): {"through": True, "voids": [[[45.5, 0.0, 7.5], [56.0, 3.04, 22.5]]]},
     ("nist-ftc-09", "op10", "lettering"): {"voids": [[[12.0, 2.0, 102.0], [70.0, 3.0, 119.0]]]},
+    # the dowel holes' Ø8 bore stops 3 mm short of the back, where the STEP opens it out in the 3 x 45 deg countersink
+    # the bench cuts by hand (plan finish, deburr): the reamer goes on through the plate
+    ("ll-1005337", "op10", "dowels"): {"holes": [{"dia": 8.0, "through_plate": True}]},
     ("ll-1005337", "op10", "recesses"): {"voids": [_NESTS(-8.0)]},
     ("ll-1005337", "op10", "nests"): {"through": True, "voids": [_NESTS(-16.0)]},
     # the plate is as wide as the Y travel: one finishing loop, its centre r off the outline (ring)
@@ -953,6 +956,9 @@ class Planner:
         out = []
         for s in specs:
             hs = self.holes(ps, s["dia"], ring=True)
+            if s.get("through_plate"):                         # on through the plate: what opens below is the bench's
+                bottom = self._stock_world.BoundingBox().zmin
+                hs = [(xy, bottom, True) for xy, lo, through in hs]
             if "at" in s:
                 at = [ps.frame.world(p)[:2] for p in s["at"]]
                 hs = [h for h in hs if min(np.linalg.norm(h[0] - a) for a in at) < 0.5]

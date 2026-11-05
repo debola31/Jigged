@@ -169,7 +169,7 @@ LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
          "stainless": ("stainless_304", [0.66, 0.66, 0.68, 1.0], 1.0, 0.3),
          "steel": ("steel_4140", [0.5, 0.51, 0.52, 1.0], 1.0, 0.35),
          "acetal": ("acetal_black", [0.02, 0.02, 0.022, 1.0], 0.0, 0.42),
-         "black oxide": ("black_oxide", [0.05, 0.05, 0.055, 1.0], 0.85, 0.45),     # dark grey-black, satin
+         "black oxide": ("black_oxide", [0.018, 0.018, 0.02, 1.0], 0.5, 0.5),      # dark grey-black, satin
          "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22)}      # bright bluish silver
 
 

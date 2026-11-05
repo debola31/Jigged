@@ -1632,10 +1632,16 @@
    "size": "279.4 x 190.5 x 3.0 mm",
    "status": "live",
    "material": "304 stainless steel sheet, 11 ga (.1195 thick), ASTM A240",
+   "stock": {
+    "material": "304 stainless steel sheet, 11 ga (.1195 thick), ASTM A240",
+    "size": "10 x 0.1195 x 13.5",
+    "from": "11 ga sheet sheared to 10 x 13-1/2 in by the supplier"
+   },
    "groups": [
     {
      "id": "op10",
-     "title": "Op 10: holes, slots and outline"
+     "title": "Op 10: holes, slots and outline",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "finish",
@@ -1653,8 +1659,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-clean.mp4"
@@ -1671,8 +1684,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-load.mp4"
@@ -1689,8 +1709,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-seat.mp4"
@@ -1707,8 +1734,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-check.mp4"
@@ -1725,8 +1763,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-xy.mp4"
@@ -1743,8 +1788,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-z.mp4"
@@ -1761,8 +1813,49 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      },
+      {
+       "name": "5/32 in drill"
+      },
+      {
+       "name": "5.5 mm drill"
+      },
+      {
+       "name": "6 mm drill"
+      },
+      {
+       "name": "K drill",
+       "item": "drill-0281"
+      },
+      {
+       "name": "1/4 in reamer"
+      },
+      {
+       "name": "1/4 in end mill",
+       "item": "em-0250-3fl"
+      },
+      {
+       "name": "1/8 in end mill"
+      },
+      {
+       "name": "1/32 in end mill"
+      },
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      },
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-tools.mp4"
@@ -1779,8 +1872,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-start.mp4"
@@ -1797,8 +1892,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-spot.webp",
@@ -1816,8 +1918,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "5/32 in drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-small.webp",
@@ -1835,8 +1943,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "5.5 mm drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-e_holes.webp",
@@ -1854,8 +1968,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "6 mm drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-datum_holes.webp",
@@ -1873,8 +1993,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "K drill",
+       "item": "drill-0281"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-k_holes.webp",
@@ -1892,8 +2019,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/4 in reamer"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-ream.webp",
@@ -1911,8 +2044,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/4 in end mill",
+       "item": "em-0250-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-holes.webp",
@@ -1930,8 +2070,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/4 in end mill",
+       "item": "em-0250-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-slots.webp",
@@ -1949,8 +2096,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/8 in end mill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-keyhole.webp",
@@ -1968,8 +2121,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/32 in end mill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-lettering.webp",
@@ -1987,8 +2146,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-chamfer.webp",
@@ -2006,8 +2172,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/nist-ftc-09/op10-outline.webp",
@@ -2025,8 +2198,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/op10-unload.mp4"
@@ -2044,6 +2219,12 @@
       "x": 27750.0,
       "y": 4500.0
      },
+     "uses": [
+      {
+       "name": "Deburring tools, files and abrasive pads",
+       "item": "deburr-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/deburr.mp4"
@@ -2061,6 +2242,7 @@
       "x": 50250.0,
       "y": 15500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/nist-ftc-09/inspect.mp4"
@@ -2075,14 +2257,21 @@
    "size": "600 x 400 x 19.1 mm",
    "status": "live",
    "material": "Delrin (acetal), black",
+   "stock": {
+    "material": "Delrin (acetal), black",
+    "size": "16 x 26 x 0.75",
+    "from": "3/4 in plate cut to 16 x 26 in by the supplier: 16 in is the VF-2's Y travel, and wider than the band saw takes"
+   },
    "groups": [
     {
      "id": "op10",
-     "title": "Op 10: nests and near edge"
+     "title": "Op 10: nests and near edge",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op20",
-     "title": "Op 20: far edge"
+     "title": "Op 20: far edge",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "finish",
@@ -2100,8 +2289,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-clean.mp4"
@@ -2118,8 +2314,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-load.mp4"
@@ -2136,8 +2339,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-seat.mp4"
@@ -2154,8 +2364,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-check.mp4"
@@ -2172,8 +2393,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-xy.mp4"
@@ -2190,8 +2418,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-z.mp4"
@@ -2208,8 +2443,29 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "8 mm reamer"
+      },
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      },
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      },
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      },
+      {
+       "name": "20 deg dovetail cutter"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-tools.mp4"
@@ -2226,8 +2482,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-start.mp4"
@@ -2244,8 +2502,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "8 mm reamer"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-dowels.webp",
@@ -2263,8 +2527,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-recesses.webp",
@@ -2282,8 +2553,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-nests.webp",
@@ -2301,8 +2579,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-chamfer.webp",
@@ -2320,8 +2605,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-outline.webp",
@@ -2339,8 +2631,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "20 deg dovetail cutter"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op10-undercut.webp",
@@ -2358,8 +2656,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op10-unload.mp4"
@@ -2376,8 +2676,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-shift.mp4"
@@ -2394,8 +2701,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
+       "item": "clamp-kit-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-check.mp4"
@@ -2412,8 +2730,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-xy.mp4"
@@ -2430,8 +2755,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-z.mp4"
@@ -2448,8 +2780,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-start.mp4"
@@ -2466,8 +2800,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1005337/op20-far_edge.webp",
@@ -2485,8 +2826,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/op20-unload.mp4"
@@ -2504,6 +2847,12 @@
       "x": 27750.0,
       "y": 4500.0
      },
+     "uses": [
+      {
+       "name": "Deburring tools, files and abrasive pads",
+       "item": "deburr-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/deburr.mp4"
@@ -2521,6 +2870,7 @@
       "x": 50250.0,
       "y": 15500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1005337/inspect.mp4"
@@ -2535,26 +2885,36 @@
    "size": "3.00 x 1.50 x 2.00 in, 0.75 legs",
    "status": "live",
    "material": "4140 alloy steel, pre-hardened 28-32 HRC",
+   "stock": {
+    "material": "4140 alloy steel, pre-hardened 28-32 HRC",
+    "size": "3.25 x 1.5 x 2.25",
+    "from": "sawn from the bar on the band saw"
+   },
    "groups": [
     {
      "id": "saw",
-     "title": "Saw: cut the blank"
+     "title": "Saw: cut the blank",
+     "where": "McMaster-Carr 8962N13 horizontal band saw"
     },
     {
      "id": "op10",
-     "title": "Op 10: bottom"
+     "title": "Op 10: bottom",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op20",
-     "title": "Op 20: end of the long leg"
+     "title": "Op 20: end of the long leg",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op30",
-     "title": "Op 30: back and threads"
+     "title": "Op 30: back and threads",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op40",
-     "title": "Op 40: the L"
+     "title": "Op 40: the L",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "finish",
@@ -2572,8 +2932,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/saw-load.mp4"
@@ -2590,8 +2952,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/saw-start.mp4"
@@ -2608,8 +2972,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/saw-cut.webp",
@@ -2627,8 +2993,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/saw-unload.mp4"
@@ -2645,8 +3013,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-clean.mp4"
@@ -2663,8 +3042,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-load.mp4"
@@ -2681,8 +3071,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-seat.mp4"
@@ -2699,8 +3100,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-check.mp4"
@@ -2717,8 +3129,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-xy.mp4"
@@ -2735,8 +3154,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-z.mp4"
@@ -2753,8 +3179,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-tools.mp4"
@@ -2771,8 +3204,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-start.mp4"
@@ -2789,8 +3224,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op10-face.webp",
@@ -2808,8 +3250,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op10-unload.mp4"
@@ -2826,8 +3270,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-clean.mp4"
@@ -2844,8 +3299,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-load.mp4"
@@ -2862,8 +3328,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-seat.mp4"
@@ -2880,8 +3357,23 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-check.mp4"
@@ -2898,8 +3390,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-xy.mp4"
@@ -2916,8 +3415,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-z.mp4"
@@ -2934,8 +3440,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-start.mp4"
@@ -2952,8 +3460,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op20-face.webp",
@@ -2971,8 +3486,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op20-unload.mp4"
@@ -2989,8 +3506,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-clean.mp4"
@@ -3007,8 +3535,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-load.mp4"
@@ -3025,8 +3564,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-seat.mp4"
@@ -3043,8 +3593,23 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-check.mp4"
@@ -3061,8 +3626,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-xy.mp4"
@@ -3079,8 +3651,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-z.mp4"
@@ -3097,8 +3676,23 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      },
+      {
+       "name": "#7 drill",
+       "item": "drill-0201"
+      },
+      {
+       "name": "1/4-20 tap",
+       "item": "tap-0250-20"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-tools.mp4"
@@ -3115,8 +3709,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-start.mp4"
@@ -3133,8 +3729,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op30-face.webp",
@@ -3152,8 +3755,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op30-spot.webp",
@@ -3171,8 +3781,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "#7 drill",
+       "item": "drill-0201"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op30-drill.webp",
@@ -3190,8 +3807,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/4-20 tap",
+       "item": "tap-0250-20"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op30-tap.webp",
@@ -3209,8 +3833,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op30-unload.mp4"
@@ -3227,8 +3853,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-clean.mp4"
@@ -3245,8 +3882,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-load.mp4"
@@ -3263,8 +3911,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-seat.mp4"
@@ -3281,8 +3940,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-check.mp4"
@@ -3299,8 +3969,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-xy.mp4"
@@ -3317,8 +3994,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-z.mp4"
@@ -3335,8 +4019,27 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      },
+      {
+       "name": "K drill",
+       "item": "drill-0281"
+      },
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      },
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-tools.mp4"
@@ -3353,8 +4056,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-start.mp4"
@@ -3371,8 +4076,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-face.webp",
@@ -3390,8 +4102,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-notch.webp",
@@ -3409,8 +4128,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-spot.webp",
@@ -3428,8 +4154,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "K drill",
+       "item": "drill-0281"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-drill.webp",
@@ -3447,8 +4180,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-cbores.webp",
@@ -3466,8 +4206,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/op40-chamfer.webp",
@@ -3485,8 +4232,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/op40-unload.mp4"
@@ -3504,6 +4253,12 @@
       "x": 27750.0,
       "y": 4500.0
      },
+     "uses": [
+      {
+       "name": "Deburring tools, files and abrasive pads",
+       "item": "deburr-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/deburr.mp4"
@@ -3521,6 +4276,7 @@
       "x": 52750.0,
       "y": 4500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/send-out.mp4"
@@ -3538,6 +4294,7 @@
       "x": 52750.0,
       "y": 4500.0
      },
+     "uses": [],
      "media": {
       "type": "cut",
       "still": "still/ct-slbeam/black-oxide.webp",
@@ -3556,6 +4313,7 @@
       "x": 50250.0,
       "y": 15500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ct-slbeam/inspect.mp4"
@@ -3570,22 +4328,31 @@
    "size": "75.0 x 49.0 x 40.0 mm",
    "status": "live",
    "material": "AISI 4140 PHT (pre-hardened)",
+   "stock": {
+    "material": "AISI 4140 PHT (pre-hardened)",
+    "size": "2.25 x 1.75 x 3.25",
+    "from": "sawn from the bar on the band saw"
+   },
    "groups": [
     {
      "id": "saw",
-     "title": "Saw: cut the blank"
+     "title": "Saw: cut the blank",
+     "where": "McMaster-Carr 8962N13 horizontal band saw"
     },
     {
      "id": "op10",
-     "title": "Op 10: top"
+     "title": "Op 10: top",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op20",
-     "title": "Op 20: underside"
+     "title": "Op 20: underside",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "op30",
-     "title": "Op 30: side of the stem"
+     "title": "Op 30: side of the stem",
+     "where": "Haas VF-2 (bay 1)"
     },
     {
      "id": "finish",
@@ -3603,8 +4370,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/saw-load.mp4"
@@ -3621,8 +4390,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/saw-start.mp4"
@@ -3639,8 +4410,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/saw-cut.webp",
@@ -3658,8 +4431,10 @@
       "name": "McMaster-Carr 8962N13 horizontal band saw",
       "item": "saw-1",
       "x": 34445.5,
-      "y": 7505.8
+      "y": 7505.8,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/saw-unload.mp4"
@@ -3676,8 +4451,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-clean.mp4"
@@ -3694,8 +4480,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-load.mp4"
@@ -3712,8 +4509,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-seat.mp4"
@@ -3730,8 +4538,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-check.mp4"
@@ -3748,8 +4567,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-xy.mp4"
@@ -3766,8 +4592,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-z.mp4"
@@ -3784,8 +4617,31 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      },
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      },
+      {
+       "name": "H drill",
+       "item": "drill-0266"
+      },
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      },
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-tools.mp4"
@@ -3802,8 +4658,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-start.mp4"
@@ -3820,8 +4678,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op10-face.webp",
@@ -3839,8 +4704,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op10-outline.webp",
@@ -3858,8 +4730,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "H drill",
+       "item": "drill-0266"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op10-holes.webp",
@@ -3877,8 +4756,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "3/8 in end mill",
+       "item": "em-0375-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op10-cbores.webp",
@@ -3896,8 +4782,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in chamfer mill",
+       "item": "chamfer-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op10-chamfer.webp",
@@ -3915,8 +4808,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op10-unload.mp4"
@@ -3933,8 +4828,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-clean.mp4"
@@ -3951,8 +4857,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-load.mp4"
@@ -3969,8 +4886,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-seat.mp4"
@@ -3987,8 +4915,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
+       "item": "parallels-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-check.mp4"
@@ -4005,8 +4944,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-xy.mp4"
@@ -4023,8 +4969,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-z.mp4"
@@ -4041,8 +4994,17 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "1/4 in ball end mill"
+      },
+      {
+       "name": "11 mm drill"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-tools.mp4"
@@ -4059,8 +5021,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-start.mp4"
@@ -4077,8 +5041,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "2 in face mill",
+       "item": "fm-2000"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op20-face.webp",
@@ -4096,8 +5067,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in end mill",
+       "item": "em-0500-3fl"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op20-underside.webp",
@@ -4115,8 +5093,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/4 in ball end mill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op20-radius.webp",
@@ -4134,8 +5118,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "11 mm drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op20-cbore.webp",
@@ -4153,8 +5143,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op20-unload.mp4"
@@ -4171,8 +5163,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-clean.mp4"
@@ -4189,8 +5192,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-load.mp4"
@@ -4207,8 +5221,19 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-seat.mp4"
@@ -4225,8 +5250,23 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Kurt D688 6\" vise #1",
+       "item": "vise-6in-1"
+      },
+      {
+       "name": "Swing-arm vise stop #1",
+       "item": "vise-stop-1"
+      },
+      {
+       "name": "Dial test indicator on a magnetic base",
+       "item": "test-indicator-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-check.mp4"
@@ -4243,8 +5283,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Edge finder, .200 tip",
+       "item": "edge-finder-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-xy.mp4"
@@ -4261,8 +5308,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "Renishaw OTS tool setter",
+       "item": "tool-setter-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-z.mp4"
@@ -4279,8 +5333,24 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      },
+      {
+       "name": "6.5 mm drill"
+      },
+      {
+       "name": "3.3 mm drill"
+      },
+      {
+       "name": "M4 tap"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-tools.mp4"
@@ -4297,8 +5367,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "pendant"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-start.mp4"
@@ -4315,8 +5387,15 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "1/2 in spot drill",
+       "item": "spot-0500-90"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op30-spot.webp",
@@ -4334,8 +5413,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "6.5 mm drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op30-clearance.webp",
@@ -4353,8 +5438,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "3.3 mm drill"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op30-tap_drill.webp",
@@ -4372,8 +5463,14 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [
+      {
+       "name": "M4 tap"
+      }
+     ],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/op30-tap.webp",
@@ -4391,8 +5488,10 @@
       "name": "Haas VF-2 (bay 1)",
       "item": "vf2-1",
       "x": 11557.7,
-      "y": 6975.3
+      "y": 6975.3,
+      "at": "table"
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/op30-unload.mp4"
@@ -4410,6 +5509,12 @@
       "x": 27750.0,
       "y": 4500.0
      },
+     "uses": [
+      {
+       "name": "Deburring tools, files and abrasive pads",
+       "item": "deburr-1"
+      }
+     ],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/deburr.mp4"
@@ -4427,6 +5532,7 @@
       "x": 52750.0,
       "y": 4500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/send-out.mp4"
@@ -4444,6 +5550,7 @@
       "x": 52750.0,
       "y": 4500.0
      },
+     "uses": [],
      "media": {
       "type": "cut",
       "still": "still/ll-1007223/zinc.webp",
@@ -4462,6 +5569,7 @@
       "x": 50250.0,
       "y": 15500.0
      },
+     "uses": [],
      "media": {
       "type": "video",
       "path": "video/ll-1007223/inspect.mp4"

@@ -44,7 +44,7 @@ function PartCard({ part, onPick }: { part: LivePart; onPick(): void }) {
           {part.name}
         </Typography>
         <Typography sx={{ color: 'text.secondary', fontSize: '0.95rem' }}>
-          {part.stock.material} · {part.stock.size} in · {setups} setups · {part.steps.length} steps
+          {part.stock.material} · {part.stock.size} in · {setups} {setups === 1 ? 'setup' : 'setups'} · {part.steps.length} steps
         </Typography>
         <Button variant="contained" size="large" onClick={onPick} sx={{ mt: 'auto', alignSelf: 'flex-start' }}>
           Make this part

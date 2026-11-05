@@ -24,7 +24,11 @@ interface Stage {
 /** The part's instructions coming together, told from its real plan, as the camera gathers what it needs. */
 function stages(part: LivePart, cat: Catalog): Stage[] {
   const setups = part.groups.filter((g) => g.id !== 'finish');
-  const machineStep = part.steps.find((s) => s.where.item);
+  // Each machine in the order the setups reach it (a bar is sawn before it's milled); the camera
+  // goes to the one most steps are at.
+  const machines = [...new Set(setups.flatMap((g) => (g.where ? [g.where] : [])))];
+  const stepsAt = (item?: string) => part.steps.filter((s) => s.where.item === item).length;
+  const machineStep = part.steps.filter((s) => s.where.item).sort((a, b) => stepsAt(b.where.item) - stepsAt(a.where.item))[0];
   const uses = (category: string, filter: (kind: string) => boolean = () => true) => [
     ...new Map(
       part.steps
@@ -44,11 +48,11 @@ function stages(part: LivePart, cat: Catalog): Stage[] {
     { title: 'Reading the part', detail: `${part.stock.size} in, ${part.stock.material}`, view: { kind: 'overview' } },
     {
       title: 'Planning the setups',
-      detail: `${setups.length} setups on the ${machineStep?.where.name ?? 'mill'}`,
+      detail: `${setups.length} ${setups.length === 1 ? 'setup' : 'setups'} on the ${machines.join(' and the ') || 'mill'}`,
       view: machineStep?.where.item ? { kind: 'item', id: machineStep.where.item } : undefined,
     },
     { title: 'Choosing the workholding', detail: holding.map((u) => u.name).join(', '), view: at(holding) },
-    { title: 'Picking the tools', detail: `${tools.length} cutters: ${tools.map((u) => u.name).join(', ')}`, view: at(tools) },
+    { title: 'Picking the tools', detail: `${tools.length} ${tools.length === 1 ? 'cutter' : 'cutters'}: ${tools.map((u) => u.name).join(', ')}`, view: at(tools) },
     { title: 'Writing the steps', detail: `${part.steps.length} steps, each shown being done`, view: { kind: 'step', index: 0 } },
   ];
 }

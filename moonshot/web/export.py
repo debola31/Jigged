@@ -150,12 +150,14 @@ def uses(step: dict, setups: dict, shop_json: dict, layout: dict) -> list[dict]:
     what = step["id"].removeprefix(f"{setup['id']}-")
     if step["kind"] == "cycle":
         op = next(o for o in setup["operations"] if o["id"] == step["operation"])
-        return tool(op["tool"])
+        # A saw's blade is the saw: the station itself.
+        return [] if op["tool"] == setup["machine"] else tool(op["tool"])
     if what == "tools":
         return [u for t in step["facts"]["tool_ids"] for u in tool(t)]
     if what in STEP_KINDS:
         return [u for k in STEP_KINDS[what] for u in thing(by_kind.get(k))]
-    if what not in ("clean", "load", "seat", "check", "shift"):
+    # A saw holds the bar in its own vise.
+    if what not in ("clean", "load", "seat", "check", "shift") or "workholding" not in setup:
         return []
     w = setup["workholding"]
     if "vise" in w:

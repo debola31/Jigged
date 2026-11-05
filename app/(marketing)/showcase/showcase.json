@@ -3520,7 +3520,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the flange's edge (probe).",
+     "caption": "Set G54 X at the finished end, off the fixed soft jaw's end (probe) and Y at the flange's edge, off the fixed soft jaw's face (probe).",
      "kind": "human",
      "group": "op20",
      "where": {

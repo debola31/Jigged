@@ -173,10 +173,10 @@ BRACKET = {
     "what": "A plain steel bracket bolted to the VF-2 table's front edge: a 10 mm plate against the table's front face "
             "and a 10 mm shelf on it, level with the table's top, reaching out toward the operator, on which the "
             "two-row tool stand stands as it stands on the table for a vise setup [proposed]",
-    "front_y": -665.0,      # the front row's holder axes (world y), as far from the operator as the back row lets it
-    "row_mm": 53.0,         # the back row this far behind: its holders' tapers 4.75 mm behind the front holders'
-                            # flanges, its tools (the 20 deg dovetail cutter's 30 mm head) 15 mm behind the front
-                            # row's, its plate, the stand's one, 2.6 mm in front of ll-1005337's plate
+    "front_y": -690.0,      # the front row's holder axes (world y), its flanges 33 mm behind the doors' panels' line
+    "row_mm": 78.0,         # the back row this far behind, its plate, the stand's one, 2.6 mm in front of
+                            # ll-1005337's plate: 53 behind, the open fingers of a hand reaching round a front holder
+                            # met the taper of the back holder behind it and pushed the hand 27 mm off its grip
     "right_x": -46.0,       # each row's rightmost fork, where the vise setups' third fork is
     "front_rise_mm": 120.0, # the front row stands this much higher than the back, on arms reaching back over it to the
                             # stand's plate behind the back row: a back holder slides out under the emptied front forks
@@ -184,11 +184,11 @@ BRACKET = {
                             # under them. The other way up, the back row raised over the front, the hand reaching for a
                             # back holder caught on the emptied front forks and closed 44 mm low and 37 mm back on it,
                             # and every front holder had to go up over the back row's knobs
-    "drop_mm": 80.0,        # the shelf this far under the table's top, the back row as far under the vise setups'
-                            # stand's height and the front row 40 mm over it: the back row at that height and the front
-                            # raised 135 over it, the hand closed on a front holder pressing 7.8 mm into its body, its
-                            # weight taken 100 ms after it touched it (people's 139-321); dropped 60, its fingers swept
-                            # the spot drill's cutter on the way in for 61 frames, 80 for 2
+    "drop_mm": 120.0,       # the shelf this far under the table's top, the back row as far under the vise setups'
+                            # stand's height and the front row (front_rise_mm over it) at that height: the back row at
+                            # that height and the front raised 135 over it, the hand closed on a front holder pressing
+                            # 7.8 mm into its body, its weight taken 100 ms after it touched it (people's 139-321);
+                            # dropped 60, its fingers swept the spot drill's cutter on the way in for 61 frames, 80 for 2
     "face_y": -524.0,       # the table's front face (vf2.json table_top), which the bracket is bolted to
     "t": 10.0, "margin_x": 60.0, "face_h": 40.0,
 }
@@ -197,7 +197,7 @@ BRACKET = {
 def bracket_layout(tool_ids: list[str]) -> Layout:
     """The two-row stand on the bracket for a plate setup's tools, in the order they go in: the first half (rounded up)
     in the front row, emptied first, the rest in the back row, each row ending at BRACKET right_x; the back row
-    drop_mm under the vise setups' stand's height, the front row front_rise_mm over it."""
+    drop_mm under the vise setups' stand's height, the front row front_rise_mm over the back."""
     per_row = (len(tool_ids) + 1) // 2
     rise, drop = BRACKET["front_rise_mm"], BRACKET["drop_mm"]
     first = (BRACKET["right_x"] - (per_row - 1) * STAND["pitch_mm"][0], BRACKET["front_y"],

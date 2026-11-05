@@ -89,7 +89,6 @@ HOLDER_KG_LIGHT = 1.2                                    # past this (every dril
 BACK_ROW_SLIDE_CLEAR_MM = 6.0                            # a back-row holder slid out its rows' pitch further, and this,
                                                          # its flange clear of the raised front fork's tines over it
 BACK_STOP_TOP_MM = 10.5                                  # a fork's back stop's top over its tines' top
-BRACKET_UP_MIN_MM = 60.0                                 # a holder off a plate's bracket lifted at least this far
 LIFT_S = 0.2                                            # the lift off the tines, 2.5 mm from 0.1 s after the
                                                          # loading starts: planned 1 mm up 0.19 s into it
 LOAD_RAMP_S = 0.26                                       # the holder's weight fed forward, and the grip firmed, over
@@ -133,7 +132,11 @@ WIDE_EASE_BACK_MM = 2.0                                  # ... and, round a tool
                                                          # face mill) seated from the stand, this far back toward the
                                                          # body, along the wrist's way from the holder's axis: let go
                                                          # from fork 0, the thumb settled 2 mm further into the body, to
-                                                         # 4.3 mm of skin
+                                                         # 4.3 mm of skin (3.5 back, the fingertips round its far side
+                                                         # were drawn 4.3 mm into it)
+WIDE_OPEN_BACK_MM = 2.0                                  # and this much further as the fingers open: without, a run
+                                                         # with ct-slbeam's parallels moved kept the thumb 3.8 mm in
+                                                         # for a frame as they began to
 LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
@@ -423,9 +426,11 @@ class Seat(ToolTake):
 
     def up_mm(self, slid_z: float) -> float:
         """How far up a holder goes once out of its fork, its gauge line from slid_z: CLEAR_UP_MM, so its tool clears
-        the part and the vise; on a plate's bracket (TL.BRACKET), whose rows its way into the machine crosses, as far as
-        its tool's tip clears by CLEAR_OVER_MM what stands there: from the front row, the back row's holders' knobs; from
-        the back row, the emptied front forks' back stops (BRACKET_UP_MIN_MM at least)."""
+        the part and the vise; on a plate's bracket (TL.BRACKET), whose rows its way into the machine crosses, to where
+        the vise setups' stand's holders go, so its insert starts as theirs do, or higher if its tool's tip must clear by
+        CLEAR_OVER_MM what stands there: from the front row, the back row's holders' knobs; from the back row, the
+        emptied front forks' back stops. (Lifted only as high as that, its insert started lower and further from
+        people's postures: a median negative log-likelihood of 29.1-29.3, against their 28.7.)"""
         lay = self.layout
         if not (lay.bracket and lay.per_row):
             return CLEAR_UP_MM
@@ -433,7 +438,8 @@ class Seat(ToolTake):
             top = TL.on_stand(lay.per_row, lay)[2] + TL.KNOB_HEAD[1] + TL.KNOB_HEAD[0]
         else:
             top = TL.stand_axis(0, lay)[2] + BACK_STOP_TOP_MM
-        return max(BRACKET_UP_MIN_MM, top + CLEAR_OVER_MM + TL.cutter(self.tool)["length"] - slid_z)
+        as_stand = TL.on_stand(0)[2] + LIFT_MM + CLEAR_UP_MM
+        return max(as_stand, top + CLEAR_OVER_MM + TL.cutter(self.tool)["length"]) - slid_z
 
     def yaw_in_deg(self) -> float:
         """How far the grip turns about the holder's axis (from above, anticlockwise) by the time it is under the
@@ -548,7 +554,9 @@ class Seat(ToolTake):
         t2 = t1 + 0.43
         slid = P0 + [0, -self.slide_mm, LIFT_MM]
         up = self.up_mm(slid[2])
-        t2b = t2 + 0.5 * math.sqrt(up / CLEAR_UP_MM)       # higher, longer, its peak acceleration kept
+        # higher, longer: its peak acceleration kept up to CLEAR_UP_MM, its peak speed past it (a back-row holder lifted
+        # 320 mm off a plate's bracket in 0.63 s whipped 33 deg over in the hand and was left 20 deg turned in it)
+        t2b = t2 + 0.5 * max(math.sqrt(up / CLEAR_UP_MM), up / CLEAR_UP_MM)
         lifted = slid + [0, 0, up]
         keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, lifted)]
         if self.part == "pick":
@@ -646,11 +654,14 @@ class Seat(ToolTake):
         # eased down off the flange, or as far as the grip says (holder_grip.json "ease_mm": the 11 mm drill's lower
         # fingers, eased 1.5 mm, swept its shank 5 mm above its tip as the hand opened off it)
         eased = SPINDLE - [0, 0, holder_grip(self.tool).get("ease_mm", EASE_MM)]
+        back = np.zeros(3)                                  # how far back the hand goes as its fingers open
         if self.wide and self.part == "seat":       # round a wide tool, which leaves the fingers no slack, a hand that
-            # took it off the stand eases back off the body too (an insert's, holding it as its pick left it, kept the
-            # thumb 2.3-2.5 mm into the body without)
-            back = (turned(t9) @ g["W_rel"]) * [1.0, 1.0, 0.0]
-            eased = eased + WIDE_EASE_BACK_MM * back / np.linalg.norm(back)
+            # took it off the stand eases back off the body too, and on as its fingers open (an insert's, holding it as
+            # its pick left it, kept the thumb 2.3-2.5 mm into the body without)
+            away = (turned(t9) @ g["W_rel"]) * [1.0, 1.0, 0.0]
+            away = away / np.linalg.norm(away)
+            eased = eased + WIDE_EASE_BACK_MM * away
+            back = WIDE_OPEN_BACK_MM * away
         keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, eased)]
         self.follow("R", t_c + 0.05, t9, "holder", at, turned)
         self.load("R", tw0, t8, kg)
@@ -664,10 +675,11 @@ class Seat(ToolTake):
         # the fingers open off it first, then the hand draws back along them, toward the body, a little right and
         # down, so the open fingers slide out from round the holder's far side: drawn back with them still round it,
         # they would pass through it, and moved right across its front, they dragged through its body
-        out = W9 + turned(t9) @ OUT_MM
+        out = W9 + back + turned(t9) @ OUT_MM
         t_out = t_open + (0.05 if self.wide else -0.1)      # off it as the fingers finish opening (round a wide tool,
                                                             # once they have: the face mill's grip has no slack)
-        self.add("R", t9, t_out + 0.45, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t_out) / 0.45), 2.0)])
+        self.add("R", t9, t_out + 0.45, lambda t: [("pose", H9, W9 + back * min_jerk((t - t9) / (t_open - t9))
+                                                     + (out - back - W9) * min_jerk((t - t_out) / 0.45), 2.0)])
         self.side["R"]["wrist"] = out
         via = [self.rest + CLEAR_STAND_MM]
         if self.layout.bracket:     # from a plate's bracket in front of the table, back over its rows and down in front

@@ -117,7 +117,8 @@ KNOB_START_DEG = -104.2     # where the handwheel is left: its knob level on the
                             # to their knees
 KNOB_TURN_S = 2.5           # the card's 2.5 s
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
-KNOB_EFFORT = 0.15          # the fist's squeeze on the knob, which spins in it (the grips' 0.4 pressed it into it)
+KNOB_EFFORT = 0.15          # the fist's squeeze on the knob, which spins in it: at the grips' 0.4 the fist, welded to
+                            # the knob and off the skin, sank 11 mm into it
 KNOB_N = 40.0               # the card's 40 N, at the knob: 2 N m, a 1.2 kN clamp through the screw past its friction
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
 VALVE_TURN_S = 0.9          # ... over this long
@@ -520,8 +521,9 @@ class ClampPlan(SawPlan):
         mid0 = self.knob_mid(tg)
         self.add("R", tg, t_off, lambda t: [("pose", H0, W0 + self.knob_mid(t) - mid0, 3.0)])
         self.event("grip", tg, t_off + 0.1, side="R", grip="knob", on="saw_handwheel")
-        # the knob keeps meeting the skin (`skin`): welded off it, the fist sank 11 mm into it
-        self.event("carry", tg + 0.1, t_off, obj="saw_handwheel", grip="knob", side="R", skin=True)
+        # welded off the skin, as the knob spins in the fist (a real knob turns on its pin; this one is the wheel's, and
+        # meeting the skin the fist's friction held it back, the jaw at 9 N)
+        self.event("carry", tg + 0.1, t_off, obj="saw_handwheel", grip="knob", side="R")
         self.event("loose", tg + 0.1, t_off, obj="saw_handwheel")      # the knob spins in the fist
         self.event("turn", self.t_turn, self.t_turn + KNOB_TURN_S, side="R", obj="saw_handwheel", force=KNOB_N,
                    q0=self.q_wheel, turn_rad=math.radians(self.turn_deg))

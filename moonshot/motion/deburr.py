@@ -1,4 +1,6 @@
-"""nist-ftc-10's step 69, "Deburr every edge", planned as a two-handed take at the inspection bench (plan §5.4).
+"""A part's deburring step (nist-ftc-10's step 69, "Deburr every edge", and G1's), planned as a two-handed take at
+the inspection bench (plan §5.4). Each part's take is its Job: how it lies, where the left hand holds it, and the
+edges stroked. nist-ftc-10's is the first, and what the rest of this says.
 
 The finished part lies pocket side up on the bench. The left hand comes onto its wide rim, fingers flat, and holds it
 down; the right picks the swivel deburring tool off the bench, draws its blade along the outer near top edge and
@@ -12,23 +14,27 @@ is straight, and its round tip slid off one face or the other however it was pre
 plan's body chose it when its turn was free (ROLL_DEG), so the hook is made for that; its turn is fixed only for the
 strokes. The part's edges are named in its STEP's frame, which is its body's.
 
-    python -m moonshot.motion.deburr          # -> <data root>/takes/nist-ftc-10-deburr: reference.npz, take.json
+    python -m moonshot.motion.deburr [part]    # -> <data root>/takes/<part>-deburr (nist-ftc-10's by default):
+                                               #    reference.npz, take.json
 """
 from __future__ import annotations
 
 import math
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, TAKE_MM, TAKE_S, TOP, BenchPlan, bench_box,
-                                   box, instrument_colliders, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PRELOAD_S, TAKE_MM, TAKE_S, TOP, BenchPlan, Steady, bench_box,
+                                   box, instrument_colliders, part_at, settle)
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
-OUT = data_root() / "takes" / "nist-ftc-10-deburr"
 TOOL_AT, TOOL_YAW = np.array([190.0, -230.0, TOP + BC.DEBURR["handle_r"] + 0.1]), 90.0
                             # straight away: turned 20 deg to the right the grip took the forearm to 71 deg of
                             # pronation (people's 61), the take 0.73 in their range; to the left, 0.90; here 0.91
@@ -39,20 +45,130 @@ TILT_DEG = 30.0             # the tool leans down at this toward the edge: at 45
                             # more wrist than the plan allows
 ROLL_DEG = -83.0            # the tool's turn about its axis from datum A's up: the plan's body held it so at both
                             # strokes when free to choose (81-84 deg), and the hook's arms are made for it
-BISECTOR = np.array([0.0, -1.0, 1.0]) / math.sqrt(2)      # both edges' outward bisector, the part's frame: up, toward +Z
-FACE_OUT, UP = np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])  # the part's frame: out of each edge's lower face
-                                                                        # (the operator's way), and datum A's normal
 INTO_MM = 0.5               # the hook is aimed this far into the corner, the faces stopping it, as the vise take's
                             # pushes are: aimed at the faces, a millimetre of lag left it short
-STROKES = [                 # (from, to) in the part's frame (mm), datum A at Y = 0
-    ((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),               # the outer near top edge, toward the right
-    ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0)),             # the pocket's far edge, toward the right
-]
 TIP = BC.deburr_tip()      # where the hook's arms meet, in the tool's frame
 
 
-def loose() -> str:
-    return BC.mat_body(PART_AT) + BC.part_body(PART_AT) + BC.deburr_body(TOOL_AT, TOOL_YAW)
+@dataclass(frozen=True)
+class Job:
+    """One part's deburring take: the part as it lies on the mat (its STEP origin at at_xy), where the left hand holds
+    it, the instruments that hand keeps clear of, and the strokes, each (from, to) in the part's frame (mm) along an
+    edge whose lower face faces the operator (face_out, out of it) under its upper face (up, out of that): the hook's
+    arms are made for edges lying so, the tool held as for nist-ftc-10's."""
+    part: BC.BenchPart
+    strokes: tuple
+    face_out: tuple
+    up: tuple
+    steady: Steady = Steady()
+    keep_off: tuple = ("mic1", "cal6")
+    at_xy: tuple = (-80.0, -110.0)
+    take_mm: float = TAKE_MM               # the tool's first rise off the bench, over TAKE_S, as it takes its weight
+    settle_s: float = 0.1                  # the blade set on its edge this long before it is drawn; the stroke
+                                           # starts (t0) 0.1 s before the draw
+    hold_to_end: bool = False              # the left hand still on the part as the take ends, the tool put back and
+                                           # the right hand at its side
+
+    @property
+    def bisector(self) -> np.ndarray:
+        n = np.add(self.face_out, self.up)
+        return n / np.linalg.norm(n)
+
+
+JOBS = {"nist-ftc-10": Job(
+    BC.NIST_FTC_10,
+    strokes=(((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),       # the outer near top edge, toward the right
+             ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0))),    # the pocket's far edge, toward the right
+    face_out=(0.0, 0.0, 1.0), up=(0.0, -1.0, 0.0))}          # the near side and the pocket's far wall; datum A
+
+
+def end_hold(top, near, far, along=(-6.0, 1.0)) -> Steady:
+    """The left hand at a short part's left end, fingers pointing right along it: the index on its top, the thumb on
+    its near face and the middle on its far face, each (point, outward normal) in the part's frame, the pads within
+    `along` of their points along the world's X. A 75 mm part leaves no room beside a 50 mm stroke for a hand flat
+    across it, as nist-ftc-10's 158 mm does; held by its end, the strokes have its right 50 mm."""
+    across = lambda at, n, k: (at, n, (("x", along), (k, (-5.0, 5.0))))     # noqa: E731
+    return Steady(at=top[0], push=top[1],
+                  pads=(("index", *across(*top, "y")), ("thumb", *across(*near, "z")),
+                        ("middle", *across(*far, "z"))),
+                  starts=HAND_FROM_LEFT, rise=G1_RISE, away=G1_AWAY)
+
+
+# G1's first rise, as nist-ftc-10's: its load came on in 133 ms (167 once; people's 163-265), the tool off the bench 4
+# frames after the load's onset however slowly the hand rose (over 0.45-0.6 s) or the carry's correction eased in
+# (0.3-0.45 s); held still 0.1 s first, or taking 4.25 mm, 100 ms
+G1_TAKE_MM = 4.5
+# ... and its blade set on each edge for longer: on ll-1007223's low step it landed 2 mm high and out and settled onto
+# the edge under its press over 0.3 s, 3 of the draw's first frames off it
+G1_SETTLE_S = 0.4
+# G1's left hand up from the thigh and off the part again further out to its side (mirrored +x): risen as nist-ftc-10's,
+# its shoulder turned in past people's (31-35 deg, theirs 31) for 7-16 frames, as many again as it left, and their
+# single-stroke takes are 340 frames
+G1_RISE, G1_AWAY = (90.0, 60.0, 160.0), (40.0, -25.0, 110.0)
+# ... and ct-slbeam's holds its part until the take ends: lifting off as the right hand put the tool back at its far
+# right, its shoulder turned in past people's for 7-10 frames however it went, and its take has one stroke
+# the shoulder turned in, the forearm palm down: the left hand comes from the left, fingers to the right
+HAND_FROM_LEFT = tuple((20, 0, 0, 40, 35, sr, 95, p, 0, 0) for sr in (15, 40) for p in (70, 90))
+JOBS["ll-1007223"] = Job(
+    BC.LL_1007223,
+    # the stem's near top edge and the lowest step's, each its right 50 mm: the near side's two long edges whose
+    # lower faces face the operator (the far top edge has the 11 mm bore through it)
+    # ending 1.5 mm short of its end: run to 0.5 mm short, the hook lagged past it and dropped off the part
+    strokes=(((35.0, 0.0, -14.0), (35.0, 0.0, 36.0)), ((49.0, 27.0, -14.0), (49.0, 27.0, 36.0))),
+    face_out=(1.0, 0.0, 0.0), up=(0.0, -1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    steady=end_hold(((29.5, 0.0, -31.0), (0.0, -1.0, 0.0)), ((35.0, 8.0, -31.0), (1.0, 0.0, 0.0)),
+                    ((24.0, 8.0, -31.0), (-1.0, 0.0, 0.0))),
+    # 40 mm back from where nist-ftc-10 lies: there the hand holding the tool to the low step's edge, its curled little
+    # finger 100 mm right of the blade and 80 mm nearer the operator, came down on the micrometer; 40 mm right, the
+    # left hand held the part's end nearer the body's middle and the left arm's posture was past people's (median 28.9,
+    # theirs 28.7)
+    at_xy=(-80.0, -70.0))
+JOBS["ct-slbeam"] = Job(
+    BC.CT_SLBEAM,
+    # the base's near top edge, 50 of its 57 mm right of the upright: its one long edge facing the operator
+    strokes=(((25.0, 0.0, 19.05), (75.0, 0.0, 19.05)),),
+    face_out=(0.0, -1.0, 0.0), up=(0.0, 0.0, 1.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S, hold_to_end=True,
+    # held down by the upright's top, flat, fingers forward, as nist-ftc-10's rim is: fingers pointing right along it,
+    # its 51 mm top took the left arm past people's (posture median 30-34, theirs 28.7), and pinched by its faces as
+    # ll-1007223's stem is, the arm's sway lifted the part 2.3 mm off the mat
+    steady=Steady(at=(9.5, 19.05, 50.8), push=(0.0, 0.0, 1.0), rise=G1_RISE, away=G1_AWAY,
+                  pads=tuple((f, (9.5, 19.05, 50.8), (0.0, 0.0, 1.0), (("x", b), ("y", (-10, 10))))
+                             for f, b in (("index", (2, 8)), ("middle", (-8, -2))))),
+    # 25 mm back from nist-ftc-10's near face: there the hand holding the tool to the edge, 19 mm up, came down on the
+    # micrometer. 40 mm right, the left hand on the upright nearer the body's middle turned its shoulder in past people's
+    at_xy=(-118.0, -122.0))
+JOBS["nist-ftc-09"] = Job(
+    BC.NIST_FTC_09,
+    # the near long side's top edge, toward the right; the sheet overhangs the mat 25 mm all round, so the hook's
+    # lower arm clears the rubber below the 3 mm edge. Right of the micrometer: where nist-ftc-10's first stroke runs,
+    # 27 mm lower, the hand holding the tool came down on it and held the tool 14 mm over the edge
+    # two strokes along it, one after the other: with one, the take's start (the trunk's sway as the body settles,
+    # common to the bench's takes) was 7% of its frames, past people's for the left arm
+    # the hand trailing 100 mm right of the blade clear of the rough-surface block (52 mm tall) at the second's end
+    strokes=(((-95.25, 3.04, 10.0), (-95.25, 3.04, 60.0)), ((-95.25, 3.04, 61.0), (-95.25, 3.04, 111.0))),
+    face_out=(-1.0, 0.0, 0.0), up=(0.0, 1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    # flat on the sheet, fingers forward, nearer the body and its middle than nist-ftc-10's hand on its rim: there,
+    # 27 mm lower, the trunk leant to the left past people's for 25 frames
+    steady=Steady(at=(-75.0, 3.04, -101.0), push=(0.0, 1.0, 0.0), rise=G1_RISE, away=G1_AWAY,
+                  pads=tuple((f, (-75.0, 3.04, -101.0), (0.0, 1.0, 0.0), (("x", b), ("y", (-12, 14))))
+                             for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))),
+    # its near side where nist-ftc-10's is, the steadying hand where nist-ftc-10's is: 46 mm nearer the body's middle,
+    # the left arm's posture was past people's (median 29.0, theirs 28.7)
+    at_xy=(-20.0, -52.0))
+
+
+def out(part: str) -> Path:
+    return data_root() / "takes" / f"{part}-deburr"
+
+
+def loose(job: Job) -> str:
+    """The mat under the middle of the part's colliders, the part on it, and the tool."""
+    at = part_at(job.part, job.at_xy)
+    lo = np.min([b[0] for b in job.part.boxes.values()], axis=0)
+    hi = np.max([b[1] for b in job.part.boxes.values()], axis=0)
+    w, x, y, z = job.part.up
+    mid = at + Rotation.from_quat([x, y, z, w]).as_matrix() @ ((lo + hi) / 2)
+    return BC.mat_body(mid) + BC.part_body(at, job.part) + BC.deburr_body(TOOL_AT, TOOL_YAW)
 
 
 def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
@@ -83,9 +199,10 @@ class DeburrPlan(BenchPlan):
     # its skin, both arms held to people's, the left steadying hand's shoulder turned past theirs for 34 frames
     solver_w = {"range": 3.5}
 
-    def __init__(self, out=OUT, verbose=True):
-        super().__init__(out, verbose)
-        rest = self.rests = settle(loose())
+    def __init__(self, job: Job, verbose=True):
+        super().__init__(out(job.part.name), verbose)
+        self.job, self.bench_part, self.steady_on = job, job.part, job.steady
+        rest = self.rests = settle(loose(job))
         self.part, self.tool0 = rest["part"], rest["deburr_tool"]
         self.paths["deburr_tool"] = [(0.0, self.tool0[1], self.tool0[0])]
         self.solve_grips(self.grip_specs(), rest)
@@ -124,13 +241,13 @@ class DeburrPlan(BenchPlan):
         specs["steady"] = self.steady_spec()
         # the left hand comes onto the rim beside the micrometer and over the calipers: kept off them, as its thumb
         # pushed the micrometer 3.9 mm
-        specs["steady"]["colliders"] += instrument_colliders(self.rests, ("mic1", "cal6"), grow=5.0)
+        specs["steady"]["colliders"] += instrument_colliders(self.rests, self.job.keep_off, grow=5.0)
         return specs
 
     # --- the verbs ------------------------------------------------------------------------------------------------
     def stroke_pose(self, e, s):
         """The tool's pose (R, origin) with its blade tip on edge point e (world), the stroke going along s."""
-        n = self.to_world(BISECTOR, vec=True)
+        n = self.to_world(self.job.bisector, vec=True)
         out = np.array([n[0], n[1], 0.0]) / np.linalg.norm(n[:2])          # the edge's outward side, level
         tilt, b, roll = math.radians(TILT_DEG), math.radians(TRAIL_DEG), math.radians(ROLL_DEG)
         a = (-out * math.cos(tilt) - np.array([0.0, 0.0, 1.0]) * math.sin(tilt)) * math.cos(b) - s * math.sin(b)
@@ -140,7 +257,8 @@ class DeburrPlan(BenchPlan):
         z = math.cos(roll) * z0 + math.sin(roll) * np.cross(z0, a)
         R = np.stack([a, np.cross(z, a), z], 1)
         # the arms' corner one arm's radius off each face, then INTO_MM into the corner
-        corner = (e + (self.to_world(FACE_OUT, vec=True) + self.to_world(UP, vec=True)) * BC.DEBURR["hook_r"]
+        corner = (e + (self.to_world(self.job.face_out, vec=True) + self.to_world(self.job.up, vec=True))
+                  * BC.DEBURR["hook_r"]
                   - n * INTO_MM)
         return R, corner - R @ TIP
 
@@ -162,7 +280,7 @@ class DeburrPlan(BenchPlan):
         self.t_grab = tg
         R0, p0 = self.tool0[1], self.tool0[0]
         self.t_lift = tg + PRELOAD_S
-        self.move("deburr_tool", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
+        self.move("deburr_tool", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, self.job.take_mm])
         self.move("deburr_tool", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + [0, 0, 35])
         # off the bench, the free ring and little fingers curl into the palm, out of the part's way (left out, the
         # little finger brushed the part's ear and pushed it 5 mm)
@@ -175,11 +293,11 @@ class DeburrPlan(BenchPlan):
         """Carry the tool over the edge, set the blade on it, draw it along, lift it off."""
         a, b = self.to_world(frm), self.to_world(to)
         s = (b - a) / np.linalg.norm(b - a)
-        n = self.to_world(BISECTOR, vec=True)
+        n = self.to_world(self.job.bisector, vec=True)
         R, p_a = self.stroke_pose(a, s)
         _, p_b = self.stroke_pose(b, s)
         t0 = self.t
-        up = self.to_world(UP, vec=True)
+        up = self.to_world(self.job.up, vec=True)
         self.look(t0, a)
         # high over the part first: carried straight in, the hand caught the part's ear and the tool hit it
         self.move("deburr_tool", t0, t0 + approach * 0.65, R, p_a + n * 25 + up * 50)
@@ -187,19 +305,20 @@ class DeburrPlan(BenchPlan):
         # in front of the edge's lower face and above it, a moment to see the hook onto it, then in and down: coming in
         # down the bisector a little low, the hook's top arm went in under datum A and threw the part; level with the
         # edge, it hung below it on the face
-        out = self.to_world(FACE_OUT, vec=True)
+        out = self.to_world(self.job.face_out, vec=True)
         self.move("deburr_tool", t0 + approach, t0 + approach + 0.35, R, p_a + out * 6 + up * 6)
         tc = t0 + approach + 0.35 + 0.4 + 0.35
         self.move("deburr_tool", tc - 0.35, tc, R, p_a)
         dur = np.linalg.norm(b - a) / 40.0                     # 40 mm/s along the edge
-        self.move("deburr_tool", tc + 0.1, tc + 0.1 + dur, R, p_b)
-        t1 = tc + 0.1 + dur
+        t_draw = tc + self.job.settle_s                        # set on the edge, pressed, then drawn along it
+        self.move("deburr_tool", t_draw, t_draw + dur, R, p_b)
+        t1 = t_draw + dur
         self.look(tc, (a + b) / 2)
         self.event("press", tc - 0.05, t1 + 0.05, side="R", normal=n.tolist(), force=STROKE_N,
                    contact="part", at="deburr_blade", obj="deburr_tool", point=TIP.tolist())
         self.held.append((t0 + approach * 0.7, t1 + 0.4))             # the tool's turn fixed: the hook needs it
         self.move("deburr_tool", t1 + 0.05, t1 + 0.4, R, p_b + n * 25 + up * 30)    # up clear of the walls
-        self.strokes.append({"edge_mm": [list(frm), list(to)], "t0": tc, "t1": t1, "force_N": STROKE_N})
+        self.strokes.append({"edge_mm": [list(frm), list(to)], "t0": t_draw - 0.1, "t1": t1, "force_N": STROKE_N})
         self.t = t1 + 0.4
         self.clip(f"stroke {i + 1}", t0, self.t, "DEBURR  the blade drawn along the edge, light and even")
 
@@ -238,11 +357,16 @@ class DeburrPlan(BenchPlan):
         self.strokes, self.held = [], []
         self.t = 0.5
         self.pick_up()
-        for i, (frm, to) in enumerate(STROKES):
+        for i, (frm, to) in enumerate(self.job.strokes):
             self.stroke(i, frm, to)
         t_down = self.put_back()
-        self.steady(0.3, t_down + 0.2)
-        self.t = max(self.t, t_down + 1.8)
+        if self.job.hold_to_end:
+            t_end = t_down + 1.8
+            self.steady(0.3, t_end)
+            self.t = t_end - 0.2                     # the plan ends 0.3 s on (BenchPlan.solve), before the hand lifts
+        else:
+            self.steady(0.3, t_down + 0.2)
+            self.t = max(self.t, t_down + 1.8)
 
 
 def curled(q: dict) -> dict:
@@ -250,15 +374,16 @@ def curled(q: dict) -> dict:
     return q | {"ring_mcp_flex": 75.0, "ring_pip": 90.0, "little_mcp_flex": 75.0, "little_pip": 90.0}
 
 
-def build(solve=True, verbose=True) -> DeburrPlan:
-    plan = DeburrPlan(verbose=verbose)
+def build(part: str = "nist-ftc-10", solve=True, verbose=True) -> DeburrPlan:
+    job = JOBS[part]
+    plan = DeburrPlan(job, verbose=verbose)
     plan.compose()
     if solve:
         plan.solve()
-        plan.save({"strokes": plan.strokes, "part_at": PART_AT.tolist(), "tool_at": TOOL_AT.tolist(),
-                   "tool_yaw": TOOL_YAW, "loose": loose()})
+        plan.save({"part": part, "strokes": plan.strokes, "part_at": part_at(job.part, job.at_xy).tolist(),
+                   "tool_at": TOOL_AT.tolist(), "tool_yaw": TOOL_YAW, "loose": loose(job)})
     return plan
 
 
 if __name__ == "__main__":
-    build()
+    build(*sys.argv[1:2])

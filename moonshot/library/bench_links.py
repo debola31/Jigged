@@ -1,7 +1,8 @@
 """Render meshes for the bench takes' moving bodies (moonshot/world/bench_cell.py), each in its body's frame, metres,
 Z up, written as moonshot/library/stations/extract.py writes a station's links (the renderer draws a GLB's stored
 coordinates in its body's frame):
-- the finished nist-ftc-10 from its STEP, in the STEP's frame: <data root>/parts/nist-ftc-10/finished.glb
+- each finished part from its STEP, in the STEP's frame: <data root>/parts/<part>/finished.glb (nist-ftc-10's, and
+  G1's as their bench takes need them)
 - the swivel deburring tool out of the deburring kit's GLB (its handle and its blade, not the file, pad or mat), its
   frame on the handle's axis at the back end, with the swivel blade's hook the kit's placeholder lacks (its collider's
   two arms): library/hand_tools/deburr/links/tool.glb
@@ -10,12 +11,14 @@ coordinates in its body's frame):
   which the GrabCAD model doesn't have: the collider's box). A part of the model is the slider's if it lies at the
   jaw end and stands out of the beam's section.
 
-    python -m moonshot.library.bench_links
+    python -m moonshot.library.bench_links                 # nist-ftc-10's part, the tool and the calipers
+    python -m moonshot.library.bench_links ll-1007223 ...  # just these parts' finished.glb
 """
 from __future__ import annotations
 
 import json
 import struct
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -93,13 +96,13 @@ def write(mesh, path: Path) -> dict:
             "min_mm": np.round(mesh.bounds[0], 1).tolist(), "max_mm": np.round(mesh.bounds[1], 1).tolist()}
 
 
-def part() -> dict:
+def part(name: str = "nist-ftc-10") -> dict:
     import cadquery as cq
     import trimesh
-    shape = cq.importers.importStep(str(data_root() / "parts" / "nist-ftc-10" / "part.step")).val()
+    shape = cq.importers.importStep(str(data_root() / "parts" / name / "part.step")).val()
     verts, faces = shape.tessellate(0.05, 0.3)
     mesh = trimesh.Trimesh(np.array([(p.x, p.y, p.z) for p in verts]), np.array(faces), process=True)
-    return write(mesh, data_root() / "parts" / "nist-ftc-10" / "finished.glb")
+    return write(mesh, data_root() / "parts" / name / "finished.glb")
 
 
 def deburr_tool() -> dict:
@@ -136,4 +139,6 @@ def caliper() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps({"part": part(), "deburr_tool": deburr_tool(), "caliper": caliper()}, indent=1))
+    names = sys.argv[1:]
+    print(json.dumps({n: part(n) for n in names} if names else
+                     {"part": part(), "deburr_tool": deburr_tool(), "caliper": caliper()}, indent=1))

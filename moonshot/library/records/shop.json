@@ -1115,6 +1115,18 @@
       "overall_length": 2.126,
       "shank_diameter": 0.168,
       "asset": "tap-m4"
+    },
+    {
+      "id": "dovetail-30-20",
+      "kind": "dovetail_cutter",
+      "description": "30 mm HSS dovetail cutter, 20° per side (40° included), 3/4\" shank",
+      "diameter": 1.1811,
+      "material": "hss",
+      "flutes": 6,
+      "flute_length": 0.7874,
+      "overall_length": 2.7559,
+      "shank_diameter": 0.75,
+      "asset": "dovetail-20"
     }
   ],
   "inspection": [

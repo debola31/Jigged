@@ -31,6 +31,33 @@ def test_every_sourced_tool_says_where_its_dimensions_came_from():
     assert {t.id for t in SOURCED} == set(SOURCES)
 
 
+@pytest.mark.data_root
+def test_the_dovetail_cuts_ll_1005337s_undercut_walls():
+    """Its flank is the end notches' undercut wall as the part's STEP has it (not a catalogue's naming of the
+    angle); its widest radius fits the walls' R15 corners and its flank spans the plate."""
+    import math
+
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+
+    from moonshot.config import data_root
+    step = data_root() / "parts" / "ll-1005337" / "part.step"
+    if not step.exists():
+        pytest.skip("no STEP for ll-1005337 in the data root")
+    part = cq.importers.importStep(str(step))
+    lean = lambda f: round(90 - math.degrees(math.acos(abs(f.normalAt().z))), 3)  # noqa: E731
+    inclined = [f for f in part.faces().vals() if f.geomType() == "PLANE" and 0.001 < abs(f.normalAt().z) < 0.999]
+    walls = [f for f in inclined if lean(f) != 45.0]                # the rest are the 45 deg chamfers
+    assert len(walls) == 2                                          # one per end notch
+    leans = {lean(f) for f in walls}
+    corners = [BRepAdaptor_Surface(f.wrapped).Cylinder() for f in part.faces().vals() if f.geomType() == "CYLINDER"
+               and 0.01 < abs(BRepAdaptor_Surface(f.wrapped).Cylinder().Axis().Direction().Y()) < 0.99]
+    t = next(t for t in SOURCED if t.id == "dovetail-20")
+    assert leans == {t.flank_deg}
+    assert corners and t.dia_mm / 2 <= min(c.Radius() for c in corners) + 1e-6
+    bb = part.val().BoundingBox()
+    assert t.flute_mm >= bb.zlen
+
+
 def _box(parts):
     return cq.Compound.makeCompound([s.val() for _, s, _ in parts]).BoundingBox()
 

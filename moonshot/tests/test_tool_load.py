@@ -31,7 +31,7 @@ def test_a_holder_carries_the_tool_the_cycle_takes_cut_with(tool_id):
 
 G1 = ["ll-1007223", "ll-1005337", "nist-ftc-09"]
 G1_TOOLS = sorted({op["tool"] for p in G1 for s in load_plan(p)["setups"] if s["machine"] == "vf2"
-                   for op in s["operations"]} - {"dovetail-20"})       # the one with no record yet
+                   for op in s["operations"]})
 
 
 @pytest.mark.parametrize("tool_id", G1_TOOLS)

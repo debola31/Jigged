@@ -1,5 +1,7 @@
 """Process plans (moonshot/planning): checked against their parts, and their written steps tell the truth."""
 import copy
+import json
+import shutil
 
 import pytest
 
@@ -58,10 +60,27 @@ def test_stock_wider_than_the_vise_opens_is_refused():
 
 
 @pytest.mark.data_root
-def test_a_tool_with_a_record_but_no_model_is_pending_not_missing():
+def test_a_tool_with_a_record_but_no_model_is_pending_not_missing(tmp_path, monkeypatch):
+    """On a copy of the catalogue whose M4 tap's record says it has no model yet."""
+    from moonshot.planning import validate
     needs_step("ll-1007223")
+    shutil.copytree(validate.RECORDS, tmp_path / "assets")
+    rec = tmp_path / "assets" / "tooling" / "tap-m4" / "tap-m4.json"
+    rec.write_text(json.dumps(json.loads(rec.read_text(encoding="utf-8")) | {"pending": "no model yet"}),
+                   encoding="utf-8")
+    monkeypatch.setattr(validate, "RECORDS", tmp_path / "assets")
     out = check(load_plan("ll-1007223"))
     assert "tap-m4" in out["pending_tools"] and "tap-m4" not in out["missing_tools"]
+
+
+@pytest.mark.data_root
+@pytest.mark.parametrize("part", ["ll-1007223", "ll-1005337", "nist-ftc-09"])
+def test_every_tool_a_g1_plan_names_has_a_model(part):
+    """Track B's catalogue work for G1: only the 20 deg dovetail cutter has no record yet (Harvey's 10 vs 20 deg
+    wall isn't settled), and nothing is left pending."""
+    needs_step(part)
+    out = check(load_plan(part))
+    assert out["pending_tools"] == [] and set(out["missing_tools"]) <= {"dovetail-20"}
 
 
 def test_a_plate_slid_between_setups_stays_clamped_in_between():

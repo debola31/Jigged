@@ -27,6 +27,28 @@ def test_a_holder_carries_the_tool_the_cycle_takes_cut_with(tool_id):
     assert TL.GAUGE_MM == pytest.approx(cam.GAUGE_MM)
 
 
+G1 = ["ll-1007223", "ll-1005337", "nist-ftc-09"]
+G1_TOOLS = sorted({op["tool"] for p in G1 for s in load_plan(p)["setups"] if s["machine"] == "vf2"
+                   for op in s["operations"]} - {"dovetail-20"})       # the one with no record yet
+
+
+@pytest.mark.parametrize("tool_id", G1_TOOLS)
+def test_every_tool_a_g1_setup_loads_has_its_holder_and_its_model(tool_id):
+    """Its holder's tool solid (gauge length, radius, mass) comes from its record, as wide as its shank where that
+    is wider than it cuts, and the take draws the tool's own GLB."""
+    from moonshot.planning.validate import record
+    rec, t = record(tool_id), TL.cutter(tool_id)
+    assert "pending" not in rec and rec["category"] == "tooling"
+    assert t["length"] > TL.GAUGE_MM and t["body_r"] >= t["r"] > 0 and t["kg"] > 0
+    assert TL.render_glbs(tool_id)[1]["path"] == f"library/tooling/{tool_id}/{rec['file']}"
+
+
+def test_a_tools_collider_is_its_shank_where_that_is_wider_than_it_cuts():
+    assert TL.cutter("em132")["r"] == pytest.approx(0.031 * 25.4 / 2)
+    assert TL.cutter("em132")["body_r"] == pytest.approx(0.125 * 25.4 / 2)
+    assert TL.cutter("drill-11")["body_r"] == pytest.approx(6.0)
+
+
 def test_tools_are_numbered_in_the_order_the_plan_first_uses_them():
     num = T.pockets(PLAN)
     assert num == {"facem": 1, "em12": 2, "em38": 3, "drill-2p5": 4, "drill-6": 5, "bem14": 6, "em14": 7,

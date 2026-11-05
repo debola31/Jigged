@@ -2354,7 +2354,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op20-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-load",

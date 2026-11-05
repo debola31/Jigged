@@ -369,8 +369,9 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     of side lean and 15-22 deg of twist, past people's range); the bench stays where it is.
   - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
     by its end faces and a slide went into the skin and overloaded the arms).
-  - A plate's clamp nuts are run down and snugged with a 3/4 in box-end wrench, in strokes (a fingertip spin
-    turned a nut only 10-30 deg a stroke);
+  - A plate's clamp nuts are run down and snugged with a 3/4 in wrench, in strokes (a fingertip spin turned a nut
+    only 10-30 deg a stroke); a ratcheting combination wrench if the box-end's 70 deg strokes can't reach the far
+    nuts (the arm runs straight or hits the near clamp);
     the seat, shift and unload takes land when they pass, caption and a still until then.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).

@@ -13,6 +13,7 @@ import ListSubheader from '@mui/material/ListSubheader';
 import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import CheckIcon from '@mui/icons-material/Check';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
@@ -21,10 +22,12 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
-import { CARD_BG, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
+import { CARD_BG, DoneContent, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
 import { CategoryIcon, PartFacts, shortName } from './glyphs';
+import { PartMenu, type PickSource } from './PartChoice';
 import type { LivePart } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -113,22 +116,23 @@ export interface ShopProps {
   cat: Catalog;
   part: LivePart;
   parts: LivePart[];
-  onPick(id: string): void;
+  onPick(id: string, source: PickSource): void;
   onGenerated(skipped: boolean): void;
 }
 
-/** What the card shows: the parts to pick, the instructions being made, what you'll need, or the step. */
+/** What the card shows: the parts to pick, the instructions being made, what you'll need, the step, or the part made. */
 function Sheet({ cat, part, parts, onPick, onGenerated }: ShopProps) {
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
   const step = useShowcase((s) => s.step);
   if (phase === 'pick') return <PickPrompt parts={parts} onPick={onPick} />;
   if (phase === 'generating') return <Generating part={part} cat={cat} onDone={onGenerated} />;
+  if (sheet === 'done') return <DoneContent part={part} parts={parts} onPick={onPick} />;
   return sheet === 'step' && step !== null ? <StepContent cat={cat} part={part} index={step} /> : <NeedContent cat={cat} part={part} />;
 }
 
 /** Before a part is picked: the same choice as the intro's, for a visitor who scrolled straight here. */
-function PickPrompt({ parts, onPick }: { parts: LivePart[]; onPick(id: string): void }) {
+function PickPrompt({ parts, onPick }: { parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
   return (
     <Box>
       <Typography component="h2" sx={{ fontWeight: 600, fontSize: '1.3rem' }}>
@@ -138,7 +142,7 @@ function PickPrompt({ parts, onPick }: { parts: LivePart[]; onPick(id: string): 
         <Box key={p.id} sx={{ mt: 2, p: 2, borderRadius: 1.5, border: '1px solid rgba(255, 255, 255, 0.12)' }}>
           <Typography sx={{ fontWeight: 600, mb: 0.75 }}>{shortName(p)}</Typography>
           <PartFacts part={p} />
-          <Button variant="contained" onClick={() => onPick(p.id)} sx={{ mt: 1.5 }}>
+          <Button variant="contained" onClick={() => onPick(p.id, 'prompt')} sx={{ mt: 1.5 }}>
             Make this part
           </Button>
         </Box>
@@ -264,27 +268,31 @@ function Hint({ cat }: { cat: Catalog }) {
  * start.
  */
 export default function ShopLayout(props: ShopProps) {
-  const { cat, part } = props;
+  const { cat, part, parts, onPick } = props;
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
   const item = useShowcase((s) => s.item);
   const showNeed = useShowcase((s) => s.showNeed);
+  const showDone = useShowcase((s) => s.showDone);
   const closeItem = useShowcase((s) => s.closeItem);
   const overview = useShowcase((s) => s.overview);
   const body = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
   const [cardWidth, setCardWidth] = useState(0);
   const step = useShowcase((s) => s.step);
-  // Folded at a step, so opening another unfolds it: a step picked is a step to watch.
-  const [folded, setFolded] = useState<{ at: number | null } | null>(null);
-  const collapsed = folded !== null && folded.at === step;
+  // Folded at a step of a part, so opening another step, finishing, or another part unfolds it: a
+  // step picked is a step to watch.
+  const [folded, setFolded] = useState<{ part: string; at: number | null; sheet: string } | null>(null);
+  const collapsed = phase === 'plan' && folded !== null && folded.part === part.id && folded.at === step && folded.sheet === sheet;
+  const fold = () => setFolded({ part: part.id, at: step, sheet });
   const watching = phase === 'plan' && sheet === 'step' && step !== null && !collapsed;
   // The whole shop wants the room the video takes: the card folds to its header, and the camera
   // frames the shop again once it has.
   const wholeShop = () => {
-    setFolded({ at: step });
+    fold();
     overview();
   };
+  const last = step === part.steps.length - 1;
   const stepDrag = useDraggable();
   const itemDrag = useDraggable();
   const thing = item ? cat.spots.get(item)?.[0] : undefined;
@@ -349,6 +357,7 @@ export default function ShopLayout(props: ShopProps) {
                 What you&apos;ll need
               </Button>
             )}
+            <PartMenu parts={parts} current={part.id} onPick={onPick} source="menu" label="Change part" buttonProps={{ startIcon: <SwapHorizIcon /> }} />
             <Box sx={{ flex: 1 }} />
             {/* Up here, so stepping on never scrolls away under a long step. */}
             {sheet === 'step' && step !== null && (
@@ -356,12 +365,18 @@ export default function ShopLayout(props: ShopProps) {
                 <IconButton size="small" aria-label="Previous step" disabled={step === 0} onClick={() => openStepTracked(part, step - 1)}>
                   <ChevronLeftIcon />
                 </IconButton>
-                <Button size="small" variant="contained" endIcon={<ChevronRightIcon />} disabled={step === part.steps.length - 1} onClick={() => openStepTracked(part, step + 1)}>
-                  Next step
-                </Button>
+                {last ? (
+                  <Button size="small" variant="contained" endIcon={<CheckIcon />} onClick={showDone}>
+                    Finish
+                  </Button>
+                ) : (
+                  <Button size="small" variant="contained" endIcon={<ChevronRightIcon />} onClick={() => openStepTracked(part, step + 1)}>
+                    Next step
+                  </Button>
+                )}
               </>
             )}
-            <IconButton size="small" onClick={() => setFolded(collapsed ? null : { at: step })} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
+            <IconButton size="small" onClick={() => (collapsed ? setFolded(null) : fold())} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
               {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
             </IconButton>
           </Box>

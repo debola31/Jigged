@@ -145,3 +145,9 @@ const PREVIEW_UNPUBLISHED = process.env.NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED
 export function ready(step: Step): boolean {
   return step.published || PREVIEW_UNPUBLISHED;
 }
+
+/** The part as its last cut leaves it: the newest published still of a machine cycle. */
+export function finishedStill(part: LivePart): string | null {
+  const cut = [...part.steps].reverse().find((s) => s.media.type === 'cut' && ready(s));
+  return cut && cut.media.type === 'cut' ? mediaUrl(cut.media.still) : null;
+}

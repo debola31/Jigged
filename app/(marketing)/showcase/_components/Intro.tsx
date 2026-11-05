@@ -4,20 +4,18 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
-import Dialog from '@mui/material/Dialog';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import CloseIcon from '@mui/icons-material/Close';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PrecisionManufacturingOutlinedIcon from '@mui/icons-material/PrecisionManufacturingOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import Section from '@/components/marketing/Section';
 import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
 import { PartFacts, shortName } from './glyphs';
-import PilotRequest from './PilotRequest';
-import { mediaUrl, ready, type LivePart } from './showcaseData';
+import { PilotDialog, type PickSource } from './PartChoice';
+import { finishedStill, type LivePart } from './showcaseData';
 
 const slideSx = {
   flex: '0 0 auto',
@@ -27,12 +25,6 @@ const slideSx = {
   border: '1px solid rgba(255, 255, 255, 0.12)',
   bgcolor: 'rgba(17, 20, 57, 0.7)',
 } as const;
-
-/** The part as its last cut leaves it: the newest published still of a machine cycle. */
-function finishedStill(part: LivePart): string | null {
-  const cut = [...part.steps].reverse().find((s) => s.media.type === 'cut' && ready(s));
-  return cut && cut.media.type === 'cut' ? mediaUrl(cut.media.still) : null;
-}
 
 /** One of our parts: the part itself, then what it is at a glance. The whole slide picks it. */
 function PartSlide({ part, onPick }: { part: LivePart; onPick(): void }) {
@@ -77,14 +69,7 @@ function OwnPart() {
       <Button variant="outlined" onClick={() => setOpen(true)}>
         Send a part
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ position: 'relative' }}>
-          <IconButton onClick={() => setOpen(false)} aria-label="Close" sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
-            <CloseIcon />
-          </IconButton>
-          <PilotRequest />
-        </Box>
-      </Dialog>
+      <PilotDialog open={open} onClose={() => setOpen(false)} />
     </Box>
   );
 }
@@ -131,7 +116,7 @@ function Carousel({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The research in a few lines, then the parts to pick from in a carousel: ours, then the visitor's own. */
-export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id: string): void }) {
+export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
   return (
     <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 } }}>
       <Box sx={{ maxWidth: 760 }}>
@@ -149,7 +134,7 @@ export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id:
       <Box sx={{ mt: { xs: 5, md: 6 } }}>
         <Carousel label="Pick a part">
           {parts.map((p) => (
-            <PartSlide key={p.id} part={p} onPick={() => onPick(p.id)} />
+            <PartSlide key={p.id} part={p} onPick={() => onPick(p.id, 'intro')} />
           ))}
           <OwnPart />
         </Carousel>

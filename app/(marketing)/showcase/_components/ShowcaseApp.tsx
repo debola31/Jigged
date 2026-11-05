@@ -9,6 +9,7 @@ import { DISPLAY_FONT } from '@/components/marketing/marketingStyles';
 import { catalog, type Catalog } from './catalog';
 import Intro from './Intro';
 import ShopLayout from './Layouts';
+import type { PickSource } from './PartChoice';
 import { ready, type LivePart, type Showcase } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -99,11 +100,11 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
   const shop = useRef<HTMLElement>(null);
   useAddress(part, cat, shop);
 
-  const pick = useCallback((id: string) => {
+  const pick = useCallback((id: string, source: PickSource) => {
     setPartId(id);
     useShowcase.setState({ phase: 'generating', sheet: 'need', step: null, item: null });
     shop.current?.scrollIntoView({ behavior: 'smooth' });
-    posthog.capture('showcase part picked', { part: id });
+    posthog.capture('showcase part picked', { part: id, source });
   }, []);
   const generated = useCallback(() => useShowcase.setState({ phase: 'plan', sheet: 'need' }), []);
 

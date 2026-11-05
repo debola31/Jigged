@@ -16,17 +16,20 @@ import ListItemText from '@mui/material/ListItemText';
 import ListSubheader from '@mui/material/ListSubheader';
 import Popover from '@mui/material/Popover';
 import Typography from '@mui/material/Typography';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HourglassEmptyOutlinedIcon from '@mui/icons-material/HourglassEmptyOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
+import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
 import { toError } from '@/lib/supabaseErrors';
 import { gatherList, stepsUsing, type Catalog } from './catalog';
 import { CategoryIcon, KindIcon, PartFacts, setupColour, shortName } from './glyphs';
-import { mediaUrl, ready, type LivePart, type Use } from './showcaseData';
+import { PartMenu, PilotDialog, type PickSource } from './PartChoice';
+import { finishedStill, mediaUrl, ready, type LivePart, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
 // three.js comes with it, so it loads only where a model is shown: on a desktop.
@@ -200,8 +203,7 @@ export function StepPicker({ part }: { part: LivePart }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const index = useShowcase((s) => s.step);
   const sheet = useShowcase((s) => s.sheet);
-  const label = sheet === 'step' && index !== null ? `Step ${index + 1} of ${part.steps.length}` : `All ${part.steps.length} steps`;
-  return (
+  const label = sheet === 'step' && index !== null ? `Step ${index + 1} of ${part.steps.length}` : `All ${part.steps.length} steps`;  return (
     <>
       <Button
         size="small"
@@ -399,6 +401,43 @@ export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart
           </Box>
         </Box>
       </Details>
+    </>
+  );
+}
+
+// --- the part made ------------------------------------------------------------------------------
+
+/** Past the last step: the part as it leaves the shop, then the visitor's own part or another of ours. */
+export function DoneContent({ part, parts, onPick }: { part: LivePart; parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
+  const [pilot, setPilot] = useState(false);
+  const still = finishedStill(part);
+  return (
+    <>
+      <Heading
+        eyebrow={
+          <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CheckCircleIcon sx={{ fontSize: 18, color: 'success.main' }} />
+            {shortName(part)}
+          </Box>
+        }
+        title="That's the part made"
+      />
+      {still && <Box component="img" src={still} alt={`${shortName(part)}, made`} sx={{ mt: 1.5, display: 'block', width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', borderRadius: 1.5, bgcolor: 'common.black' }} />}
+      <Box sx={{ mt: 1.5 }}>
+        <PartFacts part={part} />
+      </Box>
+      <Button variant="contained" size="large" fullWidth startIcon={<UploadFileOutlinedIcon />} onClick={() => setPilot(true)} sx={{ mt: 3 }}>
+        Send us your own part
+      </Button>
+      <PartMenu
+        parts={parts}
+        current={part.id}
+        onPick={onPick}
+        source="finished"
+        label="Try another part"
+        buttonProps={{ variant: 'outlined', size: 'large', fullWidth: true, sx: { mt: 1.5 } }}
+      />
+      <PilotDialog open={pilot} onClose={() => setPilot(false)} />
     </>
   );
 }

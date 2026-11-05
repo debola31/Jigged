@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { Heading } from './content';
 import type { Catalog } from './catalog';
+import { CategoryIcon } from './glyphs';
 import type { LivePart } from './showcaseData';
 import { useShowcase, type View } from './store';
 
@@ -16,9 +17,26 @@ const STAGE_MS = 1500;
 
 interface Stage {
   title: string;
-  detail: string;
+  detail: ReactNode;
   /** Where the camera goes while this stage runs. */
   view?: View;
+}
+
+// As many icons as fit on the card's line; the count says the rest.
+const MAX_ICONS = 12;
+
+/** Things counted at a glance: an icon for each, then how many. */
+function IconCount({ category, count, noun }: { category: string; count: number; noun: [string, string] }) {
+  return (
+    <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.25 }}>
+      <Box component="span" aria-hidden sx={{ display: 'inline-flex', gap: 0.25, color: 'secondary.main' }}>
+        {Array.from({ length: Math.min(count, MAX_ICONS) }, (_, i) => (
+          <CategoryIcon key={i} category={category} sx={{ fontSize: 16 }} />
+        ))}
+      </Box>
+      {count} {count === 1 ? noun[0] : noun[1]}
+    </Box>
+  );
 }
 
 /** The part's instructions coming together, told from its real plan, as the camera gathers what it needs. */
@@ -51,8 +69,8 @@ function stages(part: LivePart, cat: Catalog): Stage[] {
       detail: `${setups.length} ${setups.length === 1 ? 'setup' : 'setups'} on the ${machines.join(' and the ') || 'mill'}`,
       view: machineStep?.where.item ? { kind: 'item', id: machineStep.where.item } : undefined,
     },
-    { title: 'Choosing the workholding', detail: holding.map((u) => u.name).join(', '), view: at(holding) },
-    { title: 'Picking the tools', detail: `${tools.length} ${tools.length === 1 ? 'cutter' : 'cutters'}: ${tools.map((u) => u.name).join(', ')}`, view: at(tools) },
+    { title: 'Choosing the workholding', detail: <IconCount category="workholding" count={holding.length} noun={['piece', 'pieces']} />, view: at(holding) },
+    { title: 'Picking the tools', detail: <IconCount category="tools" count={tools.length} noun={['cutter', 'cutters']} />, view: at(tools) },
     { title: 'Writing the steps', detail: `${part.steps.length} steps, each shown being done`, view: { kind: 'step', index: 0 } },
   ];
 }
@@ -89,7 +107,11 @@ export default function Generating({ part, cat, onDone }: { part: LivePart; cat:
             </Box>
             <Box sx={{ minWidth: 0 }}>
               <Typography sx={{ fontWeight: 600 }}>{s.title}</Typography>
-              {i <= at && <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem', lineHeight: 1.45 }}>{s.detail}</Typography>}
+              {i <= at && (
+                <Typography component="div" sx={{ color: 'text.secondary', fontSize: '0.9rem', lineHeight: 1.45 }}>
+                  {s.detail}
+                </Typography>
+              )}
             </Box>
           </Box>
         ))}

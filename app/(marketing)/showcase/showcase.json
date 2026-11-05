@@ -209,7 +209,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -616,7 +616,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-start",
@@ -1380,7 +1380,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-seat",
@@ -1409,7 +1409,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-seat.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-check",

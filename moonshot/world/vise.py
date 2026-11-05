@@ -134,6 +134,22 @@ def render_meshes(load: Load, folder: Path) -> dict[str, dict]:
     return {body: {"dir": body, "frames": [0]} for body in boxes}
 
 
+TIP_SHARE_MM = 16.0     # a parallel this near another (a fingertip's width) is pressed on its far side from it
+TIP_OUT_MM = 2.5        # ... this far off its centre line (the pad's middle; a 14 mm pad there still covers its
+                        # 3.1 mm end, and its side stands clear of the neighbour's)
+
+
+def tip_y(parallels: dict, name: str, share: float = TIP_SHARE_MM, out: float = TIP_OUT_MM) -> float:
+    """Where across the vise a fingertip check on parallel `name` presses (parallels: name -> centre; share and out in
+    their unit): its centre line, or, with a neighbour nearer than a fingertip is wide, off it away from the
+    neighbour. op30's and op40's parallels stand 6.8 mm apart under their 31 mm part: the 14 mm pad aimed at para_b's
+    centre pressed para_a, 4 mm into its end, and para_b read 0 N; aimed between them it nosed into the gap and
+    pressed neither."""
+    y = float(parallels[name][1])
+    near = [float(p[1]) for n, p in parallels.items() if n != name and abs(float(p[1]) - y) < share]
+    return y + float(np.sign(y - near[0])) * out if near else y
+
+
 def knob_center(phi_deg: float) -> np.ndarray:
     """Middle of the knob's grip (mm) at crank angle phi (0 = top, + = clockwise from the operator, closing)."""
     p = math.radians(phi_deg)

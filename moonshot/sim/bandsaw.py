@@ -70,7 +70,7 @@ class SawRun(BenchRun):
 
     def __init__(self, folder: Path, place: SC.Place, loose: str, state: dict | None, carried=(), grip_objects=None,
                  lifted=None):
-        self.place, self.state = place, state
+        self.place, self.state, self.settling = place, state, False
         super().__init__(folder, loose, carried, grip_objects=grip_objects, lifted=lifted)
         m = self.model
         self.buttons = [e for e in self.tk["events"] if e["kind"] == "button"]
@@ -87,7 +87,9 @@ class SawRun(BenchRun):
     def switch_carries(self, tt: float) -> None:
         """BenchRun's, but a pushed object (its carry event's `skin`) keeps meeting the skin while it is welded: the
         fingers on a bar's end push it by their contact, the weld only assisting. Welded off the skin, the middle
-        finger's planned flexion took its tip 7 mm into the bar."""
+        finger's planned flexion took its tip 7 mm into the bar. The take's own steps have begun: the settle before
+        them doesn't switch carries (set_plan)."""
+        self.settling = False
         super().switch_carries(tt)
         m = self.model
         for e in self.carries:
@@ -98,7 +100,20 @@ class SawRun(BenchRun):
     def scene(self, loose, carried, skip):
         return SC.with_body(self.body.xml, self.place, loose, carried)
 
+    def set_plan(self, tt: float) -> np.ndarray:
+        """BenchRun's, but still while the body settles before the first frame: a plan whose trunk is already leaning
+        at its start (0.45 rad/s) had that speed fed forward through the whole settle, and the trunk drifted 12 deg
+        off it, past people's side-bend, before the take began."""
+        v = super().set_plan(tt)
+        if self.settling:
+            p = self.plan
+            p.qvel[self.body_dof], p.qacc[self.body_dof] = 0.0, 0.0
+            v[self.body_dof] = 0.0
+        return v
+
     def start(self) -> None:
+        self.settling = True
+        self.data.qvel[self.body_dof] = 0.0
         self.ctl = BS.Control(self.model, self.data)
         if self.state is not None:
             SC.set_saw(self.model, self.data, self.ctl, self.state)

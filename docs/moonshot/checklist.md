@@ -375,6 +375,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
     blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
     re-run per G1 setup with its own part, or its plate on the spoilboard.
+  - nist-ftc-09's lettering also exempts small regions, not whole faces: within the 1/32 in end mill's radius
+    (0.397 mm) of each of its 10 inside corners' edges (`regions` in the stock fixture); the sheet's top reads
+    0.059 mm outside them.
+  - The band saw's bow collider follows the C-frame (its back and top), its window open as on the real saw,
+    so the lift-out lifts the piece straight up by its sides.
+  - ct-slbeam op10's and op40's parallels move apart so a hand can set them (8.1 mm apart, too close for the
+    fingers between them); those setups' setting and tool takes re-run on it.
+  - ll-1007223 op20 keeps plain jaws in every take for now, consistent across its steps; its soft jaws (and
+    nist-ftc-10 op30's) after Nov 6.
   - The band saw's clamp: the gate may take the lower jaw force the cut shows holds the bar (it snugged at 44-50 N
     against the gate's 82.5). Since met in full: both clamps snug at about 150 N, and the gate is back at 82.5.
   - The band saw's model is fixed so that opening the feed valve only lets the bow descend: the blade motor's

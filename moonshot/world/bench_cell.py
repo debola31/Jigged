@@ -86,7 +86,34 @@ LL_1005337 = BenchPart(
      "part_lug_end_c": ((-74.51, 598.0, -20.0), (-21.21, 600.0, -0.95)),
      "part_lug_end_d": ((-343.79, 598.0, -20.0), (-325.49, 600.0, -0.95))},
     (0.70710678, 0.0, 0.0, 0.70710678), ("part_slab",), 20.2)
-PARTS = {p.name: p for p in (NIST_FTC_10, LL_1005337)}
+# the gripper jaw, 4140 (7,850 kg/m^3), 75 x 49 x 40: a 10 mm bar (Y 30-40, its top face, chamfered 5 mm on three edges)
+# with an 11 mm stem down from it (X 24-35, Y 0-30) and a stepped side (X 35-49). It lies on its top face, the stem up
+# and the stepped side to the operator: its +X to the world's -Y, -Y up, +Z to the world's +X
+LL_1007223 = BenchPart(
+    "ll-1007223", 0.4887, (27.41, 27.12, 0.0), (2.871e-4, 2.969e-4, 1.184e-4),
+    {"part_foot": ((0.0, 35.0, -32.5), (44.0, 40.0, 32.5)),      # the top face, inside its chamfers: it lies on this
+     "part_bar": ((0.0, 30.0, -37.5), (44.0, 35.0, 37.5)),
+     "part_nose": ((44.0, 27.0, -37.5), (49.0, 35.0, 37.5)),     # the near side's lowest step, under the 45 deg chamfer
+     "part_ledge": ((39.25, 27.0, -37.5), (44.0, 30.0, 37.5)),
+     "part_step": ((35.0, 20.0, -37.5), (39.25, 30.0, 37.5)),
+     "part_stem": ((24.0, 0.0, -37.5), (35.0, 30.0, 37.5)),
+     "part_fillet": ((21.0, 26.0, -37.5), (24.0, 30.0, 37.5))},  # most of the R10 in the stem's far corner
+    (0.5, -0.5, 0.5, -0.5), ("part_foot",), 40.2)
+# the L-block, 4140 (7,850 kg/m^3), 3.00 x 1.50 x 2.00 in, 0.75 legs: the base along X, the upright at X = 0, both 1.50
+# deep along Y. It lies on its base, the upright at the operator's left, as its STEP stands
+CT_SLBEAM = BenchPart(
+    "ct-slbeam", 0.5898, (29.42, 19.05, 16.98), (1.812e-4, 4.175e-4, 3.836e-4),
+    {"part_base": ((0.0, 0.0, 0.0), (76.2, 38.1, 19.05)),
+     "part_upright": ((0.0, 0.0, 19.05), (19.05, 38.1, 50.04)),
+     "part_cap": ((0.76, 0.0, 50.04), (18.29, 38.1, 50.8))},     # inside the upright's 0.76 mm top chamfers
+    (1.0, 0.0, 0.0, 0.0), ("part_base",), 0.2)
+# the stainless sheet, 304 (8,000 kg/m^3), 279.4 x 190.5 x 3.04, datum A (Y = 0) under it: one box, its holes, window,
+# notched corners and engraving left out. It lies flat, its long sides along the world's X: its +X to +Y, +Y up, +Z to +X
+NIST_FTC_09 = BenchPart(
+    "nist-ftc-09", 1.0916, (2.19, 1.52, 4.55), (6.884e-3, 1.019e-2, 3.310e-3),
+    {"part_sheet": ((-95.25, 0.0, -139.7), (95.25, 3.04, 139.7))},
+    (0.5, 0.5, 0.5, 0.5), ("part_sheet",), 0.2)
+PARTS = {p.name: p for p in (NIST_FTC_10, LL_1007223, CT_SLBEAM, NIST_FTC_09, LL_1005337)}
 
 # --- the bench mat (mm) -------------------------------------------------------------------------------------------
 MAT = {"size": (240.0, 140.0, 3.0), "friction": 0.9,     # rubber on aluminium and on maple, about 0.9 (proposed)
@@ -122,6 +149,23 @@ CAL = {"beam": ((-116.6, 1.75, 2.5), (116.6, 17.75, 6.0)),       # 16 x 3.5 mm, 
        # the slider's friction holds it on end, as a caliper's gib does, and the beam hanging from it (proposed): at 1 N
        # the beam's own 0.98 N slid it open as the calipers were turned on end
        "beam_kg": 0.10, "slider_kg": 0.07, "travel": 150.0, "friction_N": 2.0}
+
+
+# --- the micrometer (mic1, Mitutoyo 103-177 as a placeholder), in its asset's frame (mm), lying on its side ------------
+# the frame a U opening to +Y, its anvil on the left arm and the sleeve through the right one; the spindle, thimble and
+# ratchet stop slide together along +X (the placeholder holds them opened 0.5 in). The spindle's body has its origin
+# on its face, so its x in the frame's body less ANVIL_FACE is the opening, which is how a micrometer reads
+MIC = {"axis": (15.1, 9.0),                              # the anvil's and spindle's axis (y, z)
+       "anvil": (-58.0, -52.0, 3.2),                     # x from, to (its face), radius
+       "frame": [((-64.0, -24.9, 5.0), (-56.0, 19.1, 13.0)),     # the U's left arm, the anvil's
+                 ((-64.0, -24.9, 5.0), (-16.0, -12.9, 13.0)),    # its base
+                 ((-27.0, -24.9, 5.0), (-16.0, 21.1, 13.0))],    # its right arm, the sleeve's
+       "sleeve": (-16.0, 20.0, 6.5),
+       # in the spindle's body (its face at x = 0): the spindle back into the sleeve, the thimble and the ratchet stop
+       "spindle": (0.0, 40.0, 3.2), "thimble": (47.3, 87.3, 9.0), "ratchet": (87.3, 103.3, 5.5),
+       "rest_open": 12.7, "travel": 25.4, "kg": 0.2, "spindle_kg": 0.05,
+       "friction_N": 0.5}                                # the spindle's thread holds it where the thimble leaves it
+ANVIL_FACE = MIC["anvil"][1]
 
 
 def _f(v, scale=M) -> str:
@@ -227,6 +271,33 @@ def caliper_body(at_mm, yaw_deg: float, face_down: bool = False) -> str:
 """
 
 
+def mic_body(at_mm, yaw_deg: float) -> str:
+    """The micrometer lying on its side as it rests, opened 0.5 in, its asset frame at at_mm turned yaw_deg: the frame
+    with its anvil and sleeve, and the spindle with its thimble and ratchet stop on a slide joint along the axis."""
+    C = MIC
+    y, z = C["axis"]
+    cyl = lambda name, x0, x1, r, extra="": (                                  # noqa: E731
+        f'<geom name="{name}" class="tool" type="cylinder" size="{r * M:.5f} {(x1 - x0) / 2 * M:.5f}" '
+        f'pos="{_f([(x0 + x1) / 2, y, z])}" quat="0.7071068 0 0.7071068 0"{extra}/>')
+    frame_d = C["kg"] * 0.8 / sum(float(np.prod(np.subtract(hi, lo))) for lo, hi in C["frame"]) / 1e-9
+    open0 = C["rest_open"]
+    return f"""    <body name="insp_mic1" pos="{_f(at_mm)}" euler="0 0 {np.radians(yaw_deg):.6f}">
+      <freejoint name="insp_mic1"/>
+      {"".join(_box(f"mic1_frame_{i}", lo, hi, f' class="tool" density="{frame_d:.1f}" rgba="0.75 0.75 0.78 1"')
+               for i, (lo, hi) in enumerate(C["frame"]))}
+      {cyl("mic1_anvil", *C["anvil"], ' mass="0.01" rgba="0.85 0.85 0.85 1"')}
+      {cyl("mic1_sleeve", *C["sleeve"], ' mass="0.03" rgba="0.8 0.8 0.82 1"')}
+      <body name="insp_mic1_spindle" pos="{_f([ANVIL_FACE + open0, 0, 0])}">
+        <joint name="mic1_spindle" type="slide" axis="1 0 0" range="{-open0 * M:.4f} {(C['travel'] - open0) * M:.4f}"
+               damping="0.5" frictionloss="{C['friction_N']}" armature="0.001"/>
+        {cyl("mic1_spindle", *C["spindle"], f' mass="{C["spindle_kg"] * 0.3:.4f}" rgba="0.85 0.85 0.85 1"')}
+        {cyl("mic1_thimble", *C["thimble"], f' mass="{C["spindle_kg"] * 0.6:.4f}" friction="0.8 0.004 0.0001"')}
+        {cyl("mic1_ratchet", *C["ratchet"], f' mass="{C["spindle_kg"] * 0.1:.4f}"')}
+      </body>
+    </body>
+"""
+
+
 def _excludes(loose: str) -> str:
     """The contacts the loose objects need set by hand: the calipers' beam and slider don't collide (the slider rides
     round the beam); and the part meets the mat as one pair, soft along the normal (the part beds into the rubber) and
@@ -235,6 +306,8 @@ def _excludes(loose: str) -> str:
     rows = []
     if "insp_cal6_slider" in loose:
         rows.append('    <exclude body1="insp_cal6" body2="insp_cal6_slider"/>')
+    if "insp_mic1_spindle" in loose:
+        rows.append('    <exclude body1="insp_mic1" body2="insp_mic1_spindle"/>')
     if 'name="bench_mat"' in loose and 'name="part"' in loose:
         f, ref, imp = MAT["friction"], _f(MAT["solref"], 1), _f(MAT["solimp"], 1)
         rows.append('    <exclude body1="part" body2="bench_mat"/>')
@@ -283,7 +356,10 @@ ASSET = [0.0, 0.0, 0.0, 0.7071068, 0.7071068, 0.0, 0.0]   # an asset's GLB, glTF
 LINKS = {"deburr_tool": "library/hand_tools/deburr/links/tool.glb",     # moonshot/library/bench_links.py writes
          "insp_cal6": "library/inspection/cal6/links/beam.glb",            # these, and each part's finished.glb
          "insp_cal6_slider": "library/inspection/cal6/links/slider.glb",
-         "insp_hgauge": "library/inspection/hgauge/links/height_gauge.glb"}
+         "insp_hgauge": "library/inspection/hgauge/links/height_gauge.glb",
+         "insp_mic1": "library/inspection/mic1/links/frame.glb",
+         "insp_mic1_spindle": "library/inspection/mic1/links/spindle.glb"}
+SPLIT = {"insp_cal6": "insp_cal6_slider", "insp_mic1": "insp_mic1_spindle"}     # an instrument and its moving part
 
 
 def render_glbs(model, part: str = "nist-ftc-10") -> dict[str, list[dict]]:
@@ -292,7 +368,10 @@ def render_glbs(model, part: str = "nist-ftc-10") -> dict[str, list[dict]]:
     asset frame; and, on the static body `insp_bench`, the bench (the world frame is its asset's) and the granite
     plate (its underside centred)."""
     names = {model.body(b).name for b in range(1, model.nbody)}
-    links = {"part": f"parts/{part}/finished.glb"} | LINKS
+    # an instrument split at its moving part only where the take has that part as a body: the station's own calipers,
+    # one box at their rest in the deburring takes, drew as their beam alone, no slider, display or moving jaw
+    links = {"part": f"parts/{part}/finished.glb"} | {b: p for b, p in LINKS.items()
+                                                      if b not in SPLIT or SPLIT[b] in names}
     out = {b: [{"path": p, "in_body": IDENTITY}] for b, p in links.items() if b in names}
     for k in IB.record()["rests"]:
         if f"insp_{k}" in names and f"insp_{k}" not in out:

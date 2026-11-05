@@ -63,8 +63,12 @@ class Job:
     steady: Steady = Steady()
     keep_off: tuple = ("mic1", "cal6")
     at_xy: tuple = (-80.0, -110.0)
+    take_mm: float = TAKE_MM               # the tool's first rise off the bench, over TAKE_S, as it takes its weight
+    settle_s: float = 0.1                  # the blade set on its edge this long before it is drawn; the stroke
+                                           # starts (t0) 0.1 s before the draw
     skip: tuple = ()               # the station's instruments put away for it: a big part takes their place
     tool_x: float = TOOL_AT[0]     # where the tool lies along the bench's front (x, mm)
+    tool_clear: bool = False       # the tool's grip keeps off the part, which lies near it (ll-1005337's plate, 47 mm)
 
     @property
     def tool_at(self) -> np.ndarray:
@@ -100,7 +104,72 @@ JOBS["ll-1005337"] = Job(
                   push=(0.0, 0.0, 1.0)),
     # the tool 15 mm further right, 47 mm clear of the plate's end: at nist-ftc-10's place, 25 mm off it, the thumb
     # reaching for the handle's flank struck the plate's corner, which stands 7 mm higher than the handle
-    keep_off=(), at_xy=(150.0, 100.0), skip=("cal6", "mic1", "thread"), tool_x=205.0)
+    keep_off=(), at_xy=(150.0, 100.0), skip=("cal6", "mic1", "thread"), tool_x=205.0, tool_clear=True)
+
+
+def end_hold(top, near, far, along=(-6.0, 1.0)) -> Steady:
+    """The left hand at a short part's left end, fingers pointing right along it: the index on its top, the thumb on
+    its near face and the middle on its far face, each (point, outward normal) in the part's frame, the pads within
+    `along` of their points along the world's X. A 75 mm part leaves no room beside a 50 mm stroke for a hand flat
+    across it, as nist-ftc-10's 158 mm does; held by its end, the strokes have its right 50 mm."""
+    across = lambda at, n, k: (at, n, (("x", along), (k, (-5.0, 5.0))))     # noqa: E731
+    return Steady(at=top[0], push=top[1],
+                  pads=(("index", *across(*top, "y")), ("thumb", *across(*near, "z")),
+                        ("middle", *across(*far, "z"))),
+                  starts=HAND_FROM_LEFT)
+
+
+# G1's first rise, as nist-ftc-10's: its load came on in 133 ms (167 once; people's 163-265), the tool off the bench 4
+# frames after the load's onset however slowly the hand rose (over 0.45-0.6 s) or the carry's correction eased in
+# (0.3-0.45 s); held still 0.1 s first, or taking 4.25 mm, 100 ms
+G1_TAKE_MM = 4.5
+# ... and its blade set on each edge for longer: on ll-1007223's low step it landed 2 mm high and out and settled onto
+# the edge under its press over 0.3 s, 3 of the draw's first frames off it
+G1_SETTLE_S = 0.4
+# the shoulder turned in, the forearm palm down: the left hand comes from the left, fingers to the right
+HAND_FROM_LEFT = tuple((20, 0, 0, 40, 35, sr, 95, p, 0, 0) for sr in (15, 40) for p in (70, 90))
+JOBS["ll-1007223"] = Job(
+    BC.LL_1007223,
+    # the stem's near top edge and the lowest step's, each its right 50 mm: the near side's two long edges whose
+    # lower faces face the operator (the far top edge has the 11 mm bore through it)
+    # ending 1.5 mm short of its end: run to 0.5 mm short, the hook lagged past it and dropped off the part
+    strokes=(((35.0, 0.0, -14.0), (35.0, 0.0, 36.0)), ((49.0, 27.0, -14.0), (49.0, 27.0, 36.0))),
+    face_out=(1.0, 0.0, 0.0), up=(0.0, -1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    steady=end_hold(((29.5, 0.0, -31.0), (0.0, -1.0, 0.0)), ((35.0, 8.0, -31.0), (1.0, 0.0, 0.0)),
+                    ((24.0, 8.0, -31.0), (-1.0, 0.0, 0.0))),
+    # 40 mm right of where nist-ftc-10 lies and 20 mm back: there the hand holding the tool to the low step's edge, its
+    # curled little finger 100 mm right of the blade and 80 mm nearer the operator, came down on the micrometer
+    at_xy=(-40.0, -90.0))
+JOBS["ct-slbeam"] = Job(
+    BC.CT_SLBEAM,
+    # the base's near top edge, 50 of its 57 mm right of the upright: its one long edge facing the operator
+    strokes=(((25.0, 0.0, 19.05), (75.0, 0.0, 19.05)),),
+    face_out=(0.0, -1.0, 0.0), up=(0.0, 0.0, 1.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    # held down by the upright's top, flat, fingers forward, as nist-ftc-10's rim is: fingers pointing right along it,
+    # its 51 mm top took the left arm past people's (posture median 30-34, theirs 28.7), and pinched by its faces as
+    # ll-1007223's stem is, the arm's sway lifted the part 2.3 mm off the mat
+    steady=Steady(at=(9.5, 19.05, 50.8), push=(0.0, 0.0, 1.0),
+                  pads=tuple((f, (9.5, 19.05, 50.8), (0.0, 0.0, 1.0), (("x", b), ("y", (-10, 10))))
+                             for f, b in (("index", (2, 8)), ("middle", (-8, -2))))),
+    # 40 mm right of and 25 mm back from nist-ftc-10's: there the hand holding the tool to the edge, 19 mm up, came
+    # down on the micrometer (ll-1007223's)
+    at_xy=(-78.0, -122.0))
+JOBS["nist-ftc-09"] = Job(
+    BC.NIST_FTC_09,
+    # the near long side's top edge, toward the right; the sheet overhangs the mat 25 mm all round, so the hook's
+    # lower arm clears the rubber below the 3 mm edge. Right of the micrometer: where nist-ftc-10's first stroke runs,
+    # 27 mm lower, the hand holding the tool came down on it and held the tool 14 mm over the edge
+    # two strokes along it, one after the other: with one, the take's start (the trunk's sway as the body settles,
+    # common to the bench's takes) was 7% of its frames, past people's for the left arm
+    # the hand trailing 100 mm right of the blade clear of the rough-surface block (52 mm tall) at the second's end
+    strokes=(((-95.25, 3.04, -30.0), (-95.25, 3.04, 20.0)), ((-95.25, 3.04, 21.0), (-95.25, 3.04, 71.0))),
+    face_out=(-1.0, 0.0, 0.0), up=(0.0, 1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    # flat on the sheet, fingers forward, nearer the body and its middle than nist-ftc-10's hand on its rim: there,
+    # 27 mm lower, the trunk leant to the left past people's for 25 frames
+    steady=Steady(at=(-75.0, 3.04, -95.0), push=(0.0, 1.0, 0.0),
+                  pads=tuple((f, (-75.0, 3.04, -95.0), (0.0, 1.0, 0.0), (("x", b), ("y", (-12, 14))))
+                             for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))),
+    at_xy=(20.0, -52.0))                                     # its near side where nist-ftc-10's is
 
 
 def out(part: str) -> Path:
@@ -177,9 +246,9 @@ class DeburrPlan(BenchPlan):
         # clear of the rough-surface block beside it: solved without it, the hand rested on the block, its fingers
         # over the tool and never on it, and only the carry lifted it
         specs["tool"] = dict(of="deburr_tool", obj=p0, q0=q0, iters=1000,
-                             # ... and of the part, which a big one comes near (ll-1005337's plate, 47 mm off)
+                             # ... and of the part where it lies near (Job.tool_clear: ll-1005337's plate, 47 mm off)
                              colliders=[hand_cyl, blade, box(bc, bh)] + instrument_colliders(self.rests, ("rough",), 3.0)
-                             + self.part_colliders(3.0),
+                             + (self.part_colliders(3.0) if self.job.tool_clear else []),
                              targets={"thumb": on(70, 115, upper_left), "index": on(85, 125, up),
                                       "middle": on(80, 125, upper_right)},
                              # from the shoulder turned out and the forearm less turned: from 55-90 deg of
@@ -228,7 +297,7 @@ class DeburrPlan(BenchPlan):
         self.t_grab = tg
         R0, p0 = self.tool0[1], self.tool0[0]
         self.t_lift = tg + PRELOAD_S
-        self.move("deburr_tool", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
+        self.move("deburr_tool", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, self.job.take_mm])
         self.move("deburr_tool", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + [0, 0, 35])
         # off the bench, the free ring and little fingers curl into the palm, out of the part's way (left out, the
         # little finger brushed the part's ear and pushed it 5 mm)
@@ -258,14 +327,15 @@ class DeburrPlan(BenchPlan):
         tc = t0 + approach + 0.35 + 0.4 + 0.35
         self.move("deburr_tool", tc - 0.35, tc, R, p_a)
         dur = np.linalg.norm(b - a) / 40.0                     # 40 mm/s along the edge
-        self.move("deburr_tool", tc + 0.1, tc + 0.1 + dur, R, p_b)
-        t1 = tc + 0.1 + dur
+        t_draw = tc + self.job.settle_s                        # set on the edge, pressed, then drawn along it
+        self.move("deburr_tool", t_draw, t_draw + dur, R, p_b)
+        t1 = t_draw + dur
         self.look(tc, (a + b) / 2)
         self.event("press", tc - 0.05, t1 + 0.05, side="R", normal=n.tolist(), force=STROKE_N,
                    contact="part", at="deburr_blade", obj="deburr_tool", point=TIP.tolist())
         self.held.append((t0 + approach * 0.7, t1 + 0.4))             # the tool's turn fixed: the hook needs it
         self.move("deburr_tool", t1 + 0.05, t1 + 0.4, R, p_b + n * 25 + up * 30)    # up clear of the walls
-        self.strokes.append({"edge_mm": [list(frm), list(to)], "t0": tc, "t1": t1, "force_N": STROKE_N})
+        self.strokes.append({"edge_mm": [list(frm), list(to)], "t0": t_draw - 0.1, "t1": t1, "force_N": STROKE_N})
         self.t = t1 + 0.4
         self.clip(f"stroke {i + 1}", t0, self.t, "DEBURR  the blade drawn along the edge, light and even")
 

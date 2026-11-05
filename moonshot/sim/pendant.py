@@ -115,9 +115,13 @@ class PendantRunner(TakeRunner):
                      for b in s.get("cuts", [])]
         if (s.get("tool") or {}).get("ball"):
             self.machine.sensor = self.probe_touch
-        # the vise clamped on the part: the jaw at its width, the screw locked
-        load = Load.from_json(s["load"])
-        jaw = (load.opening0 - 2 * s["half_mm"][1]) / 1000
+        # the vise clamped on the part: the jaw closed to its width from the jaws' faces as built (the scene stands the
+        # moving jaw to 0.1 mm: closed from the load's opening it went 10 um into ll-1007223, which it pushed 10 um), the
+        # screw locked
+        mujoco.mj_forward(m, d)
+        fixed, moving = m.geom("fixed_jaw").id, m.geom("moving_jaw").id
+        jaw = ((d.geom_xpos[fixed][1] - m.geom_size[fixed][1]) - (d.geom_xpos[moving][1] + m.geom_size[moving][1])
+               - 2 * s["half_mm"][1] / 1000)
         d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]] = jaw
         crank = jaw / m.eq_data[m.equality("lead_screw").id, 1]
         d.qpos[m.jnt_qposadr[m.joint("crank").id]] = crank
@@ -184,11 +188,13 @@ class PendantRunner(TakeRunner):
         s = self.tk["setup"]
         paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
         xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
-        c = " ".join(f"{v / 1000:.5f}" for v in s["centre_mm"])
+        c = " ".join(f"{v / 1000:.7f}" for v in s["centre_mm"])
         h = vf2.record()["affordances"]["jog_handle"]
         rim = f"0 {-h['depth_mm'] / 2000:.5f} {h['radius_mm'] / 1000:.5f}"
+        # as stiff as the step allows (2 steps), and near-rigid: at 0.005 s and MuJoCo's default impedance the part sat
+        # 8-9 um off its place under its weight and the jaws, past half the probe's 10 um, and the probe found it there
         xml = xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
-                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
+                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.002 1" solimp="0.99 0.999 0.001"/>\n'
                           f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
                           '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '

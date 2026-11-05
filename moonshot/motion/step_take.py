@@ -59,6 +59,7 @@ class StepTake:
         self.gaze, self.events, self.clips, self.boxes = [], [], [], []
         self.grips: dict[str, dict] = {}
         self.t = 0.0
+        self.extra: dict = {}         # more for take.json: a per-setup take's "scene" and "load" (loads.scene_spec)
 
     # --- where -------------------------------------------------------------------------------------------
     def at(self, side: str, p) -> np.ndarray:
@@ -93,6 +94,19 @@ class StepTake:
                 cache.write_text(json.dumps(data, indent=1), encoding="utf-8")
         for name in specs:
             g = data[name]
+            H, W, obj = np.array(g["H"]), np.array(g["W"]), np.array(g["obj"])
+            self.grips[name] = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "obj": obj, "side": g["side"],
+                                "theta": np.array(g["theta"]), "W_rel": W - obj, "loss": g["loss"]}
+
+    def take_grips(self, source: Path, names) -> None:
+        """Grips by name as another take solved them (its grips.json), not solved again: the same object taken from the
+        same place from the same stance, as the published take took it. They are written to this take's grips.json
+        too, which the physics reads (moonshot/sim/set_parallels.py FirmGrip)."""
+        solved = json.loads(Path(source).read_text(encoding="utf-8"))
+        data = {KEY: f"from {Path(source).parent.name}"} | {n: solved[n] for n in names}
+        (self.out / "grips.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
+        for name in names:
+            g = solved[name]
             H, W, obj = np.array(g["H"]), np.array(g["W"]), np.array(g["obj"])
             self.grips[name] = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "obj": obj, "side": g["side"],
                                 "theta": np.array(g["theta"]), "W_rel": W - obj, "loss": g["loss"]}
@@ -285,8 +299,8 @@ class StepTake:
         np.savez(self.out / "reference.npz", **arrays)
         (self.out / "take.json").write_text(json.dumps({
             "events": [{k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in e.items()} for e in self.events],
-            "clips": self.clips, "T": self.T, "lumbar": self.lumbar.tolist(), "two_handed": True}, indent=1),
-            encoding="utf-8")
+            "clips": self.clips, "T": self.T, "lumbar": self.lumbar.tolist(), "two_handed": True} | self.extra,
+            indent=1), encoding="utf-8")
 
 
 def head_camera(gaze, theta, dp, lumbar):

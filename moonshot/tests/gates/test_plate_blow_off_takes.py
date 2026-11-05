@@ -14,7 +14,7 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKES = ["nist-ftc-09-op10-clean", "ll-1005337-op10-clean", "ll-1005337-op10-unload"]
+TAKES = ["nist-ftc-09-op10-clean-blow-off", "ll-1005337-op10-clean-blow-off", "ll-1005337-op10-unload-blow-off"]
 
 
 @pytest.fixture(scope="module", params=TAKES)

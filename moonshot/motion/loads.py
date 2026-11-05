@@ -33,7 +33,7 @@ import re
 import numpy as np
 
 from moonshot.world import vf2
-from moonshot.world.vise import REFERENCE, TABLE_Z, VISE, Load
+from moonshot.world.vise import PARALLEL_T, REFERENCE, TABLE_Z, VISE, Load
 
 AXIS = {"X": 0, "Y": 1, "Z": 2}
 INCH = 25.4
@@ -48,6 +48,15 @@ OPENING_MARGIN = REFERENCE.opening0 - REFERENCE.size_mm[1]
 TALL_MARGIN, TALL_MARGIN_MAX = 0.4, 30.0
 # under a narrow part (op30's 31 mm, on its side) parallel a comes in closer to the jaw so the two keep this pitch
 MIN_PITCH = 6.8
+# a hand sets each parallel pinched by its top edge, the thumb on its near face and the index and middle on its far
+# face (moonshot/motion/set_parallels.py), so those fingers, 13-14.5 mm thick (moonshot/world/vise.py), stand between
+# parallel a and the fixed jaw as it sets a, and between b and a as it sets b. Where the default places leave less than
+# that between the two (ct-slbeam's 38.1 mm part: 5.0 mm, and setting b knocked a flat) and the part is wide enough
+# for both gaps, b stands at the part's near edge, FLUSH_IN_MM inside it so the part still covers it, and a halfway
+# between b and the fixed jaw, an even gap each side: ct-slbeam's 15.7 mm (the user's decision, 2026-11-05). A part
+# too narrow even so keeps the default (nist-ftc-10 op30 and op40's 31 mm would give 12.15)
+FINGER_GAP_MM = 14.5
+FLUSH_IN_MM = 0.5
 # the stock is centred on the part in its model's x and z; Op 10 faces this much off datum A [proposed]
 FACE_A_MM = {"nist-ftc-10": 0.5}
 # each later setup's part as its box in the model's frame (mm). nist-ftc-10 finishes 158 x 31 x 75 (x -79..79, y 0..31
@@ -217,6 +226,29 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     fy = VISE["fixed_face_y"]
     to_a = min(FIXED_TO_A, width - NEAR_TO_B - MIN_PITCH)
     paras = {"para_a": fy - to_a, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
+    if paras:                                    # room for the fingers that set them (FINGER_GAP_MM)
+        gap = paras["para_a"] - paras["para_b"] - PARALLEL_T
+        even = (width - FLUSH_IN_MM - 2 * PARALLEL_T) / 2
+        if gap < FINGER_GAP_MM <= even:
+            paras = {"para_a": fy - even - PARALLEL_T / 2, "para_b": fy - width + FLUSH_IN_MM + PARALLEL_T / 2}
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
                                   else OPENING_MARGIN), density=density(plan))
+
+
+def scene_spec(part: str, setup_id: str, stock: str = "in", vise: str = "clamped") -> dict:
+    """What a per-setup take at the VF-2 (moonshot/planning/takes.py per_setup) finds on its table, for take.json:
+    {"scene": ..., and for a vise setup "load", its Load, which the checks read the part from}. stock: the part as it
+    enters the setup ("in": the start and the clean) or as its last cycle leaves it ("out": the unload). vise:
+    "clamped", the part clamped on its parallels or on the floor against its stop, as the start and the unload find it;
+    or "open", the vise open at the load's opening, the parallels in their rack (or the stop on the table) and the part
+    waiting on the table, as the clean finds it. A plate setup's plate lies on its spoilboard under its clamps
+    (moonshot/motion/plates.py)."""
+    from moonshot.planning.validate import load_plan
+    plan = load_plan(part)
+    plate = "clamps" in _setup(plan, setup_id)["workholding"]
+    out: dict = {"scene": {"part": part, "setup": setup_id, "stock": stock, "plate": plate,
+                           "vise": None if plate else vise}}
+    if not plate:
+        out["load"] = vise_load(plan, setup_id).to_json()
+    return out

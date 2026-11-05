@@ -4,8 +4,9 @@ then lets go; the left hand stays at the operator's side (plan §4; the kurt-vis
 The part is lifted out by the vise take started in the vise (setup_take.build_lift_out), one per setup's part.
 
     python -m moonshot.motion.unload           # plans into the data root's takes/loosen
+    python -m moonshot.motion.unload ct-slbeam op10     # a setup's own run: takes/ct-slbeam-op10-loosen
 
-The knob's grip is the approved vise take's (takes/setup-take/grips.json): the fist keeps its orientation and the knob
+The knob's grip is the approved vise take's on the new body (KNOB_GRIPS): the fist keeps its orientation and the knob
 spins in it.
 """
 from __future__ import annotations
@@ -18,7 +19,9 @@ import numpy as np
 
 from moonshot.config import data_root
 from moonshot.motion import setup_take as ST                  # the vise take's reach onto the knob and its release
+from moonshot.motion.loads import scene_spec, vise_load
 from moonshot.motion.primitives import min_jerk, open_for, open_like
+from moonshot.planning.validate import load_plan
 from moonshot.motion.setup_take import LUMBAR                 # where the vise take stands the operator
 from moonshot.motion.step_take import StepTake
 from moonshot.world import vise as V
@@ -36,6 +39,11 @@ KNOB_PEAK = 0.69
 # inside against 93%); standing right of it, 41
 STANCE = np.array([-90.0, 0.0, 0.0])
 RANGE_W = 10.0
+# the knob grip nist-ftc-10's published loosen (takes/loosen, 2026-11-04) was planned with, which re-planned from it
+# reproduces that take's wrist exactly: the new-body vise takes' of that morning, which the lift-outs carry. The old
+# body's (takes/setup-take) sits 46 mm off it; planned from that, every loosen's reach ended with the hand opening at
+# 100% of it and posture's likelihood at 29.1-29.6, against people's 28.7
+KNOB_GRIPS = TAKES / "lift-out-nist-ftc-10-op10" / "grips.json"
 
 
 def start_phi(load: V.Load) -> float:
@@ -46,9 +54,8 @@ def start_phi(load: V.Load) -> float:
 class Unload(StepTake):
     SOLVER_W = {"range": RANGE_W}
 
-    def __init__(self, load: V.Load = V.REFERENCE, out=TAKES / "loosen", verbose=True,
-                 grips=TAKES / "setup-take" / "grips.json"):
-        """grips: the vise take's grips.json the knob's grip is read from (the reference load's, by default)."""
+    def __init__(self, load: V.Load = V.REFERENCE, out=TAKES / "loosen", verbose=True, grips=KNOB_GRIPS):
+        """grips: the vise take's grips.json the knob's grip is read from (KNOB_GRIPS, by default)."""
         super().__init__(out, LUMBAR + STANCE, verbose)
         self.part = load
         self.home = np.array([V.VISE["x"], V.VISE["fixed_face_y"] - load.half[1],
@@ -123,8 +130,16 @@ class Unload(StepTake):
         np.savez(self.out / "part_keys.npz", phi0=start_phi(self.part), load=json.dumps(self.part.to_json()))
 
 
-def build(verbose=True, **kw):
+def build(verbose=True, part: str | None = None, setup: str | None = None, **kw):
+    """Plans into the data root's takes/loosen, for the reference load; or with a part and setup, that setup's own
+    run for its unload into takes/<part>-<setup>-loosen (moonshot/planning/takes.py per_setup): its part, as its last
+    cycle leaves it, clamped as its load take clamps it, the crank's knob where that leaves it (start_phi) (take.json
+    "scene", loads.scene_spec)."""
+    if part:
+        kw |= {"load": vise_load(load_plan(part), setup), "out": TAKES / f"{part}-{setup}-loosen"}
     take = Unload(verbose=verbose, **kw)
+    if part:
+        take.extra = scene_spec(part, setup, stock="out", vise="clamped")
     take.plan()
     take.solve(theta0=take.grips["knob"]["theta"])
     take.save()
@@ -133,4 +148,5 @@ def build(verbose=True, **kw):
 
 
 if __name__ == "__main__":
-    build("--quiet" not in sys.argv)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    build("--quiet" not in sys.argv, *args[:2])

@@ -5,6 +5,7 @@ fingers on a 3.1 mm plate can't hold it by friction alone); it is let go standin
 whether it stays standing where the load take expects it.
 
     python -m moonshot.sim.set_parallels           # runs the take in the data root and writes its take record
+    python -m moonshot.sim.set_parallels ll-1007223-op10-set-parallels     # a setup's own run (sim/setup_scene.py)
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from moonshot.body.skeleton import DATA, hand_couplings
 from moonshot.motion import set_parallels as SP
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.door_cycle import _Cell
+from moonshot.sim.setup_scene import Table
 from moonshot.world import cell
 from moonshot.world import parallel_rack as RACK
 from moonshot.world import vise as V
@@ -122,7 +124,7 @@ class SetParallels(FirmGrip, _Cell):
     def __init__(self, folder=SP.TAKES / "set-parallels"):
         super().__init__(folder)
         self.firm_setup()
-        self.load = V.REFERENCE
+        self.load = V.REFERENCE if self.table is None else self.table.load
         self.base_at = {n: [] for n in SP.ORDER}
         self.tilt = {n: [] for n in SP.ORDER}
         self.in_hand = {n: [] for n in SP.ORDER}
@@ -176,6 +178,11 @@ class SetParallels(FirmGrip, _Cell):
         return super().touching(side)
 
     def scene(self, body_xml: str) -> str:
+        """The reference load's; or a setup's own run's, its table open (moonshot/sim/setup_scene.py): the same, its
+        load's parallels in the rack and its part waiting on the table."""
+        if "scene" in self.tk:
+            self.table = Table(self.tk)
+            return self.table.xml(body_xml)
         load = V.REFERENCE
         xml = cell.with_body(body_xml, load.stage, RACK.slots(load), "R_hand", load)
         return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1)
@@ -238,12 +245,13 @@ class SetParallels(FirmGrip, _Cell):
 
 
 def main(argv: list[str]) -> int:
-    r = SetParallels()
-    r.run(log=print)
-    r.export()
-    out = r.outcome()
-    (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-    print("set-parallels", out, flush=True)
+    for name in argv or ["set-parallels"]:
+        r = SetParallels(SP.TAKES / name)
+        r.run(log=print)
+        r.export()
+        out = r.outcome()
+        (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(name, out, flush=True)
     return 0
 
 

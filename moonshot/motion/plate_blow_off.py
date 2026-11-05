@@ -7,7 +7,8 @@ nozzle swept along the middle of the spoilboard, or of the plate on it, instead 
 take.json gets, beside the events, "table": what the physics run builds (moonshot/sim/plate_blow_off.py): the part,
 the setup whose table it is, the clamps' state and whether the plate is on it.
 
-    python -m moonshot.motion.plate_blow_off nist-ftc-09 op10-clean     # plans <data root>/takes/nist-ftc-09-op10-clean
+    python -m moonshot.motion.plate_blow_off nist-ftc-09 op10-clean     # plans <data root>/takes/
+                                                                        # nist-ftc-09-op10-clean-blow-off
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import numpy as np
 
 from moonshot.motion import blow_off as BO
 from moonshot.motion import plates
+from moonshot.planning.takes import plate_take
 from moonshot.world import spoilboard as SB
 
 OVER_MM = 110.0              # the nozzle's tip this high over what it blows, as over the vise's jaws
@@ -38,6 +40,13 @@ def table(part: str, step_id: str) -> dict:
     raise ValueError(f"{step_id}: not a plate blow-off step")
 
 
+def folder(part: str, step_id: str) -> str:
+    """The take's folder under the data root's takes/: the setup's clean-blow-off or unload-blow-off
+    (moonshot/planning/takes.py plate_take), apart from the step's own video's folder (<part>-<step id>)."""
+    setup, kind = step_id.split("-", 1)
+    return plate_take(part, setup, f"{kind}-blow-off")
+
+
 class PlateBlowOff(BO.BlowOff):
     SWEEP, SWEEP_S = SWEEP_MM, SWEEP_S
 
@@ -46,7 +55,7 @@ class PlateBlowOff(BO.BlowOff):
         p = plates.plate(part, self.table["setup"])
         surface = p.top if self.table["plate"] else p.bottom          # the plate, or the spoilboard it will lie on
         self.TIP_OVER = np.array([SB.TABLE_MID[0] + RIGHT_MM, SB.TABLE_MID[1] - NEAR_MM, surface + OVER_MM])
-        out = BO.TAKES / f"{part}-{step_id}"
+        out = BO.TAKES / folder(part, step_id)
         out.mkdir(parents=True, exist_ok=True)
         shared = BO.TAKES / "blow-off" / "grips.json"     # the same grip on the same gun from the same stance: its
         if not (out / "grips.json").exists() and shared.exists():   # cache key holds, so it isn't solved again

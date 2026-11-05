@@ -101,6 +101,10 @@ OPS = {                                                                     # it
     ("ll-1005337", "op10", "dowels"): {"holes": [{"dia": 8.0, "through_plate": True}]},
     ("ll-1005337", "op10", "recesses"): {"voids": [_NESTS(-8.0)]},
     ("ll-1005337", "op10", "nests"): {"through": True, "voids": [_NESTS(-16.0)]},
+    # the two end notches' 20 deg undercut walls: the dovetail's tip at the plate's bottom, round each notch (the box
+    # takes in the notch and the air off the plate's end, where the cutter comes in)
+    ("ll-1005337", "op10", "undercut"): {"dovetail": {"flank_deg": 20.0, "foot_mm": -20.0, "in": [
+        [[-265.0, 555.0, -21.0], [-135.0, 630.0, 0.0]], [[-265.0, -30.0, -21.0], [-135.0, 45.0, 0.0]]]}},
     # the plate is as wide as the Y travel: one finishing loop, its centre r off the outline (ring)
     ("ll-1005337", "op10", "outline"): {"in": [[-460.0, -60.0, -60.0], [-23.0, 660.0, 40.0]], "ring": 0.02},
     ("ll-1005337", "op20", "far_edge"): {"in": [[-23.0, -60.0, -60.0], [60.0, 660.0, 40.0]], "ring": 0.02},
@@ -884,6 +888,8 @@ class Planner:
 
     def operation(self, ps: PartInSetup, sw, setup: dict, op: dict, cfg: dict) -> list[Pass]:
         kind, t = op["kind"], self.tool(op["tool"])
+        if "dovetail" in cfg:                                   # a profile, by the dovetail's own rule
+            return [self.dovetail(ps, sw, t, cfg["dovetail"])]
         if kind == "face":
             return [self.face(ps, sw, t)]
         if kind == "profile" and "levels" not in cfg:
@@ -1072,6 +1078,28 @@ class Planner:
             p.cut(c, ps.frame)
         return p
 
+    def dovetail(self, ps: PartInSetup, sw, t: Tool, cfg: dict) -> Pass:
+        """A dovetail cutter (its tip the widest, its flank leaning in `flank_deg` from its axis) run round the walls it
+        undercuts, its tip at the foot (along the up axis, model) and its centre wherever its tip clears the part's
+        section there, inside the boxes (model). A cone swept along a path is, at each height, the path's region grown
+        by the cutter's radius there: the cut is the region its tip sweeps, drafted in by the flank going up."""
+        up = np.abs(ps.frame.R[2]).argmax()
+        p0 = np.zeros(3)
+        p0[up] = cfg["foot_mm"]
+        foot = float(ps.frame.world(p0)[2])
+        sec = ps.section(foot + 0.05)
+        area = union([f for box in cfg["in"] for f in _faces(self.box_area(ps, box))])
+        centres = minus(area, grow(sec, t.r - 0.005))
+        p = Pass(t)
+        top = sw.zmax
+        self._follow(p, loops(centres), foot, top)
+        h = top + 1.0 - foot
+        face = grow(centres, t.r)
+        solids = [cq.Solid.extrudeLinear(f.moved(cq.Location(cq.Vector(0, 0, foot))), cq.Vector(0, 0, h),
+                                         taper=cfg["flank_deg"]) for f in _faces(face)]
+        p.cut(solids[0] if len(solids) == 1 else cq.Compound.makeCompound(solids), ps.frame)
+        return p
+
     def ball_along(self, ps: PartInSetup, sw, t: Tool, cfg: dict) -> Pass:
         """Straight passes along `along` at stations across `across` (model axes), each at the height where the ball
         first touches the part's section at profile_at (a drop cutter); the cut is the region above the passes' lower
@@ -1132,6 +1160,36 @@ def merged(passes) -> Pass:
         out.moves += p.moves
         out.cuts += [(n + i, s) for i, s in p.cuts]
     return out
+
+
+def cut_keep(stock, solid, nudged: bool = False):
+    """The stock less a cut, every piece kept (more than a cubic millimetre): a plate's skeleton stays where it lay
+    under its clamps once the outline frees the part, as the outline's tabs would keep it [declared shortcut: the tabs
+    aren't modelled]. OCC's failures are met as cut() meets them."""
+    for tol in (None, 1e-3, 1e-2):
+        try:
+            solids = [s for s in stock.cut(solid, tol=tol).Solids() if s.Volume() > 1.0]
+        except ValueError:
+            continue
+        if solids and all(s.isValid() for s in solids):
+            return solids[0] if len(solids) == 1 else cq.Compound.makeCompound(solids)
+    pieces = solid.Solids()
+    if len(pieces) > 1:
+        for piece in pieces:
+            stock = cut_keep(stock, piece)
+        return stock
+    if not nudged:
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.gp import gp_Pnt, gp_Trsf
+        c, tr = solid.Center(), gp_Trsf()
+        tr.SetScale(gp_Pnt(c.x, c.y, c.z), 1 + 2e-5)
+        return cut_keep(stock, cq.Shape.cast(BRepBuilderAPI_Transform(solid.wrapped, tr, True).Shape()), nudged=True)
+    raise ValueError("OCC can't make this cut")
+
+
+def part_of(stock):
+    """The part in a plate's stock: its largest piece (the bench cuts it out of its skeleton)."""
+    return max(stock.Solids(), key=lambda s: s.Volume())
 
 
 def cut(stock, solid, nudged: bool = False):

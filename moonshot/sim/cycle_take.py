@@ -25,7 +25,7 @@ import mujoco
 import numpy as np
 
 from moonshot.config import data_root
-from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_MM, SPOILBOARD_TOP_Z, part_pose, vise_load
+from moonshot.motion.loads import part_pose, vise_load
 from moonshot.planning.steps import expand
 from moonshot.planning.validate import load_plan
 from moonshot.sim import cam
@@ -66,15 +66,14 @@ def clamped(plan: dict, setup_id: str) -> bool:
     return "clamps" in next(s for s in plan["setups"] if s["id"] == setup_id)["workholding"]
 
 
-def spoilboard_xml() -> str:
-    """The 3/4 in MDF spoilboard over the table's top (moonshot/motion/loads.py SPOILBOARD_*)."""
-    t = vf2.record()["colliders"]["table_top"]
-    lo, hi = np.array(t["box_min_mm"], float), np.array(t["box_max_mm"], float)
-    c = np.array([*SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z - SPOILBOARD_MM / 2])
-    size = np.array([(hi - lo)[0] / 2, (hi - lo)[1] / 2, SPOILBOARD_MM / 2])
-    f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
-    return (f'    <body name="spoilboard" pos="{f(c)}">\n      <geom name="spoilboard" type="box" size="{f(size)}" '
-            f'contype="0" conaffinity="0" rgba="0.55 0.42 0.3 1"/>\n    </body>\n')
+def spoilboard_xml(plan: dict, setup_id: str) -> str:
+    """What a plate setup bolts to the table, as the plate takes have it (moonshot/world/spoilboard.py bolted): the
+    spoilboard, on its riser if the part has one (loads.plate_board_top), and the step clamps clamped on the plate
+    (moonshot/motion/plates.py)."""
+    from moonshot.motion import plates
+    from moonshot.world import spoilboard as SB
+    part = plan["part"]
+    return SB.bolted(plates.plate(part, setup_id, plan), plates.clamps(part, setup_id, plan), "clamped")
 
 
 def scene_xml(plan: dict, c: cam.Cycle, stock, tools: list[cam.Tool]) -> str:
@@ -83,7 +82,7 @@ def scene_xml(plan: dict, c: cam.Cycle, stock, tools: list[cam.Tool]) -> str:
     each tool as a body that follows the spindle."""
     f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
     if clamped(plan, c.setup):
-        on_table, paras = spoilboard_xml(), ""
+        on_table, paras = spoilboard_xml(plan, c.setup), ""
     else:
         load = vise_load(plan, c.setup)
         on_table, _, _ = V.worldbody(load, np.zeros(3), load.parallels(), "vf2_spindle", "vf2_table")
@@ -169,6 +168,8 @@ LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
          "stainless": ("stainless_304", [0.66, 0.66, 0.68, 1.0], 1.0, 0.3),
          "steel": ("steel_4140", [0.5, 0.51, 0.52, 1.0], 1.0, 0.35),
          "acetal": ("acetal_black", [0.02, 0.02, 0.022, 1.0], 0.0, 0.42),
+         "bar": ("steel_bar_cold_finished", [0.06, 0.062, 0.068, 1.0], 0.0, 0.55),  # the sawn blank: bar stock's dark
+                                                     # grey (drawn dull: metallic, it mirrors the bright shop, white)
          "black oxide": ("black_oxide", [0.018, 0.018, 0.02, 1.0], 0.5, 0.5),      # dark grey-black, satin
          "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22)}      # bright bluish silver
 
@@ -285,7 +286,8 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     v0 = stock.Volume()
     states = {0: stock}                                        # every cut first: meshing a shape for its GLB can
     for i in sorted(range(len(cuts)), key=lambda i: (done_at[i], i)):     # widen its edges' tolerances, which
-        stock = cam.cut(stock, cuts[i][1])                     # the next boolean then trips on
+        stock = (cam.cut_keep if plate else cam.cut)(stock, cuts[i][1])   # the next boolean then trips on; a
+                                                               # plate's skeleton stays under its clamps
         states[max(1, done_at[i])] = stock
     stock.exportBrep(str(out / "stock-end.brep"))
     keyframes = sorted(states)
@@ -349,7 +351,17 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
     out = data_root() / "takes" / f"{part}-{step['id']}"
     if out.exists():
         shutil.rmtree(out)
-    (out / "stock").mkdir(parents=True)
+    on_shelf(plan, stock, out, finish)
+    log(f"[cycle] {step['id']}: the finished part from {end.parent.name}, in {finish}")
+    return out
+
+
+def on_shelf(plan: dict, stock, out: Path, look: str) -> None:
+    """A take of a part on its own (a cycle step with no simulation): the stock, in look (LOOKS), on a dark shelf,
+    set down as the mill held it in its flattest setup, the still's camera close on it: take.npz, scene.json,
+    stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
+    (out / "stock").mkdir(parents=True, exist_ok=True)
+    finish = look
     # set down on the shelf as the mill held it in its flattest setup (the last of those as flat)
     poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
     R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
@@ -382,7 +394,20 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
         "from_mm": (np.array(STILL_FROM_MM) * size / 165.1 * 0.8).round(1).tolist(),
         "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's origin "
                  "plus look_off_mm (world axes: the part's centre), from from_mm off that"}, indent=1), encoding="utf-8")
-    log(f"[cycle] {step['id']}: the finished part from {end.parent.name}, in {finish}")
+
+
+def saw_cut_take(plan: dict, step: dict, log=print) -> Path:
+    """The band saw's cut (a cycle step: the machine's own work, not simulated): its take is the sawn blank on its own,
+    in bar stock's dark grey, on the shelf the finishes stand on; its stock/0.glb is the box the first setup on the
+    mill starts from (loads.envelope). Drawn in the saw, the blank was lost against its bare steel (the saw's
+    session's cell, moonshot/world/saw_cell.py, 2026-11-05). Writes only its own files into takes/<part>-<step id>/,
+    where the saw's session keeps its cut's."""
+    from moonshot.motion.loads import envelope
+    env = envelope(plan, next(x for x in plan["setups"] if "workholding" in x)["id"])
+    stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
+    out = data_root() / "takes" / f"{plan['part']}-{step['id']}"
+    on_shelf(plan, stock, out, "bar")
+    log(f"[cycle] {step['id']}: the sawn blank, {' x '.join(f'{v:.2f}' for v in env[:, 1] - env[:, 0])} mm")
     return out
 
 
@@ -404,6 +429,11 @@ def main(argv: list[str]) -> int:
         for s in expand(plan):
             if s["kind"] == "cycle" and "station" in s:
                 finish_take(plan, s)
+        return 0
+    if "--saw" in argv:                                     # the band saw's cut: the saw as it leaves the blank
+        for s in expand(plan):
+            if s["kind"] == "cycle" and s.get("machine") == "bandsaw":
+                saw_cut_take(plan, s)
         return 0
     start = argv[argv.index("--from") + 1] if "--from" in argv else None
     planner = cam.Planner(plan)

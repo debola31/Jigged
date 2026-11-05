@@ -1,4 +1,6 @@
-"""nist-ftc-10's step 69, "Deburr every edge", planned as a two-handed take at the inspection bench (plan §5.4).
+"""A part's deburring step (nist-ftc-10's step 69, "Deburr every edge", and G1's), planned as a two-handed take at
+the inspection bench (plan §5.4). Each part's take is its Job: how it lies, where the left hand holds it, and the
+edges stroked. nist-ftc-10's is the first, and what the rest of this says.
 
 The finished part lies pocket side up on the bench. The left hand comes onto its wide rim, fingers flat, and holds it
 down; the right picks the swivel deburring tool off the bench, draws its blade along the outer near top edge and
@@ -12,23 +14,27 @@ is straight, and its round tip slid off one face or the other however it was pre
 plan's body chose it when its turn was free (ROLL_DEG), so the hook is made for that; its turn is fixed only for the
 strokes. The part's edges are named in its STEP's frame, which is its body's.
 
-    python -m moonshot.motion.deburr          # -> <data root>/takes/nist-ftc-10-deburr: reference.npz, take.json
+    python -m moonshot.motion.deburr [part]    # -> <data root>/takes/<part>-deburr (nist-ftc-10's by default):
+                                               #    reference.npz, take.json
 """
 from __future__ import annotations
 
 import math
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
+from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
-from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PART_AT, PRELOAD_S, TAKE_MM, TAKE_S, TOP, BenchPlan, bench_box,
-                                   box, instrument_colliders, settle)
+from moonshot.motion.bench import (CARRY_EASE_S, LIFT_S, PRELOAD_S, TAKE_MM, TAKE_S, TOP, BenchPlan, Steady, bench_box,
+                                   box, instrument_colliders, part_at, settle)
 from moonshot.motion.primitives import open_like
 from moonshot.world import bench_cell as BC
 
-OUT = data_root() / "takes" / "nist-ftc-10-deburr"
 TOOL_AT, TOOL_YAW = np.array([190.0, -230.0, TOP + BC.DEBURR["handle_r"] + 0.1]), 90.0
                             # straight away: turned 20 deg to the right the grip took the forearm to 71 deg of
                             # pronation (people's 61), the take 0.73 in their range; to the left, 0.90; here 0.91
@@ -39,20 +45,50 @@ TILT_DEG = 30.0             # the tool leans down at this toward the edge: at 45
                             # more wrist than the plan allows
 ROLL_DEG = -83.0            # the tool's turn about its axis from datum A's up: the plan's body held it so at both
                             # strokes when free to choose (81-84 deg), and the hook's arms are made for it
-BISECTOR = np.array([0.0, -1.0, 1.0]) / math.sqrt(2)      # both edges' outward bisector, the part's frame: up, toward +Z
-FACE_OUT, UP = np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])  # the part's frame: out of each edge's lower face
-                                                                        # (the operator's way), and datum A's normal
 INTO_MM = 0.5               # the hook is aimed this far into the corner, the faces stopping it, as the vise take's
                             # pushes are: aimed at the faces, a millimetre of lag left it short
-STROKES = [                 # (from, to) in the part's frame (mm), datum A at Y = 0
-    ((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),               # the outer near top edge, toward the right
-    ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0)),             # the pocket's far edge, toward the right
-]
 TIP = BC.deburr_tip()      # where the hook's arms meet, in the tool's frame
 
 
-def loose() -> str:
-    return BC.mat_body(PART_AT) + BC.part_body(PART_AT) + BC.deburr_body(TOOL_AT, TOOL_YAW)
+@dataclass(frozen=True)
+class Job:
+    """One part's deburring take: the part as it lies on the mat (its STEP origin at at_xy), where the left hand holds
+    it, the instruments that hand keeps clear of, and the strokes, each (from, to) in the part's frame (mm) along an
+    edge whose lower face faces the operator (face_out, out of it) under its upper face (up, out of that): the hook's
+    arms are made for edges lying so, the tool held as for nist-ftc-10's."""
+    part: BC.BenchPart
+    strokes: tuple
+    face_out: tuple
+    up: tuple
+    steady: Steady = Steady()
+    keep_off: tuple = ("mic1", "cal6")
+    at_xy: tuple = (-80.0, -110.0)
+
+    @property
+    def bisector(self) -> np.ndarray:
+        n = np.add(self.face_out, self.up)
+        return n / np.linalg.norm(n)
+
+
+JOBS = {"nist-ftc-10": Job(
+    BC.NIST_FTC_10,
+    strokes=(((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),       # the outer near top edge, toward the right
+             ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0))),    # the pocket's far edge, toward the right
+    face_out=(0.0, 0.0, 1.0), up=(0.0, -1.0, 0.0))}          # the near side and the pocket's far wall; datum A
+
+
+def out(part: str) -> Path:
+    return data_root() / "takes" / f"{part}-deburr"
+
+
+def loose(job: Job) -> str:
+    """The mat under the middle of the part's colliders, the part on it, and the tool."""
+    at = part_at(job.part, job.at_xy)
+    lo = np.min([b[0] for b in job.part.boxes.values()], axis=0)
+    hi = np.max([b[1] for b in job.part.boxes.values()], axis=0)
+    w, x, y, z = job.part.up
+    mid = at + Rotation.from_quat([x, y, z, w]).as_matrix() @ ((lo + hi) / 2)
+    return BC.mat_body(mid) + BC.part_body(at, job.part) + BC.deburr_body(TOOL_AT, TOOL_YAW)
 
 
 def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
@@ -83,9 +119,10 @@ class DeburrPlan(BenchPlan):
     # its skin, both arms held to people's, the left steadying hand's shoulder turned past theirs for 34 frames
     solver_w = {"range": 3.5}
 
-    def __init__(self, out=OUT, verbose=True):
-        super().__init__(out, verbose)
-        rest = self.rests = settle(loose())
+    def __init__(self, job: Job, verbose=True):
+        super().__init__(out(job.part.name), verbose)
+        self.job, self.bench_part, self.steady_on = job, job.part, job.steady
+        rest = self.rests = settle(loose(job))
         self.part, self.tool0 = rest["part"], rest["deburr_tool"]
         self.paths["deburr_tool"] = [(0.0, self.tool0[1], self.tool0[0])]
         self.solve_grips(self.grip_specs(), rest)
@@ -124,13 +161,13 @@ class DeburrPlan(BenchPlan):
         specs["steady"] = self.steady_spec()
         # the left hand comes onto the rim beside the micrometer and over the calipers: kept off them, as its thumb
         # pushed the micrometer 3.9 mm
-        specs["steady"]["colliders"] += instrument_colliders(self.rests, ("mic1", "cal6"), grow=5.0)
+        specs["steady"]["colliders"] += instrument_colliders(self.rests, self.job.keep_off, grow=5.0)
         return specs
 
     # --- the verbs ------------------------------------------------------------------------------------------------
     def stroke_pose(self, e, s):
         """The tool's pose (R, origin) with its blade tip on edge point e (world), the stroke going along s."""
-        n = self.to_world(BISECTOR, vec=True)
+        n = self.to_world(self.job.bisector, vec=True)
         out = np.array([n[0], n[1], 0.0]) / np.linalg.norm(n[:2])          # the edge's outward side, level
         tilt, b, roll = math.radians(TILT_DEG), math.radians(TRAIL_DEG), math.radians(ROLL_DEG)
         a = (-out * math.cos(tilt) - np.array([0.0, 0.0, 1.0]) * math.sin(tilt)) * math.cos(b) - s * math.sin(b)
@@ -140,7 +177,8 @@ class DeburrPlan(BenchPlan):
         z = math.cos(roll) * z0 + math.sin(roll) * np.cross(z0, a)
         R = np.stack([a, np.cross(z, a), z], 1)
         # the arms' corner one arm's radius off each face, then INTO_MM into the corner
-        corner = (e + (self.to_world(FACE_OUT, vec=True) + self.to_world(UP, vec=True)) * BC.DEBURR["hook_r"]
+        corner = (e + (self.to_world(self.job.face_out, vec=True) + self.to_world(self.job.up, vec=True))
+                  * BC.DEBURR["hook_r"]
                   - n * INTO_MM)
         return R, corner - R @ TIP
 
@@ -175,11 +213,11 @@ class DeburrPlan(BenchPlan):
         """Carry the tool over the edge, set the blade on it, draw it along, lift it off."""
         a, b = self.to_world(frm), self.to_world(to)
         s = (b - a) / np.linalg.norm(b - a)
-        n = self.to_world(BISECTOR, vec=True)
+        n = self.to_world(self.job.bisector, vec=True)
         R, p_a = self.stroke_pose(a, s)
         _, p_b = self.stroke_pose(b, s)
         t0 = self.t
-        up = self.to_world(UP, vec=True)
+        up = self.to_world(self.job.up, vec=True)
         self.look(t0, a)
         # high over the part first: carried straight in, the hand caught the part's ear and the tool hit it
         self.move("deburr_tool", t0, t0 + approach * 0.65, R, p_a + n * 25 + up * 50)
@@ -187,7 +225,7 @@ class DeburrPlan(BenchPlan):
         # in front of the edge's lower face and above it, a moment to see the hook onto it, then in and down: coming in
         # down the bisector a little low, the hook's top arm went in under datum A and threw the part; level with the
         # edge, it hung below it on the face
-        out = self.to_world(FACE_OUT, vec=True)
+        out = self.to_world(self.job.face_out, vec=True)
         self.move("deburr_tool", t0 + approach, t0 + approach + 0.35, R, p_a + out * 6 + up * 6)
         tc = t0 + approach + 0.35 + 0.4 + 0.35
         self.move("deburr_tool", tc - 0.35, tc, R, p_a)
@@ -238,7 +276,7 @@ class DeburrPlan(BenchPlan):
         self.strokes, self.held = [], []
         self.t = 0.5
         self.pick_up()
-        for i, (frm, to) in enumerate(STROKES):
+        for i, (frm, to) in enumerate(self.job.strokes):
             self.stroke(i, frm, to)
         t_down = self.put_back()
         self.steady(0.3, t_down + 0.2)
@@ -250,15 +288,16 @@ def curled(q: dict) -> dict:
     return q | {"ring_mcp_flex": 75.0, "ring_pip": 90.0, "little_mcp_flex": 75.0, "little_pip": 90.0}
 
 
-def build(solve=True, verbose=True) -> DeburrPlan:
-    plan = DeburrPlan(verbose=verbose)
+def build(part: str = "nist-ftc-10", solve=True, verbose=True) -> DeburrPlan:
+    job = JOBS[part]
+    plan = DeburrPlan(job, verbose=verbose)
     plan.compose()
     if solve:
         plan.solve()
-        plan.save({"strokes": plan.strokes, "part_at": PART_AT.tolist(), "tool_at": TOOL_AT.tolist(),
-                   "tool_yaw": TOOL_YAW, "loose": loose()})
+        plan.save({"part": part, "strokes": plan.strokes, "part_at": part_at(job.part, job.at_xy).tolist(),
+                   "tool_at": TOOL_AT.tolist(), "tool_yaw": TOOL_YAW, "loose": loose(job)})
     return plan
 
 
 if __name__ == "__main__":
-    build()
+    build(*sys.argv[1:2])

@@ -13,7 +13,8 @@
  "density_source": {"source": "proposed", "reason": "Steel's 7.85 scaled by 0.655, so the STEP's 77,617 cm3 weighs the spec's 880 lb: the STEP's solids are filled where the castings are hollow"},
  "links": {
   "base": {"parent": null}, "head": {"parent": "base"}, "jaw": {"parent": "base"}, "handwheel": {"parent": "base"},
-  "cover_idler": {"parent": "head"}, "cover_drive": {"parent": "head"}, "blade": {"parent": "head"}
+  "cover_idler": {"parent": "head"}, "cover_drive": {"parent": "head"}, "blade": {"parent": "head"},
+  "feed_valve": {"parent": "base"}
  },
  "masses_source": {"source": "cad", "reason": "Each moving link's CAD volume, centre of mass and inertia at 1 g/cm3 (bandsaw.links.json) times density_g_cm3: the head 108.5 kg, the jaw 8.0, the handwheel 1.8, each guard 2.8. The band (0.4 kg) is drawn on the head and weighed with nothing"},
  "joints": {
@@ -42,7 +43,11 @@
   "cover_drive": {"link": "cover_drive", "type": "hinge", "at_mm": [566.14, 237.21, 1007.91], "axis": [-0.7497, 0, 0.6618],
                   "range_deg": [0, 100], "friction_n_m": 0.5,
                   "source": "cad", "reason": "The same hinge line as the idler guard's (solid 192)",
-                  "range_source": "proposed", "range_reason": "As the idler guard"}
+                  "range_source": "proposed", "range_reason": "As the idler guard"},
+  "feed_valve": {"link": "feed_valve", "type": "hinge", "at_mm": [-1276.6, -164.4, 844.8], "axis": [0, 0, 1],
+                 "range_deg": [0, 1500], "mm_s_per_deg": 0.01667, "friction_n_m": 0.05, "kg": 0.02,
+                 "source": "cad", "reason": "The control box's third knob (solid 130), 26 mm across, turning on its own vertical axis; counterclockwise from above, positive, opens it",
+                 "range_source": "proposed", "range_reason": "A needle valve: 4.2 turns from shut to fully open (the feed's 25 mm/s), a quarter turn 1.5 mm/s; its friction holds it where a hand leaves it. The STEP's knob has no stem to measure, and the JET's rate knob opens a quarter turn for a material (the card's phase 4)"}
  },
  "blade": {
   "speed_sfpm": [98, 262], "source": "spec", "reason": "McMaster 8962N13: variable blade speed, 98-262 sfpm",
@@ -65,6 +70,7 @@
   "cover_idler": {"link": "cover_idler", "centre_mm": [-240.1, 83.9, 1512.1], "half_mm": [189.5, 163.3, 216.0], "rot_y_deg": 41.42, "reason": "The idler wheel's guard (solid 157), boxed along the bow"},
   "cover_drive": {"link": "cover_drive", "centre_mm": [632.1, 83.9, 742.8], "half_mm": [185.8, 163.3, 216.0], "rot_y_deg": 41.42, "reason": "The drive wheel's guard (solid 192), boxed along the bow"},
   "handwheel": {"link": "handwheel", "cylinder_x_mm": [-879.0, -823.8], "at_mm": [-882.5, 97.8, 575.3], "radius_mm": 66.0, "reason": "The handwheel's rim, spokes and hub (solid 59), as a disc of their bounds, x -879 to -824 on the GLB"},
+  "feed_valve": {"link": "feed_valve", "cylinder_z_mm": [837.1, 852.5], "at_mm": [-1276.6, -164.4, 844.8], "radius_mm": 13.0, "reason": "The feed valve's knob (solid 130), as a disc of its bounds on the GLB"},
   "handwheel_knob": {"link": "handwheel", "cylinder_x_mm": [-941.3, -879.0], "at_mm": [-882.5, 85.5, 624.0], "radius_mm": 11.0, "reason": "The spinner knob on the rim (solid 59): 22 mm across, its axis 50 mm off the screw's, 14 deg from the top toward -Y at joint zero, measured on the GLB; boxed with the wheel, a hand on it read as inside the wheel"}
  },
  "sites": {

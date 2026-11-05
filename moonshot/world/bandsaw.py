@@ -68,7 +68,13 @@ def _inertial(link: str) -> str:
             f'fullinertia="{" ".join(f"{v:.6f}" for v in inertia)}"/>')
 
 
-def _geom(name: str, c: dict) -> str:
+def _geom(name: str, c: dict, origin=(0.0, 0.0, 0.0)) -> str:
+    """A record collider as a geom, in a body whose origin is origin (the station's mm; the world's for most)."""
+    if origin != (0.0, 0.0, 0.0):
+        o = np.asarray(origin, float)
+        z0, z1 = c["cylinder_z_mm"]
+        return (f'<geom name="{name}" type="cylinder" size="{c["radius_mm"] * M:.5f}" '
+                f'fromto="{_xyz([0, 0, z0 - o[2], 0, 0, z1 - o[2]])}"/>')
     if "box_min_mm" in c:
         lo, hi = np.array(c["box_min_mm"], float), np.array(c["box_max_mm"], float)
         return (f'<geom name="{name}" type="box" size="{_xyz((hi - lo) / 2)}" '
@@ -76,6 +82,11 @@ def _geom(name: str, c: dict) -> str:
     if "centre_mm" in c:
         return (f'<geom name="{name}" type="box" size="{_xyz(c["half_mm"])}" pos="{_xyz(c["centre_mm"])}" '
                 f'euler="0 {math.radians(c["rot_y_deg"]):.5f} 0"/>')
+    if "cylinder_z_mm" in c:
+        z0, z1 = c["cylinder_z_mm"]
+        x, y, _ = c["at_mm"]
+        return (f'<geom name="{name}" type="cylinder" size="{c["radius_mm"] * M:.5f}" '
+                f'fromto="{_xyz([x, y, z0, x, y, z1])}"/>')
     x0, x1 = c["cylinder_x_mm"]
     _, y, z = c["at_mm"]
     return (f'<geom name="{name}" type="cylinder" size="{c["radius_mm"] * M:.5f}" '
@@ -113,14 +124,14 @@ def counterbalance() -> tuple[float, float]:
 
 def worldbody() -> tuple[str, str, str]:
     """(worldbody XML, actuator XML, equality XML). Each body's origin is the world origin at joint zero, so the
-    record's world coordinates are used directly; but the blade's, which is on the drive wheel's axis: it carries no
-    geometry, and an origin a metre off its axis swung round as the blade spun up, which a take record reads as the
-    body launched."""
+    record's world coordinates are used directly; but the blade's and the feed valve's, which are on their axes: an
+    origin a metre off its axis swung round as the blade spun up, which a take record reads as the body launched."""
     r = record()
     J, B = r["joints"], r["blade"]
     inner = {link: "" for link in r["links"]}
     for name, c in r["colliders"].items():
-        inner[c["link"]] += f"      {_geom(f'saw_{name}', c)}\n"
+        if c["link"] != "feed_valve":            # the valve's body is on its axis: its geom is placed there
+            inner[c["link"]] += f"      {_geom(f'saw_{name}', c)}\n"
     for name, s in {**r["sites"], **r["affordances"]}.items():
         inner[s["link"]] += f"      {_site(f'saw_{name}', s['at_mm'])}\n"
     k, ref = counterbalance()
@@ -136,7 +147,7 @@ def worldbody() -> tuple[str, str, str]:
         {_inertial(c)}
   {inner[c]}      </body>
 """
-    bj, hw, jaw = J["blade"], J["handwheel"], J["jaw"]
+    bj, hw, jaw, fv = J["blade"], J["handwheel"], J["jaw"], J["feed_valve"]
     body = f"""    <body name="saw_base" childclass="saw">
 {inner['base']}      <body name="saw_head">
         <joint name="saw_head" type="hinge" pos="{_xyz(head['at_mm'])}" axis="{_xyz(head['axis'], 1)}"
@@ -158,6 +169,12 @@ def worldbody() -> tuple[str, str, str]:
                frictionloss="{hw['friction_n_m']}" damping="{hw['damping_n_m_s']}"/>
         {_inertial('handwheel')}
   {inner['handwheel']}      </body>
+      <body name="saw_feed_valve" pos="{_xyz(fv['at_mm'])}">
+        <joint name="saw_feed_valve" type="hinge" pos="0 0 0" axis="{_xyz(fv['axis'], 1)}"
+               range="0 {math.radians(fv['range_deg'][1]):.5f}" frictionloss="{fv['friction_n_m']}"/>
+        <inertial pos="0 0 0" mass="{fv['kg']}" diaginertia="2e-6 2e-6 2e-6"/>
+        {_geom('saw_feed_valve', r['colliders']['feed_valve'], origin=fv['at_mm'])}
+      </body>
     </body>
 """
     top_rad_s = B["speed_sfpm"][1] * SFPM / (B["drive_radius_mm"] * M)
@@ -210,7 +227,8 @@ class Control:
         self.radius = r["blade"]["drive_radius_mm"] * M
         self.shut = math.radians(r["logic"]["guard_shut_deg"])
         self.lead = r["joints"]["handwheel"]["lead_mm"] * M / (2 * math.pi)
-        self.q = {n: m.jnt_qposadr[m.joint(f"saw_{n}").id] for n in ("head", "jaw", "handwheel", *COVERS)}
+        self.q = {n: m.jnt_qposadr[m.joint(f"saw_{n}").id] for n in ("head", "jaw", "handwheel", "feed_valve", *COVERS)}
+        self.mm_s_per_rad = r["joints"]["feed_valve"]["mm_s_per_deg"] * 180 / math.pi
         self.head = m.joint("saw_head").id
         self.end_of_cut = m.jnt_range[self.head][1] - math.radians(r["logic"]["end_of_cut_within_deg"])
         self.act = {n: m.actuator(f"a_saw_{n}").id for n in ("feed", "blade")}
@@ -224,7 +242,9 @@ class Control:
         self.speed_sfpm = float(np.clip(sfpm, *self.speeds))
 
     def set_feed(self, mm_s: float) -> None:
+        """Turn the feed valve's knob to where it gives mm_s."""
         self.feed_mm_s = float(np.clip(mm_s, *self.feeds))
+        self.data.qpos[self.q["feed_valve"]] = self.feed_mm_s / self.mm_s_per_rad
 
     def press(self, button: str) -> None:
         if button == "start":
@@ -265,6 +285,7 @@ class Control:
             self.events.append("end_of_cut")
         # the valve sets the edge's descent speed; the head turns at that over the edge's lever from the hinge: its
         # horizontal distance across the hinge's axis, however a scene turns the saw
+        self.feed_mm_s = float(np.clip(d.qpos[self.q["feed_valve"]] * self.mm_s_per_rad, *self.feeds))   # as turned
         mid = (d.site_xpos[self.edge[0]] + d.site_xpos[self.edge[1]]) / 2
         r, axis = mid - d.xanchor[self.head], d.xaxis[self.head]
         r = r - axis * (r @ axis)

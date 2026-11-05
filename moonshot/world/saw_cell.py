@@ -255,7 +255,7 @@ def standalone_xml(place: Place, loose: str) -> str:
 
 
 # --- the saw's state, carried from take to take, in the station's frame -----------------------------------------------
-SAW_JOINTS = ("head", "jaw", "handwheel", "cover_idler", "cover_drive")
+SAW_JOINTS = ("head", "jaw", "handwheel", "feed_valve", "cover_idler", "cover_drive")
 
 
 def saw_state(model: mujoco.MjModel, data: mujoco.MjData, ctl: BS.Control, place: Place) -> dict:

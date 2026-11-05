@@ -16,6 +16,9 @@ in front, open, the bar between the thumb and the fingers, which close round the
 
     python -m moonshot.motion.door_cycle            # plans all three into the data root's takes/door-close,
                                                     # cycle-start, door-open
+    python -m moonshot.motion.door_cycle ct-slbeam op10 [door-close cycle-start door-open]
+                                                    # a setup's own runs (default its start's two), its part in the
+                                                    # scene: takes/ct-slbeam-op10-door-close, ...
 
 Declared shortcut: the step across from the doorway to the pendant is a cut, as the body model doesn't walk.
 """
@@ -28,6 +31,7 @@ import numpy as np
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import kinematics as BM
+from moonshot.motion.loads import scene_spec
 from moonshot.motion.primitives import blend_q, min_jerk, open_like
 from moonshot.motion.step_take import THETA0, StepTake
 from moonshot.world import cell, vf2
@@ -429,9 +433,19 @@ class CycleStart(StepTake):
         self.t = 3.9
 
 
-def build(verbose=True):
-    for cls in (DoorClose, CycleStart, DoorOpen):
-        take = cls(verbose=verbose)
+PLANNERS = {"door-close": DoorClose, "cycle-start": CycleStart, "door-open": DoorOpen}
+
+
+def build(verbose=True, part: str | None = None, setup: str | None = None, names=tuple(PLANNERS)):
+    """Plans the takes (names) into the data root's takes/<name>, or with a part and setup, that setup's own runs of
+    them into takes/<part>-<setup>-<name> (moonshot/planning/takes.py per_setup), take.json naming what the physics
+    finds on the table (loads.scene_spec): the part as it enters the setup for the start, as it leaves it for the
+    unload's door-open. The motion is the shared takes': nothing in it reaches into the vise or onto a plate."""
+    for name in names:
+        cls = PLANNERS[name]
+        take = cls(out=TAKES / (f"{part}-{setup}-{name}" if part else name), verbose=verbose)
+        if part:
+            take.extra = scene_spec(part, setup, stock="out" if name == "door-open" else "in")
         take.plan()
         take.solve()
         take.save()
@@ -440,4 +454,8 @@ def build(verbose=True):
 
 
 if __name__ == "__main__":
-    build("--quiet" not in sys.argv)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) >= 2:
+        build("--quiet" not in sys.argv, args[0], args[1], tuple(args[2:]) or ("door-close", "cycle-start"))
+    else:
+        build("--quiet" not in sys.argv)

@@ -365,6 +365,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     so a hand reaching round a front holder clears the back one.
   - The band saw's lift-out slides the cut piece 65 mm off the jaw's plate past the stop block, pulls it 35 mm
     toward the operator and takes it by its ends: across its width the hand would point 90 deg off the forearm.
+    It sets the piece down within reach in front of the operator, not on the bench by the right hip (14-15 deg
+    of side lean and 15-22 deg of twist, past people's range); the bench stays where it is.
   - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
     by its end faces and a slide went into the skin and overloaded the arms).
   - A plate's clamp nuts are run down and snugged with a 3/4 in box-end wrench, in strokes (a fingertip spin

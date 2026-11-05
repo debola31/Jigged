@@ -2694,7 +2694,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-unload.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-shift",
@@ -4498,7 +4498,7 @@
       "type": "video",
       "path": "video/ll-1007223/op10-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -4875,7 +4875,7 @@
       "type": "video",
       "path": "video/ll-1007223/op20-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-load",

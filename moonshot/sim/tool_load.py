@@ -122,13 +122,14 @@ class ToolLoadRun(PendantRunner):
         ld = self.tk["load"]
         n = len(self.tk["step"]["facts"]["tool_ids"])
         stand = {int(k): t for k, t in ld["stand"].items()}
+        layout = TL.Layout.from_json(ld.get("stand_layout"))     # a plate's on the bracket; else the vise setups'
         add = ""
         if ld["kind"] in ("seat", "pick"):          # on the stand
-            add += TL.holder_body("holder", ld["tool"], TL.on_stand(ld["fork"]))
+            add += TL.holder_body("holder", ld["tool"], TL.on_stand(ld["fork"], layout))
             stand.pop(ld["fork"])
         elif ld["kind"] == "insert":               # in the hand from the start, where the pick left it held
             add += TL.holder_body("holder", ld["tool"], np.array(ld["path"][0][1:], float))
-        add += TL.stand_xml(n, stand)
+        add += TL.stand_xml(n, stand, layout)
         add += TL.carousel_xml({int(p): t for p, t in ld["pockets"].items() if t != "probe"}, int(ld["current"]))
         xml = xml.replace("<worldbody>\n", "<worldbody>\n" + add, 1)
         if ld["kind"] in CARRIED:                  # the carry's grip assist, switched by before_step
@@ -143,8 +144,9 @@ class ToolLoadRun(PendantRunner):
 
     def glbs(self) -> dict[str, list[dict]]:
         out = super().glbs()
-        for body, drawn in V.render_glbs().items():
-            out.setdefault(body, []).extend(drawn)
+        if "plate" not in self.tk["setup"]:        # the vise (a plate's spoilboard and clamps are drawn from their geoms)
+            for body, drawn in V.render_glbs().items():
+                out.setdefault(body, []).extend(drawn)
         ld = self.tk["load"]
         if ld["kind"] in CARRIED + ("atc",):
             out["holder"] = TL.render_glbs(ld["tool"])
@@ -157,6 +159,8 @@ class ToolLoadRun(PendantRunner):
         return out
 
     def meshes(self, folder: Path) -> dict[str, dict]:
+        if "plate" in self.tk["setup"]:            # the plate, the spoilboard and the clamps: drawn from their geoms
+            return {}
         return V.render_meshes(Load.from_json(self.tk["setup"]["load"]), folder)
 
     def start(self) -> None:

@@ -36,10 +36,11 @@ from moonshot.motion import solver as BS
 from moonshot.motion.pendant import (FINGER_DEG_S, LUMBAR as PENDANT_LUMBAR, OFFSET, PendantTake,
                                      fingertip_in_hand, key_at)
 from moonshot.motion.primitives import FPS, PosePath, min_jerk, open_for, open_like
-from moonshot.motion.setting import PROBE, SCREEN, part_in_vise
+from moonshot.motion.setting import PROBE, SCREEN, part_in_vise, part_on_table
 from moonshot.motion.step_take import HANGING as STEP_HANGING, REST_NEAR_MM, StepTake
 from moonshot.planning.steps import expand
-from moonshot.planning.takes import split, tool_takes
+from moonshot.planning.takes import SPLIT_FROM_FORK, forks, split, tool_takes
+from moonshot.planning.takes import stand as stand_of
 from moonshot.planning.validate import load_plan
 from moonshot.world import tooling as TL
 from moonshot.world import vf2
@@ -85,7 +86,11 @@ WIDE_SLIDE_MM = 30.0
 PRELOAD_S = 0.23
 LIFT_LEAD_S_PER_KG = 0.33                                # the lift planned this much sooner per kg the holder weighs
 HOLDER_KG_LIGHT = 1.2                                    # past this (every drill, reamer, tap and end mill weighs less)
-LIFT_S = 0.2                                             # the lift off the tines, 2.5 mm from 0.1 s after the
+BACK_ROW_SLIDE_CLEAR_MM = 6.0                            # a back-row holder slid out its rows' pitch further, and this,
+                                                         # its flange clear of the raised front fork's tines over it
+BACK_STOP_TOP_MM = 10.5                                  # a fork's back stop's top over its tines' top
+BRACKET_UP_MIN_MM = 60.0                                 # a holder off a plate's bracket lifted at least this far
+LIFT_S = 0.2                                            # the lift off the tines, 2.5 mm from 0.1 s after the
                                                          # loading starts: planned 1 mm up 0.19 s into it
 LOAD_RAMP_S = 0.26                                       # the holder's weight fed forward, and the grip firmed, over
                                                          # this from the loading's start (moonshot/sim/tool_load.py)
@@ -132,6 +137,18 @@ WIDE_EASE_BACK_MM = 2.0                                  # ... and, round a tool
 LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
+CLEAR_OVER_MM = 10.0                                     # ... or, from a plate's bracket, the back row's knobs by this
+BRACKET_INSERT_YAW_DEG = 25.0                            # an insert from a plate's bracket turns its grip this far
+                                                         # about the holder's axis (anticlockwise from above) on its way
+                                                         # in under the spindle, as YAW_DEG_PER_FORK turns a far fork's:
+                                                         # the holder starts higher, lifted over the back row, and
+                                                         # unturned the right arm was a median 29.1 negative
+                                                         # log-likelihood (people's 28.7), turned 15 deg 29.0, 20 28.85,
+                                                         # 25 28.8 and, the stand at the table's height, passing
+BESIDE_ROWS_MM = 110.0                                   # back to rest past a plate's bracket: the wrist this far right
+BESIDE_ROWS_Z = 1150.0                                   # of its rightmost fork, at this height over the table's front
+BEFORE_ROWS_MM = 200.0                                   # (clear of the plate's clamps), then down this far in front of
+BEFORE_ROWS_Z = 950.0                                    # its front row, to this height, and in to rest
 PICK_HOLD_S = 0.6                                        # a pick ends holding it up there this long, as the operator
                                                          # turns to step over to the doorway
 INSERT_STILL_S = 0.4                                     # and an insert starts from that hold, still this long
@@ -167,19 +184,19 @@ def sequence(plan: dict, step: dict) -> list[dict]:
     fork and is taken first, so the hand, which wraps a holder from its right, never has one beside it there."""
     num = pockets(plan)
     tools = step["facts"]["tool_ids"]
-    n = len(tools)
+    layout, at = stand_of(step), forks(step)
     earlier = {num[t]: t for s in expand(plan) if s["title"] == "Load the tools" and s["id"] != step["id"]
                for t in s["facts"]["tool_ids"] if num[t] < num[tools[0]]}
-    carousel, stand = dict(earlier), {n - 1 - i: t for i, t in enumerate(tools)}
+    carousel, stand = dict(earlier), dict(zip(at, tools))
     state = lambda: {"pockets": dict(sorted(carousel.items())), "stand": dict(sorted(stand.items()))}    # noqa: E731
     out = [{"name": "00-change", "kind": "change", "to": num[tools[0]], "spindle": "probe", "current": PROBE_POCKET}
            | state()]
     carousel[PROBE_POCKET] = "probe"
     names = iter(tool_takes(step)[1:])
-    for i, t in enumerate(tools):
-        p, fork = num[t], n - 1 - i
+    for t, fork in zip(tools, at):
+        p = num[t]
         take = {"tool": t, "fork": fork, "pocket": p, "spindle": None, "current": p}
-        if split(fork):                   # picked at the stand, then, across the cut, inserted from the doorway
+        if split(fork, layout):           # picked at the stand, then, across the cut, inserted from the doorway
             out.append({"name": next(names), "kind": "pick"} | take | state())
             stand.pop(fork)
             out.append({"name": next(names), "kind": "insert"} | take | state())
@@ -336,6 +353,21 @@ def door_lumbar(fork: int) -> np.ndarray:
     return DOOR_LUMBAR + [STANCE_MM_PER_FORK * fork, 0.0, 0.0]
 
 
+def stance(fork: int, layout: TL.Layout = TL.ONE_ROW, part: str = "seat") -> np.ndarray:
+    """Where the body stands for a take of a holder in fork `fork` of the stand `layout`: for a seat, as far right of it
+    as for the vise setups' stand (door_lumbar), but no further left than the doorway's (door_lumbar(0): the left
+    index's reach to Tool Release) nor further right than a seat's furthest; for a pick (planning/takes.py split), where
+    the reach to it is the vise setups' first fork's, right of it and back from it as for that one (on a plate's bracket,
+    in front of the table, 182-235 mm further back than the doorway); for an insert, in the doorway. On the vise setups'
+    stand, door_lumbar(fork) for a seat or a pick and door_lumbar(0) for an insert, as before."""
+    if part == "insert":
+        return door_lumbar(0)
+    off = TL.stand_axis(fork, layout) - TL.stand_axis(0)              # mm from the vise setups' first fork
+    if part == "seat":
+        return DOOR_LUMBAR + [float(np.clip(off[0], 0.0, STANCE_MM_PER_FORK * (SPLIT_FROM_FORK - 1))), 0.0, 0.0]
+    return DOOR_LUMBAR + [off[0], off[1], 0.0]
+
+
 def rest_at(take: StepTake) -> None:
     """The take's hands hang at rest at REST_MM from its lumbar (the left's mirrored, as the planner has it)."""
     take.rest = take.lumbar + REST_MM
@@ -355,29 +387,72 @@ class Seat(ToolTake):
     standing in front of it and held up clear ("pick"), or its second, from that hold, standing in the doorway, as
     the operator steps over across the cut ("insert")."""
 
-    def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True, part: str = "seat"):
-        self.part = part
-        self.stance_fork = 0 if part == "insert" else fork     # where the body stands: before the fork, or the doorway
-        super().__init__(out, door_lumbar(self.stance_fork), verbose)
+    def __init__(self, out, tool_id: str, fork: int, n_forks: int, verbose=True, part: str = "seat",
+                 layout: TL.Layout = TL.ONE_ROW):
+        self.part, self.layout = part, layout
+        lumbar = stance(fork, layout, part)                  # where the body stands: before the fork, or the doorway
+        self.stance_fork = (lumbar[0] - DOOR_LUMBAR[0]) / STANCE_MM_PER_FORK      # as forks right of the doorway's
+        super().__init__(out, lumbar, verbose)
         rest_at(self)
         self.tool, self.fork, self.n = tool_id, fork, n_forks
+        self.back_row = bool(layout.per_row) and layout.row_col(fork)[0] == 1     # on a plate's bracket's back row
         self.wide = TL.cutter(tool_id)["body_r"] > TL.BODY[0]     # a tool wider than the holder's body: no slack round it
         # out of the fork this far before it goes up: round a wide tool the fingers wrap wider, and lifted after 68 mm
         # the face mill's caught the end of its fork's tine
         self.slide_mm = SLIDE_MM + (WIDE_SLIDE_MM if self.wide else 0.0)
-        boxes = []
-        for lo, hi in ((np.array(REC["colliders"]["table_top"]["box_min_mm"]) + OFFSET,
-                        np.array(REC["colliders"]["table_top"]["box_max_mm"]) + OFFSET),
-                       (TL.stand_axis(0) + [-40.0, TL.STAND["plate_y"], TL.STAND["table_z"] - TL.stand_axis(0)[2]],
-                        TL.stand_axis(n_forks - 1) + [40.0, TL.STAND["plate_y"] + 8.0, 12.0])):
-            boxes.append(((lo + hi) / 2, (hi - lo) / 2))
-        self.boxes = boxes
+        if self.back_row:           # and from a plate's bracket's back row, on out from under the emptied front fork
+            self.slide_mm += layout.back_mm[0] + BACK_ROW_SLIDE_CLEAR_MM
+        # what the forearms keep clear of (moonshot/motion/solver.py): the table, and each row's back plate. The table's
+        # box here is the record's moved by OFFSET, 381 mm left of where the table stands at loading (its right end at
+        # x -306, not 75): a known error, left until after Nov 6 as fixing it moves nist-ftc-10's published plans. The
+        # bracket's (TL.BRACKET) boxes are laid out against the real table: its shelf, out from the table's front face
+        boxes = [(np.array(REC["colliders"]["table_top"]["box_min_mm"]) + OFFSET,
+                  np.array(REC["colliders"]["table_top"]["box_max_mm"]) + OFFSET)]
+        for p in TL.stand_plates(layout, n_forks):
+            boxes.append((np.array([p["x"][0] - 40.0, p["y"], layout.foot_z]), np.array([p["x"][1] + 40.0, p["y"] + 8.0, p["top"]])))
+            if layout.bracket:
+                boxes.append((np.array([p["x"][0] - 100.0, p["y"] - 52.0, layout.foot_z - TL.BRACKET["face_h"]]),
+                              np.array([p["x"][1] + 100.0, TL.BRACKET["face_y"], layout.foot_z])))
+        self.boxes = [((lo + hi) / 2, (hi - lo) / 2) for lo, hi in boxes]
         if part != "pick":                                  # the pick doesn't press Tool Release
             self.solve_grips({"release": self.release_spec()}, source=Seat.release_spec)
         g = holder_grip(tool_id)
         W_rel = np.array(g["W_rel"], float)
         self.grips["holder"] = {"q": self.hand.clamp(g["q"]), "H": np.array(g["H"], float), "W": W_rel, "obj": np.zeros(3),
                                 "side": "R", "theta": np.zeros(12), "W_rel": W_rel, "loss": g["loss"]}
+
+    def up_mm(self, slid_z: float) -> float:
+        """How far up a holder goes once out of its fork, its gauge line from slid_z: CLEAR_UP_MM, so its tool clears
+        the part and the vise; on a plate's bracket (TL.BRACKET), whose rows its way into the machine crosses, as far as
+        its tool's tip clears by CLEAR_OVER_MM what stands there: from the front row, the back row's holders' knobs; from
+        the back row, the emptied front forks' back stops (BRACKET_UP_MIN_MM at least)."""
+        lay = self.layout
+        if not (lay.bracket and lay.per_row):
+            return CLEAR_UP_MM
+        if lay.row_col(self.fork)[0] == 0 and self.n > lay.per_row:
+            top = TL.on_stand(lay.per_row, lay)[2] + TL.KNOB_HEAD[1] + TL.KNOB_HEAD[0]
+        else:
+            top = TL.stand_axis(0, lay)[2] + BACK_STOP_TOP_MM
+        return max(BRACKET_UP_MIN_MM, top + CLEAR_OVER_MM + TL.cutter(self.tool)["length"] - slid_z)
+
+    def yaw_in_deg(self) -> float:
+        """How far the grip turns about the holder's axis (from above, anticlockwise) by the time it is under the
+        spindle: YAW_DEG_PER_FORK for each fork's stance right of the doorway's; an insert from a plate's bracket, which
+        starts with the holder up where the lift over the back row left it, by BRACKET_INSERT_YAW_DEG."""
+        if self.layout.bracket and self.part == "insert":
+            return BRACKET_INSERT_YAW_DEG
+        return YAW_DEG_PER_FORK * self.stance_fork
+
+    def over_bracket(self) -> list[np.ndarray]:
+        """The right hand's way back to rest from the spindle past a plate's bracket (TL.BRACKET): out over the table to
+        the right of the stand, BESIDE_ROWS_MM right of its rightmost fork, down in front of the stand's right end,
+        BEFORE_ROWS_MM in front of its front row, and in to rest: over the rows and down in front of them, the open
+        fingers came down on the waiting holders' tapers and knobs."""
+        lay = self.layout
+        x = max(TL.stand_axis(k, lay)[0] for k in range(self.n)) + BESIDE_ROWS_MM
+        y_f = lay.first_mm[1]
+        return [np.array([x, TL.BRACKET["face_y"] + 20.0, BESIDE_ROWS_Z]),
+                np.array([x, y_f - BEFORE_ROWS_MM, BEFORE_ROWS_Z])]
 
     def shape_s(self, a: dict, b: dict) -> float:
         """How long the hand takes from one shape to another, as a pendant take's (moonshot/motion/pendant.py)."""
@@ -398,7 +473,7 @@ class Seat(ToolTake):
 
     # --- the holder's path -----------------------------------------------------------------------------------------
     def plan(self) -> dict:
-        P0 = TL.on_stand(self.fork)
+        P0 = TL.on_stand(self.fork, self.layout)
         g = self.grips["holder"]
         H, Wg = self.grip_pose("holder", P0)
         kg = TL.holder_kg(self.tool)
@@ -471,9 +546,10 @@ class Seat(ToolTake):
         # off the tines, out of the fork toward the operator, up clear of the part, and in under the spindle
         t1 = tl + LIFT_S
         t2 = t1 + 0.43
-        t2b = t2 + 0.5
         slid = P0 + [0, -self.slide_mm, LIFT_MM]
-        lifted = slid + [0, 0, CLEAR_UP_MM]
+        up = self.up_mm(slid[2])
+        t2b = t2 + 0.5 * math.sqrt(up / CLEAR_UP_MM)       # higher, longer, its peak acceleration kept
+        lifted = slid + [0, 0, up]
         keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, lifted)]
         if self.part == "pick":
             return self.plan_pick(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted)
@@ -502,8 +578,8 @@ class Seat(ToolTake):
         """The insert's start: standing in the doorway, the holder held up as the pick left it, where it stood from the
         body then (the pick's lumbar to the doorway's: the operator stepped over, the holder in hand), still a moment
         before the carry in under the spindle."""
-        lifted = (TL.on_stand(self.fork) + [0, -self.slide_mm, LIFT_MM + CLEAR_UP_MM]
-                  + door_lumbar(0) - door_lumbar(self.fork))
+        slid = TL.on_stand(self.fork, self.layout) + [0, -self.slide_mm, LIFT_MM]
+        lifted = slid + [0, 0, self.up_mm(slid[2])] + door_lumbar(0) - stance(self.fork, self.layout, "pick")
         H, W = self.grip_pose("holder", lifted)
         self.side["R"]["wrist"] = W
         self.side["R"]["fkeys"] = [(0.0, g["q"])]
@@ -565,7 +641,7 @@ class Seat(ToolTake):
         t8 = tr + 0.35
         t9 = t8 + 0.25
         def turned(t):                                      # the grip turned about the holder's axis on the way in
-            a = math.radians(YAW_DEG_PER_FORK * self.stance_fork) * min_jerk((t - t2b) / (t3 - t2b))
+            a = math.radians(self.yaw_in_deg()) * min_jerk((t - t2b) / (t3 - t2b))
             return np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
         # eased down off the flange, or as far as the grip says (holder_grip.json "ease_mm": the 11 mm drill's lower
         # fingers, eased 1.5 mm, swept its shank 5 mm above its tip as the hand opened off it)
@@ -593,9 +669,12 @@ class Seat(ToolTake):
                                                             # once they have: the face mill's grip has no slack)
         self.add("R", t9, t_out + 0.45, lambda t: [("pose", H9, W9 + (out - W9) * min_jerk((t - t_out) / 0.45), 2.0)])
         self.side["R"]["wrist"] = out
-        clear = self.rest + CLEAR_STAND_MM
-        back_s = BACK_S * math.sqrt(max(1.0, (np.linalg.norm(clear - out) + np.linalg.norm(self.rest - clear)) / BACK_MM))
-        self.transit("R", t_out + 0.45, t_out + 0.45 + back_s, self.rest, via=[clear])
+        via = [self.rest + CLEAR_STAND_MM]
+        if self.layout.bracket:     # from a plate's bracket in front of the table, back over its rows and down in front
+            via = self.over_bracket()                       # of them: down to rest by the stand's way, it met the rows
+        pts = [out, *via, self.rest]
+        back_s = BACK_S * math.sqrt(max(1.0, sum(np.linalg.norm(b - a) for a, b in zip(pts, pts[1:])) / BACK_MM))
+        self.transit("R", t_out + 0.45, t_out + 0.45 + back_s, self.rest, via=via)
         t10 = t_out + 0.45 + back_s                         # at rest
         self.fingers("R", t10 - 0.2, self.q_relax)
         self.look(t9 + 0.2, SPINDLE - [0, 0, 40.0])
@@ -658,13 +737,15 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
     if step["title"] != "Load the tools":
         raise ValueError(f"{step_id} is {step['title']!r}, not Load the tools")
     root = data_root() / "takes" / part / step_id
-    p = part_in_vise(plan, step["setup"])
+    plate = "clamps" in step["facts"]                       # a plate on the spoilboard, its tools on the bracket's stand
+    p = part_on_table(plan, step["setup"]) if plate else part_in_vise(plan, step["setup"])
     seq = sequence(plan, step)
-    # the grips the takes share: the pendant's, and Tool Release's for each fork, which the body reaches from where it
-    # stands for that fork (door_lumbar)
-    stance = lambda s: 0 if s["kind"] == "insert" else s["fork"]         # noqa: E731  the fork the body stands for
+    layout = stand_of(step)
+    # the grips the takes share: the pendant's, and Tool Release's for each stance, which the body reaches from where it
+    # stands (`stance`), named by the vise setups' fork it stands for
+    at = lambda s: round((stance(s["fork"], layout, s["kind"])[0] - DOOR_LUMBAR[0]) / STANCE_MM_PER_FORK)  # noqa: E731
     shared = {"pendant": root / "pendant-grips.json"} | {
-        f"seat{stance(s)}": root / f"seat-grips-fork{stance(s)}.json" for s in seq if s["kind"] in ("seat", "insert")}
+        f"seat{at(s)}": root / f"seat-grips-fork{at(s)}.json" for s in seq if s["kind"] in ("seat", "insert")}
     for f in shared.values():               # every step's takes stand and grip alike: a grip another step solved
         if not f.exists():                  # serves (the cache's key says whether it still does)
             other = sorted(root.parent.glob(f"*/{f.name}"))
@@ -680,14 +761,15 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
         out.mkdir(parents=True, exist_ok=True)
         extra = {}
         if s["kind"] in ("seat", "insert"):
-            seat = shared[f"seat{stance(s)}"]
+            seat = shared[f"seat{at(s)}"]
             if seat.exists():
                 own.write_bytes(seat.read_bytes())
-            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part=s["kind"])
+            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part=s["kind"],
+                        layout=layout)
             seat.write_bytes(own.read_bytes())
             extra = take.plan()
         elif s["kind"] == "pick":
-            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part="pick")
+            take = Seat(out, s["tool"], s["fork"], len(step["facts"]["tool_ids"]), verbose, part="pick", layout=layout)
             extra = take.plan()
         else:
             if shared["pendant"].exists():
@@ -698,6 +780,8 @@ def build(part: str, step_id: str, only: str | None = None, verbose: bool = True
         take.save()
         tk = json.loads((out / "take.json").read_text(encoding="utf-8"))
         spindle_tool = PROBE if s["spindle"] == "probe" else None
+        if layout != TL.ONE_ROW:                            # the vise setups' stand is the one a take names none for
+            extra = extra | {"stand_layout": layout.to_json()}
         tk |= {"step": step, "card": CARD, "load": s | extra,
                "setup": p | {"tool": spindle_tool, "setup_mode": True, "mode": "mdi" if s["kind"] != "change" else "",
                              "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}}

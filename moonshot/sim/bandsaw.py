@@ -36,10 +36,11 @@ BUTTON_MM = 6.0             # a press registers with the pad's skin this near th
 AIM_TAU, AIM_MAX = 0.15, 0.04   # a fingertip is steered onto a control by sight this fast (s), by at most this (m), as
                                 # the pendant takes' (moonshot/sim/pendant.py)
 AIM_LEAD_S = 0.5            # ... from this long before its press
-TURN_N_PER_RAD = 300.0      # the push on the handwheel's knob grows this much per radian the wheel is behind its plan
-TURN_N_MAX = 40.0           # ... to at most this (proposed: the screw's friction alone takes 20 N at the knob. Pushed
-                            # with the arm reaching down to the thigh, the replayed forearm went past its maximum, 2.0 at
-                            # 80 N and 1.24 at 45, as the jaw snugged)
+TURN_N_PER_RAD = 150.0      # the push on the handwheel's knob grows this much per radian the wheel is behind its plan:
+                            # little for the few degrees it trails on its way round, to TURN_N_MAX as the jaw snugs and
+                            # the wheel stalls short of the plan's half turn
+TURN_N_MAX = 80.0           # ... to at most this (proposed: a firm push down, snugging the jaw: at 40 N it closed on the
+                            # bar at 10 N, at 80 at 106-175 N, and the gate's 82.5 N takes 2 N m through the screw)
 NEVER_HELD = ["saw_blade", "saw_head"]   # the band's collider, and the head that carries it (the checks read what a
                                          # hand touches by body, validate/objects.py touched)
 DRIVEN = ["saw", "saw_base", "saw_head", "saw_cover_idler", "saw_cover_drive", "saw_blade", "saw_jaw",

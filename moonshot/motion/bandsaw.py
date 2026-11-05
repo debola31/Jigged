@@ -120,16 +120,19 @@ SNUG_DEG = 20.0             # the handwheel turned this far past where the jaw m
 KNOB_START_DEG = -104.2     # where the handwheel is left: its knob level on the operator's left (at joint zero it is
                             # 14.2 deg past the top), so the half turn takes it over the top to their right, not down
                             # to their knees
-KNOB_TURN_S = 4.0           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
+KNOB_TURN_S = 5.0           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
                             # to 1.2 N m at its speed, 45 N at the knob on top of its friction's 20, more than the arm
-                            # reaching down to the thigh can push (the replayed forearm past its maximum)
+                            # reaching down to the thigh can push sideways over the top of the wheel (the replayed
+                            # forearm past its maximum); at 4 s a 30 N push still fell behind there (the wheel alone
+                            # turns at 50 deg/s under 30 N, 110 under 40)
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
 KNOB_EFFORT = 0.4           # the fist's effort on the knob, which also stiffens the arm: at 0.15 the arm followed its
                             # plan so loosely that the wheel stalled near the top of its turn, short of the bar
 KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
                             # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
-KNOB_N = 30.0               # the push at the knob (the card's 40 N, less: snugging the jaw to the gate's 82.5 N takes
-                            # about 25 N there, its friction's 20 and 0.2 N m through the screw)
+KNOB_N = 32.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
+                            # jaw snugs (moonshot/sim/bandsaw.py TURN_N_PER_RAD), the knob coming down the wheel's
+                            # right side, pushed down
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
 VALVE_TURN_S = 0.9          # ... over this long
 SLIDE_OFF_MM = 35.0         # the cut piece slid this far off the fixed jaw's plate before it is taken: its far side lies

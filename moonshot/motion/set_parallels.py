@@ -79,6 +79,12 @@ def fingers_open_for(hand, q: dict, size_mm: float, lag_mm: float = 0.0) -> dict
     return hand.clamp({n: q[n] + hi * (ext[n] - q[n]) for n in q})
 
 
+def thumb_off(hand, q: dict, amount: float) -> dict:
+    """The pinch let go by the thumb alone: its joints as open_like opens them, the fingers as they pinch."""
+    opened = open_like(hand, q, amount)
+    return hand.clamp(q | {n: v for n, v in opened.items() if n.startswith("thumb")})
+
+
 def reach(take: StepTake, grip: str, t0: float, size_mm: float, start=None, lag_mm: float = 0.0,
           opening=open_for) -> float:
     """The right hand's reach to grasp `grip`'s block from wherever it is at t0: up to the ready point, a pause, the
@@ -260,9 +266,15 @@ class SetParallels(StepTake):
             self.effort("R", t_down + 0.2, 0.0, None)
             self.fingers("R", t_down + 0.25, g["q"])
             # just off it while the hand stays put, and open the rest of the way once up over the parallels' tops: open
-            # wide on the seat, the middle finger beside parallel b went 9 mm into parallel a, and knocked it over
-            self.fingers("R", t_down + 0.55, open_like(self.hand, g["q"], 0.06))
-            self.fingers("R", t_down + 0.8, open_like(self.hand, g["q"], 0.06))
+            # wide on the seat, the middle finger beside parallel b went 9 mm into parallel a, and knocked it over.
+            # With a set parallel nearer than NEAR_SET_MM on the fingers' side (they pinch the far face), the thumb lets
+            # go and the fingers stay as they pinch until the hand is up: opening them 6% on the seat, with ll-1007223
+            # op10's 24 mm between them, touched parallel a and set it rocking on its edge
+            crowded = any(abs(float(self.dest[b][1] - self.dest[name][1])) - V.PARALLEL_T < NEAR_SET_MM
+                          and self.dest[b][1] > self.dest[name][1] for b in ORDER[:ORDER.index(name)])
+            letgo = thumb_off if crowded else open_like
+            self.fingers("R", t_down + 0.55, letgo(self.hand, g["q"], 0.06))
+            self.fingers("R", t_down + 0.8, letgo(self.hand, g["q"], 0.06))
             self.fingers("R", t_down + 1.05, open_like(self.hand, g["q"], 0.4))
             H1, W1 = self.grip_pose(grip, c1, R_at(t_down))
             off = W1 + np.array([0.0, -20.0, 110.0])    # fingertips 60 mm over the jaws' tops: at 60 the hand, moving on

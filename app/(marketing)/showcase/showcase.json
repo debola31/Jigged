@@ -965,7 +965,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-seat",
@@ -983,7 +983,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-seat.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-check",

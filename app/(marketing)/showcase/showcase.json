@@ -238,7 +238,8 @@
        "item": "em-0375-3fl"
       },
       {
-       "name": "2.5 mm drill"
+       "name": "2.5 mm drill",
+       "item": "drill-2p5mm"
       },
       {
        "name": "6 mm drill",
@@ -364,7 +365,8 @@
      },
      "uses": [
       {
-       "name": "2.5 mm drill"
+       "name": "2.5 mm drill",
+       "item": "drill-2p5mm"
       }
      ],
      "media": {
@@ -609,10 +611,12 @@
        "item": "em-0250-3fl"
       },
       {
-       "name": "3.5 mm reamer"
+       "name": "3.5 mm reamer",
+       "item": "ream-3p5mm"
       },
       {
-       "name": "M3 tap"
+       "name": "M3 tap",
+       "item": "tap-m3-05"
       }
      ],
      "media": {
@@ -734,7 +738,8 @@
      },
      "uses": [
       {
-       "name": "3.5 mm reamer"
+       "name": "3.5 mm reamer",
+       "item": "ream-3p5mm"
       }
      ],
      "media": {
@@ -759,7 +764,8 @@
      },
      "uses": [
       {
-       "name": "M3 tap"
+       "name": "M3 tap",
+       "item": "tap-m3-05"
       }
      ],
      "media": {
@@ -996,7 +1002,8 @@
      },
      "uses": [
       {
-       "name": "7 mm drill"
+       "name": "7 mm drill",
+       "item": "drill-7mm"
       }
      ],
      "media": {
@@ -1040,7 +1047,8 @@
      },
      "uses": [
       {
-       "name": "7 mm drill"
+       "name": "7 mm drill",
+       "item": "drill-7mm"
       }
      ],
      "media": {
@@ -9130,7 +9138,42 @@
     "x": 42223.2,
     "y": 12478.7,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "2.5 mm cobalt jobber drill, the M3 tap drill",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.0984"
+     ],
+     [
+      "Designation",
+      "2.5 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "1.1811"
+     ],
+     [
+      "Overall length",
+      "2.2441"
+     ],
+     [
+      "Shank diameter",
+      "0.0984"
+     ]
+    ]
    },
    {
     "item": "drill-7mm",
@@ -9138,7 +9181,42 @@
     "x": 42268,
     "y": 12476.5,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "7 mm cobalt jobber drill",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.2756"
+     ],
+     [
+      "Designation",
+      "7 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "2.7165"
+     ],
+     [
+      "Overall length",
+      "4.2913"
+     ],
+     [
+      "Shank diameter",
+      "0.2756"
+     ]
+    ]
    },
    {
     "item": "ream-3p5mm",
@@ -9146,7 +9224,38 @@
     "x": 42313.2,
     "y": 12478.2,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "3.5 mm carbide machine reamer, G6, 6 straight flutes",
+    "category": "tools",
+    "kind": "reamer",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.1378"
+     ],
+     [
+      "Material",
+      "carbide"
+     ],
+     [
+      "Flutes",
+      "6"
+     ],
+     [
+      "Flute length",
+      "0.7874"
+     ],
+     [
+      "Overall length",
+      "2.7559"
+     ],
+     [
+      "Shank diameter",
+      "0.1378"
+     ]
+    ]
    },
    {
     "item": "tap-m3-05",
@@ -9154,7 +9263,38 @@
     "x": 42356.5,
     "y": 12478.5,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "M3x0.5 HSS spiral-point plug tap, 3 flutes",
+    "category": "tools",
+    "kind": "tap",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.1181"
+     ],
+     [
+      "Designation",
+      "M3x0.5"
+     ],
+     [
+      "Material",
+      "hss"
+     ],
+     [
+      "Flutes",
+      "3"
+     ],
+     [
+      "Flute length",
+      "0.4724"
+     ],
+     [
+      "Overall length",
+      "2.2047"
+     ]
+    ]
    },
    {
     "item": "height-gauge-1",
@@ -10732,7 +10872,45 @@
       1.26,
       57.0
      ]
-    }
+    },
+    "description": "2.5 mm jobber drill, cobalt HSS, 2 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 2.5,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 30,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 57,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "cobalt HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 1.92,
+      "unit": "g",
+      "note": "volume x material density"
+     },
+     {
+      "name": "Point angle",
+      "value": 135.0,
+      "unit": "deg"
+     }
+    ]
    },
    "drill-3p3": {
     "name": "3.3 mm cobalt jobber drill",
@@ -11021,7 +11199,45 @@
       3.52,
       109.0
      ]
-    }
+    },
+    "description": "7 mm jobber drill, cobalt HSS, 2 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 7.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 69,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 109,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "cobalt HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 27.65,
+      "unit": "g",
+      "note": "volume x material density"
+     },
+     {
+      "name": "Point angle",
+      "value": 135.0,
+      "unit": "deg"
+     }
+    ]
    },
    "drillh": {
     "name": "H jobber drill",
@@ -12397,7 +12613,40 @@
       1.75,
       70.0
      ]
-    }
+    },
+    "description": "3.5 mm machine reamer, G6, carbide, 6 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 3.5,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 20,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 70,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 6,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "carbide"
+     },
+     {
+      "name": "Mass",
+      "value": 8.63,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "ream-8": {
     "name": "8 mm chucking reamer",
@@ -12845,7 +13094,44 @@
       1.51,
       56.0
      ]
-    }
+    },
+    "description": "M3x0.5 spiral-point tap, HSS, 3 flutes.",
+    "key_specs": [
+     {
+      "name": "Thread",
+      "value": "M3x0.5-6H"
+     },
+     {
+      "name": "Diameter",
+      "value": 3.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 12,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 56,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 3,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 3.04,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "tap-m4": {
     "name": "M4x0.7 spiral-point tap",

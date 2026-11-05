@@ -55,9 +55,11 @@ ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.
 ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50")}
 # the stock's box in the model's frame where the part isn't centred on the origin: centred on the part's box (its
 # STEP's bounding box) on every axis, so each face machined takes an even share off. ll-1007223 finishes 49 x 40 x 75
-# (x 0..49, y 0..40, z -37.5..37.5); ct-slbeam 76.2 x 38.1 x 50.8 from the origin, its 38.1 the bar's own width
+# (x 0..49, y 0..40, z -37.5..37.5); ct-slbeam 76.2 x 38.1 x 50.8 from the origin, its 38.1 the bar's own width;
+# ll-1005337's plate 400 x 600 (x -400..0, y 0..600), its 19.05 the plate's own thickness (z -20..-0.95)
 STOCK_MM = {"ll-1007223": ((-4.075, 53.075), (-2.225, 42.225), (-41.275, 41.275)),
-            "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975))}
+            "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975)),
+            "ll-1005337": ((-403.2, 3.2), (-30.2, 630.2), (-20.0, -0.95))}
 # ll-1007223: Op 10 faces the top to 40 and profiles the flange's edges and both ends to 49 x 75 down to 1 mm above
 # the jaws (y 17.475); Op 20 holds it by the flange in soft jaws, on the faced top, its box the 49 x 75 the jaws and
 # the parallels touch: the skirt Op 10 couldn't reach (y -2.225..17.475, 4.1 mm wider each side, 3.8 longer each

@@ -3,7 +3,8 @@ the plate (moonshot/world/spoilboard.py, no vise), its doors open, the clamps pa
 step finds them, the holster on the front panel and the gun a free body in it, held as every blow-off holds it
 (moonshot/sim/blow_off.py). No air flows.
 
-    python -m moonshot.sim.plate_blow_off nist-ftc-09 op10-clean     # runs the take and writes its take record
+    python -m moonshot.sim.plate_blow_off nist-ftc-09 op10-clean     # runs takes/nist-ftc-09-op10-clean-blow-off and
+                                                                     # writes its take record
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import sys
 import numpy as np
 
 from moonshot.motion import blow_off as BO
+from moonshot.motion import plate_blow_off as PBO
 from moonshot.motion import plates
 from moonshot.sim import blow_off as SBO
 from moonshot.sim.record import glbs_in_bodies
@@ -72,7 +74,7 @@ class PlateBlowOff(SBO.BlowOff):
 
 
 def main(argv: list[str]) -> int:
-    folder = BO.TAKES / f"{argv[0]}-{argv[1]}"
+    folder = BO.TAKES / PBO.folder(argv[0], argv[1])
     r = PlateBlowOff(folder)
     r.run(log=print)
     r.export()

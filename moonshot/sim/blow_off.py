@@ -5,6 +5,8 @@ conform to it); while aiming, the index squeezes the trigger, which is held when
 no air flows.
 
     python -m moonshot.sim.blow_off           # runs the take in the data root and writes its take record
+    python -m moonshot.sim.blow_off ct-slbeam-op10-clean-blow-off      # a setup's own run, its table as its take.json
+                                                                       # names it (moonshot/sim/setup_scene.py)
 """
 from __future__ import annotations
 
@@ -150,12 +152,13 @@ class BlowOff(FirmGrip, _Cell):
 
 
 def main(argv: list[str]) -> int:
-    r = BlowOff()
-    r.run(log=print)
-    r.export()
-    out = r.outcome()
-    (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-    print("blow-off", out, flush=True)
+    for name in argv or ["blow-off"]:
+        r = BlowOff(BO.TAKES / name)
+        r.run(log=print)
+        r.export()
+        out = r.outcome()
+        (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(name, out, flush=True)
     return 0
 
 

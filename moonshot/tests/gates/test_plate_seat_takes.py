@@ -13,7 +13,7 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKES = ["nist-ftc-09-op10-seat", "ll-1005337-op10-seat"]
+TAKES = ["nist-ftc-09-op10-set-clamps", "ll-1005337-op10-set-clamps"]
 
 
 @pytest.fixture(scope="module", params=TAKES)

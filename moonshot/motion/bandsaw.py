@@ -9,7 +9,7 @@ body model faces one way and doesn't walk. So the person works it from three pla
 turned under the body for each (moonshot/world/saw_cell.py Place):
 
 1. <part>-saw, behind the saw at its infeed (card phase 6): the right hand's fingers on the bar's tail push it
-   along the bed until its other end, which the last cut left at the blade, meets the stop block; it holds it there
+   along the bed until its other end, which shows OUT_MM past the blade, meets the stop block; it holds it there
    and against the fixed jaw a moment, and lets go.
 2. <part>-saw-clamp, at the left end (phases 8-9): the right hand turns the vise handwheel by its knob until the jaw
    is snug on the bar (the card's half turn, as the jaw is left).
@@ -29,7 +29,8 @@ Where the card can't be followed on this saw, and why (each for review):
   vise. Here the two are never at once (the jaw and the handwheel are a metre from the bar), and from the front the
   bar and the piece are on the right of the stop's left side, so the right hand does both; the left hangs.
 - Phases 1-5 (feed off, lift the bow, set the rate, open the jaw) come before these takes: the bow is up at
-  RAISED_DEG, the jaw open JAW_GAP_MM past the bar, the bar's end where the last cut left it. Phase 7 (slide the jaw
+  RAISED_DEG, the jaw open JAW_GAP_MM past the bar, the bar pushed through from the infeed until it shows OUT_MM
+  past the blade (saw_cell.OUT_MM). Phase 7 (slide the jaw
   to the bar, drop the rack block) is left out: with the jaw left that close the handwheel's half turn closes it. The
   steadying hand can't stay on the bar while the jaw bites (phase 8).
 - The length: the saw's own work stop can't come nearer the blade than 226 mm (its arm would run into the fixed jaw's

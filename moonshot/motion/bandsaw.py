@@ -102,10 +102,10 @@ BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infee
                                                     # before the right hip, where the hand hangs, the body clear of the
                                                     # motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
-END_LUMBAR = np.array([-1200.0, 170.0, 955.0])     # at the left end, facing the station's +X: the handwheel ahead, the
-                                                    # control box to the right. Crouched 115 mm (the body model has no
-                                                    # legs), the knob turn was no more like people's and the reach to
-                                                    # the control box leaned the trunk past their range
+END_LUMBAR = np.array([-1150.0, 240.0, 955.0])     # at the left end, facing the station's +X: the handwheel's knob
+                                                    # ahead at the thigh, under the right shoulder, the thighs 90 mm
+                                                    # short of it. Crouched 115 mm (the body model has no legs), the
+                                                    # knob turn was no more like people's
 KNOB_TURN_DEG = 180.0       # the card's half turn, at most
 SNUG_DEG = 20.0             # the handwheel turned this far past where the jaw meets the bar: snug (the card's end)
 KNOB_START_DEG = -104.2     # where the handwheel is left: its knob level on the operator's left (at joint zero it is
@@ -458,8 +458,9 @@ class ClampPlan(SawPlan):
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731
         h = self.hand
         specs = {}
-        # the fist round the handwheel's knob, as the vise take's round its crank's: middle, ring and little along
-        # it, then the index and thumb settle on lightly
+        # the fist round the handwheel's knob as round a suitcase's handle: the knob points at the person at their
+        # thigh, so the arm reaches down nearly hanging, the palm toward the body's middle, the index by the wheel
+        # and the ring by the knob's free end, the thumb over them
         root, out, length = self.knob_axis()
         r = BS.record()["colliders"]["handwheel_knob"]["radius_mm"]
         q0 = h.neutral()
@@ -470,14 +471,13 @@ class ClampPlan(SawPlan):
         specs["knob"] = dict(of="saw_handwheel", obj=root + out * length / 2, q0=q0, iters=1200,
                              colliders=[lambda p: G.sdf_cyl(p, root, root + out * length, r),
                                         saw_box(self.place, "handwheel"), saw_box(self.place, "rail")],
-                             # the 62 mm knob takes three fingers; the little curls beside them
-                             # the 62 mm knob takes three fingers, the index at its free end, the little curled:
-                             # with the index by the wheel it solved 335 off its pads, this way round 66
-                             targets={"middle": on(28, 40), "ring": on(12, 24), "thumb": on(15, 50, w=0.2)},
-                             refine={"index": on(44, 58), "middle": on(28, 40), "ring": on(12, 24),
-                                     "thumb": on(15, 50, w=0.5)},
-                             starts=[S(f, 0, 0, pl, 25, r_, 50, p, wf, 0) for f in (35, 45) for p in (0, 40)
-                                     for wf in (-10, 15) for pl in (20, 50) for r_ in (0,)])
+                             # the 62 mm knob takes three fingers, the little curled past its end. Turned the other
+                             # way, the index at its free end, the fist was pronated 60 deg and the wrist bent 65,
+                             # far from people's (the posture's likelihood 47 against their 28.7)
+                             targets={"index": on(6, 18), "middle": on(22, 34), "ring": on(38, 50),
+                                      "thumb": on(10, 40, w=0.2)},
+                             starts=[S(f, 0, 0, pl, el, 0, eb, p, 0, 0) for f in (28, 36) for pl in (70, 90)
+                                     for el in (30, 40) for eb in (10, 25) for p in (10, 25)])
         return specs
 
     def compose(self):

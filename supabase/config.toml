@@ -155,6 +155,11 @@ verify_jwt = false
 [functions.notify-waitlist]
 verify_jwt = false
 
+# Called by app/pilot-requests/complete/route.ts with no credentials; the function trusts only
+# the request id and claims the row itself (see its header).
+[functions.notify-pilot-request]
+verify_jwt = false
+
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used

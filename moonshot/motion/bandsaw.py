@@ -349,9 +349,10 @@ class LoadPlan(SawPlan):
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         # in from 50 mm back, the hand opened 0.45: from 35 mm and 0.6, the thumb's open tip brushed the 1-3/4 in
         # bar's end 0.2 s before the fingers came onto it. The thumb still meets the end first, 0.17 s before the
-        # wrist stops, so the hand is widest 0.24 s before (0.10 s before, it was widest as the thumb touched)
+        # wrist stops, so the hand is widest 0.225 s before (0.10 s before, it was widest as the thumb touched; 0.24
+        # before, 70% of the way)
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 120, approach=Wg + back * 50,
-                        opened=0.45, lead=0.24, rise_s=2.0, still_s=0.45)
+                        opened=0.45, lead=0.225, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, PUSH_EFFORT, "bar")
         t_slide = tg + 0.3

@@ -2299,7 +2299,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-face",
@@ -2462,7 +2462,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op20-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-face",
@@ -2881,7 +2881,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op40-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-face",
@@ -3294,7 +3294,7 @@
       "type": "video",
       "path": "video/ll-1007223/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -3807,7 +3807,7 @@
       "type": "video",
       "path": "video/ll-1007223/op30-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-start",

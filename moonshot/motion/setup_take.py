@@ -73,14 +73,17 @@ JAW_TOP = VISE["jaw_top_z"]
 # reach to grasp, as long as people's (person.reach_to_grasp_right_s 0.32-0.67 s, measured onset to first touch): the
 # planned reach (s) and where in it the opening's key falls, for the blank and the crank's knob
 REACH_S, REACH_PEAK = 0.66, 0.62
-KNOB_REACH_S, KNOB_PEAK = 0.62, 0.62
+KNOB_REACH_S, KNOB_PEAK = 0.62, 0.66
 # the final pull: out over the disc (slower than the reach, so the reach is the fastest move before the grasp), a
 # moment's pause, then the reach, onto the knob from the back of the hand as the first crank's comes on, from this far
 # out along the knob's axis (straight from behind, op40's fingers swept the lever for 17 frames). FINAL_AXIAL slides
 # the hand on along the knob's axis instead (3e2b0545), by FINAL_SLIDE_MM, the opening's key at KNOB_PEAK_FINAL
-FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 1.1, 0.65, 0.56, 110.0
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 1.1, 0.65, 0.57, 110.0
 FINAL_APPROACH_OUT_MM, FINAL_AXIAL = 30.0, False
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
+# the blank's reach comes down onto the grip from this far back off the part's near face (mm): at 12 the thumb,
+# fitted to its pad (f9cd68c3), rode down op10's near face from its top edge two frames before the grasp
+GRAB_VIA_BACK_MM = 20.0
 # a lift-out's grab (start "vise"): the raise to the ready point, up over the crank's disc, 0.6 m, slower than the
 # reach; the hand there, still, LIFT_ARRIVE_EARLY_S before the fingers close: arriving as they closed (the stage's),
 # the fingers met the part 0.14-0.19 s early while the hand still came down, op10's on its top edges (it fell out of
@@ -115,7 +118,13 @@ FINAL_SLIDE_OFF_S = SLIDE_OFF_S
 LETGO_WIDE = 0.75
 PRELOAD_FROM_TOUCH, PRELOAD_PRESS_N, PRELOAD_PRESS_LEAD_S, KNOB_LAG_MM = True, 1.5, 0.1, 4.0
 KNOB_HOLD_OPEN = 0.0
-FINAL_CLOSE_AT, FINAL_CLOSE_MM = 0.7, 8.0
+STAND_MARGIN_MM = 3.0       # a part set down stands if its middle is this far inside the parallels under it
+# a part standing far proud of the jaws is let go of (open_like PROUD_RELEASE_OPEN) PROUD_RELEASE_S before the hand
+# lifts off it, the hand backing PROUD_BACK_MM off its near face meanwhile (let_go)
+PROUD_RELEASE_S, PROUD_RELEASE_OPEN, PROUD_BACK_MM = 0.25, 0.25, 4.0
+# a key closing the hand FINAL_CLOSE_MM before the final pull's touch, at FINAL_CLOSE_AT of the reach (0: none): closing
+# there, the index's tip met the knob at the lever's joint and stopped op10's hand 20-28 mm short of its grip
+FINAL_CLOSE_AT, FINAL_CLOSE_MM = 0.0, 8.0
 SLIDE_OPEN_AT, PUSH_LEAVE_OPEN, FINAL_OVER_OPEN, SLIDE_LEAVE_OPEN, LEAVE_OPEN_AT = 0.22, 0.4, 0.4, 0.3, 1.0
 FINAL_PULL_EFFORT = 1.0
 # how far into the knob the knob grip's pads are solved (mm), fingers and thumb: at 2 the index hooked round behind the
@@ -124,6 +133,9 @@ FINAL_PULL_EFFORT = 1.0
 KNOB_GRIP_COMP_MM = 1.0
 KNOB_THUMB_COMP_MM = 0.5
 PRELOAD_EFFORT = 0.15       # the grip's effort the preload ends on, the arm not yet lifting
+PRELOAD_LOAD_N = 1.8        # ... and at most this much of the part's weight fed forward (N): at 0.15 op10's 1.4 kg
+                            # crossed the loading's onset a frame before its preload ended (233 ms), and its
+                            # loading ran 267 ms (people: 163-265); op20's 1.2 kg ends on 1.77 N
 
 
 # --- colliders for the grip solver (world mm) ------------------------------------------------------
@@ -188,6 +200,12 @@ class Take:
         self.stop = load.stop()
         if self.stop is not None:
             self.set_down += [STOP_GAP, 0, 0]
+        # kept hold of from its set-down and slid home in the grip (slide_held): a part against the stop, and one that
+        # can't stand where it is set down. op30's and op40's 31 mm wide part stands on two parallels 7 mm apart under
+        # its middle; set down 15 mm off the fixed jaw, only one was under it, at its edge, and it fell over (29 deg)
+        under = [y for y in load.parallels_y.values() if abs(y - self.set_down[1]) <= self.half[1]]
+        self.held_slide = self.stop is not None or not under or not (
+            min(under) - PAR_T / 2 + STAND_MARGIN_MM <= self.set_down[1] <= max(under) + PAR_T / 2 - STAND_MARGIN_MM)
         self.hand = AnatomicalHand(Nimble(data_root() / "hand-model" / "nimble"))
         self.th = G.TorchHand(self.hand)
         self.prior = BS.ArmPrior()
@@ -530,7 +548,8 @@ class Take:
         self.transit(t0 + 0.35, t_ready, ready, via=via, paced=bool(via))
         self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])
         t_reach = t_ready + settle_s
-        self.transit(t_reach, t_reach + reach - early, Wg, via=[Wg + [0, -12, max(62.0, top + 75 - Wg[2])]],
+        back = 12.0 if self.start == "vise" else GRAB_VIA_BACK_MM
+        self.transit(t_reach, t_reach + reach - early, Wg, via=[Wg + [0, -back, max(62.0, top + 75 - Wg[2])]],
                      fade=(Hg, 1.0), paced=bool(early))
         if early:                                 # there, still, as the fingers close
             self.add(t_reach + reach - early, t_reach + reach, lambda t, H=Hg, W=Wg: [("pose", H, W, 3.0)])
@@ -561,7 +580,8 @@ class Take:
                 self.event("press", t_touch - PRELOAD_PRESS_LEAD_S, t_load, normal=[0, 0, 1.0], force=PRELOAD_PRESS_N,
                            contact="blank")
             t_hold = t_load if PRELOAD_FROM_TOUCH else t_contact
-        self.effort(t_load, PRELOAD_EFFORT, grip)
+        self.effort(t_load, PRELOAD_EFFORT if self.start == "vise"
+                    else min(PRELOAD_EFFORT, PRELOAD_LOAD_N / (self.kg * 9.81)), grip)
         self.effort(t_lift, LIFT_END_EFFORT if self.end_lift else 1.0, grip)
         R, p = self.blank_at(t_lift)
         self.move_blank(t_lift, t_lift + 0.45, R, p + [0, 0, lift_mm])
@@ -616,9 +636,10 @@ class Take:
         self.add(t0, t_down + 0.1, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
         self.effort(t_down - 0.05, 1.0, grip)
         self.t_down = t_down
-        if self.stop is not None:       # kept hold of, and slid along the floor onto the fixed jaw and the stop (slide)
+        if self.held_slide:             # kept hold of, and slid onto the fixed jaw (and the stop) in the grip (slide)
             self.t, self.wrist = t_down, self.grip_pose(grip, t_down)[1]
-            self.clip("place", t0 - 0.3, self.t + 0.2, "PLACE  over the jaw, down onto the vise's floor")
+            self.clip("place", t0 - 0.3, self.t + 0.2, "PLACE  over the jaw, down onto the vise's floor"
+                      if self.stop is not None else "PLACE  over the jaw, down onto the parallels")
             return
         self.effort(t_down + 0.1, 0.0, grip)
         self.let_go(grip, t_down + 0.1)
@@ -629,19 +650,32 @@ class Take:
         g = self.grips[grip]
         _, W_set = self.grip_pose(grip, t_rel)
         self.fingers(t_rel, g["q"])
-        self.fingers(t_rel + 0.3, open_like(self.hand, g["q"], 0.12))
-        self.fingers(t_rel + 0.6, open_like(self.hand, g["q"], 0.5))
+        # a part standing far proud of the jaws, pinched well above them, is let go of first, then lifted off: lifted
+        # off still pinched, op40's 75 mm tall, 31 mm wide part was dragged by its top as the hand rose and fell
+        # against the jaw (29 deg)
         Hs = g["H_rel"]
-        lift = PosePath(np.eye(3), W_set).to(t_rel, 0.3, np.eye(3), W_set + [0, -4, 22]).to(t_rel + 0.22, 0.45, np.eye(3), W_set + [0, -35, 70])
+        proud = self.set_down[2] + self.half[2] - JAW_TOP >= 30
+        t_off = t_rel + (PROUD_RELEASE_S if proud else 0.0)
+        if proud:
+            # and the hand eased back off its near face as it opens: opened in place, the thumb's base still pressed
+            # that face 3-4 N above the part's middle as the fingers came off the far one, and tipped it over
+            self.fingers(t_off, open_like(self.hand, g["q"], PROUD_RELEASE_OPEN))
+            back = np.array([0.0, -PROUD_BACK_MM, 0.0])
+            self.add(t_rel, t_off, lambda t, W=W_set: [("pose", Hs, W + back * min_jerk((t - t_rel) / PROUD_RELEASE_S),
+                                                        3.0)])
+            W_set = W_set + back
+        self.fingers(t_off + 0.3, open_like(self.hand, g["q"], PROUD_RELEASE_OPEN if proud else 0.12))
+        self.fingers(t_off + 0.6, open_like(self.hand, g["q"], 0.5))
+        lift = PosePath(np.eye(3), W_set).to(t_off, 0.3, np.eye(3), W_set + [0, -4, 22]).to(t_off + 0.22, 0.45, np.eye(3), W_set + [0, -35, 70])
         def fn(t, lift=lift):
             p = lift.at(t)[1]
-            w = 1 - min_jerk((t - t_rel) / 0.5)
+            w = 1 - min_jerk((t - t_off) / 0.5)
             return [("pos", p, 1.0)] + ([("pose", Hs, p, w)] if w > 0 else [])
-        self.add(t_rel, t_rel + 0.7, fn)
+        self.add(t_off, t_off + 0.7, fn)
         self.event("hold_object", None, t_rel, obj="blank")
-        self.event("place_correct", None, t_rel + 0.3)
+        self.event("place_correct", None, t_off + 0.3)
         self.event("grip", None, t_rel + 0.1, grip=grip)
-        self.t = t_rel + 0.7
+        self.t = t_off + 0.7
         self.wrist = W_set + [0, -35, 70]
 
     def set_on_table(self, grip="blank_faces", dur=3.0):
@@ -687,7 +721,7 @@ class Take:
         """The thumb pad comes down onto the near face above the moving jaw (index and middle on the top) and pushes
         the part along the parallels until it meets the fixed jaw (friction on the parallels resists; the physics
         decides)."""
-        if self.stop is not None:
+        if self.held_slide:
             return self.slide_held()
         mm = self.place_gap if mm is None else mm
         t0 = self.t
@@ -731,6 +765,19 @@ class Take:
         the plan carries it most of the way and the press closes the last few mm."""
         t0 = self.t
         self.look(t0, self.home + [0, self.half[1], self.half[2]])
+        if self.stop is None:
+            # on parallels it can't stand on where it was set down (held_slide): slid home across them in the grip as
+            # carried, pressed onto the fixed jaw, and let go there, standing on both
+            t1 = t0 + 0.1 + dur
+            self.move_blank(t0 + 0.1, t1, np.eye(3), self.home)
+            t_rel = t1 + 0.2
+            self.event("press", t1 - 0.25, t_rel - 0.15, normal=[0, -1.0, 0], force=push_N, contact="blank")
+            self.add(t0, t_rel, lambda t: [("pose", *self.grip_pose(grip, t), 3.0)])
+            self.effort(t_rel - 0.15, 0.9, grip)
+            self.effort(t_rel, 0.0, grip)
+            self.let_go(grip, t_rel)
+            self.clip("slide", t0 - 0.2, self.t + 0.2, "SLIDE  held, across the parallels onto the fixed jaw")
+            return
         # set down leaning in the pinch, the grip eases so it stands up on its foot before it is slid: op50's, turned
         # 2.7 deg about the pinch as it was lifted, stood on its edge on the vise's floor, and eased to 0.3 stood
         # only to 1.5 deg

@@ -27,8 +27,8 @@
     {"id": "chamfer", "kind": "chamfer", "tool": "chamf", "what": "Chamfer the three top edges 5 x 45° and the counterbores 0.5 x 45°"}
    ]},
   {"id": "op20", "title": "Op 20: underside", "machine": "vf2", "face_up": "-Y",
-   "workholding": {"vise": "d688", "parallels_in": 1.375, "jaw_on": "X faces", "note": "Flipped onto the faced top, on 1.375 in parallels, in soft jaws cut to the flange's two edges: they hold its top 9 mm, so the flange's underside stands 0.9 mm above them. Cutting the soft jaws to the flange isn't a step yet, as for nist-ftc-10's Op 30"},
-   "wcs": {"code": "G54", "x": "the finished end (probe)", "y": "the flange's edge (probe)", "z": "the top on the parallels, plus 40 mm"},
+   "workholding": {"vise": "d688", "parallels_in": 1.375, "jaw_on": "X faces", "note": "Flipped onto the faced top, on 1.375 in parallels, in soft jaws cut to the flange's two edges: they hold its top 9 mm, so the flange's underside stands 0.9 mm above them. Cutting the soft jaws to the flange isn't a step yet, as for nist-ftc-10's Op 30. X and Y come off the fixed soft jaw, cut in place: the skirt Op 10 leaves below the jaws (4 mm wider each side, 4 mm longer each end) stands over the finished end and the flange's edge, so no probe reaches them (your decision, 2026-11-04)"},
+   "wcs": {"code": "G54", "x": "the finished end, off the fixed soft jaw's end (probe)", "y": "the flange's edge, off the fixed soft jaw's face (probe)", "z": "the top on the parallels, plus 40 mm"},
    "operations": [
     {"id": "face", "kind": "face", "tool": "facem", "what": "Face the stem to the 40 mm height",
      "features": [{"type": "plane", "normal": "-Y", "at_mm": 0.0}]},

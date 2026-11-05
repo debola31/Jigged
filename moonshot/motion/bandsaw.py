@@ -418,6 +418,9 @@ def on_knob(a, u, r, lo, hi, comp=2.0, w=1.0):
 class ClampPlan(SawPlan):
     place = SC.END
     lumbar_station = END_LUMBAR
+    # people's likelihood weighed more again: bent to the knob at the thigh, the arm's median was 28.9 at 1.5 (their
+    # 95th percentile 28.7)
+    solver_w = SawPlan.solver_w | {"prior": 2.5}
 
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["clamp"], state, verbose)
@@ -500,7 +503,9 @@ class ClampPlan(SawPlan):
         up, back = np.array([0, 0, 1.0]), np.array([0, -1.0, 0])
         # timed as the bar's: the rise slower than the reach, and the fingers meeting the knob 0.1-0.25 s before the
         # wrist stops (widest 0.12 s before that, it was widest as it touched; 0.36, at 43% of the reach)
-        tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 140, approach=Wg + back * 50 + up * 10,
+        # in from 70 mm back and 40 up: from 50 back and 10 up, the middle's tip brushed the knob 0.2 s before the
+        # hand came onto it, as it moved in at 0.8 m/s
+        tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 160, approach=Wg + back * 70 + up * 40,
                         opened=0.7, lead=0.33, reach_s=0.6, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "knob")
         self.effort("R", tg + 0.25, 0.4, "knob")

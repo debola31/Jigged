@@ -32,7 +32,22 @@ M = 0.001
 G = 9.81
 SFPM = 0.3048 / 60                 # m/s per surface foot per minute
 HP_W = 745.7
-FEED_KV = 1e7                      # the cylinder's stiffness against lowering: 60 N m of weight creeps 6 urad/s
+FEED_KV = 1e7                      # the cylinder's stiffness against lowering, the valve shut: 60 N m of weight creeps
+                                   # 6 urad/s
+FEED_OPEN_KV = 4e5                 # ... and the valve open, metering the descent (proposed: a pressure-compensated flow
+                                   # control holds its flow within about 5% of its setting across its load; at 4e5 the
+                                   # bow's weight, 45-60 N m at the hinge, runs the edge 0.06 mm/s over the valve's rate,
+                                   # 4% of a 1.5 mm/s cutting feed). At the shut valve's 1e7 the open cylinder chattered:
+                                   # off at the rate, then 7000 N m for a step, every three steps, and the shaken idler
+                                   # guard bounced off its stop and flew open (the blade stopped, the bow rose 4 deg).
+                                   # Here it stays engaged above the rate and meters smoothly: dt*kv/I is 7 for the 55 kg
+                                   # m^2 head
+FEED_RELIEF_NM = 1e6               # the most the cylinder pushes, its relief valve's (proposed): far past anything the
+                                   # bow loads it with (its weight is 200 N m at the hinge), so it never saturates. At
+                                   # the -20000 it had (no source), a one-step spike as the valve opened saturated it;
+                                   # saturated, an actuator's velocity derivative drops out of MuJoCo's implicit
+                                   # integration, the 1e7 damper ran explicit for that step and threw the bow up 4 deg,
+                                   # and as the cylinder can't resist rising (its check valve) it coasted up
 BLADE_KV = 20.0
 COVERS = ("cover_idler", "cover_drive")
 # the saw's defaults, for any scene that holds it: contype 0 so its parts skip each other; stiff joint limits and dry
@@ -180,7 +195,7 @@ def worldbody() -> tuple[str, str, str]:
     top_rad_s = B["speed_sfpm"][1] * SFPM / (B["drive_radius_mm"] * M)
     torque = B["motor_hp"] * HP_W / top_rad_s
     acts = (f'    <velocity name="a_saw_feed" joint="saw_head" kv="{FEED_KV:g}" forcelimited="true" '
-            f'forcerange="-20000 0"/>\n'
+            f'forcerange="{-FEED_RELIEF_NM:g} 0"/>\n'
             f'    <velocity name="a_saw_blade" joint="saw_blade" kv="{BLADE_KV}" forcelimited="true" '
             f'forcerange="{-torque:.1f} {torque:.1f}" ctrllimited="true" ctrlrange="0 {top_rad_s:.4f}"/>\n')
     lead = hw["lead_mm"] * M / (2 * math.pi)
@@ -290,6 +305,9 @@ class Control:
         r, axis = mid - d.xanchor[self.head], d.xaxis[self.head]
         r = r - axis * (r @ axis)
         lever = max(math.hypot(r[0], r[1]), 0.05)
-        d.ctrl[self.act["feed"]] = self.feed_mm_s * M / lever
+        kv = FEED_KV if self.feed_mm_s <= 0.0 else FEED_OPEN_KV       # shut, it locks; open, it meters
+        f = self.act["feed"]
+        self.model.actuator_gainprm[f, 0], self.model.actuator_biasprm[f, 2] = kv, -kv
+        d.ctrl[f] = self.feed_mm_s * M / lever
         running = self.state == "running"
         d.ctrl[self.act["blade"]] = self.speed_sfpm * SFPM / self.radius if running else 0.0

@@ -285,21 +285,23 @@ class LoadPlan(SawPlan):
         return (corners.min(0) + corners.max(0)) / 2, (corners.max(0) - corners.min(0)) / 2
 
     def grip_specs(self) -> dict:
-        """The index's, middle's and ring's pads on the bar's tail, its end toward the person at the infeed, to push
-        it: the fingers clear of the jaws, which stand 100 mm over the bar to 227 mm behind the blade, and of the
-        raised bow's box, which ends 277 mm behind it."""
+        """The thumb's, index's and middle's pads together on the middle of the bar's tail, its end toward the person
+        at the infeed, to push it straight along its axis: the fingers clear of the jaws, which stand 100 mm over the
+        bar to 227 mm behind the blade, and of the raised bow's box, which ends 277 mm behind it. With the thumb tucked
+        and the fingers anywhere on the end, the hold (between those three tips) was 46 mm off the bar's axis, and the
+        push turned the bar's front into the fixed jaw."""
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
         c = self.bar0
         tail = c[1] + SC.bar_mm() / 2
         face = self.place.world([c[0], tail, c[2]])
         out = self.place.vec([0.0, 1.0, 0.0])             # its outward normal, toward the person
         hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
-        on_face = lambda: G.plane_target(face, out, 2.0, bands(face, x=(-hw + 4, hw - 4), z=(-hh + 6, hh - 5)))  # noqa: E731
+        on_face = lambda x0, x1: G.plane_target(face, out, 2.0, bands(face, x=(x0, x1), z=(-hh + 6, hh - 5)))  # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 30.0, 25.0, 10.0
-        q0.update(little_mcp_flex=50.0, little_pip=55.0, thumb_cmc_abd=15.0, thumb_cmc_flex=20.0, thumb_mcp_flex=30.0,
-                  thumb_ip=20.0)
+        q0.update(ring_mcp_flex=50.0, ring_pip=60.0, little_mcp_flex=60.0, little_pip=70.0, thumb_cmc_abd=35.0,
+                  thumb_cmc_flex=30.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
         lo, hi = self.jaw_box()
         cols = [self.bar_box(c), saw_box(self.place, "bow", q_head=math.radians(RAISED_DEG)),
                 oriented_box(self.place.world((lo + hi) / 2), self.place.R, (hi - lo) / 2)]
@@ -310,7 +312,7 @@ class LoadPlan(SawPlan):
         over = (np.array([c[0] - 150.0, tail - 400.0, top + 3.0]), np.array([c[0] + 150.0, tail - 3.0, top + 300.0]))
         cols.append(oriented_box(self.place.world((over[0] + over[1]) / 2), self.place.R, (over[1] - over[0]) / 2))
         return {"bar": dict(of="bar", obj=self.place.world(c), q0=q0, iters=1000, colliders=cols,
-                            targets={"index": on_face(), "middle": on_face(), "ring": on_face()},
+                            targets={"thumb": on_face(-16, 16), "index": on_face(-16, 16), "middle": on_face(-16, 16)},
                             starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (15, 30) for pl in (40, 70)
                                     for r in (-20,) for p in (40, 75)])}
 

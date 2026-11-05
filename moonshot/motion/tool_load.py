@@ -148,8 +148,10 @@ CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
 
 
 def pockets(plan: dict) -> dict[str, int]:
-    """Each tool's number, and so its pocket: the order the plan first uses it."""
-    order = list(dict.fromkeys(op["tool"] for s in plan["setups"] for op in s["operations"]))
+    """Each tool's number, and so its pocket: the order the plan first uses it on the VF-2 (a band saw's blade is no
+    tool of its carousel)."""
+    order = list(dict.fromkeys(op["tool"] for s in plan["setups"] if s.get("machine", "vf2") == "vf2"
+                               for op in s["operations"]))
     return {t: i + 1 for i, t in enumerate(order)}
 
 

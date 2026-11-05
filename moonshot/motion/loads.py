@@ -41,6 +41,12 @@ FACE_A_MM = {"nist-ftc-10": 0.5}
 # from datum A, z -37.5..37.5): Op 10 profiles the outline and faces datum A, Op 20 faces the top to 31
 ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.5))}
 ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50")}
+# ct-slbeam finishes 76.2 x 38.1 x 50.8 (x 0..76.2 from the short leg's back, y 0..38.1, z 0..50.8 from the bottom), its
+# 82.55 x 38.1 x 57.15 blank centred on it in x and z: Op 10 faces the bottom to z 0, Op 20 the long leg's end to x 76.2,
+# Op 30 the back to x 0 (Op 40 faces the top and cuts the L)
+ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.975)),
+                ("ct-slbeam", "op30"): ((-3.175, 76.2), (0.0, 38.1), (0.0, 53.975)),
+                ("ct-slbeam", "op40"): ((0.0, 76.2), (0.0, 38.1), (0.0, 53.975))}
 
 
 def _setup(plan: dict, setup_id: str) -> dict:
@@ -48,8 +54,10 @@ def _setup(plan: dict, setup_id: str) -> dict:
 
 
 def envelope(plan: dict, setup_id: str) -> np.ndarray:
-    """The setup's part as a box in its model's frame: [[xmin, xmax], [ymin, ymax], [zmin, zmax]] mm."""
-    if _setup(plan, setup_id) is plan["setups"][0]:
+    """The setup's part as a box in its model's frame: [[xmin, xmax], [ymin, ymax], [zmin, zmax]] mm. The plan's stock
+    until a setup has cut it: in its first setup, or, sawn first, in the saw and the first setup after it."""
+    before = plan["setups"][:[x["id"] for x in plan["setups"]].index(setup_id)]
+    if all(x.get("machine") == "bandsaw" for x in before):
         sx, sy, sz = plan["stock"]["size_mm"]
         a = FACE_A_MM.get(plan.get("part"), 0.0)
         return np.array([[-sx / 2, sx / 2], [-a, sy - a], [-sz / 2, sz / 2]])

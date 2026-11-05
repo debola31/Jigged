@@ -104,10 +104,11 @@ SLIDE_OFF_JAW_MM = 0.3      # ... and slid this far off the fixed jaw till it is
 HOLD_S = 0.6               # held against the stop before letting go
 HOLD_N = 10.0               # ... this hard (proposed: the card's 10 N push on the jaw, as no source gives this one),
 JAW_N, DOWN_N = 4.0, 5.0    # against the fixed jaw and down on the bed (proposed: the card's 20 N hold, split)
-FRONT_LUMBAR = np.array([-200.0, -490.0, 955.0])   # the station's mm: at the front, left of the work stop, the bar
-                                                    # before the right shoulder, the knees at the base's recessed front
-                                                    # (233 mm in front of the blade from 300 to 600 mm up, its foot at
-                                                    # 450), the hanging hand clear of the work stop's arm
+FRONT_LUMBAR = np.array([-200.0, -560.0, 955.0])   # the station's mm: at the front, left of the work stop, the piece
+                                                    # before the right shoulder, the bench's back edge 80 mm ahead of
+                                                    # the hip (70 mm nearer the saw, setting the piece down behind the
+                                                    # hip the arm fell 100 mm short of the bench), the hanging hand
+                                                    # clear of the work stop's arm
 BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
                                                     # before the right hip, where the hand hangs, the body clear of the
                                                     # motor
@@ -751,8 +752,11 @@ class UnloadPlan(SawPlan):
         end = c[1] - self.length / 2                       # its end against the stop block
         hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
         up = self.place.vec([0.0, 0.0, 1.0])
-        top = self.place.world([c[0], end + 30.0, c[2] + hh])
-        on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 4, hw - 4), y=(lo, hi)))   # noqa: E731
+        # the pads 18 mm from its end at the stop block, the fingertips 12 mm short of the bow's box, and the hand
+        # 14 mm off the fixed jaw's plate: 30 mm in, the tips reached into the box, and the hand jammed between it,
+        # the plate and the block and slid the piece 6 mm
+        top = self.place.world([c[0], end + 18.0, c[2] + hh])
+        on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 4, hw - 14), y=(lo, hi)))   # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 25.0, 15.0

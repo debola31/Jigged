@@ -130,6 +130,8 @@ KNOB_TURN_S = 6.5           # the half turn's time: the card's 2.5 s took the sc
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
 KNOB_EFFORT = 0.4           # the fist's effort on the knob, which also stiffens the arm: at 0.15 the arm followed its
                             # plan so loosely that the wheel stalled near the top of its turn, short of the bar
+KNOB_SKIN = False           # the knob meets the skin while welded to the fist (trial)
+KNOB_APPROACH_MM = (70.0, 40.0)   # the hand comes onto the knob from this far back and up
 KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
                             # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
 KNOB_N = 30.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
@@ -534,7 +536,8 @@ class ClampPlan(SawPlan):
         # wrist stops (widest 0.12 s before that, it was widest as it touched; 0.36, at 43% of the reach; 0.33, 60%)
         # in from 70 mm back and 40 up: from 50 back and 10 up, the middle's tip brushed the knob 0.2 s before the
         # hand came onto it, as it moved in at 0.8 m/s
-        tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 160, approach=Wg + back * 70 + up * 40,
+        tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 160, approach=Wg + back * KNOB_APPROACH_MM[0]
+                        + up * KNOB_APPROACH_MM[1],
                         opened=0.7, lead=0.25, reach_s=0.6, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "knob")
         self.effort("R", tg + 0.25, KNOB_EFFORT, "knob")
@@ -547,9 +550,9 @@ class ClampPlan(SawPlan):
         mid0 = self.knob_mid(tg)
         self.add("R", tg, t_off, lambda t: [("pose", H0, W0 + self.knob_mid(t) - mid0, 3.0)])
         self.event("grip", tg, t_off + 0.1, side="R", grip="knob", on="saw_handwheel")
-        # welded off the skin, as the knob spins in the fist (a real knob turns on its pin; this one is the wheel's, and
-        # meeting the skin the fist's friction held it back, the jaw at 9 N)
-        self.event("carry", tg + 0.1, t_off, obj="saw_handwheel", grip="knob", side="R")
+        # meeting the skin (KNOB_SKIN), or welded off it as it spins in the fist (a real knob turns on its pin; this one
+        # is the wheel's)
+        self.event("carry", tg + 0.1, t_off, obj="saw_handwheel", grip="knob", side="R", skin=KNOB_SKIN)
         self.event("loose", tg + 0.1, t_off, obj="saw_handwheel")      # the knob spins in the fist
         self.event("turn", self.t_turn, self.t_turn + KNOB_TURN_S, side="R", obj="saw_handwheel", force=KNOB_N,
                    q0=self.q_wheel, turn_rad=math.radians(self.turn_deg))

@@ -25,7 +25,7 @@ import mujoco
 import numpy as np
 
 from moonshot.config import data_root
-from moonshot.motion.loads import vise_load
+from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_MM, SPOILBOARD_TOP_Z, part_pose, vise_load
 from moonshot.planning.steps import expand
 from moonshot.planning.validate import load_plan
 from moonshot.sim import cam
@@ -38,6 +38,16 @@ FPS = 24
 EYE = np.array([54.0, -1237.0, 1547.0])        # where the cycle-start take leaves the operator, at the pendant
 PARK = np.array([-900.0, 150.0, 1700.0])       # a tool not in the spindle waits in the carousel, out of sight
 HOLDER_GLB = "library/tooling/cat40/cat40.glb"
+STILL_FROM_MM = (120.0, -330.0, 230.0)          # the still's camera off the part, as pipeline.py's (nist-ftc-10's)
+
+
+def still_from(size_mm: float, plate: bool) -> np.ndarray:
+    """The still's camera off the stock's centre: STILL_FROM_MM for a part nist-ftc-10's size or smaller, farther for
+    a bigger one. A plate on the table from in front and to the right, above, at most 430 mm in front of it: farther
+    out, the doors' pulls block the view (nist-ftc-09's first still), and from steeply above, the spindle head does."""
+    if not plate:
+        return np.array(STILL_FROM_MM) * max(1.0, size_mm / 165.1)
+    return np.array([0.52 * size_mm, max(-0.96 * size_mm, -430.0), 0.87 * size_mm])
 
 
 def seconds_for(machine_s: float) -> float:
@@ -51,16 +61,36 @@ def _quat(R: np.ndarray) -> np.ndarray:
     return q
 
 
+def clamped(plan: dict, setup_id: str) -> bool:
+    """Is the setup a plate clamped to the table (on the spoilboard, no vise)?"""
+    return "clamps" in next(s for s in plan["setups"] if s["id"] == setup_id)["workholding"]
+
+
+def spoilboard_xml() -> str:
+    """The 3/4 in MDF spoilboard over the table's top (moonshot/motion/loads.py SPOILBOARD_*)."""
+    t = vf2.record()["colliders"]["table_top"]
+    lo, hi = np.array(t["box_min_mm"], float), np.array(t["box_max_mm"], float)
+    c = np.array([*SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z - SPOILBOARD_MM / 2])
+    size = np.array([(hi - lo)[0] / 2, (hi - lo)[1] / 2, SPOILBOARD_MM / 2])
+    f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
+    return (f'    <body name="spoilboard" pos="{f(c)}">\n      <geom name="spoilboard" type="box" size="{f(size)}" '
+            f'contype="0" conaffinity="0" rgba="0.55 0.42 0.3 1"/>\n    </body>\n')
+
+
 def scene_xml(plan: dict, c: cam.Cycle, stock, tools: list[cam.Tool]) -> str:
     """The VF-2 with the vise on its table as the vise takes build it, the jaw closed on the stock, the parallels
-    under it, the stock where loads.part_pose puts the part, and each tool as a body that follows the spindle."""
-    load = vise_load(plan, c.setup)
-    on_table, _, _ = V.worldbody(load, np.zeros(3), load.parallels(), "vf2_spindle", "vf2_table")
+    under it (or, for a plate clamped to the table, the spoilboard), the stock where loads.part_pose puts the part, and
+    each tool as a body that follows the spindle."""
     f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
-    paras = "".join(
-        f'    <body name="{n}" pos="{f(p + np.array([0, 0, load.parallel_h / 2]))}">\n'
-        f'      <geom name="{n}" class="steel" type="box" size="{f([V.PARALLEL_L / 2, V.PARALLEL_T / 2, load.parallel_h / 2])}"/>\n'
-        f'    </body>\n' for n, p in load.parallels().items())
+    if clamped(plan, c.setup):
+        on_table, paras = spoilboard_xml(), ""
+    else:
+        load = vise_load(plan, c.setup)
+        on_table, _, _ = V.worldbody(load, np.zeros(3), load.parallels(), "vf2_spindle", "vf2_table")
+        paras = "".join(
+            f'    <body name="{n}" pos="{f(p + np.array([0, 0, load.parallel_h / 2]))}">\n'
+            f'      <geom name="{n}" class="steel" type="box" size="{f([V.PARALLEL_L / 2, V.PARALLEL_T / 2, load.parallel_h / 2])}"/>\n'
+            f'    </body>\n' for n, p in load.parallels().items())
     sb = c.frame.to_world(stock).BoundingBox()
     half = np.array([sb.xlen, sb.ylen, sb.zlen]) / 2
     centre_model = c.frame.R.T @ (np.array([sb.center.x, sb.center.y, sb.center.z]) - c.frame.origin)
@@ -108,6 +138,21 @@ def program_of(c: cam.Cycle) -> tuple[list[tuple], list[int], list[tuple[int, ob
     return prog, starts, cuts
 
 
+def travel_problems(prog: list[tuple]) -> str:
+    """Where a program's moves go past the VF-2's axes' travel (as the cycle gate holds them, 0.5 mm over): the worst
+    on each axis, or nothing. The machine stops at its limit and never reaches such a move."""
+    joints = vf2.record()["joints"]
+    out = []
+    for i, a in enumerate("xyz"):
+        lo, hi = joints[a]["range_mm"]
+        v = np.array([p[i] for p in prog])
+        past = max(lo - v.min(), v.max() - hi)
+        if past > 0.5:
+            out.append(f"{a.upper()} {past:.1f} mm past its {'lower' if lo - v.min() > v.max() - hi else 'upper'} "
+                       f"limit")
+    return ", ".join(out)
+
+
 def machine_seconds(prog: list[tuple]) -> float:
     rapid = vf2.record()["joints"]["x"]["speed_mm_s"]
     t = 0.0
@@ -117,27 +162,60 @@ def machine_seconds(prog: list[tuple]) -> float:
     return t
 
 
-def write_glb(shape, path: Path) -> None:
+# how the stock looks, by its material (cam.material_of) or its outside finish: (material name, base colour, metallic,
+# roughness). aluminium_6061 is the look's milled 6061 (moonshot/render/look.py); a name the look doesn't know keeps
+# its own PBR values
+LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
+         "stainless": ("stainless_304", [0.66, 0.66, 0.68, 1.0], 1.0, 0.3),
+         "steel": ("steel_4140", [0.5, 0.51, 0.52, 1.0], 1.0, 0.35),
+         "acetal": ("acetal_black", [0.02, 0.02, 0.022, 1.0], 0.0, 0.42),
+         "black oxide": ("black_oxide", [0.05, 0.05, 0.055, 1.0], 0.85, 0.45),     # dark grey-black, satin
+         "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22)}      # bright bluish silver
+
+
+def write_glb(shape, path: Path, look: str = "aluminium") -> None:
     """A stock shape as a GLB in its own frame, mm (the take record's meshes), in milled 6061 as vise.render_meshes
-    draws the blank."""
+    draws the blank, or as LOOKS has the part's material."""
     import trimesh
     from trimesh.visual.material import PBRMaterial
+    name, colour, metal, rough = LOOKS[look]
     v, f = shape.tessellate(0.05, 0.3)
     mesh = trimesh.Trimesh(np.array([p.toTuple() for p in v]), np.array(f), process=False)
     mesh.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
-        name="aluminium_6061", baseColorFactor=[0.8, 0.81, 0.82, 1.0], metallicFactor=1.0, roughnessFactor=0.33))
+        name=name, baseColorFactor=colour, metallicFactor=metal, roughnessFactor=rough))
     mesh.export(path)
+
+
+def write_cutter_glb(t: cam.Tool, path: Path) -> None:
+    """A stand-in for a tool whose 3D model isn't built yet: its record's diameter and stickout as a steel cylinder,
+    its tip at the origin, up +z, in metres (as the library's GLBs, which the renderer places by in_body)."""
+    import trimesh
+    from trimesh.visual.material import PBRMaterial
+    body = trimesh.creation.cylinder(radius=t.r * M, height=t.stickout * M, sections=48)
+    body.apply_translation([0, 0, t.stickout * M / 2])
+    body.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
+        name="tool_steel", baseColorFactor=[0.62, 0.63, 0.65, 1.0], metallicFactor=1.0, roughnessFactor=0.25))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body.export(path)
 
 
 def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log=print):
     """Plan, run and record one cycle step; returns the stock it leaves, or None if there is nothing to cut."""
     part = plan["part"]
     t0 = time.perf_counter()
+    if not list(cam.RECORDS.glob(f"*/{op['tool']}/{op['tool']}.json")):
+        log(f"[cycle] {setup['id']}-{op['id']}: {op['tool']} has no catalogue record, so nothing says what it "
+            f"cuts: not run (a plan gap)")
+        return None
     c = planner.cycle(setup, op, stock)
     if not c.passes:
         log(f"[cycle] {c.step}: no hole of the operation's size opens upward in this setup: nothing to cut")
         return None
     prog, starts, cuts = program_of(c)
+    if out_of_travel := travel_problems(prog):
+        log(f"[cycle] {c.step}: the program leaves the VF-2's travel ({out_of_travel}), so it can't run: not run "
+            f"(a plan gap)")
+        return None
     tools = [p.tool for p in c.passes]
     out = data_root() / "takes" / f"{part}-{c.step}"
     if out.exists():
@@ -149,17 +227,20 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     q = {a: m.jnt_qposadr[m.joint(f"vf2_{a}").id] for a in ("x", "y", "z")}
     for a, v in zip("xyz", prog[0][:3]):
         d.qpos[q[a]] = v * M
-    load = vise_load(plan, c.setup)
-    jaw = m.jnt_qposadr[m.joint("jaw_slide").id]
-    d.qpos[jaw] = (load.opening0 - load.size_mm[1]) * M                      # closed on the part
-    crank = m.jnt_qposadr[m.joint("crank").id]
-    d.qpos[crank] = np.radians(V.crank_for_opening(load.size_mm[1], load.opening0))
+    plate = clamped(plan, c.setup)
+    locked = {}
+    if not plate:
+        load = vise_load(plan, c.setup)
+        jaw = m.jnt_qposadr[m.joint("jaw_slide").id]
+        d.qpos[jaw] = (load.opening0 - load.size_mm[1]) * M                  # closed on the part
+        crank = m.jnt_qposadr[m.joint("crank").id]
+        d.qpos[crank] = np.radians(V.crank_for_opening(load.size_mm[1], load.opening0))
+        locked = {jaw: d.qpos[jaw], crank: d.qpos[crank]}
     mujoco.mj_forward(m, d)
     ctl = vf2.Control(m, d, program=prog)
     ctl.press("cycle_start")
     spindle = m.body("vf2_spindle").id
     mocap = [m.body_mocapid[m.body(f"tool_{t.id}").id] for t in tools]
-    locked = {jaw: d.qpos[jaw], crank: d.qpos[crank]}
 
     est = machine_seconds(prog)
     frames = int(round(seconds_for(est) * FPS))
@@ -209,19 +290,34 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     stock.exportBrep(str(out / "stock-end.brep"))
     keyframes = sorted(states)
     for k in keyframes:
-        write_glb(states[k], out / "stock" / f"{k}.glb")
+        write_glb(states[k], out / "stock" / f"{k}.glb", planner.material)
 
     glbs = glbs_in_bodies(m, "vf2", vf2.render_links())
-    for body, drawn in V.render_glbs().items():                 # the D688, as the vise takes draw it
-        glbs.setdefault(body, []).extend(drawn)
-    meshes = V.render_meshes(load, out)                         # the parallels; the blank is the stock instead
-    shutil.rmtree(out / meshes.pop("blank")["dir"])
+    if plate:                                                   # the spoilboard is drawn from its geom
+        meshes = {}
+    else:
+        for body, drawn in V.render_glbs().items():             # the D688, as the vise takes draw it
+            glbs.setdefault(body, []).extend(drawn)
+        meshes = V.render_meshes(load, out)                     # the parallels; the blank is the stock instead
+        shutil.rmtree(out / meshes.pop("blank")["dir"])
     meshes["blank"] = {"dir": "stock", "frames": keyframes}
     for t in tools:
+        model = f"library/tooling/{t.id}/{t.id}.glb"
+        if not (data_root() / model).exists():                  # its 3D model isn't built yet: its record's shape
+            model = f"takes/{out.name}/cutter_{t.id}.glb"
+            write_cutter_glb(t, data_root() / model)
         glbs[f"tool_{t.id}"] = [{"path": HOLDER_GLB, "in_body": [0, 0, -round(cam.GAUGE_MM, 3), 1, 0, 0, 0]},
-                                {"path": f"library/tooling/{t.id}/{t.id}.glb",
-                                 "in_body": [0, 0, -round(t.length, 3), 1, 0, 0, 0]}]
+                                {"path": model, "in_body": [0, 0, -round(t.length, 3), 1, 0, 0, 0]}]
     rec.write(out, FPS, 0.0, {}, "vf2", glbs, meshes=meshes)
+    if part not in cam.AS_PUBLISHED:                            # the still's camera, framed on the stock
+        sb = c.frame.to_world(stock).BoundingBox()
+        centre = np.array([sb.center.x, sb.center.y, sb.center.z])
+        (out / "still.json").write_text(json.dumps({
+            "look_off_mm": (centre - c.frame.origin).round(1).tolist(),
+            "from_mm": still_from(max(sb.xlen, sb.ylen), plate).round(1).tolist(),
+            "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's "
+                     "origin plus look_off_mm (world axes: the stock's centre), from from_mm off that"},
+            indent=1), encoding="utf-8")
     passes = [{"tool": p.tool.id, "rpm": p.tool.rpm,
                "moves": [list(map(lambda v: round(float(v), 4), cam.joints(pt, p.tool))) + [feed] for pt, feed in p.moves]}
               for p in c.passes]
@@ -235,11 +331,64 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     return cq.Shape.importBrep(str(out / "stock-end.brep"))      # the next step starts from the file, as a resumed run
 
 
+SHELF_Z = 900.0                                 # a finished part's still: on a grey shelf this high (world mm)
+
+
+def finish_take(plan: dict, step: dict, log=print) -> Path:
+    """An outside vendor's finish (a cycle step: black oxide, zinc), which has no simulation: its take is the finished
+    part as the mill's last cycle left it, in that finish, on a shelf, for the still and the 3D view (takes/<part>-<step
+    id>/: take.npz, scene.json, stock/0.glb, still.json)."""
+    part = plan["part"]
+    ends = [(s, data_root() / "takes" / f"{part}-{s['id']}-{o['id']}" / "stock-end.brep") for s, o in cycle_steps(plan)]
+    last, end = next((s, e) for s, e in reversed(ends) if e.exists())      # the last cycle that ran
+    stock = cq.Shape.importBrep(str(end))
+    finish = "black oxide" if "black oxide" in step["caption"].lower() else "zinc" if "zinc" in step["caption"].lower() \
+        else None
+    if finish is None:
+        raise ValueError(f"{step['id']}: no look for this finish: {step['caption']}")
+    out = data_root() / "takes" / f"{part}-{step['id']}"
+    if out.exists():
+        shutil.rmtree(out)
+    (out / "stock").mkdir(parents=True)
+    R_last = np.asarray(part_pose(plan, last["id"])["R"], float)        # as the mill last held it, on the shelf
+    sb = cam.Frame(R_last, np.zeros(3)).to_world(stock).BoundingBox()
+    origin = np.array([-(sb.xmin + sb.xmax) / 2, -(sb.ymin + sb.ymax) / 2, SHELF_Z - sb.zmin])
+    f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
+    xml = f"""<mujoco model="finish">
+  <worldbody>
+{cell.FLOOR}    <body name="shelf" pos="0 0 {(SHELF_Z - 10) * M:.4f}">
+      <geom name="shelf" type="box" size="0.3 0.2 0.01" contype="0" conaffinity="0" rgba="0.42 0.43 0.45 1"/>
+    </body>
+    <body name="blank" pos="{f(origin)}" quat="{" ".join(f"{v:.7f}" for v in _quat(R_last))}">
+      <geom name="blank" type="box" size="0.001 0.001 0.001" contype="0" conaffinity="0" rgba="0.8 0.8 0.82 1"/>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+    m = mujoco.MjModel.from_xml_string(xml)
+    d = mujoco.MjData(m)
+    mujoco.mj_kinematics(m, d)
+    look = np.array([0.0, 0.0, SHELF_Z + sb.zlen / 2])
+    rec = Recorder(m, set(), arms=())
+    for _ in range(2):
+        rec.frame(d, {}, look + np.array(STILL_FROM_MM), look, [0, 0, 1])
+    write_glb(stock, out / "stock" / "0.glb", finish)
+    rec.write(out, FPS, 0.0, {}, "outside", {}, meshes={"blank": {"dir": "stock", "frames": [0]}})
+    (out / "still.json").write_text(json.dumps({
+        "look_off_mm": (look - origin).round(1).tolist(), "from_mm": still_from(max(sb.xlen, sb.ylen), False).round(1).tolist(),
+        "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's origin "
+                 "plus look_off_mm (world axes: the part's centre), from from_mm off that"}, indent=1), encoding="utf-8")
+    log(f"[cycle] {step['id']}: the finished part from {end.parent.name}, in {finish}")
+    return out
+
+
 def cycle_steps(plan: dict) -> list[tuple[dict, dict]]:
+    """The mill's cycle steps, in order (the saw's cut and an outside vendor's finish are cycle steps too, but not the
+    mill's)."""
     setups = {s["id"]: s for s in plan["setups"]}
     out = []
     for s in expand(plan):
-        if s["kind"] == "cycle":
+        if s["kind"] == "cycle" and "workholding" in setups.get(s.get("setup"), {}):
             setup = setups[s["setup"]]
             out.append((setup, next(o for o in setup["operations"] if o["id"] == s["operation"])))
     return out
@@ -247,6 +396,11 @@ def cycle_steps(plan: dict) -> list[tuple[dict, dict]]:
 
 def main(argv: list[str]) -> int:
     plan = load_plan(argv[0])
+    if "--finish" in argv:                                  # the outside finishes' takes, from the finished stock
+        for s in expand(plan):
+            if s["kind"] == "cycle" and "station" in s:
+                finish_take(plan, s)
+        return 0
     start = argv[argv.index("--from") + 1] if "--from" in argv else None
     planner = cam.Planner(plan)
     steps = cycle_steps(plan)

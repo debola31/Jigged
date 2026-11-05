@@ -41,7 +41,7 @@ STANCE = np.array([-90.0, 0.0, 0.0])
 RANGE_W = 10.0
 # the knob grip nist-ftc-10's published loosen (takes/loosen, 2026-11-04) was planned with, which re-planned from it
 # reproduces that take's wrist exactly: the new-body vise takes' of that morning, which the lift-outs carry. The old
-# body's (takes/setup-take) sits 47 mm off it; planned from that, every loosen's reach ended with the hand opening at
+# body's (takes/setup-take) sits 46 mm off it; planned from that, every loosen's reach ended with the hand opening at
 # 100% of it and posture's likelihood at 29.1-29.6, against people's 28.7
 KNOB_GRIPS = TAKES / "lift-out-nist-ftc-10-op10" / "grips.json"
 

@@ -337,6 +337,9 @@ def apply_look(cc0: Path) -> None:
             paint(m, (0.008, 0.008, 0.01), 0.6)
         elif name.startswith("handle_grip"):
             paint(m, (0.30, 0.17, 0.08), 0.6, coat=0.25, coat_rough=0.5)
+        elif name.startswith("acetal_black"):
+            # machined black acetal (Delrin): satin, a faint sheen where the cutter left it smooth
+            paint(m, (0.012, 0.012, 0.013), 0.38, coat=0.15, coat_rough=0.35, wear=0.04)
         elif name.startswith("aluminium_6061"):
             # saw-cut 6061 bar: mill finish, light scratches
             Nodes(m).pbr(cc0, "Metal050C", 6.0, tint=(1.0, 1.0, 1.0), rough=(0.3, 0.5), normal=0.5, metal=1.0)

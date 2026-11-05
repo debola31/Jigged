@@ -69,6 +69,23 @@ class BenchPart:
 
 NIST_FTC_10 = BenchPart("nist-ftc-10", PART_KG, PART_COM, (2.79e-4, 1.295e-3, 1.097e-3), PART_BOXES, POCKET_UP,
                         ("part_slab", "part_boss"), 31.2)
+# ll-1005337, the Delrin pallet inlay: 600 x 400 x 19.05, nests up (its STEP's +Z), its length along the bench (the
+# STEP's +Y to the world's -X), its near long edge (X = -398) toward the operator. The STEP's 2,837,882 mm^3 of acetal
+# at 1,410 kg/m^3, its inertia a solid slab's. Its colliders: the slab between its long edges' faces (X -398 and -2)
+# and its ends' (Y 2 and 598), and the corner lugs standing 2 mm proud of them, over which the 600 and 400 are
+# measured; its 24 recesses, nests and dowel holes left out
+LL_1005337 = BenchPart(
+    "ll-1005337", 4.001, (-198.75, 297.83, -11.68), (0.1201, 0.0535, 0.1733),
+    {"part_slab": ((-398.0, 2.0, -20.0), (-2.0, 598.0, -0.95)),
+     "part_lug_near_a": ((-400.0, 21.21, -20.0), (-398.0, 74.51, -0.95)),
+     "part_lug_near_b": ((-400.0, 525.5, -20.0), (-398.0, 543.79, -0.95)),
+     "part_lug_far_a": ((-2.0, 21.21, -20.0), (0.0, 74.51, -0.95)),
+     "part_lug_far_b": ((-2.0, 525.5, -20.0), (0.0, 578.79, -0.95)),
+     "part_lug_end_a": ((-74.51, 0.0, -20.0), (-21.21, 2.0, -0.95)),
+     "part_lug_end_b": ((-378.79, 0.0, -20.0), (-325.49, 2.0, -0.95)),
+     "part_lug_end_c": ((-74.51, 598.0, -20.0), (-21.21, 600.0, -0.95)),
+     "part_lug_end_d": ((-343.79, 598.0, -20.0), (-325.49, 600.0, -0.95))},
+    (0.70710678, 0.0, 0.0, 0.70710678), ("part_slab",), 20.2)
 # the gripper jaw, 4140 (7,850 kg/m^3), 75 x 49 x 40: a 10 mm bar (Y 30-40, its top face, chamfered 5 mm on three edges)
 # with an 11 mm stem down from it (X 24-35, Y 0-30) and a stepped side (X 35-49). It lies on its top face, the stem up
 # and the stepped side to the operator: its +X to the world's -Y, -Y up, +Z to the world's +X
@@ -96,7 +113,7 @@ NIST_FTC_09 = BenchPart(
     "nist-ftc-09", 1.0916, (2.19, 1.52, 4.55), (6.884e-3, 1.019e-2, 3.310e-3),
     {"part_sheet": ((-95.25, 0.0, -139.7), (95.25, 3.04, 139.7))},
     (0.5, 0.5, 0.5, 0.5), ("part_sheet",), 0.2)
-PARTS = {p.name: p for p in (NIST_FTC_10, LL_1007223, CT_SLBEAM, NIST_FTC_09)}
+PARTS = {p.name: p for p in (NIST_FTC_10, LL_1007223, CT_SLBEAM, NIST_FTC_09, LL_1005337)}
 
 # --- the bench mat (mm) -------------------------------------------------------------------------------------------
 MAT = {"size": (240.0, 140.0, 3.0), "friction": 0.9,     # rubber on aluminium and on maple, about 0.9 (proposed)

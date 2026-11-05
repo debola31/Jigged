@@ -141,10 +141,10 @@ def instrument_colliders(rests: dict, names: tuple[str, ...], grow: float = 0.0)
     return out
 
 
-def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Each loose body's pose (mm, rotation) once it has come to rest on the bench, no body model: what the plan
-    aims at is where the physics will find it."""
-    m = mujoco.MjModel.from_xml_string(BC.standalone_xml(loose, skip))
+def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0, cell=BC) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Each loose body's pose (mm, rotation) once it has come to rest on the bench (or in another cell, a module with
+    bench_cell's standalone_xml), no body model: what the plan aims at is where the physics will find it."""
+    m = mujoco.MjModel.from_xml_string(cell.standalone_xml(loose, skip))
     d = mujoco.MjData(m)
     for _ in range(int(seconds / m.opt.timestep)):
         mujoco.mj_step(m, d)
@@ -318,7 +318,7 @@ class BenchPlan:
         self.wrist[side] = np.asarray(W, float)
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S, above=0.0,
-              open_s=None, close_s=CLOSE_S):
+              open_s=None, close_s=CLOSE_S, rest_open=0.15, closed=0.0, thumb_open=None, keep=None):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
@@ -331,7 +331,14 @@ class BenchPlan:
         left hand's on the calipers lying on the bench struck the bench, bounced 15 mm and closed on nothing. A hand
         opening only a little opens over the last `open_s` of the way: opened over all of it, its last 0.15 s were
         level to 0.3 mm, and its widest came where the noise put it. A hand coming down far onto its grip closes over
-        `close_s`.
+        `close_s`. The hand comes to rest open `rest_open` of the way: a hand whose pads touch its grip only as it
+        closes there rests wider than 0.15. It closes to `closed` of the way open, the grip's squeeze closing it the
+        rest: a pinch closed onto the faces' planes drags what it pinches along the fingers' arcs. Given
+        `thumb_open`, the thumb comes to rest that far open, nearer its face than the fingers theirs, so it meets its
+        face first and holds what the fingers close against: a pinch from above whose fingers met the far face first
+        shoved a part standing on a shelf 20 mm toward the operator. `keep` (joint -> angle) holds the digits that take
+        no part in the grip where they are out of the way, the reach through: opened with the rest, the L-block's ring
+        finger swept through its upright as the hand closed.
         Returns when the grip has closed."""
         g = self.grips[grip]
         t_ready = t0 + RISE_S
@@ -347,9 +354,13 @@ class BenchPlan:
         self.fingers(side, t0 + 0.3, self.q_relax)
         if open_s is not None:
             self.fingers(side, tc - lead - open_s, self.q_relax)
-        self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
-        self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
-        self.fingers(side, tc + close_s, g["q"])
+        held = dict(keep or {})
+        self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened) | held)
+        at_rest = open_like(self.hand, g["q"], rest_open)
+        if thumb_open is not None:
+            at_rest |= {k: v for k, v in open_like(self.hand, g["q"], thumb_open).items() if k.startswith("thumb")}
+        self.fingers(side, tc, at_rest | held)
+        self.fingers(side, tc + close_s, (open_like(self.hand, g["q"], closed) if closed else g["q"]) | held)
         return tc + close_s
 
     def obj_at(self, name, t):
@@ -437,11 +448,14 @@ class BenchPlan:
                 return a + (b - a) * (t - t0) / max(t1 - t0, 1e-9), ga or gb
         return keys[-1][1], keys[-1][2]
 
+    def obstacles(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """What the arms' forearms keep clear of, as (centre, half size) boxes: the bench's top."""
+        return [bench_box()]
+
     def solve(self, iters=3000):
         self.T = self.t + 0.3
         n = self.n = int(self.T * FPS) + 1
-        c, h = bench_box()
-        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
+        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.obstacles(), arms=SIDES)
         s.W = BS.BodySolver.W | self.solver_w
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)

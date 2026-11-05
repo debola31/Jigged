@@ -23,8 +23,8 @@
     {"id": "undercut", "kind": "profile", "tool": "dovetail-20", "what": "Undercut the two end notches' walls 20° with their R15 corners"}
    ]},
   {"id": "op20", "title": "Op 20: far edge", "machine": "vf2", "face_up": "+Z",
-   "workholding": {"clamps": 4, "on": "the spoilboard", "shift": "10 mm toward you", "note": "The same plate, slid 10 mm toward the front so the far edge's cutter path ends 3.2 mm inside the Y travel; X and Y found again on the finished end and near edge"},
-   "wcs": {"code": "G54", "x": "the finished end (probe)", "y": "the finished near edge (probe)", "z": "the top of the plate"},
+   "workholding": {"clamps": 4, "on": "the spoilboard", "shift": "10 mm toward you", "note": "The same plate, slid 10 mm toward the front so the far edge's cutter path ends 3.2 mm inside the Y travel; X and Y picked up again from the reamed 8 mm dowel hole at its left end, by a bore cycle, and the other dowel hole probed to check it slid straight: the finished near edge stands past the front of the Y travel, where no probe reaches it (your decision, 2026-11-05)"},
+   "wcs": {"code": "G54", "x": "the dowel hole at its left end (probe)", "y": "the same hole (probe)", "z": "the top of the plate"},
    "operations": [
     {"id": "far_edge", "kind": "profile", "tool": "em12", "what": "Profile the far long edge to the 600 x 400 (-0.3/-0.5) outline and its two 45° corners, leaving tabs",
      "features": [{"type": "plane", "normal": "+X", "at_mm": -2.0}]}

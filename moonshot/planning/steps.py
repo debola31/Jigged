@@ -77,7 +77,7 @@ def held(s: dict, faces: dict) -> list[dict]:
             step(f"{p}-shift", "Shift the plate", "Loosen the clamps, slide the plate {shift} and clamp it again.", f,
                  setup=p, machine=m),
             step(f"{p}-check", "Check it's straight",
-                 "Sweep the indicator along its finished long edge: the needle should stay put.", f, setup=p, machine=m),
+                 "Probe the other dowel hole: it should read where the drawing has it.", f, setup=p, machine=m),
         ]
     if "clamps" in w:                              # a plate clamped down on the table
         f = {"setup": s["title"], "up": faces[s["face_up"]], "clamps": w["clamps"], "on": w["on"]}

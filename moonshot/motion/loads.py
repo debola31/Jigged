@@ -14,13 +14,25 @@ The pose, by rule:
 
 A later setup loads a machined part as its bounding box (ENVELOPE_MM), until the stock-removal model hands each setup
 its part: a declared shortcut, sound where the vise touches it, since every face it rests or clamps on is machined
-flat by then; the render draws its real shape.
+flat by then; the render draws its real shape. The cut simulation hands part_pose that box itself (`env`): the stock
+the setup before left, in the model's frame.
+
+A plate clamped to the table (a setup whose workholding has "clamps") lies on a 3/4 in MDF spoilboard bolted to the
+VF-2's table at its loading position, centred on the table where the vise stands (the vise comes off for it), its top
+at SPOILBOARD_TOP_Z. The plate lies flat on it, face_up up, its longer side along the table (world x) and the other
+pointing +y, so its low edge in the model is the near one; x completes the rotation. It is centred on the spoilboard,
+unless PLATE_NEAR_Y_MM places its near edge (a plate as wide as the Y travel, placed so its near edge's cutter path
+starts at the front of it). A setup whose workholding has "shift" is the same plate, still on the spoilboard, slid
+along the table: the setup before's pose, moved.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
-from moonshot.world.vise import REFERENCE, VISE, Load
+from moonshot.world import vf2
+from moonshot.world.vise import REFERENCE, TABLE_Z, VISE, Load
 
 AXIS = {"X": 0, "Y": 1, "Z": 2}
 INCH = 25.4
@@ -41,6 +53,18 @@ FACE_A_MM = {"nist-ftc-10": 0.5}
 # from datum A, z -37.5..37.5): Op 10 profiles the outline and faces datum A, Op 20 faces the top to 31
 ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.5))}
 ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50")}
+# a plate on the table: the spoilboard is 3/4 in MDF, centred on the table (its top collider's box, world mm at loading)
+SPOILBOARD_MM = 0.75 * INCH
+SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05
+_TABLE = vf2.record()["colliders"]["table_top"]
+SPOILBOARD_CENTRE_XY = ((_TABLE["box_min_mm"][0] + _TABLE["box_max_mm"][0]) / 2,       # -381.5, the vise's x
+                        (_TABLE["box_min_mm"][1] + _TABLE["box_max_mm"][1]) / 2)       # -340.5
+# the front of the Y travel: where the spindle stands over the table at Y's far end (moonshot/sim/cam.py joints)
+Y_TRAVEL_FRONT = vf2.record()["joints"]["spindle"]["centre_mm"][1] - vf2.record()["joints"]["y"]["range_mm"][1]
+# a plate placed by its near edge (world y of its stock's near edge). ll-1005337 (plan: "placed so the near edge's
+# cutter path starts at the front of the Y travel; the far edge's would end 6.8 mm past the back of it"): the 1/2 in
+# end mill's centre (r 6.35) 0.5 mm inside the front, and the 406.4 mm stock 3.2 mm wider than the part each side
+PLATE_NEAR_Y_MM = {"ll-1005337": Y_TRAVEL_FRONT + 0.5 + 0.25 * INCH - 3.2}
 
 
 def _setup(plan: dict, setup_id: str) -> dict:
@@ -72,16 +96,68 @@ def rotation(face_up: str, jaw_on: str) -> np.ndarray:
     return np.stack([x, y, z])
 
 
-def part_pose(plan: dict, setup_id: str) -> dict:
-    """The part in the vise (world mm, the table at its loading position): R, the box's centre and size (along,
-    across, up), and the model's origin, so a model point p stands at origin_mm + R @ p."""
-    w = _setup(plan, setup_id)["workholding"]
+def part_pose(plan: dict, setup_id: str, env=None) -> dict:
+    """The part in the vise, or a plate on the table (world mm, the table at its loading position): R, the box's
+    centre and size (along, across, up), and the model's origin, so a model point p stands at origin_mm + R @ p.
+    env: the part's box in its model's frame ([[xmin, xmax], [ymin, ymax], [zmin, zmax]] mm), as the cut simulation
+    has it; by default envelope()."""
     s = _setup(plan, setup_id)
+    w = s["workholding"]
+    if "clamps" in w:
+        return plate_pose(plan, setup_id, env)
+    env = envelope(plan, setup_id) if env is None else np.asarray(env, float)
     R = rotation(s["face_up"], w["jaw_on"])
-    env = envelope(plan, setup_id)
     size = np.abs(R) @ (env[:, 1] - env[:, 0])
     centre = np.array([VISE["x"], VISE["fixed_face_y"] - size[1] / 2,
                        VISE["seat_z"] + w["parallels_in"] * INCH + size[2] / 2])
+    return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
+
+
+def plate_rotation(face_up: str, env: np.ndarray) -> np.ndarray:
+    """R for a plate lying flat (as rotation()): up is face_up, the longer of its other two sides along world x, the
+    shorter pointing world +y."""
+    up = AXIS[face_up[-1]]
+    a, b = sorted({0, 1, 2} - {up}, key=lambda i: env[i, 1] - env[i, 0], reverse=True)
+    e = np.eye(3)
+    z = e[up] * (1.0 if face_up[0] == "+" else -1.0)
+    y = e[b]
+    return np.stack([np.cross(y, z), y, z])
+
+
+def plate_shift(plan: dict, setup_id: str) -> tuple[str, np.ndarray] | None:
+    """For a setup that slides the plate along the table ("shift": "<n> mm toward you" or "toward the back"): the
+    setup it slides from (the one before) and the move (world mm). None for any other setup."""
+    w = _setup(plan, setup_id).get("workholding", {})
+    if "shift" not in w:
+        return None
+    m = re.fullmatch(r"(\d+(?:\.\d+)?) mm toward (you|the back)", w["shift"])
+    if not m:
+        raise ValueError(f"{setup_id}: can't read the plate's shift {w['shift']!r}")
+    i = [x["id"] for x in plan["setups"]].index(setup_id)
+    return plan["setups"][i - 1]["id"], np.array([0.0, (-1.0 if m.group(2) == "you" else 1.0) * float(m.group(1)), 0.0])
+
+
+def shifted(before: dict, move: np.ndarray, env: np.ndarray) -> dict:
+    """A plate's pose slid by move from the pose before; env is only the box it reports."""
+    R, origin = before["R"], before["origin_mm"] + move
+    return {"R": R, "centre_mm": origin + R @ env.mean(1), "size_mm": np.abs(R) @ (env[:, 1] - env[:, 0]),
+            "origin_mm": origin, "envelope_mm": env}
+
+
+def plate_pose(plan: dict, setup_id: str, env=None) -> dict:
+    """A plate on the spoilboard (see the module's doc): part_pose's dict. A setup that slides the plate (plate_shift)
+    is the setup before's pose, moved; by default it reports the box the setup before had."""
+    s = _setup(plan, setup_id)
+    if sh := plate_shift(plan, setup_id):
+        before = part_pose(plan, sh[0])
+        return shifted(before, sh[1], before["envelope_mm"] if env is None else np.asarray(env, float))
+    env = envelope(plan, setup_id) if env is None else np.asarray(env, float)
+    R = plate_rotation(s["face_up"], env)
+    size = np.abs(R) @ (env[:, 1] - env[:, 0])
+    cy = SPOILBOARD_CENTRE_XY[1]
+    if plan.get("part") in PLATE_NEAR_Y_MM:
+        cy = PLATE_NEAR_Y_MM[plan["part"]] + size[1] / 2
+    centre = np.array([SPOILBOARD_CENTRE_XY[0], cy, SPOILBOARD_TOP_Z + size[2] / 2])
     return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
 
 

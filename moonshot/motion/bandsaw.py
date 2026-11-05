@@ -914,15 +914,17 @@ class UnloadPlan(SawPlan):
 
     def set_down_at(self):
         """Where the piece is set down (centre mm, world): on the saw's bed in front of the vise, as it lay, drawn
-        straight back toward the person to SET_DOWN_EDGE_MM from the bed's front edge (its far end 140 mm from the
+        back toward the person to SET_DOWN_EDGE_MM from the bed's front edge (its far end 140 mm from the
         blade, clear of the bow's window and left of the stop block), not on the bench (the user's decision,
         2026-11-05): the bench, beside and behind the right hip, is past people's reach, the trunk leaning 14-15 deg
         right and turning 15-22 to set it down there. The card asks of the place that it be away from the blade
         area."""
         c, _ = self.piece0
         bed = BS.record()["colliders"]["bed_front"]
+        # and wholly on the bed: as the slide left it, the piece overhung its near edge 7-10 mm
+        x = max(c[0], bed["box_min_mm"][0] + SC.STOCK["w"] / 2 + SET_DOWN_EDGE_MM + 4.0)
         y = bed["box_min_mm"][1] + self.length / 2 + SET_DOWN_EDGE_MM
-        return self.place.world([c[0], y, SC.bed_z() + SC.STOCK["h"] / 2 + 0.3])
+        return self.place.world([x, y, SC.bed_z() + SC.STOCK["h"] / 2 + 0.3])
 
     def compose(self):
         self.t = 0.5

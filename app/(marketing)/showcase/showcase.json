@@ -123,7 +123,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-z",
@@ -159,7 +159,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -856,7 +856,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-z",
@@ -1909,7 +1909,7 @@
     {
      "id": "op20-check",
      "title": "Check it's straight",
-     "caption": "Sweep the indicator along its finished long edge: the needle should stay put.",
+     "caption": "Probe the other dowel hole: it should read where the drawing has it.",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -1927,7 +1927,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the finished near edge (probe).",
+     "caption": "Set G54 X at the dowel hole at its left end (probe) and Y at the same hole (probe).",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -5043,6 +5043,14 @@
     "rot": 0
    },
    {
+    "item": "dovetail-30-20",
+    "asset": "dovetail-20",
+    "x": 42167.2,
+    "y": 12465,
+    "z": 1000,
+    "rot": 0
+   },
+   {
     "item": "height-gauge-1",
     "asset": "hgauge",
     "x": 45548.6,
@@ -5497,6 +5505,22 @@
       203.2,
       130.2,
       35.6
+     ]
+    }
+   },
+   "dovetail-20": {
+    "name": "20 deg dovetail cutter",
+    "model": "models/dovetail-20.glb",
+    "bbox": {
+     "min": [
+      -14.77,
+      -15.03,
+      -0.04
+     ],
+     "max": [
+      14.77,
+      15.03,
+      70.0
      ]
     }
    },

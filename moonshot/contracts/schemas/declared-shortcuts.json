@@ -21,6 +21,7 @@
   "couple_*": "The body's anatomical couplings (moonshot/body/skeleton.py hand_couplings)",
   "lead_screw": "The vise's lead screw as an exact ratio (moonshot/world/vise.py)",
   "saw_vise_screw": "The band saw's vise screw as an exact ratio of its handwheel, as the Kurt vise's lead_screw (moonshot/world/bandsaw.py; declared a mechanism, your decision 2026-11-04)",
+  "clamp_thread_*": "A step clamp's flange nut on its 1/2-13 stud: the nut's run along the stud as an exact ratio of its turn, the thread's 1.954 mm lead, the same form as lead_screw and saw_vise_screw (moonshot/world/spoilboard.py threads; declared a mechanism, your decision 2026-11-05). The nut is spun down by fingertip contact and snugged with a wrench (carry_wrench). The thread doesn't carry a clamp's 5 kN bite (MuJoCo's soft equality gives under it at the thread's 3,200:1): while the plate is cut the clamped weld does",
   "force on moving_jaw": "Kurt's AngLock: the moving jaw's angled nut pushes it down as it clamps, modelled as a downward force of 5% of the clamp force on the jaw (moonshot/sim/vise_take.py ANGLOCK; declared a mechanism, your decision 2026-11-03)"
  }
 }

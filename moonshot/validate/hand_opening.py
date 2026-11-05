@@ -15,6 +15,9 @@ A take that isn't the vise's has each grasped
 object's size from its record's colliders (moonshot/validate/objects.py thinnest_mm), and a left hand's reach is read
 from the left hand's aperture (sim.npz L_q; q_L in a run with the vise's keys, as the door takes', whose bars are sized
 across their width).
+
+A grasp the user exempted from this check (take.json "exempt", as grasp_timing reads it) isn't judged: its reaches are
+listed as exempt, and a take whose every grasp is exempt passes on that alone.
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ import numpy as np
 from moonshot.body.aperture import aperture_mm
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate import objects
-from moonshot.validate.grasp_timing import BARS, hand_of, measure as grasp_inputs, reaches
+from moonshot.validate.grasp_timing import BARS, all_exempt, exempt, hand_of, measure as grasp_inputs, reaches
 from moonshot.validate.registry import Result, check
 
 
@@ -51,8 +54,17 @@ def measure(take: Path) -> dict:
            "touch_lead": g["touch_lead"]}
     if "hand" in g:
         out |= {"hand": g["hand"], "hand_speed_L_mm_s": g["hand_speed_L_mm_s"],
-                "aperture_L_mm": aperture_mm(sim["q_L" if objects.is_vise(sim) else "L_q"], names).tolist()}
+                "aperture_L_mm": aperture_mm(sim[left_q_key(sim)], names).tolist()}
+    if "exempt" in g:
+        out["exempt"] = g["exempt"]
     return out
+
+
+def left_q_key(sim) -> str:
+    """Where a run's sim.npz keeps the left hand's angles: q_L in the vise runner's keys and in a step take's
+    (moonshot/sim/runner.py TakeRunner.export), L_q in the bench's. Read as L_q alone, a step take's left-hand grasp
+    had nothing to read."""
+    return "L_q" if "L_q" in sim.files else "q_L"
 
 
 def between_frames(speed: np.ndarray, ap: np.ndarray, start: int, contact: int, lead: float) -> tuple[float, float]:
@@ -92,11 +104,14 @@ def hand_opening(take: dict) -> Result:
     if not len(take["aperture_mm"]):
         raise ValueError("a take with no frames can't pass a per-frame check")
     when, slope = threshold("person.peak_aperture_reach_frac").band, threshold("person.aperture_per_object_mm").band
-    found, outside, peaks = [], [], {}
+    found, outside, peaks, excused = [], [], {}, []
     for obj, grasping in take["grasping"].items():
         side, speed = hand_of(take, obj)
         ap = np.asarray(take["aperture_mm" if side == "R" else "aperture_L_mm"], float)
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
+            if exempt(take, "hand_opening", obj, contact):
+                excused.append({"object": obj, "contact_frame": contact})
+                continue
             lead = take["touch_lead"][contact].get(obj, 0.0) if "touch_lead" in take else 0.0
             _, frac = between_frames(speed, ap, start, contact, lead)
             k = start + int(np.argmax(ap[start:contact + 1]))
@@ -106,6 +121,10 @@ def hand_opening(take: dict) -> Result:
             if not when[0] <= frac <= when[1]:
                 outside.append(f"{obj}@{contact} widest at {frac:.0%} of the reach")
     if not found:
+        if all_exempt(take, "hand_opening"):
+            return Result(passed=True, worst=0.0, detail={"reaches": [], "aperture_per_object_mm": None, "outside": [],
+                                                          "exempt": all_exempt(take, "hand_opening"),
+                                                          "exempt_reaches": excused})
         raise ValueError("no reach to grasp: the hand never closed on what the take grasps")
     per_mm = None
     sizes = {o: take["size_mm"][o] for o in peaks}
@@ -116,4 +135,5 @@ def hand_opening(take: dict) -> Result:
         if not slope[0] <= per_mm <= slope[1]:
             outside.append(f"opens {per_mm:.2f} mm wider per mm of object")
     return Result(passed=not outside, worst=float(len(outside)),
-                  detail={"reaches": found, "aperture_per_object_mm": per_mm and round(per_mm, 3), "outside": outside})
+                  detail={"reaches": found, "aperture_per_object_mm": per_mm and round(per_mm, 3), "outside": outside}
+                  | ({"exempt_reaches": excused} if excused else {}))

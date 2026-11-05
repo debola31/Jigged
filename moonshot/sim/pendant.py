@@ -75,22 +75,25 @@ NEAR_M = 0.02               # one this close to the handle bends the contact way
 def tool_xml(tool: dict) -> str:
     """A tool in its holder, hanging from the spindle's gauge line; it turns with the spindle. It doesn't collide:
     an edge finder's, probe's or indicator's touch is the machine's sensing, or the needle's, read from the geometry.
-    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus.
+    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a stylus, level, or
+    with "lever_drop_mm" angled down to the ball that far from where the stem ends.
     Its weight is carried by the head's counterbalance, as the spindle's is: uncompensated, its 1.2 kg sagged the Z
     servo 5.7 um below its setpoint, past the 5 um a probing cycle waits for, and op30-z's cycle never ended."""
     hl, st, tip = tool["holder_mm"], tool["stickout_mm"], tool["tip_mm"]
+    drop = tool.get("lever_drop_mm", 0.0)                # the stem ends this far above the ball
     f = lambda v: f"{v / 1000:.5f}"                      # noqa: E731
     body = (f'\n        <body name="tool" gravcomp="1">'
             f'<geom name="tool_holder" type="cylinder" size="{f(tool["holder_r"])} {f(hl / 2)}" pos="0 0 {f(-hl / 2)}" '
             f'contype="0" conaffinity="0" mass="1.1" rgba="0.6 0.6 0.62 1"/>'
-            f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip) / 2)}" '
-            f'pos="0 0 {f(-hl - (st - tip) / 2)}" contype="0" conaffinity="0" mass="0.05" rgba="0.7 0.7 0.72 1"/>')
+            f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip - drop) / 2)}" '
+            f'pos="0 0 {f(-hl - (st - tip - drop) / 2)}" contype="0" conaffinity="0" mass="0.05" '
+            f'rgba="0.7 0.7 0.72 1"/>')
     if "offset_mm" not in tool:
         return (body + f'<geom name="tool_tip" type="cylinder" size="{f(tool["tip_r"])} {f(tip / 2)}" '
                 f'pos="0 0 {f(-tool["length_mm"] + tip / 2)}" contype="0" conaffinity="0" mass="0.005" '
                 f'rgba="0.75 0.75 0.78 1"/></body>')
     (ox, oy), z = tool["offset_mm"], -tool["length_mm"] + tool["tip_r"]
-    return (body + f'<geom name="tool_stylus" type="capsule" fromto="0 0 {f(z)} {f(ox)} {f(oy)} {f(z)}" '
+    return (body + f'<geom name="tool_stylus" type="capsule" fromto="0 0 {f(z + drop)} {f(ox)} {f(oy)} {f(z)}" '
             f'size="{f(tool["stylus_r"])}" contype="0" conaffinity="0" mass="0.002" rgba="0.75 0.75 0.78 1"/>'
             f'<geom name="tool_tip" type="sphere" size="{f(tool["tip_r"])}" pos="{f(ox)} {f(oy)} {f(z)}" '
             f'contype="0" conaffinity="0" mass="0.001" rgba="0.85 0.3 0.3 1"/></body>')

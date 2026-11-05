@@ -35,7 +35,7 @@ STEEL = [184, 184, 191, 255]
 @dataclass(frozen=True)
 class Tool:
     id: str
-    family: str                  # drill | reamer | tap | ball_end_mill | end_mill
+    family: str                  # drill | reamer | tap | ball_end_mill | end_mill | dovetail
     name: str
     dia_mm: float
     flute_mm: float
@@ -52,6 +52,8 @@ class Tool:
     thread_mm: float | None = None
     chamfer_mm: float | None = None                 # a tap's lead
     square_mm: tuple[float, float] | None = None    # a tap's drive square: across flats, length
+    flank_deg: float | None = None                  # a dovetail's flank from its axis (per side): a cone, widest
+                                                    # at the tip (dia_mm), narrowing up its flute_mm
 
     @property
     def envelope_mm(self) -> float:
@@ -86,6 +88,9 @@ SOURCED = [
     Tool("em18", "end_mill", "1/8 in end mill", 0.125 * INCH, 0.375 * INCH, 1.5 * INCH, "carbide", 2),
     Tool("em132", "end_mill", "1/32 in end mill", 0.031 * INCH, 0.093 * INCH, 1.5 * INCH, "carbide", 2,
          shank_mm=0.125 * INCH, neck=((0.093 * INCH, 0.031 * INCH), (0.3141 * INCH, 0.125 * INCH))),
+    # sized to the part it cuts, not a catalogue entry: ll-1005337's undercut end-notch walls (SOURCES says how)
+    Tool("dovetail-20", "dovetail", "20 deg dovetail cutter", 30.0, 20.0, 70.0, "HSS", 6, helix_deg=0.0,
+         flank_deg=20.0, shank_mm=0.75 * INCH, neck=((20.0, 12.0), (25.0, 12.0), (28.0, 0.75 * INCH))),
 ]
 
 # Where each sourced tool's dimensions came from, for its record: `dims` goes into its notes, `urls` and `files`
@@ -131,6 +136,22 @@ SOURCES = {
               "urls": ["https://www.harveytool.com/products/tool-details-72031",
                        "https://harveyperformance.widen.net/content/tery12h1wd/original/Harvey_72031.dxf"],
               "files": ["Harvey_72031.dxf (Harvey Tool's profile drawing)"]},
+    "dovetail-20": {
+        "dims": "the wall it cuts, not a catalogue's 10 or 20 deg naming. The angle as read from ll-1005337's STEP "
+                "(part.step, 2026-11-05): each end notch's undercut wall is a plane whose normal is (0, -/+0.9397, "
+                "-0.3420), 20.000 deg from vertical, leaning 6.93 mm over the 19.05 mm plate (Y 24.62 at the top "
+                "face, 31.55 at the bottom), and its R15 corners are cylinders whose axes lean the same 20 deg; the "
+                "drawing (314-092-59986-10, section A-A) dimensions it 20 deg and 24.6, and the plan's op10 undercut "
+                "'walls 20 deg'. So the flank is 20 deg per side, 40 deg included, widest at the tip. Sized to the "
+                "notch: 30 mm at its widest, twice the R15 corners, the largest that doesn't leave them (a cutter "
+                "makes no corner tighter than its radius), and 20 mm of cut over the 19.05 mm wall; the 12 mm neck "
+                "5 mm long, the 3/4 in shank (for the shop's 3/4 in CAT40 end mill holder), 70 mm overall, 6 "
+                "straight flutes and HSS [proposed]. A vertical cutter's corners are its cone, R15 at the wall's "
+                "foot narrowing to R8.1 at the top face, where the model's leaning R15 stays R15 all the way up "
+                "(the drawing doesn't dimension R15)",
+        "urls": [],
+        "license": "self-made parametric generator (moonshot.library.generators, family dovetail), sized from the "
+                   "part it cuts (ll-1005337's STEP and drawing); no maker's tool"},
 }
 
 
@@ -155,7 +176,11 @@ def fluted_body(t: Tool) -> cq.Workplane:
     the helix, so the flutes are one swept profile rather than separate boolean cuts."""
     r = t.dia_mm / 2
     gullet = r * {"drill": 0.55, "end_mill": 0.5}.get(t.family, 0.35)       # a square end mill's deep, as a drill's
-    centres = [(math.cos(2 * math.pi * i / t.flutes) * r * 0.95, math.sin(2 * math.pi * i / t.flutes) * r * 0.95)
+    at = r * 0.95
+    if t.flank_deg:                    # a dovetail's gullets run from its cone's narrow top out past its wide tip
+        top = r - t.flute_mm * math.tan(math.radians(t.flank_deg))
+        at, gullet = (r + top) / 2, (r - top) / 2 + 0.05 * r
+    centres = [(math.cos(2 * math.pi * i / t.flutes) * at, math.sin(2 * math.pi * i / t.flutes) * at)
                for i in range(t.flutes)]
     face = cq.Sketch().circle(r).push(centres).circle(gullet, mode="s")._faces.Faces()[0]
     lead = math.pi * t.dia_mm / math.tan(math.radians(t.helix_deg)) if t.helix_deg else math.inf
@@ -180,6 +205,8 @@ def outline(t: Tool) -> list[tuple[float, float]]:
             z = k * p
             pts += [(root, z), (root, z + 0.125 * p), (r, z + 0.4375 * p), (r, z + 0.5625 * p), (root, z + 0.875 * p)]
         pts.append((root, t.thread_mm))
+    elif t.flank_deg:                                   # a dovetail's cone
+        pts = [(r, 0.0), (r - t.flute_mm * math.tan(math.radians(t.flank_deg)), t.flute_mm)]
     else:
         pts = [(r, 0.0), (r, t.flute_mm)]
     neck = list(t.neck) or ([(t.flute_mm + abs(rs - r), 2 * rs)] if rs != r else [])
@@ -211,6 +238,8 @@ def build(t: Tool) -> cq.Workplane:
             lower = _clip(line, 0.0, t.flute_mm)
             body = body.intersect(_revolved([(0, 0)] + lower + [(0, t.flute_mm)]))
         upper = _clip(line, t.flute_mm, t.overall_mm)
+        # from the last point at the flutes' end, so a step in there (a dovetail's neck) doesn't fold the section
+        upper = [p for p in upper if p[1] <= t.flute_mm + 1e-9][-1:] + [p for p in upper if p[1] > t.flute_mm + 1e-9]
         shank = _revolved([(0, t.flute_mm)] + upper + [(0, t.overall_mm)])
     else:
         shank = cq.Workplane("XY").workplane(offset=t.flute_mm).circle(r).extrude(t.overall_mm - t.flute_mm)
@@ -258,6 +287,9 @@ def record(t: Tool, shape: cq.Workplane) -> dict:
         specs.insert(0, {"name": "Thread", "value": t.thread})
     if t.family == "drill":
         specs.append({"name": "Point angle", "value": t.point_deg, "unit": "deg"})
+    if t.flank_deg:
+        specs.insert(1, {"name": "Flank angle", "value": t.flank_deg, "unit": "deg",
+                         "note": f"per side, from the axis; {2 * t.flank_deg:g} deg included"})
     return {
         "schema": "setupguide.asset/0.1", "id": t.id, "name": t.name, "category": "tooling",
         "make": "Generic", "model": f"{t.family} {t.dia_mm:g} mm",
@@ -476,8 +508,8 @@ def sourced_record(base: dict, gen: dict, src: dict, family: str, triangles: int
     return out | {
         "generic": True, "key_specs": specs, "source_urls": urls,
         "source_files": [f"{base['id']}.step"] + src.get("files", []),
-        "license": f"self-made parametric generator (moonshot.library.generators, family {family}), from "
-                   f"{base['make']}'s published dimensions; not the maker's CAD",
+        "license": src.get("license") or f"self-made parametric generator (moonshot.library.generators, family "
+                                         f"{family}), from {base['make']}'s published dimensions; not the maker's CAD",
         "notes": f"{use}{MARK} (family {family}) from {src['dims']}.".strip(),
         "file": f"{base['id']}.glb", "units": "mm", "up": "+Z", "bbox": gen["bbox"], "attach_points": [],
         "build": {"from": f"source/{base['id']}.step", "placeholder": f"generators.{family}", "up": "+Z",

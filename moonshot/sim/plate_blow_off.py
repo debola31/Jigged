@@ -51,8 +51,8 @@ class PlateBlowOff(SBO.BlowOff):
 
     def over_table(self, tip: np.ndarray) -> np.ndarray:
         """Is the nozzle's tip (mm, per frame) over the spoilboard, within the reach of what it blows?"""
-        lo = np.r_[SB.TABLE_MID - SB.SPOILBOARD_MM[:2] / 2, SB.TOP_Z]
-        hi = np.r_[SB.TABLE_MID + SB.SPOILBOARD_MM[:2] / 2, SB.TOP_Z + 250.0]
+        lo = np.r_[SB.TABLE_MID - SB.SPOILBOARD_MM[:2] / 2, self.plate.bottom]
+        hi = np.r_[SB.TABLE_MID + SB.SPOILBOARD_MM[:2] / 2, self.plate.bottom + 250.0]
         return np.all((tip >= lo) & (tip <= hi), axis=1)
 
     def outcome(self) -> dict:

@@ -30,8 +30,14 @@ GRAB_MM = -36.0              # the pinch's middle this far along the strap from 
 DEPTH_MM = (3.0, 7.0)        # the pads this far down the strap's sides from its top, well above what it rests on
 CLEAR_MM = 5.0               # the strap carried this high over where it lands: the pads clear the plate and the block
                              # (at 3, the physics hand ran 2-3 mm low and dragged the heel along the block)
-LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 1.0, 1.2, 0.4, 0.8     # unhurried, and a pause over its place while the eye lines it
-                                                          # up: in 2.0 s it landed 4.2 mm long
+LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 0.5, 1.2, 0.4, 0.8     # unhurried, and a pause over its place while the eye lines it
+                                                          # up: in 2.0 s it landed 4.2 mm long; brought up level in 1 s,
+                                                          # it took 400-570 ms to come up off the board once loaded
+RAISE_PEAK_MM_S = 380.0      # the hand's peak speed on its way to a reach's ready point, under the reach's own
+ARC_UP_MM = 80.0             # ... and how far over the higher of where it starts and the ready point it arcs
+LIFT_DELAY_S = 0.08          # the strap starts up this long after the carry starts: a tipped strap's middle rises slowly
+                             # as it is levelled, and at the parallels' 0.16 s it was 300 ms coming off the board once
+                             # loaded (people's 163-265)
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
 
 
@@ -110,6 +116,37 @@ def key_at(keys, t: float) -> tuple[np.ndarray, np.ndarray]:
     return keys[-1][1], keys[-1][2]
 
 
+def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None) -> tuple[float, np.ndarray]:
+    """A hand's reach to a grip from wherever it is at t0, as the parallels' (motion/set_parallels.py reach), either
+    hand: up to a ready point back from and over the grip, a pause, the paced reach down onto it, the fingers opening
+    widest ~75% of the way for an object size_mm across. obj: where the grip's object is now (world), if it has
+    moved since the grip was solved. Returns when the reach ends (the grip closes) and the grip's wrist (world)."""
+    g = take.grips[grip]
+    H, W = take.grip_pose(grip, obj)                             # the side's (mirrored for the left) world
+    Ww = take.at(s, W)                                           # ... as a world point
+    ready = Ww + np.array([0.0, -120.0, 70.0])
+    # a long way to the ready point taken no faster than the reach itself: from the hand hanging at rest in 1.2 s,
+    # its peak speed was the reach's, and the reach was timed from it (2 s, not people's 0.3-0.7)
+    here = take.at(s, take.side[s]["wrist"])
+    far = float(np.linalg.norm(ready - here))
+    t_ready = t0 + max(SP.RAISE_S, 1.875 * far / RAISE_PEAK_MM_S)
+    # up and over to it, in an arc: straight from the hand hanging at rest, the fingers dragged over the plate's near
+    # edge and the board's, and the arm caught on the table's front, 240 mm short of a far clamp
+    over = (here + ready) / 2
+    over[2] = max(here[2], ready[2]) + ARC_UP_MM
+    take.transit(s, t0, t_ready, ready, via=[over] if far > 150.0 else ())
+    take.add(s, t_ready, t_ready + SP.SETTLE_S, lambda tt, p=take.at(s, ready): [("pos", p, 1.0)])
+    t_reach = t_ready + SP.SETTLE_S
+    take.transit(s, t_reach, t_reach + SP.REACH_S, Ww, via=[Ww + np.array([0.0, -10.0, 40.0])], fade=(H, 1.0))
+    t_c = t_reach + SP.REACH_S
+    take.fingers(s, t0 + 0.2, take.q_relax)
+    take.fingers(s, t_reach, take.q_relax)
+    take.fingers(s, t_reach + SP.REACH_PEAK * SP.REACH_S, open_for(take.hand, g["q"], size_mm))
+    take.fingers(s, t_c, g["q"])
+    take.look(t0, Ww)
+    return t_c, Ww
+
+
 def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tuple[float, list]:
     """One clamp moved by its side's hand from wherever that hand is at t0: the reach to the pinch (as the
     parallels': up to a ready point over it, a pause, the paced reach opening widest ~75% of the way), the grip
@@ -117,24 +154,12 @@ def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tu
     solved where the strap starts. Returns when the hand is clear of it, and the strap's keys."""
     s = side_of(clamp)
     g = take.grips[grip]
-    H, W = take.grip_pose(grip)                                 # the side's (mirrored for the left) world
-    Ww = take.at(s, W)                                          # ... as a world point
-    ready = Ww + np.array([0.0, -120.0, 70.0])
-    t_ready = t0 + SP.RAISE_S
-    take.transit(s, t0, t_ready, ready)
-    take.add(s, t_ready, t_ready + SP.SETTLE_S, lambda tt, p=take.at(s, ready): [("pos", p, 1.0)])
-    t_reach = t_ready + SP.SETTLE_S
-    take.transit(s, t_reach, t_reach + SP.REACH_S, Ww, via=[Ww + np.array([0.0, -10.0, 40.0])], fade=(H, 1.0))
-    t_c = t_reach + SP.REACH_S
-    take.fingers(s, t0 + 0.2, take.q_relax)
-    take.fingers(s, t_reach, take.q_relax)
-    take.fingers(s, t_reach + SP.REACH_PEAK * SP.REACH_S, open_for(take.hand, g["q"], SB.CLAMP_W))
-    take.fingers(s, t_c, g["q"])
+    t_c, Ww = reach(take, s, grip, t0, SB.CLAMP_W)
     t_on = t_c - 0.1
     take.effort(s, t_c, 0.0, grip)
     take.effort(s, t_c + 0.2, 0.6, grip)
     t_load = t_c + SP.PRELOAD_S
-    keys = keys_from(t_load + SP.LIFT_DELAY_S)
+    keys = keys_from(t_load + LIFT_DELAY_S)
     R0 = keys[0][1]
     grab = np.array([GRAB_MM, 0.0, 0.0])
     take.follow(s, t_c, keys[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*key_at(keys, tt)),
@@ -153,5 +178,4 @@ def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tu
     take.add(s, t_down + 0.3, t_down + 0.8, lambda tt, a=t_down + 0.3, H1=H1, W1=W1, off=off:
              [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.5), 2.0)])
     take.side[s]["wrist"] = off
-    take.look(t0, Ww)
     return t_down + 0.8, keys

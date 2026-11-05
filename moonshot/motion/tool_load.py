@@ -502,8 +502,12 @@ class Seat(ToolTake):
         # the acceleration the cause check allows (physics.acceleration_spike_m_s2) and the arm, after it, twice that
         t_on = 0.2
         # in from level with the grip where the tool is wider than the holder's body (the face mill): from below it,
-        # the open fingers swept through the cutter
+        # the open fingers swept through the cutter. Where it is nearly as wide, its grip kept TOOL_CLEAR_MM off it
+        # (the dovetail cutter's 30 mm head, under the body), from level and further out: from below, and from
+        # 60 mm out, the closing fingers met its head 4-5.6 mm deep as the hand came on, from 90 mm out 4.2
         pre = Wg + [15.0, -60.0, 0.0 if self.wide else -12.0]
+        if not self.wide and TL.cutter(self.tool)["body_r"] + TOOL_CLEAR_MM > TL.BODY[0]:
+            pre = Wg + [15.0, -150.0, 0.0]
         # farther reaches take longer, their peak acceleration kept (a minimum-jerk move's grows as its length over its
         # duration squared), the approach onto the grip as long as ever
         reach_s = REACH_S * math.sqrt(max(1.0, np.linalg.norm(pre - self.side["R"]["wrist"]) / REACH_MM))
@@ -560,11 +564,15 @@ class Seat(ToolTake):
         lifted = slid + [0, 0, up]
         keys += [(t_touch, P0), (tl, P0), (t1, P0 + [0, 0, LIFT_MM]), (t2, slid), (t2b, lifted)]
         if self.part == "pick":
-            return self.plan_pick(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted)
+            return self.plan_pick(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted, t2)
         return self.into_spindle(keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted)
 
-    def plan_pick(self, keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted) -> dict:
-        """The pick's end: the holder held up clear of the stand, as the operator turns to step over to the doorway."""
+    def plan_pick(self, keys, at, g, kg, t_c, t_touch, tw0, t2b, lifted, t2) -> dict:
+        """The pick's end: the holder held up clear of the stand, as the operator turns to step over to the doorway. Off
+        a plate's bracket, the hand settles toward its grip as it lifts the holder clear (the carry's `regrip`, moonshot/
+        sim/tool_load.py): reaching low under the front row's arms, it closed on a back-row holder 13-15 deg off its
+        grip, which the carry kept, and the insert, the holder upright under the spindle, put the arm in a posture
+        people's sit further from (a median negative log-likelihood of 30.7-31.0, against their 28.7)."""
         t_end = t2b + PICK_HOLD_S
         keys += [(t_end, lifted)]
         self.look(t2b - 0.5, lifted + [0, 0, -40.0])
@@ -576,7 +584,8 @@ class Seat(ToolTake):
         self.effort("R", t_end, 0.6, "holder")
         self.event("grip", round(t_c, 3), round(held, 3), side="R", grip="holder", on="holder")
         self.event("carry", round(t_touch, 3), round(held, 3), side="R", obj="holder", kg=round(kg, 4),
-                   loading=[round(tw0, 3), round(tw0 + LOAD_RAMP_S, 3)])
+                   loading=[round(tw0, 3), round(tw0 + LOAD_RAMP_S, 3)],
+                   **({"regrip": [round(t2, 3), round(t2b, 3)]} if self.layout.bracket else {}))
         self.clip("Load the tools", 0.0, t_end, f"Pick up {self.tool}")
         self.t = t_end
         self.keys = keys

@@ -555,6 +555,69 @@
     "coupling": 1.84
    },
    "from": "facem's grip, kept 5 mm off a cutter wider than the holder's body: the 20 deg dovetail cutter's 30 mm head, which its holder's tool solid carries its whole length, nearly as wide as the 31.75 mm body (the default grip sinks the skin 12.6 mm into it, em12's 5.2, facem's 0: skin {'flange': 0.89, 'body': 1.36, 'tool': 0.0} mm into the holder)"
+  },
+  "ream-8": {
+   "q": {
+    "cmc2_flex": 0.002,
+    "index_mcp_abd": -9.413,
+    "index_mcp_flex": 36.91,
+    "index_pip": 57.159,
+    "index_dip": 19.746,
+    "cmc3_flex": 2.715,
+    "middle_mcp_abd": -0.856,
+    "middle_mcp_flex": 25.291,
+    "middle_pip": 63.757,
+    "middle_dip": 46.721,
+    "cmc4_flex": 8.923,
+    "ring_mcp_abd": -0.248,
+    "ring_mcp_flex": 3.535,
+    "ring_pip": 64.361,
+    "ring_dip": 2.706,
+    "cmc5_flex": 10.729,
+    "little_mcp_abd": -5.537,
+    "little_mcp_flex": 61.86500000000001,
+    "little_pip": 56.768,
+    "little_dip": 24.959,
+    "thumb_cmc_abd": 31.939,
+    "thumb_cmc_flex": 19.793,
+    "thumb_cmc_roll": -7.558,
+    "thumb_mcp_abd": -3.119,
+    "thumb_mcp_flex": 31.705,
+    "thumb_ip": -12.426
+   },
+   "H": [
+    [
+     0.22492091200502956,
+     0.22521689766173075,
+     0.9479915254634144
+    ],
+    [
+     0.9743767139402842,
+     -0.05276322318165888,
+     -0.21864597323165114
+    ],
+    [
+     0.0007763206548851397,
+     0.9728789191297692,
+     -0.23131365294580614
+    ]
+   ],
+   "W_rel": [
+    34.85109203887485,
+    -108.28028505906276,
+    -56.30281641893658
+   ],
+   "loss": 23.34,
+   "terms": {
+    "pad_index": 1.18,
+    "pad_middle": 0.01,
+    "pad_thumb": 3.77,
+    "penetration": 4.41,
+    "prior": 1.78,
+    "coupling": 12.18
+   },
+   "from": "drill-11's grip, its fingers placed off a long 12 mm shank, and eased as far down before it opens: the 8 mm reamer's shank, 4 mm round and 122 mm out of the holder, took the default's lower fingers 3.7 mm into it as they closed and as it was carried, and drill-11's eased 1.5 mm, its little finger 3.8 mm into it as it opened",
+   "ease_mm": 8.0
   }
  }
 }

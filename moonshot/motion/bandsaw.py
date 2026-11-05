@@ -303,6 +303,11 @@ class LoadPlan(SawPlan):
         cols = [self.bar_box(c), saw_box(self.place, "bow", q_head=math.radians(RAISED_DEG)),
                 oriented_box(self.place.world((lo + hi) / 2), self.place.R, (hi - lo) / 2)]
         cols += [saw_box(self.place, n) for n in ("bed_back", "fixed_jaw_back")]
+        # and behind it, not over the bar: solved without this, the fingers hooked over the end from in front, and the
+        # hand pushing the bar ran into the bow's box 85 mm on (planning only)
+        top = SC.bed_z() + SC.STOCK["h"]
+        over = (np.array([c[0] - 150.0, tail - 400.0, top + 3.0]), np.array([c[0] + 150.0, tail - 3.0, top + 300.0]))
+        cols.append(oriented_box(self.place.world((over[0] + over[1]) / 2), self.place.R, (over[1] - over[0]) / 2))
         return {"bar": dict(of="bar", obj=self.place.world(c), q0=q0, iters=1000, colliders=cols,
                             targets={"index": on_face(), "middle": on_face(), "ring": on_face()},
                             starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (15, 30) for pl in (40, 70)
@@ -334,9 +339,10 @@ class LoadPlan(SawPlan):
         t_off = t_held + HOLD_S
         self.carry("bar", tg, t_off)
         # the bar's friction on the bed, felt and pushed against as it slides, then a light push holding it to the stop
-        # and against the fixed jaw throughout (the card's phase 7), so it doesn't drift toward the open jaw
+        # and against the fixed jaw (the card's phase 7), so it doesn't drift toward the open jaw
         friction = SC.STOCK["friction"] * SC.stock_kg(SC.bar_mm()) * 9.81
-        along = np.array([JAW_N / friction, -1.0, 0.0])
+        along = np.array([0.0, -1.0, 0.0])     # straight along it: pushed toward the fixed jaw by its tail, it yawed
+                                               # 0.65 deg and wedged between the jaws
         self.event("drag", t_slide - 0.1, t_held + 0.1, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                    force=round(float(np.linalg.norm(along)) * friction, 2))
         hold = np.array([JAW_N, -HOLD_N, -DOWN_N])

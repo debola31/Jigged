@@ -24,6 +24,8 @@ check it (moonshot/validate).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from moonshot.world import inspection_bench as IB
@@ -49,6 +51,69 @@ PART_BOXES = {                       # (min, max): the STEP's planar faces, its 
     "part_boss": ((35.5, 30.0, 16.0), (59.5, 31.0, 31.0)),       # the one face at Y = 31
 }
 POCKET_UP = (0.0, 0.0, 0.70710678, -0.70710678)    # w x y z: the STEP's -Y up, its +X to the world's -X, +Z to -Y
+
+
+@dataclass(frozen=True)
+class BenchPart:
+    """A finished part as it lies on the bench mat, its body's frame its STEP's (mm): what the take's colliders, mass
+    and render are made from. nist-ftc-10's is the module's constants above; each G1 part's is read off its STEP."""
+    name: str                      # its folder under <data root>/parts, where its finished.glb is
+    kg: float
+    com: tuple                     # its STEP's centre of mass (mm)
+    inertia: tuple                 # about the com along its STEP's axes (kg m^2)
+    boxes: dict                    # name -> (min, max): colliders read off the STEP's planar faces
+    up: tuple                      # w x y z: how it lies, its STEP's frame in the world's
+    feet: tuple                    # the boxes it lies on the mat by
+    lies_mm: float                 # its STEP origin's height over the mat as it lies
+
+
+NIST_FTC_10 = BenchPart("nist-ftc-10", PART_KG, PART_COM, (2.79e-4, 1.295e-3, 1.097e-3), PART_BOXES, POCKET_UP,
+                        ("part_slab", "part_boss"), 31.2)
+# ll-1005337, the Delrin pallet inlay: 600 x 400 x 19.05, nests up (its STEP's +Z), its length along the bench (the
+# STEP's +Y to the world's -X), its near long edge (X = -398) toward the operator. The STEP's 2,837,882 mm^3 of acetal
+# at 1,410 kg/m^3, its inertia a solid slab's. Its colliders: the slab between its long edges' faces (X -398 and -2)
+# and its ends' (Y 2 and 598), and the corner lugs standing 2 mm proud of them, over which the 600 and 400 are
+# measured; its 24 recesses, nests and dowel holes left out
+LL_1005337 = BenchPart(
+    "ll-1005337", 4.001, (-198.75, 297.83, -11.68), (0.1201, 0.0535, 0.1733),
+    {"part_slab": ((-398.0, 2.0, -20.0), (-2.0, 598.0, -0.95)),
+     "part_lug_near_a": ((-400.0, 21.21, -20.0), (-398.0, 74.51, -0.95)),
+     "part_lug_near_b": ((-400.0, 525.5, -20.0), (-398.0, 543.79, -0.95)),
+     "part_lug_far_a": ((-2.0, 21.21, -20.0), (0.0, 74.51, -0.95)),
+     "part_lug_far_b": ((-2.0, 525.5, -20.0), (0.0, 578.79, -0.95)),
+     "part_lug_end_a": ((-74.51, 0.0, -20.0), (-21.21, 2.0, -0.95)),
+     "part_lug_end_b": ((-378.79, 0.0, -20.0), (-325.49, 2.0, -0.95)),
+     "part_lug_end_c": ((-74.51, 598.0, -20.0), (-21.21, 600.0, -0.95)),
+     "part_lug_end_d": ((-343.79, 598.0, -20.0), (-325.49, 600.0, -0.95))},
+    (0.70710678, 0.0, 0.0, 0.70710678), ("part_slab",), 20.2)
+# the gripper jaw, 4140 (7,850 kg/m^3), 75 x 49 x 40: a 10 mm bar (Y 30-40, its top face, chamfered 5 mm on three edges)
+# with an 11 mm stem down from it (X 24-35, Y 0-30) and a stepped side (X 35-49). It lies on its top face, the stem up
+# and the stepped side to the operator: its +X to the world's -Y, -Y up, +Z to the world's +X
+LL_1007223 = BenchPart(
+    "ll-1007223", 0.4887, (27.41, 27.12, 0.0), (2.871e-4, 2.969e-4, 1.184e-4),
+    {"part_foot": ((0.0, 35.0, -32.5), (44.0, 40.0, 32.5)),      # the top face, inside its chamfers: it lies on this
+     "part_bar": ((0.0, 30.0, -37.5), (44.0, 35.0, 37.5)),
+     "part_nose": ((44.0, 27.0, -37.5), (49.0, 35.0, 37.5)),     # the near side's lowest step, under the 45 deg chamfer
+     "part_ledge": ((39.25, 27.0, -37.5), (44.0, 30.0, 37.5)),
+     "part_step": ((35.0, 20.0, -37.5), (39.25, 30.0, 37.5)),
+     "part_stem": ((24.0, 0.0, -37.5), (35.0, 30.0, 37.5)),
+     "part_fillet": ((21.0, 26.0, -37.5), (24.0, 30.0, 37.5))},  # most of the R10 in the stem's far corner
+    (0.5, -0.5, 0.5, -0.5), ("part_foot",), 40.2)
+# the L-block, 4140 (7,850 kg/m^3), 3.00 x 1.50 x 2.00 in, 0.75 legs: the base along X, the upright at X = 0, both 1.50
+# deep along Y. It lies on its base, the upright at the operator's left, as its STEP stands
+CT_SLBEAM = BenchPart(
+    "ct-slbeam", 0.5898, (29.42, 19.05, 16.98), (1.812e-4, 4.175e-4, 3.836e-4),
+    {"part_base": ((0.0, 0.0, 0.0), (76.2, 38.1, 19.05)),
+     "part_upright": ((0.0, 0.0, 19.05), (19.05, 38.1, 50.04)),
+     "part_cap": ((0.76, 0.0, 50.04), (18.29, 38.1, 50.8))},     # inside the upright's 0.76 mm top chamfers
+    (1.0, 0.0, 0.0, 0.0), ("part_base",), 0.2)
+# the stainless sheet, 304 (8,000 kg/m^3), 279.4 x 190.5 x 3.04, datum A (Y = 0) under it: one box, its holes, window,
+# notched corners and engraving left out. It lies flat, its long sides along the world's X: its +X to +Y, +Y up, +Z to +X
+NIST_FTC_09 = BenchPart(
+    "nist-ftc-09", 1.0916, (2.19, 1.52, 4.55), (6.884e-3, 1.019e-2, 3.310e-3),
+    {"part_sheet": ((-95.25, 0.0, -139.7), (95.25, 3.04, 139.7))},
+    (0.5, 0.5, 0.5, 0.5), ("part_sheet",), 0.2)
+PARTS = {p.name: p for p in (NIST_FTC_10, LL_1007223, CT_SLBEAM, NIST_FTC_09, LL_1005337)}
 
 # --- the bench mat (mm) -------------------------------------------------------------------------------------------
 MAT = {"size": (240.0, 140.0, 3.0), "friction": 0.9,     # rubber on aluminium and on maple, about 0.9 (proposed)
@@ -110,11 +175,12 @@ def defaults() -> str:
     </default>"""
 
 
-def part_body(at_mm) -> str:
-    """The finished part, pocket side up, its STEP origin (datum A's middle) at at_mm."""
-    geoms = "".join(f'\n      {_box(n, lo, hi, " class=\"part\"")}' for n, (lo, hi) in PART_BOXES.items())
-    return (f'    <body name="part" pos="{_f(at_mm)}" quat="{_f(POCKET_UP, 1)}">\n      <freejoint name="part"/>\n'
-            f'      <inertial pos="{_f(PART_COM)}" mass="{PART_KG}" diaginertia="2.79e-4 1.295e-3 1.097e-3"/>{geoms}\n'
+def part_body(at_mm, part: BenchPart = NIST_FTC_10) -> str:
+    """The finished part as it lies (nist-ftc-10 pocket side up), its STEP origin (nist-ftc-10's datum A's middle) at
+    at_mm."""
+    geoms = "".join(f'\n      {_box(n, lo, hi, " class=\"part\"")}' for n, (lo, hi) in part.boxes.items())
+    return (f'    <body name="part" pos="{_f(at_mm)}" quat="{_f(part.up, 1)}">\n      <freejoint name="part"/>\n'
+            f'      <inertial pos="{_f(part.com)}" mass="{part.kg}" diaginertia="{_f(part.inertia, 1)}"/>{geoms}\n'
             f'    </body>\n')
 
 
@@ -199,8 +265,9 @@ def _excludes(loose: str) -> str:
     if 'name="bench_mat"' in loose and 'name="part"' in loose:
         f, ref, imp = MAT["friction"], _f(MAT["solref"], 1), _f(MAT["solimp"], 1)
         rows.append('    <exclude body1="part" body2="bench_mat"/>')
+        feet = dict.fromkeys(g for p in PARTS.values() for g in p.feet if f'name="{g}"' in loose)
         rows += [f'    <pair geom1="{g}" geom2="bench_mat" condim="4" friction="{f} {f} 0.005 0.0001 0.0001" '
-                 f'solref="{ref}" solimp="{imp}" solreffriction="0.002 1"/>' for g in ("part_slab", "part_boss")]
+                 f'solref="{ref}" solimp="{imp}" solreffriction="0.002 1"/>' for g in feet]
     return "  <contact>\n" + "\n".join(rows) + "\n  </contact>\n" if rows else ""
 
 
@@ -240,19 +307,24 @@ def rest_mm(name: str) -> np.ndarray:
 
 IDENTITY = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
 ASSET = [0.0, 0.0, 0.0, 0.7071068, 0.7071068, 0.0, 0.0]   # an asset's GLB, glTF's Y up, in its Z-up asset frame
-LINKS = {"part": "parts/nist-ftc-10/finished.glb",          # moonshot/library/bench_links.py writes these
-         "deburr_tool": "library/hand_tools/deburr/links/tool.glb",
-         "insp_cal6": "library/inspection/cal6/links/beam.glb",
+LINKS = {"deburr_tool": "library/hand_tools/deburr/links/tool.glb",     # moonshot/library/bench_links.py writes
+         "insp_cal6": "library/inspection/cal6/links/beam.glb",            # these, and each part's finished.glb
          "insp_cal6_slider": "library/inspection/cal6/links/slider.glb",
          "insp_hgauge": "library/inspection/hgauge/links/height_gauge.glb"}
+SPLIT = {"insp_cal6": "insp_cal6_slider"}           # an instrument split at its moving part, and that part
 
 
-def render_glbs(model) -> dict[str, list[dict]]:
+def render_glbs(model, part: str = "nist-ftc-10") -> dict[str, list[dict]]:
     """Each body's render meshes for the take record (moonshot/contracts/take_record.py): the moving bodies' links,
-    each in its body's frame; the instruments' own asset GLBs, each in its asset frame; and, on the static body
-    `insp_bench`, the bench (the world frame is its asset's) and the granite plate (its underside centred)."""
+    each in its body's frame (the part's, parts/<part>/finished.glb); the instruments' own asset GLBs, each in its
+    asset frame; and, on the static body `insp_bench`, the bench (the world frame is its asset's) and the granite
+    plate (its underside centred)."""
     names = {model.body(b).name for b in range(1, model.nbody)}
-    out = {b: [{"path": p, "in_body": IDENTITY}] for b, p in LINKS.items() if b in names}
+    # an instrument split at its moving part only where the take has that part as a body: the station's own calipers,
+    # one box at their rest in the deburring takes, drew as their beam alone, no slider, display or moving jaw
+    links = {"part": f"parts/{part}/finished.glb"} | {b: p for b, p in LINKS.items()
+                                                      if b not in SPLIT or SPLIT[b] in names}
+    out = {b: [{"path": p, "in_body": IDENTITY}] for b, p in links.items() if b in names}
     for k in IB.record()["rests"]:
         if f"insp_{k}" in names and f"insp_{k}" not in out:
             out[f"insp_{k}"] = [{"path": f"library/inspection/{k}/{k}.glb", "in_body": ASSET}]

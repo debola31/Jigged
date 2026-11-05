@@ -9,6 +9,7 @@
   "generic": false,
   "key_specs": [
     {"name": "Thread", "value": "1/4-20 UNC"},
+    {"name": "Diameter", "value": 0.25, "unit": "in"},
     {"name": "Thread length", "value": 1, "unit": "in"},
     {"name": "Overall length", "value": 2.5, "unit": "in"},
     {"name": "Flutes", "value": 2, "unit": "flutes"},

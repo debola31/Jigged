@@ -66,15 +66,17 @@ def spans(part: str, step: dict) -> list[Span]:
     facts = step.get("facts", {})
     if step["kind"] == "cycle":
         return [(f"{part}-{sid}", None, None)]              # the cycle's own simulation, one per operation
-    if step.get("machine") == "bandsaw":                    # one load take and one lift-out per part's bar
-        return {"load": [(vise, None, None)], "start": [("saw-start", None, None)],
+    if step.get("machine") == "bandsaw":                    # per part's bar: its load (the slide to the stop, then
+        # the vise's handwheel, at the saw's other end: moonshot/motion/bandsaw.py) and its lift-out
+        return {"load": [(vise, None, None), (f"{vise}-clamp", None, None)], "start": [("saw-start", None, None)],
                 "unload": [(f"lift-out-{vise}", None, None)]}[kind]
     own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
     start = [shared(step, "door-close"), shared(step, "cycle-start")]
+    tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
-        return {"clean": own, "load": own, "seat": own, "check": own, "shift": own, "xy": setting, "z": setting,
-                "tools": setting, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
+        return {"clean": own, "load": own, "seat": own, "check": setting, "shift": own, "xy": setting, "z": setting,
+                "tools": tools, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
     if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":
             return [shared(step, "blow-off"), shared(step, "set-stop")]
@@ -87,7 +89,7 @@ def spans(part: str, step: dict) -> list[Span]:
         "check": [(vise, "measure", "measure")],
         "xy": setting,
         "z": setting,
-        "tools": [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else [],
+        "tools": tools,
         "start": start,
         "unload": [shared(step, "door-open"), shared(step, "blow-off"), shared(step, "loosen"),
                    (f"lift-out-{vise}", None, None)],

@@ -19,6 +19,7 @@ import hashlib
 import inspect
 import json
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import mujoco
@@ -44,8 +45,14 @@ REST_OFFSET = np.array([210.0, 55.0, -105.0])     # a hand hanging relaxed by it
                                                   # left's, mirrored)
 TOP = IB.tops_mm()["bench"]
 SIDES = ("R", "L")
-PART_AT = np.array([-80.0, -110.0, TOP + BC.MAT["size"][2] + 31.2])   # the finished part, pocket up, on the mat,
-                                                                       # dropped 0.2 mm onto its boss and slab
+
+
+def part_at(part: BC.BenchPart = BC.NIST_FTC_10, xy=(-80.0, -110.0)) -> np.ndarray:
+    """Where a finished part lies on the mat: its STEP origin, a little over its resting height (it is let settle)."""
+    return np.array([*xy, TOP + BC.MAT["size"][2] + part.lies_mm])
+
+
+PART_AT = part_at()                               # nist-ftc-10, pocket up, dropped 0.2 mm onto its boss and slab
 STEADY_N = 5.0                                    # the steadying hand's push (the caliper card's, proposed): on the
                                                   # rubber mat it holds the part; at 10 N the loaded arm sagged and
                                                   # crept the part 6 mm
@@ -77,6 +84,23 @@ TAKE_MM, TAKE_S = 4.5, 0.45                       # a lift first takes the tool'
                                                   # 4 mm over 0.45 s, 333 ms; 5 mm over 0.4 s and 6 mm over 0.35 s,
                                                   # 100 ms
 LIFT_S = 1.0                                      # ... and is up its 30-35 mm this long after it starts
+
+
+@dataclass(frozen=True)
+class Steady:
+    """Where the left hand holds the part down (BenchPlan.steady_spec), in the part's frame: the point it comes onto,
+    each finger pad's target (the finger, a point on the face it lies on, the face's outward normal, and its band about
+    that point along the world's axes, as bands' x=, y=, z=), the face it pushes on (its outward normal) and the arm's
+    starting angles for the solve. nist-ftc-10's: flat on its wide rim, fingers forward."""
+    at: tuple = (41.0, 0.0, 0.0)
+    pads: tuple = tuple((f, (41.0, 0.0, 0.0), (0.0, -1.0, 0.0), (("x", b), ("y", (-12, 14))))
+                        for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))
+    push: tuple = (0.0, -1.0, 0.0)
+    starts: tuple = tuple((20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (40, 70) for r in (0, -10))
+    # the hand's way up from the thigh, from where it hangs (mirrored: +x out), and off again, from where it held: not
+    # the grip's, so out of the grips' cache key
+    rise: tuple = field(default=(40.0, 60.0, 160.0), repr=False)
+    away: tuple = field(default=(0.0, -25.0, 110.0), repr=False)
 
 
 def box(c, h):
@@ -117,10 +141,10 @@ def instrument_colliders(rests: dict, names: tuple[str, ...], grow: float = 0.0)
     return out
 
 
-def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Each loose body's pose (mm, rotation) once it has come to rest on the bench, no body model: what the plan
-    aims at is where the physics will find it."""
-    m = mujoco.MjModel.from_xml_string(BC.standalone_xml(loose, skip))
+def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0, cell=BC) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Each loose body's pose (mm, rotation) once it has come to rest on the bench (or in another cell, a module with
+    bench_cell's standalone_xml), no body model: what the plan aims at is where the physics will find it."""
+    m = mujoco.MjModel.from_xml_string(cell.standalone_xml(loose, skip))
     d = mujoco.MjData(m)
     for _ in range(int(seconds / m.opt.timestep)):
         mujoco.mj_step(m, d)
@@ -135,6 +159,8 @@ class BenchPlan:
     grip_weights: tuple[float, float] | None = None   # (people's posture, the pads' contact) for its grip solves, or
                                                       # the shared solver's (posture_cost's, 1)
     solver_w: dict = {}             # its own weights over the body solver's (BodySolver.W), as a step take's SOLVER_W
+    bench_part = BC.NIST_FTC_10     # the finished part on the mat
+    steady_on = Steady()            # where the left hand holds it down
 
     def __init__(self, out: Path, verbose: bool = True):
         torch.set_num_threads(8)
@@ -163,6 +189,7 @@ class BenchPlan:
             (MOONSHOT / f).read_text(encoding="utf-8") for f in ("motion/grasp.py", "body/hand.py", "motion/kinematics.py",
                                                                   "motion/solver.py"))
         src += inspect.getsource(type(self).grip_specs) + inspect.getsource(BenchPlan.steady_spec)
+        src += repr(self.bench_part) + repr(self.steady_on)
         src += json.dumps(np.asarray(self.lumbar).tolist() + list(self.grip_weights or ()))
         src += json.dumps({k: [np.round(p, 2).tolist(), np.round(R, 4).tolist()] for k, (p, R) in sorted(rests.items())})
         src += json.dumps({k: [np.round(s["at"][0], 2).tolist(), np.round(s["at"][1], 4).tolist()]
@@ -208,17 +235,21 @@ class BenchPlan:
     def part_colliders(self, grow=0.0):
         p, R = self.part
         return [oriented_box(p + R @ ((np.array(lo) + hi) / 2), R, (np.array(hi) - lo) / 2 + grow)
-                for lo, hi in BC.PART_BOXES.values()]
+                for lo, hi in self.bench_part.boxes.values()]
 
     def steady_spec(self) -> dict:
-        """The left hand flat on the part's wide rim (its +X end, to the operator's left), fingers forward."""
+        """The left hand on the part where steady_on says: nist-ftc-10's, flat on its wide rim (its +X end, to the
+        operator's left), fingers forward."""
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
         bc, bh = bench_box()
-        c = self.to_world([41.0, 0.0, 0.0])
-        n_up = self.to_world([0.0, -1.0, 0.0], vec=True)
-        # the pads on the rim's face, not into it: the press holds the part down. 2 mm in, on the body whose pads meet
+        st = self.steady_on
+        c = self.to_world(st.at)
+
+        # the pads on their faces, not into them: the press holds the part down. 2 mm in, on the body whose pads meet
         # what they touch (37b295a8), the arm landed as a strut and leant the trunk 16 deg to the right
-        top = lambda lo, hi: G.plane_target(c, n_up, 0.0, bands(c, x=(lo, hi), y=(-12, 14)))   # noqa: E731
+        def pad(at, n, lims):
+            p = self.to_world(at)
+            return G.plane_target(p, self.to_world(n, vec=True), 0.0, bands(p, **dict(lims)))
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 15.0, 15.0
@@ -226,8 +257,8 @@ class BenchPlan:
         # index: tucked under the hand, it caught the part's edge as the hand lifted and raised it 2.4 mm; held out, it
         # came to rest on the micrometer in front and held the hand off the part
         return dict(side="L", obj=c, q0=q0, iters=900, colliders=self.part_colliders() + [box(bc, bh)],
-                    targets={"index": top(8, 20), "middle": top(-7, 5), "ring": top(-22, -10)},
-                    starts=[S(20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (40, 70) for r in (0, -10)])
+                    targets={f: pad(at, n, lims) for f, at, n, lims in st.pads},
+                    starts=[S(*a) for a in st.starts])
 
     def steady(self, t_reach, t_off):
         """The left hand comes onto the rim, fingers flat, and holds the part down until t_off."""
@@ -237,7 +268,7 @@ class BenchPlan:
         # up out of the bench's way first: from the thigh, the knuckles catch its front edge. And out to its side as it
         # rises (+x, the mirrored world's outward): straight up in front of the thigh, the shoulder turned in to 35 deg
         # (people's 31)
-        self.transit("L", t_reach, tc, W, via=[self.rest + [40, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
+        self.transit("L", t_reach, tc, W, via=[self.rest + self.steady_on.rise, W + [0, -30, 60]], fade=(H, 1.0))
         self.fingers("L", t_reach + 0.3, open_like(self.hand, g["q"], 0.4))
         self.fingers("L", tc, g["q"])
         self.hold("L", tc, t_off, H, W)
@@ -248,14 +279,15 @@ class BenchPlan:
         self.event("grip", tc, t_off, side="L", grip="steady", on="part")
         # the push ends, and the hand is still a moment, before it lifts: lifting as it still pressed, its fingertips
         # dragged the part 9 mm
-        self.event("press", tc + 0.3, t_off - 0.4, side="L", normal=self.to_world([0, -1, 0], vec=True).tolist(),
+        push = self.to_world(self.steady_on.push, vec=True)
+        self.event("press", tc + 0.3, t_off - 0.4, side="L", normal=push.tolist(),
                    force=STEADY_N, contact="part")
         self.fingers("L", t_off + 0.3, open_like(self.hand, g["q"], 0.3))
         # well up before back past the bench's edge: the wrist rests over the calipers, and lifted 40 mm the relaxing
         # fingers swept them 107 mm toward the operator and wedged them on the bench, which threw them
-        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 110], via=[W + [0, 0, 18]])
+        self.transit("L", t_off, t_off + 0.5, W + self.steady_on.away, via=[W + [0, 0, 18]])
         self.fingers("L", t_off + 1.2, self.q_relax)
-        self.transit("L", t_off + 0.5, t_off + 1.6, self.rest, via=[W + [0, -230, 110]])
+        self.transit("L", t_off + 0.5, t_off + 1.6, self.rest, via=[W + np.add(self.steady_on.away, [0, -205, 0])])
         self.clip("steady", tc - 0.3, tc + 0.6, "STEADY  the left hand holds the part down on the bench")
 
     # --- building blocks ---------------------------------------------------------------------------------------
@@ -286,7 +318,7 @@ class BenchPlan:
         self.wrist[side] = np.asarray(W, float)
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S, above=0.0,
-              open_s=None, close_s=CLOSE_S):
+              open_s=None, close_s=CLOSE_S, rest_open=0.15, closed=0.0, thumb_open=None, keep=None):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
@@ -299,7 +331,14 @@ class BenchPlan:
         left hand's on the calipers lying on the bench struck the bench, bounced 15 mm and closed on nothing. A hand
         opening only a little opens over the last `open_s` of the way: opened over all of it, its last 0.15 s were
         level to 0.3 mm, and its widest came where the noise put it. A hand coming down far onto its grip closes over
-        `close_s`.
+        `close_s`. The hand comes to rest open `rest_open` of the way: a hand whose pads touch its grip only as it
+        closes there rests wider than 0.15. It closes to `closed` of the way open, the grip's squeeze closing it the
+        rest: a pinch closed onto the faces' planes drags what it pinches along the fingers' arcs. Given
+        `thumb_open`, the thumb comes to rest that far open, nearer its face than the fingers theirs, so it meets its
+        face first and holds what the fingers close against: a pinch from above whose fingers met the far face first
+        shoved a part standing on a shelf 20 mm toward the operator. `keep` (joint -> angle) holds the digits that take
+        no part in the grip where they are out of the way, the reach through: opened with the rest, the L-block's ring
+        finger swept through its upright as the hand closed.
         Returns when the grip has closed."""
         g = self.grips[grip]
         t_ready = t0 + RISE_S
@@ -315,9 +354,13 @@ class BenchPlan:
         self.fingers(side, t0 + 0.3, self.q_relax)
         if open_s is not None:
             self.fingers(side, tc - lead - open_s, self.q_relax)
-        self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
-        self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
-        self.fingers(side, tc + close_s, g["q"])
+        held = dict(keep or {})
+        self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened) | held)
+        at_rest = open_like(self.hand, g["q"], rest_open)
+        if thumb_open is not None:
+            at_rest |= {k: v for k, v in open_like(self.hand, g["q"], thumb_open).items() if k.startswith("thumb")}
+        self.fingers(side, tc, at_rest | held)
+        self.fingers(side, tc + close_s, (open_like(self.hand, g["q"], closed) if closed else g["q"]) | held)
         return tc + close_s
 
     def obj_at(self, name, t):
@@ -405,11 +448,14 @@ class BenchPlan:
                 return a + (b - a) * (t - t0) / max(t1 - t0, 1e-9), ga or gb
         return keys[-1][1], keys[-1][2]
 
+    def obstacles(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """What the arms' forearms keep clear of, as (centre, half size) boxes: the bench's top."""
+        return [bench_box()]
+
     def solve(self, iters=3000):
         self.T = self.t + 0.3
         n = self.n = int(self.T * FPS) + 1
-        c, h = bench_box()
-        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
+        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.obstacles(), arms=SIDES)
         s.W = BS.BodySolver.W | self.solver_w
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)

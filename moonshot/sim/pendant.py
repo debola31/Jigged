@@ -45,7 +45,8 @@ from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.body.skeleton import set_finger_contact
 from moonshot.sim.runner import ARM, PAD, SETTLE_STEPS, TakeRunner
-from moonshot.world import cell, vf2
+from moonshot.motion import plates
+from moonshot.world import cell, spoilboard, vf2
 from moonshot.world.vise import Load
 
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
@@ -74,22 +75,25 @@ NEAR_M = 0.02               # one this close to the handle bends the contact way
 def tool_xml(tool: dict) -> str:
     """A tool in its holder, hanging from the spindle's gauge line; it turns with the spindle. It doesn't collide:
     an edge finder's, probe's or indicator's touch is the machine's sensing, or the needle's, read from the geometry.
-    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a level stylus.
+    A tool with "offset_mm" (a lever test indicator) carries its ball that far off the axis on a stylus, level, or
+    with "lever_drop_mm" angled down to the ball that far from where the stem ends.
     Its weight is carried by the head's counterbalance, as the spindle's is: uncompensated, its 1.2 kg sagged the Z
     servo 5.7 um below its setpoint, past the 5 um a probing cycle waits for, and op30-z's cycle never ended."""
     hl, st, tip = tool["holder_mm"], tool["stickout_mm"], tool["tip_mm"]
+    drop = tool.get("lever_drop_mm", 0.0)                # the stem ends this far above the ball
     f = lambda v: f"{v / 1000:.5f}"                      # noqa: E731
     body = (f'\n        <body name="tool" gravcomp="1">'
             f'<geom name="tool_holder" type="cylinder" size="{f(tool["holder_r"])} {f(hl / 2)}" pos="0 0 {f(-hl / 2)}" '
             f'contype="0" conaffinity="0" mass="1.1" rgba="0.6 0.6 0.62 1"/>'
-            f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip) / 2)}" '
-            f'pos="0 0 {f(-hl - (st - tip) / 2)}" contype="0" conaffinity="0" mass="0.05" rgba="0.7 0.7 0.72 1"/>')
+            f'<geom name="tool_shank" type="cylinder" size="{f(tool["shank_r"])} {f((st - tip - drop) / 2)}" '
+            f'pos="0 0 {f(-hl - (st - tip - drop) / 2)}" contype="0" conaffinity="0" mass="0.05" '
+            f'rgba="0.7 0.7 0.72 1"/>')
     if "offset_mm" not in tool:
         return (body + f'<geom name="tool_tip" type="cylinder" size="{f(tool["tip_r"])} {f(tip / 2)}" '
                 f'pos="0 0 {f(-tool["length_mm"] + tip / 2)}" contype="0" conaffinity="0" mass="0.005" '
                 f'rgba="0.75 0.75 0.78 1"/></body>')
     (ox, oy), z = tool["offset_mm"], -tool["length_mm"] + tool["tip_r"]
-    return (body + f'<geom name="tool_stylus" type="capsule" fromto="0 0 {f(z)} {f(ox)} {f(oy)} {f(z)}" '
+    return (body + f'<geom name="tool_stylus" type="capsule" fromto="0 0 {f(z + drop)} {f(ox)} {f(oy)} {f(z)}" '
             f'size="{f(tool["stylus_r"])}" contype="0" conaffinity="0" mass="0.002" rgba="0.75 0.75 0.78 1"/>'
             f'<geom name="tool_tip" type="sphere" size="{f(tool["tip_r"])}" pos="{f(ox)} {f(oy)} {f(z)}" '
             f'contype="0" conaffinity="0" mass="0.001" rgba="0.85 0.3 0.3 1"/></body>')
@@ -111,17 +115,26 @@ class PendantRunner(TakeRunner):
         c0 = np.array(s["centre_mm"], float)
         self.bores = [{"rel": (np.array(b["centre_mm"], float) - c0[:2]) / 1000, "r": b["r_mm"] / 1000,
                        "top": (b["top_z_mm"] - c0[2]) / 1000} for b in s.get("bores", [])]
+        self.cuts = [((np.array(b["centre_mm"], float) - c0) / 1000, np.array(b["half_mm"], float) / 1000)
+                     for b in s.get("cuts", [])]
         if (s.get("tool") or {}).get("ball"):
             self.machine.sensor = self.probe_touch
-        # the vise clamped on the part: the jaw at its width, the screw locked
-        load = Load.from_json(s["load"])
-        jaw = (load.opening0 - 2 * s["half_mm"][1]) / 1000
-        d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]] = jaw
-        crank = jaw / m.eq_data[m.equality("lead_screw").id, 1]
-        d.qpos[m.jnt_qposadr[m.joint("crank").id]] = crank
-        lock = m.equality("screw_lock").id
-        m.eq_data[lock, 0], d.eq_active[lock] = crank, 1
+        # the vise clamped on the part: the jaw closed to its width from the jaws' faces as built (the scene stands the
+        # moving jaw to 0.1 mm: closed from the load's opening it went 10 um into ll-1007223, which it pushed 10 um), the
+        # screw locked. A plate's clamps are already down on it (moonshot/world/spoilboard.py)
         mujoco.mj_forward(m, d)
+        self.jaws = [g for g in (mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, n) for n in ("fixed_jaw", "moving_jaw"))
+                     if g >= 0]
+        if self.jaws:
+            fixed, moving = self.jaws
+            jaw = ((d.geom_xpos[fixed][1] - m.geom_size[fixed][1]) - (d.geom_xpos[moving][1] + m.geom_size[moving][1])
+                   - 2 * s["half_mm"][1] / 1000)
+            d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]] = jaw
+            crank = jaw / m.eq_data[m.equality("lead_screw").id, 1]
+            d.qpos[m.jnt_qposadr[m.joint("crank").id]] = crank
+            lock = m.equality("screw_lock").id
+            m.eq_data[lock, 0], d.eq_active[lock] = crank, 1
+            mujoco.mj_forward(m, d)
         self.presses = [e for e in self.tk["events"] if e["kind"] == "press"]
         self.press_i = [0.0] * len(self.presses)
         self.press_done: set[int] = set()
@@ -180,13 +193,19 @@ class PendantRunner(TakeRunner):
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
-        paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
-        xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
-        c = " ".join(f"{v / 1000:.5f}" for v in s["centre_mm"])
+        if "plate" in s:                                   # a plate on the spoilboard under its clamps, the vise off
+            part, setup = s["plate"]["part"], s["plate"]["setup"]
+            xml = spoilboard.with_body(body_xml, plates.plate(part, setup), plates.clamps(part, setup))
+        else:
+            paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
+            xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
+        c = " ".join(f"{v / 1000:.7f}" for v in s["centre_mm"])
         h = vf2.record()["affordances"]["jog_handle"]
         rim = f"0 {-h['depth_mm'] / 2000:.5f} {h['radius_mm'] / 1000:.5f}"
+        # as stiff as the step allows (2 steps), and near-rigid: at 0.005 s and MuJoCo's default impedance the part sat
+        # 8-9 um off its place under its weight and the jaws, past half the probe's 10 um, and the probe found it there
         xml = xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
-                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.005 1"/>\n'
+                          f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.002 1" solimp="0.99 0.999 0.001"/>\n'
                           f'    <connect name="dial_pinch" body1="vf2_jog_handle" body2="R_hand" anchor="{rim}" '
                           'active="false" solref="0.02 1" solimp="0.9 0.95 0.002"/>\n'
                           '    <joint name="dial_lock" joint1="vf2_jog" polycoef="0 0 0 0 0" active="true" '
@@ -200,8 +219,9 @@ class PendantRunner(TakeRunner):
         return glbs_in_bodies(self.model, "vf2", vf2.render_links())
 
     def probe_touch(self) -> bool:
-        """Is the probe's ball touching the part? Its centre against the part's box, or inside a bore its wall: the
-        machine's sensing, read from the geometry (the probe doesn't collide)."""
+        """Is the probe's ball touching the part or a jaw? Its centre against the part's box less its cuts, or inside a
+        bore its wall, and against each jaw's box: the machine's sensing, read from the geometry (the probe doesn't
+        collide)."""
         m, d = self.model, self.data
         tip, part = m.geom("tool_tip").id, m.geom("blank").id
         r = self.tk["setup"]["tool"]["tip_r"] / 1000
@@ -210,8 +230,16 @@ class PendantRunner(TakeRunner):
             q = np.hypot(*(p[:2] - b["rel"]))
             if q < b["r"] and p[2] < b["top"]:
                 return q + r >= b["r"]
-        out = np.abs(p) - m.geom_size[part]
-        return float(np.linalg.norm(np.maximum(out, 0)) + min(out.max(), 0)) <= r
+
+        def gap(v, half):                                        # signed distance from a box's surface
+            out = np.abs(v) - half
+            return float(np.linalg.norm(np.maximum(out, 0)) + min(out.max(), 0))
+        g = gap(p, m.geom_size[part])
+        for c, half in self.cuts:
+            g = max(g, -gap(p - c, half))
+        for j in self.jaws:                                      # neither turns
+            g = min(g, gap(d.geom_xpos[tip] - d.geom_xpos[j], m.geom_size[j]))
+        return g <= r
 
     # --- each step ---------------------------------------------------------------------------------------
     def key_forces(self) -> dict[str, float]:

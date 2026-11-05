@@ -2302,7 +2302,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -2694,7 +2694,7 @@
     {
      "id": "op20-check",
      "title": "Check it's straight",
-     "caption": "Sweep the indicator along its finished long edge: the needle should stay put.",
+     "caption": "Probe the other dowel hole: it should read where the drawing has it.",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -2723,7 +2723,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the finished near edge (probe).",
+     "caption": "Set G54 X at the dowel hole at its left end (probe) and Y at the same hole (probe).",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -2857,7 +2857,7 @@
       "type": "video",
       "path": "video/ll-1005337/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -3167,7 +3167,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -3192,7 +3192,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -3238,7 +3238,7 @@
       "still": "still/ct-slbeam/op10-face.webp",
       "model": "cut/ct-slbeam/op10-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -3474,7 +3474,7 @@
       "still": "still/ct-slbeam/op20-face.webp",
       "model": "cut/ct-slbeam/op20-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -3697,7 +3697,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-start",
@@ -3743,7 +3743,7 @@
       "still": "still/ct-slbeam/op30-face.webp",
       "model": "cut/ct-slbeam/op30-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-spot",
@@ -3769,7 +3769,7 @@
       "still": "still/ct-slbeam/op30-spot.webp",
       "model": "cut/ct-slbeam/op30-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-drill",
@@ -3795,7 +3795,7 @@
       "still": "still/ct-slbeam/op30-drill.webp",
       "model": "cut/ct-slbeam/op30-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap",
@@ -3821,7 +3821,7 @@
       "still": "still/ct-slbeam/op30-tap.webp",
       "model": "cut/ct-slbeam/op30-tap.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",
@@ -4090,7 +4090,7 @@
       "still": "still/ct-slbeam/op40-face.webp",
       "model": "cut/ct-slbeam/op40-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-notch",
@@ -4116,7 +4116,7 @@
       "still": "still/ct-slbeam/op40-notch.webp",
       "model": "cut/ct-slbeam/op40-notch.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-spot",
@@ -4142,7 +4142,7 @@
       "still": "still/ct-slbeam/op40-spot.webp",
       "model": "cut/ct-slbeam/op40-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-drill",
@@ -4168,7 +4168,7 @@
       "still": "still/ct-slbeam/op40-drill.webp",
       "model": "cut/ct-slbeam/op40-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-cbores",
@@ -4194,7 +4194,7 @@
       "still": "still/ct-slbeam/op40-cbores.webp",
       "model": "cut/ct-slbeam/op40-cbores.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-chamfer",
@@ -4220,7 +4220,7 @@
       "still": "still/ct-slbeam/op40-chamfer.webp",
       "model": "cut/ct-slbeam/op40-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-unload",
@@ -4263,7 +4263,7 @@
       "type": "video",
       "path": "video/ct-slbeam/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "send-out",
@@ -4281,7 +4281,7 @@
       "type": "video",
       "path": "video/ct-slbeam/send-out.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "black-oxide",
@@ -4300,7 +4300,7 @@
       "still": "still/ct-slbeam/black-oxide.webp",
       "model": "cut/ct-slbeam/black-oxide.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -4646,7 +4646,7 @@
       "type": "video",
       "path": "video/ll-1007223/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -4692,7 +4692,7 @@
       "still": "still/ll-1007223/op10-face.webp",
       "model": "cut/ll-1007223/op10-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-outline",
@@ -4718,7 +4718,7 @@
       "still": "still/ll-1007223/op10-outline.webp",
       "model": "cut/ll-1007223/op10-outline.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-holes",
@@ -4744,7 +4744,7 @@
       "still": "still/ll-1007223/op10-holes.webp",
       "model": "cut/ll-1007223/op10-holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-cbores",
@@ -4770,7 +4770,7 @@
       "still": "still/ll-1007223/op10-cbores.webp",
       "model": "cut/ll-1007223/op10-cbores.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-chamfer",
@@ -4796,7 +4796,7 @@
       "still": "still/ll-1007223/op10-chamfer.webp",
       "model": "cut/ll-1007223/op10-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -4937,7 +4937,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the flange's edge (probe).",
+     "caption": "Set G54 X at the finished end, off the fixed soft jaw's end (probe) and Y at the flange's edge, off the fixed soft jaw's face (probe).",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -5055,7 +5055,7 @@
       "still": "still/ll-1007223/op20-face.webp",
       "model": "cut/ll-1007223/op20-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-underside",
@@ -5081,7 +5081,7 @@
       "still": "still/ll-1007223/op20-underside.webp",
       "model": "cut/ll-1007223/op20-underside.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-radius",
@@ -5106,7 +5106,7 @@
       "still": "still/ll-1007223/op20-radius.webp",
       "model": "cut/ll-1007223/op20-radius.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-cbore",
@@ -5131,7 +5131,7 @@
       "still": "still/ll-1007223/op20-cbore.webp",
       "model": "cut/ll-1007223/op20-cbore.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -5401,7 +5401,7 @@
       "still": "still/ll-1007223/op30-spot.webp",
       "model": "cut/ll-1007223/op30-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clearance",
@@ -5426,7 +5426,7 @@
       "still": "still/ll-1007223/op30-clearance.webp",
       "model": "cut/ll-1007223/op30-clearance.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap_drill",
@@ -5451,7 +5451,7 @@
       "still": "still/ll-1007223/op30-tap_drill.webp",
       "model": "cut/ll-1007223/op30-tap_drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap",
@@ -5476,7 +5476,7 @@
       "still": "still/ll-1007223/op30-tap.webp",
       "model": "cut/ll-1007223/op30-tap.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",
@@ -5519,7 +5519,7 @@
       "type": "video",
       "path": "video/ll-1007223/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "send-out",
@@ -5537,7 +5537,7 @@
       "type": "video",
       "path": "video/ll-1007223/send-out.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "zinc",
@@ -5556,7 +5556,7 @@
       "still": "still/ll-1007223/zinc.webp",
       "model": "cut/ll-1007223/zinc.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -8546,6 +8546,110 @@
     ]
    },
    {
+    "item": "em-0125-2fl",
+    "asset": "em18",
+    "x": 41605.2,
+    "y": 12478.4,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "em-0031-2fl",
+    "asset": "em132",
+    "x": 41648.4,
+    "y": 12478.4,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "bem-0250-2fl",
+    "asset": "bem14",
+    "x": 41693.2,
+    "y": 12476.8,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-3p3mm",
+    "asset": "drill-3p3",
+    "x": 41738,
+    "y": 12478.3,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-0156",
+    "asset": "drill-5-32",
+    "x": 41781.7,
+    "y": 12478,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-5p5mm",
+    "asset": "drill-5p5",
+    "x": 41826.4,
+    "y": 12477.2,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-6mm",
+    "asset": "drill-6",
+    "x": 41872.2,
+    "y": 12477,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-6p5mm",
+    "asset": "drill-6p5",
+    "x": 41918.5,
+    "y": 12476.7,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-11mm",
+    "asset": "drill-11",
+    "x": 41967.8,
+    "y": 12474,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "ream-0250",
+    "asset": "ream-1-4",
+    "x": 42017,
+    "y": 12476.8,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "ream-8mm",
+    "asset": "ream-8",
+    "x": 42064.1,
+    "y": 12476,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "tap-m4-07",
+    "asset": "tap-m4",
+    "x": 42110.3,
+    "y": 12477.9,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "dovetail-30-20",
+    "asset": "dovetail-20",
+    "x": 42167.2,
+    "y": 12465,
+    "z": 1000,
+    "rot": 0
+   },
+   {
     "item": "height-gauge-1",
     "asset": "hgauge",
     "x": 45548.6,
@@ -8743,6 +8847,22 @@
       "0.02-6350"
      ]
     ]
+   },
+   {
+    "item": "thread-gauge-m4-1",
+    "asset": "thread-m4",
+    "x": 47469.3,
+    "y": 12775.2,
+    "z": 860,
+    "rot": 0
+   },
+   {
+    "item": "caliper-24-1",
+    "asset": "cal24",
+    "x": 45710,
+    "y": 11996.5,
+    "z": 860,
+    "rot": 0
    },
    {
     "item": "comparator-1",
@@ -9033,6 +9153,22 @@
      }
     ]
    },
+   "bem14": {
+    "name": "1/4 in ball end mill",
+    "model": "models/bem14.glb",
+    "bbox": {
+     "min": [
+      -3.19,
+      -3.19,
+      -0.0
+     ],
+     "max": [
+      3.19,
+      3.19,
+      63.5
+     ]
+    }
+   },
    "bench": {
     "name": "Workbench, tool cabinet and cart",
     "model": "models/bench.glb",
@@ -9309,6 +9445,22 @@
       "unit": "lb"
      }
     ]
+   },
+   "cal24": {
+    "name": "24 in digital caliper",
+    "model": "models/cal24.glb",
+    "bbox": {
+     "min": [
+      -390.0,
+      -76.5,
+      -0.0
+     ],
+     "max": [
+      390.0,
+      76.5,
+      17.7
+     ]
+    }
    },
    "cal6": {
     "name": "Digital caliper",
@@ -9695,6 +9847,22 @@
      }
     ]
    },
+   "dovetail-20": {
+    "name": "20 deg dovetail cutter",
+    "model": "models/dovetail-20.glb",
+    "bbox": {
+     "min": [
+      -14.77,
+      -15.03,
+      -0.04
+     ],
+     "max": [
+      14.77,
+      15.03,
+      70.0
+     ]
+    }
+   },
    "dpress": {
     "name": "Column drill press",
     "model": "models/dpress.glb",
@@ -9814,6 +9982,102 @@
       "value": "Cobalt steel, TiN coated (NAS907 Type J)"
      }
     ]
+   },
+   "drill-11": {
+    "name": "11 mm flat-bottom carbide drill",
+    "model": "models/drill-11.glb",
+    "bbox": {
+     "min": [
+      -6.01,
+      -6.0,
+      -0.02
+     ],
+     "max": [
+      6.01,
+      6.0,
+      90.0
+     ]
+    }
+   },
+   "drill-3p3": {
+    "name": "3.3 mm cobalt jobber drill",
+    "model": "models/drill-3p3.glb",
+    "bbox": {
+     "min": [
+      -1.66,
+      -1.66,
+      -0.01
+     ],
+     "max": [
+      1.66,
+      1.66,
+      65.0
+     ]
+    }
+   },
+   "drill-5-32": {
+    "name": "5/32 in cobalt jobber drill",
+    "model": "models/drill-5-32.glb",
+    "bbox": {
+     "min": [
+      -2.0,
+      -2.0,
+      -0.01
+     ],
+     "max": [
+      2.0,
+      2.0,
+      79.38
+     ]
+    }
+   },
+   "drill-5p5": {
+    "name": "5.5 mm jobber drill",
+    "model": "models/drill-5p5.glb",
+    "bbox": {
+     "min": [
+      -2.76,
+      -2.76,
+      -0.01
+     ],
+     "max": [
+      2.76,
+      2.76,
+      93.0
+     ]
+    }
+   },
+   "drill-6": {
+    "name": "6 mm jobber drill",
+    "model": "models/drill-6.glb",
+    "bbox": {
+     "min": [
+      -3.01,
+      -3.02,
+      -0.02
+     ],
+     "max": [
+      3.01,
+      3.02,
+      93.0
+     ]
+    }
+   },
+   "drill-6p5": {
+    "name": "6.5 mm cobalt jobber drill",
+    "model": "models/drill-6p5.glb",
+    "bbox": {
+     "min": [
+      -3.27,
+      -3.27,
+      -0.02
+     ],
+     "max": [
+      3.27,
+      3.27,
+      101.0
+     ]
+    }
    },
    "drillh": {
     "name": "H jobber drill",
@@ -10040,6 +10304,22 @@
      }
     ]
    },
+   "em132": {
+    "name": "1/32 in end mill",
+    "model": "models/em132.glb",
+    "bbox": {
+     "min": [
+      -1.59,
+      -1.59,
+      -0.0
+     ],
+     "max": [
+      1.59,
+      1.59,
+      38.1
+     ]
+    }
+   },
    "em14": {
     "name": "1/4 in end mill",
     "model": "models/em14.glb",
@@ -10073,6 +10353,22 @@
       "unit": "flutes"
      }
     ]
+   },
+   "em18": {
+    "name": "1/8 in end mill",
+    "model": "models/em18.glb",
+    "bbox": {
+     "min": [
+      -1.6,
+      -1.59,
+      -0.01
+     ],
+     "max": [
+      1.6,
+      1.6,
+      38.1
+     ]
+    }
    },
    "em38": {
     "name": "3/8 in end mill",
@@ -11003,6 +11299,38 @@
      }
     ]
    },
+   "ream-1-4": {
+    "name": "1/4 in chucking reamer",
+    "model": "models/ream-1-4.glb",
+    "bbox": {
+     "min": [
+      -3.18,
+      -3.18,
+      -0.0
+     ],
+     "max": [
+      3.18,
+      3.18,
+      152.4
+     ]
+    }
+   },
+   "ream-8": {
+    "name": "8 mm chucking reamer",
+    "model": "models/ream-8.glb",
+    "bbox": {
+     "min": [
+      -4.0,
+      -4.0,
+      -0.0
+     ],
+     "max": [
+      4.0,
+      4.0,
+      152.4
+     ]
+    }
+   },
    "rough": {
     "name": "Surface roughness tester",
     "model": "models/rough.glb",
@@ -11376,6 +11704,22 @@
      }
     ]
    },
+   "tap-m4": {
+    "name": "M4x0.7 spiral-point tap",
+    "model": "models/tap-m4.glb",
+    "bbox": {
+     "min": [
+      -2.14,
+      -2.14,
+      -0.03
+     ],
+     "max": [
+      2.14,
+      2.14,
+      54.0
+     ]
+    }
+   },
    "tcgrind": {
     "name": "Tool & cutter grinder",
     "model": "models/tcgrind.glb",
@@ -11455,6 +11799,22 @@
       "value": "chrome-plated tool steel, Rc 70"
      }
     ]
+   },
+   "thread-m4": {
+    "name": "Thread plug gauge, M4x0.7",
+    "model": "models/thread-m4.glb",
+    "bbox": {
+     "min": [
+      -34.1,
+      -4.77,
+      -0.01
+     ],
+     "max": [
+      34.1,
+      4.77,
+      9.53
+     ]
+    }
    },
    "tmx8": {
     "name": "Hurco TMX8MYi turning centre",

@@ -57,15 +57,18 @@ def cutter(tool_id: str) -> dict:
     """A tool as it sticks out of its holder (mm): radius, stickout below the nose, length below the gauge line, and
     mass. The same rule as moonshot/sim/cam.py Tool (a face mill's whole thickness; a shank tool's length less what
     the holder grips, a third of it, at most 30 mm), so a holder here is the tool the cycle takes cut with
-    (moonshot/tests/test_tool_load.py)."""
+    (moonshot/tests/test_tool_load.py). `r` is the cutting radius, as cam's; `body_r` the tool's solid, the shank's
+    where that is wider (a 1/32 in end mill on its 1/8 in shank), which its collider and mass take."""
     s = _spec(tool_id)
     mm = lambda v: float(v["value"]) * (INCH if v.get("unit") == "in" else 1.0)      # noqa: E731
     r = mm(s["Diameter"]) / 2
+    body_r = max(r, mm(s["Shank diameter"]) / 2) if "Shank diameter" in s else r
     oal = mm(s.get("Overall length", s.get("Thickness")))
     stick = oal if tool_id == "facem" else oal - min(0.35 * oal, 30.0)
     hss = any(w in s["_name"].lower() for w in ("tap", "reamer", "face mill"))
-    kg = math.pi * r * r * stick * (STEEL_KG_MM3 if hss else CARBIDE_KG_MM3) * (0.6 if tool_id == "facem" else 0.8)
-    return {"id": tool_id, "r": r, "stickout": stick, "length": GAUGE_MM + stick, "kg": kg}
+    kg = (math.pi * body_r * body_r * stick * (STEEL_KG_MM3 if hss else CARBIDE_KG_MM3)
+          * (0.6 if tool_id == "facem" else 0.8))
+    return {"id": tool_id, "r": r, "body_r": body_r, "stickout": stick, "length": GAUGE_MM + stick, "kg": kg}
 
 
 def holder_kg(tool_id: str) -> float:
@@ -98,7 +101,7 @@ def holder_geoms(prefix: str, tool_id: str, cls: str = "steel", collide: bool = 
         _cyl(f"{prefix}_groove", *GROOVE, 0.17 * kg, extra),
         _cyl(f"{prefix}_flange_low", *FLANGE_BOTTOM, 0.12 * kg, extra),
         _cyl(f"{prefix}_body", *BODY, 0.16 * kg, extra),
-        _cyl(f"{prefix}_tool", t["r"], -t["length"], -GAUGE_MM, t["kg"], extra + ' rgba="0.7 0.7 0.72 1"'),
+        _cyl(f"{prefix}_tool", t["body_r"], -t["length"], -GAUGE_MM, t["kg"], extra + ' rgba="0.7 0.7 0.72 1"'),
     ]
     return "".join(out)
 

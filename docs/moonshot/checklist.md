@@ -264,7 +264,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
-| C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`) | [ ] | [ ] band saw passes locally (2026-11-02); no CI run |
+| C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`); cutting to length (`test_bandsaw_take.py`, per G1 bar part, 2026-11-05) | [x] 2026-11-04 | [ ] band saw passes locally (2026-11-02); no CI run. Cutting to length for G1's bar parts, ct-slbeam and ll-1007223 (2026-11-05, `moonshot/motion/bandsaw.py`, `moonshot/sim/bandsaw.py`, `moonshot/world/saw_cell.py`): each part's bar, its own length (3-1/4 in) against a stop block on the bed (the saw's own stop can't come nearer than 226 mm), its 4140's weight. Load (`<part>-saw`, pushed from the infeed by the bar's tail): both parts pass every per-frame check, the bar 0.26 mm off the stop (shop tolerance ±0.38). Clamp (`<part>-saw-clamp`): the jaw snugs at 44-50 N, short of the gate's 82.5 N, and the arm reaching to the knob at the thigh goes past its muscles' maximum (1.37) and the fist into the welded knob; your decision (2026-11-05): the gate takes the lower force the cut shows holds the bar. Start (`saw-start`): runs, every quick check passing but the hand's opening; the valve 72 of its 90 deg; opening it lets the blade motor's reaction lift the bow 4 deg (the saw's model). The cut: 241 s, the rest still to 1 µm. Lift-out: its pinch grip unsolved, the piece set down off the bench |
 | C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and every per-frame check, you approved its draft (2026-11-03), and its final is on the web (2026-11-04); the pocket-depth inspect take in progress (the calipers regrasped on end), re-running with deburr on the new body; no CI run |
 | D. Usage cards | [ ] | [ ] | [ ] |
 | E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session). 2026-11-04, on the new body: the vise loads re-running; set-parallels passes skin, posture and shortcuts. G1's five plans written (your decisions): nist-ftc-09, an 11 ga sheet clamped to the table, for nist-ctc-01, which fits no machine; ct-slbeam on the VF-2; ll-1005337 in two setups; the Kurt D688 named |
@@ -297,7 +297,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   2.31 mm, the pad grooves 1.50 mm) masked with their reason, not given a tool. The bench's carry welds
   declared a grip assist; Load the tools shows every tool loaded in full. Within the unload step the doors jump from door-open's 300
   mm to the 600 the blow-off and the lift-out need.
-- [ ] Nov 4: render queue live; `nist-ftc-10` finals. As of 2026-11-04 07:30: 16 of 61 steps on the web (the 15
+- [x] Nov 4: render queue live; `nist-ftc-10` finals. As of 2026-11-04 07:30: 16 of 61 steps on the web (the 15
   cutting stills, deburr). The other 45 are people's steps, and every take they need re-runs on the new body:
   setting (3e), Load the tools (agent), the vise loads (agent; op50, a7), doors and Cycle Start (agent), inspect
   (66), and set-parallels, set-stop, blow-off, loosen and the lift-outs (here). A step goes up once all its takes
@@ -327,13 +327,50 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   every check (op10's, op40's and op50's vise loads last; op30's is op40's, the same load), 48 steps have finals
   and the rest are rendering. Open after Nov 5: a reach's hand opening and its footage median can still flip by a
   frame on a fresh run, where a fingertip's graze is or isn't caught; the fix is timing the widest point from the
-  planned movement.
-- [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
+  planned movement. The last three finals (op10-tools, op10-xy, op40-xy) landed overnight; all 61 steps' finals
+  assembled at 06:20 on Nov 5.
+- [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts.** On the web: all 61 steps published by 06:40 on Nov 5,
+  each a 720p final. Sharing is yours.
 - [ ] Nov 6: G1 (5 parts) on the web. Started 22:30 on Nov 4 alongside nist-ftc-10's last renders (your decision),
   in parallel: the four parts' cutting simulations and stills, the 11 pending tools' models (downloaded where no
   login is needed, generated otherwise: your decision), the two plate parts' table-clamp takes, the two bar parts'
   vise loads and lift-outs, their band saw takes (the saw's card changes approved as proposed: your decision),
-  setting, Load the tools, deburr, inspect and send-out; the web page readied for the four parts.
+  setting, Load the tools, deburr, inspect and send-out; the web page readied for the four parts. Your decisions on
+  Nov 5:
+  - The vise loads' push: its pronator quadratus overload (1.30-1.36x for about 25 frames; the 30 N press lands
+    65-75 mm to the side of the wrist, against nist-ftc-10's 38) is a recorded exception on G1's loads, like the
+    grip margin, to fix after Nov 6. It covers that muscle during the push only.
+  - ll-1007223 op30's load and lift-out pinch the part across its 40 mm ends, not the 75 mm.
+  - A plate's load starts with the plate in both hands at the doorway, carried in, and laid on the spoilboard
+    (the spoilboard covers the table and the body can't walk); grasp timing and hand opening are exempt for that
+    grasp, as for the tool inserts.
+  - A clamp nut's thread (`clamp_thread_<i>`, the 1/2-13 lead as an exact ratio) is a declared mechanism: the nut is
+    spun down by the fingertips and snugged with a wrench, and the `clamped` weld carries the bite while cutting.
+  - The plate parts' tools wait on a two-row stand on a bracket bolted to the table's front edge (the spoilboard
+    covers the table); a holder seats in one take where its fork isn't far, the split following the reach.
+  - nist-ftc-09 stands on a 1 in riser under its spoilboard, so its 1-1/2 in miniature end mills (keyhole, lettering)
+    reach the sheet; they stopped 4.6 and 2.4 mm short in Z.
+  - ll-1005337's op20 finds X and Y on the reamed dowel hole at its left end, and its check probes the other hole:
+    after the 10 mm slide the finished near edge is past the Y travel. Op10's straightness check runs its lever
+    angled down, so nothing overlaps the plate at the travel's front.
+  - ll-1005337's stock compare leaves out the dowel holes' back countersinks (cut by hand at the bench) and the
+    undercut's R15 corners above the wall's foot (a vertical dovetail cutter leaves R15 narrowing to R8.1; R15 isn't
+    on the drawing), each named.
+  - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
+    for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
+  - The send-outs pass as they are: the `carry_part` weld engages 0.2 s before the pinch closes (otherwise the closing
+    fingers shove the part 17-23 mm), and the arm takes a carried part's weight through its own actuators.
+  - nist-ftc-10's deburr re-renders after G1's deburrs, its bench calipers drawn whole (they were the bare beam).
+  - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
+    blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
+    re-run per G1 setup with its own part, or its plate on the spoilboard.
+  - The band saw's clamp: the gate takes the lower jaw force the cut shows holds the bar (it snugs at 44-50 N; the
+    gate asked 82.5, which the arm can't give at a knob by the thigh).
+  - The G1 deburrs' tool pickup, loading in 100-133 ms against people's 163-265, is a recorded exception; each take
+    passes every other check.
+  - G1's four inspect steps (all but nist-ftc-10's) stay caption and still.
+  - The setting takes render on the M4 as well as the M1 (the M1 alone needed about 47 h), only the video going to
+    the hub.
 - [ ] Nov 7: G2 (3 parts) on the web
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web

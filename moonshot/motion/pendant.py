@@ -72,6 +72,11 @@ STROKE_DEG_S = 200.0                                     # a stroke turns the ha
                                                           # ran 900 mm/s, the run's hand 24-40 mm behind it pulled
                                                           # the grip off the rim's centre, and op50-z's pronator went
                                                           # past its maximum mid-stroke
+LAST_STROKE = 0.5                                         # and a jog's last stroke and its spare this much slower, as
+                                                          # people slow for the last clicks: the run stops the hand
+                                                          # when the machine reads right, which OVERTURN brings within
+                                                          # them; stopped at 330 deg/s, the hand took 11 N for a frame
+                                                          # and ll-1007223 op30-z's pronator quadratus went to 1.3
 FINGER_DEG_S = 300.0                                     # a change of the hand's shape, at its quickest joint: the
                                                           # key grip curled the middle finger 82 deg in 0.14 s off
                                                           # the dial, 710 deg/s at its peak, and its deep flexor went
@@ -404,8 +409,9 @@ class PendantTake(StepTake):
         per = [abs(clicks) // n + (1 if i < abs(clicks) % n else 0) for i in range(n)]
         sign = 1 if clicks > 0 else -1
         g = self.grips["dial"]
-        for c in per + [0]:
+        for k, c in enumerate(per + [0]):
             d = sign * (c or per[-1]) * DETENT_DEG * OVERTURN
+            speed = deg_s * (LAST_STROKE if k >= len(per) - 1 else 1.0)
             a0, a1 = -d / 2, d / 2
             t0 = self.t
             H0_, W_off = self.dial_pose(a0, OFF_RIM_MM)
@@ -435,7 +441,7 @@ class PendantTake(StepTake):
                     ("pose", *self.dial_pose(b + (a0 - b) * min_jerk((t - t0) / TURN_BACK_S), OFF_RIM_MM), 3.0)])
                 t0 += TURN_BACK_S
             # onto the rim, close, turn, let go, back off
-            tc, dur = t0 + ON_RIM_S, max(0.25, abs(d) / deg_s)
+            tc, dur = t0 + ON_RIM_S, max(0.25, abs(d) / speed)
             self.add("R", t0, tc, lambda t, t0=t0, a0=a0: [
                 ("pose", *self.dial_pose(a0, OFF_RIM_MM * (1 - min_jerk((t - t0) / ON_RIM_S))), 3.0)])
             self.fingers("R", t0, dial_open(self.hand, g["q"]))

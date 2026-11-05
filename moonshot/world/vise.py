@@ -170,7 +170,9 @@ def worldbody(load: Load, blank_mm, parallels_mm: dict[str, np.ndarray], hand_bo
     ax = V["screw_axis"]
     phi0 = math.radians(CRANK0_DEG)
     lever = np.array([math.sin(phi0), 0, math.cos(phi0)]) * V["lever"]
-    f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)   # noqa: E731
+    # to 0.1 um: at 10 um (5 decimals in m) a 28.575 mm half rounded to 28.58, the jaw closed 10 um into the part and
+    # pushed it 18 um, and a probe's 10 um found the part off its place
+    f = lambda v: " ".join(f"{float(x) * M:.7f}" for x in v)   # noqa: E731
     o0, ph = load.opening0, load.parallel_h
     para_size = f([PARALLEL_L / 2, PARALLEL_T / 2, ph / 2])
     para_kg = 7850 * PARALLEL_L * PARALLEL_T * ph * 1e-9      # hardened steel

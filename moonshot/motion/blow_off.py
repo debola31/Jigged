@@ -89,6 +89,8 @@ class BlowOff(StepTake):
     # the take holds a carried gun's pose for most of its 15 s, and at the defaults the planned arm left people's range
     # wherever the gun's pose pulled it
     SOLVER_W = {"range": 3.0, "prior": 2.0}
+    TIP_OVER, SWEEP, SWEEP_S = TIP_OVER_VISE, SWEEP_MM, 0.7      # where the nozzle blows, how far either side, how long
+                                                                # one pass takes (a plate's table sweeps wider)
 
     def __init__(self, out=TAKES / "blow-off", verbose=True):
         super().__init__(out, LUMBAR, verbose)
@@ -187,7 +189,7 @@ class BlowOff(StepTake):
         H, W = self.grip_pose("gun")
         lifted = self.p0 + np.array([0.0, 0.0, LIFT_MM])
         tip = AG.NOZZLE_TO
-        aim_p = lambda dx: TIP_OVER_VISE + np.array([dx, 0.0, 0.0]) - AIM @ tip                          # noqa: E731
+        aim_p = lambda dx: self.TIP_OVER + np.array([dx, 0.0, 0.0]) - AIM @ tip                          # noqa: E731
         self.look(0.0, self.p0)
         t_c = self.reach_gun(0.3)
         t_on = t_c - 0.1                                 # the grip's start: its carry closes 0.1 s after it
@@ -201,9 +203,10 @@ class BlowOff(StepTake):
         # back in: over the bore with the nozzle's tip at its mouth, a pause while the hand settles (the bore is 24 mm
         # and the nozzle 8, so 10 mm off catches the rim), then slowly down, and held there a moment before letting go
         mouth = self.p0 + np.array([0.0, 0.0, 120.0])        # the 115 mm nozzle's tip 5 mm over the rim
-        dt = np.cumsum([0.0, 1.0, 1.2, 1.1, 0.7, 0.7, 0.5, 1.1, 1.2, 0.8, 0.5, 1.2, 0.3])
-        poses = [(self.R0, self.p0), (self.R0, lifted), (mid, inside), (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(SWEEP_MM)),
-                 (AIM, aim_p(-SWEEP_MM)), (AIM, aim_p(0.0)), (mid, inside), (self.R0, lifted), (self.R0, mouth),
+        sw = self.SWEEP_S
+        dt = np.cumsum([0.0, 1.0, 1.2, 1.1, sw, sw, sw * 5 / 7, 1.1, 1.2, 0.8, 0.5, 1.2, 0.3])
+        poses = [(self.R0, self.p0), (self.R0, lifted), (mid, inside), (AIM, aim_p(-self.SWEEP)), (AIM, aim_p(self.SWEEP)),
+                 (AIM, aim_p(-self.SWEEP)), (AIM, aim_p(0.0)), (mid, inside), (self.R0, lifted), (self.R0, mouth),
                  (self.R0, mouth), (self.R0, self.p0), (self.R0, self.p0)]
         keys = [(t_lift + d, R, p) for d, (R, p) in zip(dt, poses)]
         self.keys = keys
@@ -238,7 +241,7 @@ class BlowOff(StepTake):
         self.effort("R", keys[3][0], 1.0, "gun_fire")              # the index squeezes the trigger while aiming: at
         self.effort("R", keys[6][0], 1.0, "gun_fire")              # 0.6, 1 mm off its face, it pressed 2.5 N
         self.effort("R", keys[6][0] + 0.1, 0.5, "gun")
-        self.look(keys[1][0], TIP_OVER_VISE)
+        self.look(keys[1][0], self.TIP_OVER)
         self.look(keys[6][0] + 0.4, ORIGIN + AG.HOLSTER_TOP)
         self.effort("R", t_down, 0.5, "gun")
         self.effort("R", t_down + 0.2, 0.0, None)
@@ -253,7 +256,7 @@ class BlowOff(StepTake):
         self.transit("R", t_down + 0.6, t_down + 1.6, self.rest_of("R"),
                      via=[self.rest_of("R") + np.array([60.0, -20.0, 180.0])])
         self.fingers("R", t_down + 1.6, self.q_relax)
-        self.look(t_down + 0.6, TIP_OVER_VISE)
+        self.look(t_down + 0.6, self.TIP_OVER)
         self.clip("blow_off", 0.0, t_down + 1.0, "Blow out the vise")
         self.t = t_down + 1.8
 

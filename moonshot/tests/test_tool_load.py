@@ -11,13 +11,15 @@ import pytest
 from moonshot.motion import tool_load as T
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import spans, split, tool_takes
-from moonshot.planning.validate import load_plan
+from moonshot.planning.validate import PLANS, load_plan
 from moonshot.sim import cam
 from moonshot.world import tooling as TL
 from moonshot.world import vf2
 
 PLAN = load_plan("nist-ftc-10")
 TOOLS = [s for s in expand(PLAN) if s["title"] == "Load the tools"]
+EVERY_TOOLS = [(p, s) for p in sorted(x.stem for x in PLANS.glob("*.json")) for s in expand(load_plan(p))
+               if s["title"] == "Load the tools"]                      # every part's, by (part, step)
 
 
 @pytest.mark.parametrize("tool_id", sorted(cam.SPEEDS))
@@ -27,11 +29,39 @@ def test_a_holder_carries_the_tool_the_cycle_takes_cut_with(tool_id):
     assert TL.GAUGE_MM == pytest.approx(cam.GAUGE_MM)
 
 
+G1 = ["ll-1007223", "ll-1005337", "nist-ftc-09"]
+G1_TOOLS = sorted({op["tool"] for p in G1 for s in load_plan(p)["setups"] if s["machine"] == "vf2"
+                   for op in s["operations"]})
+
+
+@pytest.mark.parametrize("tool_id", G1_TOOLS)
+def test_every_tool_a_g1_setup_loads_has_its_holder_and_its_model(tool_id):
+    """Its holder's tool solid (gauge length, radius, mass) comes from its record, as wide as its shank where that
+    is wider than it cuts, and the take draws the tool's own GLB."""
+    from moonshot.planning.validate import record
+    rec, t = record(tool_id), TL.cutter(tool_id)
+    assert "pending" not in rec and rec["category"] == "tooling"
+    assert t["length"] > TL.GAUGE_MM and t["body_r"] >= t["r"] > 0 and t["kg"] > 0
+    assert TL.render_glbs(tool_id)[1]["path"] == f"library/tooling/{tool_id}/{rec['file']}"
+
+
+def test_a_tools_collider_is_its_shank_where_that_is_wider_than_it_cuts():
+    assert TL.cutter("em132")["r"] == pytest.approx(0.031 * 25.4 / 2)
+    assert TL.cutter("em132")["body_r"] == pytest.approx(0.125 * 25.4 / 2)
+    assert TL.cutter("drill-11")["body_r"] == pytest.approx(6.0)
+
+
 def test_tools_are_numbered_in_the_order_the_plan_first_uses_them():
     num = T.pockets(PLAN)
     assert num == {"facem": 1, "em12": 2, "em38": 3, "drill-2p5": 4, "drill-6": 5, "bem14": 6, "em14": 7,
                    "ream-3p5": 8, "tap-m3": 9, "drill-7": 10, "drill-5p5": 11}
     assert T.PROBE_POCKET not in num.values()
+
+
+def test_a_part_sawn_first_numbers_only_its_vf2_tools():
+    num = T.pockets(load_plan("ct-slbeam"))
+    assert "bandsaw" not in num
+    assert num == {"facem": 1, "spot": 2, "drill": 3, "tap": 4, "em12": 5, "drillk": 6, "em38": 7, "chamf": 8}
 
 
 def _control():
@@ -152,12 +182,13 @@ def test_a_holder_in_a_far_fork_is_picked_then_inserted():
     assert pick["stand"].get(4) == "facem" and 4 not in insert["stand"]     # on the stand to be picked, then in the hand
 
 
-@pytest.mark.parametrize("step", TOOLS, ids=lambda s: s["id"])
-def test_each_step_leaves_every_tool_in_its_numbered_pocket(step):
-    seq = T.sequence(PLAN, step)
+@pytest.mark.parametrize("part,step", EVERY_TOOLS, ids=lambda x: x if isinstance(x, str) else x["id"])
+def test_each_step_leaves_every_tool_in_its_numbered_pocket(part, step):
+    plan = load_plan(part)
+    seq = T.sequence(plan, step)
     assert [s["name"] for s in seq] == tool_takes(step)
-    assert [t for t, _, _ in spans("nist-ftc-10", step)] == [f"nist-ftc-10/{step['id']}/{n}" for n in tool_takes(step)]
-    num = T.pockets(PLAN)
+    assert [t for t, _, _ in spans(part, step)] == [f"{part}/{step['id']}/{n}" for n in tool_takes(step)]
+    num = T.pockets(plan)
     # replay the machine's bookkeeping through the takes' keys
     c, _, _ = _control()
     c.setup_mode = True

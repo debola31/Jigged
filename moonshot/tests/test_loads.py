@@ -3,7 +3,7 @@ in the vise, on both parallels whether set down short or slid home."""
 import numpy as np
 import pytest
 
-from moonshot.motion.loads import envelope, part_pose, vise_load
+from moonshot.motion.loads import density, envelope, part_pose, vise_load
 from moonshot.motion.setup_take import PLACE_GAP
 from moonshot.planning.validate import load_plan
 from moonshot.world.vise import PARALLEL_T, REFERENCE, VISE
@@ -16,12 +16,31 @@ def on_both(load, shift_mm):
 
 
 def test_the_reference_rules_reproduce_the_reference():
-    plan = {"stock": {"size_mm": list(REFERENCE.size_mm)},
+    plan = {"stock": {"size_mm": list(REFERENCE.size_mm), "material": "6061-T6 aluminium"},
             "setups": [{"id": "s", "face_up": "+Z", "workholding": {"parallels_in": 1.0, "jaw_on": "Y faces"}}]}
     load = vise_load(plan, "s")
     assert load.size_mm == pytest.approx(REFERENCE.size_mm)
     assert load.opening0 == pytest.approx(REFERENCE.opening0)
     assert load.parallels_y == pytest.approx(REFERENCE.parallels_y)
+    assert load.mass_kg == pytest.approx(REFERENCE.mass_kg)
+
+
+def test_nist_ftc_10s_loads_weigh_what_they_did():
+    """Each setup's part weighs as it did before the density came from the stock's material (6061-T6, 2700 kg/m^3)."""
+    plan = load_plan("nist-ftc-10")
+    kg = {"op10": 1.402016, "op20": 1.203012, "op30": 0.991845, "op40": 0.991845, "op50": 0.991845}
+    assert {s: round(vise_load(plan, s).mass_kg, 6) for s in kg} == kg
+
+
+@pytest.mark.parametrize("part, rho", [("ct-slbeam", 7850.0), ("ll-1007223", 7850.0), ("ll-1005337", 1410.0),
+                                       ("nist-ftc-09", 8000.0), ("nist-ftc-10", 2700.0)])
+def test_a_parts_density_is_its_stock_materials(part, rho):
+    assert density(load_plan(part)) == rho
+
+
+def test_a_stock_material_without_a_density_fails_loudly():
+    with pytest.raises(ValueError, match="no density"):
+        density({"stock": {"material": "unobtainium"}})
 
 
 def test_nist_ftc_10_op10_loads_the_stock_on_one_inch_parallels():
@@ -50,7 +69,9 @@ def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
 
 # the bar parts' vise setups, and their finished parts' boxes in their models' frames (their STEP models' bounding boxes)
 BARS = {"ll-1007223": ("op10", "op20", "op30"), "ct-slbeam": ("op10", "op20", "op30", "op40")}
-FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8))}
+FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8)),
+            "nist-ftc-09": ((-95.25, 95.25), (0.0, 3.038), (-139.7, 139.7)),
+            "ll-1005337": ((-400.0, 0.0), (0.0, 600.0), (-20.0, -0.95))}
 VISE_SETUPS = [("nist-ftc-10", s) for s in ("op10", "op20", "op30", "op40", "op50")]
 VISE_SETUPS += [(p, s) for p, ss in BARS.items() for s in ss]
 
@@ -67,6 +88,16 @@ def test_a_bar_part_comes_off_the_saw_and_onto_the_mill_as_its_stock(part):
         env = envelope(plan, setup)
         assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
         assert contains(env, FINISHED[part]), f"{setup}: the stock doesn't hold the part"
+
+
+@pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
+def test_a_plate_goes_onto_the_spoilboard_as_its_stock_around_the_part(part):
+    plan = load_plan(part)
+    env = envelope(plan, plan["setups"][0]["id"])
+    assert env[:, 1] - env[:, 0] == pytest.approx(plan["stock"]["size_mm"])
+    assert contains(env, FINISHED[part]), "the stock doesn't hold the part"
+    # its margins even about the part, as the clamps on them and the outline's tabs are planned
+    assert env.mean(1) == pytest.approx(np.mean(FINISHED[part], axis=1), abs=0.01)
 
 
 @pytest.mark.parametrize("part", list(BARS))
@@ -128,7 +159,7 @@ def box_in_world(p) -> tuple[np.ndarray, np.ndarray]:
 
 @pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
 def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(part):
-    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, SPOILBOARD_TOP_Z
+    from moonshot.motion.loads import SPOILBOARD_CENTRE_XY, plate_board_top
     plan = load_plan(part)
     s = plan["setups"][0]
     p = part_pose(plan, s["id"])
@@ -137,9 +168,20 @@ def test_a_clamped_plate_lies_flat_on_the_spoilboard_long_side_along_the_table(p
     up = np.eye(3)["XYZ".index(s["face_up"][1])] * (1 if s["face_up"][0] == "+" else -1)
     assert R @ up == pytest.approx([0, 0, 1])
     lo, hi = box_in_world(p)
-    assert lo[2] == pytest.approx(SPOILBOARD_TOP_Z)
+    assert lo[2] == pytest.approx(plate_board_top(part))
     assert hi[0] - lo[0] >= hi[1] - lo[1], "its longer side along the table"
     assert (lo[0] + hi[0]) / 2 == pytest.approx(SPOILBOARD_CENTRE_XY[0])
+
+
+@pytest.mark.parametrize("part,setup,bottom,top", [
+    ("nist-ftc-09", "op10", 853.0 + 19.05 + 25.4, 853.0 + 19.05 + 25.4 + 3.04),   # on the 1 in riser (2026-11-05)
+    ("ll-1005337", "op10", 853.0 + 19.05, 853.0 + 19.05 + 19.05),                 # on the spoilboard on the table
+    ("ll-1005337", "op20", 853.0 + 19.05, 853.0 + 19.05 + 19.05)])
+def test_each_plate_lies_on_its_own_spoilboards_top(part, setup, bottom, top):
+    """nist-ftc-09's sheet stands on its spoilboard on a 1.000 in riser, so its miniature end mills reach it;
+    ll-1005337's plate on the spoilboard on the table, as before (table top 853, the MDF 3/4 in)."""
+    lo, hi = box_in_world(part_pose(load_plan(part), setup))
+    assert lo[2] == pytest.approx(bottom) and hi[2] == pytest.approx(top)
 
 
 def test_nist_ftc_09_is_centred_on_the_spoilboard():

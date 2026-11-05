@@ -19,7 +19,8 @@ simulation hands part_pose that box itself (`env`): the stock the setup before l
 
 A plate clamped to the table (a setup whose workholding has "clamps") lies on a 3/4 in MDF spoilboard bolted to the
 VF-2's table at its loading position, centred on the table where the vise stands (the vise comes off for it), its top
-at SPOILBOARD_TOP_Z. The plate lies flat on it, face_up up, its longer side along the table (world x) and the other
+at SPOILBOARD_TOP_Z, or RISER_MM higher on a riser for a part whose short tools need the plate higher
+(plate_board_top). The plate lies flat on it, face_up up, its longer side along the table (world x) and the other
 pointing +y, so its low edge in the model is the near one; x completes the rotation. It is centred on the spoilboard,
 unless PLATE_NEAR_Y_MM places its near edge (a plate as wide as the Y travel, placed so its near edge's cutter path
 starts at the front of it). A setup whose workholding has "shift" is the same plate, still on the spoilboard, slid
@@ -55,14 +56,15 @@ ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.
 ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50")}
 # the stock's box in the model's frame where the part isn't centred on the origin: centred on the part's box (its
 # STEP's bounding box) on every axis, so each face machined takes an even share off. ll-1007223 finishes 49 x 40 x 75
-# (x 0..49, y 0..40, z -37.5..37.5); ct-slbeam 76.2 x 38.1 x 50.8 from the origin, its 38.1 the bar's own width
+# (x 0..49, y 0..40, z -37.5..37.5); ct-slbeam 76.2 x 38.1 x 50.8 from the origin, its 38.1 the bar's own width;
+# ll-1005337's plate 400 x 600 (x -400..0, y 0..600), its 19.05 the plate's own thickness (z -20..-0.95)
 STOCK_MM = {"ll-1007223": ((-4.075, 53.075), (-2.225, 42.225), (-41.275, 41.275)),
-            "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975))}
+            "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975)),
+            "ll-1005337": ((-403.2, 3.2), (-30.2, 630.2), (-20.0, -0.95))}
 # ll-1007223: Op 10 faces the top to 40 and profiles the flange's edges and both ends to 49 x 75 down to 1 mm above
-# the jaws (y 17.475); Op 20 holds it by the flange in soft jaws, on the faced top, its box the 49 x 75 the jaws and
-# the parallels touch: the skirt Op 10 couldn't reach (y -2.225..17.475, 4.1 mm wider each side, 3.8 longer each
-# end) stands above the jaws, left out [declared shortcut]; Op 30 holds the finished part
-ENVELOPE_MM |= {("ll-1007223", "op20"): ((0.0, 49.0), (-2.225, 40.0), (-37.5, 37.5)),
+# the jaws (y 17.475), leaving the skirt below them the stock's own size, which Op 20 holds above its soft jaws; Op 30
+# holds the finished part
+ENVELOPE_MM |= {("ll-1007223", "op20"): ((-4.075, 53.075), (-2.225, 40.0), (-41.275, 41.275)),
                 ("ll-1007223", "op30"): ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5))}
 # ct-slbeam: Op 10 faces the bottom (z 0), Op 20 the long leg's end (x 76.2), Op 30 the back (x 0)
 ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.975)),
@@ -70,7 +72,16 @@ ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.
                 ("ct-slbeam", "op40"): ((0.0, 76.2), (0.0, 38.1), (0.0, 53.975))}
 # a plate on the table: the spoilboard is 3/4 in MDF, centred on the table (its top collider's box, world mm at loading)
 SPOILBOARD_MM = 0.75 * INCH
-SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05
+SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05, on the table itself
+# a part whose short tools can't reach its plate down there has the spoilboard raised on a riser bolted to the table
+# (moonshot/world/spoilboard.py): nist-ftc-09's 1-1/2 in miniature end mills (keyhole em18, lettering em132) stop 4.6
+# and 2.4 mm short of the sheet in Z, so it stands on a 1.000 in aluminium sub-plate (the user's decision, 2026-11-05)
+RISER_MM = {"nist-ftc-09": 1.0 * INCH}
+
+
+def plate_board_top(part: str | None) -> float:
+    """The top of the spoilboard a part's plate lies on (world mm, the table at loading): on its riser if it has one."""
+    return SPOILBOARD_TOP_Z + RISER_MM.get(part, 0.0)
 _TABLE = vf2.record()["colliders"]["table_top"]
 SPOILBOARD_CENTRE_XY = ((_TABLE["box_min_mm"][0] + _TABLE["box_max_mm"][0]) / 2,       # -381.5, the vise's x
                         (_TABLE["box_min_mm"][1] + _TABLE["box_max_mm"][1]) / 2)       # -340.5
@@ -176,8 +187,28 @@ def plate_pose(plan: dict, setup_id: str, env=None) -> dict:
     cy = SPOILBOARD_CENTRE_XY[1]
     if plan.get("part") in PLATE_NEAR_Y_MM:
         cy = PLATE_NEAR_Y_MM[plan["part"]] + size[1] / 2
-    centre = np.array([SPOILBOARD_CENTRE_XY[0], cy, SPOILBOARD_TOP_Z + size[2] / 2])
+    centre = np.array([SPOILBOARD_CENTRE_XY[0], cy, plate_board_top(plan.get("part")) + size[2] / 2])
     return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
+
+
+# each stock material's density (kg/m^3), found by its key as a word in the plan's stock material, with its source
+DENSITY = {
+    "6061": (2700.0, "6061-T6 aluminium 2.70 g/cm^3: ASM Aerospace Specification Metals, Aluminum 6061-T6 data sheet"),
+    "4140": (7850.0, "AISI 4140 steel 7.85 g/cm^3: MatWeb, AISI 4140 Steel (ASM Handbook vol. 1 values)"),
+    "304": (8000.0, "AISI 304 stainless 8.00 g/cm^3: MatWeb, AISI Type 304 Stainless Steel (ASM Handbook vol. 1 values)"),
+    "acetal": (1410.0, "acetal 1.41 g/cm^3 (copolymer; Delrin homopolymer 1.42): MatWeb, Overview of materials for Acetal"),
+    "delrin": (1410.0, "Delrin acetal 1.41-1.42 g/cm^3: DuPont Delrin 150 product information; as acetal above"),
+}
+
+
+def density(plan: dict) -> float:
+    """The stock's density (kg/m^3) from its material (DENSITY). A material the table doesn't know raises: taken as
+    the Load's default, aluminium, G1's 4140 steel parts weighed a third of what they do."""
+    material = str(plan.get("stock", {}).get("material", ""))
+    for key, (rho, _source) in DENSITY.items():
+        if re.search(rf"\b{key}\b", material.lower()):
+            return rho
+    raise ValueError(f"no density for the stock material {material!r}: add it to loads.DENSITY, with its source")
 
 
 def vise_load(plan: dict, setup_id: str) -> Load:
@@ -188,4 +219,4 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     paras = {"para_a": fy - to_a, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
-                                  else OPENING_MARGIN))
+                                  else OPENING_MARGIN), density=density(plan))

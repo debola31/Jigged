@@ -14,6 +14,11 @@ people's were measured, nor lifts. A left hand's reach is held to people's left 
 it (a carried tool leaves the skin, so the carry can close before a finger meets it), as the cause check reads
 touching: validate/take.py gives every check the one `touching`, and with right-hand touches alone the cause check
 found the left hand's work uncaused.
+
+A grasp the user exempted from this check is named in take.json "exempt" by its grip, with the checks it's exempt
+from: its reaches aren't timed but listed, and a take whose every grasp is exempt passes on that alone. A plate's
+load starts with the plate in both hands, carried in from off-screen, as a tool's insert starts with its holder
+held (the user's decision, 2026-11-05).
 """
 from __future__ import annotations
 
@@ -72,23 +77,55 @@ def intervals(events: list[dict], kind: str) -> list[dict]:
     return out + opened
 
 
+def exempted(tk: dict) -> dict[str, dict]:
+    """The grasps the user exempted from a check, as take.json names them: "exempt": [{"grip": <the grip event's
+    grip>, "checks": [check names], "why": ...}] -> {grip: that entry}. A plate's load starts with the plate in both
+    hands, carried in from off-screen, so its grips have no reach (the user's decision, 2026-11-05)."""
+    return {x["grip"]: x for x in tk.get("exempt", [])}
+
+
+def exempt(take: dict, check_name: str, obj: str, frame: int) -> bool:
+    """Is a grasp of obj at frame one the user exempted from check_name (take's "exempt": {check: {object: per
+    frame}})?"""
+    mask = take.get("exempt", {}).get(check_name, {}).get(obj)
+    return bool(mask and mask[min(frame, len(mask) - 1)])
+
+
+def all_exempt(take: dict, check_name: str) -> list[str]:
+    """The grasped objects all of whose planned grasps are exempt from check_name, or [] unless every one's is."""
+    masks = take.get("exempt", {}).get(check_name, {})
+    objs = []
+    for obj, grasping in take["grasping"].items():
+        g, mk = np.asarray(grasping, bool), np.asarray(masks.get(obj, []), bool)
+        if not mk.size or (g & ~mk[:len(g)]).any():
+            return []
+        objs.append(obj)
+    return objs
+
+
 def _from_record(take: Path, tk: dict, ck: dict) -> dict:
     rec = np.load(take / "take.npz")
     fps, t, at = float(rec["fps"]), rec["t"], objects.positions(take)
     lift = threshold("person.lift_off_mm").value
     grasping: dict[str, np.ndarray] = {}
     hand: dict[str, str] = {}
+    excused = exempted(tk)
+    masks: dict[str, dict[str, np.ndarray]] = {}
     carried = {(e["obj"], e.get("side", "R")) for e in tk["events"] if e["kind"] == "carry"}
     for e in intervals(tk["events"], "grip"):
         obj, side = e.get("on"), e.get("side")
         if side not in ("R", "L") or obj not in at or (obj, side) not in carried:   # a press holding the part down
             continue
         k0 = min(len(t) - 1, int(round(e["t0"] * fps)))
-        if at[obj][k0, 2] > at[obj][0, 2] + lift:                   # already up: taken from the other hand
-            continue
+        if at[obj][k0, 2] > at[obj][0, 2] + lift and e.get("grip") not in excused:   # already up: taken from the
+            continue                                                                  # other hand
         t1 = e["t1"] if e["t1"] is not None else t[-1]
-        grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | ((t >= e["t0"] - LEAD_S) & (t <= t1))
+        frames = (t >= e["t0"] - LEAD_S) & (t <= t1)
+        grasping[obj] = grasping.get(obj, np.zeros(len(t), bool)) | frames
         hand[obj] = side
+        for c in excused.get(e.get("grip"), {}).get("checks", []):
+            m = masks.setdefault(c, {})
+            m[obj] = m.get(obj, np.zeros(len(t), bool)) | frames
     lifted = [o for o in grasping if o in ck.get("load_N", {})]
     out = {"fps": fps, "hand_speed_mm_s": hand_speed(rec["R_W"], fps).tolist(),
            "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
@@ -98,6 +135,8 @@ def _from_record(take: Path, tk: dict, ck: dict) -> dict:
     if "L" in hand.values():
         out |= {"hand": {o: s for o, s in hand.items() if s == "L"},
                 "hand_speed_L_mm_s": hand_speed(rec["L_W"], fps).tolist()}
+    if masks:
+        out["exempt"] = {c: {o: v.tolist() for o, v in m.items()} for c, m in masks.items()}
     return out
 
 
@@ -153,11 +192,14 @@ def grasp_timing(take: dict) -> Result:
     phases = {"preload_ms": threshold("person.grasp_preload_ms").band,
               "loading_ms": threshold("person.grasp_loading_ms").band}
     onset, lift = threshold("person.force_onset_frac").value, threshold("person.lift_off_mm").value
-    found, outside = [], []
+    found, outside, excused = [], [], []
     for obj, grasping in take["grasping"].items():
         side, speed = hand_of(take, obj)
         bands = {"reach_s": reach[side]} | phases
         for start, contact in reaches(speed, take["touching"], obj, grasping, fps):
+            if exempt(take, "grasp_timing", obj, contact):
+                excused.append({"object": obj, "contact_frame": contact})
+                continue
             g = {"object": obj, "hand": side, "contact_frame": contact, "reach_s": round((contact - start) / fps, 3)}
             if obj in take["height_mm"]:
                 z = np.asarray(take["height_mm"][obj], float)[contact:]
@@ -171,5 +213,9 @@ def grasp_timing(take: dict) -> Result:
             found.append(g)
             outside += [f"{obj}@{contact} {k} {g[k]}" for k, (lo, hi) in bands.items() if k in g and not lo <= g[k] <= hi]
     if not found:
+        if all_exempt(take, "grasp_timing"):
+            return Result(passed=True, worst=0.0, detail={"grasps": [], "outside": [], "exempt": all_exempt(
+                take, "grasp_timing"), "exempt_reaches": excused})
         raise ValueError("no grasp to time: the hand never closed on what the take grasps")
-    return Result(passed=not outside, worst=float(len(outside)), detail={"grasps": found, "outside": outside})
+    return Result(passed=not outside, worst=float(len(outside)),
+                  detail={"grasps": found, "outside": outside} | ({"exempt_reaches": excused} if excused else {}))

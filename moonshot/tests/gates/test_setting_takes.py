@@ -1,21 +1,25 @@
-"""The setting steps' takes, Find X and Y and Set Z, in every setup of nist-ftc-10, meet their outcomes on the full body
+"""The setting steps' takes, Find X and Y and Set Z, in every setup of G1's parts, meet their outcomes on the full body
 at the VF-2's pendant: the work offset the machine ends with puts the spindle on the datum the take planned, the jog
 handle turns only while a hand turns it, every key the plan presses registers on the machine and no other does, and
 every per-frame check passes (docs/moonshot/physics.md). Physics tier: farm and hub only (`pytest moonshot -m farm`),
-on the takes the runners write to the data root (takes/nist-ftc-10/<step id>/).
+on the takes the runners write to the data root (takes/<part>/<step id>/).
 
-So does Check it's square, where a setup stands the part on the vise floor (op50): a test indicator in the spindle,
-its ball pressed against the part's side, swept up it by jogging Z with the handle; the needle stays put.
+So does Check it's square, where a setup stands the part on the vise floor (nist-ftc-10's op50, ct-slbeam's op20 and
+op30): a test indicator in the spindle, its ball pressed against the part's side, swept up it by jogging Z with the
+handle; the needle stays put. So does Check it's straight, where a plate lies on the spoilboard (nist-ftc-09's op10,
+ll-1005337's op10 and op20): the ball against its long edge, swept along it by jogging X. ll-1007223's op30 checks a
+face that stands level, by a sweep across it: not this one.
 
 What each take carries besides its record (take.npz, scene.json):
-    take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
-                  world point (mm, at frame 0) each axis's zero must pass through; for "z", "tool": {"length_mm"},
+    take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z], "wcs"}}, the
+                  world point (mm, at frame 0) each axis's zero must pass through, in the work offset "wcs" (G54 if
+                  none); for "z", "tool": {"length_mm"},
                   the gauge line to the tip of the tool the zero is set with; "events": the plan's key presses
                   ({"kind": "press", "key", "t0", "t1"}); for the check, "setup": {"tool": {"length_mm", "tip_r",
                   "offset_mm"} (the gauge line to the bottom of the indicator's ball, its radius, and how far its
                   centre stands off the spindle's axis, [x, y] in the tool's frame), "centre_mm", "half_mm" (the
                   part's box at frame 0, world, which it stands square to)}
-    outcome.json  the machine at the end: "work": {"G54": [X, Y, Z]}, "tool_length": {n: Z}, "tool": n (machine
+    outcome.json  the machine at the end: "work": {"G54": [X, Y, Z], ...}, "tool_length": {n: Z}, "tool": n (machine
                   mm, Haas's signs), and "pressed": [[t, key], ...] as the machine registered them
     checks.json   per frame, "touching": what the hands touch, and "handle_deg": the jog handle's angle
 
@@ -33,18 +37,24 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import tool_takes
-from moonshot.planning.validate import load_plan
+from moonshot.planning.validate import PLANS, load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
-SETTING = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] in ("Find X and Y", "Set Z")]
-CHECKS = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Check it's square"]
+PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
+STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
+# ll-1005337's Op 20 checks the plate slid straight by probing its second dowel hole into G55 (the user's decision,
+# 2026-11-05: its finished near edge stands past the Y travel's front): a work offset, held to the probe's bar
+PROBED_CHECKS = ["ll-1005337/op20-check"]
+SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")] + PROBED_CHECKS
+CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Check it's square", "Check it's straight")
+          and f"{p}/{s['id']}" not in ["ll-1007223/op30-check", *PROBED_CHECKS]]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
 
 
 def _folder(step):
-    folder = TAKES / step
+    folder = data_root() / "takes" / step
     if not (folder / "take.npz").exists():
         pytest.skip(f"no take at {folder}")
     return folder
@@ -96,11 +106,11 @@ def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):
     base, spindle = pos("vf2"), pos("vf2_spindle")
     table = pos("vf2_table") - base                                  # the X and Y joints' travel at frame 0
     head = pos("vf2_head") - base                                    # the Z joint's
-    G54 = np.array(out["work"]["G54"], float)
     assert tk["sets"], "the take sets no axis"
     for axis, s in tk["sets"].items():
         tol = threshold(TOLERANCE[s["method"]]).value
         datum = np.array(s["datum_mm"], float)
+        G54 = np.array(out["work"][s.get("wcs", "G54")], float)             # the offset the take sets, G54 unless named
         if axis in "xy":
             i = "xy".index(axis)
             # at machine X (Y) = G54, the table's joint stands at -G54, carrying the datum with it
@@ -134,11 +144,11 @@ def test_every_planned_key_press_registers_and_no_other(take):
             f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
 
 
-def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
+def test_the_needle_stays_put_through_a_sweep_along_the_side(square):
     tk = _json(square, "take.json")
     s, d = tk["setup"], np.load(square / "take.npz")
     names = [str(b) for b in d["bodies"]]
-    tool, blank, head = (names.index(b) for b in ("tool", "blank", "vf2_head"))
+    tool, blank = (names.index(b) for b in ("tool", "blank"))
     r = s["tool"]["tip_r"]
     w, v = d["quat"][:, tool, :1], d["quat"][:, tool, 1:]
     down = np.array([*s["tool"].get("offset_mm", (0.0, 0.0)), -(s["tool"]["length_mm"] - r)])   # the ball, tool frame
@@ -151,16 +161,20 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
     on = np.flatnonzero(needle > 0)
     assert on.size, "the indicator never touches the part"
     assert np.all(np.diff(on) == 1), f"the ball leaves the side mid-sweep, at frame {on[np.argmax(np.diff(on) > 1)]}"
-    z = d["pos"][on, head, 2]
-    rise = z[-1] - z[0]
-    assert rise >= threshold("setting.sweep_mm").value, f"swept {rise:.1f} mm up the side"
-    sweep = (z > z[0] + 0.5) & (z < z[-1] - 0.5)                        # while the head rises, not the ball's way in or out
+    # the sweep: the ball's way over the side, along whichever of its directions it went farthest (up a square check's
+    # side by Z, along a straight check's edge by X)
+    q = p[on]
+    a = max((i for i in range(3) if i != np.argmax(out[on].mean(axis=0))), key=lambda i: abs(q[-1, i] - q[0, i]))
+    lo, hi = sorted((q[0, a], q[-1, a]))
+    assert hi - lo >= threshold("setting.sweep_mm").value, f"swept {hi - lo:.1f} mm along the side"
+    sweep = (q[:, a] > lo + 0.5) & (q[:, a] < hi - 0.5)                  # not the ball's way in or out
     spread = np.ptp(needle[on][sweep])
     assert spread <= threshold("setting.indicator_mm").value, f"the needle moved {spread:.4f} mm"
 
 
 # --- Load the tools ----------------------------------------------------------------------------------------------------
-# In every setup that brings new tools, its takes cut together under takes/nist-ftc-10/<step id>/ (moonshot/planning/
+# In every part's every setup that brings new tools (nist-ftc-10's, and every other part a plan is written for), its
+# takes cut together under takes/<part>/<step id>/ (moonshot/planning/
 # takes.py tool_takes; the vf2-tool-load card): at the pendant MDI, the first tool's number and ATC FWD empty the
 # spindle; then for each tool its holder is taken off the stand on the table and pushed up into the spindle while the
 # left hand holds Tool Release (a seat take), and ATC FWD puts it in its pocket (an atc take). A holder in a far fork
@@ -174,33 +188,42 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 # Besides the record: take.json "load" (kind, tool, pocket, and the state the run starts from), outcome.json "pockets"
 # ({pocket: tool}), "spindle_tool", "tool_release_held_s" (when the machine read Tool Release held) and "pressed";
 # checks.json "touching_R", the right hand's touches.
-TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
-TOOL_TAKES = [f"{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
+TOOL_STEPS = {f"{p}/{s['id']}": s for p in sorted(x.stem for x in PLANS.glob("*.json"))
+              for s in expand(load_plan(p)) if s["title"] == "Load the tools"}      # by <part>/<step id>
+TOOL_TAKES = [f"{ps}/{t}" for ps, s in TOOL_STEPS.items() for t in tool_takes(s)]
 SEATS = [t for t in TOOL_TAKES if "-seat-" in t or "-insert-" in t]          # the takes that seat a holder
 PICKS = [t for t in TOOL_TAKES if "-pick-" in t]
 PROBE_POCKET = 20                                   # moonshot/library/records/shop.json conventions.probe_tool_number
 INSERT_GRASPED = ("grasp_timing", "hand_opening")   # an insert's holder is grasped in the pick before it, not in it
 
 
+def _tool_folder(path):
+    """A tool take's folder, takes/<part>/<step id>/<take>."""
+    folder = data_root() / "takes" / path
+    if not (folder / "take.npz").exists():
+        pytest.skip(f"no take at {folder}")
+    return folder
+
+
 @pytest.fixture(params=TOOL_TAKES)
 def tool_take(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
 @pytest.fixture(params=SEATS)
 def seat(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
 @pytest.fixture(params=PICKS)
 def pick(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
-@pytest.fixture(params=[s["id"] for s in TOOL_STEPS])
+@pytest.fixture(params=list(TOOL_STEPS))
 def tool_step(request):
-    step = next(s for s in TOOL_STEPS if s["id"] == request.param)
-    folders = [TAKES / step["id"] / t for t in tool_takes(step)]
+    step = TOOL_STEPS[request.param]
+    folders = [data_root() / "takes" / request.param / t for t in tool_takes(step)]
     missing = [f for f in folders if not (f / "take.npz").exists()]
     if missing:
         pytest.skip(f"no take at {missing[0]}")
@@ -262,7 +285,7 @@ def test_a_pick_holds_the_holder_up_where_its_insert_starts(pick):
     h = names.index("holder")
     assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 150, "the holder never came off the stand"
     assert "carry_holder" in ck["active_constraints"][-1], "the holder not in the hand at the pick's end"
-    step = next(s for s in TOOL_STEPS if s["id"] == pick.parent.name)
+    step = TOOL_STEPS[f"{pick.parent.parent.name}/{pick.parent.name}"]
     takes = tool_takes(step)
     insert = pick.parent / takes[takes.index(pick.name) + 1]
     assert "-insert-" in insert.name
@@ -274,9 +297,10 @@ def test_a_pick_holds_the_holder_up_where_its_insert_starts(pick):
     assert off <= threshold("physics.tracking_lag_mm").value, f"the insert starts {off:.1f} mm off where the pick left it"
 
 
-def _numbers():
-    """The tools' numbers, the order the plan first uses them."""
-    order = list(dict.fromkeys(op["tool"] for s in load_plan("nist-ftc-10")["setups"] for op in s["operations"]))
+def _numbers(part):
+    """The tools' numbers, the order the part's plan first uses them on the VF-2 (not the band saw's blade)."""
+    order = list(dict.fromkeys(op["tool"] for s in load_plan(part)["setups"] if s.get("machine", "vf2") == "vf2"
+                               for op in s["operations"]))
     return {t: i + 1 for i, t in enumerate(order)}
 
 
@@ -285,7 +309,7 @@ def test_the_step_ends_with_every_tool_in_its_pocket(tool_step):
     empty; each ATC FWD put the tool just seated in its pocket; and each seat take's machine ends holding that tool in
     the spindle, the pocket its number names facing it."""
     step, folders = tool_step
-    num = _numbers()
+    num = _numbers(folders[0].parent.parent.name)
     last = _json(folders[-1], "outcome.json")
     pockets = {int(p): t for p, t in last["pockets"].items()}
     for t in step["facts"]["tool_ids"]:

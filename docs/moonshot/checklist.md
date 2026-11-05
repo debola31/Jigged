@@ -323,7 +323,11 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   was tuned for capsules 2.5 mm inside the pads), to bring back into the band after Nov 5. The exception covers
   every vise load tonight (your decision, 16:30). The thumb's fingertip collider refit to its pad as it carries
   (your decision): in the carry grips its pad stood 2.1-2.5 mm outside it at the median, so carried parts read
-  3.6-3.9 mm of skin; moved 2.5 mm, 1.0-1.9 at worst.
+  3.6-3.9 mm of skin; moved 2.5 mm, 1.0-1.9 at worst. By 19:30 every take nist-ftc-10's 61 steps need passes
+  every check (op10's, op40's and op50's vise loads last; op30's is op40's, the same load), 48 steps have finals
+  and the rest are rendering. Open after Nov 5: a reach's hand opening and its footage median can still flip by a
+  frame on a fresh run, where a fingertip's graze is or isn't caught; the fix is timing the widest point from the
+  planned movement.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

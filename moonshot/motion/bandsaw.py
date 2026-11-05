@@ -98,7 +98,7 @@ FRONT_LUMBAR = np.array([-200.0, -490.0, 955.0])   # the station's mm: at the fr
                                                     # before the right shoulder, the knees at the base's recessed front
                                                     # (233 mm in front of the blade from 300 to 600 mm up, its foot at
                                                     # 450), the hanging hand clear of the work stop's arm
-BACK_LUMBAR = np.array([200.0, 540.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
+BACK_LUMBAR = np.array([200.0, 525.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
                                                     # before the right shoulder, the body clear of the motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
 END_LUMBAR = np.array([-1200.0, 170.0, 955.0])     # at the left end, facing the station's +X: the handwheel ahead, the
@@ -181,8 +181,9 @@ class SawPlan(BenchPlan):
         return [world_box(self.place, n) for n in ("bed_front", "bed_back", "fixed_jaw_front", "work_stop")] + [block]
 
     def theta0(self, n) -> np.ndarray:
-        """The body solve's start: the right arm as its first grip holds it while it has a task, hanging relaxed
-        before and after; the left, which has none, hanging throughout."""
+        """The body solve's start: the trunk and the right arm as its first grip holds them while it has a task, the
+        trunk upright and the arm hanging relaxed before and after; the left, which has none, hanging throughout.
+        Started from the grip's trunk throughout, the body leaned 21 deg standing at rest too."""
         r = next(g for g in self.grips.values() if g["side"] == "R")["theta"]
         th = np.tile(np.r_[r[:12], HANGING], (n, 1))
         first = min((x[0] for x in self.cons["R"]), default=0.0)
@@ -190,6 +191,7 @@ class SawPlan(BenchPlan):
         for k in range(n):
             if not first <= k / FPS < last:
                 th[k, 3:12] = HANGING
+                th[k, :3] = 0.0
         return th
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=0.12, reach_s=0.5, pre=0.25, rise_s=RISE_S,
@@ -326,12 +328,11 @@ class LoadPlan(SawPlan):
         self.look(0.0, p0 + back * (SC.bar_mm() / 2 - 40))
         # up off the thigh to over the tail and back from it, a pause, then onto it: the rise slower than the reach
         # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
-        # 0.15 s before it comes to rest (at the bar's front, contact 0.18 s late and the hand widest 0.21 s before it
-        # was planned to stop, it was widest 41% of the way)
+        # 0.185 s before it comes to rest (0.15 s before, it was widest 81% of the way)
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
-                        opened=0.6, lead=0.15, rise_s=2.0, still_s=0.45)
+                        opened=0.6, lead=0.185, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
         t_slide = tg + 0.3

@@ -44,8 +44,10 @@ STOCK = {"w": 25.4, "h": 25.4, "density": 7850.0, "friction": 0.2, "blank_mm": 8
          "solref": (0.002, 1.0), "solimp": (0.95, 0.99, 0.001), "rgba": (0.42, 0.42, 0.45, 1.0)}
 KERF_MM = 1.4               # proposed: a 0.035 in band's set teeth cut about 0.055 in wide
 REST_MM = 300.0             # the bar left behind the blade after the cut
-OUT_MM = 25.0               # before the take the bar is pushed through from the infeed until its end shows this far
-                            # past the blade (phases 1-5), past the end of the fixed jaw's front plate (20.3 mm): left
+OUT_MM = 40.0               # before the take the bar is pushed through from the infeed until its end shows this far
+                            # past the blade (phases 1-5), past the end of the fixed jaw's front plate (20.3 mm), and
+                            # the take's push is short enough to stay in people's postures (from 25 mm, the arm's
+                            # stretch at the end of it was less likely than theirs): left
                             # where the last cut left it, at the kerf, its corner caught on that plate's end, whose face
                             # is the back plate's
 STOP_BLOCK = {"depth": 25.0, "height": 30.0, "rgba": (0.55, 0.45, 0.2, 1.0)}   # the stop block clamped on the bed

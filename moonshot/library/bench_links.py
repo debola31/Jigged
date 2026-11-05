@@ -10,8 +10,10 @@ coordinates in its body's frame):
   and slider.glb (the slider and display, the moving jaw, the thumb roller and the locking screw, and the depth rod,
   which the GrabCAD model doesn't have: the collider's box). A part of the model is the slider's if it lies at the
   jaw end and stands out of the beam's section.
+- the micrometer split at its spindle: library/inspection/mic1/links/frame.glb (the frame, anvil, sleeve and lock) and
+  spindle.glb (the spindle, thimble and ratchet stop, on the spindle's face)
 
-    python -m moonshot.library.bench_links                 # nist-ftc-10's part, the deburring tool and the calipers
+    python -m moonshot.library.bench_links                 # nist-ftc-10's part, the tool, calipers and micrometer
     python -m moonshot.library.bench_links ll-1007223 ...  # just these parts' finished.glb
 """
 from __future__ import annotations
@@ -138,7 +140,30 @@ def caliper() -> dict:
             "slider": write(trimesh.util.concatenate(slider), lib / "links" / "slider.glb")}
 
 
+def micrometer() -> dict:
+    """The micrometer split at its spindle: library/inspection/mic1/links/frame.glb (the frame, the anvil, the sleeve
+    and the lock, in the asset's frame) and spindle.glb (the spindle, thimble and ratchet stop, its origin on the
+    spindle's face: bench_cell.MIC). The placeholder's spindle side is one mesh; its pieces are told apart by where
+    they lie along the axis."""
+    import trimesh
+    from moonshot.world.bench_cell import ANVIL_FACE, MIC
+    lib = data_root() / "library" / "inspection" / "mic1"
+    face = ANVIL_FACE + MIC["rest_open"]
+    frame, spindle = [], []
+    for name, v, f in read_glb(lib / "mic1.glb"):
+        for c in trimesh.Trimesh(v, f, process=True).split(only_watertight=False):
+            (x0, _, _), (x1, _, _) = c.bounds
+            sleeve = abs(x0 - MIC["sleeve"][0]) < 0.5 and abs(x1 - MIC["sleeve"][1]) < 0.5
+            if name == "anvil" and x0 > face - 1.0 and not sleeve:
+                spindle.append(trimesh.Trimesh(c.vertices - [face, 0.0, 0.0], c.faces))
+            else:
+                frame.append(c)
+    return {"frame": write(trimesh.util.concatenate(frame), lib / "links" / "frame.glb"),
+            "spindle": write(trimesh.util.concatenate(spindle), lib / "links" / "spindle.glb")}
+
+
 if __name__ == "__main__":
     names = sys.argv[1:]
     print(json.dumps({n: part(n) for n in names} if names else
-                     {"part": part(), "deburr_tool": deburr_tool(), "caliper": caliper()}, indent=1))
+                     {"part": part(), "deburr_tool": deburr_tool(), "caliper": caliper(),
+                      "micrometer": micrometer()}, indent=1))

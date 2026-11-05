@@ -5,7 +5,7 @@ check passed. Runs on the hub; the jobs show on the dashboard like any other.
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
     python -m moonshot.orchestrate.pipeline <take> --local [--final] [--data <dir>] [--look <dir>]
     python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
-    python -m moonshot.orchestrate.pipeline <take> --still
+    python -m moonshot.orchestrate.pipeline <take> --still [--worker hub-gtx1070]
 
 The take's files and its draft land in the data root's takes/<take>/ as the jobs finish. A render is split: the skin
 baked once, then frame ranges any GPU takes, then joined on the hub, so every machine works on the same take. It
@@ -47,10 +47,11 @@ FINAL = {"res": "1280x720", "samples": 16}               # moonshot/render/rende
                                                           # 48 samples took 2.1 s a frame on the M4, 16 take 1.1)
 
 
-def submit(kind: str, payload: dict, inputs: list[str], group: str) -> str:
+def submit(kind: str, payload: dict, inputs: list[str], group: str, requires: dict | None = None) -> str:
     root = data_root()
     req = urllib.request.Request(hub_url() + "/jobs", data=json.dumps(
-        {"kind": kind, "payload": payload, "inputs": inputs, "group": group}).encode(), headers={
+        {"kind": kind, "payload": payload, "inputs": inputs, "group": group, "requires": requires or {}}).encode(),
+        headers={
         "Authorization": f"Bearer {token_for(root)}", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())["id"]
@@ -84,7 +85,7 @@ def main(argv: list[str]) -> int:
     if "--local" in argv:
         return local(take, final="--final" in argv, data=opt("--data"), look=opt("--look"))
     if "--still" in argv:
-        return still(take)
+        return still(take, worker=opt("--worker"))
     if "--assemble" in argv:
         from moonshot.render.step_video import assemble
         state = assemble(take, "final" if "--final" in argv else "draft")
@@ -133,8 +134,9 @@ def stored(path) -> str:
 STILL_FROM_MM = (120.0, -330.0, 230.0)                    # the camera from the part: in front, a little right, above
 
 
-def still(take: str) -> int:
-    """One picture of the take's last frame, close on the part (its blank), at final quality: takes/<take>/still.png."""
+def still(take: str, worker: str | None = None) -> int:
+    """One picture of the take's last frame, close on the part (its blank), at final quality: takes/<take>/still.png.
+    worker: the one GPU worker that may render it (--worker hub-gtx1070, while the Macs render finals)."""
     import io
     import tarfile
 
@@ -144,6 +146,10 @@ def still(take: str) -> int:
     rec = np.load(folder / "take.npz")
     part = rec["pos"][-1, [str(b) for b in rec["bodies"]].index("blank")]
     camera = {"eye": (part + STILL_FROM_MM).round(1).tolist(), "look": part.round(1).tolist()}
+    if (folder / "still.json").exists():                  # the take frames its own: on its stock's centre, far enough
+        s = json.loads((folder / "still.json").read_text(encoding="utf-8"))      # back for a plate (cycle_take.py)
+        look = part + np.asarray(s["look_off_mm"], float)
+        camera = {"eye": (look + s["from_mm"]).round(1).tolist(), "look": look.round(1).tolist()}
     packs = data_root() / "packs" / "render"
     pack = stored(take_pack(folder, packs / f"{take}.tar"))
     look = stored(look_pack(packs / "look.tar"))
@@ -154,7 +160,7 @@ def still(take: str) -> int:
     n = bake["result"]["frames"]
     job = wait(submit("take_render", {"take": take, "frames": [n - 1, n], "camera": camera, "res": FINAL["res"],
                                       "samples": 2 * FINAL["samples"]}, [pack, bake["result"]["bake"], look],
-                      group=f"{take}-still"))
+                      group=f"{take}-still", requires={"worker": worker} if worker else None))
     if job["state"] != "done":
         print(f"[pipeline] {take}: the still failed: {job.get('error')}", flush=True)
         return 1

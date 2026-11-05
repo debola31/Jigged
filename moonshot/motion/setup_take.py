@@ -78,7 +78,7 @@ KNOB_REACH_S, KNOB_PEAK = 0.62, 0.645
 # moment's pause, then the reach, onto the knob from the back of the hand as the first crank's comes on, from this far
 # out along the knob's axis (straight from behind, op40's fingers swept the lever for 17 frames). FINAL_AXIAL slides
 # the hand on along the knob's axis instead (3e2b0545), by FINAL_SLIDE_MM, the opening's key at KNOB_PEAK_FINAL
-FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 1.1, 0.65, 0.57, 110.0
+FINAL_OVER_S, FINAL_REACH_S, KNOB_PEAK_FINAL, FINAL_SLIDE_MM = 1.1, 0.65, 0.575, 110.0
 FINAL_APPROACH_OUT_MM, FINAL_AXIAL = 30.0, False
 READY_FROM_GRIP = np.array([0.0, -240.0, 40.0])  # where the hand pauses before the blank's reach: short of its grip
 # the blank's reach comes down onto the grip from this far back off the part's near face (mm): at 12 the thumb,
@@ -121,9 +121,13 @@ KNOB_HOLD_OPEN = 0.0
 STAND_MARGIN_MM = 3.0       # a part set down stands if its middle is this far inside the parallels under it
 TALL_TOP_CLEAR_MM = 4.0     # a tall part's grip keeps the hand this far over its top (_grip_specs)
 TALL_RISE_S = 0.04          # ... and it rises off the table this long after the plan lifts it (grab)
+# ... and its reach opens widest at TALL_PEAK of it: at REACH_PEAK op40's whole take's moves were widest at a median
+# 0.69 of each (the footage check; people 0.35-0.65), its reach to the part 0.69 of the way
+TALL_PEAK = 0.58
 # a part standing far proud of the jaws is let go of (open_like PROUD_RELEASE_OPEN) PROUD_RELEASE_S before the hand
 # lifts off it (let_go)
-PROUD_RELEASE_S, PROUD_RELEASE_OPEN = 0.25, 0.25
+# (open_like 0.5: opened 0.25 there, the hand went on opening as it rose off op40's part, widest at the end of the move)
+PROUD_RELEASE_S, PROUD_RELEASE_OPEN = 0.25, 0.5
 # a key closing the hand FINAL_CLOSE_MM before the final pull's touch, at FINAL_CLOSE_AT of the reach (0: none): closing
 # there, the index's tip met the knob at the lever's joint and stopped op10's hand 20-28 mm short of its grip
 FINAL_CLOSE_AT, FINAL_CLOSE_MM = 0.0, 8.0
@@ -563,11 +567,12 @@ class Take:
             # before the close, and it rises off the table 0.09 s after the plan lifts it: timed from the other loads'
             # touch and rise, op50's preload and loading measured 300 and 267 ms
             lead, rise = (TOUCH_LEAD_S, 0.0) if self.half[0] >= 30 else (0.16, 0.06)
+            peak = REACH_PEAK
             if self.half[0] >= 30 and self.set_down[2] + self.half[2] - JAW_TOP >= 30:
                 # a part pinched halfway down rises a frame later than a shorter one pinched near its top: op40's
-                # loading measured 267 ms (people 163-265)
-                rise = TALL_RISE_S
-            via, peak, touch_lead, early, loading_s = [], REACH_PEAK, lead, 0.0, ga["loading_s"] - rise
+                # loading measured 267 ms (people 163-265); and its reach's widest comes a little earlier (TALL_PEAK)
+                rise, peak = TALL_RISE_S, TALL_PEAK
+            via, touch_lead, early, loading_s = [], lead, 0.0, ga["loading_s"] - rise
         t_ready = t0 + 0.35 + raise_s
         self.transit(t0 + 0.35, t_ready, ready, via=via, paced=bool(via))
         self.add(t_ready, t_ready + settle_s, lambda t, W=ready: [("pos", W, 1.0)])

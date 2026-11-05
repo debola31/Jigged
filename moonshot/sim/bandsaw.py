@@ -105,11 +105,19 @@ class SawRun(BenchRun):
 
     def anchor_weld(self, e: dict, eq: int, tt: float) -> None:
         """BenchRun's, but a knob that spins in the fist is held on its own axis: at the pinch, off the axis, the hold
-        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob."""
+        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob. And a piece
+        slid by the fingers on its top is held at its middle, so that the push neither turns nor tips it: at the pinch,
+        the thumb's tip off the piece drew it round as it slid, and at its top's middle the push tipped it 2.5 deg;
+        either way it wedged between the stop block and the rest."""
         super().anchor_weld(e, eq, tt)
+        m, d = self.model, self.data
+        if e["obj"] == "piece" and e.get("grip") == "top":
+            hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("piece").id
+            m.eq_data[eq, 0:3] = 0.0                                              # its middle
+            m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (d.xpos[ob] - d.xpos[hb])
+            return
         if e["obj"] != "saw_handwheel":
             return
-        m, d = self.model, self.data
         hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("saw_handwheel").id
         j, kg = m.joint("saw_handwheel").id, m.geom("saw_handwheel_knob").id
         axis, centre = d.xaxis[j], d.geom_xpos[kg]
@@ -211,9 +219,12 @@ class SawRun(BenchRun):
             if e["t0"] <= tt < e["t1"]:
                 ease = min(1.0, (tt - e["t0"]) / 0.25, (e["t1"] - tt) / 0.25)
                 hand = m.body(f"{e['side']}_hand").id
-                # where the fingers hold it, between the thumb's, index's and middle's tips (the carry weld's anchor):
-                # pushed at the wrist against a bar held at the fingertips, the hand pivoted on them
-                at = np.mean([d.geom_xpos[m.geom(f"{e['side']}_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
+                # where the fingers hold it, between the thumb's, index's and middle's tips (the carry weld's anchor),
+                # or the drag's own fingers: pushed at the wrist against a bar held at the fingertips, the hand pivoted
+                # on them; and pushed between the thumb, off the piece, and the pads on its top, the hand turned 1.5
+                # deg and tipped 5 as it slid it, and the piece wedged
+                at = np.mean([d.geom_xpos[m.geom(f"{e['side']}_g_dis{i}").id] for i in e.get("fingers", (1, 2, 3))],
+                             axis=0)
                 jacp = np.zeros((3, m.nv))
                 mujoco.mj_jac(m, d, jacp, None, at, hand)
                 tau += jacp[:, self.act_dof].T @ (np.asarray(e["direction"], float) * e["force"] * ease)

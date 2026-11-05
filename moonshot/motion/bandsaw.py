@@ -153,16 +153,24 @@ KNOB_N = 30.0               # the push at the knob along its way round (the card
                             # right side, pushed down
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
 VALVE_TURN_S = 0.9          # ... over this long
-SLIDE_OFF_MM = 65.0         # the cut piece slid this far along the stop block's face, off the fixed jaw's front plate, which
-                            # its far side lies against for 63 of its 82 mm, and past the block's edge (8 mm), then
-                            # pulled PULL_MM toward the person: its ends are its sides the hand can span from the front
-                            # (across its width, 57 mm, the hand would point 90 deg right of the forearm: slid 40 and
-                            # 50, that pinch solved 20-38 off its pads and 13-15 into the piece, and the piece was let
-                            # go on the way to the bench), and where it lay one was on the block, the other 0.4 mm from
-                            # the blade
-SLIDE_OFF_S = 1.0           # ... over this long
+SLIDE_OFF_MM = 80.0         # the cut piece slid this far along the stop block's face, off the fixed jaw's front plate, which
+                            # its far side lies against for 63 of its 82 mm, and past the block's edge, then pulled
+                            # PULL_MM toward the person: its ends are its sides the hand can span from the front (across
+                            # its width, 57 mm, the hand would point 90 deg right of the forearm: slid 40 and 50, that
+                            # pinch solved 20-38 off its pads and 13-15 into the piece, and the piece was let go on the
+                            # way to the bench), and where it lay one was on the block, the other 0.4 mm from the blade.
+                            # Planned 80, it goes about 70, the hand turning a little about its hold as it pushes: planned
+                            # 65, it went 49-57, short of the block's edge, and the pull pressed it into the block
+SLIDE_OFF_S = 2.0           # ... over this long: in 1 s the hand fell 30 mm behind and the pull began before it was clear
 PULL_MM = 35.0              # ... room for the fingers at its cut end, between it and the blade
 PULL_S = 0.8
+SLIDE_LOOSE = True          # the piece keeps its own turn as it slides, between the stop block and the rest of the bar
+                            # 1.6 mm wider than it can take turned: held to the hand's, the hand's 1-2 deg as it pushed
+                            # wedged it between them
+SLIDE_EFFORT = 0.6          # the hand's effort on its top as it slides it, which stiffens the arm: at the push's 0.05 the
+                            # hand swung about its hold and the piece stayed put; at 0.3 it went 37 mm of 65
+SLIDE_FENCE = 0.0           # ... not pressed to the block's face as to a fence: pressed, past the block's edge the face's
+                            # corner turned it 2 deg and wedged it
 PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried (welded, off the skin)
 
 
@@ -842,28 +850,30 @@ class UnloadPlan(SawPlan):
         tg = self.reach("R", "top", self.t, ready=Wg + up * 70 + back * 100, approach=Wg + up * 30 + back * 15,
                         opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "top")
-        self.effort("R", tg + 0.25, PUSH_EFFORT, "top")
+        self.effort("R", tg + 0.25, SLIDE_EFFORT, "top")
         t_slide = tg + 0.3
         t_pull = t_slide + SLIDE_OFF_S
         t_off = t_pull + PULL_S + 0.15
-        # along the stop block's face, as along a fence, pressed lightly to it: the hand 2 mm off its plan toward the
-        # saw pushed the piece onto the rest of the bar, 1.4 mm off its other end, and it stuck between the two
-        self.move("piece", t_slide, t_pull, R0, self.place.world(self.off - [0.0, 1.0, 0.0]))
+        # straight along the stop block's face, between it and the rest of the bar, 1.4 mm wider than the piece: pressed
+        # to the block as to a fence, its friction there turned the piece 1.4 deg and wedged it between the two
+        self.move("piece", t_slide, t_pull, R0, self.place.world(self.off - [0.0, 1.0 if SLIDE_FENCE else 0.0, 0.0]))
         self.move("piece", t_pull, t_pull + PULL_S, R0, p1)
         self.carry("top", tg, t_off)
         # its friction on the bed, pushed against as it slides, and the fingers' press down on it (a press, not a
         # grasp: the grasp is the next; moonshot/validate/grasp_timing.py)
         friction = SC.STOCK["friction"] * SC.stock_kg(self.length) * 9.81
-        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -0.6]), (t_pull, t_off - 0.05, [0.0, -1.0])):
+        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -SLIDE_FENCE]), (t_pull, t_off - 0.05, [0.0, -1.0])):
             along = np.array([*way, -DOWN_N / friction])
             self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
-                       force=round(float(np.linalg.norm(along)) * friction, 2))
+                       force=round(float(np.linalg.norm(along)) * friction, 2), fingers=[2, 3, 4])   # the pads on it
         self.event("grip", tg, t_off + 0.1, side="R", grip="top")
-        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`), held square by the hand and
-        # pressed to the stop block's face: let turn (`loose`), pushed off its middle it yawed and wedged between the
-        # block and the rest of the bar
+        # moved by the fingers' contact, the weld assisting, as the load's bar (`skin`), and keeping its own turn while
+        # it slides between the block and the rest (`loose`): held to the hand's, the arm's turn as it swept left wedged
+        # it. Held to it again as it is pulled clear, so that it comes to the hand's grasp square
         self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
-        self.effort("R", t_off - 0.1, PUSH_EFFORT, "top")
+        if SLIDE_LOOSE:
+            self.event("loose", tg + 0.05, t_pull, obj="piece")
+        self.effort("R", t_off - 0.1, SLIDE_EFFORT, "top")
         self.effort("R", t_off + 0.1, 0.0, "top")
         _, W = self.grip_pose("top", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.4)

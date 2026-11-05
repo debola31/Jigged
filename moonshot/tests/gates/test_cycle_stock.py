@@ -6,7 +6,9 @@ What the cycle hands this gate (moonshot/sim/cycle_take.py writes it): takes/<pa
 cycle step, the stock after that operation in the part's model frame (mm). The last cycle step's is the finished stock.
 
 Machined faces are every face of the STEP but those its fixture (tests/fixtures/stock/<part>.json) exempts, each with
-its reason, and on a face that meets a concave exempt blend, the band within band_mm of that blend. Both ways round:
+its reason, and on a face that meets a concave exempt blend, the band within band_mm of that blend. A fixture's
+regions exempt part of a face, each with its reason: within its within_mm of its edge, on the faces that meet the
+edge (in_regions; nist-ftc-09's letters' inside corners, the user's decision 2026-11-05). Both ways round:
 every point of a machined face lies within the limit of the stock's surface (nothing left on, nothing cut away), and
 every point of the stock's surface whose nearest point of the part lies on a machined face lies within the limit of it
 (no material left over a face). Exempt faces' deviations are reported, not gated.
@@ -185,8 +187,28 @@ class Mesh:
         return np.vstack([pts, self.v]), np.concatenate([self.face[tri], corner_face])
 
 
+def in_regions(points: np.ndarray, face_ids: np.ndarray, faces: list, regions: list[dict]) -> np.ndarray:
+    """Which points lie in a fixture's exempt region: within its within_mm of its edge (a segment, the part's frame,
+    to the micron) and on a face that meets the edge (the faces either side of it, or meeting it at an end, within a
+    micron)."""
+    import cadquery as cq
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    out = np.zeros(len(points), bool)
+    for r in regions:
+        a, b = (np.asarray(v, float) for v in r["edge"])
+        ab = b - a
+        s = np.clip((points - a) @ ab / (ab @ ab), 0.0, 1.0)
+        near = np.linalg.norm(points - (a + s[:, None] * ab), axis=1) <= r["within_mm"]
+        line = cq.Edge.makeLine(cq.Vector(*a), cq.Vector(*b))
+        meet = [i for i in np.unique(face_ids[near])
+                if BRepExtrema_DistShapeShape(faces[i].wrapped, line.wrapped).Value() < 1e-3]
+        out |= near & np.isin(face_ids, meet)
+    return out
+
+
 def deviation(part, stock, fx: dict) -> dict:
-    """Both ways round: the worst distance on machined faces, and per face (machined and exempt)."""
+    """Both ways round: the worst distance on machined faces, and per face (machined and exempt). A fixture's
+    regions (in_regions) are left out of the gate, as its exempt faces are."""
     faces = part.Faces()
     why = [exemption(f, fx) for f in faces]
     index = {f: i for i, f in enumerate(faces)}
@@ -211,6 +233,8 @@ def deviation(part, stock, fx: dict) -> dict:
     pts, fid = pmesh.samples()
     d1 = smesh.nearest(pts)[1]
     gated1 = np.array([why[i] is None for i in fid]) & ~banded(pts, fid)
+    if fx.get("regions"):
+        gated1 &= ~in_regions(pts, fid, faces, fx["regions"])
     np.maximum.at(worst, fid, d1)
     gated_worst = np.zeros(len(faces))
     np.maximum.at(gated_worst, fid[gated1], d1[gated1])
@@ -218,6 +242,8 @@ def deviation(part, stock, fx: dict) -> dict:
     spts, _ = smesh.samples(seed=1)
     c2, d2, fid2 = pmesh.nearest(spts)
     gated2 = np.array([why[i] is None for i in fid2]) & ~banded(c2, fid2)
+    if fx.get("regions"):
+        gated2 &= ~in_regions(c2, fid2, faces, fx["regions"])
     np.maximum.at(worst, fid2, d2)
     np.maximum.at(gated_worst, fid2[gated2], d2[gated2])
     w1 = d1[gated1].max(initial=0.0)

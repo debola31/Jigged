@@ -787,22 +787,25 @@ class UnloadPlan(SawPlan):
                              targets={"index": on_top(-6, 10), "middle": on_top(-6, 10), "ring": on_top(-12, 6)},
                              starts=starts)}
         cs = self.slid
-        at = cs.copy()                                     # by its middle, the whole of it clear now
-        near, far = self.place.world(at - [hw, 0, 0]), self.place.world(at + [hw, 0, 0])
-        nx = self.place.vec([1.0, 0.0, 0.0])
-        side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, y=(lo, hi), z=(-hh + 7, hh - 3)))  # noqa: E731
+        at = cs.copy()                                     # pulled clear of the stop block and the rest: both ends free
+        # the thumb on its near end, the index and middle over its far end, as a block is picked up in front of you:
+        # across its sides (thumb to one, index and middle to the other) the grip solved 37-114 mm off its pads
+        hl = self.length / 2
+        near, far = self.place.world(at - [0, hl, 0]), self.place.world(at + [0, hl, 0])
+        ny = self.place.vec([0.0, 1.0, 0.0])
+        face = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, x=(lo, hi), z=(-hh + 7, hh - 3)))  # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle"):
-            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 50.0, 55.0, 25.0
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 45.0, 45.0, 20.0
         for nm in ("ring", "little"):                       # curled out of the way
-            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 75.0, 90.0, 40.0
-        q0.update(thumb_cmc_abd=40.0, thumb_cmc_flex=20.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 70.0, 85.0, 40.0
+        q0.update(thumb_cmc_abd=45.0, thumb_cmc_flex=25.0, thumb_mcp_flex=10.0, thumb_ip=10.0)
         specs["pinch"] = dict(of="piece", obj=self.place.world(at), q0=q0, iters=1000, colliders=self.colliders(cs),
                               load=round(SC.stock_kg(self.length), 2),
-                              targets={"thumb": side(near, -nx, -8, 8), "index": side(far, nx, 4, 14),
-                                       "middle": side(far, nx, -14, -4)},
-                              starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (25, 40) for pl in (60, 80)
-                                      for r in (-20,) for p in (70, 95)])
+                              targets={"thumb": face(near, -ny, -8, 8), "index": face(far, ny, -12, 2),
+                                       "middle": face(far, ny, 2, 16)},
+                              starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (20, 35) for pl in (50, 75)
+                                      for r in (-20,) for p in (60, 85)])
         return specs
 
     def set_down_at(self):

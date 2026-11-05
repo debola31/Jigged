@@ -41,7 +41,7 @@ def clamps(part: str, setup_id: str, plan: dict | None = None) -> list[SB.Clamp]
     if "shift" in w:
         before = clamps(part, plan["setups"][i - 1]["id"], plan)
         top = plate(part, setup_id, plan).top
-        return [SB.Clamp(c.name, c.stud, c.yaw, top, c.heel_rise) for c in before]
+        return [SB.Clamp(c.name, c.stud, c.yaw, top, c.heel_rise, c.board_z) for c in before]
     return SB.layout(plate(part, setup_id, plan), int(w["clamps"]))
 
 

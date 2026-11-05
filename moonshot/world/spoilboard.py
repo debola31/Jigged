@@ -46,8 +46,16 @@ MDF_FRICTION = 0.4                                       # [proposed] dry MDF ag
                                                          # board's contacts take it (its priority over the steel's
                                                          # 0.25, on which a parked clamp slid down onto the plate)
 
+# a riser under the spoilboard for a part whose short tools can't reach its plate on the table (moonshot/motion/
+# loads.py RISER_MM, nist-ftc-09's 1-1/2 in miniature end mills; the user's decision, 2026-11-05): a 1.000 in 6061
+# aluminium sub-plate the spoilboard's size, bolted to the table, its clamps' studs through it into the T-slots, as a
+# shop raises a job on a sub-plate rather than on loose riser blocks it would have to square
+RISER_KG_M3 = 2700.0
+
 # the clamp kit: 1/2-13 studs and flange nuts, 4 in step clamps (McMaster 4999A32 class), step blocks in 3/4 in steps
-STUD_R, STUD_L = 0.25 * IN, 4.0 * IN
+STUD_R = 0.25 * IN
+STUD_LENGTHS_IN = (3.0, 4.0, 5.0, 6.0, 7.0, 8.0)          # the kit's studs (8957A43: 4 each 3-8 in)
+STUD_OVER_NUT_MM = 3.0                                    # a stud stands at least this far over its nut, run up
 LEAD_MM = IN / 13.0                                      # 1/2-13: 1.954 mm a turn
 TNUT_DEPTH = 22.0                                        # the stud's foot, in the T-nut, under the table's top
 CLAMP_L, CLAMP_W, CLAMP_T = 4.0 * IN, 1.25 * IN, 0.625 * IN
@@ -90,25 +98,39 @@ class Plate:
         return float(self.centre[2] + self.size[2] / 2)
 
     @property
+    def bottom(self) -> float:
+        """Its underside: the top of the spoilboard it lies on."""
+        return float(self.centre[2] - self.size[2] / 2)
+
+    @property
     def mass_kg(self) -> float:
         return self.density * float(np.prod(self.size)) * 1e-9
 
     @classmethod
-    def on_board(cls, xy, size_mm, density) -> "Plate":
-        """A plate lying on the spoilboard with its middle at xy."""
+    def on_board(cls, xy, size_mm, density, board_z: float = TOP_Z) -> "Plate":
+        """A plate lying on the spoilboard (its top at board_z) with its middle at xy."""
         s = np.asarray(size_mm, float)
-        return cls((float(xy[0]), float(xy[1]), TOP_Z + s[2] / 2), tuple(float(v) for v in s), density)
+        return cls((float(xy[0]), float(xy[1]), board_z + s[2] / 2), tuple(float(v) for v in s), density)
+
+
+def riser_mm(board_z: float) -> float:
+    """The riser under a spoilboard whose top is at board_z: none on the table itself."""
+    r = board_z - TOP_Z
+    if r < -1e-6:
+        raise ValueError(f"a spoilboard's top at {board_z} mm is below the table's own spoilboard")
+    return max(0.0, r)
 
 
 @dataclass(frozen=True)
 class Clamp:
     """One step clamp: its stud (x, y mm), the strap's direction heel to nose when clamped (yaw, rad from +x), the
-    plate's top it clamps (mm), and the heel block's top over the spoilboard (mm)."""
+    plate's top it clamps (mm), the heel block's top over the spoilboard (mm), and the spoilboard's top (mm)."""
     name: str
     stud: tuple[float, float]
     yaw: float
     plate_top: float
     heel_rise: float
+    board_z: float = TOP_Z
 
     @property
     def u(self) -> np.ndarray:
@@ -127,7 +149,7 @@ class Clamp:
         """How a clamp slid back PARK_SLIDE_MM rests: tipped nose-down until its nose's pad is on the spoilboard and
         its underside on its block (the heel's pad, or the rails over the block's front edge when it tips that far).
         (pitch rad, the middle's height mm), solved by bisection on the pitch."""
-        zb = TOP_Z + self.heel_rise
+        zb = self.board_z + self.heel_rise
         a0 = -PARK_SLIDE_MM                                       # the middle along u from the stud
         lo_b, hi_b = sorted(self.heel_steps()[0][:2])             # the block's extent along u from the stud
         xs = np.linspace(-CLAMP_L / 2, CLAMP_L / 2, 409)
@@ -136,7 +158,7 @@ class Clamp:
 
         def rest(th):
             c, s = math.cos(th), math.sin(th)
-            h = TOP_Z + (CLAMP_L / 2) * s + (CLAMP_T / 2 + PAD_T) * c    # the nose's front-bottom edge on the board
+            h = self.board_z + (CLAMP_L / 2) * s + (CLAMP_T / 2 + PAD_T) * c   # the nose's front-bottom edge on the board
             a = a0 + xs * c + zl * s
             z = h - xs * s + zl * c
             over = (a >= lo_b) & (a <= hi_b)
@@ -165,7 +187,14 @@ class Clamp:
         return z if state == "clamped" else z + PARK_NUT_GAP_MM
 
     def stud_z(self) -> tuple[float, float]:
-        return TABLE_Z - TNUT_DEPTH, TABLE_Z - TNUT_DEPTH + STUD_L
+        """The stud's foot (in its T-nut) and top (mm): the kit's shortest stud that stands STUD_OVER_NUT_MM over the
+        nut run up to park (a 4 in on the table, a 5 in through a 1 in riser)."""
+        foot = TABLE_Z - TNUT_DEPTH
+        need = self.nut_z("parked") + FLANGE_T + NUT_HEX_H + STUD_OVER_NUT_MM - foot
+        length = next((L * IN for L in STUD_LENGTHS_IN if L * IN >= need), None)
+        if length is None:
+            raise ValueError(f"{self.name}: no stud in the kit reaches {need:.1f} mm")
+        return foot, foot + length
 
     def heel_steps(self) -> list[tuple[float, float, float]]:
         """The heel block as (from, to along the strap from the stud, top over the spoilboard), mm: one step level
@@ -193,7 +222,7 @@ def layout(plate: Plate, n: int) -> list[Clamp]:
             u = np.array([-sign * math.sqrt(1.0 - uy * uy), uy])
             stud = tip - u * CLAMP_L / 2
             out.append(Clamp(f"clamp_{len(out)}", (float(stud[0]), float(y)), math.atan2(u[1], u[0]), plate.top,
-                             float(rise)))
+                             float(rise), plate.bottom))
     return out
 
 
@@ -279,11 +308,19 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
     each its own body, with no GLB, so the take record draws it from its geoms): the spoilboard with each clamp's T-nut,
     stud and heel block (body `spoilboard`), each clamp not in `free` in its pose, and each clamp's nut where the pose
     has it: on its thread (a body on a slide and a hinge along the stud, its frame at the flange's underside) if its
-    clamp is in `nuts` (by default the free clamps), fixed otherwise."""
-    c = np.r_[TABLE_MID, TABLE_Z + SPOILBOARD_MM[2] / 2]
+    clamp is in `nuts` (by default the free clamps), fixed otherwise. The spoilboard's top is the plate's underside
+    (its clamps' board when the plate isn't on it), on its riser if that is above the table's own (riser_mm)."""
+    board = plate.bottom if plate is not None else (clamps[0].board_z if clamps else TOP_Z)
+    rise = riser_mm(board)
+    c = np.r_[TABLE_MID, board - SPOILBOARD_MM[2] / 2]
     out = (f'        <body name="spoilboard">\n'
            f'        <geom name="spoilboard" type="box" size="{_f(SPOILBOARD_MM / 2)}" pos="{_f(c)}" contype="1" '
            f'conaffinity="3" priority="2" friction="{MDF_FRICTION} 0.004 0.0001" rgba="0.62 0.5 0.36 1"/>\n')
+    if rise > 0:
+        size = np.r_[SPOILBOARD_MM[:2], rise]
+        kg = RISER_KG_M3 * float(np.prod(size)) * 1e-9
+        out += (f'        <geom name="riser" class="steel" type="box" size="{_f(size / 2)}" '
+                f'pos="{_f(np.r_[TABLE_MID, TABLE_Z + rise / 2])}" mass="{kg:.3f}" rgba="0.75 0.76 0.78 1"/>\n')
     for i, k in enumerate(clamps):
         z0, z1 = k.stud_z()
         s = np.asarray(k.stud, float)
@@ -295,7 +332,7 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
         for j, (a, b, top) in enumerate(k.heel_steps()):
             mid = s + k.u * (a + b) / 2
             out += (f'        <geom name="heel_block_{i}_{j}" class="steel" type="box" '
-                    f'size="{_f([abs(b - a) / 2, BLOCK_W / 2, top / 2])}" pos="{_f(np.r_[mid, TOP_Z + top / 2])}" '
+                    f'size="{_f([abs(b - a) / 2, BLOCK_W / 2, top / 2])}" pos="{_f(np.r_[mid, k.board_z + top / 2])}" '
                     f'quat="{_quat_z(k.yaw)}" priority="2" friction="{BLOCK_FRICTION} 0.004 0.0001" '
                     f'rgba="0.15 0.15 0.16 1"/>\n')
     out += '        </body>\n'

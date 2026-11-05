@@ -1,7 +1,7 @@
-"""nist-ftc-10's step 69, "Deburr every edge", as a two-handed physics take at the inspection bench (plan §5.4): the
-left hand holds the finished part still on the bench while the right draws the deburring tool's blade along its
-edges, then puts the tool back. Physics tier, on the take the runner writes to the data root
-(takes/nist-ftc-10-deburr). Protected (plan §6, rule 1).
+"""Each part's deburring step (nist-ftc-10's step 69, "Deburr every edge", and G1's), as a two-handed physics take at
+the inspection bench (plan §5.4): the left hand holds the finished part still on the bench while the right draws the
+deburring tool's blade along its edges, then puts the tool back. Physics tier, on the take the runner writes to the
+data root (takes/<part>-deburr); a part whose take isn't made yet is skipped. Protected (plan §6, rule 1).
 
 Each stroke is measured from the take record, the blade's own collider against the edge the plan names in the
 part's frame (its STEP's, mm), so the measurement doesn't use the runner's account of it (plan §6, rule 2). The
@@ -17,7 +17,7 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKE = data_root() / "takes" / "nist-ftc-10-deburr"
+PARTS = ("nist-ftc-10", "ll-1007223", "ct-slbeam", "nist-ftc-09", "ll-1005337")
 ON_EDGE_MM = 0.5            # the blade's collider within this of the edge counts as on it
 ON_EDGE_FRAC = 0.9          # ... in this share of a stroke's frames, its first and last 0.2 s aside
 COVER_FRAC = 0.8            # and its contact runs along this share of the edge
@@ -37,17 +37,18 @@ def turned_deg(q0, q1):
     return float(np.degrees(2 * np.arccos(min(1.0, abs(float(np.dot(q0, q1)))))))
 
 
-@pytest.fixture(scope="module")
-def take():
-    if not (TAKE / "take.npz").exists():
-        pytest.skip(f"no physics run in {TAKE}")
-    d = np.load(TAKE / "take.npz")
+@pytest.fixture(scope="module", params=PARTS)
+def take(request):
+    folder = data_root() / "takes" / f"{request.param}-deburr"
+    if not (folder / "take.npz").exists():
+        pytest.skip(f"no physics run in {folder}")
+    d = np.load(folder / "take.npz")
     bodies = [str(b) for b in d["bodies"]]
-    return {"npz": d, "i": {b: k for k, b in enumerate(bodies)},
-            "scene": json.loads((TAKE / "scene.json").read_text(encoding="utf-8")),
-            "plan": json.loads((TAKE / "take.json").read_text(encoding="utf-8")),
-            "report": json.loads((TAKE / "report.json").read_text(encoding="utf-8")),
-            "checks": json.loads((TAKE / "checks.json").read_text(encoding="utf-8"))}
+    return {"folder": folder, "npz": d, "i": {b: k for k, b in enumerate(bodies)},
+            "scene": json.loads((folder / "scene.json").read_text(encoding="utf-8")),
+            "plan": json.loads((folder / "take.json").read_text(encoding="utf-8")),
+            "report": json.loads((folder / "report.json").read_text(encoding="utf-8")),
+            "checks": json.loads((folder / "checks.json").read_text(encoding="utf-8"))}
 
 
 def pose(take, body):
@@ -67,7 +68,7 @@ def blade_segments(take):
 
 
 def test_the_record_is_complete_and_two_handed(take):
-    assert check(TAKE) == []
+    assert check(take["folder"]) == []
     assert sorted(str(a) for a in take["npz"]["arms"]) == ["L", "R"]
 
 
@@ -125,5 +126,5 @@ def test_the_hand_never_touches_the_blade_and_the_skin_is_measured_on_both_tool_
 
 def test_the_take_passes_every_check(take):
     from moonshot.validate.take import run
-    failed = {k: v for k, v in run(TAKE).items() if isinstance(v, str) or not v.passed}
+    failed = {k: v for k, v in run(take["folder"]).items() if isinstance(v, str) or not v.passed}
     assert not failed, failed

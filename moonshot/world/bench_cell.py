@@ -24,6 +24,8 @@ check it (moonshot/validate).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from moonshot.world import inspection_bench as IB
@@ -49,6 +51,25 @@ PART_BOXES = {                       # (min, max): the STEP's planar faces, its 
     "part_boss": ((35.5, 30.0, 16.0), (59.5, 31.0, 31.0)),       # the one face at Y = 31
 }
 POCKET_UP = (0.0, 0.0, 0.70710678, -0.70710678)    # w x y z: the STEP's -Y up, its +X to the world's -X, +Z to -Y
+
+
+@dataclass(frozen=True)
+class BenchPart:
+    """A finished part as it lies on the bench mat, its body's frame its STEP's (mm): what the take's colliders, mass
+    and render are made from. nist-ftc-10's is the module's constants above; each G1 part's is read off its STEP."""
+    name: str                      # its folder under <data root>/parts, where its finished.glb is
+    kg: float
+    com: tuple                     # its STEP's centre of mass (mm)
+    inertia: tuple                 # about the com along its STEP's axes (kg m^2)
+    boxes: dict                    # name -> (min, max): colliders read off the STEP's planar faces
+    up: tuple                      # w x y z: how it lies, its STEP's frame in the world's
+    feet: tuple                    # the boxes it lies on the mat by
+    lies_mm: float                 # its STEP origin's height over the mat as it lies
+
+
+NIST_FTC_10 = BenchPart("nist-ftc-10", PART_KG, PART_COM, (2.79e-4, 1.295e-3, 1.097e-3), PART_BOXES, POCKET_UP,
+                        ("part_slab", "part_boss"), 31.2)
+PARTS = {p.name: p for p in (NIST_FTC_10,)}
 
 # --- the bench mat (mm) -------------------------------------------------------------------------------------------
 MAT = {"size": (240.0, 140.0, 3.0), "friction": 0.9,     # rubber on aluminium and on maple, about 0.9 (proposed)
@@ -110,11 +131,12 @@ def defaults() -> str:
     </default>"""
 
 
-def part_body(at_mm) -> str:
-    """The finished part, pocket side up, its STEP origin (datum A's middle) at at_mm."""
-    geoms = "".join(f'\n      {_box(n, lo, hi, " class=\"part\"")}' for n, (lo, hi) in PART_BOXES.items())
-    return (f'    <body name="part" pos="{_f(at_mm)}" quat="{_f(POCKET_UP, 1)}">\n      <freejoint name="part"/>\n'
-            f'      <inertial pos="{_f(PART_COM)}" mass="{PART_KG}" diaginertia="2.79e-4 1.295e-3 1.097e-3"/>{geoms}\n'
+def part_body(at_mm, part: BenchPart = NIST_FTC_10) -> str:
+    """The finished part as it lies (nist-ftc-10 pocket side up), its STEP origin (nist-ftc-10's datum A's middle) at
+    at_mm."""
+    geoms = "".join(f'\n      {_box(n, lo, hi, " class=\"part\"")}' for n, (lo, hi) in part.boxes.items())
+    return (f'    <body name="part" pos="{_f(at_mm)}" quat="{_f(part.up, 1)}">\n      <freejoint name="part"/>\n'
+            f'      <inertial pos="{_f(part.com)}" mass="{part.kg}" diaginertia="{_f(part.inertia, 1)}"/>{geoms}\n'
             f'    </body>\n')
 
 
@@ -199,8 +221,9 @@ def _excludes(loose: str) -> str:
     if 'name="bench_mat"' in loose and 'name="part"' in loose:
         f, ref, imp = MAT["friction"], _f(MAT["solref"], 1), _f(MAT["solimp"], 1)
         rows.append('    <exclude body1="part" body2="bench_mat"/>')
+        feet = dict.fromkeys(g for p in PARTS.values() for g in p.feet if f'name="{g}"' in loose)
         rows += [f'    <pair geom1="{g}" geom2="bench_mat" condim="4" friction="{f} {f} 0.005 0.0001 0.0001" '
-                 f'solref="{ref}" solimp="{imp}" solreffriction="0.002 1"/>' for g in ("part_slab", "part_boss")]
+                 f'solref="{ref}" solimp="{imp}" solreffriction="0.002 1"/>' for g in feet]
     return "  <contact>\n" + "\n".join(rows) + "\n  </contact>\n" if rows else ""
 
 
@@ -240,19 +263,20 @@ def rest_mm(name: str) -> np.ndarray:
 
 IDENTITY = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
 ASSET = [0.0, 0.0, 0.0, 0.7071068, 0.7071068, 0.0, 0.0]   # an asset's GLB, glTF's Y up, in its Z-up asset frame
-LINKS = {"part": "parts/nist-ftc-10/finished.glb",          # moonshot/library/bench_links.py writes these
-         "deburr_tool": "library/hand_tools/deburr/links/tool.glb",
-         "insp_cal6": "library/inspection/cal6/links/beam.glb",
+LINKS = {"deburr_tool": "library/hand_tools/deburr/links/tool.glb",     # moonshot/library/bench_links.py writes
+         "insp_cal6": "library/inspection/cal6/links/beam.glb",            # these, and each part's finished.glb
          "insp_cal6_slider": "library/inspection/cal6/links/slider.glb",
          "insp_hgauge": "library/inspection/hgauge/links/height_gauge.glb"}
 
 
-def render_glbs(model) -> dict[str, list[dict]]:
+def render_glbs(model, part: str = "nist-ftc-10") -> dict[str, list[dict]]:
     """Each body's render meshes for the take record (moonshot/contracts/take_record.py): the moving bodies' links,
-    each in its body's frame; the instruments' own asset GLBs, each in its asset frame; and, on the static body
-    `insp_bench`, the bench (the world frame is its asset's) and the granite plate (its underside centred)."""
+    each in its body's frame (the part's, parts/<part>/finished.glb); the instruments' own asset GLBs, each in its
+    asset frame; and, on the static body `insp_bench`, the bench (the world frame is its asset's) and the granite
+    plate (its underside centred)."""
     names = {model.body(b).name for b in range(1, model.nbody)}
-    out = {b: [{"path": p, "in_body": IDENTITY}] for b, p in LINKS.items() if b in names}
+    links = {"part": f"parts/{part}/finished.glb"} | LINKS
+    out = {b: [{"path": p, "in_body": IDENTITY}] for b, p in links.items() if b in names}
     for k in IB.record()["rests"]:
         if f"insp_{k}" in names and f"insp_{k}" not in out:
             out[f"insp_{k}"] = [{"path": f"library/inspection/{k}/{k}.glb", "in_body": ASSET}]

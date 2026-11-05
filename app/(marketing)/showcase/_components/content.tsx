@@ -8,19 +8,26 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemText from '@mui/material/ListItemText';
+import ListSubheader from '@mui/material/ListSubheader';
+import Popover from '@mui/material/Popover';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
 import { toError } from '@/lib/supabaseErrors';
 import { CATEGORY_LABELS, gatherList, stepsUsing, type Catalog } from './catalog';
-import PilotRequest from './PilotRequest';
-import { mediaUrl, ready, type LivePart, type Use } from './showcaseData';
+import { mediaUrl, ready, type LivePart, type Step, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
 // three.js comes with it, so it loads only where a model is shown: on a desktop.
 const ModelView = dynamic(() => import('./ModelView'), { ssr: false });
 
 const FINE_POINTER = '(hover: hover) and (pointer: fine)';
+export const CARD_BG = 'rgba(17, 20, 57, 0.92)';
+export const SUBHEADER_BG = 'rgba(17, 20, 57, 0.98)';
 
 function subscribeFinePointer(change: () => void) {
   const query = window.matchMedia(FINE_POINTER);
@@ -28,19 +35,21 @@ function subscribeFinePointer(change: () => void) {
   return () => query.removeEventListener('change', change);
 }
 
-/** A mouse, so a model can be turned without taking the panel's scroll from a finger. */
+/** A mouse, so a model can be turned without taking the card's scroll from a finger. */
 function useFinePointer(): boolean {
   return useSyncExternalStore(subscribeFinePointer, () => window.matchMedia(FINE_POINTER).matches, () => false);
 }
 
 const statusSx = { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 3, textAlign: 'center', color: 'text.secondary' } as const;
 
-function Heading({ eyebrow, title, onClose, closeLabel }: { eyebrow: string; title: string; onClose?(): void; closeLabel?: string }) {
+export function Heading({ eyebrow, title, onClose, closeLabel }: { eyebrow: ReactNode; title: string; onClose?(): void; closeLabel?: string }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography sx={{ color: EYEBROW_COLOR, fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.04em' }}>{eyebrow}</Typography>
-        <Typography component="h2" sx={{ mt: 0.75, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.6rem', lineHeight: 1.15 }}>
+        <Typography component="div" sx={{ color: EYEBROW_COLOR, fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.04em' }}>
+          {eyebrow}
+        </Typography>
+        <Typography component="h2" sx={{ mt: 0.5, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.45rem', lineHeight: 1.15 }}>
           {title}
         </Typography>
       </Box>
@@ -53,10 +62,10 @@ function Heading({ eyebrow, title, onClose, closeLabel }: { eyebrow: string; tit
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Box component="section" sx={{ mt: 3 }}>
-      <Typography component="h3" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+    <Box component="section" sx={{ mt: 2.5 }}>
+      <Typography component="h3" sx={{ color: 'text.secondary', fontWeight: 600, fontSize: '0.78rem', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
         {title}
       </Typography>
       <Box sx={{ mt: 1 }}>{children}</Box>
@@ -83,7 +92,7 @@ function Facts({ rows }: { rows: string[][] }) {
 }
 
 /** What a step or the plan uses: a thing the shop has placed opens it, and the camera flies there. */
-function Uses({ cat, uses }: { cat: Catalog; uses: Use[] }) {
+export function Uses({ cat, uses }: { cat: Catalog; uses: Use[] }) {
   const openItem = useShowcase((s) => s.openItem);
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
@@ -107,37 +116,123 @@ function Uses({ cat, uses }: { cat: Catalog; uses: Use[] }) {
   );
 }
 
-// --- the plan -----------------------------------------------------------------------------------
+export function stepNote(s: Step): string | undefined {
+  const coming = s.media.type === 'cut' ? 'Picture coming' : 'Video coming';
+  const notes = [s.kind === 'cycle' && 'Machine cycle', !ready(s) && coming].filter(Boolean);
+  return notes.length ? notes.join(' · ') : undefined;
+}
 
-function PlanPanel({ cat, part }: { cat: Catalog; part: LivePart }) {
-  const openStep = useShowcase((s) => s.openStep);
+export function openStepTracked(part: LivePart, i: number) {
+  useShowcase.getState().openStep(i);
+  posthog.capture('showcase step opened', { part: part.id, step_number: i + 1, kind: part.steps[i].kind });
+}
+
+/** Every step, grouped by setup; the open one is marked. */
+export function StepList({ part, onPick, dense = true }: { part: LivePart; onPick(i: number): void; dense?: boolean }) {
+  const index = useShowcase((s) => s.step);
+  const sheet = useShowcase((s) => s.sheet);
+  return (
+    <>
+      {part.groups.map((g) => (
+        <List
+          key={g.id}
+          dense={dense}
+          disablePadding
+          subheader={
+            <ListSubheader sx={{ bgcolor: SUBHEADER_BG, color: 'text.secondary', fontWeight: 600, lineHeight: 2.4 }}>{g.title}</ListSubheader>
+          }
+        >
+          {part.steps.map((s, i) =>
+            s.group !== g.id ? null : (
+              <ListItemButton
+                key={s.id}
+                data-step={i}
+                selected={sheet === 'step' && i === index}
+                aria-current={sheet === 'step' && i === index ? 'step' : undefined}
+                onClick={() => onPick(i)}
+              >
+                <ListItemText primary={`${i + 1}. ${s.title}`} secondary={stepNote(s)} />
+              </ListItemButton>
+            ),
+          )}
+        </List>
+      ))}
+    </>
+  );
+}
+
+/** "Step 5 of 61 · Find X and Y ▾": opens the whole list, to jump to any step. */
+export function StepPicker({ part }: { part: LivePart }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const index = useShowcase((s) => s.step);
+  const sheet = useShowcase((s) => s.sheet);
+  const label = sheet === 'step' && index !== null ? `Step ${index + 1} of ${part.steps.length}` : `All ${part.steps.length} steps`;
+  return (
+    <>
+      <Button
+        size="small"
+        variant="outlined"
+        endIcon={<ExpandMoreIcon />}
+        onClick={(e) => setAnchor(e.currentTarget)}
+        aria-haspopup="listbox"
+        sx={{ color: 'common.white', borderColor: 'rgba(255, 255, 255, 0.3)' }}
+      >
+        {label}
+      </Button>
+      <Popover
+        open={!!anchor}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        slotProps={{
+          paper: { sx: { width: 380, maxHeight: '60vh', bgcolor: SUBHEADER_BG, colorScheme: 'dark' } },
+          transition: {
+            onEntered: (node: HTMLElement) => node.querySelector<HTMLElement>(`[data-step="${index ?? 0}"]`)?.scrollIntoView({ block: 'center' }),
+          },
+        }}
+      >
+        <StepList
+          part={part}
+          onPick={(i) => {
+            setAnchor(null);
+            openStepTracked(part, i);
+          }}
+        />
+      </Popover>
+    </>
+  );
+}
+
+// --- what you'll need ---------------------------------------------------------------------------
+
+export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
   const openItem = useShowcase((s) => s.openItem);
+  const look = useShowcase((s) => s.look);
   const gather = gatherList(part, cat, (id) => cat.shop.surfaces[id] ?? id);
-  // The stations in the order the steps reach them, each with the first step done there.
-  const stations = [...new Map(part.steps.map((s, i) => [s.where.name, { where: s.where, first: i }])).values()].map((st) => ({
-    ...st,
-    count: part.steps.filter((s) => s.where.name === st.where.name).length,
+  // The stations in the order the steps reach them.
+  const stations = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()].map((where) => ({
+    where,
+    count: part.steps.filter((s) => s.where.name === where.name).length,
   }));
+  const setups = part.groups.filter((g) => g.id !== 'finish').length;
 
   return (
     <>
-      <Heading eyebrow="Before you start" title="What you'll need" />
-      <Section title="Stock">
-        <Typography sx={{ fontSize: '1.05rem', lineHeight: 1.5 }}>
-          {part.stock.material}, {part.stock.size} in: a {part.stock.from}.
-        </Typography>
-      </Section>
-      <Section title="Stations">
+      <Heading eyebrow={part.name} title="What you'll need" />
+      <Typography sx={{ mt: 1.5, lineHeight: 1.55 }}>
+        {part.stock.material}, {part.stock.size} in: a {part.stock.from}. {setups} setups, {part.steps.length} steps.
+      </Typography>
+      <Section title="Stations, in order">
         {stations.map((st, n) => (
-          <Box key={st.where.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 0.75 }}>
-            <Typography sx={{ color: 'text.secondary', width: '1.5em' }}>{n + 1}</Typography>
+          <Box key={st.where.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 0.5 }}>
+            <Typography sx={{ color: 'text.secondary', width: '1.25em' }}>{n + 1}</Typography>
             <Box sx={{ flex: 1 }}>
               <Typography sx={{ fontWeight: 600 }}>{st.where.name}</Typography>
-              <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>
+              <Typography sx={{ color: 'text.secondary', fontSize: '0.88rem' }}>
                 {st.count} {st.count === 1 ? 'step' : 'steps'}
               </Typography>
             </Box>
-            <Button size="small" onClick={() => (st.where.item ? openItem(st.where.item) : openStep(st.first))}>
+            <Button size="small" onClick={() => (st.where.item ? openItem(st.where.item) : look({ kind: 'zone', where: st.where }))}>
               Show me
             </Button>
           </Box>
@@ -148,21 +243,20 @@ function PlanPanel({ cat, part }: { cat: Catalog; part: LivePart }) {
           <Uses cat={cat} uses={g.uses} />
         </Section>
       ))}
-      <Button variant="contained" size="large" fullWidth onClick={() => openStep(0)} sx={{ mt: 4 }}>
+      <Button variant="contained" size="large" fullWidth onClick={() => openStepTracked(part, 0)} sx={{ mt: 3 }}>
         Start with step 1
       </Button>
-      <PilotRequest sx={{ mt: 4 }} />
     </>
   );
 }
 
 // --- a step -------------------------------------------------------------------------------------
 
-function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: number }) {
+/** One step: its video (or the cut part), what it says, where, what it uses, and previous / next. */
+export function StepContent({ cat, part, index, header = true }: { cat: Catalog; part: LivePart; index: number; header?: boolean }) {
   const step = part.steps[index];
   const group = part.groups.find((g) => g.id === step.group);
   const openStep = useShowcase((s) => s.openStep);
-  const showPlan = useShowcase((s) => s.showPlan);
   const [failed, setFailed] = useState<string | null>(null);
   const [modelShown, setModelShown] = useState<string | null>(null);
   const reported = useRef(new Set<string>());
@@ -174,16 +268,12 @@ function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: 
     reported.current.add(step.id);
     Sentry.captureException(toError(error, `Showcase: the ${what} for ${part.id} ${step.id} failed to load`));
   };
-  const go = (i: number) => {
-    openStep(i);
-    posthog.capture('showcase step opened', { part: part.id, step_number: i + 1, kind: part.steps[i].kind });
-  };
   const onModel = useCallback(() => setModelShown(step.id), [step.id]);
 
   return (
     <>
-      <Heading eyebrow={`Step ${index + 1} of ${part.steps.length}${group ? ` · ${group.title}` : ''}`} title={step.title} onClose={showPlan} closeLabel="Back to the plan" />
-      <Box sx={{ mt: 2, position: 'relative', aspectRatio: '16 / 9', borderRadius: 2, overflow: 'hidden', bgcolor: 'common.black' }}>
+      {header && <Heading eyebrow={group?.title ?? ''} title={step.title} />}
+      <Box sx={{ mt: header ? 1.5 : 0, position: 'relative', aspectRatio: '16 / 9', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'common.black' }}>
         {!ready(step) ? (
           <Typography role="status" sx={statusSx}>
             This step&apos;s {what} is still being made.
@@ -207,7 +297,7 @@ function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: 
               </Box>
             )}
             {modelShown === step.id && (
-              <Typography sx={{ position: 'absolute', left: 12, bottom: 10, fontSize: '0.85rem', color: 'text.secondary', pointerEvents: 'none' }}>
+              <Typography sx={{ position: 'absolute', left: 10, bottom: 8, fontSize: '0.8rem', color: 'text.secondary', pointerEvents: 'none' }}>
                 Drag to turn the part
               </Typography>
             )}
@@ -236,9 +326,9 @@ function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: 
           </Typography>
         )}
       </Box>
-      <Box sx={{ mt: 2 }} aria-live="polite">
+      <Box sx={{ mt: 1.5 }} aria-live="polite">
         {step.kind === 'cycle' && <Chip label="Machine cycle" size="small" variant="outlined" sx={{ mb: 1 }} />}
-        <Typography sx={{ fontSize: '1.1rem', lineHeight: 1.6 }}>{step.caption}</Typography>
+        <Typography sx={{ fontSize: '1.05rem', lineHeight: 1.55 }}>{step.caption}</Typography>
       </Box>
       <Section title="Where">
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -256,11 +346,11 @@ function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: 
           <Uses cat={cat} uses={step.uses} />
         </Section>
       )}
-      <Box sx={{ mt: 4, display: 'flex', gap: 1.5 }}>
-        <Button variant="outlined" disabled={index === 0} onClick={() => go(index - 1)} sx={{ flex: 1 }}>
-          Previous step
+      <Box sx={{ mt: 2.5, display: 'flex', gap: 1.5 }}>
+        <Button variant="outlined" disabled={index === 0} onClick={() => openStepTracked(part, index - 1)} sx={{ flex: 1 }}>
+          Previous
         </Button>
-        <Button variant="contained" disabled={index === part.steps.length - 1} onClick={() => go(index + 1)} sx={{ flex: 1 }}>
+        <Button variant="contained" disabled={index === part.steps.length - 1} onClick={() => openStepTracked(part, index + 1)} sx={{ flex: 1 }}>
           Next step
         </Button>
       </Box>
@@ -270,11 +360,11 @@ function StepPanel({ cat, part, index }: { cat: Catalog; part: LivePart; index: 
 
 // --- a thing ------------------------------------------------------------------------------------
 
-function ItemPanel({ cat, part, id }: { cat: Catalog; part: LivePart; id: string }) {
+export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; id: string }) {
   const thing = cat.spots.get(id)?.[0];
   const closeItem = useShowcase((s) => s.closeItem);
   const step = useShowcase((s) => s.step);
-  const openStep = useShowcase((s) => s.openStep);
+  const sheet = useShowcase((s) => s.sheet);
   const finePointer = useFinePointer();
   const [shown, setShown] = useState<string | null>(null);
   const onLoad = useCallback(() => setShown(id), [id]);
@@ -291,30 +381,30 @@ function ItemPanel({ cat, part, id }: { cat: Catalog; part: LivePart; id: string
         eyebrow={CATEGORY_LABELS[thing.category] ?? thing.category}
         title={thing.name}
         onClose={closeItem}
-        closeLabel={step === null ? 'Back to the plan' : 'Back to the step'}
+        closeLabel={sheet === 'step' && step !== null ? 'Back to the step' : 'Close'}
       />
-      <Typography sx={{ mt: 1, color: 'text.secondary' }}>
+      <Typography sx={{ mt: 0.75, color: 'text.secondary', fontSize: '0.95rem' }}>
         {[makeModel, cat.zoneName(thing.zone), surface].filter(Boolean).join(' · ')}
       </Typography>
       {finePointer && (
-        <Box sx={{ mt: 2, position: 'relative', aspectRatio: '4 / 3', borderRadius: 2, overflow: 'hidden', bgcolor: 'common.black' }}>
+        <Box sx={{ mt: 1.5, position: 'relative', aspectRatio: '4 / 3', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'common.black' }}>
           <ModelView key={id} url={mediaUrl(asset.model)} onLoad={onLoad} onError={(e) => Sentry.captureException(toError(e, `Showcase: the model of ${id} failed to load`))} />
-          <Typography sx={{ position: 'absolute', left: 12, bottom: 10, fontSize: '0.85rem', color: 'text.secondary', pointerEvents: 'none' }}>
+          <Typography sx={{ position: 'absolute', left: 10, bottom: 8, fontSize: '0.8rem', color: 'text.secondary', pointerEvents: 'none' }}>
             {shown === id ? 'Drag to turn · scroll to zoom' : 'Loading the model…'}
           </Typography>
         </Box>
       )}
       {used.length > 0 && (
-        <Section title={`In this part's plan`}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        <Section title={`In ${part.name.split(' (')[0]}'s steps`}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
             {used.map((n) => (
-              <Chip key={n} label={`Step ${n}`} onClick={() => openStep(n - 1)} variant={step === n - 1 ? 'filled' : 'outlined'} />
+              <Chip key={n} size="small" label={`Step ${n}`} onClick={() => openStepTracked(part, n - 1)} variant={sheet === 'step' && step === n - 1 ? 'filled' : 'outlined'} />
             ))}
           </Box>
         </Section>
       )}
       <Section title="About it">
-        <Typography sx={{ lineHeight: 1.6 }}>{asset.description}</Typography>
+        <Typography sx={{ lineHeight: 1.55 }}>{asset.description}</Typography>
       </Section>
       {specs.length > 0 && (
         <Section title="Key specs">
@@ -327,20 +417,5 @@ function ItemPanel({ cat, part, id }: { cat: Catalog; part: LivePart; id: string
         </Section>
       )}
     </>
-  );
-}
-
-/** The right panel: a thing when one is open, else the open step, else the plan's "what you'll need". */
-export default function Panel({ cat, part }: { cat: Catalog; part: LivePart }) {
-  const item = useShowcase((s) => s.item);
-  const step = useShowcase((s) => s.step);
-  return (
-    <Box
-      component="aside"
-      aria-label={item ? 'The thing' : step === null ? 'The plan' : 'The step'}
-      sx={{ minHeight: 0, overflowY: 'auto', colorScheme: 'dark', p: 2.5, borderLeft: '1px solid rgba(255, 255, 255, 0.09)', bgcolor: 'rgba(17, 20, 57, 0.55)' }}
-    >
-      {item ? <ItemPanel cat={cat} part={part} id={item} /> : step === null ? <PlanPanel cat={cat} part={part} /> : <StepPanel cat={cat} part={part} index={step} />}
-    </Box>
   );
 }

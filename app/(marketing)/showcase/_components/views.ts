@@ -57,7 +57,7 @@ export function itemPose(cat: Catalog, id: string, fovDeg: number): Pose | null 
 }
 
 /** The middle of a zone's things (plan mm), which can sit off the zone's own centre. */
-function zoneCentre(cat: Catalog, where: Where): [number, number] {
+export function zoneCentre(cat: Catalog, where: Where): [number, number] {
   const rect = cat.shop.zones.find((z) => z.name === where.name)?.rect;
   const inside = rect
     ? [...cat.shop.items, ...cat.shop.furniture].filter((t) => t.x >= rect[0] && t.x <= rect[2] && t.y >= rect[1] && t.y <= rect[3])

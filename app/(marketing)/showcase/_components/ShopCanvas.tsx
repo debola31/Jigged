@@ -1,17 +1,17 @@
 'use client';
 
-import { CameraControls, Environment, Lightformer, useGLTF, useProgress } from '@react-three/drei';
+import { CameraControls, Environment, Html, Lightformer, useGLTF, useProgress } from '@react-three/drei';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Typography from '@mui/material/Typography';
-import { BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, SRGBColorSpace, Vector3, type PerspectiveCamera } from 'three';
+import { BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, SRGBColorSpace, Vector3 } from 'three';
 import { toError } from '@/lib/supabaseErrors';
 import { spotBox, toScene, type Catalog, type Vec3 } from './catalog';
 import { mediaUrl, type LivePart, type Rect, type ShopItem } from './showcaseData';
 import { useShowcase } from './store';
-import { itemPose, overviewPose, stepPose, walkLegs, type Leg, type Pose } from './views';
+import { itemPose, overviewPose, stepPose, walkLegs, zoneCentre, zonePose, type Leg, type Pose } from './views';
 
 const AMBER = '#D4872A';
 const TEAL = '#2BBCB3';
@@ -137,13 +137,16 @@ function Outline({ cat, id, color }: { cat: Catalog; id: string; color: string }
 function Highlights({ cat, part }: { cat: Catalog; part: LivePart }) {
   const item = useShowcase((s) => s.item);
   const index = useShowcase((s) => s.step);
+  const sheet = useShowcase((s) => s.sheet);
   const hovered = useShowcase((s) => s.hovered);
   const invalidate = useThree((s) => s.invalidate);
-  const step = index === null ? null : part.steps[index];
+  const step = sheet === 'step' && index !== null ? part.steps[index] : null;
   const amber = new Set([step?.where.item, item].filter((id): id is string => !!id));
   const teal = new Set([...(step?.uses ?? []).flatMap((u) => (u.item ? [u.item] : [])), ...(hovered ? [hovered] : [])].filter((id) => !amber.has(id)));
   // The canvas draws on demand.
-  useEffect(() => invalidate(), [item, index, hovered, invalidate]);
+  useEffect(() => {
+    invalidate();
+  }, [item, index, sheet, hovered, invalidate]);
   return (
     <>
       {[...amber].map((id) => (
@@ -152,6 +155,77 @@ function Highlights({ cat, part }: { cat: Catalog; part: LivePart }) {
       {[...teal].map((id) => (
         <Outline key={`t-${id}`} cat={cat} id={id} color={TEAL} />
       ))}
+    </>
+  );
+}
+
+/**
+ * A name over a place in the shop, to click. Drawn as HTML by drei, outside the page's MUI theme,
+ * so it is styled inline.
+ */
+function Label({ at, text, color, shown, onClick }: { at: Vec3; text: string; color: string; shown: boolean; onClick(): void }) {
+  // Hidden, not unmounted: each label is its own React root, and unmounting one while the step
+  // changes makes React warn about a root unmounted mid-render.
+  return (
+    <Html position={at} center zIndexRange={[20, 0]}>
+      <button
+        type="button"
+        onClick={onClick}
+        tabIndex={shown ? 0 : -1}
+        aria-hidden={!shown}
+        style={{
+          display: shown ? 'block' : 'none',
+          whiteSpace: 'nowrap',
+          cursor: 'pointer',
+          font: 'inherit',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          color: '#fff',
+          background: 'rgba(17, 20, 57, 0.88)',
+          border: `1px solid ${color}`,
+          borderRadius: 999,
+          padding: '0.25rem 0.7rem',
+        }}
+      >
+        {text}
+      </button>
+    </Html>
+  );
+}
+
+/** The part's stations, amber, and what the open step uses, teal: each opens or flies to its place. */
+function Labels({ cat, part }: { cat: Catalog; part: LivePart }) {
+  const phase = useShowcase((s) => s.phase);
+  const index = useShowcase((s) => s.step);
+  const sheet = useShowcase((s) => s.sheet);
+  const item = useShowcase((s) => s.item);
+  const { openItem, look } = useShowcase.getState();
+  if (phase === 'pick') return null;
+  const above = (id: string, lift: number): Vec3 | null => {
+    const spot = cat.spots.get(id)?.[0];
+    if (!spot) return null;
+    const { center, size } = spotBox(cat.shop.assets[spot.asset], spot);
+    return [center[0], center[1] + size[1] / 2 + lift, center[2]];
+  };
+  const open = (id: string) => {
+    openItem(id);
+    posthog.capture('showcase item opened', { category: cat.spots.get(id)?.[0].category ?? 'unknown', source: 'label' });
+  };
+  const stations = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()];
+  const step = sheet === 'step' && index !== null ? part.steps[index] : null;
+  const current = new Set((step?.uses ?? []).flatMap((u) => (u.item && u.item !== item ? [u.item] : [])));
+  // Every placed thing any step uses gets a label, shown only while its step is open.
+  const all = [...new Map(part.steps.flatMap((s) => s.uses).flatMap((u) => (u.item ? [[u.item, u.name] as const] : []))).entries()];
+  return (
+    <>
+      {stations.map((w) => {
+        const at = w.item ? above(w.item, 0.35) : toScene(...zoneCentre(cat, w), 2200);
+        return at && <Label key={w.name} at={at} text={w.name} color={AMBER} shown onClick={() => (w.item ? open(w.item) : look({ kind: 'zone', where: w }))} />;
+      })}
+      {all.map(([id, name]) => {
+        const at = above(id, 0.12);
+        return at && <Label key={id} at={at} text={name} color={TEAL} shown={current.has(id)} onClick={() => open(id)} />;
+      })}
     </>
   );
 }
@@ -339,6 +413,7 @@ function CameraRig({ cat, part }: { cat: Catalog; part: LivePart }) {
     () => (v: typeof view): Pose =>
       (v.kind === 'item' && itemPose(cat, v.id, camera.fov)) ||
       (v.kind === 'step' && stepPose(cat, part.steps[v.index], camera.fov)) ||
+      (v.kind === 'zone' && zonePose(cat, v.where)) ||
       overviewPose(cat, camera.aspect, camera.fov),
     [cat, part, camera],
   );
@@ -421,6 +496,24 @@ function CameraRig({ cat, part }: { cat: Catalog; part: LivePart }) {
   return <CameraControls ref={controls} makeDefault minDistance={0.3} maxDistance={140} maxPolarAngle={deg(86)} dollyToCursor smoothTime={0.35} />;
 }
 
+/**
+ * With cards floating over the shop's sides, the view's centre moves to the middle of what they
+ * leave uncovered, so whatever the camera flies to lands where it can be seen.
+ */
+function ViewOffset({ left, right }: { left: number; right: number }) {
+  const get = useThree((s) => s.get);
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    const { camera, invalidate } = get();
+    if (!(camera instanceof PerspectiveCamera)) return;
+    const shift = (left - right) / 2;
+    if (shift) camera.setViewOffset(size.width, size.height, -shift, 0, size.width, size.height);
+    else camera.clearViewOffset();
+    invalidate();
+  }, [get, size, left, right]);
+  return null;
+}
+
 /** Nothing in the shop moves, so the shadow map is drawn again only when another model arrives. */
 function Shadows() {
   const get = useThree((s) => s.get);
@@ -475,7 +568,7 @@ function ScreenProbe({ cat }: { cat: Catalog }) {
   return null;
 }
 
-function Scene({ cat, part }: { cat: Catalog; part: LivePart }) {
+function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left: number; right: number }) {
   // The sun's target has to be in the scene so its matrix follows its position.
   const sunTarget = useMemo(() => new Object3D(), []);
   const [bw, bd] = cat.shop.building.size;
@@ -512,7 +605,9 @@ function Scene({ cat, part }: { cat: Catalog; part: LivePart }) {
         <Thing key={`${spot.item}#${i}`} cat={cat} spot={spot} />
       ))}
       <Highlights cat={cat} part={part} />
+      <Labels cat={cat} part={part} />
       <CameraRig cat={cat} part={part} />
+      <ViewOffset left={left} right={right} />
       <Shadows />
       <ScreenProbe cat={cat} />
     </>
@@ -527,15 +622,18 @@ function LoadStatus() {
   return (
     <Typography
       role="status"
-      sx={{ position: 'absolute', left: 12, bottom: 12, px: 1.5, py: 0.75, borderRadius: 1, bgcolor: 'rgba(17, 20, 57, 0.8)', color: 'text.secondary', fontSize: '0.9rem' }}
+      sx={{ position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', px: 1.5, py: 0.75, borderRadius: 1, bgcolor: 'rgba(17, 20, 57, 0.8)', color: 'text.secondary', fontSize: '0.9rem' }}
     >
       {active ? `Loading the shop: ${loaded} of ${total} models` : `${failed} models couldn't be loaded. Reload the page to try again.`}
     </Typography>
   );
 }
 
-/** The shop in 3D. Loaded only in the browser, so three.js stays out of every other bundle. */
-export default function ShopCanvas({ cat, part }: { cat: Catalog; part: LivePart }) {
+/**
+ * The shop in 3D. Loaded only in the browser, so three.js stays out of every other bundle. `left`
+ * and `right` are how much of the view cards cover on each side, in CSS pixels.
+ */
+export default function ShopCanvas({ cat, part, left = 0, right = 0 }: { cat: Catalog; part: LivePart; left?: number; right?: number }) {
   return (
     <>
       <Canvas
@@ -546,7 +644,7 @@ export default function ShopCanvas({ cat, part }: { cat: Catalog; part: LivePart
         gl={{ antialias: true }}
         onPointerMissed={() => useShowcase.getState().hover(null)}
       >
-        <Scene cat={cat} part={part} />
+        <Scene cat={cat} part={part} left={left} right={right} />
       </Canvas>
       <LoadStatus />
     </>

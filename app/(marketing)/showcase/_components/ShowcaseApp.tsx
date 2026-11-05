@@ -1,25 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import dynamic from 'next/dynamic';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT } from '@/components/marketing/marketingStyles';
-import { catalog } from './catalog';
-import Panel from './Panel';
-import Rail from './Rail';
+import { catalog, type Catalog } from './catalog';
+import Intro from './Intro';
+import { CardsLayout, RailLayout } from './Layouts';
 import type { LivePart, Showcase } from './showcaseData';
 import { useShowcase } from './store';
 
-// three.js, React Three Fiber and drei load only in the browser, and only on this page.
-const ShopCanvas = dynamic(() => import('./ShopCanvas'), {
-  ssr: false,
-  loading: () => <Box sx={{ position: 'absolute', inset: 0, bgcolor: '#eceae5' }} />,
-});
-
-const overlaySx = { position: 'absolute', bgcolor: 'rgba(17, 20, 57, 0.75)' } as const;
 // The marketing header above, which stays put.
 const HEADER = 52;
 const NARROW = '(max-width: 899px)';
@@ -34,9 +26,9 @@ function subscribeNarrow(change: () => void) {
 function PhoneNotice({ onOpen }: { onOpen(): void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <Box sx={{ minHeight: `calc(100dvh - ${HEADER}px)`, display: 'grid', placeItems: 'center', px: 3, py: 6, textAlign: 'center' }}>
+    <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', px: 3, py: 6, textAlign: 'center' }}>
       <Box sx={{ maxWidth: 420 }}>
-        <Typography component="h1" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.9rem', lineHeight: 1.15 }}>
+        <Typography component="h2" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.7rem', lineHeight: 1.15 }}>
           The shop is built for a computer
         </Typography>
         <Typography sx={{ mt: 2, color: 'text.secondary', fontSize: '1.05rem', lineHeight: 1.6 }}>
@@ -61,105 +53,78 @@ function PhoneNotice({ onOpen }: { onOpen(): void }) {
   );
 }
 
-/** The 3D view and what floats over it: walk the shop, back to the whole shop, and the walk's stop. */
-function Stage({ part, cat }: { part: LivePart; cat: ReturnType<typeof catalog> }) {
-  const walking = useShowcase((s) => s.walking);
-  const walkStop = useShowcase((s) => s.walkStop);
-  const { setWalking, overview } = useShowcase.getState();
-  return (
-    <Box sx={{ position: 'relative', minWidth: 0, minHeight: 0 }}>
-      <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0 }}>
-        <ShopCanvas cat={cat} part={part} />
-      </Box>
-      <Box sx={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 1 }}>
-        <Button
-          size="small"
-          variant="contained"
-          onClick={() => {
-            if (!walking) posthog.capture('showcase walk started', { part: part.id });
-            setWalking(!walking);
-          }}
-        >
-          {walking ? 'Stop the walk' : 'Walk the shop'}
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={overview}
-          sx={{ color: 'common.white', bgcolor: overlaySx.bgcolor, '&:hover, &:focus-visible': { bgcolor: 'rgba(17, 20, 57, 0.92)' } }}
-        >
-          Whole shop
-        </Button>
-      </Box>
-      {walking && (
-        <Typography role="status" sx={{ ...overlaySx, top: 12, left: 12, px: 1.5, py: 0.75, borderRadius: 1, fontSize: '0.9rem', fontWeight: 600 }}>
-          {walkStop ?? 'Walking the shop'}
-        </Typography>
-      )}
-      <Typography sx={{ ...overlaySx, right: 12, bottom: 12, px: 1.25, py: 0.5, borderRadius: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
-        {cat.shop.name}
-        {cat.shop.fictional && ', a fictional shop'} · drag to turn · right-drag to move · scroll to zoom
-      </Typography>
-    </Box>
-  );
-}
-
-/** ?step=<id> and ?item=<id>: a link opens on that step or thing, and the address follows the visitor. */
-function useAddress(part: LivePart, cat: ReturnType<typeof catalog>) {
+/**
+ * The address follows the visitor: ?step=<id> and ?item=<id> open there (skipping the way in), and
+ * ?layout=rail picks the layout under review.
+ */
+function useAddress(part: LivePart, cat: Catalog, shop: React.RefObject<HTMLElement | null>) {
   const step = useShowcase((s) => s.step);
   const item = useShowcase((s) => s.item);
+  const sheet = useShowcase((s) => s.sheet);
+  const layout = useShowcase((s) => s.layout);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const s = part.steps.findIndex((x) => x.id === q.get('step'));
     const i = q.get('item');
-    const { openStep, openItem, setTab } = useShowcase.getState();
-    if (s >= 0) openStep(s);
-    if (i && cat.spots.has(i)) {
-      openItem(i);
-      if (s < 0) setTab('shop');
+    const st = useShowcase.getState();
+    if (q.get('layout') === 'rail') st.setLayout('rail');
+    if (s >= 0 || (i && cat.spots.has(i))) {
+      st.setPhase('plan');
+      if (s >= 0) st.openStep(s);
+      if (i && cat.spots.has(i)) st.openItem(i);
+      // After the router's own scroll on arrival, which would otherwise put the page back at the top.
+      const t = window.setTimeout(() => shop.current?.scrollIntoView(), 250);
+      return () => window.clearTimeout(t);
     }
-  }, [part, cat]);
+  }, [part, cat, shop]);
   useEffect(() => {
     const q = new URLSearchParams();
-    if (step !== null) q.set('step', part.steps[step].id);
+    if (sheet === 'step' && step !== null) q.set('step', part.steps[step].id);
     if (item) q.set('item', item);
+    if (layout === 'rail') q.set('layout', 'rail');
     const query = q.toString();
     const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
     if (url !== window.location.pathname + window.location.search) window.history.replaceState(null, '', url);
-  }, [step, item, part]);
+  }, [step, item, sheet, layout, part]);
 }
 
 /**
- * The showcase (plan §1 "Website"): the shop in 3D between the part's plan and the open step. Pick
- * a step and the camera goes to where it is done, with its video beside; pick anything in the
- * shop and it opens. Everything on it was made ahead of time; nothing a visitor does generates
- * anything or changes the simulation.
+ * The showcase (plan §1 "Website"): the research in a few lines and the parts to pick, then the
+ * whole shop in 3D. Picking a part makes its instructions, then each step flies the camera to where
+ * it is done and plays its video in the card it was picked from. Everything was made ahead of time;
+ * nothing a visitor does generates anything or changes the simulation.
  */
 export default function ShowcaseApp({ data }: { data: Showcase }) {
-  const part = data.parts.find((p): p is LivePart => p.status === 'live')!;
+  const parts = useMemo(() => data.parts.filter((p): p is LivePart => p.status === 'live'), [data.parts]);
+  const [partId, setPartId] = useState(parts[0].id);
+  const part = parts.find((p) => p.id === partId) ?? parts[0];
   const cat = useMemo(() => catalog(data.shop), [data.shop]);
+  const layout = useShowcase((s) => s.layout);
   const narrow = useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW).matches, () => false);
   const [anyway, setAnyway] = useState(false);
-  useAddress(part, cat);
+  const shop = useRef<HTMLElement>(null);
+  useAddress(part, cat, shop);
 
-  if (narrow && !anyway) return <PhoneNotice onOpen={() => setAnyway(true)} />;
+  const pick = useCallback((id: string) => {
+    setPartId(id);
+    useShowcase.setState({ phase: 'generating', sheet: 'need', step: null, item: null });
+    shop.current?.scrollIntoView({ behavior: 'smooth' });
+    posthog.capture('showcase part picked', { part: id });
+  }, []);
+  const generated = useCallback(() => useShowcase.setState({ phase: 'plan', sheet: 'need' }), []);
+
+  const props = { cat, part, parts, onPick: pick, onGenerated: generated };
   return (
-    <Box
-      sx={{
-        height: `calc(100dvh - ${HEADER}px)`,
-        minHeight: 560,
-        display: 'grid',
-        gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: '300px minmax(0, 1fr) 380px', xl: '340px minmax(0, 1fr) 420px' },
-        gridTemplateRows: { xs: '45vh auto auto', md: 'minmax(0, 1fr)' },
-      }}
-    >
-      <Box sx={{ order: { xs: 2, md: 0 }, display: 'grid', minHeight: 0 }}>
-        <Rail cat={cat} part={part} />
+    <>
+      <Intro parts={parts} onPick={pick} />
+      <Box
+        component="section"
+        ref={shop}
+        aria-label="The shop"
+        sx={{ height: `calc(100dvh - ${HEADER}px)`, minHeight: 600, scrollMarginTop: `${HEADER}px`, borderTop: '1px solid rgba(255, 255, 255, 0.09)' }}
+      >
+        {narrow && !anyway ? <PhoneNotice onOpen={() => setAnyway(true)} /> : layout === 'rail' ? <RailLayout {...props} /> : <CardsLayout {...props} />}
       </Box>
-      <Stage part={part} cat={cat} />
-      <Box sx={{ order: { xs: 3, md: 0 }, display: 'grid', minHeight: 0 }}>
-        <Panel cat={cat} part={part} />
-      </Box>
-    </Box>
+    </>
   );
 }

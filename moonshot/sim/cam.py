@@ -509,13 +509,11 @@ class Planner:
             self._stock_world = ps.frame.to_world(stock)
             c.passes = self.operation(ps, sw, setup, op, OPS.get(key, {}))
             if c.passes:                                       # the program ends sending Z home (G28 G91 Z0), then
-                p = c.passes[-1]                               # the table out to unload: X at its far end, so the
-                J = vf2.record()["joints"]                     # head stands past the part's left end (over table
-                s = J["spindle"]["centre_mm"]                  # x = -762), and Y0, the table toward the operator
-                home = s[2] - p.tool.length
-                p.to([*p.moves[-1][0][:2], home])
-                p.to([s[0] - J["x"]["range_mm"][1], s[1] - J["y"]["range_mm"][0], home])
-            return c
+                p = c.passes[-1]                               # the spindle over the stock's middle: every step
+                home = vf2.record()["joints"]["spindle"]["centre_mm"][2] - p.tool.length   # leaves the part in one
+                p.to([*p.moves[-1][0][:2], home])              # place in the machine, the head 500 mm above it, so
+                p.to([sw.center.x, sw.center.y, home])         # each still sees it from inside the doors, clear of
+            return c                                           # the head (ll-1005337's dowels)
         if kind == "face":
             c.passes = [self.face(ps, sw, tool(op["tool"]))]
         elif kind == "profile":

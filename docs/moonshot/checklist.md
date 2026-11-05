@@ -358,6 +358,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     on the drawing), each named.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
+    ll-1007223 op10's 8 retries didn't pass, so it shows caption and a still too: the best run failed only skin,
+    4.91 mm for 35 frames as the index's middle segment sinks into the knob on the final pull (the hand stops
+    10-13 mm short and the knob's hold pulls it on), a fix for after the timing fix. The vise work to pick up
+    is on its agent's branch (546f31a1, 628d57f7, 7c663177, 228cccd6), not on this one.
   - The send-outs pass as they are: the `carry_part` weld engages 0.2 s before the pinch closes (otherwise the closing
     fingers shove the part 17-23 mm), and the arm takes a carried part's weight through its own actuators.
   - nist-ftc-10's deburr re-renders after G1's deburrs, its bench calipers drawn whole (they were the bare beam).

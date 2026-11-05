@@ -514,10 +514,10 @@ class ClampPlan(SawPlan):
                              # the 62 mm knob takes three fingers, the little curled past its end. Turned the other
                              # way, the index at its free end, the fist was pronated 60 deg and the wrist bent 65,
                              # far from people's (the posture's likelihood 47 against their 28.7)
-                             # the index 16 mm off the wheel: at 6 and 10, its side pressed 3-5 mm into the wheel's
-                             # face
-                             targets={"index": on(16, 28), "middle": on(32, 44), "ring": on(47, 59),
-                                      "thumb": on(16, 46, w=0.2)},
+                             # the index 22 mm off the wheel: at 6-16, the planned fist stood 3-5 mm into the wheel's
+                             # face, and the carry's correction put it there once the wheel was welded off the skin
+                             targets={"index": on(22, 34), "middle": on(37, 49), "ring": on(51, 61),
+                                      "thumb": on(22, 52, w=0.2)},
                              # from a deeper lean, the arm raised and the elbow bent, as people's arms work in front
                              # of them: from the arm hanging nearly straight under a 35 deg lean, the turn was still
                              # less likely than people's (30.7)

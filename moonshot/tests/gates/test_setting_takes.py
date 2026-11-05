@@ -1,11 +1,12 @@
-"""The setting steps' takes, Find X and Y and Set Z, in every setup of nist-ftc-10, meet their outcomes on the full body
+"""The setting steps' takes, Find X and Y and Set Z, in every setup of G1's parts, meet their outcomes on the full body
 at the VF-2's pendant: the work offset the machine ends with puts the spindle on the datum the take planned, the jog
 handle turns only while a hand turns it, every key the plan presses registers on the machine and no other does, and
 every per-frame check passes (docs/moonshot/physics.md). Physics tier: farm and hub only (`pytest moonshot -m farm`),
-on the takes the runners write to the data root (takes/nist-ftc-10/<step id>/).
+on the takes the runners write to the data root (takes/<part>/<step id>/).
 
-So does Check it's square, where a setup stands the part on the vise floor (op50): a test indicator in the spindle,
-its ball pressed against the part's side, swept up it by jogging Z with the handle; the needle stays put.
+So does Check it's square, where a setup stands the part on the vise floor (nist-ftc-10's op50, ct-slbeam's op20 and
+op30): a test indicator in the spindle, its ball pressed against the part's side, swept up it by jogging Z with the
+handle; the needle stays put. ll-1007223's op30 checks a face that stands level, by a sweep across it: not this one.
 
 What each take carries besides its record (take.npz, scene.json):
     take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
@@ -37,14 +38,16 @@ from moonshot.planning.validate import load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
-SETTING = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] in ("Find X and Y", "Set Z")]
-CHECKS = [s["id"] for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Check it's square"]
+PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
+STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
+SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")]
+CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] == "Check it's square" and f"{p}/{s['id']}" != "ll-1007223/op30-check"]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
 
 
 def _folder(step):
-    folder = TAKES / step
+    folder = data_root() / "takes" / step
     if not (folder / "take.npz").exists():
         pytest.skip(f"no take at {folder}")
     return folder
@@ -175,7 +178,7 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 # ({pocket: tool}), "spindle_tool", "tool_release_held_s" (when the machine read Tool Release held) and "pressed";
 # checks.json "touching_R", the right hand's touches.
 TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
-TOOL_TAKES = [f"{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
+TOOL_TAKES = [f"nist-ftc-10/{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
 SEATS = [t for t in TOOL_TAKES if "-seat-" in t or "-insert-" in t]          # the takes that seat a holder
 PICKS = [t for t in TOOL_TAKES if "-pick-" in t]
 PROBE_POCKET = 20                                   # moonshot/library/records/shop.json conventions.probe_tool_number

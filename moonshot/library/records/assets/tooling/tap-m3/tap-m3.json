@@ -1,0 +1,75 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "tap-m3",
+  "name": "M3x0.5 spiral-point tap",
+  "category": "tooling",
+  "make": "Generic",
+  "model": "tap 3 mm",
+  "description": "M3x0.5 spiral-point tap, HSS, 3 flutes.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Thread",
+      "value": "M3x0.5-6H"
+    },
+    {
+      "name": "Diameter",
+      "value": 3.0,
+      "unit": "mm"
+    },
+    {
+      "name": "Flute length",
+      "value": 12,
+      "unit": "mm"
+    },
+    {
+      "name": "Overall length",
+      "value": 56,
+      "unit": "mm"
+    },
+    {
+      "name": "Flutes",
+      "value": 3,
+      "unit": "flutes"
+    },
+    {
+      "name": "Material",
+      "value": "HSS"
+    },
+    {
+      "name": "Mass",
+      "value": 3.04,
+      "unit": "g",
+      "note": "volume x material density"
+    }
+  ],
+  "source_urls": [],
+  "source_files": [
+    "tap-m3.step"
+  ],
+  "license": "self-made parametric generator (moonshot.library.generators, family tap)",
+  "notes": "Generated from its dimensions; replace with a vendor STEP when one is sourced.",
+  "file": "tap-m3.glb",
+  "units": "mm",
+  "up": "+Z",
+  "bbox": {
+    "min": [
+      -1.51,
+      -1.51,
+      -0.01
+    ],
+    "max": [
+      1.5,
+      1.51,
+      56.0
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/tap-m3.step",
+    "placeholder": "generators.tap",
+    "up": "+Z",
+    "max_triangles": 50000
+  },
+  "triangles": 2569
+}

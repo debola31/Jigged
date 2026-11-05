@@ -13,7 +13,7 @@ import ListItemText from '@mui/material/ListItemText';
 import MenuIcon from '@mui/icons-material/Menu';
 import MuiLink from '@mui/material/Link';
 import JiggedLogo from '@/components/branding/JiggedLogo';
-import { gradientButtonSx } from './marketingStyles';
+import { BRAND, gradientButtonSx } from './marketingStyles';
 
 // "How it works" is root-relative, not a bare `#how-it-works`: this header renders on
 // every marketing route, and that section only exists on the landing page.
@@ -23,11 +23,24 @@ import { gradientButtonSx } from './marketingStyles';
 // /#how-it-works scrolls to the anchor before the landing page's images have their
 // height, and you land a section or two past the target. A hard load lands correctly,
 // and on / itself the browser treats it as a same-page fragment jump with no reload.
+//
+// "Research" is the showcase (/showcase), set apart as a pill so it reads as something to see.
 const navItems = [
+  { label: 'Research', href: '/showcase', highlight: true },
   { label: 'How it works', href: '/#how-it-works' },
   { label: 'Pricing', href: '/pricing' },
   { label: 'Log in', href: '/login' },
 ];
+
+const highlightSx = {
+  px: 1.5,
+  py: 0.5,
+  borderRadius: 999,
+  border: `1px solid ${BRAND.teal}`,
+  color: BRAND.teal,
+  fontWeight: 600,
+  '&:hover': { color: 'white', borderColor: 'white' },
+};
 
 const CTA = { label: 'Request access', href: '/invite/early-access' };
 
@@ -76,6 +89,7 @@ export default function MarketingHeader() {
                 fontSize: '0.9rem',
                 fontWeight: 500,
                 '&:hover': { color: 'white' },
+                ...(item.highlight && highlightSx),
               }}
             >
               {item.label}
@@ -127,7 +141,10 @@ export default function MarketingHeader() {
               onClick={() => setDrawerOpen(false)}
               sx={{ borderRadius: 2, mb: 0.5 }}
             >
-              <ListItemText primary={item.label} />
+              <ListItemText
+                primary={item.label}
+                slotProps={{ primary: { sx: item.highlight ? { color: BRAND.teal, fontWeight: 600 } : undefined } }}
+              />
             </ListItemButton>
           ))}
           <Button

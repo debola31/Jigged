@@ -394,7 +394,7 @@
       "required": ["id", "kind", "description", "diameter", "material", "asset"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
-        "kind": { "enum": ["end_mill", "spot_drill", "drill", "tap", "face_mill", "chamfer_mill", "boring_bar"] },
+        "kind": { "enum": ["end_mill", "spot_drill", "drill", "reamer", "tap", "face_mill", "chamfer_mill", "dovetail_cutter", "boring_bar"] },
         "description": { "type": "string", "minLength": 1 },
         "diameter": { "$ref": "#/$defs/length", "description": "Cutting diameter; for a boring bar, the smallest bore it enters." },
         "designation": { "type": "string", "description": "Drill size name or tap thread, e.g. #7, H or 1/4-20; insert code for a boring bar." },
@@ -416,6 +416,10 @@
         {
           "if": { "properties": { "kind": { "enum": ["drill", "spot_drill", "chamfer_mill"] } } },
           "then": { "required": ["point_angle", "overall_length", "shank_diameter"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["reamer", "dovetail_cutter"] } } },
+          "then": { "required": ["flutes", "flute_length", "overall_length", "shank_diameter"] }
         },
         {
           "if": { "properties": { "kind": { "const": "tap" } } },

@@ -1,0 +1,114 @@
+"""Nothing moves without a cause (plan §5.1): every loose object's motion is explained by the hand on it, the vise's
+jaw closing on it, or gravity; no frame of the run is non-finite; nothing recorded accelerates like a solver
+blowing up.
+
+Judged from the run's recorded poses (sim.npz, or for a take that isn't the vise's, its take record) and what the
+hands touch or carry (checks.json), never from MuJoCo's contact forces, which would offer a solver's spurious contact as
+the cause of the launch it produces (plan §6, rule 2).
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+
+from moonshot.contracts.thresholds import threshold
+from moonshot.validate import objects
+from moonshot.validate.registry import Result, check
+from moonshot.world import vise as V
+
+LOOSE = ("blank", "para_a", "para_b")
+G = 9.81
+
+
+def _finite(arrays, n: int) -> list[bool]:
+    finite = np.ones(n, bool)
+    for k in arrays.files:
+        if arrays[k].dtype.kind == "f" and arrays[k].ndim and len(arrays[k]) == n:
+            finite &= np.isfinite(arrays[k].reshape(n, -1)).all(1)
+    return finite.tolist()
+
+
+def measure(take: Path) -> dict:
+    """What the check reads, from a physics run: a vise take's own keys, or any other take's record, where every object
+    is loose and its cause the hands touching or carrying it (there are no jaws). Unless the run says otherwise in
+    checks.json: `driven`, the bodies a machine moves (its table, head, doors), which aren't loose and are only held
+    to being finite and never launched; and `rides_on` ({object: what it rides on}), each such object judged by its
+    motion on that, so stock clamped to a table moves with a jog without a cause but not within the vise."""
+    sim = np.load(take / "sim.npz")
+    ck = json.loads((take / "checks.json").read_text(encoding="utf-8"))
+    if not objects.is_vise(sim):
+        rec = np.load(take / "take.npz")
+        at = objects.positions(take) | {o: objects.riding(take, o, on) for o, on in ck.get("rides_on", {}).items()}
+        driven = set(ck.get("driven", ()))
+        return {"fps": float(rec["fps"]), "finite": _finite(rec, len(rec["t"])), "opening_mm": [0.0] * len(rec["t"]),
+                "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+                "bodies_mm": {k: v.tolist() for k, v in at.items()} | {"hand": rec["R_W"].tolist(),
+                                                                       "hand_L": rec["L_W"].tolist()},
+                "loose": [o for o in at if o not in driven]}
+    paras = ("para_a", "para_b")[:sim["para"].shape[1]]      # none for a part stood on the vise's floor (op50)
+    return {"fps": float(sim["fps"]), "touching": ck["touching"], "finite": _finite(sim, len(sim["t"])),
+            "opening_mm": sim["opening"].tolist(),
+            "bodies_mm": {"blank": sim["blank"].tolist(), **{n: sim["para"][:, i].tolist() for i, n in enumerate(paras)},
+                          "hand": sim["W"].tolist()}}
+
+
+def _between_the_jaws(p: np.ndarray, opening: np.ndarray) -> np.ndarray:
+    """Per frame, is a point inside the vise's jaws (within a parallel's thickness of the space between them)?"""
+    pad = V.PARALLEL_T
+    return ((np.abs(p[:, 0] - V.VISE["x"]) < V.VISE["half_width"] + pad)
+            & (p[:, 1] < V.VISE["fixed_face_y"] + pad) & (p[:, 1] > V.VISE["fixed_face_y"] - opening - pad))
+
+
+def _since_last(p: np.ndarray, fps: float) -> np.ndarray:
+    """Velocity over each frame's own interval, from the frame before: what the hand touches is recorded at the end
+    of that interval, so frame k's motion is judged against frame k's contacts."""
+    return np.vstack([np.zeros((1, p.shape[1])), np.diff(p, axis=0)]) * fps
+
+
+def _held(cause: np.ndarray, frames: int) -> np.ndarray:
+    """A cause carries on for `frames` frames after it ends: a body comes to rest after it's let go."""
+    out = cause.copy()
+    for k in np.flatnonzero(cause):
+        out[k:k + frames + 1] = True
+    return out
+
+
+@check("nothing_moves_without_a_cause",
+       good=["good/nothing_moves_vise_take.json"],
+       bad=["bad/nothing_moves_drift.json", "bad/nothing_moves_launch.json", "bad/nothing_moves_nan.json"])
+def nothing_moves_without_a_cause(take: dict) -> Result:
+    """take: {"fps", "bodies_mm": {"blank", "para_a", "para_b", "hand": per-frame [x, y, z]}, "touching": per-frame
+    names the hand touches, "opening_mm": the vise's jaw opening per frame, "finite": per-frame bool, and optionally
+    "loose": the bodies whose motion needs a cause (the vise's blank and parallels when absent)}."""
+    fps, finite = float(take["fps"]), np.asarray(take["finite"], bool)
+    if not len(finite):
+        raise ValueError("a take with no frames can't pass a per-frame check")
+    still = threshold("physics.still_mm_s").value
+    settle = int(round(threshold("physics.settle_s").value * fps))
+    spike = threshold("physics.acceleration_spike_m_s2").value
+    fall = threshold("physics.free_fall_frac").value
+    opening = np.asarray(take["opening_mm"], float)
+    jaw = _held(np.abs(_since_last(opening[:, None], fps))[:, 0] > still, settle)
+    uncaused, spikes = {}, {}
+    for name, p in take["bodies_mm"].items():
+        p = np.nan_to_num(np.asarray(p, float))
+        v = _since_last(p, fps)                                              # mm/s
+        a = _since_last(v, fps) / 1000              # m/s^2: a central difference would halve a jump within a frame
+        over = np.flatnonzero(np.linalg.norm(a, axis=1) > spike)
+        if over.size:
+            spikes[name] = int(over[0])
+        if name not in take.get("loose", LOOSE):
+            continue
+        moving = np.linalg.norm(v, axis=1) > still
+        touched = _held(np.array([name in t for t in take["touching"]]), settle)
+        falling = (np.abs(a[:, 2] + G) < fall * G) & (np.linalg.norm(a[:, :2], axis=1) < fall * G)
+        bad = moving & ~touched & ~(jaw & _between_the_jaws(p, opening)) & ~falling
+        if bad.any():
+            uncaused[name] = int(np.flatnonzero(bad)[0])
+    nonfinite = np.flatnonzero(~finite)
+    passed = not uncaused and not spikes and not nonfinite.size
+    return Result(passed=passed, worst=float(len(uncaused) + len(spikes) + nonfinite.size),
+                  detail={"first_uncaused_motion": uncaused, "first_acceleration_spike": spikes,
+                          "first_nonfinite": int(nonfinite[0]) if nonfinite.size else None})

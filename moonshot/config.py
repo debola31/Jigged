@@ -22,5 +22,14 @@ def data_root() -> Path:
     return Path("C:/jigged-data") if sys.platform == "win32" else Path.home() / "jigged-data"
 
 
+def blender() -> str:
+    """Blender's executable: MOONSHOT_BLENDER if set, else where the hub and the Macs have it."""
+    if env := os.environ.get("MOONSHOT_BLENDER"):
+        return env
+    if sys.platform == "win32":
+        return r"C:\blender\blender-5.2.3-windows-x64\blender.exe"
+    return "/Applications/Blender.app/Contents/MacOS/Blender"
+
+
 def hub_url() -> str:
     return os.environ.get("MOONSHOT_HUB", f"http://{HUB_HOST}:{HUB_PORT}")

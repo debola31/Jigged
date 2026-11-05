@@ -98,3 +98,23 @@ def test_a_failing_handler_is_reported_not_fatal(hub, tmp_path):
     w.step()
     job = server.queue.get(jid)
     assert job["state"] == "queued" and "blender exited 1" in job["error"]
+
+
+def test_a_worker_uploads_a_result_by_hash(hub, tmp_path):
+    server, root, url = hub
+    w = make_worker(tmp_path, root, url)
+    f = tmp_path / "result.bin"
+    f.write_bytes(b"a take's video" * 1000)
+    digest = w.upload(f)
+    assert digest == hashlib.sha256(f.read_bytes()).hexdigest()
+    assert (root / "blobs" / digest).read_bytes() == f.read_bytes()
+
+
+def test_an_upload_that_doesnt_hash_right_is_refused(hub, tmp_path):
+    server, root, url = hub
+    req = urllib.request.Request(f"{url}/blobs", data=b"truncated", headers={
+        "Authorization": f"Bearer {token_for(root)}", "X-Sha256": "0" * 64})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req)
+    assert e.value.code == 400
+    assert not (root / "blobs" / ("0" * 64)).exists()

@@ -1,0 +1,71 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "ream-3p5",
+  "name": "3.5 mm machine reamer, G6",
+  "category": "tooling",
+  "make": "Generic",
+  "model": "reamer 3.5 mm",
+  "description": "3.5 mm machine reamer, G6, carbide, 6 flutes.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 3.5,
+      "unit": "mm"
+    },
+    {
+      "name": "Flute length",
+      "value": 20,
+      "unit": "mm"
+    },
+    {
+      "name": "Overall length",
+      "value": 70,
+      "unit": "mm"
+    },
+    {
+      "name": "Flutes",
+      "value": 6,
+      "unit": "flutes"
+    },
+    {
+      "name": "Material",
+      "value": "carbide"
+    },
+    {
+      "name": "Mass",
+      "value": 8.63,
+      "unit": "g",
+      "note": "volume x material density"
+    }
+  ],
+  "source_urls": [],
+  "source_files": [
+    "ream-3p5.step"
+  ],
+  "license": "self-made parametric generator (moonshot.library.generators, family reamer)",
+  "notes": "Generated from its dimensions; replace with a vendor STEP when one is sourced.",
+  "file": "ream-3p5.glb",
+  "units": "mm",
+  "up": "+Z",
+  "bbox": {
+    "min": [
+      -1.75,
+      -1.75,
+      -0.0
+    ],
+    "max": [
+      1.75,
+      1.75,
+      70.0
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/ream-3p5.step",
+    "placeholder": "generators.reamer",
+    "up": "+Z",
+    "max_triangles": 50000
+  },
+  "triangles": 2616
+}

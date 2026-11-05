@@ -1,0 +1,51 @@
+{
+ "schema": "jigged.card/1",
+ "id": "kurt-vise-load-and-clamp",
+ "name": "Load a part into a 6 in machine vise on parallels, clamp it and check it is seated",
+ "assets": ["d688", "para", "vf2"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "carries the part, cranks the vise, seats and checks",
+   "grasps": {"part": "prismatic_4_finger", "part_near_face": "thumb_push", "part_top": "flat_press",
+              "crank_knob": "medium_wrap", "parallel_end": "fingertip_press"},
+   "contacts": [{"digit": "thumb", "on": "part_near_face"}, {"digit": "index", "on": "part_far_face"},
+                {"digit": "middle", "on": "part_far_face"}, {"digit": "ring", "on": "part_far_face"},
+                {"digit": "little", "on": "part_far_face"}]
+  }
+ },
+ "phases": [
+  {"phase": "reach", "what": "Up and out of the table's way, then a slower final approach from above", "duration_s": 1.27, "source": 2},
+  {"phase": "preshape", "what": "Open wider than the part, the widest at about 74% of the reach", "source": 2},
+  {"phase": "grasp", "what": "Close on the near and far faces; preload, then load, then lift 40 mm",
+   "action": "lift", "on": "part", "duration_s": 0.44, "source": 3},
+  {"phase": "check", "what": "Hold it up in front and turn it 28 deg to look at a face, then back", "action": "read",
+   "duration_s": 2.6, "source": 4},
+  {"phase": "transport", "what": "Carry it over the moving jaw, 20 mm clear", "duration_s": 2.05, "source": 4},
+  {"phase": "release", "what": "Set it on the parallels 6 mm short of the fixed jaw; let go by lifting off, not by opening into the jaws",
+   "action": "place", "on": "parallels", "source": 4},
+  {"phase": "operate", "what": "The thumb pushes it along the parallels onto the fixed jaw, index and middle steadying the top",
+   "action": "push", "on": "part_near_face", "force_n": 9, "travel_mm": 6, "duration_s": 0.8, "ends_on": "the fixed jaw stops it", "source": 4},
+  {"phase": "operate", "what": "Crank the moving jaw onto the part until snug, about 2 turns a second: the fist keeps its orientation, the knob spins in it",
+   "action": "turn", "on": "crank_knob", "ends_on": "15 N of clamp: held, but it can still be pushed down", "source": 1},
+  {"phase": "operate", "what": "Flat fingers press it down onto the parallels, a little toward the fixed jaw",
+   "action": "press", "on": "part_top", "force_n": 30, "duration_s": 0.7, "source": 4},
+  {"phase": "operate", "what": "The final pull on the crank", "action": "turn", "on": "crank_knob", "ends_on": "feel", "source": 4},
+  {"phase": "check", "what": "Press each parallel's exposed end and try to slide it: a seated part pinches them",
+   "action": "feel", "on": "parallel_end", "force_n": 3, "travel_mm": 1, "duration_s": 1.0, "ends_on": "neither moves", "source": 4}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Kurt Workholding, D688 AngLock vise: CAD and specifications (asset record d688)",
+   "url": "https://grabcad.com/library/kurt-d688-cnc-vise-1", "gives": "the jaws, screw and handle the hand works"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations, peak speed and aperture timing, crank speed (about 1-2 turns/s)"},
+  {"kind": "study", "ref": "Jeannerod (1984) and Bhatia et al. (2022), reach-to-grasp kinematics, as used in trainual's accepted take",
+   "gives": "minimum-jerk reaches; grip aperture peaks wider than the part at about 70-77% of the reach"},
+  {"kind": "study", "ref": "Johansson & Westling (1984), grip and load forces in lifting",
+   "gives": "the preload (0.23 s) and loading (0.21 s) phases before lift-off; grip force 1.7-2.2x the slip force"},
+  {"kind": "practice", "ref": "Machinists' vise setup as reviewed in trainual's accepted take",
+   "gives": "the order: set short, slide onto the fixed jaw, snug, seat, final pull, check the parallels"}
+ ],
+ "motion": "moonshot.motion.setup_take:build",
+ "notes": "The card behind the reference vise take (plan §5). Its numbers are the take's; generalising the take to any blank and parallel height is next."
+}

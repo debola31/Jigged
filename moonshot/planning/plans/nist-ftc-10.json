@@ -1,0 +1,71 @@
+{
+ "schema": "jigged.plan/1",
+ "part": "nist-ftc-10",
+ "about": "Process plan for NIST FTC-10 on the shop's Haas VF-2 with a 6 in Kurt D688. Written by Claude from the drawing (nist_ftc_10_asme1_rb) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: Y is height (the Y=0 face is datum A, the pocket side), X is length, Z is width.",
+ "stock": {"material": "6061-T6 aluminium", "material_note": "The drawing specifies none; 6061-T6 is the shop's default for a precision housing",
+           "size_mm": [165.1, 38.1, 82.55], "size_in": "6.5 x 1.5 x 3.25", "from": "pre-cut blank from the rack"},
+ "setups": [
+  {"id": "op10", "title": "Op 10: pocket side", "machine": "vf2", "face_up": "-Y",
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Stock on 1 in parallels, 0.25 in proud of the jaws"},
+   "wcs": {"code": "G54", "x": "the centre of the stock's length", "y": "the centre of its width", "z": "top of the faced stock", "by": "edge finder in X and Y; tool setter for Z"},
+   "operations": [
+    {"id": "face", "kind": "face", "tool": "facem", "what": "Face datum A flat (flatness 0.2) and to height"},
+    {"id": "outline", "kind": "profile", "tool": "em12", "what": "Profile the body and the four mounting ears to the model outline"},
+    {"id": "pocket", "kind": "pocket", "tool": "em38", "what": "Rough and finish the pocket 17 mm deep (profile 1.2 to A B C)",
+     "features": [{"type": "plane", "normal": "-Y", "at_mm": 17.0}]},
+    {"id": "cross_drill", "kind": "drill", "tool": "drill-2p5", "what": "Drill 8X Ø2.5 ±0.15 from the pocket floor into the cross bores (note 4)",
+     "features": [{"type": "hole", "dia_mm": 2.5, "axis": "Y", "count": 8}]},
+    {"id": "ears", "kind": "drill", "tool": "drill-6", "what": "Drill 4X Ø6 ±0.15 through the mounting ears",
+     "features": [{"type": "hole", "dia_mm": 6.0, "axis": "Y", "count": 4}]}
+   ]},
+  {"id": "op20", "title": "Op 20: scalloped side", "machine": "vf2", "face_up": "+Y",
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Z faces", "note": "Flipped onto datum A; clamp on the finished sides; 1 in parallels, so the finished 31 mm part stands 12.3 mm proud of the jaws and every op20 tool clears them"},
+   "wcs": {"code": "G54", "x": "the ear holes (probe)", "y": "the ear holes (probe)", "z": "datum A on the parallels, plus 31 mm"},
+   "operations": [
+    {"id": "face", "kind": "face", "tool": "facem", "what": "Face to the 31 mm overall height"},
+    {"id": "scallops", "kind": "ball_mill", "tool": "bem14", "what": "Rough and finish the four Ø16 humps and the Ø25 hollows between them",
+     "features": [{"type": "hole", "dia_mm": 16.0, "axis": "Z", "count": 4}, {"type": "hole", "dia_mm": 25.0, "axis": "Z", "count": 3}]},
+    {"id": "pads", "kind": "pocket", "tool": "em14", "what": "Mill the oval boss and the three coplanar pads (datum D)",
+     "features": [{"type": "plane", "normal": "+Y", "at_mm": 27.0}, {"type": "plane", "normal": "+Y", "at_mm": 31.0}]},
+    {"id": "pins", "kind": "ream", "tool": "ream-3p5", "what": "Drill and ream 3X Ø3.5 G6 to D B C",
+     "features": [{"type": "hole", "dia_mm": 3.5, "axis": "Y", "count": 6}]},
+    {"id": "taps", "kind": "tap", "tool": "tap-m3", "what": "Drill Ø2.5 and tap 6X M3x0.5-6g",
+     "features": [{"type": "hole", "dia_mm": 2.46, "axis": "Y", "count": 6}]},
+    {"id": "ear_cbores", "kind": "counterbore", "tool": "em38", "what": "Counterbore the ears Ø10 and spot Ø18",
+     "features": [{"type": "hole", "dia_mm": 10.0, "axis": "Y", "count": 4}, {"type": "hole", "dia_mm": 18.0, "axis": "Y", "count": 4}]}
+   ]},
+  {"id": "op30", "title": "Op 30: first long side (F65)", "machine": "vf2", "face_up": "+Z",
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "On its side; soft jaws protect the humps"},
+   "wcs": {"code": "G54", "x": "the left end (probe)", "y": "datum A (probe)", "z": "top of the side face"},
+   "operations": [
+    {"id": "bores", "kind": "drill", "tool": "drill-7", "what": "Drill 4X Ø7 ±0.25 through the humps",
+     "features": [{"type": "hole", "dia_mm": 7.0, "axis": "Z", "count": 4}]},
+    {"id": "cbores", "kind": "counterbore", "tool": "em38", "what": "Counterbore 4X Ø10 ±0.25, 10 ±0.2 deep",
+     "features": [{"type": "hole", "dia_mm": 10.0, "axis": "Z", "count": 4}]}
+   ]},
+  {"id": "op40", "title": "Op 40: second long side (F81)", "machine": "vf2", "face_up": "-Z",
+   "workholding": {"vise": "d688", "parallels_in": 1.0, "jaw_on": "Y faces", "note": "Rolled over; the bores from Op 30 locate it"},
+   "wcs": {"code": "G54", "x": "a Ø7 bore (probe)", "y": "datum A (probe)", "z": "top of the side face"},
+   "operations": [
+    {"id": "cbores", "kind": "counterbore", "tool": "em38", "what": "Counterbore 4X Ø10 ±0.25, 10 ±0.2 deep, coaxial with the bores"}
+   ]},
+  {"id": "op50", "title": "Op 50: first end", "machine": "vf2", "face_up": "+X",
+   "workholding": {"vise": "d688", "parallels_in": 0, "jaw_on": "Z faces", "note": "Standing on end against a stop; check it's square with the indicator"},
+   "wcs": {"code": "G54", "x": "the side (probe)", "y": "datum A (probe)", "z": "top of the end"},
+   "operations": [
+    {"id": "deep", "kind": "drill", "tool": "drill-5p5", "what": "Peck-drill both Ø5.5 ±0.2 holes from this end, 35 ±1 and 27.5 ±1 deep",
+     "features": [{"type": "hole", "dia_mm": 5.5, "axis": "X", "count": 2}]}
+   ]}
+ ],
+ "finish": [
+  {"id": "deburr", "station": "bench", "what": "Deburr every edge: scrape off the sharp slivers of metal (burrs) the cutters leave on the edges, with a hooked blade drawn along each one, so the part is safe to handle. Break the sharp corners of the pocket and the cross holes"},
+  {"id": "inspect", "station": "inspection", "what": "Check the pocket depth, the 31 mm height, the Ø3.5 G6 pins with gauge pins, the M3 threads with a go/no-go gauge, and the Ø7 bores",
+   "tools": ["cal6", "mic1", "hgauge", "thread"]}
+ ],
+ "step_pattern": {
+  "about": "Every VF-2 setup is shown as these instruction steps; the first setup also loads its tools",
+  "steps": ["Clean the vise and set the parallels", "Load the part", "Seat it and tighten the vise", "Check the parallels are pinched",
+            "Find X and Y with the edge finder", "Set Z with the tool setter", "Load the tools (first setup only)",
+            "Close the door and start the cycle", "Watch each operation (a few seconds each)", "Blow off the chips and unload"]
+ }
+}

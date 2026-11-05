@@ -1,0 +1,71 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "bem14",
+  "name": "1/4 in ball end mill",
+  "category": "tooling",
+  "make": "Generic",
+  "model": "ball_end_mill 6.35 mm",
+  "description": "1/4 in ball end mill, carbide, 2 flutes.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 6.35,
+      "unit": "mm"
+    },
+    {
+      "name": "Flute length",
+      "value": 19.05,
+      "unit": "mm"
+    },
+    {
+      "name": "Overall length",
+      "value": 63.5,
+      "unit": "mm"
+    },
+    {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+    },
+    {
+      "name": "Material",
+      "value": "carbide"
+    },
+    {
+      "name": "Mass",
+      "value": 27.59,
+      "unit": "g",
+      "note": "volume x material density"
+    }
+  ],
+  "source_urls": [],
+  "source_files": [
+    "bem14.step"
+  ],
+  "license": "self-made parametric generator (moonshot.library.generators, family ball_end_mill)",
+  "notes": "Generated from its dimensions; replace with a vendor STEP when one is sourced.",
+  "file": "bem14.glb",
+  "units": "mm",
+  "up": "+Z",
+  "bbox": {
+    "min": [
+      -3.19,
+      -3.19,
+      -0.0
+    ],
+    "max": [
+      3.19,
+      3.19,
+      63.5
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/bem14.step",
+    "placeholder": "generators.ball_end_mill",
+    "up": "+Z",
+    "max_triangles": 50000
+  },
+  "triangles": 30695
+}

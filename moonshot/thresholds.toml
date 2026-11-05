@@ -18,16 +18,16 @@ source = "measured"
 reason = "MuJoCo's soft joint limits overshoot by up to 0.9 deg on the reference take"
 
 [body.posture_frames_in_range_frac]
-value = 0.95
+value = 0.93
 unit = "fraction of frames"
-source = "proposed"
-reason = "Trunk-to-wrist angles inside the 1st-99th percentile of GRAB and ARCTIC; standing work differs from their seated data"
+source = "measured"
+reason = "People's own median: each trial's frames with every trunk-to-wrist angle inside the range, held out of their own dataset's, median 0.932 of 694 trials, seated (GRAB, ARCTIC) and standing (AnDy) (validate/people_prior.py; your decisions 2026-11-03: people seated or standing, held to their median; was a proposed 0.95 against seated data alone)"
 
 [body.posture_nll_median_max]
-value = 25.0
+value = 28.7
 unit = "negative log-likelihood"
 source = "measured"
-reason = "People's own 95th percentile under the posture prior (ARCTIC sample); the reference take's median is 24.9"
+reason = "People's own 95th percentile: each trial's median under the even seated-and-standing mixture with their own dataset's fitted without them, 28.69 over 694 trials (validate/people_prior.py, 2026-11-03; was 25.0 under the seated mixture alone)"
 
 [body.muscle_activation_max]
 value = 1.0
@@ -46,6 +46,12 @@ value = 5.0
 unit = "s"
 source = "proposed"
 reason = "A hold this long counts as sustained for muscle_hold_activation_max"
+
+[body.muscle_hold_joint_speed_deg_s]
+value = 10.0
+unit = "deg/s"
+source = "proposed"
+reason = "A hold is every trunk-to-wrist joint slower than this; turning a part slowly to look at it is still a hold"
 
 # --- Physics (plan §5.1) ---
 
@@ -92,10 +98,10 @@ source = "proposed"
 reason = "Reference take's finger collision shapes went 2.03 mm into solids at worst"
 
 [physics.skin_penetration_mm]
-value = 1.0
+value = 3.5
 unit = "mm"
-source = "measured"
-reason = "trainual's rendered-skin limit; worst on the load-blank take was 0.461 mm over 1,275 frames"
+source = "decided"
+reason = "The pads' compression: 2-3 mm under 5 N (plan 3.1), more under the vise take's 30 N push (3.48 mm); 1.0 mm came from trainual's rigid-skinned hand (decided 2026-11-02)"
 
 [physics.stock_deviation_mm]
 value = 0.1
@@ -154,3 +160,149 @@ value = 180
 unit = "s"
 source = "proposed"
 reason = "Agents run the fast tier on every change; a slow loop gets skipped (plan §6)"
+
+[physics.parallel_pinched_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "A parallel the clamped part pinches doesn't move under a 3 N fingertip press; the reference take's moved 0.16 mm at most"
+
+[physics.mechanism_ratio_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "Jaw travel matches crank turns x screw lead within this, the rest being contact compliance (the reference take: 0.5 mm)"
+
+# --- Machining (plan §5.1: machines stay in spec), checked on every cycle step's program ---
+
+[machining.vf2_cutting_feed_mm_min]
+value = 16510
+unit = "mm/min"
+source = "spec"
+reason = "Haas VF-2 with 1,000 in/min rapids (vf2.json): 650 in/min maximum cutting feed, as its spec sheet lists it for a 2015 VF-2"
+
+[machining.surface_speed_hss_m_min]
+value = 152
+unit = "m/min"
+source = "proposed"
+reason = "HSS and cobalt HSS in aluminium: 250 sfm (University of Florida design lab speeds and feeds, Table 1), times its own 2.0 high-speed toolpath factor, 500 sfm at most"
+
+[machining.surface_speed_carbide_m_min]
+value = 381
+unit = "m/min"
+source = "proposed"
+reason = "Carbide in aluminium: 625 sfm (the same table, HSS x 2.5), times its 2.0 high-speed factor, 1,250 sfm at most"
+
+[machining.mill_feed_per_tooth_mm]
+value = [0.10, 0.30]
+unit = "mm per tooth"
+source = "proposed"
+reason = "End mills and inserts in aluminium and its alloys: 0.004-0.012 in per tooth (the same table, Table 3)"
+
+[machining.drill_feed_per_rev_dia_frac]
+value = [0.008, 0.032]
+unit = "feed per rev / diameter"
+source = "proposed"
+reason = "2-flute drills: 0.002-0.004 in/rev at 1/8-1/4 in, 0.004-0.008 at 1/4-1/2 in (the same table, Table 2): 0.8-3.2% of the diameter across its bands"
+
+[machining.ream_speed_feed_factor]
+value = 2.0
+unit = "x"
+source = "proposed"
+reason = "The same page: run a reamer at half a drill's speed and twice its feed per rev; held to taps too, which the table omits"
+
+# --- Setting a part up on the machine: work offsets and tool lengths (plan §4: vf2-controls, vf2-tool-setter) ---
+
+[setting.edge_finder_mm]
+value = 0.03
+unit = "mm"
+source = "proposed"
+reason = "The edge finder trips within one click at .001 in (0.0254 mm), the finest the vf2-controls card jogs it; the tip itself repeats to 0.0002 in"
+
+[setting.probe_mm]
+value = 0.01
+unit = "mm"
+source = "proposed"
+reason = "The OMP40-2 repeats to 1 um (Renishaw); the rest allows for the axes' servos settling as it touches"
+
+[setting.touch_off_mm]
+value = 0.13
+unit = "mm"
+source = "proposed"
+reason = "Touched off on paper about 0.1 mm thick, which neither of the vf2-controls card's sources subtracts, plus a click at .0001 in"
+
+[setting.indicator_mm]
+value = 0.01
+unit = "mm"
+source = "proposed"
+reason = "A test indicator's graduation: the needle stays put if it stays within one; the clamped part stands square, so what moves it is the machine"
+
+[setting.sweep_mm]
+value = 50.0
+unit = "mm"
+source = "proposed"
+reason = "Swept this far up the side, a needle steady to 0.01 mm shows the part square to 0.2 mrad; a shorter sweep says little"
+
+# --- Nothing moves without a cause; machines inside spec (plan §5.1) ---
+
+[physics.still_mm_s]
+value = 2.0
+unit = "mm/s"
+source = "proposed"
+reason = "A body slower than this is at rest; untouched, the re-planned vise take's parallels creep 0.4 mm/s at most"
+
+[physics.settle_s]
+value = 0.5
+unit = "s"
+source = "proposed"
+reason = "A body may keep moving this long after its cause ends, coming to rest: the vise take's blank, set down, settles within a frame"
+
+[physics.acceleration_spike_m_s2]
+value = 20.0
+unit = "m/s^2"
+source = "proposed"
+reason = "No recorded body accelerates faster: the re-planned vise take's hand reaches 6.3, its blank 2.7; a solver launching a part shows as a jump of a metre a second within a frame (30)"
+
+[physics.free_fall_frac]
+value = 0.3
+unit = "fraction of g"
+source = "proposed"
+reason = "An untouched body accelerating downward at g within this, and sideways under it, is falling: gravity is its cause"
+
+[physics.machine_travel_mm]
+value = 0.5
+unit = "mm"
+source = "proposed"
+reason = "A machine axis's soft limit may overshoot its travel by this, as joint limits do"
+
+[physics.machine_speed_frac]
+value = 0.02
+unit = "fraction of rapid"
+source = "proposed"
+reason = "Frame-to-frame speed may read this far over the rapid rate from sampling at 30 fps"
+
+# --- Grasp timing, hand opening, footage (plan §5.2) ---
+
+[person.movement_onset_frac]
+value = 0.05
+unit = "fraction of peak speed"
+source = "proposed"
+reason = "A reach starts when the hand's speed passes this fraction of its peak, the usual onset criterion in reach-to-grasp kinematics"
+
+[person.force_onset_frac]
+value = 0.05
+unit = "fraction of the object's weight"
+source = "proposed"
+reason = "Loading starts when the hand's lifting force passes this fraction of the object's weight, ending the preload"
+
+[person.lift_off_mm]
+value = 1.0
+unit = "mm"
+source = "proposed"
+reason = "An object this far above where it sat at contact has lifted off"
+
+[person.footage_frac_band]
+value = 0.15
+unit = "fraction of a movement"
+source = "proposed"
+reason = "A take's median peak speed and widest opening come within this of its footage's, as far through each movement"

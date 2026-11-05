@@ -358,7 +358,7 @@ mindmap
 | **Forces reach their targets** | Within 5% (*proposed*) | 29.7 N against 30 N | — |
 | **Mechanisms obey their ratios** | Jaw travel = turns × lead; clamp force plausible | 2.28 turns, 90 → 75.7 mm; clamp 7,333 N | Kurt spec |
 | **Body keeps up with its plan** | Lag under 10 mm (*proposed*); more means physics refused the motion | 6.77 mm | — |
-| **Nothing passes through solids** | Collision shapes under 2.5 mm (*proposed*); rendered skin under 1.0 mm | 2.03 mm; skin **1.52 mm into the table** (fails, §5.5) | trainual limit |
+| **Nothing passes through solids** | Collision shapes under 2.5 mm (*proposed*); rendered skin under 1.0 mm | 2.03 mm; skin **1.52 mm into the table, 8.27 mm into the knob** (fails, §5.5) | trainual limit |
 | **Nothing moves without a cause** | Every pose change explained by a contact, joint or motor; no velocity spikes or NaN | Not yet checked | New |
 | **Stable, not lucky** | Half the timestep changes no outcome past its threshold | Not yet checked | New |
 | **Machines stay in spec** | Every axis within the maker's travel, speed and acceleration | Not yet checked | Spec sheets |
@@ -409,9 +409,15 @@ Step 3 targets: nominal 100%, perturbed at least 95% (*proposed*).
 
 ### 5.5 Known gaps in the reference take
 
-It fails four checks. The new body model must fix them, or you consciously loosen the threshold:
+It fails six checks. The new body model must fix them, or you consciously loosen the threshold:
+- the wrist past its flexion-deviation ellipse (1.12 against 1.0) while the blank is held up, 3.8–5.0 s, and
+  to 1.04 twice while cranking;
+- the crank gripped round the lever's joint, which sweeps through the fist each turn (found on review
+  2026-11-01; why neither was caught: [physics.md](physics.md)). Both are fixed in the re-planned take
+  (2026-11-02);
 - finger spread up to 5.4° past range (435 frames);
-- skin 1.52 mm into the table;
+- skin 1.52 mm into the table, and 8.27 mm into the knob (3.45 mm at worst on the re-planned take, within the
+  pads' compression, 2026-11-02);
 - shoulder rotation at 154°/s against 150°/s;
 - trunk rotation outside the recorded-people range in 359 frames. That data is seated tabletop work, so a
   separate range for standing bench work may be the honest fix.
@@ -426,8 +432,10 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | Look and review | §5.3, then you | Drafts, then finals |
 
 **Each rule is enforced by a CI check:**
-1. **A change either moves the bar or meets it, never both.** Thresholds, reference outputs and the deliberately
-   bad takes live in protected files; a PR may touch those or the code, not both.
+1. **A change either moves the bar or meets it, never both.** Thresholds, gate tests, reference outputs and the
+   deliberately bad takes live in protected files. A PR that changes or deletes any of them may not change code.
+   Adding a new gate or threshold alongside the code it gates is allowed: that creates the bar rather than moving
+   it (`moonshot/tools/bar_check.py`).
 2. **Checks never use the code they check.** Penetration is measured on the rendered mesh, not from MuJoCo's own
    contact report; stock is compared to the STEP with OpenCASCADE.
 3. **No faked physics** in physics tests, and no flaky tests tolerated.
@@ -437,11 +445,11 @@ It fails four checks. The new body model must fix them, or you consciously loose
 
 | # | Part | Routing | Steps | Group |
 |---|---|---|---|---|
-| 1 | **nist-ctc-01**, NIST prismatic test part | band saw → VMC → inspection | 16 | **G1, Thu Nov 5: first shared** |
-| 2 | nist-ftc-10, NIST prismatic | VMC → inspection | 12 | G1 |
-| 3 | ll-1005337, L&L Delrin pallet inlay | VMC → inspection | 13 | G1 |
-| 4 | ct-slbeam, Contour L-block, 4140 | saw → Hurco VM1 → black oxide → QC | 17 | G1, Fri Nov 6 |
-| 5 | ll-1007223, L&L gripper jaw, 4140 | saw → VMC → zinc plate → inspection | 17 | G1, Fri Nov 6 |
+| 1 | **nist-ftc-10**, NIST prismatic, 158 × 75 × 31 mm | VMC → inspection | 12 | **G1, Thu Nov 5: first shared** |
+| 2 | nist-ftc-09, NIST stainless sheet, 279.4 × 190.5 × 3 mm | VF-2, the sheet clamped to the table → inspection (no sheet laser station yet) | 9 | G1, in place of nist-ctc-01 (§11) |
+| 3 | ll-1005337, L&L Delrin pallet inlay | VF-2, clamped to the table in two setups → inspection | 13 | G1 |
+| 4 | ct-slbeam, Contour L-block, 4140 | saw → VF-2 (its routing's Hurco VM1 has no station) → black oxide → QC | 17 | G1, Fri Nov 6 |
+| 5 | ll-1007223, L&L gripper jaw, 4140 | saw → VF-2 → zinc plate → inspection | 17 | G1, Fri Nov 6 |
 | 6 | ct-tpg322, Contour carbide insert | surface grinder → quick check | 9 | G2, Sat Nov 7 |
 | 7 | ll-1011439, L&L bronze centering pin | lathe → inspection | 11 | G2 |
 | 8 | ll-1007224, L&L 6061 spacer | saw → lathe (2 ops) → VMC → inspection | 32 | G2 |
@@ -450,7 +458,7 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | 11 | mcm-8492a054, McMaster drill bushing | lathe → heat treat → OD grinder → hone → inspection | 24 | G3 |
 | 12 | mcm-91259a544, McMaster shoulder screw | lathe → thread roller → heat treat → OD grinder → black oxide → inspection | 24 | G3 |
 | 13 | ct-8848hn, Contour thread bar | Hurco lathe → grind → Hurco mill → grind → laser marker → QC | 36 | G3 |
-| 14 | nist-ftc-09, NIST stainless sheet | sheet laser → inspection | 9 | G4, Tue Nov 10 |
+| 14 | nist-ctc-01, NIST prismatic test part, 800 × 450 × 150 mm | band saw → VMC → inspection | 16 | G4, Tue Nov 10, **open question** (§11) |
 | 15 | ll-1011443, L&L aluminium bracket | sheet laser → press brake → inspection | 15 | G4 |
 | 16 | ll-1011604, L&L steel cover | sheet laser → press brake → powder coat → inspection | 18 | G4 |
 | 17 | ct-brmb0143, Contour form tool, M2 | grinding → wire EDM → laser marker → QC | 20 | G4 |
@@ -459,7 +467,9 @@ It fails four checks. The new body model must fix them, or you consciously loose
 | 20 | ct-10004-bcrm, Contour brazed reamer | saw → lathe → knee mill → grind → wire EDM → braze → ANCA | 45 | G5 |
 | | **Total** | | **≈ 420** | |
 
-`nist-ctc-01` goes first: it needs only three stations and exercises the VMC chain that 9 of the 20 parts share.
+`nist-ftc-10` goes first: it is public, hand-sized, needs only two stations, and exercises the VMC chain that 9 of the 20 parts share.
+
+**Withdrawn:** `nist-ctc-01` first — wrong because its 800 × 450 × 150 mm (about 146 kg in aluminium) exceeds the VF-2's X and Y travel and can't be lifted by hand (found 2026-11-01).
 
 ## 8. Compute
 
@@ -508,7 +518,14 @@ Outside processes (heat treat, plating, coating) are one "send out and receive" 
 
 ## 11. Open questions
 
-None outstanding.
+1. **`nist-ctc-01` doesn't fit the shop as modelled** (found 2026-11-01). At 800 × 450 × 150 mm it exceeds the
+   VF-2's X and Y travel (762 / 406 mm), would weigh about 146 kg in aluminium, and is beyond a band saw's usual
+   capacity. Options: (a) the VF-3 (1016 × 508 mm travel) with an overhead hoist added to the shop; (b) machine it at
+   a stated scale that fits the VF-2 by hand, with the drawing's dimensions scaled to match; (c) replace it with
+   another public part. My recommendation is (b) at 1:4 (200 × 112.5 × 37.5 mm, about 2.3 kg), labelled as a
+   scale model, since NIST's test cases exist to exercise GD&T, not size. `nist-ftc-10` goes first meanwhile.
+   **Decided 2026-11-04 (yours):** out of G1, swapped with `nist-ftc-09` (§7); what becomes of it in G4 is still
+   open.
 
 **Decided 2026-11-01** (you delegated 1 and 2 to my judgement):
 

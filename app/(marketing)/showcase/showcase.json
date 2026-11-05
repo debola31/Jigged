@@ -241,7 +241,8 @@
        "name": "2.5 mm drill"
       },
       {
-       "name": "6 mm drill"
+       "name": "6 mm drill",
+       "item": "drill-6mm"
       }
      ],
      "media": {
@@ -388,7 +389,8 @@
      },
      "uses": [
       {
-       "name": "6 mm drill"
+       "name": "6 mm drill",
+       "item": "drill-6mm"
       }
      ],
      "media": {
@@ -599,7 +601,8 @@
      },
      "uses": [
       {
-       "name": "1/4 in ball end mill"
+       "name": "1/4 in ball end mill",
+       "item": "bem-0250-2fl"
       },
       {
        "name": "1/4 in end mill",
@@ -679,7 +682,8 @@
      },
      "uses": [
       {
-       "name": "1/4 in ball end mill"
+       "name": "1/4 in ball end mill",
+       "item": "bem-0250-2fl"
       }
      ],
      "media": {
@@ -1509,7 +1513,8 @@
      },
      "uses": [
       {
-       "name": "5.5 mm drill"
+       "name": "5.5 mm drill",
+       "item": "drill-5p5mm"
       }
      ],
      "media": {
@@ -1553,7 +1558,8 @@
      },
      "uses": [
       {
-       "name": "5.5 mm drill"
+       "name": "5.5 mm drill",
+       "item": "drill-5p5mm"
       }
      ],
      "media": {
@@ -1822,30 +1828,36 @@
        "item": "spot-0500-90"
       },
       {
-       "name": "5/32 in drill"
+       "name": "5/32 in drill",
+       "item": "drill-0156"
       },
       {
-       "name": "5.5 mm drill"
+       "name": "5.5 mm drill",
+       "item": "drill-5p5mm"
       },
       {
-       "name": "6 mm drill"
+       "name": "6 mm drill",
+       "item": "drill-6mm"
       },
       {
        "name": "K drill",
        "item": "drill-0281"
       },
       {
-       "name": "1/4 in reamer"
+       "name": "1/4 in reamer",
+       "item": "ream-0250"
       },
       {
        "name": "1/4 in end mill",
        "item": "em-0250-3fl"
       },
       {
-       "name": "1/8 in end mill"
+       "name": "1/8 in end mill",
+       "item": "em-0125-2fl"
       },
       {
-       "name": "1/32 in end mill"
+       "name": "1/32 in end mill",
+       "item": "em-0031-2fl"
       },
       {
        "name": "1/2 in chamfer mill",
@@ -1923,7 +1935,8 @@
      },
      "uses": [
       {
-       "name": "5/32 in drill"
+       "name": "5/32 in drill",
+       "item": "drill-0156"
       }
      ],
      "media": {
@@ -1948,7 +1961,8 @@
      },
      "uses": [
       {
-       "name": "5.5 mm drill"
+       "name": "5.5 mm drill",
+       "item": "drill-5p5mm"
       }
      ],
      "media": {
@@ -1973,7 +1987,8 @@
      },
      "uses": [
       {
-       "name": "6 mm drill"
+       "name": "6 mm drill",
+       "item": "drill-6mm"
       }
      ],
      "media": {
@@ -2024,7 +2039,8 @@
      },
      "uses": [
       {
-       "name": "1/4 in reamer"
+       "name": "1/4 in reamer",
+       "item": "ream-0250"
       }
      ],
      "media": {
@@ -2101,7 +2117,8 @@
      },
      "uses": [
       {
-       "name": "1/8 in end mill"
+       "name": "1/8 in end mill",
+       "item": "em-0125-2fl"
       }
      ],
      "media": {
@@ -2126,7 +2143,8 @@
      },
      "uses": [
       {
-       "name": "1/32 in end mill"
+       "name": "1/32 in end mill",
+       "item": "em-0031-2fl"
       }
      ],
      "media": {
@@ -2448,7 +2466,8 @@
      },
      "uses": [
       {
-       "name": "8 mm reamer"
+       "name": "8 mm reamer",
+       "item": "ream-8mm"
       },
       {
        "name": "1/2 in end mill",
@@ -2463,7 +2482,8 @@
        "item": "chamfer-0500-90"
       },
       {
-       "name": "20 deg dovetail cutter"
+       "name": "20 deg dovetail cutter",
+       "item": "dovetail-30-20"
       }
      ],
      "media": {
@@ -2507,7 +2527,8 @@
      },
      "uses": [
       {
-       "name": "8 mm reamer"
+       "name": "8 mm reamer",
+       "item": "ream-8mm"
       }
      ],
      "media": {
@@ -2636,7 +2657,8 @@
      },
      "uses": [
       {
-       "name": "20 deg dovetail cutter"
+       "name": "20 deg dovetail cutter",
+       "item": "dovetail-30-20"
       }
      ],
      "media": {
@@ -4999,10 +5021,12 @@
      },
      "uses": [
       {
-       "name": "1/4 in ball end mill"
+       "name": "1/4 in ball end mill",
+       "item": "bem-0250-2fl"
       },
       {
-       "name": "11 mm drill"
+       "name": "11 mm drill",
+       "item": "drill-11mm"
       }
      ],
      "media": {
@@ -5098,7 +5122,8 @@
      },
      "uses": [
       {
-       "name": "1/4 in ball end mill"
+       "name": "1/4 in ball end mill",
+       "item": "bem-0250-2fl"
       }
      ],
      "media": {
@@ -5123,7 +5148,8 @@
      },
      "uses": [
       {
-       "name": "11 mm drill"
+       "name": "11 mm drill",
+       "item": "drill-11mm"
       }
      ],
      "media": {
@@ -5342,13 +5368,16 @@
        "item": "spot-0500-90"
       },
       {
-       "name": "6.5 mm drill"
+       "name": "6.5 mm drill",
+       "item": "drill-6p5mm"
       },
       {
-       "name": "3.3 mm drill"
+       "name": "3.3 mm drill",
+       "item": "drill-3p3mm"
       },
       {
-       "name": "M4 tap"
+       "name": "M4 tap",
+       "item": "tap-m4-07"
       }
      ],
      "media": {
@@ -5418,7 +5447,8 @@
      },
      "uses": [
       {
-       "name": "6.5 mm drill"
+       "name": "6.5 mm drill",
+       "item": "drill-6p5mm"
       }
      ],
      "media": {
@@ -5443,7 +5473,8 @@
      },
      "uses": [
       {
-       "name": "3.3 mm drill"
+       "name": "3.3 mm drill",
+       "item": "drill-3p3mm"
       }
      ],
      "media": {
@@ -5468,7 +5499,8 @@
      },
      "uses": [
       {
-       "name": "M4 tap"
+       "name": "M4 tap",
+       "item": "tap-m4-07"
       }
      ],
      "media": {
@@ -8551,7 +8583,42 @@
     "x": 41605.2,
     "y": 12478.4,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "1/8\" 2-flute carbide square end mill (Harvey Tool 72125)",
+    "category": "tools",
+    "kind": "end_mill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.125"
+     ],
+     [
+      "Material",
+      "carbide"
+     ],
+     [
+      "Flutes",
+      "2"
+     ],
+     [
+      "Flute length",
+      "0.375"
+     ],
+     [
+      "Overall length",
+      "1.5"
+     ],
+     [
+      "Shank diameter",
+      "0.125"
+     ],
+     [
+      "Corner radius",
+      "0.0"
+     ]
+    ]
    },
    {
     "item": "em-0031-2fl",
@@ -8559,7 +8626,42 @@
     "x": 41648.4,
     "y": 12478.4,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "1/32\" 2-flute carbide square end mill, 1/8\" shank (Harvey Tool 72031)",
+    "category": "tools",
+    "kind": "end_mill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.031"
+     ],
+     [
+      "Material",
+      "carbide"
+     ],
+     [
+      "Flutes",
+      "2"
+     ],
+     [
+      "Flute length",
+      "0.093"
+     ],
+     [
+      "Overall length",
+      "1.5"
+     ],
+     [
+      "Shank diameter",
+      "0.125"
+     ],
+     [
+      "Corner radius",
+      "0.0"
+     ]
+    ]
    },
    {
     "item": "bem-0250-2fl",
@@ -8567,7 +8669,42 @@
     "x": 41693.2,
     "y": 12476.8,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "1/4\" 2-flute carbide ball end mill",
+    "category": "tools",
+    "kind": "end_mill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.25"
+     ],
+     [
+      "Material",
+      "carbide"
+     ],
+     [
+      "Flutes",
+      "2"
+     ],
+     [
+      "Flute length",
+      "0.75"
+     ],
+     [
+      "Overall length",
+      "2.5"
+     ],
+     [
+      "Shank diameter",
+      "0.25"
+     ],
+     [
+      "Corner radius",
+      "0.125"
+     ]
+    ]
    },
    {
     "item": "drill-3p3mm",
@@ -8575,7 +8712,42 @@
     "x": 41738,
     "y": 12478.3,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "3.3 mm cobalt jobber drill, the M4 tap drill (Chicago-Latrobe 47843)",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.1299"
+     ],
+     [
+      "Designation",
+      "3.3 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "1.4173"
+     ],
+     [
+      "Overall length",
+      "2.5591"
+     ],
+     [
+      "Shank diameter",
+      "0.1299"
+     ]
+    ]
    },
    {
     "item": "drill-0156",
@@ -8583,7 +8755,42 @@
     "x": 41781.7,
     "y": 12478,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "5/32\" (.156\") cobalt jobber drill (Chicago-Latrobe 47710)",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.1562"
+     ],
+     [
+      "Designation",
+      "5/32"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "2.0"
+     ],
+     [
+      "Overall length",
+      "3.125"
+     ],
+     [
+      "Shank diameter",
+      "0.1562"
+     ]
+    ]
    },
    {
     "item": "drill-5p5mm",
@@ -8591,7 +8798,42 @@
     "x": 41826.4,
     "y": 12477.2,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "5.5 mm cobalt jobber drill",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.2165"
+     ],
+     [
+      "Designation",
+      "5.5 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "2.2441"
+     ],
+     [
+      "Overall length",
+      "3.6614"
+     ],
+     [
+      "Shank diameter",
+      "0.2165"
+     ]
+    ]
    },
    {
     "item": "drill-6mm",
@@ -8599,7 +8841,42 @@
     "x": 41872.2,
     "y": 12477,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "6 mm cobalt jobber drill",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.2362"
+     ],
+     [
+      "Designation",
+      "6 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "2.4803"
+     ],
+     [
+      "Overall length",
+      "3.6614"
+     ],
+     [
+      "Shank diameter",
+      "0.2362"
+     ]
+    ]
    },
    {
     "item": "drill-6p5mm",
@@ -8607,7 +8884,42 @@
     "x": 41918.5,
     "y": 12476.7,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "6.5 mm cobalt jobber drill (Chicago-Latrobe 47875)",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.2559"
+     ],
+     [
+      "Designation",
+      "6.5 mm"
+     ],
+     [
+      "Material",
+      "cobalt"
+     ],
+     [
+      "Point angle",
+      "135"
+     ],
+     [
+      "Flute length",
+      "2.4803"
+     ],
+     [
+      "Overall length",
+      "3.9764"
+     ],
+     [
+      "Shank diameter",
+      "0.2559"
+     ]
+    ]
    },
    {
     "item": "drill-11mm",
@@ -8615,7 +8927,42 @@
     "x": 41967.8,
     "y": 12474,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "11 mm solid carbide flat-bottom drill, 12 mm shank (YG-1 DPP447110)",
+    "category": "tools",
+    "kind": "drill",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.4331"
+     ],
+     [
+      "Designation",
+      "11 mm"
+     ],
+     [
+      "Material",
+      "carbide"
+     ],
+     [
+      "Point angle",
+      "180"
+     ],
+     [
+      "Flute length",
+      "1.8898"
+     ],
+     [
+      "Overall length",
+      "3.5433"
+     ],
+     [
+      "Shank diameter",
+      "0.4724"
+     ]
+    ]
    },
    {
     "item": "ream-0250",
@@ -8623,7 +8970,38 @@
     "x": 42017,
     "y": 12476.8,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "1/4\" HSS straight-flute chucking reamer, 6 flutes (Cleveland C25513)",
+    "category": "tools",
+    "kind": "reamer",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.25"
+     ],
+     [
+      "Material",
+      "hss"
+     ],
+     [
+      "Flutes",
+      "6"
+     ],
+     [
+      "Flute length",
+      "1.5"
+     ],
+     [
+      "Overall length",
+      "6.0"
+     ],
+     [
+      "Shank diameter",
+      "0.24"
+     ]
+    ]
    },
    {
     "item": "ream-8mm",
@@ -8631,7 +9009,38 @@
     "x": 42064.1,
     "y": 12476,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "8 mm HSS straight-flute chucking reamer, 6 flutes (Cleveland C25668)",
+    "category": "tools",
+    "kind": "reamer",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.315"
+     ],
+     [
+      "Material",
+      "hss"
+     ],
+     [
+      "Flutes",
+      "6"
+     ],
+     [
+      "Flute length",
+      "1.5"
+     ],
+     [
+      "Overall length",
+      "6.0"
+     ],
+     [
+      "Shank diameter",
+      "0.2787"
+     ]
+    ]
    },
    {
     "item": "tap-m4-07",
@@ -8639,7 +9048,42 @@
     "x": 42110.3,
     "y": 12477.9,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "M4x0.7 HSS spiral-point plug tap (OSG 1980401)",
+    "category": "tools",
+    "kind": "tap",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "0.1575"
+     ],
+     [
+      "Designation",
+      "M4x0.7"
+     ],
+     [
+      "Material",
+      "hss"
+     ],
+     [
+      "Flutes",
+      "2"
+     ],
+     [
+      "Flute length",
+      "0.3937"
+     ],
+     [
+      "Overall length",
+      "2.126"
+     ],
+     [
+      "Shank diameter",
+      "0.168"
+     ]
+    ]
    },
    {
     "item": "dovetail-30-20",
@@ -8647,7 +9091,38 @@
     "x": 42167.2,
     "y": 12465,
     "z": 1000,
-    "rot": 0
+    "rot": 0,
+    "name": "30 mm HSS dovetail cutter, 20° per side (40° included), 3/4\" shank",
+    "category": "tools",
+    "kind": "dovetail_cutter",
+    "zone": "tool-crib",
+    "on": "crib-tools",
+    "facts": [
+     [
+      "Diameter",
+      "1.1811"
+     ],
+     [
+      "Material",
+      "hss"
+     ],
+     [
+      "Flutes",
+      "6"
+     ],
+     [
+      "Flute length",
+      "0.7874"
+     ],
+     [
+      "Overall length",
+      "2.7559"
+     ],
+     [
+      "Shank diameter",
+      "0.75"
+     ]
+    ]
    },
    {
     "item": "height-gauge-1",
@@ -8854,7 +9329,20 @@
     "x": 47469.3,
     "y": 12775.2,
     "z": 860,
-    "rot": 0
+    "rot": 0,
+    "name": "M4x0.70 go/no-go thread plug gauge",
+    "category": "inspection",
+    "kind": "thread_gauge",
+    "zone": "inspection",
+    "on": "insp-table",
+    "make": "Vermont Gage",
+    "model": "302111530",
+    "facts": [
+     [
+      "Designation",
+      "M4x0.70-6H"
+     ]
+    ]
    },
    {
     "item": "caliper-24-1",
@@ -8862,7 +9350,32 @@
     "x": 45710,
     "y": 11996.5,
     "z": 860,
-    "rot": 0
+    "rot": 0,
+    "name": "24\" digital caliper",
+    "category": "inspection",
+    "kind": "caliper",
+    "zone": "inspection",
+    "on": "insp-table",
+    "make": "Mitutoyo",
+    "model": "500-506-10",
+    "facts": [
+     [
+      "Range min",
+      "0.0"
+     ],
+     [
+      "Range max",
+      "24.0"
+     ],
+     [
+      "Resolution",
+      "0.0005"
+     ],
+     [
+      "Accuracy",
+      "0.002"
+     ]
+    ]
    },
    {
     "item": "comparator-1",
@@ -9167,7 +9680,40 @@
       3.19,
       63.5
      ]
-    }
+    },
+    "description": "1/4 in ball end mill, carbide, 2 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 6.35,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 19.05,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 63.5,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "carbide"
+     },
+     {
+      "name": "Mass",
+      "value": 27.59,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "bench": {
     "name": "Workbench, tool cabinet and cart",
@@ -9460,7 +10006,59 @@
       76.5,
       17.7
      ]
-    }
+    },
+    "description": "ABSOLUTE Digimatic caliper, 0-24 in / 0-600 mm, with SPC output and no thumb roller.",
+    "key_specs": [
+     {
+      "name": "Range",
+      "value": [
+       0.0,
+       24.0
+      ],
+      "unit": "in"
+     },
+     {
+      "name": "Resolution",
+      "value": 0.0005,
+      "unit": "in"
+     },
+     {
+      "name": "Accuracy",
+      "value": 0.002,
+      "unit": "in",
+      "note": "plus or minus"
+     },
+     {
+      "name": "Overall length",
+      "value": 780,
+      "unit": "mm",
+      "note": "L"
+     },
+     {
+      "name": "Outside jaw depth",
+      "value": 90,
+      "unit": "mm",
+      "note": "D"
+     },
+     {
+      "name": "Inside jaw length",
+      "value": 38,
+      "unit": "mm",
+      "note": "A"
+     },
+     {
+      "name": "Beam height",
+      "value": 25,
+      "unit": "mm",
+      "note": "H"
+     },
+     {
+      "name": "Mass",
+      "value": 1350,
+      "unit": "g",
+      "note": "Mitutoyo's datasheet"
+     }
+    ]
    },
    "cal6": {
     "name": "Digital caliper",
@@ -9861,7 +10459,52 @@
       15.03,
       70.0
      ]
-    }
+    },
+    "description": "30 mm HSS dovetail cutter, 20 degrees per side (40 included), widest at the tip: undercuts the end notches' walls.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 30.0,
+      "unit": "mm",
+      "note": "at the tip, its widest"
+     },
+     {
+      "name": "Flank angle",
+      "value": 20.0,
+      "unit": "deg",
+      "note": "per side, from the axis; 40 deg included"
+     },
+     {
+      "name": "Flute length",
+      "value": 20.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 70.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 19.05,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 6,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 146.42,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "dpress": {
     "name": "Column drill press",
@@ -9997,7 +10640,51 @@
       6.0,
       90.0
      ]
-    }
+    },
+    "description": "11 mm Dream Drill flat-bottom drill, 180 degree point, solid carbide, no coolant hole.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 11.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Point angle",
+      "value": 180,
+      "unit": "deg",
+      "note": "flat bottom"
+     },
+     {
+      "name": "Flute length",
+      "value": 48,
+      "unit": "mm"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 12,
+      "unit": "mm"
+     },
+     {
+      "name": "Material",
+      "value": "solid carbide"
+     },
+     {
+      "name": "Overall length",
+      "value": 90,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Mass",
+      "value": 114.98,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "drill-3p3": {
     "name": "3.3 mm cobalt jobber drill",
@@ -10013,7 +10700,46 @@
       1.66,
       65.0
      ]
-    }
+    },
+    "description": "3.30 mm cobalt jobber drill, 135 degree split point: the tap drill for M4x0.7.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 3.3,
+      "unit": "mm"
+     },
+     {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+     },
+     {
+      "name": "Overall length",
+      "value": 65,
+      "unit": "mm"
+     },
+     {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+     },
+     {
+      "name": "Flute length",
+      "value": 36,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Mass",
+      "value": 3.78,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "drill-5-32": {
     "name": "5/32 in cobalt jobber drill",
@@ -10029,7 +10755,46 @@
       2.0,
       79.38
      ]
-    }
+    },
+    "description": "5/32 in (0.156) cobalt jobber drill, 135 degree split point.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 0.15625,
+      "unit": "in"
+     },
+     {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+     },
+     {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+     },
+     {
+      "name": "Flute length",
+      "value": 50.8,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 79.375,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Mass",
+      "value": 6.46,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "drill-5p5": {
     "name": "5.5 mm jobber drill",
@@ -10045,7 +10810,45 @@
       2.76,
       93.0
      ]
-    }
+    },
+    "description": "5.5 mm jobber drill, cobalt HSS, 2 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 5.5,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 57,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 93,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "cobalt HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 14.68,
+      "unit": "g",
+      "note": "volume x material density"
+     },
+     {
+      "name": "Point angle",
+      "value": 135.0,
+      "unit": "deg"
+     }
+    ]
    },
    "drill-6": {
     "name": "6 mm jobber drill",
@@ -10061,7 +10864,45 @@
       3.02,
       93.0
      ]
-    }
+    },
+    "description": "6 mm jobber drill, cobalt HSS, 2 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 6.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 63,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 93,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "cobalt HSS"
+     },
+     {
+      "name": "Mass",
+      "value": 17.04,
+      "unit": "g",
+      "note": "volume x material density"
+     },
+     {
+      "name": "Point angle",
+      "value": 135.0,
+      "unit": "deg"
+     }
+    ]
    },
    "drill-6p5": {
     "name": "6.5 mm cobalt jobber drill",
@@ -10077,7 +10918,46 @@
       3.27,
       101.0
      ]
-    }
+    },
+    "description": "6.50 mm cobalt jobber drill, 135 degree split point, DIN 338.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 6.5,
+      "unit": "mm"
+     },
+     {
+      "name": "Point angle",
+      "value": 135,
+      "unit": "deg",
+      "note": "split point"
+     },
+     {
+      "name": "Material",
+      "value": "Chicago-Latrobe 550ASP: HSS-Co 5% (M35), 135 degree split point, straw finish"
+     },
+     {
+      "name": "Flute length",
+      "value": 63,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 101,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Mass",
+      "value": 22.16,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "drillh": {
     "name": "H jobber drill",
@@ -10318,7 +11198,50 @@
       1.59,
       38.1
      ]
-    }
+    },
+    "description": "1/32 in 2-flute uncoated carbide square end mill, 3/32 in length of cut, 1/8 in shank.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 0.031,
+      "unit": "in"
+     },
+     {
+      "name": "Length of cut",
+      "value": 0.093,
+      "unit": "in"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 0.125,
+      "unit": "in"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "solid carbide, uncoated"
+     },
+     {
+      "name": "Flute length",
+      "value": 2.3622,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 38.1,
+      "unit": "mm"
+     },
+     {
+      "name": "Mass",
+      "value": 3.75,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "em14": {
     "name": "1/4 in end mill",
@@ -10368,7 +11291,50 @@
       1.6,
       38.1
      ]
-    }
+    },
+    "description": "1/8 in 2-flute uncoated carbide square end mill, 3/8 in length of cut, 1/8 in shank.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 0.125,
+      "unit": "in"
+     },
+     {
+      "name": "Length of cut",
+      "value": 0.375,
+      "unit": "in"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 0.125,
+      "unit": "in"
+     },
+     {
+      "name": "Overall length",
+      "value": 1.5,
+      "unit": "in"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Material",
+      "value": "solid carbide, uncoated"
+     },
+     {
+      "name": "Flute length",
+      "value": 9.525,
+      "unit": "mm"
+     },
+     {
+      "name": "Mass",
+      "value": 4.1,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "em38": {
     "name": "3/8 in end mill",
@@ -11313,7 +12279,45 @@
       3.18,
       152.4
      ]
-    }
+    },
+    "description": "1/4 in (.2500) HSS straight-shank chucking reamer, 6 flutes.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 0.25,
+      "unit": "in"
+     },
+     {
+      "name": "Flutes",
+      "value": 6,
+      "unit": "flutes"
+     },
+     {
+      "name": "Flute length",
+      "value": 1.5,
+      "unit": "in"
+     },
+     {
+      "name": "Overall length",
+      "value": 6,
+      "unit": "in"
+     },
+     {
+      "name": "Material",
+      "value": "HSS"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 6.096,
+      "unit": "mm"
+     },
+     {
+      "name": "Mass",
+      "value": 32.82,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "ream-8": {
     "name": "8 mm chucking reamer",
@@ -11329,7 +12333,45 @@
       4.0,
       152.4
      ]
-    }
+    },
+    "description": "8.00 mm HSS straight-shank chucking reamer.",
+    "key_specs": [
+     {
+      "name": "Diameter",
+      "value": 8.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 38.1,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 152.4,
+      "unit": "mm"
+     },
+     {
+      "name": "Material",
+      "value": "HSS"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 7.079,
+      "unit": "mm"
+     },
+     {
+      "name": "Flutes",
+      "value": 6,
+      "unit": "flutes"
+     },
+     {
+      "name": "Mass",
+      "value": 45.65,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "rough": {
     "name": "Surface roughness tester",
@@ -11684,6 +12726,11 @@
       "value": "1/4-20 UNC"
      },
      {
+      "name": "Diameter",
+      "value": 0.25,
+      "unit": "in"
+     },
+     {
       "name": "Thread length",
       "value": 1,
       "unit": "in"
@@ -11718,7 +12765,53 @@
       2.14,
       54.0
      ]
-    }
+    },
+    "description": "M4x0.7 HSS spiral-point plug tap, D4 thread limit, 2 flutes, steam oxide: for through holes.",
+    "key_specs": [
+     {
+      "name": "Thread",
+      "value": "M4x0.7, D4 limit"
+     },
+     {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+     },
+     {
+      "name": "Chamfer",
+      "value": "plug"
+     },
+     {
+      "name": "Material",
+      "value": "HSS, steam oxide"
+     },
+     {
+      "name": "Diameter",
+      "value": 4.0,
+      "unit": "mm"
+     },
+     {
+      "name": "Flute length",
+      "value": 14,
+      "unit": "mm"
+     },
+     {
+      "name": "Overall length",
+      "value": 54,
+      "unit": "mm"
+     },
+     {
+      "name": "Shank diameter",
+      "value": 4.2672,
+      "unit": "mm"
+     },
+     {
+      "name": "Mass",
+      "value": 5.03,
+      "unit": "g",
+      "note": "volume x material density"
+     }
+    ]
    },
    "tcgrind": {
     "name": "Tool & cutter grinder",
@@ -11814,7 +12907,36 @@
       4.77,
       9.53
      ]
-    }
+    },
+    "description": "Go/no-go M4x0.70 6H thread plug gauge assembly with handle, for checking tapped holes.",
+    "key_specs": [
+     {
+      "name": "Thread",
+      "value": "M4x0.70, class 6H"
+     },
+     {
+      "name": "Go member",
+      "value": "302111510"
+     },
+     {
+      "name": "No-go member",
+      "value": "302111520"
+     },
+     {
+      "name": "Go member length",
+      "value": 10.3,
+      "unit": "mm"
+     },
+     {
+      "name": "No-go member length",
+      "value": 7.1,
+      "unit": "mm"
+     },
+     {
+      "name": "Handle",
+      "value": "#0 taperlock, double end, aluminium, 2 in long"
+     }
+    ]
    },
    "tmx8": {
     "name": "Hurco TMX8MYi turning centre",

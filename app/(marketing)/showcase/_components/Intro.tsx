@@ -44,9 +44,12 @@ function PartCard({ part, onPick }: { part: LivePart; onPick(): void }) {
           Make this part
         </Button>
       </Box>
-      <Box sx={{ position: 'relative', width: '46%', flexShrink: 0, minHeight: { xs: 140, md: 170 }, bgcolor: 'common.black' }}>
-        {still && <Box component="img" src={still} alt={`${part.name}, finished`} sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
-      </Box>
+      {/* Until one of its cuts is published there is no picture of the part, and an empty frame reads as broken. */}
+      {still && (
+        <Box sx={{ position: 'relative', width: '46%', flexShrink: 0, minHeight: { xs: 140, md: 170 }, bgcolor: 'common.black' }}>
+          <Box component="img" src={still} alt={`${part.name}, finished`} sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        </Box>
+      )}
     </Box>
   );
 }

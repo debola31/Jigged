@@ -14,7 +14,7 @@ moonshot/tests/gates/test_bandsaw_take.py.
 - While the hand turns the handwheel it pushes the knob round with the card's force, fed forward through the arm
   as a press is (`hand_forces`).
 
-    python -m moonshot.sim.bandsaw <part> load|clamp|start|cut|unload|all [--replan]   # -> <data root>/takes/<take>
+    python -m moonshot.sim.bandsaw <part> load|clamp|start|cut|slide|unload|all [--replan]   # -> <data root>/takes/<take>
 """
 from __future__ import annotations
 
@@ -396,18 +396,28 @@ def cut(seconds: float | None = None) -> dict:
     return report
 
 
-def run_unload(replan=False, seconds=None) -> dict:
-    out = plan.OUT["unload"]
-    state = plan.state_of("cut")
+def run_piece(take: str, after: str, grips: dict, lifted: tuple, replan=False, seconds=None) -> dict:
+    """A take of the person's with the cut piece (the slide, the lift-out), from the state the take before left."""
+    out = plan.OUT[take]
+    state = plan.state_of(after)
     if replan or not (out / "reference.npz").exists():
-        plan.build("unload")
+        plan.build(take)
     st = state["stock"]
     loose = "".join(SC.stock_body(b, SC.FRONT, st[b]["centre"], st[b]["R"], st[b]["length"]) for b in ("piece", "rest"))
-    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects={"top": ("piece",), "pinch": ("piece",)},
-               lifted=("piece",))
+    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects=grips, lifted=lifted)
     r.go(seconds)
     p = SC.saw_state(r.model, r.data, r.ctl, r.place)["stock"]
     return r.finish({"piece_end": p["piece"], "rest_end": p["rest"]})
+
+
+def run_slide(replan=False, seconds=None) -> dict:
+    return run_piece("slide", "cut", {"top": ("piece",)}, (), replan, seconds)
+
+
+def run_unload(replan=False, seconds=None) -> dict:
+    """Planned from where the slide left the piece: planned from where it was meant to, the hand closed 5-9 mm off
+    it, the slide having carried it 10-15% short, and sank 10-16 mm into it."""
+    return run_piece("unload", "slide", {"pinch": ("piece",)}, ("piece",), replan, seconds)
 
 
 def still(take: str, frame: int | None = None, out: Path | None = None, view_from=(-0.55, -0.55, 0.75)) -> Path:
@@ -447,7 +457,7 @@ def still(take: str, frame: int | None = None, out: Path | None = None, view_fro
 
 
 RUNS = {"load": run_load, "clamp": run_clamp, "start": run_start,
-        "cut": lambda replan=False, seconds=None: cut(seconds), "unload": run_unload}
+        "cut": lambda replan=False, seconds=None: cut(seconds), "slide": run_slide, "unload": run_unload}
 
 
 def main(argv: list[str]) -> int:

@@ -12,9 +12,9 @@ The pose, by rule:
   and along takes the sign that keeps the frame a rotation;
 - a setup with no parallels stands on the vise's floor.
 
-A later setup loads a machined part as its bounding box (ENVELOPE_MM), until the stock-removal model hands each setup
-its part: a declared shortcut, sound where the vise touches it, since every face it rests or clamps on is machined
-flat by then; the render draws its real shape.
+The saw's setup, and the first on the mill, hold the stock. A later setup loads a machined part as its bounding box
+(ENVELOPE_MM), until the stock-removal model hands each setup its part: a declared shortcut, sound where the vise
+touches it, since every face it rests or clamps on is machined flat by then; the render draws its real shape.
 """
 from __future__ import annotations
 
@@ -41,6 +41,21 @@ FACE_A_MM = {"nist-ftc-10": 0.5}
 # from datum A, z -37.5..37.5): Op 10 profiles the outline and faces datum A, Op 20 faces the top to 31
 ENVELOPE_MM = {("nist-ftc-10", "op20"): ((-79.0, 79.0), (0.0, 37.6), (-37.5, 37.5))}
 ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) for s in ("op30", "op40", "op50")}
+# the stock's box in the model's frame where the part isn't centred on the origin: centred on the part's box (its
+# STEP's bounding box) on every axis, so each face machined takes an even share off. ll-1007223 finishes 49 x 40 x 75
+# (x 0..49, y 0..40, z -37.5..37.5); ct-slbeam 76.2 x 38.1 x 50.8 from the origin, its 38.1 the bar's own width
+STOCK_MM = {"ll-1007223": ((-4.075, 53.075), (-2.225, 42.225), (-41.275, 41.275)),
+            "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975))}
+# ll-1007223: Op 10 faces the top to 40 and profiles the flange's edges and both ends to 49 x 75 down to 1 mm above
+# the jaws (y 17.475); Op 20 holds it by the flange in soft jaws, on the faced top, its box the 49 x 75 the jaws and
+# the parallels touch: the skirt Op 10 couldn't reach (y -2.225..17.475, 4.1 mm wider each side, 3.8 longer each
+# end) stands above the jaws, left out [declared shortcut]; Op 30 holds the finished part
+ENVELOPE_MM |= {("ll-1007223", "op20"): ((0.0, 49.0), (-2.225, 40.0), (-37.5, 37.5)),
+                ("ll-1007223", "op30"): ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5))}
+# ct-slbeam: Op 10 faces the bottom (z 0), Op 20 the long leg's end (x 76.2), Op 30 the back (x 0)
+ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.975)),
+                ("ct-slbeam", "op30"): ((-3.175, 76.2), (0.0, 38.1), (0.0, 53.975)),
+                ("ct-slbeam", "op40"): ((0.0, 76.2), (0.0, 38.1), (0.0, 53.975))}
 
 
 def _setup(plan: dict, setup_id: str) -> dict:
@@ -49,7 +64,11 @@ def _setup(plan: dict, setup_id: str) -> dict:
 
 def envelope(plan: dict, setup_id: str) -> np.ndarray:
     """The setup's part as a box in its model's frame: [[xmin, xmax], [ymin, ymax], [zmin, zmax]] mm."""
-    if _setup(plan, setup_id) is plan["setups"][0]:
+    setups = plan["setups"]
+    first = next(i for i, s in enumerate(setups) if "workholding" in s)        # the first on the mill
+    if any(s["id"] == setup_id for s in setups[:first + 1]):
+        if plan.get("part") in STOCK_MM:
+            return np.array(STOCK_MM[plan["part"]], float)
         sx, sy, sz = plan["stock"]["size_mm"]
         a = FACE_A_MM.get(plan.get("part"), 0.0)
         return np.array([[-sx / 2, sx / 2], [-a, sy - a], [-sz / 2, sz / 2]])

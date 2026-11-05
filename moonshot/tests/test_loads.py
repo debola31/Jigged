@@ -221,6 +221,27 @@ def test_nist_ftc_10s_and_ll_1007223s_parallels_stay_where_they_were(part, setup
     assert load.parallels_y == pytest.approx(PLACED[(part, setup)], abs=1e-9)
 
 
+NIST_OPENING = {"op10": 96.35, "op20": 88.8, "op30": 61.0, "op40": 61.0, "op50": 105.0}
+
+
+@pytest.mark.parametrize("setup", sorted(NIST_OPENING))
+def test_nist_ftc_10s_vise_opens_as_it_did(setup):
+    assert vise_load(load_plan("nist-ftc-10"), setup).opening0 == pytest.approx(NIST_OPENING[setup], abs=1e-9)
+
+
+@pytest.mark.parametrize("part, setup, before", [("ll-1007223", "op30", 88.8), ("ct-slbeam", "op20", 68.1),
+                                                 ("ct-slbeam", "op30", 68.1)])
+def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_setters_hand_has_room(part, setup,
+                                                                                                    before):
+    """One turn wider than its part and margin ask, so the crank's knob stands where it would (the loosen's reach)."""
+    from moonshot.motion.loads import STOP_JAW_CLEAR_MM
+    from moonshot.world.vise import STOP_MM
+    load = vise_load(load_plan(part), setup)
+    assert load.opening0 == pytest.approx(before + VISE["lead"])
+    clear = lambda o: o - load.size_mm[1] / 2 - STOP_MM[1] / 2                    # noqa: E731
+    assert clear(before) < STOP_JAW_CLEAR_MM <= clear(load.opening0)
+
+
 @pytest.mark.parametrize("setup", ["op10", "op40"])
 def test_ct_slbeams_parallels_leave_the_setting_fingers_room_each_side_of_parallel_a(setup):
     """b at the part's near edge, a halfway between it and the fixed jaw: 15.7 mm each side of a, where 5.0 mm between

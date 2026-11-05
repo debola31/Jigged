@@ -28,12 +28,13 @@ along the table: the setup before's pose, moved.
 """
 from __future__ import annotations
 
+import math
 import re
 
 import numpy as np
 
 from moonshot.world import vf2
-from moonshot.world.vise import PARALLEL_T, REFERENCE, TABLE_Z, VISE, Load
+from moonshot.world.vise import PARALLEL_T, REFERENCE, STOP_MM, TABLE_Z, VISE, Load
 
 AXIS = {"X": 0, "Y": 1, "Z": 2}
 INCH = 25.4
@@ -57,6 +58,12 @@ MIN_PITCH = 6.8
 # too narrow even so keeps the default (nist-ftc-10 op30 and op40's 31 mm would give 12.15)
 FINGER_GAP_MM = 14.5
 FLUSH_IN_MM = 0.5
+# a part stood on the vise's floor against a stop: the hand that sets the stop pinches it with the thumb on its near
+# face, toward the open moving jaw, and letting go its side stands over that jaw's top. It needs this much between the
+# stop's near face and the jaw: op50's 58 mm let go 13 mm clear; ll-1007223 op30's 41.8 put the hand on the jaw's edge,
+# which turned the thumb 4.1 mm into the stop, and one turn wider (48.2) let go clear (skin 3.2). Such a vise opens
+# whole crank turns wider until it does, so the knob stands where it would and the loosen reaches it as it does
+STOP_JAW_CLEAR_MM = 45.0
 # the stock is centred on the part in its model's x and z; Op 10 faces this much off datum A [proposed]
 FACE_A_MM = {"nist-ftc-10": 0.5}
 # each later setup's part as its box in the model's frame (mm). nist-ftc-10 finishes 158 x 31 x 75 (x -79..79, y 0..31
@@ -231,9 +238,12 @@ def vise_load(plan: dict, setup_id: str) -> Load:
         even = (width - FLUSH_IN_MM - 2 * PARALLEL_T) / 2
         if gap < FINGER_GAP_MM <= even:
             paras = {"para_a": fy - even - PARALLEL_T / 2, "para_b": fy - width + FLUSH_IN_MM + PARALLEL_T / 2}
+    opening = width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width else OPENING_MARGIN)
+    if not w["parallels_in"]:                    # against a stop: room for the hand that sets it (STOP_JAW_CLEAR_MM)
+        clear = opening - width / 2 - STOP_MM[1] / 2
+        opening += math.ceil(max(0.0, STOP_JAW_CLEAR_MM - clear) / VISE["lead"]) * VISE["lead"]
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
-                opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
-                                  else OPENING_MARGIN), density=density(plan))
+                opening0=opening, density=density(plan))
 
 
 def scene_spec(part: str, setup_id: str, stock: str = "in", vise: str = "clamped") -> dict:

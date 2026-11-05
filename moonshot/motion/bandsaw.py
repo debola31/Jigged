@@ -724,10 +724,13 @@ class StartPlan(SawPlan):
         self.effort("R", t_off + 0.1, 0.0, "valve")
         H, W = self.grip_pose("valve", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.45)
-        self.add("R", t_off, t_off + 0.45, lambda t: [("pose", H, W + up * 50 * min_jerk((t - t_off) / 0.45), 3.0)])
-        self.wrist["R"] = W + up * 50
-        self.clip("feed", tg - 1.5, t_off + 0.4, "FEED  the valve a quarter turn open: the bow comes down")
-        self.to_rest("R", t_off + 0.45, t_off + 1.5)
+        # lifted 100 mm and drawn back before it goes to rest: lifted 50, the index swept across the knob on the way
+        # down and turned it 4 deg back
+        self.add("R", t_off, t_off + 0.5, lambda t: [("pose", H, W + up * 100 * min_jerk((t - t_off) / 0.5), 3.0)])
+        self.wrist["R"] = W + up * 100
+        self.transit("R", t_off + 0.5, t_off + 0.8, W + up * 100 + back * 90)
+        self.clip("feed", tg - 1.5, t_off + 0.6, "FEED  the valve a quarter turn open: the bow comes down")
+        self.to_rest("R", t_off + 0.8, t_off + 1.8)
         self.look(t_off + 0.5, self.place.world([60.0, 0.0, 750.0]))
         self.t = t_off + 2.8
         self.clip("cut", t_off + 0.5, self.t, "CUT  hands off while the bow comes down and cuts")
@@ -840,8 +843,11 @@ class UnloadPlan(SawPlan):
             self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                        force=round(float(np.linalg.norm(along)) * friction, 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="top")
-        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`)
+        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`), keeping its own turn
+        # (`loose`): held to the hand's, it wedged between the stop block and the rest of the bar 1.4 mm off its other
+        # end, and slid 5 mm of 65
         self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
+        self.event("loose", tg + 0.05, t_off, obj="piece")
         self.effort("R", t_off - 0.1, PUSH_EFFORT, "top")
         self.effort("R", t_off + 0.1, 0.0, "top")
         _, W = self.grip_pose("top", t_off)

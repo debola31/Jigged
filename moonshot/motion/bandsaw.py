@@ -717,7 +717,9 @@ class StartPlan(SawPlan):
         t_off = self.t_turn + VALVE_TURN_S + 0.4
         self.carry("valve", tg, t_off)
         self.event("grip", tg, t_off + 0.1, side="R", grip="valve", on="saw_feed_valve")
-        self.event("carry", tg + 0.05, t_off, obj="saw_feed_valve", grip="valve", side="R")
+        # the knob keeps meeting the skin (`skin`): it turns with the pinch, not in it, and welded off the skin the
+        # fingers sank 7.7 mm into it
+        self.event("carry", tg + 0.05, t_off, obj="saw_feed_valve", grip="valve", side="R", skin=True)
         self.event("twist", self.t_turn, t_off - 0.05, side="R", obj="saw_feed_valve", q0=self.valve0,
                    turn_rad=math.radians(VALVE_TURN_DEG), turn_s=VALVE_TURN_S, torque=0.1)
         self.effort("R", t_off - 0.1, 0.3, "valve")

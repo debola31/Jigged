@@ -109,7 +109,7 @@ class ToolLoadRun(PendantRunner):
         # a tool wider than the holder's body (the face mill) leaves the fingers no slack round it: as the hand takes the
         # weight, the weld sets it wholly on its planned grip, not just turned to it about the holder's axis (held
         # where it closed, a few millimetres and degrees off, the fingers sat 6 mm into the cutter as it was carried)
-        self.wide = self.loose is not None and TL.cutter(ld["tool"])["r"] > TL.BODY[0]
+        self.wide = self.loose is not None and TL.cutter(ld["tool"])["body_r"] > TL.BODY[0]
         self._pivoting = False
         self._pivot_R = np.eye(3)
         self._hold, self._hold_q = None, None

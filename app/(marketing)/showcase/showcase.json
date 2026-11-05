@@ -4947,6 +4947,102 @@
     "rot": 0
    },
    {
+    "item": "em-0125-2fl",
+    "asset": "em18",
+    "x": 41605.2,
+    "y": 12478.4,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "em-0031-2fl",
+    "asset": "em132",
+    "x": 41648.4,
+    "y": 12478.4,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "bem-0250-2fl",
+    "asset": "bem14",
+    "x": 41693.2,
+    "y": 12476.8,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-3p3mm",
+    "asset": "drill-3p3",
+    "x": 41738,
+    "y": 12478.3,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-0156",
+    "asset": "drill-5-32",
+    "x": 41781.7,
+    "y": 12478,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-5p5mm",
+    "asset": "drill-5p5",
+    "x": 41826.4,
+    "y": 12477.2,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-6mm",
+    "asset": "drill-6",
+    "x": 41872.2,
+    "y": 12477,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-6p5mm",
+    "asset": "drill-6p5",
+    "x": 41918.5,
+    "y": 12476.7,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-11mm",
+    "asset": "drill-11",
+    "x": 41967.8,
+    "y": 12474,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "ream-0250",
+    "asset": "ream-1-4",
+    "x": 42017,
+    "y": 12476.8,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "ream-8mm",
+    "asset": "ream-8",
+    "x": 42064.1,
+    "y": 12476,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "tap-m4-07",
+    "asset": "tap-m4",
+    "x": 42110.3,
+    "y": 12477.9,
+    "z": 1000,
+    "rot": 0
+   },
+   {
     "item": "height-gauge-1",
     "asset": "hgauge",
     "x": 45548.6,
@@ -4999,6 +5095,22 @@
     "asset": "rough",
     "x": 47295.5,
     "y": 12712.7,
+    "z": 860,
+    "rot": 0
+   },
+   {
+    "item": "thread-gauge-m4-1",
+    "asset": "thread-m4",
+    "x": 47469.3,
+    "y": 12775.2,
+    "z": 860,
+    "rot": 0
+   },
+   {
+    "item": "caliper-24-1",
+    "asset": "cal24",
+    "x": 45710,
+    "y": 11996.5,
     "z": 860,
     "rot": 0
    },
@@ -5097,6 +5209,22 @@
       215.9,
       152.4,
       560.3
+     ]
+    }
+   },
+   "bem14": {
+    "name": "1/4 in ball end mill",
+    "model": "models/bem14.glb",
+    "bbox": {
+     "min": [
+      -3.19,
+      -3.19,
+      -0.0
+     ],
+     "max": [
+      3.19,
+      3.19,
+      63.5
      ]
     }
    },
@@ -5209,6 +5337,22 @@
       79.4,
       94.6,
       189.2
+     ]
+    }
+   },
+   "cal24": {
+    "name": "24 in digital caliper",
+    "model": "models/cal24.glb",
+    "bbox": {
+     "min": [
+      -390.0,
+      -76.5,
+      -0.0
+     ],
+     "max": [
+      390.0,
+      76.5,
+      17.7
      ]
     }
    },
@@ -5404,6 +5548,102 @@
      ]
     }
    },
+   "drill-11": {
+    "name": "11 mm flat-bottom carbide drill",
+    "model": "models/drill-11.glb",
+    "bbox": {
+     "min": [
+      -6.01,
+      -6.0,
+      -0.02
+     ],
+     "max": [
+      6.01,
+      6.0,
+      90.0
+     ]
+    }
+   },
+   "drill-3p3": {
+    "name": "3.3 mm cobalt jobber drill",
+    "model": "models/drill-3p3.glb",
+    "bbox": {
+     "min": [
+      -1.66,
+      -1.66,
+      -0.01
+     ],
+     "max": [
+      1.66,
+      1.66,
+      65.0
+     ]
+    }
+   },
+   "drill-5-32": {
+    "name": "5/32 in cobalt jobber drill",
+    "model": "models/drill-5-32.glb",
+    "bbox": {
+     "min": [
+      -2.0,
+      -2.0,
+      -0.01
+     ],
+     "max": [
+      2.0,
+      2.0,
+      79.38
+     ]
+    }
+   },
+   "drill-5p5": {
+    "name": "5.5 mm jobber drill",
+    "model": "models/drill-5p5.glb",
+    "bbox": {
+     "min": [
+      -2.76,
+      -2.76,
+      -0.01
+     ],
+     "max": [
+      2.76,
+      2.76,
+      93.0
+     ]
+    }
+   },
+   "drill-6": {
+    "name": "6 mm jobber drill",
+    "model": "models/drill-6.glb",
+    "bbox": {
+     "min": [
+      -3.01,
+      -3.02,
+      -0.02
+     ],
+     "max": [
+      3.01,
+      3.02,
+      93.0
+     ]
+    }
+   },
+   "drill-6p5": {
+    "name": "6.5 mm cobalt jobber drill",
+    "model": "models/drill-6p5.glb",
+    "bbox": {
+     "min": [
+      -3.27,
+      -3.27,
+      -0.02
+     ],
+     "max": [
+      3.27,
+      3.27,
+      101.0
+     ]
+    }
+   },
    "drillh": {
     "name": "H jobber drill",
     "model": "models/drillh.glb",
@@ -5500,6 +5740,22 @@
      ]
     }
    },
+   "em132": {
+    "name": "1/32 in end mill",
+    "model": "models/em132.glb",
+    "bbox": {
+     "min": [
+      -1.59,
+      -1.59,
+      -0.0
+     ],
+     "max": [
+      1.59,
+      1.59,
+      38.1
+     ]
+    }
+   },
    "em14": {
     "name": "1/4 in end mill",
     "model": "models/em14.glb",
@@ -5513,6 +5769,22 @@
       3.2,
       3.2,
       63.5
+     ]
+    }
+   },
+   "em18": {
+    "name": "1/8 in end mill",
+    "model": "models/em18.glb",
+    "bbox": {
+     "min": [
+      -1.6,
+      -1.59,
+      -0.01
+     ],
+     "max": [
+      1.6,
+      1.6,
+      38.1
      ]
     }
    },
@@ -5868,6 +6140,38 @@
      ]
     }
    },
+   "ream-1-4": {
+    "name": "1/4 in chucking reamer",
+    "model": "models/ream-1-4.glb",
+    "bbox": {
+     "min": [
+      -3.18,
+      -3.18,
+      -0.0
+     ],
+     "max": [
+      3.18,
+      3.18,
+      152.4
+     ]
+    }
+   },
+   "ream-8": {
+    "name": "8 mm chucking reamer",
+    "model": "models/ream-8.glb",
+    "bbox": {
+     "min": [
+      -4.0,
+      -4.0,
+      -0.0
+     ],
+     "max": [
+      4.0,
+      4.0,
+      152.4
+     ]
+    }
+   },
    "rough": {
     "name": "Surface roughness tester",
     "model": "models/rough.glb",
@@ -6012,6 +6316,22 @@
      ]
     }
    },
+   "tap-m4": {
+    "name": "M4x0.7 spiral-point tap",
+    "model": "models/tap-m4.glb",
+    "bbox": {
+     "min": [
+      -2.14,
+      -2.14,
+      -0.03
+     ],
+     "max": [
+      2.14,
+      2.14,
+      54.0
+     ]
+    }
+   },
    "tcgrind": {
     "name": "Tool & cutter grinder",
     "model": "models/tcgrind.glb",
@@ -6041,6 +6361,22 @@
       53.7,
       5.5,
       9.5
+     ]
+    }
+   },
+   "thread-m4": {
+    "name": "Thread plug gauge, M4x0.7",
+    "model": "models/thread-m4.glb",
+    "bbox": {
+     "min": [
+      -34.1,
+      -4.77,
+      -0.01
+     ],
+     "max": [
+      34.1,
+      4.77,
+      9.53
      ]
     }
    },

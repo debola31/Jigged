@@ -229,7 +229,7 @@ def holder_colliders(at, tool_id: str, tool_clear_mm: float = 0.0, body_clear_mm
     cyl = lambda r, z0, z1: (lambda p, r=r, a=at + [0, 0, z0], b=at + [0, 0, z1]: G.sdf_cyl(p, a, b, r))  # noqa: E731
     c = tool_clear_mm
     return [cyl(TL.FLANGE_TOP[0], TL.FLANGE_BOTTOM[1], TL.FLANGE_TOP[2]), cyl(TL.BODY[0] + body_clear_mm, *TL.BODY[1:]),
-            cyl(t["r"] + c, -t["length"] - c, -TL.GAUGE_MM + c), cyl(TL.TAPER["r"], -4.5, 68.5)]
+            cyl(t["body_r"] + c, -t["length"] - c, -TL.GAUGE_MM + c), cyl(TL.TAPER["r"], -4.5, 68.5)]
 
 
 def fit_holder_grip(tool_id: str = "drill-5p5", iters: int = 350) -> dict:
@@ -361,7 +361,7 @@ class Seat(ToolTake):
         super().__init__(out, door_lumbar(self.stance_fork), verbose)
         rest_at(self)
         self.tool, self.fork, self.n = tool_id, fork, n_forks
-        self.wide = TL.cutter(tool_id)["r"] > TL.BODY[0]     # a tool wider than the holder's body: no slack round it
+        self.wide = TL.cutter(tool_id)["body_r"] > TL.BODY[0]     # a tool wider than the holder's body: no slack round it
         # out of the fork this far before it goes up: round a wide tool the fingers wrap wider, and lifted after 68 mm
         # the face mill's caught the end of its fork's tine
         self.slide_mm = SLIDE_MM + (WIDE_SLIDE_MM if self.wide else 0.0)
@@ -442,7 +442,7 @@ class Seat(ToolTake):
         self.side["R"]["wrist"] = Wg
         # opened round the holder's body, or round a wider tool kept clear of (the face mill's: opened for the body,
         # the fingers closed into its cutter as the hand came in)
-        size = 2 * max(TL.BODY[0], TL.cutter(self.tool)["r"] + TOOL_CLEAR_MM)
+        size = 2 * max(TL.BODY[0], TL.cutter(self.tool)["body_r"] + TOOL_CLEAR_MM)
         # the hand opens for the reach as for the default grip where its own is the default's with fingers moved
         # ("from"): an end mill's grip, its middle and ring fingers straightened off the cutter, opened so, put them on
         # the table's front edge as the hand rose; and so does every hand reaching for a holder over the table (its fork

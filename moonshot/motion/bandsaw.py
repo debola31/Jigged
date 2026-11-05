@@ -89,7 +89,8 @@ SLIDE_S = 4.5               # the card's bar slide, from Dake's footage
 STOP_INTO_MM = 2.0          # the slide is aimed this far past the stop's face, and JAW_INTO_MM into the fixed jaw, so
 JAW_INTO_MM = 1.0           # the bar meets both, as people push a bar up to a stop and its fence: aimed 0.5 mm in and
                             # at the jaw's face, it ended 0.64 mm short of the stop and 1.25 mm off the jaw
-HOLD_S = 0.6                # held against the stop before letting go
+SLIDE_OFF_JAW_MM = 0.3      # ... and slid this far off the fixed jaw till it is held at the stop
+HOLD_S = 0.6               # held against the stop before letting go
 HOLD_N = 10.0               # ... this hard (proposed: the card's 10 N push on the jaw, as no source gives this one),
 JAW_N, DOWN_N = 4.0, 5.0    # against the fixed jaw and down on the bed (proposed: the card's 20 N hold, split)
 FRONT_LUMBAR = np.array([-200.0, -490.0, 955.0])   # the station's mm: at the front, left of the work stop, the bar
@@ -333,10 +334,13 @@ class LoadPlan(SawPlan):
         t_slide = tg + 0.3
         slide = SC.stop_face_y() - STOP_INTO_MM - (self.bar0[1] - SC.bar_mm() / 2)        # along +Y: negative
         self.look(t_slide, self.place.world([SC.fixed_face_x(), SC.stop_face_y(), SC.bed_z() + 20]))
-        p1 = p0 + self.place.vec([JAW_INTO_MM, slide, 0.0])
+        # slid a hair off the fixed jaw, then pressed onto it as it is held at the stop: its end starts in the gap
+        # between the jaw's two plates, and aimed into the jaw as it slid, its corner caught the front plate's end
+        p1 = p0 + self.place.vec([-SLIDE_OFF_JAW_MM, slide, 0.0])
         self.move("bar", t_slide, t_slide + SLIDE_S, R0, p1)
         t_held = t_slide + SLIDE_S
         t_off = t_held + HOLD_S
+        self.move("bar", t_held, t_held + HOLD_S * 0.6, R0, p1 + self.place.vec([JAW_INTO_MM + SLIDE_OFF_JAW_MM, 0, 0]))
         self.carry("bar", tg, t_off)
         # the bar's friction on the bed, felt and pushed against as it slides, then a light push holding it to the stop
         # and against the fixed jaw (the card's phase 7), so it doesn't drift toward the open jaw

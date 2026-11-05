@@ -141,7 +141,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",

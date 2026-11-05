@@ -66,14 +66,15 @@ def min_jerk(x: float) -> float:
 
 class BenchRun:
     def __init__(self, folder: Path, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = (),
-                 grip_objects: dict[str, tuple[str, ...]] | None = None):
-        """grip_objects: each grip's name -> the bodies its digits squeeze into."""
+                 grip_objects: dict[str, tuple[str, ...]] | None = None, cell=BC):
+        """grip_objects: each grip's name -> the bodies its digits squeeze into. cell: the scene, a module with
+        bench_cell's with_body (the inspection bench's, unless another's)."""
         self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
         self.folder = Path(folder)
         self.tk = json.loads((self.folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(self.folder / "reference.npz")
         self.body = build(pelvis_mm=tuple(self.tk["lumbar"]))
-        self.xml = BC.with_body(self.body.xml, loose, carried, skip)
+        self.xml = cell.with_body(self.body.xml, loose, carried, skip)
         m = self.model = mujoco.MjModel.from_xml_string(self.xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
         self.ref = ReferenceTake(self.body, m, self.folder)

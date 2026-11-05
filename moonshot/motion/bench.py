@@ -117,10 +117,10 @@ def instrument_colliders(rests: dict, names: tuple[str, ...], grow: float = 0.0)
     return out
 
 
-def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Each loose body's pose (mm, rotation) once it has come to rest on the bench, no body model: what the plan
-    aims at is where the physics will find it."""
-    m = mujoco.MjModel.from_xml_string(BC.standalone_xml(loose, skip))
+def settle(loose: str, skip: tuple[str, ...] = (), seconds: float = 1.0, cell=BC) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Each loose body's pose (mm, rotation) once it has come to rest on the bench (or in another cell, a module with
+    bench_cell's standalone_xml), no body model: what the plan aims at is where the physics will find it."""
+    m = mujoco.MjModel.from_xml_string(cell.standalone_xml(loose, skip))
     d = mujoco.MjData(m)
     for _ in range(int(seconds / m.opt.timestep)):
         mujoco.mj_step(m, d)
@@ -405,11 +405,14 @@ class BenchPlan:
                 return a + (b - a) * (t - t0) / max(t1 - t0, 1e-9), ga or gb
         return keys[-1][1], keys[-1][2]
 
+    def obstacles(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """What the arms' forearms keep clear of, as (centre, half size) boxes: the bench's top."""
+        return [bench_box()]
+
     def solve(self, iters=3000):
         self.T = self.t + 0.3
         n = self.n = int(self.T * FPS) + 1
-        c, h = bench_box()
-        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=[(c, h)], arms=SIDES)
+        s = BS.BodySolver(n, FPS, self.lumbar, self.prior, boxes=self.obstacles(), arms=SIDES)
         s.W = BS.BodySolver.W | self.solver_w
         for side in SIDES:
             first = min((x[0] for x in self.cons[side]), default=0.0)

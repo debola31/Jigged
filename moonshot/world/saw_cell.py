@@ -175,6 +175,7 @@ class Place:
 FRONT = Place()                     # the person at the front, by the work stop: the saw as it stands
 START = Place(yaw_deg=43.6)         # in front of the control box, which faces the saw's front-left corner: its long side
                                     # square to the way the body faces
+BACK = Place(yaw_deg=180.0)         # behind the saw at its infeed: the station's -Y is the way the body faces
 END = Place(yaw_deg=90.0)           # at the left end, by the handwheel and the control box: the station's +X is the
                                     # world's +Y, the way the body faces
 

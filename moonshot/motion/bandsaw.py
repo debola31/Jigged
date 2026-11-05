@@ -8,9 +8,9 @@ handle and control box are at its left end and its work stop at the front right,
 body model faces one way and doesn't walk. So the person works it from three places, each a take, and the saw is
 turned under the body for each (moonshot/world/saw_cell.py Place):
 
-1. <part>-saw, at the front by the stop (card phase 6): the right hand lies flat on the bar where the last cut left
-   its end, at the blade, and slides it along the bed until its end meets the stop block, holds it there and against
-   the fixed jaw a moment, and lets go.
+1. <part>-saw, behind the saw at its infeed (card phase 6): the right hand's fingers on the bar's tail push it
+   along the bed until its other end, which the last cut left at the blade, meets the stop block; it holds it there
+   and against the fixed jaw a moment, and lets go.
 2. <part>-saw-clamp, at the left end (phases 8-9): the right hand turns the vise handwheel by its knob until the jaw
    is snug on the bar (the card's half turn, as the jaw is left).
 3. saw-start, in front of the control box, the same for every bar (phases 10-12): the index presses Start, and the
@@ -22,6 +22,9 @@ turned under the body for each (moonshot/world/saw_cell.py Place):
    right hip.
 
 Where the card can't be followed on this saw, and why (each for review):
+- The bar is pushed from the infeed side, as a bar is fed: its end is at the blade, under the raised bow, and from
+  the front the person reaching it leaned their head into the idler wheel's guard (raising the bow brings the guard
+  no higher there).
 - Sides: the card's steadying hand (left) feeds the bar and takes the piece while its working hand (right) works the
   vise. Here the two are never at once (the jaw and the handwheel are a metre from the bar), and from the front the
   bar and the piece are on the right of the stop's left side, so the right hand does both; the left hangs.
@@ -89,8 +92,12 @@ JAW_INTO_MM = 1.0           # the bar meets both, as people push a bar up to a s
 HOLD_S = 0.6                # held against the stop before letting go
 HOLD_N = 10.0               # ... this hard (proposed: the card's 10 N push on the jaw, as no source gives this one),
 JAW_N, DOWN_N = 4.0, 5.0    # against the fixed jaw and down on the bed (proposed: the card's 20 N hold, split)
-FRONT_LUMBAR = np.array([-180.0, -560.0, 955.0])   # the station's mm: at the front, left of the work stop, the bar
-                                                    # before the right shoulder, as near as the saw's base lets it
+FRONT_LUMBAR = np.array([-200.0, -490.0, 955.0])   # the station's mm: at the front, left of the work stop, the bar
+                                                    # before the right shoulder, the knees at the base's recessed front
+                                                    # (233 mm in front of the blade from 300 to 600 mm up, its foot at
+                                                    # 450), the hanging hand clear of the work stop's arm
+BACK_LUMBAR = np.array([200.0, 540.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
+                                                    # before the right shoulder, the body clear of the motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
 END_LUMBAR = np.array([-1200.0, 170.0, 955.0])     # at the left end, facing the station's +X: the handwheel ahead, the
                                                     # control box to the right. Crouched 115 mm (the body model has no
@@ -247,55 +254,73 @@ class SawPlan(BenchPlan):
 
 # --- 1. load: slide the bar to the stop ------------------------------------------------------------------------------
 class LoadPlan(SawPlan):
+    place = SC.BACK
+    lumbar_station = BACK_LUMBAR
+
     def __init__(self, out=None, verbose=True):
         super().__init__(out or OUT["load"], None, verbose)
         self.bar0 = SC.bar_at(-SC.OUT_MM)
         self.paths["bar"] = [(0.0, self.place.R, self.place.world(self.bar0))]
         self.solve_grips(self.grip_specs(), {"bar": (self.place.world(self.bar0), self.place.R)})
 
+    def solver_boxes(self) -> list:
+        return [world_box(self.place, n) for n in ("bed_back", "fixed_jaw_back", "rail")] + [self.jaw_aabb()]
+
+    def jaw_open_mm(self) -> float:
+        """The movable jaw's joint (mm) as the take finds it: its face JAW_GAP_MM off the bar (moonshot/sim/bandsaw.py)."""
+        return SC.bar_x()[0] - JAW_GAP_MM - SC.site_mm("jaw_face")[0]
+
+    def jaw_box(self):
+        c = BS.record()["colliders"]["jaw"]
+        lo, hi = np.array(c["box_min_mm"], float), np.array(c["box_max_mm"], float)
+        lo[0] += self.jaw_open_mm()
+        hi[0] += self.jaw_open_mm()
+        return lo, hi
+
+    def jaw_aabb(self):
+        lo, hi = self.jaw_box()
+        corners = self.place.world(np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1])
+                                             for z in (lo[2], hi[2])]))
+        return (corners.min(0) + corners.max(0)) / 2, (corners.max(0) - corners.min(0)) / 2
+
     def grip_specs(self) -> dict:
-        """The right hand's fingers on the bar's top by its end, which the last cut left at the blade, their tips
-        toward it: the index's, middle's and ring's pads pressing on it to draw it toward the stop. Only the fingers go
-        in under the raised bow (its box spans the window from 33.6 mm in front of the blade, 47 mm over a 1-1/2 in
-        bar), the palm in front of it, clear of the fixed jaw's plate that stands 100 mm over the bar on its right.
-        Lying along the bar 120 mm in, the whole hand was under the bow, and lifted it 2.5 deg."""
+        """The index's, middle's and ring's pads on the bar's tail, its end toward the person at the infeed, to push
+        it: the fingers clear of the jaws, which stand 100 mm over the bar to 227 mm behind the blade, and of the
+        raised bow's box, which ends 277 mm behind it."""
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
         c = self.bar0
-        end = c[1] - SC.bar_mm() / 2
-        top = self.place.world([c[0], end + 22.0, SC.bed_z() + SC.STOCK["h"]])
-        up = self.place.vec([0.0, 0.0, 1.0])
+        tail = c[1] + SC.bar_mm() / 2
+        face = self.place.world([c[0], tail, c[2]])
+        out = self.place.vec([0.0, 1.0, 0.0])             # its outward normal, toward the person
+        hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
+        on_face = lambda: G.plane_target(face, out, 2.0, bands(face, x=(-hw + 4, hw - 4), z=(-hh + 6, hh - 5)))  # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
-            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 35.0, 35.0, 15.0
-        q0.update(little_mcp_flex=55.0, little_pip=60.0, thumb_cmc_abd=20.0, thumb_cmc_flex=5.0, thumb_mcp_flex=15.0,
-                  thumb_ip=10.0)
-        hw = SC.STOCK["w"] / 2
-        on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 3, hw - 3), y=(lo, hi)))   # noqa: E731
-        cols = [self.bar_box(c), self.stop_block_box(), saw_box(self.place, "bow", q_head=math.radians(RAISED_DEG))]
-        cols += [saw_box(self.place, n) for n in ("bed_front", "fixed_jaw_front", "fixed_jaw_back")]
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 30.0, 25.0, 10.0
+        q0.update(little_mcp_flex=50.0, little_pip=55.0, thumb_cmc_abd=15.0, thumb_cmc_flex=20.0, thumb_mcp_flex=30.0,
+                  thumb_ip=20.0)
+        lo, hi = self.jaw_box()
+        cols = [self.bar_box(c), saw_box(self.place, "bow", q_head=math.radians(RAISED_DEG)),
+                oriented_box(self.place.world((lo + hi) / 2), self.place.R, (hi - lo) / 2)]
+        cols += [saw_box(self.place, n) for n in ("bed_back", "fixed_jaw_back")]
         return {"bar": dict(of="bar", obj=self.place.world(c), q0=q0, iters=1000, colliders=cols,
-                            targets={"index": on_top(-8, 8), "middle": on_top(-4, 12), "ring": on_top(-12, 4)},
-                            starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (25, 40) for pl in (60, 80)
-                                    for r in (-20,) for p in (60, 85)])}
+                            targets={"index": on_face(), "middle": on_face(), "ring": on_face()},
+                            starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (15, 30) for pl in (40, 70)
+                                    for r in (-20,) for p in (40, 75)])}
 
     def compose(self):
         self.t = 0.5
         g = self.grips["bar"]
         R0, p0 = self.place.R, self.place.world(self.bar0)
         _, Wg = self.grip_pose("bar", self.t)
-        up, back = self.place.vec([0, 0, 1.0]), self.place.vec([0, -1.0, 0])
+        up, back = self.place.vec([0, 0, 1.0]), self.place.vec([0, 1.0, 0])     # back: toward the person
         self.look(0.0, p0 + back * (SC.bar_mm() / 2 - 40))
-        # widest 0.12 s before it came to rest, it was widest 93% of the way: its fingers meet the bar about 0.1 s
-        # before the wrist stops
-        # ready over the grip, not back over the bar's end: from 120 mm back, the hand coming down landed on the bar's
-        # end and the work stop, 105 mm short
-        # up off the thigh first, over the work stop's block, then forward over the grip (rising forward, the hanging
-        # fingers caught on the block and came to rest on the fixed jaw's plate)
-        # the rise slower than the reach down: a reach is timed from the last stop before the fastest frame of the 2 s
-        # before contact, and risen in 1.4 s (806 mm/s, the reach 463) it was timed from the thigh. Paused low and
-        # 150 mm back from the grip, then the fingers in under the raised bow, below its box
-        tg = self.reach("R", "bar", self.t, ready=Wg + up * 40 + back * 150, approach=Wg + up * 25 + back * 40,
-                        opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45, rise_via=[self.rest + up * 140 + back * -60])
+        # up off the thigh to over the tail and back from it, a pause, then onto it: the rise slower than the reach
+        # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
+        # 0.15 s before it comes to rest (at the bar's front, contact 0.18 s late and the hand widest 0.21 s before it
+        # was planned to stop, it was widest 41% of the way)
+        tg = self.reach("R", "bar", self.t, ready=Wg + up * 70 + back * 110, approach=Wg + up * 10 + back * 35,
+                        opened=0.6, lead=0.15, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
         t_slide = tg + 0.3
@@ -322,10 +347,10 @@ class LoadPlan(SawPlan):
         _, W = self.grip_pose("bar", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.55)
         self.wrist["R"] = W
-        self.transit("R", t_off + 0.05, t_off + 0.55, W + up * 60)
+        self.transit("R", t_off + 0.05, t_off + 0.55, W + up * 40 + back * 50)
         self.to_rest("R", t_off + 0.55, t_off + 1.6)
         self.t = t_off + 1.8
-        self.clip("load", 0.0, self.t, "LOAD  the bar slid along the bed until its end meets the work stop")
+        self.clip("load", 0.0, self.t, "LOAD  the bar pushed along the bed from the infeed until its end meets the stop")
         self.slide = {"t0": t_slide, "t1": t_held, "mm": -slide}
 
 

@@ -224,7 +224,7 @@ def run_load(replan=False, seconds=None) -> dict:
     out = plan.OUT["load"]
     if replan or not (out / "reference.npz").exists():
         plan.build("load")
-    r = SawRun(out, SC.FRONT, SC.bar_body(SC.FRONT), None, carried=("bar",), grip_objects={"bar": ("bar",)},
+    r = SawRun(out, SC.BACK, SC.bar_body(SC.BACK), None, carried=("bar",), grip_objects={"bar": ("bar",)},
                lifted=())
     r.go(seconds)
     s = SC.saw_state(r.model, r.data, r.ctl, r.place)["stock"]["bar"]

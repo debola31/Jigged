@@ -496,9 +496,10 @@ class Control:
         """A probing cycle output from VPS to MDI, to run on Cycle Start: "surface" (axis, sign: one touch, its offset
         the ball's radius beyond the ball's centre; in Z the probe's length below its gauge line), "bore" (four
         touches, the centre in X and Y), or "tool_length" (the tool in the spindle down onto the tool setter, whose top
-        is setter_z; gauge_length is the operator's approximate length, to come down to it at rapid)."""
+        is setter_z; gauge_length is the operator's approximate length, to come down to it at rapid). A cycle writes
+        the work offset "wcs" names, G54 unless it names another (G55, to measure without moving the zero)."""
         s, r = self.machine_mm().copy(), v.get("ball_r", 0.0)
-        G = self.work["G54"]
+        G = self.work.setdefault(v.get("wcs", "G54"), np.zeros(3))
         if template == "surface":
             i, sign = "xyz".index(v["axis"]), v["sign"]
             u = np.zeros(3)

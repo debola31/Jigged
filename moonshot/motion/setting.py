@@ -51,7 +51,11 @@ STANDOFF_MM = 6.0           # how far off a face the coarse jog stops: a click a
 CLOSE_MM = 0.3              # and the .01 jog: a click at .01 short of it is 0.25 mm
 APPROACH_MM = 1.5           # a fine move's .1 jog stops this short, so its rounding (a click is 2.54 mm) never passes
 Y_TRAVEL_MM = vf2.record()["joints"]["y"]["range_mm"][1]   # the spindle reaches this far toward the operator
-STEM_CLEAR_MM = 2.0         # a straight check's indicator stem stands this far off the edge it sweeps
+LEVER_DROP_MM = 2.5         # a straight check's indicator lever angles down this far to its ball, so its stem ends
+                            # above the plate's top while the ball sweeps 1.5 mm under it: level, the stem reached
+                            # down beside the ball, into the plate where the Y travel kept it near (ll-1005337)
+LEVER_OUT_MM = 0.5          # and the lever runs along the edge this far out from it, clear of the plate
+DOWEL_R_MM = 4.0            # ll-1005337's reamed 8.000 mm dowel holes
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -194,14 +198,21 @@ class Probing:
         else:
             self.jog("z", target[2] - self.ball()[2], "inc_0.1")
 
-    def cycle(self, template: str, wait_s: float, **values) -> None:
-        """Choose the cycle in VPS, output it to MDI, start it with the left hand over Feed Hold, and wait it out."""
+    def cycle(self, template: str, wait_s: float, wcs: str = "G54", **values) -> None:
+        """Choose the cycle in VPS (and the work offset it writes, if not G54), output it to MDI, start it with the left
+        hand over Feed Hold, and wait it out."""
         k = self.k
         k.look(k.t, SCREEN)
         k.keys(["edit", "down", "down", "enter", "down", "enter"] + ["right"] * {"surface": 1, "bore": 2}[template]
-               + ["enter", "f4"])
+               + ["enter"])
+        if wcs != "G54":
+            k.keys(["down"])
+            k.type(wcs[1:])
+            k.keys(["enter"])
+        k.keys(["f4"])
         self.page = "vps"
-        self.vps.append({"template": template, "ball_r": PROBE["tip_r"]} | values)
+        self.vps.append({"template": template, "ball_r": PROBE["tip_r"]} | ({"wcs": wcs} if wcs != "G54" else {})
+                        | values)
         k.press_left("cycle_start", hover_right="feed_hold")
         k.look(k.t, self.ball())
         k.wait(wait_s)
@@ -234,16 +245,16 @@ class Probing:
         if axis != "z":
             self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
 
-    def bore(self, centre: np.ndarray, z: float, datum: np.ndarray, axes: str = "xy") -> None:
+    def bore(self, centre: np.ndarray, z: float, datum: np.ndarray, axes: str = "xy", wcs: str = "G54") -> None:
         """A bore cycle with the ball at z in a vertical bore; the zero shifted from its centre to the datum, on the
-        axes the bore gives."""
+        axes the bore gives (G54's: a bore measured into another offset is left as it reads)."""
         self.to([centre[0], centre[1], z], fine=True)
-        self.cycle("bore", 12.0)
-        for a in axes:
+        self.cycle("bore", 12.0, wcs)
+        for a in axes if wcs == "G54" else "":
             self.shift(a, datum["xy".index(a)] - centre["xy".index(a)])
         self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
 
-    def plan(self, axes: str) -> dict:
+    def plan(self, axes: str, wcs: str = "G54") -> dict:
         k, f = self.k, self.f
         k.look(0.0, key_at("handle_jog"))
         k.wait(0.5)
@@ -252,13 +263,14 @@ class Probing:
         if axes == "xy":
             if "bore" in f:
                 self.bore(np.array(f["bore"]["centre_mm"]), f["bore"]["z_mm"], np.array(f["datum_mm"]),
-                          "".join(a for a in "xy" if a not in f))
+                          "".join(a for a in "xy" if a not in f), wcs)
             for a in ("x", "y"):
                 if a in f:
                     s = f[a]
                     self.surface(a, np.array(s["face_mm"]), np.array(s["normal"]), f["datum_mm"]["xy".index(a)],
                                  s["z_mm"], s.get("standoff_mm", 2 * STANDOFF_MM), s.get("fine", False))
-            sets = {a: {"method": "probe", "datum_mm": list(f["datum_mm"])} for a in "xy"}
+            sets = {a: {"method": "probe", "datum_mm": list(f["datum_mm"])} | ({"wcs": wcs} if wcs != "G54" else {})
+                    for a in "xy"}
         else:
             top = np.array([*f["z"]["at_xy"], f["z"].get("z_mm", self.top)])
             self.surface("z", top, np.array([0, 0, 1.0]), f["datum_mm"][2], 0.0)
@@ -329,23 +341,21 @@ def approach(s, axis: str, to: float) -> None:
 
 class StraightCheck:
     """Check it's straight: a plate's near long edge swept along X by the test indicator, as SquareCheck sweeps a side
-    up Z: the ball beside the edge at mid-thickness, in at .001 to the preload, along the edge at .01 between its clamps,
-    a look at the needle, then back off and up to home.
+    up Z: the ball beside the edge 1.5 mm under its top, in at .001 to the preload, along the edge at .01 between its
+    clamps, a look at the needle, then back off and up to home.
 
-    The indicator is turned in the spindle so its stylus runs along the edge and a little out from it, its stem, which
-    reaches down to the ball's height, STEM_CLEAR_MM off the edge. Where the Y travel's front leaves no room for that
-    (ll-1005337's plate is the travel's width) the stem stands as far forward as it reaches and the ball sweeps 1.5 mm
-    under the top, the stem over the edge's top corner by the rest [declared shortcut: the real lever angles down to
-    its ball]."""
+    The indicator is turned in the spindle so its lever runs along the edge, LEVER_OUT_MM out from it, angled down
+    LEVER_DROP_MM to the ball, as the lever of a test indicator angles to the face it reads: its stem ends above the
+    plate's top, so nothing of it reaches over the plate where the Y travel's front keeps the spindle close
+    (ll-1005337's plate is the travel's width)."""
 
     def __init__(self, take: PendantTake, part: dict):
         self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
-        r, face = INDICATOR["tip_r"], self.c[1] - self.h[1]
+        r = INDICATOR["tip_r"]
         self.front = SPINDLE[1] - Y_TRAVEL_MM + 0.3             # the spindle's nearest reach, less a margin
-        out = min(INDICATOR["shank_r"] + STEM_CLEAR_MM - r, face - r - self.front - 0.7)
-        self.tool = INDICATOR | {"offset_mm": [math.sqrt(INDICATOR["offset_mm"][0] ** 2 - out ** 2), out]}
-        top = self.c[2] + self.h[2]
-        self.z = top - (self.h[2] if out >= INDICATOR["shank_r"] - r else 1.5)
+        self.tool = INDICATOR | {"offset_mm": [math.sqrt(INDICATOR["offset_mm"][0] ** 2 - LEVER_OUT_MM ** 2),
+                                               LEVER_OUT_MM], "lever_drop_mm": LEVER_DROP_MM}
+        self.z = self.c[2] + self.h[2] - 1.5
         self.ball0 = SPINDLE + [*self.tool["offset_mm"], -INDICATOR["length_mm"] + r]
 
     def ball(self) -> np.ndarray:
@@ -383,13 +393,13 @@ class StraightCheck:
         return {}
 
 
-def probe_features(plan: dict, setup_id: str) -> dict:
+def probe_features(plan: dict, setup_id: str, check: bool = False) -> dict:
     """What each setup of nist-ftc-10 probes, and where its zero is (world mm, frame 0), from the plan's wcs.
 
     The plan's X and Y are the machine's. Op 50 stands the part on end with datum A facing along X, so datum A
     can't give Y as its wcs says: there it gives X, and the front face Y. The bar parts' are in PROBES."""
     if (plan["part"], setup_id) in PROBES:
-        return g1_features(plan, setup_id)
+        return g1_features(plan, setup_id, check)
     pose = part_pose(plan, setup_id)
     R, O, c, h = pose["R"], pose["origin_mm"], pose["centre_mm"], pose["size_mm"] / 2
     world = lambda p: O + R @ np.asarray(p, float)           # noqa: E731  a point of the part's model
@@ -456,6 +466,11 @@ PROBES |= {
     ("ll-1005337", "op10"): {"x": ((-212.25, 630.2, -10.475), "+Y", {"fine": True}),
                              "y": ((-403.2, 300.0, -10.475), "-X", {"fine": True, "standoff_mm": 2.0}),
                              "datum": (-200.0, 300.0, -0.95)},
+    # ll-1005337 Op 20, slid 10 mm toward the front: its finished near edge past the Y travel's front, X and Y come
+    # from the reamed 8 mm dowel hole at its left end, by a bore cycle, the ball 8 mm down it; its check probes the
+    # other hole into G55 (the user's decision, 2026-11-05)
+    ("ll-1005337", "op20"): {"bore": (-40.5, 579.5, -8.95), "datum": (-40.5, 579.5, -0.95),
+                             "check": {"bore": (-20.5, 20.5, -8.95), "wcs": "G55"}},
 }
 # the fixed jaw's -x end, and its face 17 mm past the end of a part up to 83 mm long: 5 and 3 mm below its top
 FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
@@ -476,7 +491,7 @@ def square_sweep(plan: dict, setup_id: str, part: dict) -> dict:
     return {"side": 1, "from_z": start, "sweep_mm": sweep}
 
 
-def g1_features(plan: dict, setup_id: str) -> dict:
+def g1_features(plan: dict, setup_id: str, check: bool = False) -> dict:
     """probe_features for a PROBES setup: its touches, cuts and zero as world points (mm, frame 0)."""
     spec, pose = PROBES[(plan["part"], setup_id)], part_pose(plan, setup_id)
     R, O, c, h = pose["R"], pose["origin_mm"], pose["centre_mm"], pose["size_mm"] / 2
@@ -505,6 +520,12 @@ def g1_features(plan: dict, setup_id: str) -> dict:
         lo, hi = corners.min(0), corners.max(0)
         out["cuts"].append({"centre_mm": ((lo + hi) / 2).tolist(), "half_mm": ((hi - lo) / 2).tolist()})
     out["datum_mm"] = world(spec["datum"]).tolist()
+    if check and "check" in spec:                            # the check's bore, measured into its own offset
+        spec = spec["check"]
+        out["datum_mm"], out["wcs"] = world(spec["bore"]).tolist()[:2] + [out["datum_mm"][2]], spec["wcs"]
+    if "bore" in spec:
+        b, top = world(spec["bore"]), c[2] + h[2]
+        out["bore"] = {"centre_mm": b[:2].tolist(), "z_mm": float(b[2]), "r_mm": DOWEL_R_MM, "top_z_mm": float(top)}
     return out
 
 
@@ -526,6 +547,12 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         tool = PROBE
         extra = {"vps": pr.vps, "bores": [f["bore"]] if "bore" in f else [], "cuts": f.get("cuts", []),
                  "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}
+    elif step["title"] == "Check it's straight" and "check" in PROBES.get((part, setup), {}):
+        f = probe_features(plan, setup, check=True)
+        pr = Probing(take, p, f)
+        sets = pr.plan("xy", f["wcs"])
+        tool = PROBE
+        extra = {"vps": pr.vps, "bores": [f["bore"]], "cuts": [], "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}
     elif step["title"] == "Check it's straight":
         sq = StraightCheck(take, p)
         sets = sq.plan()

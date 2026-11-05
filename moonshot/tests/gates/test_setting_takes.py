@@ -11,14 +11,15 @@ ll-1005337's op10 and op20): the ball against its long edge, swept along it by j
 face that stands level, by a sweep across it: not this one.
 
 What each take carries besides its record (take.npz, scene.json):
-    take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
-                  world point (mm, at frame 0) each axis's zero must pass through; for "z", "tool": {"length_mm"},
+    take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z], "wcs"}}, the
+                  world point (mm, at frame 0) each axis's zero must pass through, in the work offset "wcs" (G54 if
+                  none); for "z", "tool": {"length_mm"},
                   the gauge line to the tip of the tool the zero is set with; "events": the plan's key presses
                   ({"kind": "press", "key", "t0", "t1"}); for the check, "setup": {"tool": {"length_mm", "tip_r",
                   "offset_mm"} (the gauge line to the bottom of the indicator's ball, its radius, and how far its
                   centre stands off the spindle's axis, [x, y] in the tool's frame), "centre_mm", "half_mm" (the
                   part's box at frame 0, world, which it stands square to)}
-    outcome.json  the machine at the end: "work": {"G54": [X, Y, Z]}, "tool_length": {n: Z}, "tool": n (machine
+    outcome.json  the machine at the end: "work": {"G54": [X, Y, Z], ...}, "tool_length": {n: Z}, "tool": n (machine
                   mm, Haas's signs), and "pressed": [[t, key], ...] as the machine registered them
     checks.json   per frame, "touching": what the hands touch, and "handle_deg": the jog handle's angle
 
@@ -42,9 +43,12 @@ pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
 PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
 STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
-SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")]
+# ll-1005337's Op 20 checks the plate slid straight by probing its second dowel hole into G55 (the user's decision,
+# 2026-11-05: its finished near edge stands past the Y travel's front): a work offset, held to the probe's bar
+PROBED_CHECKS = ["ll-1005337/op20-check"]
+SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")] + PROBED_CHECKS
 CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Check it's square", "Check it's straight")
-          and f"{p}/{s['id']}" != "ll-1007223/op30-check"]
+          and f"{p}/{s['id']}" not in ["ll-1007223/op30-check", *PROBED_CHECKS]]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
 
@@ -102,11 +106,11 @@ def test_the_work_offset_puts_the_spindle_on_the_planned_datum(setting):
     base, spindle = pos("vf2"), pos("vf2_spindle")
     table = pos("vf2_table") - base                                  # the X and Y joints' travel at frame 0
     head = pos("vf2_head") - base                                    # the Z joint's
-    G54 = np.array(out["work"]["G54"], float)
     assert tk["sets"], "the take sets no axis"
     for axis, s in tk["sets"].items():
         tol = threshold(TOLERANCE[s["method"]]).value
         datum = np.array(s["datum_mm"], float)
+        G54 = np.array(out["work"][s.get("wcs", "G54")], float)             # the offset the take sets, G54 unless named
         if axis in "xy":
             i = "xy".index(axis)
             # at machine X (Y) = G54, the table's joint stands at -G54, carrying the datum with it

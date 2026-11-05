@@ -1909,7 +1909,7 @@
     {
      "id": "op20-check",
      "title": "Check it's straight",
-     "caption": "Sweep the indicator along its finished long edge: the needle should stay put.",
+     "caption": "Probe the other dowel hole: it should read where the drawing has it.",
      "kind": "human",
      "group": "op20",
      "where": {
@@ -1927,7 +1927,7 @@
     {
      "id": "op20-xy",
      "title": "Find X and Y",
-     "caption": "Set G54 X at the finished end (probe) and Y at the finished near edge (probe).",
+     "caption": "Set G54 X at the dowel hole at its left end (probe) and Y at the same hole (probe).",
      "kind": "human",
      "group": "op20",
      "where": {

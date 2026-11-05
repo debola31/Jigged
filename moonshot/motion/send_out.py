@@ -24,20 +24,25 @@ from moonshot.motion.step_take import HANGING
 from moonshot.world import outproc_cell as OC
 
 TAKES = data_root() / "takes"
-LUMBAR = np.array([-100.0, -575.0, 955.0])  # standing at the rack's front, as at the bench: 270 mm behind the shelf's
-                                            # front edge, the bag in front of the right side of the belly: 40 mm
-                                            # further right, set in at the body's middle, the right arm crossed it
-                                            # (shoulder plane 53 deg) and was less like people's (median NLL 29.1)
-OVER_RIM_MM = 25.0          # carried over the bag, the part's underside this far over its rim
+LUMBAR = np.array([-40.0, -575.0, 955.0])   # standing at the rack's front, as at the bench: 270 mm behind the shelf's
+                                            # front edge, between the bag and the part: 60 mm further left, the trunk
+                                            # turned 11-14 deg to the work on the right the whole take, past people's
+                                            # for the left arm (its -14); at the bag, the right arm crossed the body
+                                            # (shoulder plane 53 deg, median NLL 29.1, people's 28.7)
+OVER_RIM_MM = 35.0          # carried over the bag, the part's underside this far over its rim: at 25 the arm, sagging, carried the
+                            # L-block into the bag's wall
 IN_FROM_NEAR_MM = 38.0      # set in, the part's near side this far from the bag's near wall: the thumb is behind it
 RIGHT_OF_MIDDLE_MM = 15.0   # ... and this far right of the bag's middle: the fingers lie to the part's left, the hand
                             # coming from the right
 LOWER_S, SET_S = 0.8, 0.5   # down into the bag to 15 mm over its floor, then the last 15 mm onto it, slower
 GRIP_EFFORT = 0.2           # the pinch's effort while it carries the part: carried, the part leaves the skin, and at
                             # 0.4 the squeeze took the thumb 5.8 mm into it (the skin's 3.5)
-LOAD_S, UNLOAD_S = 0.3, 0.3 # the arm takes the part's weight on over this long as it lifts it (people's loading
+LOAD_S, UNLOAD_S = 0.2, 0.3 # the arm takes the part's weight on over this long as it lifts it (people's loading
                             # 163-265 ms), and lets it go over this long as it sets it down (moonshot/sim/bench.py
-                            # carry_load): at 0.2 s the 0.6 kg part left the shelf 167 ms after its load began
+                            # carry_load): at 0.3 s, with the pinch at 0.2, the part left the shelf 367-600 ms after
+                            # its load began
+PART_TAKE_MM = 6.0          # the part's first rise, over TAKE_S, as the arm takes its weight: the deburring tool's 4.5
+                            # left the 0.6 kg part on the shelf 11 frames after its load began
 
 
 def loose(part: str) -> str:
@@ -53,10 +58,10 @@ class SendOutPlan(BenchPlan):
     lumbar = LUMBAR
     # the grip weighs people's posture at 3, and its pads x3 to keep contact, as the deburring tool's grip does
     grip_weights = (3.0, 3.0)
-    # the body people's range at 3.5, as the bench takes', and their posture at 2 (BodySolver.W["prior"], 0.3): the
+    # the body people's range at 3.5, as the bench takes', and their posture at 1.5 (BodySolver.W["prior"], 0.3): the
     # palm-down pinch the whole take long, the shoulder turned in where people's isn't, the median NLL was 29.1 at
-    # 0.3 and 28.1-28.9 at 1 (people's 28.7)
-    solver_w = {"range": 3.5, "prior": 2.0}
+    # 0.3 and 28.1-28.9 at 1 (people's 28.7); at 2, 25.9-26.8, but the trunk turned to the right arm's work
+    solver_w = {"range": 3.5, "prior": 1.5}
 
     def __init__(self, part: str, out=None, verbose=True):
         self.spec = OC.SEND_OUT[part]
@@ -105,16 +110,19 @@ class SendOutPlan(BenchPlan):
         q0 = self.hand.neutral()
         q0.update(index_mcp_flex=45, index_pip=50, middle_mcp_flex=50, middle_pip=55, ring_mcp_flex=60, ring_pip=70,
                   little_mcp_flex=65, little_pip=75, thumb_cmc_abd=35, thumb_cmc_flex=15, thumb_mcp_flex=15, thumb_ip=10)
-        # each pad on its face, not pressed into it (carried, the part leaves the skin); along the face as the fingers
-        # lie, the index and middle either side of the middle of theirs, each level with the thumb
-        on = lambda c, nn, x: G.plane_target(c, nn, 0.5, bands(c, x=x, z=(-3, 3)))   # noqa: E731
+        # each pad just off its face, the grip's squeeze closing them on it: closed onto the faces 0.5 mm in, the
+        # fingers' arcs dragged the part up 0.64 N as they met it, 5% of its weight at the touch (the load's onset);
+        # along the face as the fingers lie, the index and middle either side of the middle of theirs, each level
+        # with the thumb
+        on = lambda c, nn, x: G.plane_target(c, nn, -0.5, bands(c, x=x, z=(-3, 3)))   # noqa: E731
         return {"part": dict(of="part", obj=thumb, q0=q0, iters=1000, load=P.kg,
                              colliders=self.part_colliders() + [box((lo + hi) / 2, (hi - lo) / 2), self.bag_box(5.0)],
                              targets={"thumb": on(thumb, n, (-4, 4)), "index": on(fing, -n, (-b, -a)),
                                       "middle": on(fing, -n, (a, b))},
-                             # four starts, from the shoulder turned out: eight took 20 minutes a grip on the shared
-                             # hub, and both parts' best grips turned the trunk 7-8 deg, between eight's two
-                             starts=[S(20, 0, 0, 45, 45, sr, 75, p, 0, 0) for p in (30, 60) for sr in (-35, -10)])}
+                             # eight starts, from the shoulder turned out: four left the L-block's index 331 off its
+                             # face once
+                             starts=[S(20, 0, r, 45, 45, sr, 75, p, 0, 0) for p in (30, 60) for sr in (-35, -10)
+                                     for r in (0, 15)])}
 
     # --- the verbs ------------------------------------------------------------------------------------------------
     def pick_up(self):
@@ -126,19 +134,22 @@ class SendOutPlan(BenchPlan):
         lo, hi = self.spec.world_extent()
         self.look(t0, p0 + R0 @ np.zeros(3) + (lo + hi) / 2)
         # ready in front of the shelf's edge, high enough that the hanging fingers clear it, and onto the part from
-        # above, coming to rest at the grip and closing there: closing 5 mm down onto it, the fingers dragged the
-        # L-block down 1.3 N and threw the jaw 4.6 mm up, so the load began at the touch (preload 0 and 67 ms, people's
-        # 139-321). Widest 0.11 s before it comes to rest: 0.09 s was 71% of the way with the touch on the way down,
-        # and closing from 0.6 open in 0.06 s the fingers snapped shut on the parts and threw them 21-23 mm
-        tg = self.reach("R", "part", t0, ready=Wg + [0, -130, 110], approach=Wg + [0, -30, 45], opened=0.8, lead=0.11,
-                        close_s=0.12)
+        # above, coming to rest at the grip open round it and closing there: closing 5 mm down onto it, the fingers
+        # dragged the L-block down 1.3 N and threw the jaw 4.6 mm up, so the load began at the touch (preload 0 and 67
+        # ms, people's 139-321). Widest 0.11 s before it comes to rest, the thumb at rest by its face and the fingers
+        # still open half way, so the thumb meets the part first and the fingers close it against the thumb: coming
+        # to rest 0.15 and 0.35 open, the pads met the part 0.05 s before the hand stopped and the touch came 80-82%
+        # of the way after the widest (people's 71-77); the fingers meeting the far face first, they shoved the parts
+        # 20-23 mm toward the operator, and the hand dragged them back along the shelf before it could lift them
+        tg = self.reach("R", "part", t0, ready=Wg + [0, -130, 110], approach=Wg + [0, -30, 45], opened=0.8,
+                        lead=0.11, close_s=0.2, rest_open=0.5, thumb_open=0.15)
         self.effort("R", tg, 0.0, "part")
         self.effort("R", tg + 0.25, GRIP_EFFORT, "part")
         self.t_grab = tg
         self.t_lift = tg + PRELOAD_S
         rim = self.bag0[0][2] + OC.record()["bag"]["height_mm"]
         up = rim + OVER_RIM_MM - (p0[2] + lo[2])
-        self.move("part", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, TAKE_MM])
+        self.move("part", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, PART_TAKE_MM])
         self.move("part", self.t_lift + TAKE_S, self.t_lift + TAKE_S + 0.8, R0, p0 + [0, 0, up])
         self.fingers("R", tg + 0.5, self.grips["part"]["q"])
         self.t = self.t_lift + TAKE_S + 0.8

@@ -99,7 +99,9 @@ SEND_OUT = {
                "part_step_b": ((39.25, 27.0, -37.5), (49.0, 30.0, 37.5))},
         volume_mm3=62258.2,
         rest=_cols([0, -1, 0], [0, 0, -1], [1, 0, 0]),         # STEP x toward the operator, its top (+Y) down
-        thumb_at=(35.0, 9.0, 0.0), finger_at=(24.0, 9.0, 0.0), thumb_n=(1.0, 0.0, 0.0), spread=(8.0, 20.0)),
+        # 6 mm down from the stem's end: at 9 the thumb's tip came onto the ledge under it (Y = 20) and pressed the
+        # part down 2 N as it was lifted
+        thumb_at=(35.0, 6.0, 0.0), finger_at=(24.0, 6.0, 0.0), thumb_n=(1.0, 0.0, 0.0), spread=(8.0, 20.0)),
 }
 
 

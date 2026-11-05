@@ -314,7 +314,7 @@ class BenchPlan:
         self.wrist[side] = np.asarray(W, float)
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=OPEN_LEAD_S, reach_s=REACH_S, above=0.0,
-              open_s=None, close_s=CLOSE_S):
+              open_s=None, close_s=CLOSE_S, rest_open=0.15, closed=0.0, thumb_open=None):
         """Up from where the hand hangs to ready, still a moment as the eyes find the grip, then the reach to grasp it,
         down onto it from approach, the hand widest (opened of the way to open_like's widest) lead before it comes to
         rest open round the tool, then closing on it. People's reaches to grasp last 0.32-0.67 s from the
@@ -327,7 +327,12 @@ class BenchPlan:
         left hand's on the calipers lying on the bench struck the bench, bounced 15 mm and closed on nothing. A hand
         opening only a little opens over the last `open_s` of the way: opened over all of it, its last 0.15 s were
         level to 0.3 mm, and its widest came where the noise put it. A hand coming down far onto its grip closes over
-        `close_s`.
+        `close_s`. The hand comes to rest open `rest_open` of the way: a hand whose pads touch its grip only as it
+        closes there rests wider than 0.15. It closes to `closed` of the way open, the grip's squeeze closing it the
+        rest: a pinch closed onto the faces' planes drags what it pinches along the fingers' arcs. Given
+        `thumb_open`, the thumb comes to rest that far open, nearer its face than the fingers theirs, so it meets its
+        face first and holds what the fingers close against: a pinch from above whose fingers met the far face first
+        shoved a part standing on a shelf 20 mm toward the operator.
         Returns when the grip has closed."""
         g = self.grips[grip]
         t_ready = t0 + RISE_S
@@ -344,8 +349,11 @@ class BenchPlan:
         if open_s is not None:
             self.fingers(side, tc - lead - open_s, self.q_relax)
         self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
-        self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
-        self.fingers(side, tc + close_s, g["q"])
+        at_rest = open_like(self.hand, g["q"], rest_open)
+        if thumb_open is not None:
+            at_rest |= {k: v for k, v in open_like(self.hand, g["q"], thumb_open).items() if k.startswith("thumb")}
+        self.fingers(side, tc, at_rest)
+        self.fingers(side, tc + close_s, open_like(self.hand, g["q"], closed) if closed else g["q"])
         return tc + close_s
 
     def obj_at(self, name, t):

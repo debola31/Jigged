@@ -64,6 +64,11 @@ class Job:
     keep_off: tuple = ("mic1", "cal6")
     at_xy: tuple = (-80.0, -110.0)
     skip: tuple = ()               # the station's instruments put away for it: a big part takes their place
+    tool_x: float = TOOL_AT[0]     # where the tool lies along the bench's front (x, mm)
+
+    @property
+    def tool_at(self) -> np.ndarray:
+        return np.array([self.tool_x, *TOOL_AT[1:]])
 
     @property
     def bisector(self) -> np.ndarray:
@@ -78,20 +83,24 @@ JOBS = {"nist-ftc-10": Job(
     face_out=(0.0, 0.0, 1.0), up=(0.0, -1.0, 0.0))}          # the near side and the pocket's far wall; datum A
 # ll-1005337, the 600 x 400 Delrin plate, along the bench's front, its near long edge 83 mm in from the bench's edge
 # and its far edge clear of the gauge-block case: the calipers, the micrometer and the thread gauge are put away, as
-# it lies where they were kept. The left hand flat on its top, fingers forward, the middle along the 10 mm rib between
-# the near column's fifth and sixth recesses (STEP Y 475-485): on the near margin alone (26.5 mm, between the edge and
-# the recesses) the pads could find no place (the grip's pads 58-302 against nist-ftc-10's under 1). The blade along
-# the near top edge twice. The caption says the tabs cut and filed, and the rest
+# it lies where they were kept. The left hand flat on its top, fingers forward, across the 25 mm rib between its two
+# columns of recesses (STEP X -212.5 to -187.5), where nist-ftc-10's take has it: 60 mm left of the body's middle and
+# well out in front. On the near margin alone (26.5 mm, between the edge and the recesses) the pads could find no
+# place (the grip's pads 58-302 against nist-ftc-10's under 1); out at the plate's left, 270 mm left of the middle, the
+# trunk turned and the right hand's reach for the tool struck its shank. The blade along the near top edge twice, in
+# front of the body. The caption says the tabs cut and filed, and the rest
 JOBS["ll-1005337"] = Job(
     BC.LL_1005337,
-    strokes=(((-398.0, 190.0, -0.95), (-398.0, 110.0, -0.95)),      # the near top edge, toward the right
-             ((-398.0, 330.0, -0.95), (-398.0, 260.0, -0.95))),     # ... and again, further left
+    strokes=(((-398.0, 150.0, -0.95), (-398.0, 85.0, -0.95)),       # the near top edge, toward the right
+             ((-398.0, 260.0, -0.95), (-398.0, 190.0, -0.95))),     # ... and again, further left
     face_out=(-1.0, 0.0, 0.0), up=(0.0, 0.0, 1.0),
-    steady=Steady(at=(-360.0, 480.0, -0.95),
-                  pads=tuple((f, (-360.0, 480.0, -0.95), (0.0, 0.0, 1.0), (("x", b), ("y", (-25, 25))))
+    steady=Steady(at=(-200.0, 270.0, -0.95),
+                  pads=tuple((f, (-200.0, 270.0, -0.95), (0.0, 0.0, 1.0), (("x", b), ("y", (-25, 25))))
                              for f, b in (("index", (8, 20)), ("middle", (-5, 5)), ("ring", (-22, -10)))),
                   push=(0.0, 0.0, 1.0)),
-    keep_off=(), at_xy=(150.0, 100.0), skip=("cal6", "mic1", "thread"))
+    # the tool 15 mm further right, 47 mm clear of the plate's end: at nist-ftc-10's place, 25 mm off it, the thumb
+    # reaching for the handle's flank struck the plate's corner, which stands 7 mm higher than the handle
+    keep_off=(), at_xy=(150.0, 100.0), skip=("cal6", "mic1", "thread"), tool_x=205.0)
 
 
 def out(part: str) -> Path:
@@ -105,7 +114,7 @@ def loose(job: Job) -> str:
     hi = np.max([b[1] for b in job.part.boxes.values()], axis=0)
     w, x, y, z = job.part.up
     mid = at + Rotation.from_quat([x, y, z, w]).as_matrix() @ ((lo + hi) / 2)
-    return BC.mat_body(mid) + BC.part_body(at, job.part) + BC.deburr_body(TOOL_AT, TOOL_YAW)
+    return BC.mat_body(mid) + BC.part_body(at, job.part) + BC.deburr_body(job.tool_at, TOOL_YAW)
 
 
 def on_cylinder(a, u, r, lo, hi, side=None, comp=2.0, w=1.0, side_w=30.0):
@@ -168,7 +177,9 @@ class DeburrPlan(BenchPlan):
         # clear of the rough-surface block beside it: solved without it, the hand rested on the block, its fingers
         # over the tool and never on it, and only the carry lifted it
         specs["tool"] = dict(of="deburr_tool", obj=p0, q0=q0, iters=1000,
-                             colliders=[hand_cyl, blade, box(bc, bh)] + instrument_colliders(self.rests, ("rough",), 3.0),
+                             # ... and of the part, which a big one comes near (ll-1005337's plate, 47 mm off)
+                             colliders=[hand_cyl, blade, box(bc, bh)] + instrument_colliders(self.rests, ("rough",), 3.0)
+                             + self.part_colliders(3.0),
                              targets={"thumb": on(70, 115, upper_left), "index": on(85, 125, up),
                                       "middle": on(80, 125, upper_right)},
                              # from the shoulder turned out and the forearm less turned: from 55-90 deg of
@@ -313,7 +324,7 @@ def build(part: str = "nist-ftc-10", solve=True, verbose=True, folder=None) -> D
     if solve:
         plan.solve()
         plan.save({"part": part, "strokes": plan.strokes, "part_at": part_at(job.part, job.at_xy).tolist(),
-                   "tool_at": TOOL_AT.tolist(), "tool_yaw": TOOL_YAW, "loose": loose(job)})
+                   "tool_at": job.tool_at.tolist(), "tool_yaw": TOOL_YAW, "loose": loose(job)})
     return plan
 
 

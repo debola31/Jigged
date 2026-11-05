@@ -25,7 +25,7 @@
          "friction_source": "proposed", "friction_reason": "Kraft paper on steel, and steel on kraft, about 0.5"},
  "tag": {"size_mm": [60.0, 121.0], "thickness_mm": 0.3, "on": "the bag's near wall, hanging from its rim",
          "source": "proposed", "reason": "A #5 manila shipping tag (2-3/8 x 4-3/4 in), the vendor's process and the job written on it; drawn only, it never touches anything"},
- "part_at_mm": [130.0, -150.0],
+ "part_at_mm": [175.0, -150.0],
  "part_at_source": "proposed",
- "part_at_reason": "Where the part was set down on the coating shelf when it was brought from the bench: to the right of the bag, 155 mm in from the shelf's front edge, under the right hand"
+ "part_at_reason": "Where the part was set down on the coating shelf when it was brought from the bench: to the right of the bag, 155 mm in from the shelf's front edge, under the right hand, the hand that picks it up clear of the bag (at 130 the bag 150 wide kept the fingers off their faces)"
 }

@@ -874,7 +874,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-start",
@@ -1055,7 +1055,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-start",

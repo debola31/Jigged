@@ -8,13 +8,9 @@ export type View =
   | { kind: 'step'; index: number }
   | { kind: 'zone'; where: Where };
 
-/** The two layouts the user is choosing between (2026-11-04): cards over the shop, or one side rail. */
-export type Layout = 'cards' | 'rail';
-
 interface ShowcaseState {
   /** The visitor's way in: pick a part, watch its instructions come together, then the plan. */
   phase: 'pick' | 'generating' | 'plan';
-  layout: Layout;
   /** What the step card shows: the plan's "what you'll need", or the open step. */
   sheet: 'need' | 'step';
   /** The open step, by its index in the part; null before the visitor picks one. */
@@ -30,7 +26,6 @@ interface ShowcaseState {
   /** Shop models that failed to load. */
   failedModels: number;
   setPhase(phase: 'pick' | 'generating' | 'plan'): void;
-  setLayout(layout: Layout): void;
   /** Move the camera without opening anything. */
   look(view: View): void;
   openStep(index: number): void;
@@ -46,7 +41,6 @@ interface ShowcaseState {
 
 export const useShowcase = create<ShowcaseState>((set) => ({
   phase: 'pick',
-  layout: 'cards',
   sheet: 'need',
   step: null,
   item: null,
@@ -57,7 +51,6 @@ export const useShowcase = create<ShowcaseState>((set) => ({
   walkStop: null,
   failedModels: 0,
   setPhase: (phase) => set({ phase }),
-  setLayout: (layout) => set({ layout }),
   look: (view) => set((s) => ({ view, token: s.token + 1 })),
   openStep: (index) => set((s) => ({ step: index, sheet: 'step', item: null, view: { kind: 'step', index }, token: s.token + 1 })),
   openItem: (id) => set((s) => ({ item: id, view: { kind: 'item', id }, token: s.token + 1 })),

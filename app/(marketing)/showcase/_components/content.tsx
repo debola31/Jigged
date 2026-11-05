@@ -253,7 +253,8 @@ export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
 // --- a step -------------------------------------------------------------------------------------
 
 /** One step: its video (or the cut part), what it says, where, what it uses, and previous / next. */
-export function StepContent({ cat, part, index, header = true }: { cat: Catalog; part: LivePart; index: number; header?: boolean }) {
+/** A step: its video (or the part after a machine cycle) as large as the card, then what it says, where and with what. */
+export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart; index: number }) {
   const step = part.steps[index];
   const group = part.groups.find((g) => g.id === step.group);
   const openStep = useShowcase((s) => s.openStep);
@@ -272,8 +273,8 @@ export function StepContent({ cat, part, index, header = true }: { cat: Catalog;
 
   return (
     <>
-      {header && <Heading eyebrow={group?.title ?? ''} title={step.title} />}
-      <Box sx={{ mt: header ? 1.5 : 0, position: 'relative', aspectRatio: '16 / 9', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'common.black' }}>
+      <Heading eyebrow={group?.title ?? ''} title={step.title} />
+      <Box sx={{ mt: 1.5, position: 'relative', aspectRatio: '16 / 9', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'common.black' }}>
         {!ready(step) ? (
           <Typography role="status" sx={statusSx}>
             This step&apos;s {what} is still being made.
@@ -326,33 +327,30 @@ export function StepContent({ cat, part, index, header = true }: { cat: Catalog;
           </Typography>
         )}
       </Box>
-      <Box sx={{ mt: 1.5 }} aria-live="polite">
-        {step.kind === 'cycle' && <Chip label="Machine cycle" size="small" variant="outlined" sx={{ mb: 1 }} />}
-        <Typography sx={{ fontSize: '1.05rem', lineHeight: 1.55 }}>{step.caption}</Typography>
-      </Box>
-      <Section title="Where">
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography sx={{ flex: 1 }}>
-            {step.where.name}
-            {step.where.at === 'pendant' ? ', at the control' : step.where.at === 'table' ? ', at the table' : ''}
-          </Typography>
-          <Button size="small" onClick={() => openStep(index)}>
-            Show me
-          </Button>
+      {/* Side by side once the card is wide enough, so the video can take the height. */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', columnGap: 3, alignItems: 'start' }}>
+        <Box sx={{ mt: 2.5 }} aria-live="polite">
+          {step.kind === 'cycle' && <Chip label="Machine cycle" size="small" variant="outlined" sx={{ mb: 1 }} />}
+          <Typography sx={{ fontSize: '1.1rem', lineHeight: 1.55 }}>{step.caption}</Typography>
         </Box>
-      </Section>
-      {step.uses.length > 0 && (
-        <Section title="Uses">
-          <Uses cat={cat} uses={step.uses} />
-        </Section>
-      )}
-      <Box sx={{ mt: 2.5, display: 'flex', gap: 1.5 }}>
-        <Button variant="outlined" disabled={index === 0} onClick={() => openStepTracked(part, index - 1)} sx={{ flex: 1 }}>
-          Previous
-        </Button>
-        <Button variant="contained" disabled={index === part.steps.length - 1} onClick={() => openStepTracked(part, index + 1)} sx={{ flex: 1 }}>
-          Next step
-        </Button>
+        <Box>
+          <Section title="Where">
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={{ flex: 1 }}>
+                {step.where.name}
+                {step.where.at === 'pendant' && ', at the control'}
+              </Typography>
+              <Button size="small" onClick={() => openStep(index)}>
+                Show me
+              </Button>
+            </Box>
+          </Section>
+          {step.uses.length > 0 && (
+            <Section title="Uses">
+              <Uses cat={cat} uses={step.uses} />
+            </Section>
+          )}
+        </Box>
       </Box>
     </>
   );

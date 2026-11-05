@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
@@ -14,11 +13,13 @@ import ListSubheader from '@mui/material/ListSubheader';
 import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
 import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
-import { CARD_BG, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, stepNote, SUBHEADER_BG } from './content';
+import { CARD_BG, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
 import type { LivePart } from './showcaseData';
 import { useShowcase } from './store';
@@ -31,6 +32,10 @@ const ShopCanvas = dynamic(() => import('./ShopCanvas'), {
 
 // A thing's card, on the right of the shop.
 const ITEM_CARD = 360;
+// The step card is sized for its video, the page's main thing: 16:9 at the height the shop section
+// leaves under the card's header, the step's title and its details (about 470px with the marketing
+// header), between the narrow card's width and a little over half the screen.
+const STEP_CARD = 'clamp(420px, calc((100dvh - 470px) * 16 / 9 + 40px), 58vw)';
 
 const floatSx = {
   position: 'absolute',
@@ -50,14 +55,13 @@ export interface ShopProps {
   onGenerated(skipped: boolean): void;
 }
 
-/** What the card or rail shows: the parts to pick, the instructions being made, what you'll need, or the step. */
-function Sheet({ cat, part, parts, onPick, onGenerated, inlineSteps = false }: ShopProps & { inlineSteps?: boolean }) {
+/** What the card shows: the parts to pick, the instructions being made, what you'll need, or the step. */
+function Sheet({ cat, part, parts, onPick, onGenerated }: ShopProps) {
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
   const step = useShowcase((s) => s.step);
   if (phase === 'pick') return <PickPrompt parts={parts} onPick={onPick} />;
   if (phase === 'generating') return <Generating part={part} cat={cat} onDone={onGenerated} />;
-  if (inlineSteps) return <RailSteps cat={cat} part={part} />;
   return sheet === 'step' && step !== null ? <StepContent cat={cat} part={part} index={step} /> : <NeedContent cat={cat} part={part} />;
 }
 
@@ -145,12 +149,12 @@ function FindThings({ cat }: { cat: Catalog }) {
 }
 
 /** Over the shop, top right: find, walk, and back to the whole shop. */
-function ShopButtons({ part, find }: { part: LivePart; find?: ReactNode }) {
+function ShopButtons({ cat, part }: { cat: Catalog; part: LivePart }) {
   const walking = useShowcase((s) => s.walking);
   const { setWalking, overview } = useShowcase.getState();
   return (
     <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
-      {find}
+      <FindThings cat={cat} />
       <Button
         size="small"
         variant="contained"
@@ -188,10 +192,12 @@ function Hint({ cat }: { cat: Catalog }) {
   );
 }
 
-// --- option 1: cards over the shop --------------------------------------------------------------
-
-/** The shop fills the section; the step card floats on the left and a thing's card on the right. */
-export function CardsLayout(props: ShopProps) {
+/**
+ * The shop fills the section, with cards over it: the step card on the left, which opens out to its
+ * video's size while a step is open, and a thing's card on the right. The camera centres what it
+ * flies to in the space the cards leave.
+ */
+export default function ShopLayout(props: ShopProps) {
   const { cat, part } = props;
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
@@ -202,6 +208,7 @@ export function CardsLayout(props: ShopProps) {
   const card = useRef<HTMLElement>(null);
   const [cardWidth, setCardWidth] = useState(0);
   const step = useShowcase((s) => s.step);
+  const watching = phase === 'plan' && sheet === 'step' && step !== null && !collapsed;
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0;
   }, [step, sheet]);
@@ -218,13 +225,22 @@ export function CardsLayout(props: ShopProps) {
       <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0 }}>
         <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
       </Box>
-      <ShopButtons part={part} find={<FindThings cat={cat} />} />
+      <ShopButtons cat={cat} part={part} />
       <WalkStatus />
       <Box
         component="aside"
         ref={card}
         aria-label="The step"
-        sx={{ ...floatSx, top: 16, left: 16, width: { md: 380, xl: 420 }, maxHeight: 'calc(100% - 32px)', display: 'flex', flexDirection: 'column' }}
+        sx={{
+          ...floatSx,
+          top: 16,
+          left: 16,
+          width: watching ? STEP_CARD : { md: 380, xl: 420 },
+          maxHeight: 'calc(100% - 32px)',
+          display: 'flex',
+          flexDirection: 'column',
+          transition: 'width 0.3s ease',
+        }}
       >
         {phase === 'plan' && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.5, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
@@ -234,7 +250,19 @@ export function CardsLayout(props: ShopProps) {
                 What you&apos;ll need
               </Button>
             )}
-            <IconButton size="small" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? 'Show the card' : 'Fold the card away'} sx={{ ml: 'auto' }}>
+            <Box sx={{ flex: 1 }} />
+            {/* Up here, so stepping on never scrolls away under a long step. */}
+            {sheet === 'step' && step !== null && (
+              <>
+                <IconButton size="small" aria-label="Previous step" disabled={step === 0} onClick={() => openStepTracked(part, step - 1)}>
+                  <ChevronLeftIcon />
+                </IconButton>
+                <Button size="small" variant="contained" endIcon={<ChevronRightIcon />} disabled={step === part.steps.length - 1} onClick={() => openStepTracked(part, step + 1)}>
+                  Next step
+                </Button>
+              </>
+            )}
+            <IconButton size="small" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
               {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
             </IconButton>
           </Box>
@@ -251,162 +279,6 @@ export function CardsLayout(props: ShopProps) {
         </Box>
       )}
       <Hint cat={cat} />
-    </Box>
-  );
-}
-
-// --- option 2: one side rail --------------------------------------------------------------------
-
-/** The steps in the rail, the open one opened out in place with its video. */
-function RailSteps({ cat, part }: { cat: Catalog; part: LivePart }) {
-  const index = useShowcase((s) => s.step);
-  const sheet = useShowcase((s) => s.sheet);
-  const showNeed = useShowcase((s) => s.showNeed);
-  const open = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    // Keep the open step in view inside the rail, without scrolling the page (which scrollIntoView would).
-    const c = open.current;
-    const box = c?.closest<HTMLElement>('[data-rail-scroll]');
-    if (!c || !box) return;
-    // Below the group's sticky heading, which would otherwise cover the open step's title.
-    const heading = c.closest('ul')?.querySelector<HTMLElement>('li.MuiListSubheader-root')?.offsetHeight ?? 0;
-    box.scrollTop = c.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - heading - 4;
-  }, [index, sheet]);
-  return (
-    <>
-      <ListItemButton selected={sheet === 'need'} onClick={showNeed} ref={sheet === 'need' ? open : undefined}>
-        <ListItemText primary="What you'll need" secondary="The stock, the stations and the tools" />
-      </ListItemButton>
-      {sheet === 'need' && (
-        <Box sx={{ px: 2.5, pb: 3 }}>
-          <NeedContent cat={cat} part={part} />
-        </Box>
-      )}
-      {part.groups.map((g) => (
-        <List key={g.id} disablePadding subheader={<ListSubheader sx={{ bgcolor: SUBHEADER_BG, color: 'text.secondary', fontWeight: 600, lineHeight: 2.4 }}>{g.title}</ListSubheader>}>
-          {part.steps.map((s, i) => {
-            if (s.group !== g.id) return null;
-            const isOpen = sheet === 'step' && i === index;
-            return (
-              <Box key={s.id} ref={isOpen ? open : undefined}>
-                <ListItemButton selected={isOpen} aria-current={isOpen ? 'step' : undefined} onClick={() => openStepTracked(part, i)}>
-                  <ListItemText primary={`${i + 1}. ${s.title}`} secondary={isOpen ? undefined : stepNote(s)} />
-                </ListItemButton>
-                {isOpen && (
-                  <Box sx={{ px: 2, pb: 2.5, pt: 0.5, bgcolor: 'rgba(255, 255, 255, 0.04)' }}>
-                    <StepContent cat={cat} part={part} index={i} header={false} />
-                  </Box>
-                )}
-              </Box>
-            );
-          })}
-        </List>
-      ))}
-    </>
-  );
-}
-
-/** Steps and things matching the rail's search. */
-function RailSearch({ cat, part, query, onDone }: { cat: Catalog; part: LivePart; query: string; onDone(): void }) {
-  const openItem = useShowcase((s) => s.openItem);
-  const q = query.trim().toLowerCase();
-  const steps = part.steps.flatMap((s, i) => ((s.title + ' ' + s.caption).toLowerCase().includes(q) ? [i] : []));
-  const things = cat.things.filter((t) => matches(t, query, cat.zoneName(t.zone)));
-  return (
-    <>
-      {steps.length > 0 && (
-        <List dense disablePadding subheader={<ListSubheader sx={{ bgcolor: SUBHEADER_BG, color: 'text.secondary', fontWeight: 600 }}>Steps</ListSubheader>}>
-          {steps.map((i) => (
-            <ListItemButton
-              key={part.steps[i].id}
-              onClick={() => {
-                onDone();
-                openStepTracked(part, i);
-              }}
-            >
-              <ListItemText primary={`${i + 1}. ${part.steps[i].title}`} />
-            </ListItemButton>
-          ))}
-        </List>
-      )}
-      {things.length > 0 && (
-        <List dense disablePadding subheader={<ListSubheader sx={{ bgcolor: SUBHEADER_BG, color: 'text.secondary', fontWeight: 600 }}>In the shop</ListSubheader>}>
-          {things.map((t) => (
-            <ListItemButton
-              key={t.item}
-              onClick={() => {
-                onDone();
-                openItem(t.item);
-                posthog.capture('showcase item opened', { category: t.category, source: 'search' });
-              }}
-            >
-              <ListItemText primary={t.name} secondary={cat.zoneName(t.zone)} />
-            </ListItemButton>
-          ))}
-        </List>
-      )}
-      {steps.length + things.length === 0 && <Typography sx={{ p: 2.5, color: 'text.secondary' }}>Nothing matches “{query}”.</Typography>}
-    </>
-  );
-}
-
-/** One rail on the left with the steps (the open one plays in place) and a search over steps and things. */
-export function RailLayout(props: ShopProps) {
-  const { cat, part } = props;
-  const phase = useShowcase((s) => s.phase);
-  const item = useShowcase((s) => s.item);
-  const [query, setQuery] = useState('');
-  return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { md: '380px minmax(0, 1fr)', xl: '420px minmax(0, 1fr)' }, height: '100%' }}>
-      <Box component="nav" aria-label="The steps" sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid rgba(255, 255, 255, 0.09)', bgcolor: 'rgba(17, 20, 57, 0.6)' }}>
-        {phase === 'plan' && (
-          <Box sx={{ p: 2, flexShrink: 0, borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <Typography sx={{ fontWeight: 600 }}>{part.name}</Typography>
-            <TextField
-              fullWidth
-              size="small"
-              type="search"
-              placeholder="Search the steps and the shop"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              sx={{ mt: 1.5 }}
-              slotProps={{
-                htmlInput: { 'aria-label': 'Search the steps and the shop' },
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon fontSize="small" />
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
-          </Box>
-        )}
-        <Box data-rail-scroll sx={{ flex: 1, minHeight: 0, overflowY: 'auto', colorScheme: 'dark' }}>
-          {item ? (
-            <Box sx={{ p: 2.5 }}>
-              <ItemContent cat={cat} part={part} id={item} />
-            </Box>
-          ) : query.trim() && phase === 'plan' ? (
-            <RailSearch cat={cat} part={part} query={query} onDone={() => setQuery('')} />
-          ) : phase === 'plan' ? (
-            <Sheet {...props} inlineSteps />
-          ) : (
-            <Box sx={{ p: 2.5 }}>
-              <Sheet {...props} />
-            </Box>
-          )}
-        </Box>
-      </Box>
-      <Box sx={{ position: 'relative', minWidth: 0, minHeight: 0 }}>
-        <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0 }}>
-          <ShopCanvas cat={cat} part={part} />
-        </Box>
-        <ShopButtons part={part} />
-        <WalkStatus />
-        <Hint cat={cat} />
-      </Box>
     </Box>
   );
 }

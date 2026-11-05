@@ -5,8 +5,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import IconButton from '@mui/material/IconButton';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
@@ -14,11 +12,9 @@ import Section from '@/components/marketing/Section';
 import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
 import PilotRequest from './PilotRequest';
 import { mediaUrl, ready, type LivePart } from './showcaseData';
-import { useShowcase, type Layout } from './store';
 
 const cardSx = {
   display: 'flex',
-  flexDirection: 'column',
   borderRadius: 2,
   overflow: 'hidden',
   border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -31,15 +27,13 @@ function finishedStill(part: LivePart): string | null {
   return cut && cut.media.type === 'cut' ? mediaUrl(cut.media.still) : null;
 }
 
+/** One of our parts: what it is on the left, the part itself on the right. */
 function PartCard({ part, onPick }: { part: LivePart; onPick(): void }) {
   const still = finishedStill(part);
   const setups = part.groups.filter((g) => g.id !== 'finish').length;
   return (
     <Box sx={cardSx}>
-      <Box sx={{ aspectRatio: '16 / 9', bgcolor: 'common.black' }}>
-        {still && <Box component="img" src={still} alt={`${part.name}, finished`} sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
-      </Box>
-      <Box sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1, flex: 1 }}>
+      <Box sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
         <Typography component="h3" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.2rem', lineHeight: 1.2 }}>
           {part.name}
         </Typography>
@@ -50,22 +44,28 @@ function PartCard({ part, onPick }: { part: LivePart; onPick(): void }) {
           Make this part
         </Button>
       </Box>
+      <Box sx={{ position: 'relative', width: '46%', flexShrink: 0, minHeight: { xs: 140, md: 170 }, bgcolor: 'common.black' }}>
+        {still && <Box component="img" src={still} alt={`${part.name}, finished`} sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+      </Box>
     </Box>
   );
 }
 
-function OwnPartCard() {
+/** The visitor's own part: one line, since it has nothing to show yet. */
+function OwnPart() {
   const [open, setOpen] = useState(false);
   return (
-    <Box sx={{ ...cardSx, borderStyle: 'dashed', justifyContent: 'center', p: 3, gap: 1.5 }}>
-      <UploadFileOutlinedIcon sx={{ fontSize: 40, color: EYEBROW_COLOR }} />
-      <Typography component="h3" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.2rem' }}>
-        Your own part
-      </Typography>
-      <Typography sx={{ color: 'text.secondary', fontSize: '0.95rem', lineHeight: 1.55 }}>
-        Send us a STEP, IGES, Parasolid or SolidWorks file, or a PDF drawing, and we&apos;ll make its walkthrough for your shop.
-      </Typography>
-      <Button variant="outlined" size="large" onClick={() => setOpen(true)} sx={{ alignSelf: 'flex-start' }}>
+    <Box sx={{ ...cardSx, borderStyle: 'dashed', alignItems: 'center', gap: 2, px: 2.5, py: 2, flexWrap: { xs: 'wrap', sm: 'nowrap' } }}>
+      <UploadFileOutlinedIcon sx={{ fontSize: 32, color: EYEBROW_COLOR }} />
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography component="h3" sx={{ fontWeight: 600 }}>
+          Your own part
+        </Typography>
+        <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem', lineHeight: 1.5 }}>
+          Send a STEP, IGES, Parasolid or SolidWorks file, or a PDF drawing, and we&apos;ll make its walkthrough for your shop.
+        </Typography>
+      </Box>
+      <Button variant="outlined" onClick={() => setOpen(true)} sx={{ flexShrink: 0 }}>
         Send a part
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
@@ -80,45 +80,31 @@ function OwnPartCard() {
   );
 }
 
-/**
- * Temporary, for the review only: the user is choosing between the two shop layouts (2026-11-04).
- * Remove it, and the layout not chosen, once they have.
- */
-function LayoutChoice() {
-  const layout = useShowcase((s) => s.layout);
-  const setLayout = useShowcase((s) => s.setLayout);
-  return (
-    <Box sx={{ mt: 5, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', p: 1.5, borderRadius: 1.5, border: '1px dashed rgba(255, 255, 255, 0.25)', width: 'fit-content' }}>
-      <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>For review only: the shop&apos;s layout</Typography>
-      <ToggleButtonGroup size="small" exclusive value={layout} onChange={(_, v: Layout | null) => v && setLayout(v)}>
-        <ToggleButton value="cards">Cards over the shop</ToggleButton>
-        <ToggleButton value="rail">One side rail</ToggleButton>
-      </ToggleButtonGroup>
-    </Box>
-  );
-}
-
-/** The research, in a few lines, and the parts to pick from: ours, or the visitor's own. */
+/** The research, in a few lines, beside the parts to pick from: ours, or the visitor's own. */
 export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id: string): void }) {
   return (
     <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 } }}>
-      <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
-        Research preview
-      </Typography>
-      <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4.5vw, 3.4rem)', lineHeight: 1.05, letterSpacing: '-0.03em', maxWidth: 820 }}>
-        Pick a part. Watch every step of making it.
-      </Typography>
-      <Typography sx={{ mt: 2.5, maxWidth: 680, color: 'rgba(255, 255, 255, 0.8)', fontSize: { xs: '1.05rem', md: '1.15rem' }, lineHeight: 1.6 }}>
-        Jigged plans the part for a real shop&apos;s machines, then shows each step being done, at the machine and with the
-        tools it needs. The shop and the hands are simulated.
-      </Typography>
-      <Box sx={{ mt: 5, display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' } }}>
-        {parts.map((p) => (
-          <PartCard key={p.id} part={p} onPick={() => onPick(p.id)} />
-        ))}
-        <OwnPartCard />
+      <Box sx={{ display: 'grid', gap: { xs: 5, md: 6 }, gridTemplateColumns: { md: 'minmax(0, 5fr) minmax(0, 7fr)' }, alignItems: 'start' }}>
+        {/* Stays in view beside a long list of parts. */}
+        <Box sx={{ position: { md: 'sticky' }, top: { md: 96 } }}>
+          <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
+            Research preview
+          </Typography>
+          <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 3.6vw, 3rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
+            Pick a part. Watch every step of making it.
+          </Typography>
+          <Typography sx={{ mt: 2.5, color: 'rgba(255, 255, 255, 0.8)', fontSize: { xs: '1.05rem', md: '1.15rem' }, lineHeight: 1.6 }}>
+            Jigged plans the part for a real shop&apos;s machines, then shows each step being done, at the machine and with the
+            tools it needs. The shop and the hands are simulated.
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {parts.map((p) => (
+            <PartCard key={p.id} part={p} onPick={() => onPick(p.id)} />
+          ))}
+          <OwnPart />
+        </Box>
       </Box>
-      <LayoutChoice />
     </Section>
   );
 }

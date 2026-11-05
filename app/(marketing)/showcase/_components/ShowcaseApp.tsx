@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT } from '@/components/marketing/marketingStyles';
 import { catalog, type Catalog } from './catalog';
 import Intro from './Intro';
-import { CardsLayout, RailLayout } from './Layouts';
+import ShopLayout from './Layouts';
 import { ready, type LivePart, type Showcase } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -53,21 +53,16 @@ function PhoneNotice({ onOpen }: { onOpen(): void }) {
   );
 }
 
-/**
- * The address follows the visitor: ?step=<id> and ?item=<id> open there (skipping the way in), and
- * ?layout=rail picks the layout under review.
- */
+/** The address follows the visitor: ?step=<id> and ?item=<id> open there, skipping the way in. */
 function useAddress(part: LivePart, cat: Catalog, shop: React.RefObject<HTMLElement | null>) {
   const step = useShowcase((s) => s.step);
   const item = useShowcase((s) => s.item);
   const sheet = useShowcase((s) => s.sheet);
-  const layout = useShowcase((s) => s.layout);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const s = part.steps.findIndex((x) => x.id === q.get('step'));
     const i = q.get('item');
     const st = useShowcase.getState();
-    if (q.get('layout') === 'rail') st.setLayout('rail');
     if (s >= 0 || (i && cat.spots.has(i))) {
       st.setPhase('plan');
       if (s >= 0) st.openStep(s);
@@ -81,11 +76,10 @@ function useAddress(part: LivePart, cat: Catalog, shop: React.RefObject<HTMLElem
     const q = new URLSearchParams();
     if (sheet === 'step' && step !== null) q.set('step', part.steps[step].id);
     if (item) q.set('item', item);
-    if (layout === 'rail') q.set('layout', 'rail');
     const query = q.toString();
     const url = `${window.location.pathname}${query ? `?${query}` : ''}`;
     if (url !== window.location.pathname + window.location.search) window.history.replaceState(null, '', url);
-  }, [step, item, sheet, layout, part]);
+  }, [step, item, sheet, part]);
 }
 
 /**
@@ -100,7 +94,6 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
   const [partId, setPartId] = useState(parts[0].id);
   const part = parts.find((p) => p.id === partId) ?? parts[0];
   const cat = useMemo(() => catalog(data.shop), [data.shop]);
-  const layout = useShowcase((s) => s.layout);
   const narrow = useSyncExternalStore(subscribeNarrow, () => window.matchMedia(NARROW).matches, () => false);
   const [anyway, setAnyway] = useState(false);
   const shop = useRef<HTMLElement>(null);
@@ -124,7 +117,7 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
         aria-label="The shop"
         sx={{ height: `calc(100dvh - ${HEADER}px)`, minHeight: 600, scrollMarginTop: `${HEADER}px`, borderTop: '1px solid rgba(255, 255, 255, 0.09)' }}
       >
-        {narrow && !anyway ? <PhoneNotice onOpen={() => setAnyway(true)} /> : layout === 'rail' ? <RailLayout {...props} /> : <CardsLayout {...props} />}
+        {narrow && !anyway ? <PhoneNotice onOpen={() => setAnyway(true)} /> : <ShopLayout {...props} />}
       </Box>
     </>
   );

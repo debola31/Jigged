@@ -2990,7 +2990,7 @@
       "type": "video",
       "path": "video/ct-slbeam/saw-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-cut",
@@ -3317,7 +3317,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op20-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-load",
@@ -3553,7 +3553,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-load",
@@ -4428,7 +4428,7 @@
       "type": "video",
       "path": "video/ll-1007223/saw-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-cut",

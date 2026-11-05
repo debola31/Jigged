@@ -21,6 +21,8 @@ const TURN_MS = 900;
 const HOLD_MS = 1800;
 // A vertical mill's table, from the floor: where a person at the door looks for the vise.
 const TABLE_MM = 950;
+/** The shop's walls as drawn: low, so the overview sees in (the real walls come with the realism pass). */
+export const WALL_MM = 1200;
 
 const add = (a: Vec3, b: Vec3, k = 1): Vec3 => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 
@@ -29,18 +31,44 @@ function norm(v: Vec3): Vec3 {
   return [v[0] / l, v[1] / l, v[2] / l];
 }
 
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+/** How far back along `dir` the camera has to be for every corner to be in view. */
+function fitDistance(corners: Vec3[], target: Vec3, dir: Vec3, tanH: number, tanV: number): number {
+  const forward: Vec3 = [-dir[0], -dir[1], -dir[2]];
+  const right = norm(cross(forward, [0, 1, 0]));
+  const up = cross(right, forward);
+  // A corner at `rel` from the target is in view once its depth covers its offset across and up.
+  return Math.max(
+    ...corners.map((c) => {
+      const rel: Vec3 = [c[0] - target[0], c[1] - target[1], c[2] - target[2]];
+      const depth = dot(rel, forward);
+      return Math.max(Math.abs(dot(rel, right)) / tanH - depth, Math.abs(dot(rel, up)) / tanV - depth);
+    }),
+  );
+}
+
 /**
- * The whole building from above its south-west corner, so its length runs away from the camera and
- * fills a view that is taller than the building is deep, at any aspect.
+ * The whole building from above its south-west, as close as keeps every corner of its floor and
+ * walls in view. `aspect` is the view's, less what cards cover: a narrow view looks more along the
+ * building's length, a wide one more across it, whichever frames it largest.
  */
 export function overviewPose(cat: Catalog, aspect = 1.6, fovDeg = 40): Pose {
   const [w, d] = cat.shop.building.size;
   const target = toScene(w / 2, d / 2, 0);
-  const radius = Math.hypot(w, d) / 2000;
-  const half = (fovDeg * Math.PI) / 360;
-  const fit = Math.min(half, Math.atan(Math.tan(half) * aspect));
-  const dir = norm([-0.42, 0.68, 0.6]);
-  return { target, position: add(target, dir, (radius / Math.sin(fit)) * 0.95) };
+  const tanV = Math.tan((fovDeg * Math.PI) / 360) * 0.92;
+  const tanH = tanV * aspect;
+  const corners = [0, w].flatMap((x) => [0, d].flatMap((y) => [toScene(x, y, 0), toScene(x, y, WALL_MM)]));
+  // 38° above the floor, from between 25° and 70° west of south.
+  const rise = (38 * Math.PI) / 180;
+  const fits = [25, 35, 45, 55, 70].map((deg) => {
+    const a = (deg * Math.PI) / 180;
+    const dir: Vec3 = [-Math.sin(a) * Math.cos(rise), Math.sin(rise), Math.cos(a) * Math.cos(rise)];
+    return { dir, distance: fitDistance(corners, target, dir, tanH, tanV) };
+  });
+  const best = fits.reduce((a, b) => (b.distance < a.distance ? b : a));
+  return { target, position: add(target, best.dir, best.distance) };
 }
 
 /** A thing from a little off its front, so its front and one side both show, filling the view. */

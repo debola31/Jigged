@@ -6,17 +6,21 @@ import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNo
 import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Typography from '@mui/material/Typography';
-import { BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, SRGBColorSpace, Vector3 } from 'three';
+import { BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three';
 import { toError } from '@/lib/supabaseErrors';
 import { spotBox, toScene, type Catalog, type Vec3 } from './catalog';
 import { mediaUrl, type LivePart, type Rect, type ShopItem } from './showcaseData';
 import { useShowcase } from './store';
-import { itemPose, overviewPose, stepPose, walkLegs, zoneCentre, zonePose, type Leg, type Pose } from './views';
+import { itemPose, overviewPose, stepPose, walkLegs, WALL_MM, zoneCentre, zonePose, type Leg, type Pose } from './views';
 
 const AMBER = '#D4872A';
 const TEAL = '#2BBCB3';
 const FOV = 40;
-const WALL_M = 1.2; // low, so the overview sees in; the real walls come with the realism pass
+const WALL_M = WALL_MM / 1000;
+// The building's own floor round the shop: dark concrete, gridded every metre and every 5 m, fading
+// into the dark well before the fog, so the shop reads as a cell in a larger hall.
+const HALL = '#16181d';
+const HALL_FLOOR = '#1f2228';
 
 const deg = (d: number) => (d * Math.PI) / 180;
 
@@ -339,6 +343,55 @@ function Building({ cat }: { cat: Catalog }) {
   );
 }
 
+const HALL_M = 600;
+const SECTION_M = 5;
+
+/**
+ * The hall round the shop: a dark concrete floor, gridded every metre and more boldly every 5 m,
+ * fading into the dark with the fog. The grid is a tiled texture, which every GPU draws (drei's
+ * shader grid drew nothing under a software renderer).
+ */
+function Hall({ centre }: { centre: Vec3 }) {
+  const texture = useMemo(() => {
+    const px = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = px;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = HALL_FLOOR;
+    ctx.fillRect(0, 0, px, px);
+    ctx.strokeStyle = '#2f343d';
+    ctx.lineWidth = 2;
+    for (let i = 1; i < SECTION_M; i++) {
+      const at = (i * px) / SECTION_M;
+      ctx.beginPath();
+      ctx.moveTo(at, 0);
+      ctx.lineTo(at, px);
+      ctx.moveTo(0, at);
+      ctx.lineTo(px, at);
+      ctx.stroke();
+    }
+    // The section's edge, half on each side of the tile, so neighbouring tiles make it whole.
+    ctx.strokeStyle = '#454b57';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(0, 0, px, px);
+    const t = new CanvasTexture(canvas);
+    t.wrapS = t.wrapT = RepeatWrapping;
+    t.repeat.set(HALL_M / SECTION_M, HALL_M / SECTION_M);
+    t.anisotropy = 8;
+    t.colorSpace = SRGBColorSpace;
+    return t;
+  }, []);
+  useEffect(() => () => texture?.dispose(), [texture]);
+  return (
+    // Just under the shop's own floor, which hides it inside the walls.
+    <mesh rotation-x={-Math.PI / 2} position={[centre[0], -0.05, centre[2]]} receiveShadow>
+      <planeGeometry args={[HALL_M, HALL_M]} />
+      <meshStandardMaterial map={texture} color={texture ? '#ffffff' : HALL_FLOOR} roughness={0.95} />
+    </mesh>
+  );
+}
+
 const FURNITURE_COLOUR: Record<string, [string, string]> = {
   bench: ['#3b4a5a', '#b8915f'],
   cabinet: ['#4682B4', '#2f3338'],
@@ -399,23 +452,34 @@ const lerp = (a: Vec3, b: Vec3, t: number): Vec3 => [a[0] + (b[0] - a[0]) * t, a
  * A mouse can orbit, pan and zoom between moves, and grabbing the view ends a move in progress.
  * Under reduced motion every move is a cut, and only the walk's stops take time.
  */
-function CameraRig({ cat, part }: { cat: Catalog; part: LivePart }) {
+function CameraRig({ cat, part, left, right }: { cat: Catalog; part: LivePart; left: number; right: number }) {
   const controls = useRef<CameraControls>(null);
   const view = useShowcase((s) => s.view);
   const token = useShowcase((s) => s.token);
   const walking = useShowcase((s) => s.walking);
   const invalidate = useThree((s) => s.invalidate);
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
+  const get = useThree((s) => s.get);
   const flight = useRef<{ legs: Leg[]; i: number; start: number; from: Pose } | null>(null);
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
+  // Read when a pose is asked for, so a card changing size doesn't fly the camera again.
+  const cover = useRef({ left, right });
+  useEffect(() => {
+    cover.current = { left, right };
+  }, [left, right]);
 
   const poseOf = useMemo(
-    () => (v: typeof view): Pose =>
-      (v.kind === 'item' && itemPose(cat, v.id, camera.fov)) ||
-      (v.kind === 'step' && stepPose(cat, part.steps[v.index], camera.fov)) ||
-      (v.kind === 'zone' && zonePose(cat, v.where)) ||
-      overviewPose(cat, camera.aspect, camera.fov),
-    [cat, part, camera],
+    () => (v: typeof view): Pose => {
+      const { width, height } = get().size;
+      const open = Math.max(width - cover.current.left - cover.current.right, width * 0.3);
+      return (
+        (v.kind === 'item' && itemPose(cat, v.id, camera.fov)) ||
+        (v.kind === 'step' && stepPose(cat, part.steps[v.index], camera.fov)) ||
+        (v.kind === 'zone' && zonePose(cat, v.where)) ||
+        overviewPose(cat, height ? open / height : camera.aspect, camera.fov)
+      );
+    },
+    [cat, part, camera, get],
   );
 
   const fly = (legs: Leg[]) => {
@@ -441,6 +505,16 @@ function CameraRig({ cat, part }: { cat: Catalog; part: LivePart }) {
     if (!useShowcase.getState().walking) fly([{ ...pose, ms: 1300 }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `token` re-runs it for a repeated request
   }, [view, token, poseOf]);
+
+  // While the whole shop is in view, a card folding, opening or closing frames it again, once the
+  // card has settled.
+  useEffect(() => {
+    const s = useShowcase.getState();
+    if (s.view.kind !== 'overview' || s.walking || first.current) return;
+    const t = window.setTimeout(() => fly([{ ...poseOf(s.view), ms: 900 }]), 150);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of what the cards cover re-frames
+  }, [left, right]);
 
   useEffect(() => {
     if (walking) {
@@ -575,8 +649,9 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
   const centre = toScene(bw / 2, bd / 2, 0);
   return (
     <>
-      <color attach="background" args={['#eceae5']} />
-      <fog attach="fog" args={['#eceae5', 90, 190]} />
+      <color attach="background" args={[HALL]} />
+      {/* Clear of the shop from as far as the whole-shop view stands. */}
+      <fog attach="fog" args={[HALL, 130, 320]} />
       <hemisphereLight args={['#ffffff', '#b9b2a6', 0.35]} />
       <directionalLight
         position={[centre[0] - 18, 40, centre[2] + 22]}
@@ -600,13 +675,14 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
         <Lightformer form="rect" intensity={1} position={[-20, 6, 10]} rotation-y={Math.PI / 2} scale={[30, 6, 1]} />
         <Lightformer form="rect" intensity={0.8} position={[20, 6, -10]} rotation-y={-Math.PI / 2} scale={[30, 6, 1]} color="#ffe2c2" />
       </Environment>
+      <Hall centre={centre} />
       <Building cat={cat} />
       {cat.shop.items.map((spot, i) => (
         <Thing key={`${spot.item}#${i}`} cat={cat} spot={spot} />
       ))}
       <Highlights cat={cat} part={part} />
       <Labels cat={cat} part={part} />
-      <CameraRig cat={cat} part={part} />
+      <CameraRig cat={cat} part={part} left={left} right={right} />
       <ViewOffset left={left} right={right} />
       <Shadows />
       <ScreenProbe cat={cat} />

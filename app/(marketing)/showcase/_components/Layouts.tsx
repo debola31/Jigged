@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import dynamic from 'next/dynamic';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
@@ -15,27 +15,89 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CloseIcon from '@mui/icons-material/Close';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
 import { CARD_BG, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
+import { CategoryIcon, PartFacts, shortName } from './glyphs';
 import type { LivePart } from './showcaseData';
 import { useShowcase } from './store';
+
+// The ground the shop stands on, until the scene draws it.
+const GROUND = '#16181d';
 
 // three.js, React Three Fiber and drei load only in the browser, and only on this page.
 const ShopCanvas = dynamic(() => import('./ShopCanvas'), {
   ssr: false,
-  loading: () => <Box sx={{ position: 'absolute', inset: 0, bgcolor: '#eceae5' }} />,
+  loading: () => <Box sx={{ position: 'absolute', inset: 0, bgcolor: GROUND }} />,
 });
 
 // A thing's card, on the right of the shop.
 const ITEM_CARD = 360;
 // The step card is sized for its video, the page's main thing: 16:9 at the height the shop section
-// leaves under the card's header, the step's title and its details (about 470px with the marketing
-// header), between the narrow card's width and a little over half the screen.
-const STEP_CARD = 'clamp(420px, calc((100dvh - 470px) * 16 / 9 + 40px), 58vw)';
+// leaves under the card's header, the step's title and the Details button (about 340px with the
+// marketing header), between the narrow card's width and a little over half the screen.
+const STEP_CARD = 'clamp(420px, calc((100dvh - 340px) * 16 / 9 + 40px), 58vw)';
+// How much of a dragged card stays in the shop: enough of its header to grab it again.
+const KEEP_X = 120;
+const KEEP_Y = 56;
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * A card the visitor can drag by its header, anywhere over the shop. Pressing a control in the
+ * header doesn't drag; a double-click puts the card back.
+ */
+function useDraggable() {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ px: number; py: number; x: number; y: number; box: { x0: number; x1: number; y0: number; y1: number } } | null>(null);
+  const reset = useCallback(() => setOffset({ x: 0, y: 0 }), []);
+  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, input, [role="button"]')) return;
+    const card = e.currentTarget.closest('aside');
+    const shop = card?.parentElement;
+    if (!card || !shop) return;
+    const c = card.getBoundingClientRect();
+    const s = shop.getBoundingClientRect();
+    drag.current = {
+      px: e.clientX,
+      py: e.clientY,
+      x: offset.x,
+      y: offset.y,
+      box: {
+        x0: offset.x - (c.left - s.left) - (c.width - KEEP_X),
+        x1: offset.x + (s.right - c.left) - KEEP_X,
+        y0: offset.y - (c.top - s.top),
+        y1: offset.y + (s.bottom - c.top) - KEEP_Y,
+      },
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    setOffset({ x: clamp(d.x + e.clientX - d.px, d.box.x0, d.box.x1), y: clamp(d.y + e.clientY - d.py, d.box.y0, d.box.y1) });
+  };
+  const onPointerUp = () => {
+    drag.current = null;
+  };
+  const onDoubleClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (!(e.target as HTMLElement).closest('button, a, input, [role="button"]')) reset();
+  };
+  return {
+    offset,
+    moved: offset.x !== 0 || offset.y !== 0,
+    reset,
+    handle: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick },
+    handleSx: { cursor: 'grab', touchAction: 'none', userSelect: 'none', '&:active': { cursor: 'grabbing' } },
+    transform: `translate(${offset.x}px, ${offset.y}px)`,
+  };
+}
 
 const floatSx = {
   position: 'absolute',
@@ -74,10 +136,8 @@ function PickPrompt({ parts, onPick }: { parts: LivePart[]; onPick(id: string): 
       </Typography>
       {parts.map((p) => (
         <Box key={p.id} sx={{ mt: 2, p: 2, borderRadius: 1.5, border: '1px solid rgba(255, 255, 255, 0.12)' }}>
-          <Typography sx={{ fontWeight: 600 }}>{p.name}</Typography>
-          <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem', mt: 0.5 }}>
-            {p.stock.material} · {p.steps.length} steps
-          </Typography>
+          <Typography sx={{ fontWeight: 600, mb: 0.75 }}>{shortName(p)}</Typography>
+          <PartFacts part={p} />
           <Button variant="contained" onClick={() => onPick(p.id)} sx={{ mt: 1.5 }}>
             Make this part
           </Button>
@@ -148,12 +208,17 @@ function FindThings({ cat }: { cat: Catalog }) {
   );
 }
 
-/** Over the shop, top right: find, walk, and back to the whole shop. */
-function ShopButtons({ cat, part }: { cat: Catalog; part: LivePart }) {
+/** Over the shop, top right: the cards back where they were, find, walk, and back to the whole shop. */
+function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; part: LivePart; onSnapBack?(): void; onWholeShop(): void }) {
   const walking = useShowcase((s) => s.walking);
-  const { setWalking, overview } = useShowcase.getState();
+  const { setWalking } = useShowcase.getState();
   return (
     <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
+      {onSnapBack && (
+        <Button size="small" variant="contained" color="inherit" startIcon={<RestartAltIcon />} onClick={onSnapBack} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
+          Put the cards back
+        </Button>
+      )}
       <FindThings cat={cat} />
       <Button
         size="small"
@@ -165,7 +230,7 @@ function ShopButtons({ cat, part }: { cat: Catalog; part: LivePart }) {
       >
         {walking ? 'Stop the walk' : 'Walk the shop'}
       </Button>
-      <Button size="small" variant="contained" color="inherit" onClick={overview} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
+      <Button size="small" variant="contained" color="inherit" onClick={onWholeShop} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
         Whole shop
       </Button>
     </Box>
@@ -194,8 +259,9 @@ function Hint({ cat }: { cat: Catalog }) {
 
 /**
  * The shop fills the section, with cards over it: the step card on the left, which opens out to its
- * video's size while a step is open, and a thing's card on the right. The camera centres what it
- * flies to in the space the cards leave.
+ * video's size while a step is open, and a thing's card on the right. Either can be dragged by its
+ * header and put back. The camera centres what it flies to in the space the cards leave where they
+ * start.
  */
 export default function ShopLayout(props: ShopProps) {
   const { cat, part } = props;
@@ -203,12 +269,25 @@ export default function ShopLayout(props: ShopProps) {
   const sheet = useShowcase((s) => s.sheet);
   const item = useShowcase((s) => s.item);
   const showNeed = useShowcase((s) => s.showNeed);
-  const [collapsed, setCollapsed] = useState(false);
+  const closeItem = useShowcase((s) => s.closeItem);
+  const overview = useShowcase((s) => s.overview);
   const body = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
   const [cardWidth, setCardWidth] = useState(0);
   const step = useShowcase((s) => s.step);
+  // Folded at a step, so opening another unfolds it: a step picked is a step to watch.
+  const [folded, setFolded] = useState<{ at: number | null } | null>(null);
+  const collapsed = folded !== null && folded.at === step;
   const watching = phase === 'plan' && sheet === 'step' && step !== null && !collapsed;
+  // The whole shop wants the room the video takes: the card folds to its header, and the camera
+  // frames the shop again once it has.
+  const wholeShop = () => {
+    setFolded({ at: step });
+    overview();
+  };
+  const stepDrag = useDraggable();
+  const itemDrag = useDraggable();
+  const thing = item ? cat.spots.get(item)?.[0] : undefined;
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0;
   }, [step, sheet]);
@@ -226,7 +305,19 @@ export default function ShopLayout(props: ShopProps) {
       <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
         <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
       </Box>
-      <ShopButtons cat={cat} part={part} />
+      <ShopButtons
+        cat={cat}
+        part={part}
+        onWholeShop={wholeShop}
+        onSnapBack={
+          stepDrag.moved || itemDrag.moved
+            ? () => {
+                stepDrag.reset();
+                itemDrag.reset();
+              }
+            : undefined
+        }
+      />
       <WalkStatus />
       <Box
         component="aside"
@@ -236,15 +327,22 @@ export default function ShopLayout(props: ShopProps) {
           ...floatSx,
           top: 16,
           left: 16,
-          width: watching ? STEP_CARD : { md: 380, xl: 420 },
+          // Folded, just its header, on one line.
+          width: watching ? STEP_CARD : collapsed ? 'max-content' : { md: 380, xl: 420 },
+          '& button': { whiteSpace: 'nowrap' },
           maxHeight: 'calc(100% - 32px)',
           display: 'flex',
           flexDirection: 'column',
+          transform: stepDrag.transform,
           transition: 'width 0.3s ease',
         }}
       >
         {phase === 'plan' && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.5, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
+          <Box
+            {...stepDrag.handle}
+            sx={{ ...stepDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, p: 1.5, pl: 0.75, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
+          >
+            <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
             <StepPicker part={part} />
             {sheet === 'step' && (
               <Button size="small" onClick={showNeed}>
@@ -263,7 +361,7 @@ export default function ShopLayout(props: ShopProps) {
                 </Button>
               </>
             )}
-            <IconButton size="small" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
+            <IconButton size="small" onClick={() => setFolded(collapsed ? null : { at: step })} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
               {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
             </IconButton>
           </Box>
@@ -275,8 +373,27 @@ export default function ShopLayout(props: ShopProps) {
         )}
       </Box>
       {item && (
-        <Box component="aside" aria-label="The thing" sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', overflowY: 'auto', p: 2.5 }}>
-          <ItemContent cat={cat} part={part} id={item} />
+        <Box
+          component="aside"
+          aria-label="The thing"
+          sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column', transform: itemDrag.transform }}
+        >
+          <Box
+            {...itemDrag.handle}
+            sx={{ ...itemDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 0.75, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
+          >
+            <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
+            <CategoryIcon category={thing?.category} sx={{ fontSize: 20, color: 'secondary.main' }} />
+            <Typography sx={{ flex: 1, color: 'secondary.main', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.04em' }}>
+              {thing ? (CATEGORY_LABELS[thing.category] ?? thing.category) : ''}
+            </Typography>
+            <IconButton size="small" onClick={closeItem} aria-label={sheet === 'step' && step !== null ? 'Back to the step' : 'Close'}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+          <Box sx={{ p: 2.5, overflowY: 'auto', minHeight: 0 }}>
+            <ItemContent cat={cat} part={part} id={item} />
+          </Box>
         </Box>
       )}
       <Hint cat={cat} />

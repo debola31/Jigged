@@ -75,7 +75,10 @@ describe("what you'll need", () => {
   });
 
   it("lists a cutter the 3D shop doesn't show by name", () => {
-    expect(at('Also needed')).toContain('2.5 mm drill');
+    // Every cutter the live parts name is in the crib now, so the unplaced one is made up.
+    const unplaced = { ...part, steps: [{ ...part.steps[0], uses: [{ name: '2.5 mm drill' }] }] };
+    const also = gatherList(unplaced, cat, (id) => cat.shop.surfaces[id] ?? id).find((g) => g.place === 'Also needed');
+    expect(also?.uses).toEqual([{ name: '2.5 mm drill' }]);
   });
 
   it('numbers the steps that use a thing', () => {

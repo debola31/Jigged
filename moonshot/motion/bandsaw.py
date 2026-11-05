@@ -834,14 +834,16 @@ class UnloadPlan(SawPlan):
         self.effort("R", tg + 0.25, PUSH_EFFORT, "top")
         t_slide = tg + 0.3
         t_pull = t_slide + SLIDE_OFF_S
-        self.move("piece", t_slide, t_pull, R0, self.place.world(self.off))
+        # along the stop block's face, as along a fence, pressed lightly to it: the hand 2 mm off its plan toward the
+        # saw pushed the piece onto the rest of the bar, 1.4 mm off its other end, and it stuck between the two
+        self.move("piece", t_slide, t_pull, R0, self.place.world(self.off - [0.0, 1.0, 0.0]))
         self.move("piece", t_pull, t_pull + PULL_S, R0, p1)
         t_off = t_pull + PULL_S + 0.15
         self.carry("top", tg, t_off)
         # its friction on the bed, pushed against as it slides, and the fingers' press down on it (a press, not a
         # grasp: the grasp is the next; moonshot/validate/grasp_timing.py)
         friction = SC.STOCK["friction"] * SC.stock_kg(self.length) * 9.81
-        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, 0.0]), (t_pull, t_off - 0.05, [0.0, -1.0])):
+        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -0.25]), (t_pull, t_off - 0.05, [0.0, -1.0])):
             along = np.array([*way, -DOWN_N / friction])
             self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                        force=round(float(np.linalg.norm(along)) * friction, 2))

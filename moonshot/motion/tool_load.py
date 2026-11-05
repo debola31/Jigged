@@ -502,12 +502,13 @@ class Seat(ToolTake):
         # the acceleration the cause check allows (physics.acceleration_spike_m_s2) and the arm, after it, twice that
         t_on = 0.2
         # in from level with the grip where the tool is wider than the holder's body (the face mill): from below it,
-        # the open fingers swept through the cutter. Where it is nearly as wide, its grip kept TOOL_CLEAR_MM off it
-        # (the dovetail cutter's 30 mm head, under the body), from level and further out: from below, and from
-        # 60 mm out, the closing fingers met its head 4-5.6 mm deep as the hand came on, from 90 mm out 4.2
-        pre = Wg + [15.0, -60.0, 0.0 if self.wide else -12.0]
-        if not self.wide and TL.cutter(self.tool)["body_r"] + TOOL_CLEAR_MM > TL.BODY[0]:
-            pre = Wg + [15.0, -150.0, 0.0]
+        # the open fingers swept through the cutter. Where a narrower tool takes the face mill's grip, its fingers kept
+        # off a wide cutter (holder_grip.json "wide_grip": the dovetail cutter's 30 mm head under the body, the 8 mm
+        # reamer's long shank), from level and further out, the hand opened as its own grip (below): from below, and
+        # from 60 mm out, the fingers closing onto it met the dovetail's head 4-5.6 mm deep as the hand came on, the
+        # reamer's shank 3.6; from 150 mm out, faster, the shoulder turned past people's
+        wide_grip = not self.wide and holder_grip(self.tool).get("wide_grip", False)
+        pre = Wg + ([15.0, -90.0, 0.0] if wide_grip else [15.0, -60.0, 0.0 if self.wide else -12.0])
         # farther reaches take longer, their peak acceleration kept (a minimum-jerk move's grows as its length over its
         # duration squared), the approach onto the grip as long as ever
         reach_s = REACH_S * math.sqrt(max(1.0, np.linalg.norm(pre - self.side["R"]["wrist"]) / REACH_MM))
@@ -533,11 +534,12 @@ class Seat(ToolTake):
         # the table's front edge as the hand rose; and so does every hand reaching for a holder over the table (its fork
         # short of the table's right end): the face mill's own grip, its ring and little fingers straight, opened for
         # the reach to fork 0 hung them 120 mm under the wrist, and they caught on the table's front edge as the hand
-        # rose (from fork 4, past the table's end, nothing is there)
+        # rose (from fork 4, past the table's end, nothing is there). Not for the face mill's grip on a narrower tool
+        # (`wide_grip`): opened as the default's, the fingers closing from it onto that grip swept the tool
         kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8"))
         over_table = P0[0] < TABLE_END_X
-        reach_q = (self.hand.clamp(kept["grips"][kept["default"]]["q"]) if "from" in holder_grip(self.tool) or over_table
-                   else g["q"])
+        reach_q = (self.hand.clamp(kept["grips"][kept["default"]]["q"])
+                   if ("from" in holder_grip(self.tool) or over_table) and not wide_grip else g["q"])
         self.fingers("R", t_on + 0.05, open_like(self.hand, reach_q, 0.2))
         onset = t_on - ONSET_LEAD_S
         self.fingers("R", onset + OPEN_AT * (t_touch - onset), open_for(self.hand, reach_q, size))

@@ -6,7 +6,9 @@ A take is named by its folder under the data root's takes/. A span is (take, fir
 clip names (take.json "clips"), or the whole take. Many steps share takes: every VF-2 setup closes its doors the same
 way, so `door-close` and `cycle-start` serve them all (25-35% reuse, plan §8). A take a machine's setups share is
 named for its machine (`hurco-door-close`); the VF-2's keep their bare names. The band saw's Start, coolant and feed
-are the same for every bar (`saw-start`).
+are the same for every bar (`saw-start`). Only nist-ftc-10, published so, plays the cell's shared takes for its clean,
+start and unload: every other part's setup has its own run of them, its part or plate in the scene
+(`<part>-<setup>-door-close`, ...: per_setup).
 
 A machine-only (cycle) step is no take of people's work: the web shows it as its caption and a still, or in
 three.js, from the cycle's own simulation in takes/<part>-<step id>.
@@ -37,10 +39,26 @@ def split(fork: int) -> bool:
     return fork >= SPLIT_FROM_FORK
 
 
+# the parts whose clean, start and unload play the cell's shared takes (`shared`), each drawing nist-ftc-10's stock and
+# parallels in the vise: nist-ftc-10's 61 steps are published so. Every other part's re-run per setup, with that setup's
+# own part or plate in the scene (the user's decision, 2026-11-05; moonshot/motion/loads.py scene_spec): on the
+# shared takes G1's parts showed the wrong part, and its plates a vise where their plate clamped to the table stands
+SHARED_TAKES = {"nist-ftc-10"}
+
+
 def shared(step: dict, take: str) -> Span:
     """A take every setup on the step's machine shares."""
     m = step.get("machine", "vf2")
     return (take if m == "vf2" else f"{m}-{take}", None, None)
+
+
+def per_setup(part: str, step: dict, take: str) -> Span:
+    """The step's setup's own run of a cell take (`take`: door-close, cycle-start, door-open, clean-blow-off,
+    unload-blow-off, set-parallels, set-stop, loosen), its part or plate on the table, in takes/<part>-<setup>-<take>;
+    nist-ftc-10's the shared take it was published with (`shared`; a blow-off's step kind left off)."""
+    if part in SHARED_TAKES:
+        return shared(step, take.split("-", 1)[1] if take.endswith("-blow-off") else take)
+    return (f"{part}-{step['setup']}-{take}", None, None)
 
 
 def tool_takes(step: dict) -> list[str]:
@@ -72,18 +90,21 @@ def spans(part: str, step: dict) -> list[Span]:
                 "unload": [(f"lift-out-{vise}", None, None)]}[kind]
     own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
-    start = [shared(step, "door-close"), shared(step, "cycle-start")]
+    if not setup:
+        return own                                           # finishing: the bench's and inspection's takes
+    cell = lambda take: per_setup(part, step, take)          # noqa: E731  the setup's run of a cell take
+    start = [cell("door-close"), cell("cycle-start")]
     tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
         return {"clean": own, "load": own, "seat": own, "check": setting, "shift": own, "xy": setting, "z": setting,
-                "tools": tools, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
+                "tools": tools, "start": start, "unload": [cell("door-open"), *own]}[kind]
     if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":
-            return [shared(step, "blow-off"), shared(step, "set-stop")]
+            return [cell("clean-blow-off"), cell("set-stop")]
         if kind == "check":                                  # squared by indicator: the setting session's take
             return setting
     return {
-        "clean": [shared(step, "blow-off"), shared(step, "set-parallels")],
+        "clean": [cell("clean-blow-off"), cell("set-parallels")],
         "load": [(vise, "grab", "slide")],
         "seat": [(vise, "rotate", "push")],
         "check": [(vise, "measure", "measure")],
@@ -91,9 +112,23 @@ def spans(part: str, step: dict) -> list[Span]:
         "z": setting,
         "tools": tools,
         "start": start,
-        "unload": [shared(step, "door-open"), shared(step, "blow-off"), shared(step, "loosen"),
-                   (f"lift-out-{vise}", None, None)],
-    }.get(kind, own)                                         # finishing: the bench's and inspection's takes
+        "unload": [cell("door-open"), cell("unload-blow-off"), cell("loosen"), (f"lift-out-{vise}", None, None)],
+    }.get(kind, own)
+
+
+def played(kind: str) -> list[str]:
+    """Every take of a cell take's kind (door-close, cycle-start, door-open, clean-blow-off, unload-blow-off,
+    set-parallels, set-stop, loosen) the plans' steps play, in plan order: the shared take nist-ftc-10 plays, and each
+    other part's setups' own runs (per_setup). A blow-off's shared take is both step kinds' (`blow-off`)."""
+    from moonshot.planning.validate import PLANS
+    shared_name = kind.split("-", 1)[1] if kind.endswith("-blow-off") else kind
+    out: list[str] = []
+    for f in sorted(PLANS.glob("*.json")):
+        for s in expand(load_plan(f.stem)):
+            for t, _, _ in spans(f.stem, s):
+                if (t == shared_name or t.endswith(f"-{kind}")) and t not in out:
+                    out.append(t)
+    return out
 
 
 def main(argv: list[str]) -> None:

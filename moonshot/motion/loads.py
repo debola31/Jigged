@@ -220,3 +220,21 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
                                   else OPENING_MARGIN), density=density(plan))
+
+
+def scene_spec(part: str, setup_id: str, stock: str = "in", vise: str = "clamped") -> dict:
+    """What a per-setup take at the VF-2 (moonshot/planning/takes.py per_setup) finds on its table, for take.json:
+    {"scene": ..., and for a vise setup "load", its Load, which the checks read the part from}. stock: the part as it
+    enters the setup ("in": the start and the clean) or as its last cycle leaves it ("out": the unload). vise:
+    "clamped", the part clamped on its parallels or on the floor against its stop, as the start and the unload find it;
+    or "open", the vise open at the load's opening, the parallels in their rack (or the stop on the table) and the part
+    waiting on the table, as the clean finds it. A plate setup's plate lies on its spoilboard under its clamps
+    (moonshot/motion/plates.py)."""
+    from moonshot.planning.validate import load_plan
+    plan = load_plan(part)
+    plate = "clamps" in _setup(plan, setup_id)["workholding"]
+    out: dict = {"scene": {"part": part, "setup": setup_id, "stock": stock, "plate": plate,
+                           "vise": None if plate else vise}}
+    if not plate:
+        out["load"] = vise_load(plan, setup_id).to_json()
+    return out

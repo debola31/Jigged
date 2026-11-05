@@ -11,13 +11,15 @@ import pytest
 from moonshot.motion import tool_load as T
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import spans, split, tool_takes
-from moonshot.planning.validate import load_plan
+from moonshot.planning.validate import PLANS, load_plan
 from moonshot.sim import cam
 from moonshot.world import tooling as TL
 from moonshot.world import vf2
 
 PLAN = load_plan("nist-ftc-10")
 TOOLS = [s for s in expand(PLAN) if s["title"] == "Load the tools"]
+EVERY_TOOLS = [(p, s) for p in sorted(x.stem for x in PLANS.glob("*.json")) for s in expand(load_plan(p))
+               if s["title"] == "Load the tools"]                      # every part's, by (part, step)
 
 
 @pytest.mark.parametrize("tool_id", sorted(cam.SPEEDS))
@@ -54,6 +56,12 @@ def test_tools_are_numbered_in_the_order_the_plan_first_uses_them():
     assert num == {"facem": 1, "em12": 2, "em38": 3, "drill-2p5": 4, "drill-6": 5, "bem14": 6, "em14": 7,
                    "ream-3p5": 8, "tap-m3": 9, "drill-7": 10, "drill-5p5": 11}
     assert T.PROBE_POCKET not in num.values()
+
+
+def test_a_part_sawn_first_numbers_only_its_vf2_tools():
+    num = T.pockets(load_plan("ct-slbeam"))
+    assert "bandsaw" not in num
+    assert num == {"facem": 1, "spot": 2, "drill": 3, "tap": 4, "em12": 5, "drillk": 6, "em38": 7, "chamf": 8}
 
 
 def _control():
@@ -174,12 +182,13 @@ def test_a_holder_in_a_far_fork_is_picked_then_inserted():
     assert pick["stand"].get(4) == "facem" and 4 not in insert["stand"]     # on the stand to be picked, then in the hand
 
 
-@pytest.mark.parametrize("step", TOOLS, ids=lambda s: s["id"])
-def test_each_step_leaves_every_tool_in_its_numbered_pocket(step):
-    seq = T.sequence(PLAN, step)
+@pytest.mark.parametrize("part,step", EVERY_TOOLS, ids=lambda x: x if isinstance(x, str) else x["id"])
+def test_each_step_leaves_every_tool_in_its_numbered_pocket(part, step):
+    plan = load_plan(part)
+    seq = T.sequence(plan, step)
     assert [s["name"] for s in seq] == tool_takes(step)
-    assert [t for t, _, _ in spans("nist-ftc-10", step)] == [f"nist-ftc-10/{step['id']}/{n}" for n in tool_takes(step)]
-    num = T.pockets(PLAN)
+    assert [t for t, _, _ in spans(part, step)] == [f"{part}/{step['id']}/{n}" for n in tool_takes(step)]
+    num = T.pockets(plan)
     # replay the machine's bookkeeping through the takes' keys
     c, _, _ = _control()
     c.setup_mode = True

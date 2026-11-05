@@ -34,7 +34,7 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 from moonshot.planning.steps import expand
 from moonshot.planning.takes import tool_takes
-from moonshot.planning.validate import load_plan
+from moonshot.planning.validate import PLANS, load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
@@ -163,7 +163,8 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 
 
 # --- Load the tools ----------------------------------------------------------------------------------------------------
-# In every setup that brings new tools, its takes cut together under takes/nist-ftc-10/<step id>/ (moonshot/planning/
+# In every part's every setup that brings new tools (nist-ftc-10's, and every other part a plan is written for), its
+# takes cut together under takes/<part>/<step id>/ (moonshot/planning/
 # takes.py tool_takes; the vf2-tool-load card): at the pendant MDI, the first tool's number and ATC FWD empty the
 # spindle; then for each tool its holder is taken off the stand on the table and pushed up into the spindle while the
 # left hand holds Tool Release (a seat take), and ATC FWD puts it in its pocket (an atc take). A holder in a far fork
@@ -177,33 +178,47 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 # Besides the record: take.json "load" (kind, tool, pocket, and the state the run starts from), outcome.json "pockets"
 # ({pocket: tool}), "spindle_tool", "tool_release_held_s" (when the machine read Tool Release held) and "pressed";
 # checks.json "touching_R", the right hand's touches.
+<<<<<<< HEAD
 TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
 TOOL_TAKES = [f"nist-ftc-10/{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
+=======
+TOOL_STEPS = {f"{p}/{s['id']}": s for p in sorted(x.stem for x in PLANS.glob("*.json"))
+              for s in expand(load_plan(p)) if s["title"] == "Load the tools"}      # by <part>/<step id>
+TOOL_TAKES = [f"{ps}/{t}" for ps, s in TOOL_STEPS.items() for t in tool_takes(s)]
+>>>>>>> worktree-agent-aae51e344740d7c54
 SEATS = [t for t in TOOL_TAKES if "-seat-" in t or "-insert-" in t]          # the takes that seat a holder
 PICKS = [t for t in TOOL_TAKES if "-pick-" in t]
 PROBE_POCKET = 20                                   # moonshot/library/records/shop.json conventions.probe_tool_number
 INSERT_GRASPED = ("grasp_timing", "hand_opening")   # an insert's holder is grasped in the pick before it, not in it
 
 
+def _tool_folder(path):
+    """A tool take's folder, takes/<part>/<step id>/<take>."""
+    folder = data_root() / "takes" / path
+    if not (folder / "take.npz").exists():
+        pytest.skip(f"no take at {folder}")
+    return folder
+
+
 @pytest.fixture(params=TOOL_TAKES)
 def tool_take(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
 @pytest.fixture(params=SEATS)
 def seat(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
 @pytest.fixture(params=PICKS)
 def pick(request):
-    return _folder(request.param)
+    return _tool_folder(request.param)
 
 
-@pytest.fixture(params=[s["id"] for s in TOOL_STEPS])
+@pytest.fixture(params=list(TOOL_STEPS))
 def tool_step(request):
-    step = next(s for s in TOOL_STEPS if s["id"] == request.param)
-    folders = [TAKES / step["id"] / t for t in tool_takes(step)]
+    step = TOOL_STEPS[request.param]
+    folders = [data_root() / "takes" / request.param / t for t in tool_takes(step)]
     missing = [f for f in folders if not (f / "take.npz").exists()]
     if missing:
         pytest.skip(f"no take at {missing[0]}")
@@ -265,7 +280,7 @@ def test_a_pick_holds_the_holder_up_where_its_insert_starts(pick):
     h = names.index("holder")
     assert d["pos"][-1, h, 2] - d["pos"][0, h, 2] > 150, "the holder never came off the stand"
     assert "carry_holder" in ck["active_constraints"][-1], "the holder not in the hand at the pick's end"
-    step = next(s for s in TOOL_STEPS if s["id"] == pick.parent.name)
+    step = TOOL_STEPS[f"{pick.parent.parent.name}/{pick.parent.name}"]
     takes = tool_takes(step)
     insert = pick.parent / takes[takes.index(pick.name) + 1]
     assert "-insert-" in insert.name
@@ -277,9 +292,10 @@ def test_a_pick_holds_the_holder_up_where_its_insert_starts(pick):
     assert off <= threshold("physics.tracking_lag_mm").value, f"the insert starts {off:.1f} mm off where the pick left it"
 
 
-def _numbers():
-    """The tools' numbers, the order the plan first uses them."""
-    order = list(dict.fromkeys(op["tool"] for s in load_plan("nist-ftc-10")["setups"] for op in s["operations"]))
+def _numbers(part):
+    """The tools' numbers, the order the part's plan first uses them on the VF-2 (not the band saw's blade)."""
+    order = list(dict.fromkeys(op["tool"] for s in load_plan(part)["setups"] if s.get("machine", "vf2") == "vf2"
+                               for op in s["operations"]))
     return {t: i + 1 for i, t in enumerate(order)}
 
 
@@ -288,7 +304,7 @@ def test_the_step_ends_with_every_tool_in_its_pocket(tool_step):
     empty; each ATC FWD put the tool just seated in its pocket; and each seat take's machine ends holding that tool in
     the spindle, the pocket its number names facing it."""
     step, folders = tool_step
-    num = _numbers()
+    num = _numbers(folders[0].parent.parent.name)
     last = _json(folders[-1], "outcome.json")
     pockets = {int(p): t for p, t in last["pockets"].items()}
     for t in step["facts"]["tool_ids"]:

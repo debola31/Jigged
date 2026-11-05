@@ -72,9 +72,10 @@ def spans(part: str, step: dict) -> list[Span]:
     own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
     start = [shared(step, "door-close"), shared(step, "cycle-start")]
+    tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
         return {"clean": own, "load": own, "seat": own, "check": own, "shift": own, "xy": setting, "z": setting,
-                "tools": setting, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
+                "tools": tools, "start": start, "unload": [shared(step, "door-open"), *own]}[kind]
     if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":
             return [shared(step, "blow-off"), shared(step, "set-stop")]
@@ -87,7 +88,7 @@ def spans(part: str, step: dict) -> list[Span]:
         "check": [(vise, "measure", "measure")],
         "xy": setting,
         "z": setting,
-        "tools": [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else [],
+        "tools": tools,
         "start": start,
         "unload": [shared(step, "door-open"), shared(step, "blow-off"), shared(step, "loosen"),
                    (f"lift-out-{vise}", None, None)],

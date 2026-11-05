@@ -124,6 +124,11 @@ SHORT_MM = 25.0                                          # pushed up to this far
                                                          # drawbar: the knob stops 10 mm under the closed fingers
 OVER_MM = 1.0                                            # and pushed this far past the seat, which stops it
 EASE_MM = 1.5                                            # the hand eases this far down once the drawbar holds it
+WIDE_EASE_BACK_MM = 2.0                                  # ... and, round a tool wider than the holder's body (the
+                                                         # face mill) seated from the stand, this far back toward the
+                                                         # body, along the wrist's way from the holder's axis: let go
+                                                         # from fork 0, the thumb settled 2 mm further into the body, to
+                                                         # 4.3 mm of skin
 LIFT_MM = 2.5                                            # off the stand's tines, and slid out toward the operator
 SLIDE_MM = 68.0
 CLEAR_UP_MM = 200.0                                      # then up, so its tool clears the part and the vise
@@ -145,11 +150,14 @@ CLEAR_STAND_MM = np.array([0.0, 120.0, 270.0])           # back to rest by way o
                                                          # fingers hit the crank; by way of one 50 mm left of the rest,
                                                          # the index came down on the crank's knob)
 CAROUSEL = np.array(REC["tool_changer"]["centre_mm"], float) + OFFSET
+TABLE_END_X = REC["colliders"]["table_top"]["box_max_mm"][0]     # the table's right end (world, the table at loading)
 
 
 def pockets(plan: dict) -> dict[str, int]:
-    """Each tool's number, and so its pocket: the order the plan first uses it."""
-    order = list(dict.fromkeys(op["tool"] for s in plan["setups"] for op in s["operations"]))
+    """Each tool's number, and so its pocket: the order the plan first uses it on the VF-2 (a band saw's blade is no
+    tool of its carousel)."""
+    order = list(dict.fromkeys(op["tool"] for s in plan["setups"] if s.get("machine", "vf2") == "vf2"
+                               for op in s["operations"]))
     return {t: i + 1 for i, t in enumerate(order)}
 
 
@@ -437,9 +445,14 @@ class Seat(ToolTake):
         size = 2 * max(TL.BODY[0], TL.cutter(self.tool)["body_r"] + TOOL_CLEAR_MM)
         # the hand opens for the reach as for the default grip where its own is the default's with fingers moved
         # ("from"): an end mill's grip, its middle and ring fingers straightened off the cutter, opened so, put them on
-        # the table's front edge as the hand rose
+        # the table's front edge as the hand rose; and so does every hand reaching for a holder over the table (its fork
+        # short of the table's right end): the face mill's own grip, its ring and little fingers straight, opened for
+        # the reach to fork 0 hung them 120 mm under the wrist, and they caught on the table's front edge as the hand
+        # rose (from fork 4, past the table's end, nothing is there)
         kept = json.loads(HOLDER_GRIP.read_text(encoding="utf-8"))
-        reach_q = self.hand.clamp(kept["grips"][kept["default"]]["q"]) if "from" in holder_grip(self.tool) else g["q"]
+        over_table = P0[0] < TABLE_END_X
+        reach_q = (self.hand.clamp(kept["grips"][kept["default"]]["q"]) if "from" in holder_grip(self.tool) or over_table
+                   else g["q"])
         self.fingers("R", t_on + 0.05, open_like(self.hand, reach_q, 0.2))
         onset = t_on - ONSET_LEAD_S
         self.fingers("R", onset + OPEN_AT * (t_touch - onset), open_for(self.hand, reach_q, size))
@@ -551,10 +564,18 @@ class Seat(ToolTake):
         # the right hand holds on while the fingers close, eases off the flange, opens and comes back out
         t8 = tr + 0.35
         t9 = t8 + 0.25
-        keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, SPINDLE - [0, 0, EASE_MM])]
         def turned(t):                                      # the grip turned about the holder's axis on the way in
             a = math.radians(YAW_DEG_PER_FORK * self.stance_fork) * min_jerk((t - t2b) / (t3 - t2b))
             return np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
+        # eased down off the flange, or as far as the grip says (holder_grip.json "ease_mm": the 11 mm drill's lower
+        # fingers, eased 1.5 mm, swept its shank 5 mm above its tip as the hand opened off it)
+        eased = SPINDLE - [0, 0, holder_grip(self.tool).get("ease_mm", EASE_MM)]
+        if self.wide and self.part == "seat":       # round a wide tool, which leaves the fingers no slack, a hand that
+            # took it off the stand eases back off the body too (an insert's, holding it as its pick left it, kept the
+            # thumb 2.3-2.5 mm into the body without)
+            back = (turned(t9) @ g["W_rel"]) * [1.0, 1.0, 0.0]
+            eased = eased + WIDE_EASE_BACK_MM * back / np.linalg.norm(back)
+        keys += [(t8, SPINDLE + [0, 0, OVER_MM]), (t9, eased)]
         self.follow("R", t_c + 0.05, t9, "holder", at, turned)
         self.load("R", tw0, t8, kg)
         self.effort("R", t8, 0.6, "holder")
@@ -563,7 +584,7 @@ class Seat(ToolTake):
         open_q = open_like(self.hand, g["q"], OPEN_OFF)
         t_open = t9 + self.shape_s(g["q"], open_q)
         self.fingers("R", t_open, open_q)
-        H9, W9 = self.grip_pose("holder", SPINDLE - [0, 0, EASE_MM], turned(t9))
+        H9, W9 = self.grip_pose("holder", eased, turned(t9))
         # the fingers open off it first, then the hand draws back along them, toward the body, a little right and
         # down, so the open fingers slide out from round the holder's far side: drawn back with them still round it,
         # they would pass through it, and moved right across its front, they dragged through its body

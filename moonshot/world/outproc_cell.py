@@ -121,14 +121,16 @@ def _quat(R) -> str:
 
 
 def defaults() -> str:
-    """The rack's classes, the part's and the bag's."""
+    """The rack's classes, the part's and the bag's. Their colours are what the render paints them (linear, as
+    moonshot/render/look.py geom has them): the rack's dark painted steel, the totes blue, the bag kraft and its tag
+    manila; at 0.18-0.23 the shelf drew near white under the shop's light."""
     c = record()["contact"]
     ref, imp = _f(c["solref"], 1), _f(c["solimp"], 1)
     return f"""    <default class="surface">
-      <geom contype="1" conaffinity="3" priority="2" solref="{ref}" solimp="{imp}" rgba="0.18 0.2 0.23 1"/>
+      <geom contype="1" conaffinity="3" priority="2" solref="{ref}" solimp="{imp}" rgba="0.035 0.038 0.042 1"/>
     </default>
     <default class="dressing">
-      <geom contype="0" conaffinity="0" rgba="0.12 0.26 0.55 1"/>
+      <geom contype="0" conaffinity="0" rgba="0.02 0.06 0.2 1"/>
     </default>
     <default class="part">
       <!-- steel, as stiff as the shelf: what rests on it sits at its true height -->
@@ -137,7 +139,7 @@ def defaults() -> str:
     </default>
     <default class="bag">
       <geom contype="1" conaffinity="3" friction="{record()['bag']['friction']} 0.004 0.0001" solref="{ref}"
-            solimp="{imp}" rgba="0.6 0.43 0.26 1"/>
+            solimp="{imp}" rgba="0.3 0.17 0.07 1"/>
     </default>"""
 
 
@@ -200,7 +202,7 @@ def bag_body(at_mm) -> str:
     # hung from the rim on its string, its top 10 mm under it, off-centre to the left as a tag is tied through a
     # punched corner
     tag = _box("bag_tag", (-ox * 0.15 - tw / 2, -oy - t["thickness_mm"] - 0.2, h - 10.0 - tl),
-               (-ox * 0.15 + tw / 2, -oy - 0.2, h - 10.0), ' class="dressing" mass="0.0001" rgba="0.85 0.74 0.5 1"')
+               (-ox * 0.15 + tw / 2, -oy - 0.2, h - 10.0), ' class="dressing" mass="0.0001" rgba="0.62 0.48 0.22 1"')
     return (f'    <body name="bag" pos="{_f(at_mm)}">\n      <freejoint name="bag"/>{geoms}\n      {tag}\n'
             f'    </body>\n')
 

@@ -9,7 +9,8 @@ descent at the valve's rate, holds the head when the valve is shut, and lets a h
 The jaw follows the handwheel through the screw's lead, an equality the quick release switches off. The blade is a
 velocity servo inside the spec's speed range and the motor's torque. Colliders are the record's boxes, in class "saw":
 stock and hands collide with them but they never collide with each other, since the boxes are coarser than the parts
-(the bow's box spans the C-frame's open window) and the joints' limits are what bound the saw's own motion. Its joints
+(the bow's ends are boxed through their wheels' depth; its window, under its beam and between the guide arms, is left
+open as on the saw) and the joints' limits are what bound the saw's own motion. Its joints
 take stiff limits and dry friction, so a guard rests on its stop and the self-locking screw holds without MuJoCo's
 soft friction letting it creep. Render geometry is the per-link GLBs, drawn by Blender, not by MuJoCo.
 

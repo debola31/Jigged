@@ -401,13 +401,13 @@ def run_unload(replan=False, seconds=None) -> dict:
 
 def still(take: str, frame: int | None = None, out: Path | None = None, view_from=(-0.55, -0.55, 0.75)) -> Path:
     """A picture of the physics run at a frame (the middle by default), as MuJoCo draws it: its colliders, the body's
-    capsules, the saw and the stock (the bow's boxes see-through), at the right hand from view_from (m, world). For
+    capsules, the saw and the stock (the head's boxes see-through), at the right hand from view_from (m, world). For
     review; the take's render is Blender's (moonshot/render/)."""
     folder = plan.OUT[take]
     xml = (folder / "physics.xml").read_text(encoding="utf-8")
     xml = xml.replace("<worldbody>", '<visual><global offwidth="1280" offheight="720"/></visual>\n  <worldbody>', 1)
     m = mujoco.MjModel.from_xml_string(xml)
-    for g in range(m.ngeom):            # the bow's coarse boxes, which span its window, drawn see-through
+    for g in range(m.ngeom):            # the head's and the guards' coarse boxes drawn see-through
         if m.body(m.geom_bodyid[g]).name in ("saw_head", "saw_cover_idler", "saw_cover_drive"):
             m.geom_rgba[g, 3] = 0.1
         elif m.body(m.geom_bodyid[g]).name in SC.STOCK_BODIES:

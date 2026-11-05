@@ -79,9 +79,11 @@ def use_part(part: str) -> None:
     OUT.update(load=TAKES / f"{part}-saw", clamp=TAKES / f"{part}-saw-clamp", cut=TAKES / f"{part}-saw-cut",
                unload=TAKES / f"lift-out-{part}-saw")
 
-RAISED_DEG = 10.0           # the head lowered this far from its top stop: the blade 177 mm over the bar (at the card's
-                            # 25 mm the bow's box stands 12 mm into the bar), and its idler guard clear of the head of
-                            # someone bent over the handwheel (at 20 deg the guard met it and lifted the bow 3 deg)
+RAISED_DEG = 10.0           # the head lowered this far from its top stop: the blade 177 mm over the bar, not the card's
+                            # 25 mm, so that its idler guard is clear of the head of someone bent over the handwheel (at
+                            # 20 deg the guard met it and lifted the bow 3 deg)
+BOW = ("bow_beam", "bow_idler_end", "bow_drive_end", "guide_arm_idler", "guide_arm_drive")   # the bow's colliders
+                            # (bandsaw.json): its window left open, as on the saw
 JAW_GAP_MM = 2.3            # the jaw left open this far past the bar, so the handwheel's half turn (2.54 mm at its
                             # 5.08 mm lead) closes it and snugs it
 CUT_FEED_MM_S = 1.5         # the feed valve opened to this (proposed): the blade down through 1 in of 4140 in about
@@ -138,8 +140,10 @@ KNOB_SKIN = False           # the knob doesn't meet the skin while welded to the
                             # held the wheel back (at 9 N, and in a later trial 0 N on the bar)
 KNOB_APPROACH_MM = (95.0, 60.0)   # the hand comes onto the knob from this far back and up: from 70 and 40, the ring's
                                   # and middle's tips brushed the knob before the hand came onto it
-KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
-                            # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
+KNOB_EASE = 0.3             # ... its fingers eased this far open from the planned fist while it is welded to the knob,
+                            # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it, and
+                            # eased 0.15 from the stance at END_LUMBAR, the knob tilting in the fist as it went round
+                            # sank 4.9 mm into the index's, middle's and ring's middle bones
 KNOB_N = 30.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
                             # jaw snugs (moonshot/sim/bandsaw.py TURN_N_PER_RAD), the knob coming down the wheel's
                             # right side, pushed down
@@ -157,7 +161,12 @@ PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried 
 
 
 def saw_box(place: SC.Place, name: str, grow: float = 0.0, q_head: float = 0.0):
-    """A record collider as an SDF in the take's world (box, oriented box or cylinder along x), the head's at q_head."""
+    """A record collider as an SDF in the take's world (box, oriented box or cylinder along x), the head's at q_head;
+    "bow" is all of BOW's, as one."""
+    if name == "bow":
+        import torch
+        parts = [saw_box(place, n, grow, q_head) for n in BOW]
+        return lambda p, parts=parts: torch.stack([f(p) for f in parts]).min(0).values
     c = BS.record()["colliders"][name]
     if "box_min_mm" in c:
         lo, hi = np.array(c["box_min_mm"], float), np.array(c["box_max_mm"], float)

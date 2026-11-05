@@ -1,13 +1,14 @@
 """Cutting bar stock to length on the band saw (the bandsaw-cut-to-length card), for each of G1's bar parts, as the
 person's takes at the saw and the machine's cut between them (plan §5.4): the bar slid along the bed to the stop
 (<part>-saw), clamped by the handwheel (<part>-saw-clamp), the saw started and its feed opened (saw-start, the same
-for every bar), cut by the machine with no one at it (<part>-saw-cut), and the cut piece taken off to the bench
-(lift-out-<part>-saw). Physics tier, on the takes the runner writes to the data root (moonshot/sim/bandsaw.py).
+for every bar), cut by the machine with no one at it (<part>-saw-cut), the cut piece slid clear of the fixed jaw and the stop block
+(<part>-saw-slide), and taken off to the bench from where that left it (lift-out-<part>-saw). Physics tier, on the takes the runner writes to the data root (moonshot/sim/bandsaw.py).
 Protected (plan §6, rule 1).
 
 The cut's outcomes are measured from the records, not the runner's account (plan §6, rule 2): where the bar lay when
 it was clamped (the clamp take's record) against the blade's plane, the cut as it ran (cut.npz), and where the piece
-and the rest of the bar went (the lift-out's record). The length is the part's own blank (its plan's stock), held to
+and the rest of the bar went (the slide's and the lift-out's records); where the piece is set down, the saw's bed
+in front of the vise, away from the blade (the user's decision, 2026-11-05: the bench by the hip is past reach). The length is the part's own blank (its plan's stock), held to
 the shop's tolerance for its saw (library/records/shop.json saw-1: 0.015 in on a cut length, the stock sawn oversize
 and machined).
 """
@@ -25,17 +26,20 @@ from moonshot.world import saw_cell as SC
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 PARTS = ("ct-slbeam", "ll-1007223")         # G1's parts sawn from bar
-PERSON = ("load", "clamp", "start", "unload")
+PERSON = ("load", "clamp", "start", "slide", "unload")
 SHOP = Path(__file__).resolve().parents[2] / "library" / "records" / "shop.json"
 IN = 25.4
 STILL_MM = 0.1              # clamped, the rest moves no more than this while it is cut
 LIFT_MM = 20.0              # taken away, the piece rises this far off the bed at least
+CLEAR_MM = 20.0             # slid clear, its cut end is this far from the blade at least: room for the fingers
+AWAY_MM = 100.0             # set down, it is this far from the blade at least: clear of the bow's window (its guide
+                            # arms reach 48 mm in front of the blade)
 
 
 def folders(part: str) -> dict[str, Path]:
     t = data_root() / "takes"
     return {"load": t / f"{part}-saw", "clamp": t / f"{part}-saw-clamp", "start": t / "saw-start",
-            "cut": t / f"{part}-saw-cut", "unload": t / f"lift-out-{part}-saw"}
+            "cut": t / f"{part}-saw-cut", "slide": t / f"{part}-saw-slide", "unload": t / f"lift-out-{part}-saw"}
 
 
 SLIDE_N = 15.0              # the card's push that slides the bar (bandsaw-cut-to-length phase 6)
@@ -118,7 +122,7 @@ def test_every_take_record_is_complete(takes):
     for k in PERSON:
         assert check(takes[k]["dir"]) == [], k
         assert takes[k]["plan"]["card"] == "bandsaw-cut-to-length"
-    for k in ("load", "clamp", "unload"):
+    for k in ("load", "clamp", "slide", "unload"):
         assert takes[k]["plan"]["part"] == takes["part"], k
 
 
@@ -186,13 +190,39 @@ def test_the_bar_is_clamped_while_it_is_cut(takes):
     assert cut["head_deg"][-1] >= BS.record()["joints"]["head"]["range_deg"][1] - 0.5
 
 
-def test_the_piece_comes_free_and_is_set_down_on_the_bench(takes):
+def corners_xy(take, body, k=-1) -> np.ndarray:
+    """A stock body's four corners in plan (the station's mm) at frame k."""
+    c, R = pose(take, body, k)
+    hw, hl = SC.STOCK["w"] / 2, length_mm(take, body) / 2
+    return np.array([(c + R @ [sx * hw, sy * hl, 0.0])[:2] for sx in (-1, 1) for sy in (-1, 1)])
+
+
+def test_the_piece_is_slid_clear(takes):
+    """Off the stop block's face and away from the blade, its ends free for the hand that lifts it, still flat on the
+    bed; the rest of the bar still clamped."""
+    t = takes["slide"]
+    xy = corners_xy(t, "piece")
+    assert xy[:, 0].max() < SC.bar_x()[0], xy                           # past the block's edge (it is the bar's width)
+    assert xy[:, 1].max() <= -CLEAR_MM, xy                              # the blade's plane is y = 0
+    p, _ = pose(t, "piece", -1)
+    assert abs(p[2] - (SC.bed_z() + SC.STOCK["h"] / 2)) <= threshold("physics.placement_mm").value
+    r, _ = pose(t, "rest")
+    assert np.linalg.norm(r - r[0], axis=1).max() <= STILL_MM
+
+
+def test_the_piece_comes_free_and_is_set_down_away_from_the_blade(takes):
+    """Lifted from where the slide left it and set down on the saw's bed in front of the vise, away from the blade
+    area (the card), not on the bench beside the hip, past people's reach (the user's decision, 2026-11-05)."""
     t = takes["unload"]
     p, _ = pose(t, "piece")
+    s, _ = pose(takes["slide"], "piece", -1)
+    assert np.linalg.norm(p[0] - s) <= threshold("physics.placement_mm").value   # where the slide left it
     assert p[:, 2].max() - p[0, 2] >= LIFT_MM
-    lo, hi = np.array(SC.BENCH["lo"]), np.array(SC.BENCH["hi"])
-    assert (lo < p[-1, :2]).all() and (p[-1, :2] < hi).all(), p[-1]
-    assert abs(p[-1, 2] - (SC.bench_top_mm() + SC.STOCK["h"] / 2)) <= threshold("physics.placement_mm").value
+    bed = BS.record()["colliders"]["bed_front"]
+    xy = corners_xy(t, "piece")
+    assert (np.array(bed["box_min_mm"][:2]) <= xy).all() and (xy <= np.array(bed["box_max_mm"][:2])).all(), xy
+    assert xy[:, 1].max() <= -AWAY_MM, xy                               # the blade's plane is y = 0
+    assert abs(p[-1, 2] - (SC.bed_z() + SC.STOCK["h"] / 2)) <= threshold("physics.placement_mm").value
     fps = float(t["npz"]["fps"])
     still = p[-int(0.3 * fps):]
     assert np.linalg.norm(still - still[-1], axis=1).max() < 0.5        # resting there, let go

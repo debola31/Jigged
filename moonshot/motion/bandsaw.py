@@ -17,9 +17,11 @@ turned under the body for each (moonshot/world/saw_cell.py Place):
    blade runs up to speed; thumb and index turn the feed valve's knob a quarter turn open, and the bow comes down at
    the cutting feed; hands at the sides while it cuts.
 4. <part>-saw-cut, the machine's (moonshot/sim/bandsaw.py cut): no person.
-5. lift-out-<part>-saw, at the front (phases 14-15): the right hand slides the cut piece off the fixed jaw's plate and
-   toward the person, takes it by its ends, thumb against index, middle and ring (the card's prismatic grasp), lifts
-   it straight up out of the bow's window and sets it down on the bench beside the right hip.
+5. <part>-saw-slide, at the front (phase 14): the right hand's fingers on the cut piece's top slide it off the fixed
+   jaw's plate and toward the person, and let go.
+6. lift-out-<part>-saw, at the front (phase 15), planned from where the slide left the piece: the right hand takes it
+   by its ends, thumb against index, middle and ring (the card's prismatic grasp), lifts it straight up out of the
+   bow's window and sets it down on the saw's bed in front of the vise, away from the blade.
 
 Where the card can't be followed on this saw, and why (each for review):
 - The bar is pushed from the infeed side, as a bar is fed: its end is at the blade, under the raised bow, and from
@@ -47,8 +49,12 @@ Where the card can't be followed on this saw, and why (each for review):
   taken, by its ends: this saw's fixed jaw has a plate in front of the blade, which the piece's far side lies against
   for 63 of its 82 mm; one end is on the stop block and the other at the blade; and from the front, the hand spans
   the piece along the forearm, not across it.
+- The piece is set down on the saw's bed in front of the vise, its far end 140 mm from the blade, not on the bench
+  (the user's decision, 2026-11-05): the bench beside and behind the right hip is past people's reach (the trunk
+  leant 14-15 deg and turned 15-22 to set it down there). Of the place, the card asks that it be away from the blade
+  area, which this is.
 
-    python -m moonshot.motion.bandsaw <part> load|clamp|start|unload     # -> <data root>/takes/<take>
+    python -m moonshot.motion.bandsaw <part> load|clamp|start|slide|unload     # -> <data root>/takes/<take>
 """
 from __future__ import annotations
 
@@ -77,7 +83,7 @@ def use_part(part: str) -> None:
     from moonshot.planning.validate import load_plan
     SC.use_stock(part, load_plan(part)["stock"])
     OUT.update(load=TAKES / f"{part}-saw", clamp=TAKES / f"{part}-saw-clamp", cut=TAKES / f"{part}-saw-cut",
-               unload=TAKES / f"lift-out-{part}-saw")
+               slide=TAKES / f"{part}-saw-slide", unload=TAKES / f"lift-out-{part}-saw")
 
 RAISED_DEG = 10.0           # the head lowered this far from its top stop: the blade 177 mm over the bar, not the card's
                             # 25 mm, so that its idler guard is clear of the head of someone bent over the handwheel (at
@@ -172,6 +178,9 @@ SLIDE_EFFORT = 0.6          # the hand's effort on its top as it slides it, whic
 SLIDE_FENCE = 0.0           # ... not pressed to the block's face as to a fence: pressed, past the block's edge the face's
                             # corner turned it 2 deg and wedged it
 PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried (welded, off the skin)
+SET_DOWN_EDGE_MM = 10.0     # the piece set down this far in from the saw's bed's front edge
+PINCH_EASE = 0.12           # ... its fingers eased this far open from the planned grasp while it is welded to them, off
+                            # the skin: closed to the plan and squeezed, they sat 5-6 mm in the piece's ends
 
 
 def saw_box(place: SC.Place, name: str, grow: float = 0.0, q_head: float = 0.0):
@@ -259,7 +268,7 @@ class SawPlan(BenchPlan):
         return th
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=0.12, reach_s=0.5, pre=0.25, rise_s=RISE_S,
-              still_s=STILL_S, rise_via=()):
+              still_s=STILL_S, rise_via=(), rest_open=0.15):
         """BenchPlan's reach to grasp: up from the thigh to ready, still, then onto the grip from approach, the hand
         widest `lead` before it comes to rest open round the grip, then closing on it. Here the rise and the pause
         are the take's (the physics arm trails a fast rise by 50-75 mm, and coming down behind its plan beside the
@@ -280,7 +289,7 @@ class SawPlan(BenchPlan):
         self.fingers(side, t0 + rise_s / 2, open_like(self.hand, g["q"], pre))
         self.fingers(side, t_ready + still_s / 2, open_like(self.hand, g["q"], pre * 0.4))
         self.fingers(side, tc - lead, open_like(self.hand, g["q"], opened))
-        self.fingers(side, tc, open_like(self.hand, g["q"], 0.15))
+        self.fingers(side, tc, open_like(self.hand, g["q"], rest_open))
         self.fingers(side, tc + CLOSE_S, g["q"])
         return tc + CLOSE_S
 
@@ -762,15 +771,14 @@ class StartPlan(SawPlan):
         self.clip("cut", t_off + 0.5, self.t, "CUT  hands off while the bow comes down and cuts")
 
 
-# --- 5. lift-out: the cut piece to the bench ------------------------------------------------------------------------
-class UnloadPlan(SawPlan):
-    """The cut piece off the bed and onto the bench: slid off the fixed jaw's front plate along the stop block's face and
-    pulled toward the person by the fingers on its top, then taken by its ends, the card's prismatic grasp (the thumb
-    on its near end, the index, middle and ring across its far end), lifted straight up out of the bow's window and set
-    down beside the right hip."""
+# --- 5. slide: the cut piece off the fixed jaw's plate and toward the person -------------------------------------------
+class SlidePlan(SawPlan):
+    """The cut piece slid off the fixed jaw's front plate along the stop block's face and pulled toward the person by
+    the fingers on its top, then let go: its ends, which the hand spans to lift it, were on the block and at the blade.
+    The lift-out is planned from where this leaves it."""
 
     def __init__(self, state: dict, out=None, verbose=True):
-        super().__init__(out or OUT["unload"], state, verbose)
+        super().__init__(out or OUT["slide"], state, verbose)
         s, r = state["stock"]["piece"], state["stock"]["rest"]
         self.piece0 = (np.array(s["centre"], float), np.array(s["R"], float))
         self.rest0 = (np.array(r["centre"], float), np.array(r["R"], float), r["length"])
@@ -780,9 +788,7 @@ class UnloadPlan(SawPlan):
         self.off = c + np.array([-SLIDE_OFF_MM, 0.0, 0.0])
         self.slid = self.off + np.array([0.0, -PULL_MM, 0.0])
         self.paths["piece"] = [(0.0, self.place.R @ R, self.place.world(c))]
-        specs = self.grip_specs()
-        specs["pinch"]["at"] = (self.place.world(self.slid), self.place.R @ R)
-        self.solve_grips(specs, {"piece": (self.place.world(c), self.place.R @ R)})
+        self.solve_grips(self.grip_specs(), {"piece": (self.place.world(c), self.place.R @ R)})
 
     def colliders(self, centre):
         c, R = centre, self.piece0[1]
@@ -791,64 +797,42 @@ class UnloadPlan(SawPlan):
                 + [saw_box(self.place, n) for n in ("bed_front", "fixed_jaw_front")])
 
     def grip_specs(self) -> dict:
-        """On its top, the fingers' pads along it toward the blade about its middle, clear of the fixed jaw's plate.
-        Then, slid off the plate and pulled toward the person, by its ends from above, the card's prismatic grasp: the
-        thumb on its near end, the index, middle and ring across its far end, the index on the thumb's side."""
+        """On its top, the fingers' pads along it toward the blade about its middle, clear of the fixed jaw's plate."""
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
         c, R = self.piece0
         hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
         up = self.place.vec([0.0, 0.0, 1.0])
         top = self.place.world([c[0], c[1], c[2] + hh])
-        on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 4, hw - 14), y=(lo, hi)))   # noqa: E731
+        # the pads over its near half, the little finger curled: over its far half, the little finger lay on the stop
+        # block's top (8 mm below the 1-1/2 in bar's) and against the fixed jaw's plate, and the hand read as touching
+        # before its pads did
+        on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 4, hw - 30), y=(lo, hi)))   # noqa: E731
         q0 = self.hand.neutral()
-        for nm in ("index", "middle", "ring", "little"):
+        for nm in ("index", "middle", "ring"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 25.0, 15.0
+        q0.update(little_mcp_flex=60.0, little_pip=70.0, little_dip=30.0)
         q0.update(thumb_cmc_abd=20.0, thumb_cmc_flex=0.0, thumb_mcp_flex=10.0, thumb_ip=5.0)
         starts = [S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (25, 40) for pl in (60, 80) for r in (-20,)
                   for p in (60, 85)]
-        specs = {"top": dict(of="piece", obj=self.place.world(c), q0=q0, iters=1000, colliders=self.colliders(c),
-                             targets={"index": on_top(-4, 16), "middle": on_top(-4, 16), "ring": on_top(-14, 6)},
-                             starts=starts)}
-        cs = self.slid
-        hl = self.length / 2
-        ny = self.place.vec([0.0, 1.0, 0.0])
-        near, far = self.place.world(cs - [0, hl, 0]), self.place.world(cs + [0, hl, 0])
-        side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, x=(lo, hi), z=(-hh + 5, hh - 2)))  # noqa: E731
-        q0 = self.hand.neutral()
-        for nm in ("index", "middle", "ring"):
-            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 45.0, 45.0, 20.0
-        q0["little_mcp_flex"], q0["little_pip"], q0["little_dip"] = 70.0, 85.0, 40.0     # curled out of the way
-        q0.update(thumb_cmc_abd=45.0, thumb_cmc_flex=25.0, thumb_mcp_flex=10.0, thumb_ip=10.0)
-        specs["pinch"] = dict(of="piece", obj=self.place.world(cs), q0=q0, iters=1000, colliders=self.colliders(cs),
-                              load=round(SC.stock_kg(self.length), 2),
-                              targets={"thumb": side(near, -ny, -16, 16), "index": side(far, ny, -26, -4),
-                                       "middle": side(far, ny, -10, 12), "ring": side(far, ny, 4, 26)},
-                              starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (20, 35) for pl in (50, 75)
-                                      for r in (-20,) for p in (60, 85)])
-        return specs
-
-    def set_down_at(self):
-        """Where the piece is set down: on the bench beside the right hip, along it as it lay, by the bench's back edge
-        (centre mm, world)."""
-        lo, hi = np.array(SC.BENCH["lo"]), np.array(SC.BENCH["hi"])
-        # at the bench's corner nearest the hand (it fell 90 mm short of a set-down 90 mm in from its edge)
-        c = np.array([lo[0] + SC.STOCK["w"] / 2 + 18.0, hi[1] - self.length / 2 - 12.0,
-                      SC.bench_top_mm() + SC.STOCK["h"] / 2 + 0.3])
-        return self.place.world(c)
+        return {"top": dict(of="piece", obj=self.place.world(c), q0=q0, iters=1000, colliders=self.colliders(c),
+                            targets={"index": on_top(-4, 16), "middle": on_top(-4, 16), "ring": on_top(-14, 6)},
+                            starts=starts)}
 
     def compose(self):
         self.t = 0.5
         R0, p0 = self.place.R @ self.piece0[1], self.place.world(self.piece0[0])
         p1 = self.place.world(self.slid)
         up, back = self.place.vec([0, 0, 1.0]), self.place.vec([0, -1.0, 0])
-        left = self.place.vec([-1.0, 0, 0])
         self.look(0.0, p0)
-        # 1. the fingers onto its top, as the load take's onto the bar: up off the thigh, paused low and back from it,
+        # the fingers onto its top, as the load take's onto the bar: up off the thigh, paused low and back from it,
         # then on
         g = self.grips["top"]
         _, Wg = self.grip_pose("top", self.t)
-        tg = self.reach("R", "top", self.t, ready=Wg + up * 70 + back * 100, approach=Wg + up * 30 + back * 15,
-                        opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45)
+        # down onto it from over it, widest 0.2 s before the wrist stops: coming in from 15 mm back and 30 up, the
+        # fingertips met its top while the hand was still opening, and the touch read late; at 0.21 s, widest at 71-72%
+        # of the reach (people's 71-77%), and at 0.195, 76-78%
+        tg = self.reach("R", "top", self.t, ready=Wg + up * 90 + back * 90, approach=Wg + up * 45 + back * 5,
+                        opened=0.6, lead=0.2, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "top")
         self.effort("R", tg + 0.25, SLIDE_EFFORT, "top")
         t_slide = tg + 0.3
@@ -860,16 +844,16 @@ class UnloadPlan(SawPlan):
         self.move("piece", t_pull, t_pull + PULL_S, R0, p1)
         self.carry("top", tg, t_off)
         # its friction on the bed, pushed against as it slides, and the fingers' press down on it (a press, not a
-        # grasp: the grasp is the next; moonshot/validate/grasp_timing.py)
+        # grasp: the grasp is the lift-out's; moonshot/validate/grasp_timing.py)
         friction = SC.STOCK["friction"] * SC.stock_kg(self.length) * 9.81
         for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -SLIDE_FENCE]), (t_pull, t_off - 0.05, [0.0, -1.0])):
             along = np.array([*way, -DOWN_N / friction])
             self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                        force=round(float(np.linalg.norm(along)) * friction, 2), fingers=[2, 3, 4])   # the pads on it
-        self.event("grip", tg, t_off + 0.1, side="R", grip="top")
+        self.event("grip", tg, t_off + 0.1, side="R", grip="top", on="piece")
         # moved by the fingers' contact, the weld assisting, as the load's bar (`skin`), and keeping its own turn while
         # it slides between the block and the rest (`loose`): held to the hand's, the arm's turn as it swept left wedged
-        # it. Held to it again as it is pulled clear, so that it comes to the hand's grasp square
+        # it. Held to it again as it is pulled clear
         self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
         if SLIDE_LOOSE:
             self.event("loose", tg + 0.05, t_pull, obj="piece")
@@ -878,33 +862,101 @@ class UnloadPlan(SawPlan):
         _, W = self.grip_pose("top", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.4)
         self.wrist["R"] = W
-        self.transit("R", t_off + 0.05, t_off + 0.4, W + up * 45 + left * 10)
-        self.clip("slide", 0.0, t_off + 0.3, "SLIDE  the cut piece off the fixed jaw's plate and toward you")
-        # 2. round its ends from above, thumb to the near one, index, middle and ring across the far, and straight up
-        # out of the bow's window
+        self.transit("R", t_off + 0.05, t_off + 0.4, W + up * 45)
+        self.to_rest("R", t_off + 0.4, t_off + 1.4)
+        self.t = t_off + 1.6
+        self.clip("slide", 0.0, self.t, "SLIDE  the cut piece off the fixed jaw's plate and toward you")
+
+
+# --- 6. lift-out: the cut piece to the bench ------------------------------------------------------------------------
+class UnloadPlan(SawPlan):
+    """The cut piece, where the slide left it, taken by its ends, the card's prismatic grasp (the thumb on its near
+    end, the index, middle and ring across its far end), lifted straight up out of the bow's window and set down on the
+    saw's bed in front of the vise, away from the blade (set_down_at)."""
+
+    def __init__(self, state: dict, out=None, verbose=True):
+        super().__init__(out or OUT["unload"], state, verbose)
+        s, r = state["stock"]["piece"], state["stock"]["rest"]
+        self.piece0 = (np.array(s["centre"], float), np.array(s["R"], float))
+        self.rest0 = (np.array(r["centre"], float), np.array(r["R"], float), r["length"])
+        self.length = s["length"]
+        self.head = state["q"]["head"]
+        c, R = self.piece0
+        self.paths["piece"] = [(0.0, self.place.R @ R, self.place.world(c))]
+        self.solve_grips(self.grip_specs(), {"piece": (self.place.world(c), self.place.R @ R)})
+
+    def colliders(self, centre):
+        c, R = centre, self.piece0[1]
+        return ([self.bar_box(c, R, self.length), self.bar_box(*self.rest0), self.stop_block_box(),
+                 saw_box(self.place, "bow", q_head=self.head), saw_box(self.place, "blade", q_head=self.head)]
+                + [saw_box(self.place, n) for n in ("bed_front", "fixed_jaw_front")])
+
+    def grip_specs(self) -> dict:
+        """By its ends from above, where it lies: the thumb on its near end, the index, middle and ring across its far
+        end, the index on the thumb's side."""
+        S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
+        c, R = self.piece0
+        hh, hl = SC.STOCK["h"] / 2, self.length / 2
+        ny = self.place.vec(R @ [0.0, 1.0, 0.0])
+        near, far = self.place.world(c - R @ [0, hl, 0]), self.place.world(c + R @ [0, hl, 0])
+        side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, x=(lo, hi), z=(-hh + 5, hh - 2)))  # noqa: E731
+        q0 = self.hand.neutral()
+        for nm in ("index", "middle", "ring"):
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 45.0, 45.0, 20.0
+        q0["little_mcp_flex"], q0["little_pip"], q0["little_dip"] = 70.0, 85.0, 40.0     # curled out of the way
+        q0.update(thumb_cmc_abd=45.0, thumb_cmc_flex=25.0, thumb_mcp_flex=10.0, thumb_ip=10.0)
+        return {"pinch": dict(of="piece", obj=self.place.world(c), q0=q0, iters=1000, colliders=self.colliders(c),
+                              load=round(SC.stock_kg(self.length), 2),
+                              targets={"thumb": side(near, -ny, -16, 16), "index": side(far, ny, -26, -4),
+                                       "middle": side(far, ny, -10, 12), "ring": side(far, ny, 4, 26)},
+                              starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (20, 35) for pl in (50, 75)
+                                      for r in (-20,) for p in (60, 85)])}
+
+    def set_down_at(self):
+        """Where the piece is set down (centre mm, world): on the saw's bed in front of the vise, as it lay, drawn
+        back toward the person to SET_DOWN_EDGE_MM from the bed's front edge (its far end 140 mm from the
+        blade, clear of the bow's window and left of the stop block), not on the bench (the user's decision,
+        2026-11-05): the bench, beside and behind the right hip, is past people's reach, the trunk leaning 14-15 deg
+        right and turning 15-22 to set it down there. The card asks of the place that it be away from the blade
+        area."""
+        c, _ = self.piece0
+        bed = BS.record()["colliders"]["bed_front"]
+        # and wholly on the bed: as the slide left it, the piece overhung its near edge 7-10 mm
+        x = max(c[0], bed["box_min_mm"][0] + SC.STOCK["w"] / 2 + SET_DOWN_EDGE_MM + 4.0)
+        y = bed["box_min_mm"][1] + self.length / 2 + SET_DOWN_EDGE_MM
+        return self.place.world([x, y, SC.bed_z() + SC.STOCK["h"] / 2 + 0.3])
+
+    def compose(self):
+        self.t = 0.5
+        R0, p0 = self.place.R @ self.piece0[1], self.place.world(self.piece0[0])
+        up = self.place.vec([0, 0, 1.0])
+        self.look(0.0, p0)
+        # round its ends from above, thumb to the near one, index, middle and ring across the far: up off the thigh,
+        # still over it, then on
         g = self.grips["pinch"]
-        _, Wg = self.grip_pose("pinch", t_off)
-        t0 = t_off + 0.5
-        # still a moment over it first: from a 0.3 s pause the reach read as one with the release, 1.8 s long
-        tg = self.reach("R", "pinch", t0, ready=Wg + up * 70, approach=Wg + up * 30, opened=0.8, lead=0.21,
-                        rise_s=0.6, still_s=0.45, reach_s=0.5)
+        _, Wg = self.grip_pose("pinch", self.t)
+        # coming to rest nearly closed on it, its pads meeting its ends as it comes down: 15% open, 9 mm clear of each,
+        # they met it only as they closed, after the wrist stopped, and the hand was widest at 54% of the reach; and
+        # widest 0.15 s before the wrist stops: 0.21 s before, at 63-64% (people's 71-77%)
+        tg = self.reach("R", "pinch", self.t, ready=Wg + up * 100, approach=Wg + up * 30, opened=0.8, lead=0.15,
+                        rise_s=2.0, still_s=0.45, rest_open=0.03)
+        eased = open_like(self.hand, g["q"], PINCH_EASE)
+        self.fingers("R", tg + 0.15, eased)
         self.effort("R", tg, 0.0, "pinch")
         self.effort("R", tg + 0.25, PINCH_EFFORT, "pinch")
+        # and straight up out of the bow's window
         self.t_lift = tg + PRELOAD_S
-        self.move("piece", self.t_lift, self.t_lift + TAKE_S, R0, p1 + up * TAKE_MM)
-        self.move("piece", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p1 + up * 50)
+        self.move("piece", self.t_lift, self.t_lift + TAKE_S, R0, p0 + up * TAKE_MM)
+        self.move("piece", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p0 + up * 50)
         down = self.set_down_at()
-        # back from the saw and up over the work stop's arm, to over the bench, then down onto it
-        t_over = self.t_lift + LIFT_S + 1.4
+        # back toward the person over the bed, then down onto it
+        t_over = self.t_lift + LIFT_S + 0.9
         self.look(self.t_lift + LIFT_S, down)
         self.move("piece", self.t_lift + LIFT_S, t_over, R0, down + up * 50)
         t_down = t_over + 0.6
         self.move("piece", t_over, t_down, R0, down)
         t_off = t_down + 0.1
-        # turned about its upright as the body likes once it is up and on its way: held square to the saw, the hand
-        # kept its fingers pointing away to the right down to the bench by the hip, and the arm fell 100 mm short
-        # and low of it and set the piece on the work stop
-        self.carry("pinch", tg, t_off, free=[(self.t_lift + LIFT_S, t_off)], axis=(0.0, 0.0, 1.0))
+        self.carry("pinch", tg, t_off)
         self.event("grip", tg, t_off + 0.1, side="R", grip="pinch", on="piece")
         self.event("carry", self.t_lift, t_off, obj="piece", grip="pinch", side="R", ease_in=CARRY_EASE_S)
         # its weight, which the hand knows and bears as it lifts, fed forward through the arm (carried on the plan
@@ -913,13 +965,24 @@ class UnloadPlan(SawPlan):
                    force=round(SC.stock_kg(self.length) * 9.81, 2))
         self.effort("R", t_off - 0.1, PINCH_EFFORT, "pinch")
         self.effort("R", t_off + 0.1, 0.0, "pinch")
-        _, W = self.grip_pose("pinch", t_off)
-        self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.5)
-        self.wrist["R"] = W
-        self.transit("R", t_off + 0.05, t_off + 0.5, W + up * 60)
-        self.to_rest("R", t_off + 0.5, t_off + 1.5)
-        self.t = t_off + 1.7
-        self.clip("unload", t0 - 0.2, self.t, "UNLOAD  the cut piece lifted off the bed and set on the bench")
+        H, W = self.grip_pose("pinch", t_off)
+        # let go where it lies, then straight up off it, then back to the thigh, each movement widest half way, as the
+        # card's footage has a hand: drawn back while the fingers still wrapped its ends, they went 10 mm through its
+        # far end; and narrowing from an open hand all the way back, the hand was widest at the start of the movement
+        t_open = t_off + 0.25
+        self.hold("R", t_off, t_open, H, W)
+        self.fingers("R", t_off + 0.05, eased)
+        self.fingers("R", t_open, open_like(self.hand, eased, 0.25))
+        t_up = t_open + 0.4
+        self.transit("R", t_open, t_up, W + up * 70)
+        self.fingers("R", (t_open + t_up) / 2, open_like(self.hand, eased, 0.35))
+        self.fingers("R", t_up, open_like(self.hand, eased, 0.3))
+        t_back = t_up + 1.1
+        self.transit("R", t_up, t_back, self.rest)
+        self.fingers("R", (t_up + t_back) / 2, open_like(self.hand, eased, 0.45))
+        self.fingers("R", t_back, self.q_relax)
+        self.t = t_back + 0.2
+        self.clip("unload", 0.0, self.t, "UNLOAD  the cut piece lifted out and set down away from the blade")
         self.down = {"t": t_down, "at_mm": down.tolist()}
 
 
@@ -936,13 +999,16 @@ def build(take: str, solve=True, verbose=True):
         plan = ClampPlan(state_of("load"), verbose=verbose)
     elif take == "start":
         plan = StartPlan(state_of("clamp"), verbose=verbose)
+    elif take == "slide":
+        plan = SlidePlan(state_of("cut"), verbose=verbose)
     else:
-        plan = UnloadPlan(state_of("cut"), verbose=verbose)
+        plan = UnloadPlan(state_of("slide"), verbose=verbose)
     plan.compose()
     if solve:
         plan.solve()
         extra = ({"slide": plan.slide} if take == "load" else {"set_down": plan.down} if take == "unload" else
                  {"valve_turn_deg": VALVE_TURN_DEG} if take == "start" else
+                 {"slide_mm": SLIDE_OFF_MM, "pull_mm": PULL_MM} if take == "slide" else
                  {"jaw_off_bar_mm": round(plan.gap_mm, 3), "turn_deg": round(plan.turn_deg, 1)})
         plan.save_take(extra | {"part": SC.STOCK["part"], "blank_mm": SC.STOCK["blank_mm"], "jaw_gap_mm": JAW_GAP_MM,
                                 "raised_deg": RAISED_DEG, "feed_mm_s": CUT_FEED_MM_S})

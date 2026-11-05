@@ -6,7 +6,7 @@ The part is lifted out by the vise take started in the vise (setup_take.build_li
     python -m moonshot.motion.unload           # plans into the data root's takes/loosen
     python -m moonshot.motion.unload ct-slbeam op10     # a setup's own run: takes/ct-slbeam-op10-loosen
 
-The knob's grip is the approved vise take's (takes/setup-take/grips.json): the fist keeps its orientation and the knob
+The knob's grip is the approved vise take's on the new body (KNOB_GRIPS): the fist keeps its orientation and the knob
 spins in it.
 """
 from __future__ import annotations
@@ -39,6 +39,11 @@ KNOB_PEAK = 0.69
 # inside against 93%); standing right of it, 41
 STANCE = np.array([-90.0, 0.0, 0.0])
 RANGE_W = 10.0
+# the knob grip nist-ftc-10's published loosen (takes/loosen, 2026-11-04) was planned with, which re-planned from it
+# reproduces that take's wrist exactly: the new-body vise takes' of that morning, which the lift-outs carry. The old
+# body's (takes/setup-take) sits 47 mm off it; planned from that, every loosen's reach ended with the hand opening at
+# 100% of it and posture's likelihood at 29.1-29.6, against people's 28.7
+KNOB_GRIPS = TAKES / "lift-out-nist-ftc-10-op10" / "grips.json"
 
 
 def start_phi(load: V.Load) -> float:
@@ -49,9 +54,8 @@ def start_phi(load: V.Load) -> float:
 class Unload(StepTake):
     SOLVER_W = {"range": RANGE_W}
 
-    def __init__(self, load: V.Load = V.REFERENCE, out=TAKES / "loosen", verbose=True,
-                 grips=TAKES / "setup-take" / "grips.json"):
-        """grips: the vise take's grips.json the knob's grip is read from (the reference load's, by default)."""
+    def __init__(self, load: V.Load = V.REFERENCE, out=TAKES / "loosen", verbose=True, grips=KNOB_GRIPS):
+        """grips: the vise take's grips.json the knob's grip is read from (KNOB_GRIPS, by default)."""
         super().__init__(out, LUMBAR + STANCE, verbose)
         self.part = load
         self.home = np.array([V.VISE["x"], V.VISE["fixed_face_y"] - load.half[1],

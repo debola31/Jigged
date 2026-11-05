@@ -329,7 +329,11 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   frame on a fresh run, where a fingertip's graze is or isn't caught; the fix is timing the widest point from the
   planned movement.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
-- [ ] Nov 6: G1 (5 parts) on the web
+- [ ] Nov 6: G1 (5 parts) on the web. Started 22:30 on Nov 4 alongside nist-ftc-10's last renders (your decision),
+  in parallel: the four parts' cutting simulations and stills, the 11 pending tools' models (downloaded where no
+  login is needed, generated otherwise: your decision), the two plate parts' table-clamp takes, the two bar parts'
+  vise loads and lift-outs, their band saw takes (the saw's card changes approved as proposed: your decision),
+  setting, Load the tools, deburr, inspect and send-out; the web page readied for the four parts.
 - [ ] Nov 7: G2 (3 parts) on the web
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web

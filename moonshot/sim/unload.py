@@ -34,8 +34,10 @@ class Unload(_Cell):
         return "enclose"
 
     def scene(self, body_xml: str) -> str:
-        """The cell's, less the vise's own `enclose`: TakeRunner adds the one this take drives, by the same name."""
-        return re.sub(r'\s*<connect name="enclose"[^>]*/>', "", super().scene(body_xml), count=1)
+        """The cell's, less the vise's own `enclose`: TakeRunner adds the one this take drives, by the same name. The
+        vise writes it as a weld since it holds the knob's axis too (moonshot/world/vise.py), where this matched only
+        a connect and the model refused the repeated name."""
+        return re.sub(r'\s*<(?:connect|weld) name="enclose"[^>]*/>', "", super().scene(body_xml), count=1)
 
     def __init__(self, folder=UL.TAKES / "loosen"):
         super().__init__(folder)

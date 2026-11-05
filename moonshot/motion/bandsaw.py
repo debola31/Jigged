@@ -163,8 +163,11 @@ class SawPlan(BenchPlan):
     place = SC.FRONT
     lumbar_station = FRONT_LUMBAR
     # people's range weighed more than the shared 0.5: rising from the thigh over the work stop, the plan turned the
-    # shoulder out to 53 deg (people's 99th percentile, 31), 92% of the load take's frames in their range
-    solver_w = {"range": 3.0}
+    # shoulder out to 53 deg (people's 99th percentile, 31), 92% of the load take's frames in their range. And their
+    # likelihood more than the shared 0.3: the hanging left arm's plane of elevation, which means little while it
+    # hangs, went to 37 deg toward the comfort centre's 50 (people's hanging arms ~15), less likely than their 95th
+    # percentile all through the load take (30.0 against 28.7)
+    solver_w = {"range": 3.0, "prior": 1.5}
 
     def __init__(self, out, state: dict | None = None, verbose: bool = True):
         self.lumbar = self.place.world(self.lumbar_station)
@@ -333,12 +336,12 @@ class LoadPlan(SawPlan):
         self.look(0.0, p0 + back * (SC.bar_mm() / 2 - 40))
         # up off the thigh to over the tail and back from it, a pause, then onto it: the rise slower than the reach
         # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
-        # 0.22 s before it comes to rest (its fingers meet the end 0.1 s before the wrist stops; 0.185 s before, it
-        # was widest 80% of the way)
+        # 0.16 s before it comes to rest (its fingers meet the end 0.05 s before the wrist stops, and the hand is
+        # widest 0.04 s before its key: 0.22 s before, it was widest 58% of the way)
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
-                        opened=0.6, lead=0.22, rise_s=2.0, still_s=0.45)
+                        opened=0.6, lead=0.16, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
         t_slide = tg + 0.3

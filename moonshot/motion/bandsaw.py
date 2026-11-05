@@ -415,6 +415,10 @@ class ClampPlan(SawPlan):
     place = SC.END
     lumbar_station = END_LUMBAR
 
+    # people's range weighed more again: bent to the knob, the trunk's side-bend went 1 deg past the left arm's view of
+    # their range (-8.4 deg) for 14% of the take
+    solver_w = {"range": 8.0, "prior": 1.5}
+
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["clamp"], state, verbose)
         self.q_wheel = state["q"]["handwheel"]
@@ -480,8 +484,11 @@ class ClampPlan(SawPlan):
                              # far from people's (the posture's likelihood 47 against their 28.7)
                              targets={"index": on(6, 18), "middle": on(22, 34), "ring": on(38, 50),
                                       "thumb": on(10, 40, w=0.2)},
-                             starts=[S(f, 0, 0, pl, el, 0, eb, p, 0, 0) for f in (28, 36) for pl in (70, 90)
-                                     for el in (30, 40) for eb in (10, 25) for p in (10, 25)])
+                             # from a deeper lean, the arm raised and the elbow bent, as people's arms work in front
+                             # of them: from the arm hanging nearly straight under a 35 deg lean, the turn was still
+                             # less likely than people's (30.7)
+                             starts=[S(f, 0, 0, pl, el, -30, eb, 20, -10, 0) for f in (45, 55) for pl in (50, 70)
+                                     for el in (45, 60) for eb in (45, 70)])
         return specs
 
     def compose(self):

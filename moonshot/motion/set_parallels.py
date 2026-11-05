@@ -5,6 +5,7 @@ load take expects it (vise.Load.parallels); the far one first, so the hand never
 The left hand stays by the operator's side.
 
     python -m moonshot.motion.set_parallels            # plans into the data root's takes/set-parallels
+    python -m moonshot.motion.set_parallels ll-1007223 op10     # a setup's own: takes/ll-1007223-op10-set-parallels
 """
 from __future__ import annotations
 
@@ -16,9 +17,11 @@ import torch
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import setup_take as ST
+from moonshot.motion.loads import scene_spec, vise_load
 from moonshot.motion.primitives import PEAK_PER_MM, PEAK_PLUS_MM, blend_q, min_jerk, open_for, open_like
 from moonshot.motion.setup_take import plane, vise_boxes
 from moonshot.motion.step_take import StepTake
+from moonshot.planning.validate import load_plan
 from moonshot.world import parallel_rack as RACK
 from moonshot.world import vise as V
 
@@ -262,8 +265,17 @@ class SetParallels(StepTake):
         self.t = t + 1.8
 
 
-def build(verbose=True):
-    take = SetParallels(verbose=verbose)
+def build(verbose=True, part: str | None = None, setup: str | None = None):
+    """Plans into the data root's takes/set-parallels, for the reference load; or with a part and setup, that setup's
+    own run for its clean into takes/<part>-<setup>-set-parallels (moonshot/planning/takes.py per_setup): its
+    parallels, at their height, set where its load take puts them (loads.vise_load), the vise open at its opening and
+    its part, as it enters the setup, waiting on the table (take.json "scene", loads.scene_spec)."""
+    if part:
+        load = vise_load(load_plan(part), setup)
+        take = SetParallels(out=TAKES / f"{part}-{setup}-set-parallels", load=load, verbose=verbose)
+        take.extra = scene_spec(part, setup, stock="in", vise="open")
+    else:
+        take = SetParallels(verbose=verbose)
     take.plan()
     take.solve()
     take.save()
@@ -274,4 +286,5 @@ def build(verbose=True):
 
 
 if __name__ == "__main__":
-    build("--quiet" not in sys.argv)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    build("--quiet" not in sys.argv, *args[:2])

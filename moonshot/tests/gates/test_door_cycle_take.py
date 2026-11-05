@@ -15,9 +15,7 @@ import pytest
 
 from moonshot.config import data_root
 from moonshot.contracts.take_record import check
-from moonshot.planning.steps import expand
-from moonshot.planning.takes import spans
-from moonshot.planning.validate import PLANS, load_plan
+from moonshot.planning.takes import played
 from moonshot.world import vf2
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
@@ -25,18 +23,7 @@ TAKES = data_root() / "takes"
 FULLY_OPEN_MM = vf2.record()["joints"]["door_right"]["range_mm"][1]
 AT_STOP_MM = 3.0                # a door run home sits this close to its stop
 CYCLE_START_EXEMPT = ("grasp_timing", "hand_opening")
-
-
-def _takes(kind: str) -> list[str]:
-    """Every take of this kind the plans' VF-2 steps play: the shared one, and each setup's own."""
-    out = []
-    for f in sorted(PLANS.glob("*.json")):
-        for s in expand(load_plan(f.stem)):
-            out += [t for t, _, _ in spans(f.stem, s) if (t == kind or t.endswith(f"-{kind}")) and t not in out]
-    return out
-
-
-CLOSE, START, OPEN = _takes("door-close"), _takes("cycle-start"), _takes("door-open")
+CLOSE, START, OPEN = played("door-close"), played("cycle-start"), played("door-open")
 
 
 def _run(name, runner):

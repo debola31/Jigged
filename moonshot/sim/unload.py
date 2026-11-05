@@ -3,6 +3,7 @@ the vise with the jaw on it. The closed hand holds the crank's knob by the vise 
 it cranks; the screw is locked whenever the crank isn't being turned, as the vise take locks it.
 
     python -m moonshot.sim.unload           # runs the take in the data root's takes/loosen and writes its take record
+    python -m moonshot.sim.unload ct-slbeam-op10-loosen      # a setup's own run, its part clamped (sim/setup_scene.py)
 """
 from __future__ import annotations
 
@@ -74,12 +75,13 @@ class Unload(_Cell):
 
 
 def main(argv: list[str]) -> int:
-    r = Unload()
-    r.run(log=print)
-    r.export()
-    out = r.outcome()
-    (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-    print("loosen", out, flush=True)
+    for name in argv or ["loosen"]:
+        r = Unload(UL.TAKES / name)
+        r.run(log=print)
+        r.export()
+        out = r.outcome()
+        (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(name, out, flush=True)
     return 0
 
 

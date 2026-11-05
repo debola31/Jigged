@@ -116,6 +116,21 @@ def spans(part: str, step: dict) -> list[Span]:
     }.get(kind, own)
 
 
+def played(kind: str) -> list[str]:
+    """Every take of a cell take's kind (door-close, cycle-start, door-open, clean-blow-off, unload-blow-off,
+    set-parallels, set-stop, loosen) the plans' steps play, in plan order: the shared take nist-ftc-10 plays, and each
+    other part's setups' own runs (per_setup). A blow-off's shared take is both step kinds' (`blow-off`)."""
+    from moonshot.planning.validate import PLANS
+    shared_name = kind.split("-", 1)[1] if kind.endswith("-blow-off") else kind
+    out: list[str] = []
+    for f in sorted(PLANS.glob("*.json")):
+        for s in expand(load_plan(f.stem)):
+            for t, _, _ in spans(f.stem, s):
+                if (t == shared_name or t.endswith(f"-{kind}")) and t not in out:
+                    out.append(t)
+    return out
+
+
 def main(argv: list[str]) -> None:
     part = argv[0]
     takes = data_root() / "takes"

@@ -5,6 +5,7 @@ the far one, and stands it on the vise's floor at the part's -x end, where the l
 (vise.Load.stop). The left hand stays by the operator's side. As moonshot/motion/set_parallels.py, for one block.
 
     python -m moonshot.motion.set_stop            # plans into the data root's takes/set-stop
+    python -m moonshot.motion.set_stop ct-slbeam op20     # a setup's own run: takes/ct-slbeam-op20-set-stop
 """
 from __future__ import annotations
 
@@ -148,8 +149,17 @@ class SetStop(StepTake):
         self.t = t + 1.8
 
 
-def build(verbose=True):
-    take = SetStop(verbose=verbose)
+def build(verbose=True, part: str | None = None, setup: str | None = None):
+    """Plans into the data root's takes/set-stop, for nist-ftc-10 op50; or with a part and setup, that setup's own run
+    for its clean into takes/<part>-<setup>-set-stop (moonshot/planning/takes.py per_setup): the stop stood where its
+    part's load sets the part against it (vise.Load.stop), the vise open at its opening and its part, as it enters the
+    setup, waiting on the table (take.json "scene", loads.scene_spec)."""
+    if part:
+        take = SetStop(out=TAKES / f"{part}-{setup}-set-stop", load=loads.vise_load(load_plan(part), setup),
+                       verbose=verbose)
+        take.extra = loads.scene_spec(part, setup, stock="in", vise="open")
+    else:
+        take = SetStop(verbose=verbose)
     take.plan()
     take.solve()
     take.save()
@@ -160,4 +170,5 @@ def build(verbose=True):
 
 
 if __name__ == "__main__":
-    build("--quiet" not in sys.argv)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    build("--quiet" not in sys.argv, *args[:2])

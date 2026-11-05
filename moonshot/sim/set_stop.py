@@ -5,11 +5,13 @@ rack. The pinch holds it by a declared soft constraint while it is carried, as t
 standing where the load take expects it.
 
     python -m moonshot.sim.set_stop           # runs the take in the data root and writes its take record
+    python -m moonshot.sim.set_stop ct-slbeam-op20-set-stop      # a setup's own run (moonshot/sim/setup_scene.py)
 """
 from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -18,6 +20,7 @@ from moonshot.motion import set_stop as SS
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.door_cycle import _Cell
 from moonshot.sim.set_parallels import FirmGrip
+from moonshot.sim.setup_scene import Table
 from moonshot.world import cell
 from moonshot.world import parallel_rack as RACK
 from moonshot.world import vise as V
@@ -34,7 +37,8 @@ class SetStop(FirmGrip, _Cell):
     welded = {SS.GRIP}
 
     def __init__(self, folder=SS.TAKES / "set-stop"):
-        self.load = SS.op50()
+        tk = json.loads((Path(folder) / "take.json").read_text(encoding="utf-8"))
+        self.load = V.Load.from_json(tk["load"]) if "load" in tk else SS.op50()     # a setup's own run's, or op50's
         super().__init__(folder)
         self.base_at, self.tilt, self.in_hand = [], [], []
         self.carry = next(e for e in self.tk["events"] if e["kind"] == "carry")
@@ -87,6 +91,10 @@ class SetStop(FirmGrip, _Cell):
         return super().touching(side)
 
     def scene(self, body_xml: str) -> str:
+        """op50's; or a setup's own run's, its table open (moonshot/sim/setup_scene.py): the same, its part waiting."""
+        if "scene" in self.tk:
+            self.table = Table(self.tk)
+            return self.table.xml(body_xml)
         xml = cell.with_body(body_xml, self.load.stage, {}, "R_hand", self.load, stop_mm=V.STOP_HOME)
         return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1)
 
@@ -121,6 +129,8 @@ class SetStop(FirmGrip, _Cell):
         return None
 
     def meshes(self, folder):
+        if self.table is not None:
+            return self.table.meshes(folder)
         return V.render_meshes(self.load, folder)
 
     def on_frame(self, k: int) -> None:
@@ -143,12 +153,13 @@ class SetStop(FirmGrip, _Cell):
 
 
 def main(argv: list[str]) -> int:
-    r = SetStop()
-    r.run(log=print)
-    r.export()
-    out = r.outcome()
-    (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-    print("set-stop", out, flush=True)
+    for name in argv or ["set-stop"]:
+        r = SetStop(SS.TAKES / name)
+        r.run(log=print)
+        r.export()
+        out = r.outcome()
+        (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(name, out, flush=True)
     return 0
 
 

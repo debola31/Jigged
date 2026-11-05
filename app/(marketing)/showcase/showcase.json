@@ -1628,7 +1628,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-clean.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -2030,7 +2030,7 @@
       "type": "video",
       "path": "video/ll-1005337/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -2263,7 +2263,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -2281,7 +2281,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -2318,7 +2318,7 @@
       "still": "still/ct-slbeam/op10-face.webp",
       "model": "cut/ct-slbeam/op10-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -2481,7 +2481,7 @@
       "still": "still/ct-slbeam/op20-face.webp",
       "model": "cut/ct-slbeam/op20-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -2625,7 +2625,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-start",
@@ -2662,7 +2662,7 @@
       "still": "still/ct-slbeam/op30-face.webp",
       "model": "cut/ct-slbeam/op30-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-spot",
@@ -2681,7 +2681,7 @@
       "still": "still/ct-slbeam/op30-spot.webp",
       "model": "cut/ct-slbeam/op30-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-drill",
@@ -2700,7 +2700,7 @@
       "still": "still/ct-slbeam/op30-drill.webp",
       "model": "cut/ct-slbeam/op30-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap",
@@ -2719,7 +2719,7 @@
       "still": "still/ct-slbeam/op30-tap.webp",
       "model": "cut/ct-slbeam/op30-tap.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",
@@ -2900,7 +2900,7 @@
       "still": "still/ct-slbeam/op40-face.webp",
       "model": "cut/ct-slbeam/op40-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-notch",
@@ -2919,7 +2919,7 @@
       "still": "still/ct-slbeam/op40-notch.webp",
       "model": "cut/ct-slbeam/op40-notch.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-spot",
@@ -2938,7 +2938,7 @@
       "still": "still/ct-slbeam/op40-spot.webp",
       "model": "cut/ct-slbeam/op40-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-drill",
@@ -2957,7 +2957,7 @@
       "still": "still/ct-slbeam/op40-drill.webp",
       "model": "cut/ct-slbeam/op40-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-cbores",
@@ -2976,7 +2976,7 @@
       "still": "still/ct-slbeam/op40-cbores.webp",
       "model": "cut/ct-slbeam/op40-cbores.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-chamfer",
@@ -2995,7 +2995,7 @@
       "still": "still/ct-slbeam/op40-chamfer.webp",
       "model": "cut/ct-slbeam/op40-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-unload",
@@ -3030,7 +3030,7 @@
       "type": "video",
       "path": "video/ct-slbeam/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "send-out",
@@ -3047,7 +3047,7 @@
       "type": "video",
       "path": "video/ct-slbeam/send-out.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "black-oxide",
@@ -3065,7 +3065,7 @@
       "still": "still/ct-slbeam/black-oxide.webp",
       "model": "cut/ct-slbeam/black-oxide.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",
@@ -3312,7 +3312,7 @@
       "type": "video",
       "path": "video/ll-1007223/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -3349,7 +3349,7 @@
       "still": "still/ll-1007223/op10-face.webp",
       "model": "cut/ll-1007223/op10-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-outline",
@@ -3368,7 +3368,7 @@
       "still": "still/ll-1007223/op10-outline.webp",
       "model": "cut/ll-1007223/op10-outline.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-holes",
@@ -3387,7 +3387,7 @@
       "still": "still/ll-1007223/op10-holes.webp",
       "model": "cut/ll-1007223/op10-holes.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-cbores",
@@ -3406,7 +3406,7 @@
       "still": "still/ll-1007223/op10-cbores.webp",
       "model": "cut/ll-1007223/op10-cbores.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-chamfer",
@@ -3425,7 +3425,7 @@
       "still": "still/ll-1007223/op10-chamfer.webp",
       "model": "cut/ll-1007223/op10-chamfer.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -3606,7 +3606,7 @@
       "still": "still/ll-1007223/op20-face.webp",
       "model": "cut/ll-1007223/op20-face.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-underside",
@@ -3625,7 +3625,7 @@
       "still": "still/ll-1007223/op20-underside.webp",
       "model": "cut/ll-1007223/op20-underside.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-radius",
@@ -3644,7 +3644,7 @@
       "still": "still/ll-1007223/op20-radius.webp",
       "model": "cut/ll-1007223/op20-radius.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-cbore",
@@ -3663,7 +3663,7 @@
       "still": "still/ll-1007223/op20-cbore.webp",
       "model": "cut/ll-1007223/op20-cbore.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -3844,7 +3844,7 @@
       "still": "still/ll-1007223/op30-spot.webp",
       "model": "cut/ll-1007223/op30-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clearance",
@@ -3863,7 +3863,7 @@
       "still": "still/ll-1007223/op30-clearance.webp",
       "model": "cut/ll-1007223/op30-clearance.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap_drill",
@@ -3882,7 +3882,7 @@
       "still": "still/ll-1007223/op30-tap_drill.webp",
       "model": "cut/ll-1007223/op30-tap_drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tap",
@@ -3901,7 +3901,7 @@
       "still": "still/ll-1007223/op30-tap.webp",
       "model": "cut/ll-1007223/op30-tap.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",
@@ -3936,7 +3936,7 @@
       "type": "video",
       "path": "video/ll-1007223/deburr.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "send-out",
@@ -3953,7 +3953,7 @@
       "type": "video",
       "path": "video/ll-1007223/send-out.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "zinc",
@@ -3971,7 +3971,7 @@
       "still": "still/ll-1007223/zinc.webp",
       "model": "cut/ll-1007223/zinc.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "inspect",

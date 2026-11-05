@@ -151,9 +151,10 @@ KNOB_N = 30.0               # the push at the knob along its way round (the card
                             # right side, pushed down
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
 VALVE_TURN_S = 0.9          # ... over this long
-SLIDE_OFF_MM = 40.0         # the cut piece slid this far along the stop block's face, off the fixed jaw's front plate, which
+SLIDE_OFF_MM = 50.0         # the cut piece slid this far along the stop block's face, off the fixed jaw's front plate, which
                             # its far side lies against for 63 of its 82 mm: room for the fingers there to take it by
-                            # its sides (they are about 18 mm deep), and still against the block its whole way
+                            # its sides, its end still on the block's face (7 mm of it at the end). Slid 40, the side
+                            # pinch solved 20-38 off its pads and 15 into the piece
 SLIDE_OFF_S = 1.0           # ... over this long
 PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried (welded, off the skin)
 
@@ -794,7 +795,7 @@ class UnloadPlan(SawPlan):
         cs = self.off
         nx = self.place.vec([1.0, 0.0, 0.0])
         near, far = self.place.world(cs - [hw, 0, 0]), self.place.world(cs + [hw, 0, 0])
-        side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, y=(lo, hi), z=(-hh + 7, hh - 3)))  # noqa: E731
+        side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, y=(lo, hi), z=(-hh + 5, hh - 2)))  # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 45.0, 45.0, 20.0
@@ -803,8 +804,8 @@ class UnloadPlan(SawPlan):
         hl = self.length / 2
         specs["pinch"] = dict(of="piece", obj=self.place.world(cs), q0=q0, iters=1000, colliders=self.colliders(cs),
                               load=round(SC.stock_kg(self.length), 2),
-                              targets={"thumb": side(near, -nx, -14, 14), "index": side(far, nx, 2, hl - 11),
-                                       "middle": side(far, nx, -14, 12), "ring": side(far, nx, -30, -4)},
+                              targets={"thumb": side(near, -nx, -22, 22), "index": side(far, nx, -4, hl - 11),
+                                       "middle": side(far, nx, -18, 16), "ring": side(far, nx, -hl + 8, 0)},
                               starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (20, 35) for pl in (50, 75)
                                       for r in (-20,) for p in (60, 85)])
         return specs
@@ -863,8 +864,9 @@ class UnloadPlan(SawPlan):
         g = self.grips["pinch"]
         _, Wg = self.grip_pose("pinch", t_off)
         t0 = t_off + 0.5
+        # still a moment over it first: from a 0.3 s pause the reach read as one with the release, 1.8 s long
         tg = self.reach("R", "pinch", t0, ready=Wg + up * 70, approach=Wg + up * 30, opened=0.8, lead=0.21,
-                        rise_s=0.5, still_s=0.3, reach_s=0.5)
+                        rise_s=0.6, still_s=0.45, reach_s=0.5)
         self.effort("R", tg, 0.0, "pinch")
         self.effort("R", tg + 0.25, PINCH_EFFORT, "pinch")
         self.t_lift = tg + PRELOAD_S
@@ -878,7 +880,10 @@ class UnloadPlan(SawPlan):
         t_down = t_over + 0.6
         self.move("piece", t_over, t_down, R0, down)
         t_off = t_down + 0.1
-        self.carry("pinch", tg, t_off)
+        # turned about its upright as the body likes once it is up and on its way: held square to the saw, the hand
+        # kept its fingers pointing away to the right down to the bench by the hip, and the arm fell 100 mm short
+        # and low of it and set the piece on the work stop
+        self.carry("pinch", tg, t_off, free=[(self.t_lift + LIFT_S, t_off)], axis=(0.0, 0.0, 1.0))
         self.event("grip", tg, t_off + 0.1, side="R", grip="pinch", on="piece")
         self.event("carry", self.t_lift, t_off, obj="piece", grip="pinch", side="R", ease_in=CARRY_EASE_S)
         # its weight, which the hand knows and bears as it lifts, fed forward through the arm (carried on the plan

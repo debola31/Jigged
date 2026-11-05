@@ -104,11 +104,11 @@ SLIDE_OFF_JAW_MM = 0.3      # ... and slid this far off the fixed jaw till it is
 HOLD_S = 0.6               # held against the stop before letting go
 HOLD_N = 10.0               # ... this hard (proposed: the card's 10 N push on the jaw, as no source gives this one),
 JAW_N, DOWN_N = 4.0, 5.0    # against the fixed jaw and down on the bed (proposed: the card's 20 N hold, split)
-FRONT_LUMBAR = np.array([-200.0, -560.0, 955.0])   # the station's mm: at the front, left of the work stop, the piece
-                                                    # before the right shoulder, the bench's back edge 80 mm ahead of
-                                                    # the hip (70 mm nearer the saw, setting the piece down behind the
-                                                    # hip the arm fell 100 mm short of the bench), the hanging hand
-                                                    # clear of the work stop's arm
+FRONT_LUMBAR = np.array([-200.0, -525.0, 955.0])   # the station's mm: at the front, left of the work stop, the piece
+                                                    # before the right shoulder, the bench's back edge beside the hip,
+                                                    # the hanging hand clear of the work stop's arm. 35 mm further
+                                                    # back, the hand fell 35 mm short of the piece's top and onto the
+                                                    # stop block
 BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
                                                     # before the right hip, where the hand hangs, the body clear of the
                                                     # motor
@@ -806,7 +806,9 @@ class UnloadPlan(SawPlan):
         """Where the piece is set down: on the bench beside the right hip, along it as it lay, by the bench's back edge
         (centre mm, world)."""
         lo, hi = np.array(SC.BENCH["lo"]), np.array(SC.BENCH["hi"])
-        c = np.array([lo[0] + 90.0, hi[1] - self.length / 2 - 25.0, SC.bench_top_mm() + SC.STOCK["h"] / 2 + 0.3])
+        # at the bench's corner nearest the hand (it fell 90 mm short of a set-down 90 mm in from its edge)
+        c = np.array([lo[0] + SC.STOCK["w"] / 2 + 18.0, hi[1] - self.length / 2 - 12.0,
+                      SC.bench_top_mm() + SC.STOCK["h"] / 2 + 0.3])
         return self.place.world(c)
 
     def compose(self):
@@ -820,7 +822,7 @@ class UnloadPlan(SawPlan):
         # then on
         g = self.grips["top"]
         _, Wg = self.grip_pose("top", self.t)
-        tg = self.reach("R", "top", self.t, ready=Wg + up * 40 + back * 120, approach=Wg + up * 20 + back * 30,
+        tg = self.reach("R", "top", self.t, ready=Wg + up * 70 + back * 100, approach=Wg + up * 30 + back * 15,
                         opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "top")
         self.effort("R", tg + 0.25, PUSH_EFFORT, "top")

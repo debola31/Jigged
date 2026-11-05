@@ -50,7 +50,9 @@ def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
 
 # the bar parts' vise setups, and their finished parts' boxes in their models' frames (their STEP models' bounding boxes)
 BARS = {"ll-1007223": ("op10", "op20", "op30"), "ct-slbeam": ("op10", "op20", "op30", "op40")}
-FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8))}
+FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8)),
+            "nist-ftc-09": ((-95.25, 95.25), (0.0, 3.038), (-139.7, 139.7)),
+            "ll-1005337": ((-400.0, 0.0), (0.0, 600.0), (-20.0, -0.95))}
 VISE_SETUPS = [("nist-ftc-10", s) for s in ("op10", "op20", "op30", "op40", "op50")]
 VISE_SETUPS += [(p, s) for p, ss in BARS.items() for s in ss]
 
@@ -67,6 +69,16 @@ def test_a_bar_part_comes_off_the_saw_and_onto_the_mill_as_its_stock(part):
         env = envelope(plan, setup)
         assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
         assert contains(env, FINISHED[part]), f"{setup}: the stock doesn't hold the part"
+
+
+@pytest.mark.parametrize("part", ["nist-ftc-09", "ll-1005337"])
+def test_a_plate_goes_onto_the_spoilboard_as_its_stock_around_the_part(part):
+    plan = load_plan(part)
+    env = envelope(plan, plan["setups"][0]["id"])
+    assert env[:, 1] - env[:, 0] == pytest.approx(plan["stock"]["size_mm"])
+    assert contains(env, FINISHED[part]), "the stock doesn't hold the part"
+    # its margins even about the part, as the clamps on them and the outline's tabs are planned
+    assert env.mean(1) == pytest.approx(np.mean(FINISHED[part], axis=1), abs=0.01)
 
 
 @pytest.mark.parametrize("part", list(BARS))

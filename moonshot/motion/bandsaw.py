@@ -170,8 +170,9 @@ class SawPlan(BenchPlan):
     # shoulder out to 53 deg (people's 99th percentile, 31), 92% of the load take's frames in their range. And their
     # likelihood more than the shared 0.3: the hanging left arm's plane of elevation, which means little while it
     # hangs, went to 37 deg toward the comfort centre's 50 (people's hanging arms ~15), less likely than their 95th
-    # percentile all through the load take (30.0 against 28.7)
-    solver_w = {"range": 3.0, "prior": 1.5}
+    # percentile all through the load take (30.0 against 28.7). Range at 8: reaching down, the trunk's side-bend went
+    # past the left arm's view of people's range (-8.4 deg) for up to a quarter of a take
+    solver_w = {"range": 8.0, "prior": 1.5}
 
     def __init__(self, out, state: dict | None = None, verbose: bool = True):
         self.lumbar = self.place.world(self.lumbar_station)
@@ -344,8 +345,10 @@ class LoadPlan(SawPlan):
         # widest 0.04 s before its key: 0.16 s before, it was widest 66% of the way)
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
-        tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
-                        opened=0.6, lead=0.10, rise_s=2.0, still_s=0.45)
+        # in from 50 mm back, the hand opened 0.45: from 35 mm and 0.6, the thumb's open tip brushed the 1-3/4 in
+        # bar's end 0.2 s before the fingers came onto it
+        tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 120, approach=Wg + back * 50,
+                        opened=0.45, lead=0.10, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, PUSH_EFFORT, "bar")
         t_slide = tg + 0.3
@@ -370,7 +373,8 @@ class LoadPlan(SawPlan):
         self.event("drag", t_held - 0.1, t_off - 0.05, side="R", direction=(self.place.vec(hold) / np.linalg.norm(hold)).tolist(),
                    force=round(float(np.linalg.norm(hold)), 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="bar", on="bar")
-        self.event("carry", tg + 0.05, t_off, obj="bar", grip="bar", side="R")
+        # pushed by the fingers' contact on its end, the weld assisting: it keeps meeting the skin (`skin`)
+        self.event("carry", tg + 0.05, t_off, obj="bar", grip="bar", side="R", skin=True)
         # pushed by its end, the bar keeps its own turn, which the bed and the jaws square: held to the hand's, a
         # degree's yaw from the arm wedged it between the jaws, 2.3 mm wider than it (the push is fed forward at the
         # fingers, moonshot/sim/bandsaw.py hand_forces, so the hand doesn't pivot on them)
@@ -414,10 +418,6 @@ def on_knob(a, u, r, lo, hi, comp=2.0, w=1.0):
 class ClampPlan(SawPlan):
     place = SC.END
     lumbar_station = END_LUMBAR
-
-    # people's range weighed more again: bent to the knob, the trunk's side-bend went 1 deg past the left arm's view of
-    # their range (-8.4 deg) for 14% of the take
-    solver_w = {"range": 8.0, "prior": 1.5}
 
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["clamp"], state, verbose)

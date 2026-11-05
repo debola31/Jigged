@@ -82,6 +82,17 @@ class SawRun(BenchRun):
         self.qpos: list[np.ndarray] = []
         self.aim = np.zeros(3)
 
+    def switch_carries(self, tt: float) -> None:
+        """BenchRun's, but a pushed object (its carry event's `skin`) keeps meeting the skin while it is welded: the
+        fingers on a bar's end push it by their contact, the weld only assisting. Welded off the skin, the middle
+        finger's planned flexion took its tip 7 mm into the bar."""
+        super().switch_carries(tt)
+        m = self.model
+        for e in self.carries:
+            if e.get("skin") and e["t0"] <= tt < e["t1"]:
+                for g in self.body_geoms[e["obj"]]:
+                    m.geom_contype[g], m.geom_conaffinity[g] = self.contact_bits[g]
+
     def scene(self, loose, carried, skip):
         return SC.with_body(self.body.xml, self.place, loose, carried)
 

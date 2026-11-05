@@ -567,7 +567,9 @@ class Seat(ToolTake):
         def turned(t):                                      # the grip turned about the holder's axis on the way in
             a = math.radians(YAW_DEG_PER_FORK * self.stance_fork) * min_jerk((t - t2b) / (t3 - t2b))
             return np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
-        eased = SPINDLE - [0, 0, EASE_MM]
+        # eased down off the flange, or as far as the grip says (holder_grip.json "ease_mm": the 11 mm drill's lower
+        # fingers, eased 1.5 mm, swept its shank 5 mm above its tip as the hand opened off it)
+        eased = SPINDLE - [0, 0, holder_grip(self.tool).get("ease_mm", EASE_MM)]
         if self.wide and self.part == "seat":       # round a wide tool, which leaves the fingers no slack, a hand that
             # took it off the stand eases back off the body too (an insert's, holding it as its pick left it, kept the
             # thumb 2.3-2.5 mm into the body without)

@@ -692,8 +692,9 @@ class StartPlan(SawPlan):
         self.look(self.t, knob)
         _, Wg = self.grip_pose("valve", self.t)
         up, back = np.array([0, 0, 1.0]), np.array([0, -1.0, 0])
+        # the hand widest 0.10 s before it stops on the knob (0.2 s before, it was widest 56% of the way)
         tg = self.reach("R", "valve", self.t, ready=Wg + up * 90 + back * 60, approach=Wg + up * 30, opened=0.6,
-                        lead=0.2, rise_s=1.0, still_s=0.35, reach_s=0.5)
+                        lead=0.10, rise_s=1.0, still_s=0.35, reach_s=0.5)
         self.effort("R", tg, 0.0, "valve")
         self.effort("R", tg + 0.2, 0.3, "valve")
         self.t_turn = tg + 0.25

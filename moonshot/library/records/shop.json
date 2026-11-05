@@ -1127,6 +1127,56 @@
       "overall_length": 2.7559,
       "shank_diameter": 0.75,
       "asset": "dovetail-20"
+    },
+    {
+      "id": "drill-2p5mm",
+      "kind": "drill",
+      "description": "2.5 mm cobalt jobber drill, the M3 tap drill",
+      "diameter": 0.0984,
+      "designation": "2.5 mm",
+      "material": "cobalt",
+      "point_angle": 135,
+      "flute_length": 1.1811,
+      "overall_length": 2.2441,
+      "shank_diameter": 0.0984,
+      "asset": "drill-2p5"
+    },
+    {
+      "id": "drill-7mm",
+      "kind": "drill",
+      "description": "7 mm cobalt jobber drill",
+      "diameter": 0.2756,
+      "designation": "7 mm",
+      "material": "cobalt",
+      "point_angle": 135,
+      "flute_length": 2.7165,
+      "overall_length": 4.2913,
+      "shank_diameter": 0.2756,
+      "asset": "drill-7"
+    },
+    {
+      "id": "ream-3p5mm",
+      "kind": "reamer",
+      "description": "3.5 mm carbide machine reamer, G6, 6 straight flutes",
+      "diameter": 0.1378,
+      "material": "carbide",
+      "flutes": 6,
+      "flute_length": 0.7874,
+      "overall_length": 2.7559,
+      "shank_diameter": 0.1378,
+      "asset": "ream-3p5"
+    },
+    {
+      "id": "tap-m3-05",
+      "kind": "tap",
+      "description": "M3x0.5 HSS spiral-point plug tap, 3 flutes",
+      "diameter": 0.1181,
+      "designation": "M3x0.5",
+      "material": "hss",
+      "flutes": 3,
+      "flute_length": 0.4724,
+      "overall_length": 2.2047,
+      "asset": "tap-m3"
     }
   ],
   "inspection": [

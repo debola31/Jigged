@@ -3,6 +3,7 @@ the vise with the jaw on it. The closed hand holds the crank's knob by the vise 
 it cranks; the screw is locked whenever the crank isn't being turned, as the vise take locks it.
 
     python -m moonshot.sim.unload           # runs the take in the data root's takes/loosen and writes its take record
+    python -m moonshot.sim.unload ct-slbeam-op10-loosen      # a setup's own run, its part clamped (sim/setup_scene.py)
 """
 from __future__ import annotations
 
@@ -33,8 +34,10 @@ class Unload(_Cell):
         return "enclose"
 
     def scene(self, body_xml: str) -> str:
-        """The cell's, less the vise's own `enclose`: TakeRunner adds the one this take drives, by the same name."""
-        return re.sub(r'\s*<connect name="enclose"[^>]*/>', "", super().scene(body_xml), count=1)
+        """The cell's, less the vise's own `enclose`: TakeRunner adds the one this take drives, by the same name. The
+        vise writes it as a weld since it holds the knob's axis too (moonshot/world/vise.py), where this matched only
+        a connect and the model refused the repeated name."""
+        return re.sub(r'\s*<(?:connect|weld) name="enclose"[^>]*/>', "", super().scene(body_xml), count=1)
 
     def __init__(self, folder=UL.TAKES / "loosen"):
         super().__init__(folder)
@@ -74,12 +77,13 @@ class Unload(_Cell):
 
 
 def main(argv: list[str]) -> int:
-    r = Unload()
-    r.run(log=print)
-    r.export()
-    out = r.outcome()
-    (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
-    print("loosen", out, flush=True)
+    for name in argv or ["loosen"]:
+        r = Unload(UL.TAKES / name)
+        r.run(log=print)
+        r.export()
+        out = r.outcome()
+        (r.folder / "sim-report.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
+        print(name, out, flush=True)
     return 0
 
 

@@ -4,7 +4,7 @@ the plate on the spoilboard, each clamp a take moves a free body on its stud. Th
 soft constraint while it is carried (carry_<clamp>, as the parallels' and the stop's, sim/set_parallels.py FirmGrip);
 the eye steers it along its planned path in the air, and the physics decides where it lands.
 
-    python -m moonshot.sim.plate_clamps ll-1005337-op10-seat     # runs the take in the data root's takes/
+    python -m moonshot.sim.plate_clamps ll-1005337-op10-set-clamps     # runs the take in the data root's takes/
 """
 from __future__ import annotations
 

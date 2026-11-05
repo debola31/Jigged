@@ -4,12 +4,14 @@ panel, aims the nozzle down into the vise and sweeps it along the jaws with the 
 left hand stays by the operator's side (plan §4; the gun and holster, moonshot/world/air_gun.py).
 
     python -m moonshot.motion.blow_off            # plans into the data root's takes/blow-off
+    python -m moonshot.motion.blow_off ct-slbeam op10 clean     # a setup's own run: takes/ct-slbeam-op10-clean-blow-off
 
 The gun is held in a pistol grip: the palm on the back of its handle, the middle, ring and little fingers round it,
 the index on the trigger and the thumb round the far side; solved in two stages, as the vise crank's knob.
 """
 from __future__ import annotations
 
+import shutil
 import sys
 
 import numpy as np
@@ -19,6 +21,7 @@ from scipy.spatial.transform import Rotation, Slerp
 from moonshot.config import data_root
 from moonshot.motion import grasp as G
 from moonshot.motion import set_parallels as SP
+from moonshot.motion.loads import scene_spec
 from moonshot.motion.primitives import FPS, min_jerk, open_for, open_like
 from moonshot.motion.step_take import StepTake
 from moonshot.world import air_gun as AG
@@ -284,8 +287,21 @@ class BlowOff(StepTake):
         return next(e["t0"] for e in self.events if e["kind"] == "grip") + 0.1
 
 
-def build(verbose=True):
-    take = BlowOff(verbose=verbose)
+def build(verbose=True, part: str | None = None, setup: str | None = None, step: str = "clean"):
+    """Plans into the data root's takes/blow-off, or with a part and setup, that setup's own run for its clean or its
+    unload (step) into takes/<part>-<setup>-<step>-blow-off (moonshot/planning/takes.py per_setup), take.json naming
+    what the physics finds on the table (loads.scene_spec): for the clean, the vise open, its parallels in their rack
+    and the part as it enters the setup waiting on the table; for the unload, the part as it leaves the setup clamped
+    in the vise. The gun's path is the shared take's: it blows between the jaws, over whatever stands there."""
+    out = TAKES / (f"{part}-{setup}-{step}-blow-off" if part else "blow-off")
+    shared = TAKES / "blow-off" / "grips.json"     # the same grip on the same gun from the same stance, as the plates'
+    if part and not (out / "grips.json").exists() and shared.exists():      # (plate_blow_off.py): its cache key
+        out.mkdir(parents=True, exist_ok=True)                                # still decides whether it holds
+        shutil.copy(shared, out / "grips.json")
+    take = BlowOff(out=out, verbose=verbose)
+    if part:
+        take.extra = scene_spec(part, setup, stock="in" if step == "clean" else "out",
+                                vise="open" if step == "clean" else "clamped")
     take.plan()
     take.solve()
     take.save()
@@ -297,4 +313,5 @@ def build(verbose=True):
 
 
 if __name__ == "__main__":
-    build("--quiet" not in sys.argv)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    build("--quiet" not in sys.argv, *args[:3])

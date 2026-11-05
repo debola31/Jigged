@@ -12,6 +12,10 @@ The run writes, beside the take record, checks.json (TakeRunner's; the never-hel
 sim.npz, which moonshot/validate/take.py reads.
 
     python -m moonshot.sim.door_cycle           # runs the three takes in the data root and writes their records
+    python -m moonshot.sim.door_cycle ct-slbeam-op10-door-close ct-slbeam-op10-cycle-start    # a setup's own runs
+
+A take run per setup (moonshot/planning/takes.py per_setup) has that setup's table (moonshot/sim/setup_scene.py): its
+part clamped in the vise, or its plate under its clamps; the shared takes, nist-ftc-10's reference load.
 """
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from moonshot.motion import door_cycle as DC
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.sim.runner import SIDES, TakeRunner
+from moonshot.sim.setup_scene import Table
 from moonshot.world import cell, vf2
 from moonshot.world import vise as V
 
@@ -43,17 +48,23 @@ def clamped_home(load: V.Load) -> np.ndarray:
 
 
 class _Cell(TakeRunner):
+    """The VF-2 cell with nist-ftc-10's reference load clamped in the vise, the shared takes' scene; or, for a take
+    run per setup (take.json "scene"), that setup's table (moonshot/sim/setup_scene.py)."""
     station = "vf2"
     doors_open_mm = 0.0
     never_held = NEVER_HELD
     vise_keys = False          # the door takes' runs carry the vise's keys in sim.npz, which the checks read as a vise
                                # take's (the part and parallels sit clamped); the other cell takes' work is elsewhere
+    table: Table | None = None
 
     def __init__(self, folder):
         super().__init__(folder)
         self.vise = {k: [] for k in ("blank", "para", "opening")}
 
     def scene(self, body_xml: str) -> str:
+        self.table = Table(self.tk) if "scene" in self.tk else None
+        if self.table is not None:
+            return self.table.xml(body_xml)
         load = V.REFERENCE
         return cell.with_body(body_xml, clamped_home(load), load.parallels(), "R_hand", load)
 
@@ -63,6 +74,9 @@ class _Cell(TakeRunner):
         self.ctl = cell.start(m, d)
         for k in DOORS:
             d.qpos[self.ctl.q[k]] = self.doors_open_mm * 0.001
+        if self.table is not None:
+            self.table.start(m, d)
+            return
         load = V.REFERENCE
         jaw = (load.opening0 - load.size[1] - 0.1) * 0.001
         lead = m.eq_data[m.equality("lead_screw").id, 1]
@@ -77,25 +91,35 @@ class _Cell(TakeRunner):
         self.ctl.apply()
 
     def glbs(self):
+        if self.table is not None:
+            return self.table.glbs(self.model)
         out = glbs_in_bodies(self.model, "vf2", vf2.render_links())
         for body, entries in V.render_glbs().items():
             out.setdefault(body, []).extend(entries)
         return out
 
     def meshes(self, folder):
+        if self.table is not None:
+            return self.table.meshes(folder)
         return V.render_meshes(V.REFERENCE, folder)
 
     def record_checks(self) -> None:
         """TakeRunner's checks this frame, and for a door take the vise's part, parallels and jaw opening, sim.npz's
-        vise keys."""
+        vise keys. A plate's run carries the same keys, so the checks read it as the door takes they are: its plate
+        as the part, no parallels and no jaw (opening 0, never moving)."""
         super().record_checks()
         if not self.vise_keys:
             return
         m, d = self.model, self.data
+        load = V.REFERENCE if self.table is None else self.table.load
+        paras = () if load is None else tuple(load.parallels_y)
         self.vise["blank"].append(d.body("blank").xpos * 1000)
-        self.vise["para"].append(np.array([d.body(p).xpos * 1000 for p in ("para_a", "para_b")]))
+        self.vise["para"].append(np.array([d.body(p).xpos * 1000 for p in paras]).reshape(len(paras), 3))
+        if load is None:
+            self.vise["opening"].append(0.0)
+            return
         jaw = d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]]
-        self.vise["opening"].append(V.REFERENCE.opening0 - jaw * 1000)
+        self.vise["opening"].append(load.opening0 - jaw * 1000)
 
     def export(self, folder: Path | None = None) -> None:
         """The take record, sim.npz and checks.json (TakeRunner.export), and the vise's keys in sim.npz, which
@@ -284,9 +308,18 @@ class CycleStart(_Cell):
         return {"events": list(self.ctl.events), "state": self.ctl.state, "press_N_max": round(max(self.press_N), 1)}
 
 
+RUNNERS = {"door-close": DoorClose, "cycle-start": CycleStart, "door-open": DoorOpen}
+
+
+def runner_for(take: str):
+    """The runner of a take by its folder's name: a shared take's, or a setup's own run of one (<part>-<setup>-<take>,
+    moonshot/planning/takes.py per_setup)."""
+    return next(cls for name, cls in RUNNERS.items() if take == name or take.endswith(f"-{name}"))
+
+
 def main(argv: list[str]) -> int:
-    for cls, name in ((DoorClose, "door-close"), (CycleStart, "cycle-start"), (DoorOpen, "door-open")):
-        r = cls(DC.TAKES / name)
+    for name in argv or list(RUNNERS):
+        r = runner_for(name)(DC.TAKES / name)
         r.run(log=print)
         r.export()
         out = r.outcome()

@@ -124,8 +124,10 @@ KNOB_TURN_S = 4.0           # the half turn's time: the card's 2.5 s took the sc
                             # to 1.2 N m at its speed, 45 N at the knob on top of its friction's 20, more than the arm
                             # reaching down to the thigh can push (the replayed forearm past its maximum)
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
-KNOB_EFFORT = 0.15          # the fist's squeeze on the knob, which spins in it: at the grips' 0.4 the fist, welded to
-                            # the knob and off the skin, sank 11 mm into it
+KNOB_EFFORT = 0.4           # the fist's effort on the knob, which also stiffens the arm: at 0.15 the arm followed its
+                            # plan so loosely that the wheel stalled near the top of its turn, short of the bar
+KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
+                            # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
 KNOB_N = 30.0               # the push at the knob (the card's 40 N, less: snugging the jaw to the gate's 82.5 N takes
                             # about 25 N there, its friction's 20 and 0.2 N m through the screw)
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
@@ -524,6 +526,8 @@ class ClampPlan(SawPlan):
                         opened=0.7, lead=0.33, reach_s=0.6, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "knob")
         self.effort("R", tg + 0.25, KNOB_EFFORT, "knob")
+        eased = open_like(self.hand, g["q"], KNOB_EASE)
+        self.fingers("R", tg + 0.15, eased)
         self.t_turn = tg + 0.3
         t_off = self.t_turn + KNOB_TURN_S + 0.2
         # the fist keeps its turn and goes round with the knob, which spins in it (as the vise take's crank knob)
@@ -540,8 +544,8 @@ class ClampPlan(SawPlan):
         self.effort("R", t_off - 0.1, KNOB_EFFORT, "knob")
         self.effort("R", t_off + 0.1, 0.0, "knob")
         W = W0 + self.knob_mid(t_off) - mid0
-        self.fingers("R", t_off, g["q"])
-        self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.5)
+        self.fingers("R", t_off, eased)
+        self.release_keys(eased, t_off, t_off + 0.05, t_off + 0.5)
         self.wrist["R"] = W
         self.transit("R", t_off + 0.05, t_off + 0.5, W + back * 60 + up * 30)
         self.clip("clamp", 0.0, t_off + 0.4, "CLAMP  the handwheel turned until the jaw is snug on the bar")

@@ -16,5 +16,14 @@
    "why": "The pad grooves (1.50 mm left). nist-ftc-10's machining plan has no tool that reaches it, so the cycles leave it as the plan does; masked rather than given a tool (your decision 2026-11-03). Reported, not gated."}
  ],
  "band_mm": 6.35,
- "band_why": "On a face that meets a concave blend, the band within this distance of the blend is exempt too: a tool can't reach into an inside radius smaller than its own, and leaves material on both faces out to its radius. 6.35 mm is the plan's largest end mill's radius (em12, 1/2 in)."
+ "band_why": "On a face that meets a concave blend, the band within this distance of the blend is exempt too: a tool can't reach into an inside radius smaller than its own, and leaves material on both faces out to its radius. 6.35 mm is the plan's largest end mill's radius (em12, 1/2 in).",
+ "regions": [
+  {"what": "plan gap mouth", "edge": [[45.0, 0.0, 36.5], [45.0, 0.0, 34.5]], "within_mm": 3.0,
+   "why": "Datum A's rim round the mouth of the +Z side slot, the masked plan gap above (your decision 2026-11-03): the slot runs from datum A (y = 0) to y = 23, no tool reaches it, and the stock left in it ends flush with datum A, so its readings fall on datum A's rim (1.976 mm). Exempt within the slot's 3 mm depth of each of datum A's five edges round the mouth (your decision 2026-11-05: extend the mask)."},
+  {"what": "plan gap mouth", "edge": [[50.0, 0.0, 36.5], [45.0, 0.0, 36.5]], "within_mm": 3.0, "why": "As above."},
+  {"what": "plan gap mouth", "edge": [[50.0, 0.0, 34.5], [50.0, 0.0, 36.5]], "within_mm": 3.0, "why": "As above."},
+  {"what": "plan gap mouth", "edge": [[55.0, 0.0, 34.5], [50.0, 0.0, 34.5]], "within_mm": 3.0, "why": "As above."},
+  {"what": "plan gap mouth", "edge": [[55.0, 0.0, 37.5], [55.0, 0.0, 34.5]], "within_mm": 3.0, "why": "As above."}
+ ],
+ "regions_why": "A region exempts the samples within within_mm of its edge (a segment, the part's frame) on the faces that meet the edge (moonshot/tests/gates/test_cycle_stock.py in_regions), not the faces whole."
 }

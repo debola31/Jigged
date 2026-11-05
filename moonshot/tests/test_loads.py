@@ -202,8 +202,8 @@ def test_ll_1005337_sits_by_its_near_edge_then_slides_10_mm_toward_you():
     assert (p10["R"] @ [1.0, 0, 0]) == pytest.approx([0, 1.0, 0])
 
 
-# each setup's parallels as they stood before ct-slbeam's were spaced for the fingers that set them (2026-11-05): the
-# placements nist-ftc-10's published takes and ll-1007223's runs were made on, which must not move
+# each setup's parallels as its takes were made on, which must not move. ct-slbeam's were briefly spaced for the
+# fingers that set them and put back (the user's decision, 2026-11-05: its clean steps caption and still)
 PLACED = {("nist-ftc-10", "op10"): {"para_a": -249.8, "para_b": -302.35},
           ("nist-ftc-10", "op20"): {"para_a": -249.8, "para_b": -294.8},
           ("nist-ftc-10", "op30"): {"para_a": -244.0, "para_b": -250.8},
@@ -211,7 +211,9 @@ PLACED = {("nist-ftc-10", "op10"): {"para_a": -249.8, "para_b": -302.35},
           ("nist-ftc-10", "op50"): {},
           ("ll-1007223", "op10"): {"para_a": -249.8, "para_b": -276.95},
           ("ll-1007223", "op20"): {"para_a": -249.8, "para_b": -276.95},
-          ("ll-1007223", "op30"): {}}
+          ("ll-1007223", "op30"): {},
+          ("ct-slbeam", "op10"): {"para_a": -249.8, "para_b": -257.9},
+          ("ct-slbeam", "op40"): {"para_a": -249.8, "para_b": -257.9}}
 
 
 @pytest.mark.parametrize("part, setup", sorted(PLACED))
@@ -221,15 +223,23 @@ def test_nist_ftc_10s_and_ll_1007223s_parallels_stay_where_they_were(part, setup
     assert load.parallels_y == pytest.approx(PLACED[(part, setup)], abs=1e-9)
 
 
-@pytest.mark.parametrize("setup", ["op10", "op40"])
-def test_ct_slbeams_parallels_leave_the_setting_fingers_room_each_side_of_parallel_a(setup):
-    """b at the part's near edge, a halfway between it and the fixed jaw: 15.7 mm each side of a, where 5.0 mm between
-    them left the fingers that set b no room."""
-    from moonshot.motion.loads import FINGER_GAP_MM, FLUSH_IN_MM
-    load = vise_load(load_plan("ct-slbeam"), setup)
-    a, b = load.parallels_y["para_a"], load.parallels_y["para_b"]
-    jaw_gap = VISE["fixed_face_y"] - (a + PARALLEL_T / 2)
-    between = (a - PARALLEL_T / 2) - (b + PARALLEL_T / 2)
-    assert jaw_gap == pytest.approx(between) and between == pytest.approx(15.7)
-    assert between >= FINGER_GAP_MM
-    assert b - PARALLEL_T / 2 == pytest.approx(VISE["fixed_face_y"] - load.size_mm[1] + FLUSH_IN_MM)
+NIST_OPENING = {"op10": 96.35, "op20": 88.8, "op30": 61.0, "op40": 61.0, "op50": 105.0}
+
+
+@pytest.mark.parametrize("setup", sorted(NIST_OPENING))
+def test_nist_ftc_10s_vise_opens_as_it_did(setup):
+    assert vise_load(load_plan("nist-ftc-10"), setup).opening0 == pytest.approx(NIST_OPENING[setup], abs=1e-9)
+
+
+@pytest.mark.parametrize("part, setup, before", [("ll-1007223", "op30", 88.8), ("ct-slbeam", "op20", 68.1),
+                                                 ("ct-slbeam", "op30", 68.1)])
+def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_setters_hand_has_room(part, setup,
+                                                                                                    before):
+    """One turn wider than its part and margin ask, so the crank's knob stands where it would (the loosen's reach)."""
+    from moonshot.motion.loads import STOP_JAW_CLEAR_MM
+    from moonshot.world.vise import STOP_MM
+    load = vise_load(load_plan(part), setup)
+    assert load.opening0 == pytest.approx(before + VISE["lead"])
+    clear = lambda o: o - load.size_mm[1] / 2 - STOP_MM[1] / 2                    # noqa: E731
+    assert clear(before) < STOP_JAW_CLEAR_MM <= clear(load.opening0)
+

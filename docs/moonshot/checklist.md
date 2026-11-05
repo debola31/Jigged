@@ -380,8 +380,14 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     0.059 mm outside them.
   - The band saw's bow collider follows the C-frame (its back and top), its window open as on the real saw,
     so the lift-out lifts the piece straight up by its sides.
-  - ct-slbeam op10's and op40's parallels move apart so a hand can set them (8.1 mm apart, too close for the
-    fingers between them); those setups' setting and tool takes re-run on it.
+  - ct-slbeam op10's and op40's clean steps show caption and a still: two parallels under its 38.1 mm part can't
+    both leave the setting hand room (it needs about 17.5 mm beside each, 42 mm in all), so their spacing stays
+    as its takes were made (moving them apart was tried and reverted).
+  - nist-ftc-10's masked +Z side slot also exempts small regions on datum A's edges round its mouth (within its
+    3 mm depth), where the uncut slot's stock ends flush: its finished-stock gate then reads 0.042 mm at worst.
+    Only the fixture changed; nothing re-ran or republished.
+  - A vise holding a part against a stop opens whole crank turns wider until the stop's setter has 45 mm to the
+    moving jaw (ll-1007223 op30, ct-slbeam op20/op30); nist-ftc-10's openings unchanged.
   - ll-1007223 op20 keeps plain jaws in every take for now, consistent across its steps; its soft jaws (and
     nist-ftc-10 op30's) after Nov 6.
   - The band saw's clamp: the gate may take the lower jaw force the cut shows holds the bar (it snugged at 44-50 N

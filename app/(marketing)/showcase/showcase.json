@@ -5051,6 +5051,38 @@
     "rot": 0
    },
    {
+    "item": "drill-2p5mm",
+    "asset": "drill-2p5",
+    "x": 42223.2,
+    "y": 12478.7,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "drill-7mm",
+    "asset": "drill-7",
+    "x": 42268,
+    "y": 12476.5,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "ream-3p5mm",
+    "asset": "ream-3p5",
+    "x": 42313.2,
+    "y": 12478.2,
+    "z": 1000,
+    "rot": 0
+   },
+   {
+    "item": "tap-m3-05",
+    "asset": "tap-m3",
+    "x": 42356.5,
+    "y": 12478.5,
+    "z": 1000,
+    "rot": 0
+   },
+   {
     "item": "height-gauge-1",
     "asset": "hgauge",
     "x": 45548.6,
@@ -5588,6 +5620,22 @@
      ]
     }
    },
+   "drill-2p5": {
+    "name": "2.5 mm jobber drill",
+    "model": "models/drill-2p5.glb",
+    "bbox": {
+     "min": [
+      -1.25,
+      -1.26,
+      -0.01
+     ],
+     "max": [
+      1.25,
+      1.26,
+      57.0
+     ]
+    }
+   },
    "drill-3p3": {
     "name": "3.3 mm cobalt jobber drill",
     "model": "models/drill-3p3.glb",
@@ -5665,6 +5713,22 @@
       3.27,
       3.27,
       101.0
+     ]
+    }
+   },
+   "drill-7": {
+    "name": "7 mm jobber drill",
+    "model": "models/drill-7.glb",
+    "bbox": {
+     "min": [
+      -3.51,
+      -3.52,
+      -0.02
+     ],
+     "max": [
+      3.51,
+      3.52,
+      109.0
      ]
     }
    },
@@ -6180,6 +6244,22 @@
      ]
     }
    },
+   "ream-3p5": {
+    "name": "3.5 mm machine reamer, G6",
+    "model": "models/ream-3p5.glb",
+    "bbox": {
+     "min": [
+      -1.75,
+      -1.75,
+      -0.0
+     ],
+     "max": [
+      1.75,
+      1.75,
+      70.0
+     ]
+    }
+   },
    "ream-8": {
     "name": "8 mm chucking reamer",
     "model": "models/ream-8.glb",
@@ -6337,6 +6417,22 @@
       3.2,
       3.2,
       66.7
+     ]
+    }
+   },
+   "tap-m3": {
+    "name": "M3x0.5 spiral-point tap",
+    "model": "models/tap-m3.glb",
+    "bbox": {
+     "min": [
+      -1.51,
+      -1.51,
+      -0.01
+     ],
+     "max": [
+      1.5,
+      1.51,
+      56.0
      ]
     }
    },

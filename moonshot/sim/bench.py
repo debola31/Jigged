@@ -8,7 +8,10 @@ What moonshot/sim/vise_take.py does for the right hand, for both, and no more th
 - carry: the declared shortcut, a soft weld from the right hand to the tool, switched on where the grip was planned
   in the hand and off when the tool is set down (moonshot/world/bench_cell.py);
 - press: a force the hand applies on purpose along a planned direction, at its contact (or at a carried tool's
-  working part), trimmed by integral control on the measured contact force, as people press.
+  working part), trimmed by integral control on the measured contact force, as people press;
+- a carried part's weight anticipated (`anticipate`): fed forward through the carrying arm as it lifts it.
+The scene is the inspection bench's unless another cell's (`cell`: the outside-process rack's,
+moonshot/world/outproc_cell.py).
 
     run = BenchRun(folder, loose, carried, skip); run.run(); run.export()   # sim.npz, checks.json, the take record
 """
@@ -261,9 +264,10 @@ class BenchRun:
         m, d = self.model, self.data
         tau = np.zeros(len(self.acts))
         for e in self.carries:
-            if e["obj"] not in self.anticipate or not e["t0"] <= tt < e["t1"]:
+            t0 = e.get("load_t0", e["t0"])               # a carry may hold the part before the lift takes its weight
+            if e["obj"] not in self.anticipate or not t0 <= tt < e["t1"]:
                 continue
-            w = min_jerk((tt - e["t0"]) / max(e.get("load_s", 0.2), 1e-6))
+            w = min_jerk((tt - t0) / max(e.get("load_s", 0.2), 1e-6))
             w *= 1 - min_jerk((tt - (e["t1"] - e.get("unload_s", 0.3))) / max(e.get("unload_s", 0.3), 1e-6))
             tree = self.tree(e["obj"])
             kg = float(sum(m.body_mass[b] for b in tree))

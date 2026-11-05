@@ -32,8 +32,8 @@ LUMBAR = np.array([-40.0, -575.0, 955.0])   # standing at the rack's front, as a
 OVER_RIM_MM = 35.0          # carried over the bag, the part's underside this far over its rim: at 25 the arm, sagging, carried the
                             # L-block into the bag's wall
 IN_FROM_NEAR_MM = 38.0      # set in, the part's near side this far from the bag's near wall: the thumb is behind it
-RIGHT_OF_MIDDLE_MM = 15.0   # ... and this far right of the bag's middle: the fingers lie to the part's left, the hand
-                            # coming from the right
+RIGHT_OF_MIDDLE_MM = 0.0    # ... and this far right of the bag's middle: at 15 the hand's little-finger side met the
+                            # bag's right wall as it set the part down
 LOWER_S, SET_S = 0.8, 0.5   # down into the bag to 15 mm over its floor, then the last 15 mm onto it, slower
 GRIP_EFFORT = 0.2           # the pinch's effort while it carries the part: carried, the part leaves the skin, and at
                             # 0.4 the squeeze took the thumb 5.8 mm into it (the skin's 3.5)
@@ -41,7 +41,18 @@ LOAD_S, UNLOAD_S = 0.2, 0.3 # the arm takes the part's weight on over this long 
                             # 163-265 ms), and lets it go over this long as it sets it down (moonshot/sim/bench.py
                             # carry_load): at 0.3 s, with the pinch at 0.2, the part left the shelf 367-600 ms after
                             # its load began
-PART_TAKE_MM = 6.0          # the part's first rise, over TAKE_S, as the arm takes its weight: the deburring tool's 4.5
+PINCH_S = 0.2               # the fingers close on the part over this long once the hand has come to rest round it
+HOLD_OPEN = {"ct-slbeam": 0.08,    # ... to this far short of the grip's closed pose, holding it while it is carried
+             "ll-1007223": 0.2}    # (the carry holds it; the grip's squeeze closes them the rest): closed to the
+                                   # grip, the middle's tip was 5.3-5.8 mm into the parts the carry through (the skin's
+                                   # 3.5), and at 0.08 still 5.2 into the jaw's 11 mm stem
+FREE_OPEN = {"ct-slbeam": None,    # the free fingers, ring and little, opened this far the take through (None: as the
+             "ll-1007223": 0.6}    # grip has them as it reaches, and with the pinch as it holds): as the grip has
+                                   # them, the jaw's ring finger curled 5.3 mm into its stem as it was carried
+OPEN_LEAD = {"ll-1007223": 0.11,   # the hand widest this long before it comes to rest round the part: the L-block's
+             "ct-slbeam": 0.127}   # upright, wider than the jaw's stem, meets the fingers sooner, and at 0.11-0.12 its
+                                   # widest came 77.3% of the way, at 0.135-0.15 70.6-70.8% (people's 71-77)
+PART_TAKE_MM = 6.0         # the part's first rise, over TAKE_S, as the arm takes its weight: the deburring tool's 4.5
                             # left the 0.6 kg part on the shelf 11 frames after its load began
 
 
@@ -136,22 +147,23 @@ class SendOutPlan(BenchPlan):
         # ready in front of the shelf's edge, high enough that the hanging fingers clear it, and onto the part from
         # above, coming to rest at the grip open round it and closing there: closing 5 mm down onto it, the fingers
         # dragged the L-block down 1.3 N and threw the jaw 4.6 mm up, so the load began at the touch (preload 0 and 67
-        # ms, people's 139-321). Widest 0.11 s before it comes to rest, the thumb at rest by its face and the fingers
-        # still open half way, so the thumb meets the part first and the fingers close it against the thumb: coming
+        # ms, people's 139-321). Widest 0.11-0.12 s before it comes to rest (OPEN_LEAD), the thumb at rest by its face
+        # and the fingers still open half way, so the thumb meets the part first and the fingers close it against it: coming
         # to rest 0.15 and 0.35 open, the pads met the part 0.05 s before the hand stopped and the touch came 80-82%
         # of the way after the widest (people's 71-77); the fingers meeting the far face first, they shoved the parts
         # 20-23 mm toward the operator, and the hand dragged them back along the shelf before it could lift them
         tg = self.reach("R", "part", t0, ready=Wg + [0, -130, 110], approach=Wg + [0, -30, 45], opened=0.8,
-                        lead=0.11, close_s=0.2, rest_open=0.5, thumb_open=0.15)
+                        lead=OPEN_LEAD[self.spec.name], close_s=PINCH_S, rest_open=0.5, thumb_open=0.15,
+                        closed=HOLD_OPEN[self.spec.name], keep=self.free_digits())
         self.effort("R", tg, 0.0, "part")
         self.effort("R", tg + 0.25, GRIP_EFFORT, "part")
-        self.t_grab = tg
+        self.t_grab, self.t_rest = tg, tg - PINCH_S
         self.t_lift = tg + PRELOAD_S
         rim = self.bag0[0][2] + OC.record()["bag"]["height_mm"]
         up = rim + OVER_RIM_MM - (p0[2] + lo[2])
         self.move("part", self.t_lift, self.t_lift + TAKE_S, R0, p0 + [0, 0, PART_TAKE_MM])
         self.move("part", self.t_lift + TAKE_S, self.t_lift + TAKE_S + 0.8, R0, p0 + [0, 0, up])
-        self.fingers("R", tg + 0.5, self.grips["part"]["q"])
+        self.fingers("R", tg + 0.5, self.held(HOLD_OPEN[self.spec.name]))
         self.t = self.t_lift + TAKE_S + 0.8
         self.clip("pick up", t0, self.t, "PICK UP  the part off the shelf")
 
@@ -172,12 +184,16 @@ class SendOutPlan(BenchPlan):
         self.effort("R", t_down - 0.1, GRIP_EFFORT, "part")
         self.effort("R", t_down + 0.05, 0.0, "part")
         self.event("grip", self.t_grab, t_down + 0.15, side="R", grip="part", on="part")
-        self.event("carry", self.t_lift, t_down + 0.05, obj="part", grip="part", ease_in=CARRY_EASE_S,
-                   load_s=LOAD_S, unload_s=UNLOAD_S)
-        self.fingers("R", t_down + 0.05, g["q"])
+        # held by the carry from when the hand comes to rest round it, as the fingers close (the shortcut stands in
+        # for their hold): with the part free until the pinch had closed, the closing fingers shoved it and the hand
+        # together 17-23 mm toward the operator, braced or not. The arm takes its weight once the pinch has closed:
+        # from the lift, the load began 333-367 ms after the touch (people's 139-321)
+        self.event("carry", self.t_rest, t_down + 0.05, obj="part", grip="part", ease_in=CARRY_EASE_S,
+                   load_t0=self.t_grab, load_s=LOAD_S, unload_s=UNLOAD_S)
+        self.fingers("R", t_down + 0.05, self.held(HOLD_OPEN[self.spec.name]))
         # the fingers only let go in the bag, and open once the hand is up out of it: opened as it rose, the thumb
         # swung out into the bag's wall and pushed the bag 15 mm
-        self.fingers("R", t_down + 0.3, open_like(self.hand, g["q"], 0.2))
+        self.fingers("R", t_down + 0.3, self.held(0.2))
         self.fingers("R", t_down + 0.9, open_like(self.hand, g["q"], 0.5))
         _, W = self.grip_pose("part", t_down)
         self.wrist["R"] = W
@@ -188,6 +204,18 @@ class SendOutPlan(BenchPlan):
         self.t = t_down + 1.8
         self.t_down = t_down
         self.clip("bag", t0, self.t, "BAG  the part, set into its tagged bag on the coating shelf")
+
+    def free_digits(self) -> dict:
+        """The ring and little fingers, which take no part in the pinch, out of its way: as the grip has them, or
+        opened FREE_OPEN of the way."""
+        q = open_like(self.hand, self.grips["part"]["q"], FREE_OPEN[self.spec.name] or 0.0)
+        return {k: v for k, v in q.items() if k.startswith(("ring", "little"))}
+
+    def held(self, amount: float) -> dict:
+        """The hand round the part, the pinch opened `amount` of the way, its free fingers where FREE_OPEN has them
+        if it says where."""
+        q = open_like(self.hand, self.grips["part"]["q"], amount)
+        return q | (self.free_digits() if FREE_OPEN[self.spec.name] is not None else {})
 
     def compose(self):
         self.t = 0.5

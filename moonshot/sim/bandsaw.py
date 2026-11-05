@@ -1,20 +1,20 @@
 """Cutting bar stock to length on the band saw, run on the full body model (plan §5.4): the takes planned in
 moonshot/motion/bandsaw.py, their physics on the two-handed bench runner (moonshot/sim/bench.py) in the saw's cell
 (moonshot/world/saw_cell.py), and between them the machine's own cut, run without the person. Each take starts from
-the saw as the one before left it (state.json, in the station's frame). Its gate is
+the saw as the one before left it (state.json, in the station's frame); the cut starts from the part's clamp take
+with the saw as the controls' take (saw-start, the same for every bar) left it. Its gate is
 moonshot/tests/gates/test_bandsaw_take.py.
 
-- The saw's switchgear and feed valve (bandsaw.Control) run every step. Start and the feed valve have no colliders in
-  the station's record, so they are worked at their sites: Start registers when the index's pad comes down within
-  BUTTON_MM of its top during the plan's press, and the valve opens to the plan's rate when the thumb's and index's
-  pads have held it, within VALVE_MM, through the plan's turn. Everything else is contact: the bar slides on the bed
-  and stops on the work stop, the handwheel turns the screw that closes the jaw on the bar.
-- Carried, the bar, the piece and the handwheel's knob are held to the hand by the declared `carry_<body>` weld (the
-  knob turning in the fist, `loose`); they keep meeting the saw and the bench, not the skin.
+- The saw's switchgear and feed (bandsaw.Control) run every step, the feed set by the valve's knob where it is turned.
+  Start has no collider in the station's record, so it is worked at its site: it registers when the index's pad comes
+  down within BUTTON_MM of its top during the plan's press. Everything else is contact: the bar slides on the bed and
+  stops on the stop block, the handwheel turns the screw that closes the jaw on the bar, the fingers turn the valve.
+- Carried, the bar, the piece, the handwheel's knob and the valve's are held to the hand by the declared
+  `carry_<body>` weld (the knob turning in the fist, `loose`); they keep meeting the saw and the bench, not the skin.
 - While the hand turns the handwheel it pushes the knob round with the card's force, fed forward through the arm
   as a press is (`hand_forces`).
 
-    python -m moonshot.sim.bandsaw load|clamp|cut|unload|all [--replan]    # -> <data root>/takes/bandsaw-<take>
+    python -m moonshot.sim.bandsaw <part> load|clamp|start|cut|unload|all [--replan]   # -> <data root>/takes/<take>
 """
 from __future__ import annotations
 
@@ -33,8 +33,6 @@ from moonshot.world import bandsaw as BS
 from moonshot.world import saw_cell as SC
 
 BUTTON_MM = 6.0             # a press registers with the pad's skin this near the button's top (its travel, proposed)
-VALVE_MM = 12.0             # the pinch holds the valve's knob: the middle of its tips this near its axis, inside its
-                            # 13 mm barrel (proposed)
 AIM_TAU, AIM_MAX = 0.15, 0.04   # a fingertip is steered onto a control by sight this fast (s), by at most this (m), as
                                 # the pendant takes' (moonshot/sim/pendant.py)
 AIM_LEAD_S = 0.5            # ... from this long before its press
@@ -43,7 +41,7 @@ TURN_N_MAX = 80.0           # ... to at most this (proposed: a firm one-handed p
 NEVER_HELD = ["saw_blade", "saw_head"]   # the band's collider, and the head that carries it (the checks read what a
                                          # hand touches by body, validate/objects.py touched)
 DRIVEN = ["saw", "saw_base", "saw_head", "saw_cover_idler", "saw_cover_drive", "saw_blade", "saw_jaw",
-          "saw_handwheel", "saw_bench"]
+          "saw_handwheel", "saw_feed_valve", "saw_bench", "saw_stop_block"]
 CUT_EXTRA_S = 3.0           # the cut's run past the end of cut, while the blade runs down
 
 
@@ -74,14 +72,12 @@ class SawRun(BenchRun):
         super().__init__(folder, loose, carried, grip_objects=grip_objects, lifted=lifted)
         m = self.model
         self.buttons = [e for e in self.tk["events"] if e["kind"] == "button"]
-        self.valves = [e for e in self.tk["events"] if e["kind"] == "valve"]
         self.turns = [e for e in self.tk["events"] if e["kind"] == "turn"]
         self.drags = [e for e in self.tk["events"] if e["kind"] == "drag"]
         self.pad = {dg: m.geom(f"R_g_dis{i}").id for dg, i in (("thumb", 1), ("index", 2))}
         # the saw's links are the machine's, driven, not objects riding on one another: touching its bed isn't touching
         # its blade (BenchRun groups every tree that isn't the person)
         self.moves_with = {k: v for k, v in self.moves_with.items() if k not in DRIVEN}
-        self.held_valve: dict[int, bool] = {}
         self.log = {"axes": {"saw_head_deg": [], "saw_blade_sfpm": []}, "jaw_N": [], "controls": []}
         self.qpos: list[np.ndarray] = []
         self.aim = np.zeros(3)
@@ -116,23 +112,15 @@ class SawRun(BenchRun):
             if e["t0"] <= tt < e["t1"] and self.ctl.state == "idle" and self.pad_mm(e["digit"], e["at"]) < BUTTON_MM:
                 self.ctl.press(e["button"])
                 self.log["controls"].append({"t": round(tt, 3), "button": e["button"], "state": self.ctl.state})
-        for i, e in enumerate(self.valves):
-            if e["t0"] <= tt < e["t1"]:
-                # the pinch on the knob: the middle of the thumb's and index's tips on its axis
-                near = np.linalg.norm(self.pinch_mm()[:2] - np.asarray(e["at"], float)[:2]) < VALVE_MM
-                self.held_valve[i] = self.held_valve.get(i, True) and near
-            elif tt >= e["t1"] and self.held_valve.get(i) and self.ctl.feed_mm_s != e["feed_mm_s"]:
-                self.ctl.set_feed(e["feed_mm_s"])
-                self.log["controls"].append({"t": round(tt, 3), "valve_mm_s": self.ctl.feed_mm_s})
+        feed = self.ctl.feed_mm_s
         self.ctl.apply()
-
-    def pinch_mm(self) -> np.ndarray:
-        d = self.data
-        return (d.geom_xpos[self.pad["thumb"]] + d.geom_xpos[self.pad["index"]]) * 500
+        if self.ctl.feed_mm_s != feed and (not self.log["controls"] or "feed_mm_s" not in self.log["controls"][-1]
+                                           or abs(self.ctl.feed_mm_s - self.log["controls"][-1]["feed_mm_s"]) > 0.25):
+            self.log["controls"].append({"t": round(tt, 3), "feed_mm_s": round(self.ctl.feed_mm_s, 3)})
 
     def aim_error(self, tt: float) -> np.ndarray | None:
         """Where a control's press wants the fingertip less where it is (m, world): the index's pad onto Start's top
-        through its travel, the pinch's middle onto the valve's axis; None outside them."""
+        through its travel; None outside it."""
         m, d = self.model, self.data
         for e in self.buttons:
             if e["t0"] - AIM_LEAD_S <= tt < e["t1"]:
@@ -140,10 +128,6 @@ class SawRun(BenchRun):
                 pad = d.geom_xpos[g] * 1000 - np.array([0.0, 0.0, m.geom_size[g][0] * 1000])   # its underside
                 want = np.asarray(e["at"], float) - [0.0, 0.0, e.get("travel_mm", 0.0) if tt >= e["t0"] else 0.0]
                 return (want - pad) / 1000
-        for e in self.valves:
-            if e["t0"] - AIM_LEAD_S <= tt < e["t1"]:
-                at, pinch = np.asarray(e["at"], float), self.pinch_mm()
-                return np.r_[(at - pinch)[:2], 0.0] / 1000
         return None
 
     def carry_offset(self, tt: float) -> np.ndarray:
@@ -262,6 +246,30 @@ def run_clamp(replan=False, seconds=None) -> dict:
                      "jaw_closed_mm": round((r.data.qpos[r.ctl.q["jaw"]] - state["q"]["jaw"]) * 1000, 3)})
 
 
+def run_start(replan=False, seconds=None) -> dict:
+    """The controls' take, the same for every bar: from the part's clamp take (the first part's, as it is planned)."""
+    out = plan.OUT["start"]
+    state = plan.state_of("clamp")
+    if replan or not (out / "reference.npz").exists():
+        plan.build("start")
+    s = state["stock"]["bar"]
+    r = SawRun(out, SC.START, SC.bar_body(SC.START, s["centre"], s["R"]), state, carried=("saw_feed_valve",),
+               grip_objects={"valve": ("saw_feed_valve",)}, lifted=())
+    r.go(seconds)
+    J = BS.record()["joints"]["feed_valve"]
+    return r.finish({"valve_turned_deg": round(math.degrees(r.data.qpos[r.ctl.q["feed_valve"]]
+                                                            - state["q"]["feed_valve"]), 2),
+                     "feed_mm_s": round(r.ctl.feed_mm_s, 3), "mm_s_per_deg": J["mm_s_per_deg"]})
+
+
+def cut_state() -> dict:
+    """Where the cut starts: the part's bar and vise as its clamp take left them, the saw's head, valve, switchgear and
+    blade as the controls' take left them (its own bar the first part's: the bow is still 170 mm over either)."""
+    clamp, start = plan.state_of("clamp"), plan.state_of("start")
+    return clamp | {"q": clamp["q"] | {k: start["q"][k] for k in ("head", "feed_valve", "cover_idler", "cover_drive")},
+                    "control": start["control"], "blade_rad_s": start["blade_rad_s"]}
+
+
 def cut(seconds: float | None = None) -> dict:
     """The machine's own work, without the person: the bar as the clamp left it, cut (the piece and the rest a kerf
     apart, saw_cell.cut_bodies); the head comes down on the feed the valve was opened to, and the blade stops at the
@@ -269,7 +277,7 @@ def cut(seconds: float | None = None) -> dict:
     the jaw's force on the rest, every 0.1 s), for the gate."""
     out = plan.OUT["cut"]
     out.mkdir(parents=True, exist_ok=True)
-    state = plan.state_of("clamp")
+    state = cut_state()
     s = state["stock"]["bar"]
     m = mujoco.MjModel.from_xml_string(SC.standalone_xml(SC.FRONT, SC.cut_bodies(SC.FRONT, s["centre"], s["R"])))
     d = mujoco.MjData(m)
@@ -299,7 +307,8 @@ def cut(seconds: float | None = None) -> dict:
     np.savez(out / "cut.npz", **{k: np.array(v) for k, v in rec.items()})
     nxt = SC.saw_state(m, d, ctl, SC.FRONT)
     (out / "state.json").write_text(json.dumps(nxt, indent=1), encoding="utf-8")
-    report = {"seconds": round(t, 1), "end_of_cut_s": None if end_at is None else round(end_at, 1),
+    report = {"part": SC.STOCK["part"], "seconds": round(t, 1),
+              "end_of_cut_s": None if end_at is None else round(end_at, 1),
               "events": list(ctl.events), "head_deg_end": round(rec["head_deg"][-1], 3),
               "blade_sfpm_end": round(rec["blade_sfpm"][-1], 2),
               "rest_moved_mm": round(float(np.linalg.norm(np.array(rec["rest"]) - rec["rest"][0], axis=1).max()), 4),
@@ -316,7 +325,8 @@ def run_unload(replan=False, seconds=None) -> dict:
         plan.build("unload")
     st = state["stock"]
     loose = "".join(SC.stock_body(b, SC.FRONT, st[b]["centre"], st[b]["R"], st[b]["length"]) for b in ("piece", "rest"))
-    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects={"piece": ("piece",)}, lifted=("piece",))
+    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects={"top": ("piece",), "pinch": ("piece",)},
+               lifted=("piece",))
     r.go(seconds)
     p = SC.saw_state(r.model, r.data, r.ctl, r.place)["stock"]
     return r.finish({"piece_end": p["piece"], "rest_end": p["rest"]})
@@ -358,15 +368,18 @@ def still(take: str, frame: int | None = None, out: Path | None = None, view_fro
     return path
 
 
-RUNS = {"load": run_load, "clamp": run_clamp, "cut": lambda replan=False, seconds=None: cut(seconds),
-        "unload": run_unload}
+RUNS = {"load": run_load, "clamp": run_clamp, "start": run_start,
+        "cut": lambda replan=False, seconds=None: cut(seconds), "unload": run_unload}
 
 
 def main(argv: list[str]) -> int:
-    which = argv[0] if argv else "all"
+    """<part> <take>|all [--replan] [--seconds s]: a part's takes (all: its own, the controls' when it has none yet)."""
+    plan.use_part(argv[0])
+    which = argv[1] if len(argv) > 1 else "all"
     replan = "--replan" in argv
     seconds = float(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
-    for k in (RUNS if which == "all" else [which]):
+    order = [k for k in RUNS if k != "start" or not (plan.OUT["start"] / "state.json").exists()]
+    for k in (order if which == "all" else [which]):
         print(k, json.dumps(RUNS[k](replan=replan, seconds=seconds), indent=1), flush=True)
     return 0
 

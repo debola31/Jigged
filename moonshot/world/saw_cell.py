@@ -37,21 +37,22 @@ FLOOR = '    <geom name="floor" type="plane" size="4 4 0.1" contype="1" conaffin
 STOCK_BODIES = ("bar", "piece", "rest")
 
 # --- the bar (mm) ---------------------------------------------------------------------------------------------------
-STOCK = {"w": 25.4, "h": 25.4, "density": 7850.0, "friction": 0.2,
+STOCK = {"w": 25.4, "h": 25.4, "density": 7850.0, "friction": 0.2, "blank_mm": 82.55, "part": None,
          "material": "4140 alloy steel, 1 in square bar",
          # steel on the oiled bed, about 0.2 (the card's own figure for sliding a bar); stiff, as the saw's joints are
          # (bandsaw.SAW_DEFAULT), so a bar held to the work stop sits at its face, not a millimetre into it
          "solref": (0.002, 1.0), "solimp": (0.95, 0.99, 0.001), "rgba": (0.42, 0.42, 0.45, 1.0)}
 KERF_MM = 1.4               # proposed: a 0.035 in band's set teeth cut about 0.055 in wide
 REST_MM = 300.0             # the bar left behind the blade after the cut
-OUT_MM = 250.0              # before the take the bar is pushed through from the infeed until it shows this far
-                            # past the blade, 52 mm short of the stop (proposed): the hand pressing on it lies along it,
-                            # its fingers short of the blade and its heel short of the stop when the bar meets it
+OUT_MM = -KERF_MM / 2       # before the take the bar's end is where the last cut left it, at the kerf
+STOP_BLOCK = {"depth": 25.0, "height": 30.0, "rgba": (0.55, 0.45, 0.2, 1.0)}   # the stop block clamped on the bed
 SEAT_GAP_MM = 0.05          # the bar lies this far off the fixed jaw's face, not touching it before anything does
 
 # --- the bench for the cut pieces (mm, the station's frame) ---------------------------------------------------------
-BENCH = {"lo": (160.0, -1050.0), "hi": (860.0, -300.0), "height": 863.6, "top": 25.0, "friction": 0.4,
-         "legs_hi_y": -480.0,     # its back legs stand in front of the saw's base (front at y = -450), its top over it
+BENCH = {"lo": (60.0, -900.0), "hi": (700.0, -480.0), "height": 863.6, "top": 25.0, "friction": 0.4,
+         # beside the person's right hip at the front, its top over the work stop's arm and rod, its back legs clear of
+         # them: further out, the hand carrying a blank there trailed it 90-140 mm
+         "legs_hi_y": -560.0,
          "rgba": (0.35, 0.36, 0.38, 1.0)}
 
 
@@ -70,9 +71,36 @@ def site_mm(name: str) -> np.ndarray:
     return np.array({**r["sites"], **r["affordances"]}[name]["at_mm"], float)
 
 
+def use_part(part: str) -> None:
+    """Set the cell for a part's bar (its plan's stock): the bar lying flat, its wider side down, the blank's length,
+    and its density from the plan's material (G1's bars are 4140: steel, near three times aluminium's weight)."""
+    from moonshot.planning.validate import load_plan
+    st = load_plan(part)["stock"]
+    w, h = max(st["bar_mm"]), min(st["bar_mm"])
+    length = next(x for x in st["size_mm"] if all(abs(x - b) > 0.01 for b in st["bar_mm"]))
+    STOCK.update(w=w, h=h, blank_mm=float(length), part=part, material=f"{st['material']}, {st['bar']}",
+                 density=density_of(st["material"]))
+
+
+DENSITY = {"steel": 7850.0, "aluminium": 2700.0}   # kg/m^3
+
+
+def density_of(material: str) -> float:
+    """A plan's material's density: steels (AISI 41xx, 10xx, tool and stainless steel) and aluminium alloys (6061,
+    7075, "aluminum"); anything else is an error rather than a guess."""
+    m = material.lower()
+    if any(k in m for k in ("alumin", "6061", "7075", "2024", "5052")):
+        return DENSITY["aluminium"]
+    if any(k in m for k in ("steel", "4140", "4130", "1018", "1045", "303", "304", "316", "17-4")):
+        return DENSITY["steel"]
+    raise ValueError(f"no density for {material!r}: add it to saw_cell.DENSITY")
+
+
 def stop_face_y() -> float:
-    """Where the work stop's face is, along the bar (the record's collider)."""
-    return float(BS.record()["colliders"]["work_stop"]["box_max_mm"][1])
+    """Where the work stop's face is, along the bar: set at the blank's length from the near side of the kerf. The
+    saw's own stop can't come nearer the blade than 226 mm (its arm would run into the fixed jaw's front plate), so
+    for a short blank the stop is a block clamped on the bed in front of the bar (stop_block_body)."""
+    return -KERF_MM / 2 - STOCK["blank_mm"]
 
 
 def fixed_face_x() -> float:
@@ -86,6 +114,18 @@ def bed_z() -> float:
 def piece_mm() -> float:
     """The length the work stop cuts to: from its face to the near side of the kerf."""
     return -KERF_MM / 2 - stop_face_y()
+
+
+def stop_block_body(place: "Place") -> str:
+    """The stop block on the bed, its face at the blank's length: a static body, so the take record carries it."""
+    x0, x1 = bar_x()
+    B = STOP_BLOCK
+    lo = np.array([x0, stop_face_y() - B["depth"], bed_z()])
+    hi = np.array([x1, stop_face_y(), bed_z() + B["height"]])
+    c = (lo + hi) / 2
+    return (f'    <body name="saw_stop_block" pos="{_f(place.world(c))}" quat="{_f(place.quat(), 1)}">\n'
+            f'      <geom name="saw_stop_block" class="bench" type="box" size="{_f((hi - lo) / 2)}" '
+            f'rgba="{_f(B["rgba"], 1)}"/>\n    </body>\n')
 
 
 def bar_mm() -> float:
@@ -133,6 +173,8 @@ class Place:
 
 
 FRONT = Place()                     # the person at the front, by the work stop: the saw as it stands
+START = Place(yaw_deg=43.6)         # in front of the control box, which faces the saw's front-left corner: its long side
+                                    # square to the way the body faces
 END = Place(yaw_deg=90.0)           # at the left end, by the handwheel and the control box: the station's +X is the
                                     # world's +Y, the way the body faces
 
@@ -221,7 +263,8 @@ def with_body(body_xml: str, place: Place, loose: str, carried: tuple = ()) -> s
     saw, acts, eq = _saw(place)
     head, _, tail = body_xml.rpartition("\n  </default>")
     xml = head + "\n" + defaults() + "\n  </default>" + tail
-    xml = xml.replace("<worldbody>\n", "<worldbody>\n" + FLOOR + saw + bench_body(place) + loose, 1)
+    xml = xml.replace("<worldbody>\n", "<worldbody>\n" + FLOOR + saw + bench_body(place) + stop_block_body(place)
+                      + loose, 1)
     pairs = [c if isinstance(c, tuple) else ("R", c) for c in carried]
     welds = "".join(f'    <weld name="carry_{b}" body1="{side}_hand" body2="{b}" active="false" solref="0.004 1" '
                     f'solimp="0.95 0.99 0.001" torquescale="1"/>\n' for side, b in pairs)
@@ -245,7 +288,7 @@ def standalone_xml(place: Place, loose: str) -> str:
 {defaults()}
   </default>
   <worldbody>
-{FLOOR}{saw}{bench_body(place)}{loose}  </worldbody>
+{FLOOR}{saw}{bench_body(place)}{stop_block_body(place)}{loose}  </worldbody>
 {_contacts(loose)}  <equality>
 {eq}  </equality>
   <actuator>

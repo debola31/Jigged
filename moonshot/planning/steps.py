@@ -30,7 +30,8 @@ TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em3
               "ream-3p5": "the 3.5 mm reamer", "tap-m3": "the M3 tap", "spot": "the 1/2 in spot drill",
               "drill": "the #7 drill", "drillk": "the K drill", "drillh": "the H drill", "tap": "the 1/4-20 tap",
               "chamf": "the 1/2 in chamfer mill", "bandsaw": "the band saw",
-              # not in the catalogue yet (python -m moonshot.planning.validate lists them)
+              # G1's (moonshot/library/generators.py SOURCED); dovetail-20 has no record yet
+              # (python -m moonshot.planning.validate lists it)
               "drill-3p3": "the 3.3 mm drill", "drill-6p5": "the 6.5 mm drill", "drill-11": "the 11 mm drill",
               "tap-m4": "the M4 tap", "ream-8": "the 8 mm reamer", "dovetail-20": "the 20 deg dovetail cutter",
               "drill-5-32": "the 5/32 in drill", "ream-1-4": "the 1/4 in reamer", "em18": "the 1/8 in end mill",

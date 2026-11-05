@@ -49,6 +49,16 @@ def test_the_library_has_records():
     assert ASSET_RECORDS
 
 
+def test_the_shop_validates_and_names_only_assets_in_the_library():
+    schema = json.loads((RECORDS_DIR / "shop.schema.json").read_text(encoding="utf-8"))
+    shop = json.loads((RECORDS_DIR / "shop.json").read_text(encoding="utf-8"))
+    errors = [f"{'/'.join(map(str, e.absolute_path))}: {e.message}"
+              for e in Draft202012Validator(schema).iter_errors(shop)]
+    assert errors == []
+    assets = {p.stem for p in ASSET_RECORDS}
+    assert {i["asset"] for k in ("tools", "inspection") for i in shop[k]} <= assets
+
+
 @pytest.mark.parametrize("path", ASSET_RECORDS, ids=lambda p: p.stem)
 def test_record_validates_and_sits_in_its_folder(validator, path):
     record = json.loads(path.read_text(encoding="utf-8"))

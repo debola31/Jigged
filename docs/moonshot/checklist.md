@@ -361,7 +361,8 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     flank leaves a wedge (up to 0.98 mm): what a round tool leaves.
   - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
     by its end faces and a slide went into the skin and overloaded the arms).
-  - A plate's clamp nuts are spun down by the fingertips and snugged with a 3/4 in box-end wrench, in full;
+  - A plate's clamp nuts are run down and snugged with a 3/4 in box-end wrench, in strokes (a fingertip spin
+    turned a nut only 10-30 deg a stroke);
     the seat, shift and unload takes land when they pass, caption and a still until then.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
@@ -375,6 +376,21 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
     blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
     re-run per G1 setup with its own part, or its plate on the spoilboard.
+  - nist-ftc-09's lettering also exempts small regions, not whole faces: within the 1/32 in end mill's radius
+    (0.397 mm) of each of its 10 inside corners' edges (`regions` in the stock fixture); the sheet's top reads
+    0.059 mm outside them.
+  - The band saw's bow collider follows the C-frame (its back and top), its window open as on the real saw,
+    so the lift-out lifts the piece straight up by its sides.
+  - ct-slbeam op10's and op40's clean steps show caption and a still: two parallels under its 38.1 mm part can't
+    both leave the setting hand room (it needs about 17.5 mm beside each, 42 mm in all), so their spacing stays
+    as its takes were made (moving them apart was tried and reverted).
+  - nist-ftc-10's masked +Z side slot also exempts small regions on datum A's edges round its mouth (within its
+    3 mm depth), where the uncut slot's stock ends flush: its finished-stock gate then reads 0.042 mm at worst.
+    Only the fixture changed; nothing re-ran or republished.
+  - A vise holding a part against a stop opens whole crank turns wider until the stop's setter has 45 mm to the
+    moving jaw (ll-1007223 op30, ct-slbeam op20/op30); nist-ftc-10's openings unchanged.
+  - ll-1007223 op20 keeps plain jaws in every take for now, consistent across its steps; its soft jaws (and
+    nist-ftc-10 op30's) after Nov 6.
   - The band saw's clamp: the gate may take the lower jaw force the cut shows holds the bar (it snugged at 44-50 N
     against the gate's 82.5). Since met in full: both clamps snug at about 150 N, and the gate is back at 82.5.
   - The band saw's model is fixed so that opening the feed valve only lets the bow descend: the blade motor's

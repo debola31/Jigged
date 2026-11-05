@@ -9,6 +9,17 @@ def test_the_committed_page_data_is_current():
     assert json.loads(OUT.read_text(encoding="utf-8")) == build()
 
 
+def test_a_step_is_published_by_its_part_and_id():
+    """Every live part has an op10-load, so the upload names the part, and each step's media is its own."""
+    from moonshot.web.media import live_steps
+    steps = live_steps()
+    assert sum(i == "op10-load" for _, i in steps) == len({part for part, _ in steps}) > 1
+    paths = [p for s in steps.values() for p in media_paths(s["media"])]
+    assert len(set(paths)) == len(paths)
+    for (part, i), s in steps.items():
+        assert all(p.split("/")[1] == part and p.split("/")[2].rsplit(".", 1)[0] == i for p in media_paths(s["media"]))
+
+
 def test_every_placed_item_has_its_asset_and_model():
     layout = _json(RECORDS / "layout.json")
     shop = build()["shop"]

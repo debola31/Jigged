@@ -346,7 +346,21 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     grasp, as for the tool inserts.
   - A clamp nut's thread (`clamp_thread_<i>`, the 1/2-13 lead as an exact ratio) is a declared mechanism: the nut is
     spun down by the fingertips and snugged with a wrench, and the `clamped` weld carries the bite while cutting.
-  - The plate parts' tools wait on the stand in two rows.
+  - The plate parts' tools wait on a two-row stand on a bracket bolted to the table's front edge (the spoilboard
+    covers the table); a holder seats in one take where its fork isn't far, the split following the reach.
+  - nist-ftc-09 stands on a 1 in riser under its spoilboard, so its 1-1/2 in miniature end mills (keyhole, lettering)
+    reach the sheet; they stopped 4.6 and 2.4 mm short in Z.
+  - ll-1005337's op20 finds X and Y on the reamed dowel hole at its left end, and its check probes the other hole:
+    after the 10 mm slide the finished near edge is past the Y travel. Op10's straightness check runs its lever
+    angled down, so nothing overlaps the plate at the travel's front.
+  - ll-1005337's stock compare leaves out the dowel holes' back countersinks (cut by hand at the bench) and the
+    undercut's R15 corners above the wall's foot (a vertical dovetail cutter leaves R15 narrowing to R8.1; R15 isn't
+    on the drawing), each named.
+  - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
+    for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
+  - The send-outs pass as they are: the `carry_part` weld engages 0.2 s before the pinch closes (otherwise the closing
+    fingers shove the part 17-23 mm), and the arm takes a carried part's weight through its own actuators.
+  - nist-ftc-10's deburr re-renders after G1's deburrs, its bench calipers drawn whole (they were the bare beam).
   - The band saw's clamp: the gate takes the lower jaw force the cut shows holds the bar (it snugs at 44-50 N; the
     gate asked 82.5, which the arm can't give at a knob by the thigh).
   - The G1 deburrs' tool pickup, loading in 100-133 ms against people's 163-265, is a recorded exception; each take

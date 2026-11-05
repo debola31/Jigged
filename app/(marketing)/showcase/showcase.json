@@ -1442,7 +1442,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op50-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op50-xy",

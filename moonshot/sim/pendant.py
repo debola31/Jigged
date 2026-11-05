@@ -45,7 +45,8 @@ from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.body.skeleton import set_finger_contact
 from moonshot.sim.runner import ARM, PAD, SETTLE_STEPS, TakeRunner
-from moonshot.world import cell, vf2
+from moonshot.motion import plates
+from moonshot.world import cell, spoilboard, vf2
 from moonshot.world.vise import Load
 
 PRESS_KI = 20.0             # the pushed force grows 20 N/s per newton it falls short (as the vise take's)
@@ -117,17 +118,20 @@ class PendantRunner(TakeRunner):
             self.machine.sensor = self.probe_touch
         # the vise clamped on the part: the jaw closed to its width from the jaws' faces as built (the scene stands the
         # moving jaw to 0.1 mm: closed from the load's opening it went 10 um into ll-1007223, which it pushed 10 um), the
-        # screw locked
+        # screw locked. A plate's clamps are already down on it (moonshot/world/spoilboard.py)
         mujoco.mj_forward(m, d)
-        fixed, moving = m.geom("fixed_jaw").id, m.geom("moving_jaw").id
-        jaw = ((d.geom_xpos[fixed][1] - m.geom_size[fixed][1]) - (d.geom_xpos[moving][1] + m.geom_size[moving][1])
-               - 2 * s["half_mm"][1] / 1000)
-        d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]] = jaw
-        crank = jaw / m.eq_data[m.equality("lead_screw").id, 1]
-        d.qpos[m.jnt_qposadr[m.joint("crank").id]] = crank
-        lock = m.equality("screw_lock").id
-        m.eq_data[lock, 0], d.eq_active[lock] = crank, 1
-        mujoco.mj_forward(m, d)
+        self.jaws = [g for g in (mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, n) for n in ("fixed_jaw", "moving_jaw"))
+                     if g >= 0]
+        if self.jaws:
+            fixed, moving = self.jaws
+            jaw = ((d.geom_xpos[fixed][1] - m.geom_size[fixed][1]) - (d.geom_xpos[moving][1] + m.geom_size[moving][1])
+                   - 2 * s["half_mm"][1] / 1000)
+            d.qpos[m.jnt_qposadr[m.joint("jaw_slide").id]] = jaw
+            crank = jaw / m.eq_data[m.equality("lead_screw").id, 1]
+            d.qpos[m.jnt_qposadr[m.joint("crank").id]] = crank
+            lock = m.equality("screw_lock").id
+            m.eq_data[lock, 0], d.eq_active[lock] = crank, 1
+            mujoco.mj_forward(m, d)
         self.presses = [e for e in self.tk["events"] if e["kind"] == "press"]
         self.press_i = [0.0] * len(self.presses)
         self.press_done: set[int] = set()
@@ -186,8 +190,12 @@ class PendantRunner(TakeRunner):
 
     def scene(self, body_xml: str) -> str:
         s = self.tk["setup"]
-        paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
-        xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
+        if "plate" in s:                                   # a plate on the spoilboard under its clamps, the vise off
+            part, setup = s["plate"]["part"], s["plate"]["setup"]
+            xml = spoilboard.with_body(body_xml, plates.plate(part, setup), plates.clamps(part, setup))
+        else:
+            paras = {k: np.array(v, float) for k, v in s["parallels"].items()}
+            xml = cell.with_body(body_xml, np.array(s["centre_mm"], float), paras, "R_hand", Load.from_json(s["load"]))
         c = " ".join(f"{v / 1000:.7f}" for v in s["centre_mm"])
         h = vf2.record()["affordances"]["jog_handle"]
         rim = f"0 {-h['depth_mm'] / 2000:.5f} {h['radius_mm'] / 1000:.5f}"
@@ -226,8 +234,7 @@ class PendantRunner(TakeRunner):
         g = gap(p, m.geom_size[part])
         for c, half in self.cuts:
             g = max(g, -gap(p - c, half))
-        for jaw in ("fixed_jaw", "moving_jaw"):                  # neither turns
-            j = m.geom(jaw).id
+        for j in self.jaws:                                      # neither turns
             g = min(g, gap(d.geom_xpos[tip] - d.geom_xpos[j], m.geom_size[j]))
         return g <= r
 

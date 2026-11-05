@@ -49,6 +49,9 @@ PRELOAD_MM = 0.2            # the dti-sweep-face card's: the needle about 20 div
 SWEEP_MM = 75.0             # the card's sweep, about the side the part shows above the jaws
 STANDOFF_MM = 6.0           # how far off a face the coarse jog stops: a click at .1 short of it is 2.5 mm
 CLOSE_MM = 0.3              # and the .01 jog: a click at .01 short of it is 0.25 mm
+APPROACH_MM = 1.5           # a fine move's .1 jog stops this short, so its rounding (a click is 2.54 mm) never passes
+Y_TRAVEL_MM = vf2.record()["joints"]["y"]["range_mm"][1]   # the spindle reaches this far toward the operator
+STEM_CLEAR_MM = 2.0         # a straight check's indicator stem stands this far off the edge it sweeps
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -61,6 +64,14 @@ def part_in_vise(plan: dict, setup_id: str) -> dict:
     return {"centre_mm": pose["centre_mm"].tolist(), "half_mm": (pose["size_mm"] / 2).tolist(), "R": pose["R"].tolist(),
             "origin_mm": pose["origin_mm"].tolist(), "load": load.to_json(),
             "parallels": {k: v.tolist() for k, v in load.parallels().items()}}
+
+
+def part_on_table(plan: dict, setup_id: str) -> dict:
+    """A plate on the spoilboard (moonshot/motion/plates.py): its box as part_in_vise gives the vise's part, and which
+    plate and clamps the physics run builds."""
+    pose = part_pose(plan, setup_id)
+    return {"centre_mm": pose["centre_mm"].tolist(), "half_mm": (pose["size_mm"] / 2).tolist(), "R": pose["R"].tolist(),
+            "origin_mm": pose["origin_mm"].tolist(), "plate": {"part": plan["part"], "setup": setup_id}}
 
 
 def clicks(mm: float, inc: str) -> int:
@@ -167,16 +178,21 @@ class Probing:
         k.look(k.t, self.ball() * [1, 1, 1])
         k.turn(clicks(mm, inc), STROKE_DEG_S)
 
-    def to(self, target, fine: bool = False) -> None:
-        """The ball over to a point: up clear of the part first if it has to cross it, across in X and Y, then down."""
+    def to(self, target, fine: bool = False, fine_z: bool = False) -> None:
+        """The ball over to a point: up clear of the part first if it has to cross it, across in X and Y, then down
+        (and at .01 for fine, fine_z: in a bore, beside a 3 mm sheet's edge)."""
         target = np.asarray(target, float)
         if self.ball()[2] < self.top + 10 and np.linalg.norm(target[:2] - self.ball()[:2]) > 1:
             self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
         for i, a in enumerate("xy"):
-            self.jog(a, target[i] - self.ball()[i], "inc_0.1")
             if fine:
-                self.jog(a, target[i] - self.ball()[i], "inc_0.01")
-        self.jog("z", target[2] - self.ball()[2], "inc_0.1")
+                approach(self, a, target[i])
+            else:
+                self.jog(a, target[i] - self.ball()[i], "inc_0.1")
+        if fine_z:
+            approach(self, "z", target[2])
+        else:
+            self.jog("z", target[2] - self.ball()[2], "inc_0.1")
 
     def cycle(self, template: str, wait_s: float, **values) -> None:
         """Choose the cycle in VPS, output it to MDI, start it with the left hand over Feed Hold, and wait it out."""
@@ -204,14 +220,15 @@ class Probing:
             k.type(f"{mm:.3f}".rstrip("0").rstrip("."))
             k.keys(["enter"])
 
-    def surface(self, axis: str, face: np.ndarray, normal: np.ndarray, datum: float, z: float) -> None:
+    def surface(self, axis: str, face: np.ndarray, normal: np.ndarray, datum: float, z: float,
+                standoff: float = 2 * STANDOFF_MM, fine: bool = False) -> None:
         """A single-surface cycle on the face through `face` with outward `normal` (world, along axis), then the shift
-        to the datum's coordinate on that axis."""
+        to the datum's coordinate on that axis. The ball starts `standoff` mm off the face, placed at .01 if fine."""
         i = "xyz".index(axis)
-        stand = face + normal * (PROBE["tip_r"] + 2 * STANDOFF_MM)
+        stand = face + normal * (PROBE["tip_r"] + standoff)
         if axis != "z":
             stand[2] = z
-        self.to(stand)
+        self.to(stand, fine=fine, fine_z=fine)
         self.cycle("surface", 4.0, axis=axis, sign=int(-normal[i]))
         self.shift(axis, datum - face[i])
         if axis != "z":
@@ -240,7 +257,7 @@ class Probing:
                 if a in f:
                     s = f[a]
                     self.surface(a, np.array(s["face_mm"]), np.array(s["normal"]), f["datum_mm"]["xy".index(a)],
-                                 s["z_mm"])
+                                 s["z_mm"], s.get("standoff_mm", 2 * STANDOFF_MM), s.get("fine", False))
             sets = {a: {"method": "probe", "datum_mm": list(f["datum_mm"])} for a in "xy"}
         else:
             top = np.array([*f["z"]["at_xy"], f["z"].get("z_mm", self.top)])
@@ -295,6 +312,72 @@ class SquareCheck:
         k.wait(1.0)
         self.jog("x", side * 2 * INC["inc_0.1"], "inc_0.1")
         self.jog("z", -k.axis_mm[2], "inc_0.1")
+        k.rest_hand()
+        k.wait(0.5)
+        return {}
+
+
+def approach(s, axis: str, to: float) -> None:
+    """s's ball (a Probing's, a StraightCheck's) to `to` along axis: at .1 to short of it, a click's rounding never
+    taking it past (into a sheet, past the Y travel's front), then at .01."""
+    i = "xyz".index(axis)
+    d = to - s.ball()[i]
+    if abs(d) > APPROACH_MM:
+        s.jog(axis, d - math.copysign(APPROACH_MM, d), "inc_0.1")
+    s.jog(axis, to - s.ball()[i], "inc_0.01")
+
+
+class StraightCheck:
+    """Check it's straight: a plate's near long edge swept along X by the test indicator, as SquareCheck sweeps a side
+    up Z: the ball beside the edge at mid-thickness, in at .001 to the preload, along the edge at .01 between its clamps,
+    a look at the needle, then back off and up to home.
+
+    The indicator is turned in the spindle so its stylus runs along the edge and a little out from it, its stem, which
+    reaches down to the ball's height, STEM_CLEAR_MM off the edge. Where the Y travel's front leaves no room for that
+    (ll-1005337's plate is the travel's width) the stem stands as far forward as it reaches and the ball sweeps 1.5 mm
+    under the top, the stem over the edge's top corner by the rest [declared shortcut: the real lever angles down to
+    its ball]."""
+
+    def __init__(self, take: PendantTake, part: dict):
+        self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
+        r, face = INDICATOR["tip_r"], self.c[1] - self.h[1]
+        self.front = SPINDLE[1] - Y_TRAVEL_MM + 0.3             # the spindle's nearest reach, less a margin
+        out = min(INDICATOR["shank_r"] + STEM_CLEAR_MM - r, face - r - self.front - 0.7)
+        self.tool = INDICATOR | {"offset_mm": [math.sqrt(INDICATOR["offset_mm"][0] ** 2 - out ** 2), out]}
+        top = self.c[2] + self.h[2]
+        self.z = top - (self.h[2] if out >= INDICATOR["shank_r"] - r else 1.5)
+        self.ball0 = SPINDLE + [*self.tool["offset_mm"], -INDICATOR["length_mm"] + r]
+
+    def ball(self) -> np.ndarray:
+        return self.ball0 + self.k.axis_mm
+
+    def jog(self, axis: str, mm: float, inc: str, deg_s: float = STROKE_DEG_S) -> None:
+        k = self.k
+        k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
+        k.look(k.t, self.ball())
+        k.turn(clicks(mm, inc), deg_s)
+
+    def plan(self) -> dict:
+        k, r = self.k, INDICATOR["tip_r"]
+        face = self.c[1] - self.h[1]
+        gap = lambda: face - self.ball()[1] - r                    # noqa: E731  the ball off the edge
+        stand = min(STANDOFF_MM, face - r - (self.front + self.tool["offset_mm"][1]))
+        k.look(0.0, key_at("handle_jog"))
+        k.wait(0.5)
+        k.keys(["handle_jog", "inc_0.1"])
+        k.inc_mm = INC["inc_0.1"]
+        self.jog("x", self.c[0] - SWEEP_MM / 2 - self.ball()[0], "inc_0.1")
+        approach(self, "y", face - r - stand)
+        approach(self, "z", self.z)
+        self.jog("y", max(0.0, gap() - CLOSE_MM), "inc_0.01")
+        self.jog("y", gap() + PRELOAD_MM, "inc_0.001", 150.0)
+        self.jog("x", SWEEP_MM, "inc_0.01", 200.0)
+        k.look(k.t, self.ball())
+        k.wait(1.0)
+        self.jog("y", -(stand + PRELOAD_MM), "inc_0.01")
+        up = -k.axis_mm[2]                                         # home: whole clicks at .1, the rest at .01
+        self.jog("z", math.trunc(up / INC["inc_0.1"]) * INC["inc_0.1"], "inc_0.1")
+        self.jog("z", -k.axis_mm[2], "inc_0.01")
         k.rest_hand()
         k.wait(0.5)
         return {}
@@ -363,6 +446,17 @@ PROBES = {
                              "z": (24.0, 10.0, 0.0), "cuts": [((-50.0, 24.0), (-50.0, 20.0), (-60.0, 60.0))],
                              "datum": (24.0, 40.0, -37.5)},
 }
+# The plates (moonshot/motion/plates.py), on the spoilboard, probed as their plans say ("probe in X, Y and Z"): the
+# stock's -x end, between its clamps, and its near edge, each at mid-thickness and placed at .01 (nist-ftc-09's sheet
+# is 3.04 mm), the zero at the stock's middle, its top. ll-1005337's 406.4 mm plate is the Y travel's width: in front
+# of its near edge the spindle has 3.65 mm, so the ball stands 2 mm off it, not 13.
+PROBES |= {
+    ("nist-ftc-09", "op10"): {"x": ((-51.5, 1.52, -171.45), "-Z", {"fine": True}),
+                              "y": ((-127.0, 1.52, 0.0), "-X", {"fine": True}), "datum": (0.0, 3.04, 0.0)},
+    ("ll-1005337", "op10"): {"x": ((-212.25, 630.2, -10.475), "+Y", {"fine": True}),
+                             "y": ((-403.2, 300.0, -10.475), "-X", {"fine": True, "standoff_mm": 2.0}),
+                             "datum": (-200.0, 300.0, -0.95)},
+}
 # the fixed jaw's -x end, and its face 17 mm past the end of a part up to 83 mm long: 5 and 3 mm below its top
 FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
                          [-1.0, 0.0, 0.0]),
@@ -391,13 +485,15 @@ def g1_features(plan: dict, setup_id: str) -> dict:
     for a in "xy":
         if a not in spec:
             continue
+        extra = {}
         if isinstance(spec[a], str):
             face, normal = (np.asarray(v, float) for v in FIXED_JAW[spec[a]])
         else:
-            point, n = spec[a]
+            point, n, *more = spec[a]
             face, normal = world(point), R @ (np.eye(3)["XYZ".index(n[1])] * (1.0 if n[0] == "+" else -1.0))
+            extra = more[0] if more else {}
         assert abs(abs(normal["xy".index(a)]) - 1) < 1e-9, f"{setup_id}: the {a} touch's face doesn't face along {a}"
-        out[a] = {"face_mm": face.tolist(), "normal": normal.tolist(), "z_mm": float(face[2])}
+        out[a] = {"face_mm": face.tolist(), "normal": normal.tolist(), "z_mm": float(face[2])} | extra
     if "z" in spec:
         p = world(spec["z"])
         out["z"] = {"at_xy": p[:2].tolist(), "z_mm": float(p[2])}
@@ -416,10 +512,11 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
     plan = load_plan(part)
     step = next(s for s in expand(plan) if s["id"] == step_id)
     setup = step["setup"]
-    p = part_in_vise(plan, setup)
+    s = next(x for x in plan["setups"] if x["id"] == setup)
+    p = part_on_table(plan, setup) if "clamps" in s["workholding"] else part_in_vise(plan, setup)
     take = PendantTake(data_root() / "takes" / part / step_id, verbose=verbose)
     extra = {}
-    if step["title"] == "Find X and Y" and "probe" not in step["facts"]["x"]:
+    if step["title"] == "Find X and Y" and "edge finder" in s["wcs"].get("by", ""):
         sets = XYEdgeFinder(take, p).plan()
         tool = EDGE_FINDER
     elif step["title"] in ("Find X and Y", "Set Z"):
@@ -429,6 +526,10 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         tool = PROBE
         extra = {"vps": pr.vps, "bores": [f["bore"]] if "bore" in f else [], "cuts": f.get("cuts", []),
                  "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}
+    elif step["title"] == "Check it's straight":
+        sq = StraightCheck(take, p)
+        sets = sq.plan()
+        tool = sq.tool
     elif step["title"] == "Check it's square":
         sq = SquareCheck(take, p, **square_sweep(plan, setup, p))
         sets = sq.plan()

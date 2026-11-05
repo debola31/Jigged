@@ -98,6 +98,19 @@ class StepTake:
             self.grips[name] = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "obj": obj, "side": g["side"],
                                 "theta": np.array(g["theta"]), "W_rel": W - obj, "loss": g["loss"]}
 
+    def take_grips(self, source: Path, names) -> None:
+        """Grips by name as another take solved them (its grips.json), not solved again: the same object taken from the
+        same place from the same stance, as the published take took it. They are written to this take's grips.json
+        too, which the physics reads (moonshot/sim/set_parallels.py FirmGrip)."""
+        solved = json.loads(Path(source).read_text(encoding="utf-8"))
+        data = {KEY: f"from {Path(source).parent.name}"} | {n: solved[n] for n in names}
+        (self.out / "grips.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
+        for name in names:
+            g = solved[name]
+            H, W, obj = np.array(g["H"]), np.array(g["W"]), np.array(g["obj"])
+            self.grips[name] = {"q": self.hand.clamp(g["q"]), "H": H, "W": W, "obj": obj, "side": g["side"],
+                                "theta": np.array(g["theta"]), "W_rel": W - obj, "loss": g["loss"]}
+
     def grip_pose(self, name: str, obj=None, R=None) -> tuple[np.ndarray, np.ndarray]:
         """The grip's hand frame and wrist (the side's world) with its object at obj (world; default where it was
         solved), turned by R (world, from how it stood when the grip was solved)."""

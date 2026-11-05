@@ -7,18 +7,20 @@ Each clamp is a 4 in step clamp, its slot over a 4 in stud screwed into a T-nut 
 its nose on the plate's end margin and its heel on a step block, the flange nut on the stud pressing it down. Its nose
 is NOSE_IN_MM onto the plate, inside the outline's cutter path (the plans keep 30-32 mm margins); in an outer T-slot
 nearer a long edge than SIDE_IN_MM the clamp is swung about its stud to keep its nose that far in. The heel stands on
-the step block's step level with the plate's top (a 3/4 in step under the 3/4 in Delrin plate; under the 3 mm sheet,
-a 1/8 in shim), so the clamp sits level and its nose bears.
+a block level with the plate's top (a 3/4 in step block's step under the 3/4 in Delrin plate; under the 3 mm sheet, a
+strip of its own stock), so the clamp sits level.
 
 World millimetres at the loading position, +Z up, as moonshot/world/cell.py's (the table's top at TABLE_Z, its middle
 at TABLE_MID). Bolted things (the spoilboard, the studs and T-nuts, the step blocks, and a clamp and its nut while
 tightened or parked and untouched) are geoms of the machine's table body, so they ride the table when the machine
 moves; the plate is the free body `blank`, as the vise's part is, so a take's `clamped` weld names it the same way.
 
-A clamp's two poses: `clamped`, on the plate; `parked`, swung 90 deg about its stud off the plate and lying flat on the
-spoilboard, its nut run up the stud, as a machinist leaves them while the plate goes on or comes off. A clamp the take
-moves is a free body, and its nut turns on the stud's thread (`clamp_thread_<i>`, the 1/2-13 thread's lead as an
-exact ratio, as the vise's `lead_screw`).
+A clamp's two poses: `clamped`, on the plate; `parked`, slid back along its slot off the plate's end and tipped
+nose-down onto the spoilboard about its heel, which stays on its block, its nut run up the stud, as a machinist leaves
+them while the plate goes on or comes off (moonshot/motion/plate_clamps.py brings one level and slides it on: swung
+off across the table instead, setting one back took the hand a quarter turn about the vertical, past the arm's
+reach). A clamp the take moves is a free body; a nut on its thread turns on the stud (`clamp_thread_<i>`, the
+1/2-13 thread's lead as an exact ratio, as the vise's `lead_screw`; not yet declared).
 
     with_body(body_xml, plate, layout(plate, 4), state="clamped")      # the scene, in place of cell.with_body
 """
@@ -40,18 +42,25 @@ TABLE_MID = np.array([-381.5, -340.5])                   # the table top's middl
 TSLOT_Y = tuple(float(TABLE_MID[1] + k * 4.921 * IN) for k in (-1, 0, 1))   # shop.json vf2-1: 3 slots 4.921 in apart
 SPOILBOARD_MM = np.array([36.0 * IN, 14.0 * IN, 0.75 * IN])     # the table's 36 x 14 in, 3/4 in MDF
 TOP_Z = TABLE_Z + SPOILBOARD_MM[2]                       # 872.05: the spoilboard's top, where a plate's underside sits
-MDF_FRICTION = 0.4                                       # [proposed] dry MDF against a plate or a clamp's pad
+MDF_FRICTION = 0.4                                       # [proposed] dry MDF against a plate or a clamp's pad; the
+                                                         # board's contacts take it (its priority over the steel's
+                                                         # 0.25, on which a parked clamp slid down onto the plate)
 
 # the clamp kit: 1/2-13 studs and flange nuts, 4 in step clamps (McMaster 4999A32 class), step blocks in 3/4 in steps
 STUD_R, STUD_L = 0.25 * IN, 4.0 * IN
 LEAD_MM = IN / 13.0                                      # 1/2-13: 1.954 mm a turn
 TNUT_DEPTH = 22.0                                        # the stud's foot, in the T-nut, under the table's top
 CLAMP_L, CLAMP_W, CLAMP_T = 4.0 * IN, 1.25 * IN, 0.625 * IN
-SLOT_W, SLOT_HALF = 9.0 / 16.0 * IN, 22.0                # the slot, 9/16 in wide, 44 mm long about the strap's middle
+SLOT_W, SLOT_HALF = 9.0 / 16.0 * IN, 36.0                # the slot, 9/16 in wide, 72 mm long about the strap's middle:
+                                                         # at 64, a parked clamp's tipped slot end met the stud
 PAD_L, PAD_T = 14.0, 3.0                                 # the nose's and the heel's pads under the strap's ends
 NUT_AF, NUT_HEX_H, FLANGE_R, FLANGE_T = 0.75 * IN, 9.7, 13.5, 3.0     # 3/4 in hex, its flange 27 mm across
-STEP_RISE, STEP_DEPTH, BLOCK_W = 0.75 * IN, 19.0, 1.5 * IN
-SHIM_T = 0.125 * IN                                      # under a thin sheet's heel: a 1/8 in shim, not a step
+STEP_RISE, BLOCK_W = 0.75 * IN, 1.0 * IN                 # the block narrower than the strap: at 1.5 in its edges
+                                                         # stood out under the pinching fingertips, which dragged on it
+BLOCK_FRICTION = 0.6         # [proposed] a step block's serrated step: at steel's 0.25 a parked clamp, tipped 16 deg
+                             # over the block's front edge, crept down it 0.5 mm a second
+PARK_SLIDE_MM = 25.0                                     # a parked clamp slid back this far along its slot: its
+                                                         # tipped nose clear of the plate's end
 NOSE_IN_MM = 12.0                                        # the nose's reach onto the plate from its end
 SIDE_IN_MM = 24.0                                        # ... and its tip at least this far in from a long edge: at
                                                          # 18 a swung nose's back corner stood 1.5 mm off the sheet
@@ -106,15 +115,45 @@ class Clamp:
         return np.array([math.cos(self.yaw), math.sin(self.yaw)])
 
     def strap_z(self, state: str = "clamped") -> float:
-        """The strap's mid-thickness (mm): on its pads on the plate and the heel block, or lying on the spoilboard."""
-        return (self.plate_top if state == "clamped" else TOP_Z) + PAD_T + CLAMP_T / 2
+        """The strap's mid-thickness when level (mm), on its pads on the plate and the heel block."""
+        return self.plate_top + PAD_T + CLAMP_T / 2
 
-    def pose(self, state: str = "clamped") -> tuple[np.ndarray, float]:
-        """The strap's middle (mm) and yaw (rad): clamped, its middle on the stud; parked, swung about the stud to lie
-        across the table, its nose toward the nearer long edge, clear of the plate's end, and lying on the spoilboard."""
+    def pose_at(self, slide: float = 0.0, lift: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+        """The strap level, slid back `slide` mm along its slot from its clamped place and lifted `lift` mm: its middle
+        (mm) and frame (its columns: heel to nose, across, up)."""
+        return np.r_[np.asarray(self.stud) - self.u * slide, self.strap_z() + lift], _rot(self.yaw)
+
+    def park_pitch(self) -> tuple[float, float]:
+        """How a clamp slid back PARK_SLIDE_MM rests: tipped nose-down until its nose's pad is on the spoilboard and
+        its underside on its block (the heel's pad, or the rails over the block's front edge when it tips that far).
+        (pitch rad, the middle's height mm), solved by bisection on the pitch."""
+        zb = TOP_Z + self.heel_rise
+        a0 = -PARK_SLIDE_MM                                       # the middle along u from the stud
+        lo_b, hi_b = sorted(self.heel_steps()[0][:2])             # the block's extent along u from the stud
+        xs = np.linspace(-CLAMP_L / 2, CLAMP_L / 2, 409)
+        pad = (np.abs(xs) >= CLAMP_L / 2 - PAD_L)
+        zl = np.where(pad, -CLAMP_T / 2 - PAD_T, -CLAMP_T / 2)   # the underside, strap frame
+
+        def rest(th):
+            c, s = math.cos(th), math.sin(th)
+            h = TOP_Z + (CLAMP_L / 2) * s + (CLAMP_T / 2 + PAD_T) * c    # the nose's front-bottom edge on the board
+            a = a0 + xs * c + zl * s
+            z = h - xs * s + zl * c
+            over = (a >= lo_b) & (a <= hi_b)
+            return h, float((z[over] - zb).min())
+        lo, hi = 0.0, 0.5
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if rest(mid)[1] < 0 else (lo, mid)
+        return hi, rest(hi)[0]
+
+    def pose(self, state: str = "clamped") -> tuple[np.ndarray, np.ndarray]:
+        """The strap's middle (mm) and frame: clamped, level with its middle on the stud; parked, slid back
+        PARK_SLIDE_MM off the plate's end and tipped onto the spoilboard (park_pitch)."""
         if state == "clamped":
-            return np.r_[self.stud, self.strap_z(state)], self.yaw
-        return np.r_[self.stud, self.strap_z(state)], math.copysign(math.pi / 2, self.stud[1] - TABLE_MID[1] - 1e-6)
+            return self.pose_at()
+        th, h = self.park_pitch()
+        return np.r_[np.asarray(self.stud) - self.u * PARK_SLIDE_MM, h], _rot(self.yaw) @ _pitch(th)
 
     def nose_tip(self) -> np.ndarray:
         """Where the nose's tip stands when clamped (x, y mm)."""
@@ -129,14 +168,9 @@ class Clamp:
         return TABLE_Z - TNUT_DEPTH, TABLE_Z - TNUT_DEPTH + STUD_L
 
     def heel_steps(self) -> list[tuple[float, float, float]]:
-        """The heel block's steps as (from, to along the strap from its middle, top over the spoilboard), mm: the step
-        the heel's pad sits on, and the risers behind it (a shim alone under a thin sheet's heel)."""
-        x0 = -CLAMP_L / 2 + PAD_L + 3.0                   # 3 mm toward the stud past the heel pad
-        if self.heel_rise < STEP_RISE / 2:
-            return [(x0, -CLAMP_L / 2 - 6.0, self.heel_rise)]
-        steps = [(x0, -CLAMP_L / 2 - 2.0, self.heel_rise)]
-        steps.append((-CLAMP_L / 2 - 2.0, -CLAMP_L / 2 - 2.0 - STEP_DEPTH, self.heel_rise + STEP_RISE))
-        return steps
+        """The heel block as (from, to along the strap from the stud, top over the spoilboard), mm: one step level
+        with the plate's top, long enough that the heel's pad stays on it when the clamp is slid back to park."""
+        return [(-CLAMP_L / 2 + PAD_L + 3.0, -CLAMP_L / 2 - PARK_SLIDE_MM - 6.0, self.heel_rise)]
 
 
 def layout(plate: Plate, n: int) -> list[Clamp]:
@@ -149,7 +183,7 @@ def layout(plate: Plate, n: int) -> list[Clamp]:
     slots = (TSLOT_Y[0], TSLOT_Y[2]) if per_end == 2 else TSLOT_Y
     c, s = plate.centre, plate.size
     y_lo, y_hi = c[1] - s[1] / 2 + SIDE_IN_MM, c[1] + s[1] / 2 - SIDE_IN_MM
-    rise = s[2] if s[2] >= STEP_RISE / 2 else SHIM_T
+    rise = s[2]                                      # a 3/4 in step block's step; under the sheet, a strip of its stock
     out = []
     for sign in (-1.0, 1.0):                         # -x end, the nose pointing +x; +x end, pointing -x
         x_end = c[0] + sign * s[0] / 2
@@ -175,6 +209,19 @@ def _quat_z(yaw: float) -> str:
 def _rot(yaw: float) -> np.ndarray:
     c, s = math.cos(yaw), math.sin(yaw)
     return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def _pitch(a: float) -> np.ndarray:
+    """A turn about the strap's across axis (its y), nose-down for a positive a."""
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def _quat(R: np.ndarray) -> str:
+    """A rotation matrix as MJCF's w x y z."""
+    from scipy.spatial.transform import Rotation
+    x, y, z, w = Rotation.from_matrix(np.asarray(R, float)).as_quat()
+    return f"{w:.7f} {x:.7f} {y:.7f} {z:.7f}"
 
 
 def strap_boxes() -> list[tuple[str, np.ndarray, np.ndarray]]:
@@ -226,16 +273,17 @@ def _nut_geoms(name: str, ind: str) -> str:
     return out
 
 
-def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple[str, ...] = ()) -> str:
+def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple[str, ...] = (),
+           nuts: tuple[str, ...] | None = None) -> str:
     """What is bolted to the table (bodies fixed in the table body, whose frame is the world's at the loading position;
     each its own body, with no GLB, so the take record draws it from its geoms): the spoilboard with each clamp's T-nut,
-    stud and heel block (body `spoilboard`), each clamp not in `free` in its pose and its nut down on it, and the nuts
-    of the free clamps on their threads (bodies on a slide and a hinge along the stud, their own frames at the
-    flange's underside)."""
+    stud and heel block (body `spoilboard`), each clamp not in `free` in its pose, and each clamp's nut where the pose
+    has it: on its thread (a body on a slide and a hinge along the stud, its frame at the flange's underside) if its
+    clamp is in `nuts` (by default the free clamps), fixed otherwise."""
     c = np.r_[TABLE_MID, TABLE_Z + SPOILBOARD_MM[2] / 2]
     out = (f'        <body name="spoilboard">\n'
            f'        <geom name="spoilboard" type="box" size="{_f(SPOILBOARD_MM / 2)}" pos="{_f(c)}" contype="1" '
-           f'conaffinity="3" friction="{MDF_FRICTION} 0.004 0.0001" rgba="0.62 0.5 0.36 1"/>\n')
+           f'conaffinity="3" priority="2" friction="{MDF_FRICTION} 0.004 0.0001" rgba="0.62 0.5 0.36 1"/>\n')
     for i, k in enumerate(clamps):
         z0, z1 = k.stud_z()
         s = np.asarray(k.stud, float)
@@ -248,14 +296,18 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
             mid = s + k.u * (a + b) / 2
             out += (f'        <geom name="heel_block_{i}_{j}" class="steel" type="box" '
                     f'size="{_f([abs(b - a) / 2, BLOCK_W / 2, top / 2])}" pos="{_f(np.r_[mid, TOP_Z + top / 2])}" '
-                    f'quat="{_quat_z(k.yaw)}" rgba="0.15 0.15 0.16 1"/>\n')
+                    f'quat="{_quat_z(k.yaw)}" priority="2" friction="{BLOCK_FRICTION} 0.004 0.0001" '
+                    f'rgba="0.15 0.15 0.16 1"/>\n')
     out += '        </body>\n'
     for k in clamps:
         s = np.asarray(k.stud, float)
         z1 = k.stud_z()[1]
-        at, yaw = k.pose(state)
+        at, R = k.pose(state)
         nz = k.nut_z(state)
-        if k.name in free:
+        if k.name not in free:
+            out += (f'        <body name="{k.name}" pos="{_f(at)}" quat="{_quat(R)}">\n'
+                    + _strap_geoms(k.name, ind="          ") + '        </body>\n')
+        if k.name in (free if nuts is None else nuts):
             out += (f'        <body name="{k.name}_nut" pos="{_f(np.r_[s, nz])}">\n'
                     f'          <joint name="{k.name}_nut_slide" type="slide" axis="0 0 1" '
                     f'range="{-(nz - k.nut_z()) * M - 0.004:.5f} {(z1 - nz - NUT_HEX_H - FLANGE_T) * M:.5f}" '
@@ -264,8 +316,6 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
                     f'damping="0.002" frictionloss="0.02" armature="0.0005"/>\n'
                     + _nut_geoms(f"{k.name}_nut", "          ") + '        </body>\n')
         else:
-            out += (f'        <body name="{k.name}" pos="{_f(at)}" quat="{_quat_z(yaw)}">\n'
-                    + _strap_geoms(k.name, ind="          ") + '        </body>\n')
             out += (f'        <body name="{k.name}_nut" pos="{_f(np.r_[s, nz])}">\n'
                     + _nut_geoms(f"{k.name}_nut", "          ") + '        </body>\n')
     return out
@@ -280,8 +330,8 @@ def loose(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple
         f'rgba="{PLATE_RGBA.get(plate.density, "0.6 0.6 0.62 1")}"/>\n    </body>\n')
     for k in clamps:
         if k.name in free:
-            at, yaw = k.pose(state)
-            out += (f'    <body name="{k.name}" pos="{_f(at)}" quat="{_quat_z(yaw)}">\n'
+            at, R = k.pose(state)
+            out += (f'    <body name="{k.name}" pos="{_f(at)}" quat="{_quat(R)}">\n'
                     f'      <freejoint name="{k.name}"/>\n' + _strap_geoms(k.name) + '    </body>\n')
     return out
 
@@ -301,20 +351,22 @@ def excludes(clamps: list[Clamp], free: tuple[str, ...] = ()) -> str:
     return "".join(f'    <exclude body1="spoilboard" body2="{c.name}_nut"/>\n' for c in clamps if c.name in free)
 
 
-def with_body(body_xml: str, plate: Plate, clamps: list[Clamp], state: str = "clamped",
-              free: tuple[str, ...] = ()) -> str:
+def with_body(body_xml: str, plate: Plate | None, clamps: list[Clamp], state: str = "clamped",
+              free: tuple[str, ...] = (), nuts: tuple[str, ...] | None = None) -> str:
     """The body model's MJCF with the VF-2 cell set up for the plate: the machine carrying the spoilboard and the
-    clamps, the floor, the plate, the free clamps and their threads, and the machine's actuators after the body's. The
-    vise isn't on the table. state: the clamps' pose (`clamped` or `parked`); free: the clamps a take moves."""
+    clamps, the floor, the plate (None: the table bare), the free clamps and the nuts on their threads, and the
+    machine's actuators after the body's. The vise isn't on the table. state: the clamps' pose (`clamped` or
+    `parked`); free: the clamps a take moves; nuts: the clamps whose nuts turn on their threads (default: free's)."""
     from moonshot.world.cell import LOAD_X_MM
-    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free))
+    nuts = free if nuts is None else nuts
+    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free, nuts))
     machine = f'    <body name="vf2" pos="{-LOAD_X_MM * vf2.M:.4f} 0 0">\n{machine}    </body>\n'
     head, _, tail = body_xml.rpartition("\n  </default>")
     xml = head + "\n" + V.STEEL_DEFAULT + "\n  </default>" + tail
     xml = xml.replace("<worldbody>\n", "<worldbody>\n" + FLOOR + machine + loose(plate, clamps, state, free), 1)
-    xml = xml.replace("<equality>\n", "<equality>\n" + threads(clamps, free), 1)
-    if free:
-        xml = xml.replace("  <equality>\n", f"  <contact>\n{excludes(clamps, free)}  </contact>\n  <equality>\n", 1)
+    xml = xml.replace("<equality>\n", "<equality>\n" + threads(clamps, nuts), 1)
+    if nuts:
+        xml = xml.replace("  <equality>\n", f"  <contact>\n{excludes(clamps, nuts)}  </contact>\n  <equality>\n", 1)
     head, _, tail = xml.rpartition("  </actuator>")
     return head + acts + "  </actuator>" + tail
 

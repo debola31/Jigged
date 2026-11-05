@@ -123,18 +123,26 @@ def test_each_clamped_nose_bears_on_the_margin_clear_of_the_cutter_heel_on_its_b
 
 
 @pytest.mark.parametrize("part,setup", SETUPS)
-def test_a_parked_clamp_lies_still_on_the_spoilboard_clear_of_the_plate(part, setup):
+def test_a_parked_clamp_rests_still_tipped_onto_the_spoilboard_clear_of_the_plate(part, setup):
+    """Parked, a free clamp slid back along its slot rests on its heel's block and its nose on the spoilboard, clear
+    of the plate's end so a plate can be laid down between the clamps, and stays there."""
     m, d, p, cl = build(part, setup, "parked", free=tuple(c.name for c in plates.clamps(part, setup)))
     lo, hi = p.centre - p.size / 2, p.centre + p.size / 2
+    at0 = {k.name: d.body(k.name).xpos.copy() for k in cl}
     settle(m, d, 0.5)
     at = {k.name: d.body(k.name).xpos.copy() for k in cl}
     settle(m, d, 1.0)
-    for k in cl:
+    for i, k in enumerate(cl):
         c = np.vstack([corners_mm(m, d, g) for g in geoms(m, f"{k.name}_") if "nut" not in m.geom(g).name])
-        assert c[:, 2].min() == pytest.approx(SB.TOP_Z, abs=0.1), k.name
+        nose = corners_mm(m, d, m.geom(f"{k.name}_nose").id)
+        assert nose[:, 2].min() == pytest.approx(SB.TOP_Z, abs=0.2), k.name            # on the spoilboard
+        on = {(m.geom(x.geom1).name, m.geom(x.geom2).name) for x in d.contact[:d.ncon]}
+        assert any(f"heel_block_{i}_0" in pair and any(n.startswith(f"{k.name}_") for n in pair) for pair in on), \
+            k.name                                                                     # and on its block
         gap = np.maximum(lo[0] - c[:, 0], c[:, 0] - hi[0]).min()
-        assert gap >= 15.0, (k.name, gap)
-        assert np.linalg.norm(d.body(k.name).xpos - at[k.name]) * 1000 < threshold("physics.placement_mm").value
+        assert gap >= 3.0, (k.name, gap)
+        assert np.linalg.norm(at[k.name] - at0[k.name]) * 1000 < threshold("physics.placement_mm").value, k.name
+        assert np.linalg.norm(d.body(k.name).xpos - at[k.name]) * 1000 < 0.01, k.name
 
 
 def test_a_nut_spun_on_its_stud_runs_along_the_thread_down_onto_the_strap():

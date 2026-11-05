@@ -35,6 +35,8 @@ SNUG = math.radians(25.0)                # the last swing, that snugs a nut run 
 LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.5, 1.2, 0.5, 0.8     # up off the plate, over to a nut, held over it while the
                                                          # eye lines the box end up on it, and down onto it
 SWING_S, UP_S, BACK_S, SEAT_S = 0.5, 0.15, 0.4, 0.25     # a stroke: swung, off, back in the air, and on again
+DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
+                             # down past its chamfer was tipped off the nut
 
 
 def rest(plate: SB.Plate) -> tuple[np.ndarray, float]:
@@ -115,8 +117,9 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
         start = y0n if direction == "tighten" else y0n - STROKE      # a loosening stroke swings back to y0n
         Ra, pa = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
         Rs, ps = on_nut(c, start, z)
-        k += [(t + MOVE_S, Ra, pa), (t + MOVE_S + OVER_S, Ra, pa), (t + MOVE_S + OVER_S + DOWN_S, Rs, ps)]
-        t += MOVE_S + OVER_S + DOWN_S
+        k += [(t + MOVE_S, Ra, pa), (t + MOVE_S + OVER_S, Ra, pa), (t + MOVE_S + OVER_S + DOWN_S, Rs, ps),
+              (t + MOVE_S + OVER_S + DOWN_S + DWELL_S, Rs, ps)]
+        t += MOVE_S + OVER_S + DOWN_S + DWELL_S
         for i, a in enumerate(swings):
             z1 = z + SB.LEAD_MM * a / (2 * math.pi)                  # the nut's run with the swing
             b = start + a + math.copysign(WR.play(), a)              # the swing takes up the box end's play first
@@ -128,10 +131,11 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
             Ru, pu = on_nut(c, b, z1, CLEAR_MM if not last else OVER_MM + SB.NUT_HEX_H)
             k.append((t + UP_S, Ru, pu))
             t += UP_S
-            if not last:                                             # back in the air, on again
-                k += [(t + BACK_S, Rs, on_nut(c, start, z1, CLEAR_MM)[1]), (t + BACK_S + SEAT_S, Rs,
-                                                                             on_nut(c, start, z1)[1])]
-                t += BACK_S + SEAT_S
+            if not last:                                             # back in the air, on again, settled
+                seated = on_nut(c, start, z1)[1]
+                k += [(t + BACK_S, Rs, on_nut(c, start, z1, CLEAR_MM)[1]), (t + BACK_S + SEAT_S, Rs, seated),
+                      (t + BACK_S + SEAT_S + DWELL_S, Rs, seated)]
+                t += BACK_S + SEAT_S + DWELL_S
             z = z1
     k += [(t + MOVE_S, R0, p0 + [0.0, 0.0, 40.0]), (t + MOVE_S + LIFT_S, R0, p0)]
     return k, done
@@ -160,7 +164,7 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     for c, a, b, rad in swings:
         if c.name not in looked:                                     # the eye on each nut as the wrench goes to it
             looked.add(c.name)
-            take.look(a - DOWN_S - OVER_S - MOVE_S / 2, np.r_[c.stud, c.nut_z("clamped")])
+            take.look(a - DWELL_S - DOWN_S - OVER_S - MOVE_S / 2, np.r_[c.stud, c.nut_z("clamped")])
         take.event("turn_nut", a, b, side="R", obj=f"{c.name}_nut", rad=rad)
     take.effort("R", t_down - 0.1, 0.6, grip)
     take.effort("R", t_down + 0.2, 0.0, None)

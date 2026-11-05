@@ -75,7 +75,7 @@ SIDE_IN_MM = 24.0                                        # ... and its tip at le
 PARK_NUT_GAP_MM = 6.0                                    # a parked clamp's nut run up this far over its clamped place
 NUT_FRICTION_NM = 0.008      # [proposed] a loose flange nut's drag on a clean stud: at 0.02 a fingertip pinch's twist
                              # turned it half as far as the hand
-NUT_FRICTION = 0.6           # [proposed] dry steel's: a fingertip on the nut's flange, and the flange on the strap (as
+NUT_FRICTION = 0.6           # [proposed] dry steel's: the flange on the strap, and a fingertip on the flange (as
                              # "steel", 0.25, the fingertip slid round the rim, turning it 10-30 deg a stroke)
 NUT_ARMATURE = 5e-5          # [proposed] the nut's turn's added inertia (kg m^2), for the thread's stability: a 3/4 in
                              # flange nut's own is ~3e-6; at 5e-4 it weighed like 2.7 kg at its rim, and a fingertip's
@@ -304,9 +304,11 @@ def _nut_geoms(name: str, ind: str) -> str:
     out = (f'{ind}<geom name="{name}_flange" class="steel" type="cylinder" size="{_f([FLANGE_R, FLANGE_T / 2])}" '
            f'pos="0 0 {FLANGE_T / 2 * M:.5f}" mass="{kg_flange:.5f}" {fr} rgba="0.3 0.3 0.32 1"/>\n')
     for j in range(3):
+        # the hex's flats are the wrench's, steel on steel: at the flange's dry 0.6 a box end set down a little off them
+        # stuck on its chamfer instead of sliding down onto them (the wrench does it all, no fingertip spins the nut)
         out += (f'{ind}<geom name="{name}_hex_{j}" class="steel" type="box" size="{_f([side / 2, NUT_AF / 2, NUT_HEX_H / 2])}" '
                 f'pos="0 0 {(FLANGE_T + NUT_HEX_H / 2) * M:.5f}" quat="{_quat_z(j * math.pi / 3)}" '
-                f'mass="{kg_hex / 3:.5f}" {fr} rgba="0.3 0.3 0.32 1"/>\n')
+                f'mass="{kg_hex / 3:.5f}" rgba="0.3 0.3 0.32 1"/>\n')
     return out
 
 

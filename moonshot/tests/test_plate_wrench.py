@@ -23,7 +23,7 @@ def test_the_box_end_fits_over_the_nut_square_on_its_flats():
         assert SB.NUT_AF / 2 < inner < SB.NUT_AF / 2 + 1.0
         a = math.atan2(R[1, 0], R[0, 0])
         assert min(abs(((a - math.pi / 6) % (math.pi / 3)) - x) for x in (0.0, math.pi / 3)) < 1e-9
-    assert 0.0 < WR.play() < math.radians(8.0)                   # it turns the nut, a little loose on it
+    assert 0.0 < WR.play() < math.radians(12.0)                  # it turns the nut, a little loose on it
 
 
 def test_the_box_ends_chamfer_leads_it_onto_the_nut_without_reaching_below_it():

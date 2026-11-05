@@ -15,7 +15,9 @@ from scipy.spatial.transform import Rotation
 M = 0.001
 IN = 25.4
 NUT_AF = 0.75 * IN                       # the 3/4 in hex it fits
-AF_IN = NUT_AF + 0.9                     # its box end's inside, across flats: 0.45 mm play a flat [proposed]
+AF_IN = NUT_AF + 1.6                     # its box end's inside, across flats: 0.8 mm play a flat [proposed], a well used
+                                         # one's: set down by the hand 0.4-1 mm off the nut's middle, at 0.45 the box end
+                                         # sat on its chamfer and the swing tipped it off
 CHAMFER_MM = 2.0                         # the box end's inside edge on its underside chamfered this far, at 45 deg
                                          # [proposed], as a box end's is: set down a millimetre or two off the nut's
                                          # middle, or turned off its flats, it is led onto them (without, it came down

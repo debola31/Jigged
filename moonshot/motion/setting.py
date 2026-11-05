@@ -25,7 +25,7 @@ from moonshot.motion.loads import FACE_A_MM, part_pose, vise_load
 from moonshot.motion.pendant import STROKE_DEG_S, PendantTake, key_at
 from moonshot.planning.steps import expand
 from moonshot.planning.validate import load_plan
-from moonshot.world import vf2
+from moonshot.world import vf2, vise
 
 INC = {"inc_0.1": 0.1 * vf2.INCH, "inc_0.01": 0.01 * vf2.INCH, "inc_0.001": 0.001 * vf2.INCH}
 SPINDLE = np.array(vf2.record()["joints"]["spindle"]["centre_mm"], float) + [-381.0, 0, 0]   # the gauge line at home
@@ -243,7 +243,7 @@ class Probing:
                                  s["z_mm"])
             sets = {a: {"method": "probe", "datum_mm": list(f["datum_mm"])} for a in "xy"}
         else:
-            top = np.array([*f["z"]["at_xy"], self.top])
+            top = np.array([*f["z"]["at_xy"], f["z"].get("z_mm", self.top)])
             self.surface("z", top, np.array([0, 0, 1.0]), f["datum_mm"][2], 0.0)
             self.jog("z", -k.axis_mm[2], "inc_0.1")             # back up to home
             sets = {"z": {"method": "probe", "datum_mm": list(f["datum_mm"])}}
@@ -255,11 +255,17 @@ class Probing:
 class SquareCheck:
     """Check it's square with the test indicator in the spindle (the dti-sweep-face card, phases 6-11): its ball
     beside the part's left side just above the jaws, in at .001 to the card's preload, up the side by Z at .01 while
-    the eyes stay on the needle, a look at it at the top, then back off the side and up to home."""
+    the eyes stay on the needle, a look at it at the top, then back off the side and up to home.
 
-    def __init__(self, take: PendantTake, part: dict):
+    Where a stop stands against the left side (moonshot/world/vise.py Load.stop), the right side is swept instead,
+    from low between the jaws, the indicator turned in the spindle to face it (SQUARE)."""
+
+    def __init__(self, take: PendantTake, part: dict, side: int = -1, from_z: float = JAW_TOP_MM + 6.0,
+                 sweep_mm: float = SWEEP_MM):
         self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
-        self.ball0 = SPINDLE + [*INDICATOR["offset_mm"], -INDICATOR["length_mm"] + INDICATOR["tip_r"]]
+        self.side, self.from_z, self.sweep_mm = side, from_z, sweep_mm
+        self.tool = INDICATOR | {"offset_mm": [-side * INDICATOR["offset_mm"][0], 0.0]}
+        self.ball0 = SPINDLE + [*self.tool["offset_mm"], -INDICATOR["length_mm"] + INDICATOR["tip_r"]]
 
     def ball(self) -> np.ndarray:
         """The ball's centre among the part's frame-0 positions, as machine X, Y and Z move it."""
@@ -272,21 +278,22 @@ class SquareCheck:
         k.turn(clicks(mm, inc), deg_s)
 
     def plan(self) -> dict:
-        k, r = self.k, INDICATOR["tip_r"]
-        face = self.c[0] - self.h[0]
+        k, r, side = self.k, INDICATOR["tip_r"], self.side
+        face = self.c[0] + side * self.h[0]
+        gap = lambda: side * (self.ball()[0] - face) - r          # noqa: E731  the ball off the face
         k.look(0.0, key_at("handle_jog"))
         k.wait(0.5)
         k.keys(["handle_jog", "inc_0.1"])
         k.inc_mm = INC["inc_0.1"]
         self.jog("y", self.c[1] - self.ball()[1], "inc_0.1")
-        self.jog("x", face - r - STANDOFF_MM - self.ball()[0], "inc_0.1")
-        self.jog("z", JAW_TOP_MM + 6.0 - self.ball()[2], "inc_0.1")
-        self.jog("x", max(0.0, face - r - self.ball()[0] - CLOSE_MM), "inc_0.01")
-        self.jog("x", face - r - self.ball()[0] + PRELOAD_MM, "inc_0.001", 150.0)
-        self.jog("z", SWEEP_MM, "inc_0.01", 200.0)
+        self.jog("x", face + side * (r + STANDOFF_MM) - self.ball()[0], "inc_0.1")
+        self.jog("z", self.from_z - self.ball()[2], "inc_0.1")
+        self.jog("x", -side * max(0.0, gap() - CLOSE_MM), "inc_0.01")
+        self.jog("x", -side * (gap() + PRELOAD_MM), "inc_0.001", 150.0)
+        self.jog("z", self.sweep_mm, "inc_0.01", 200.0)
         k.look(k.t, self.ball())
         k.wait(1.0)
-        self.jog("x", -2 * INC["inc_0.1"], "inc_0.1")
+        self.jog("x", side * 2 * INC["inc_0.1"], "inc_0.1")
         self.jog("z", -k.axis_mm[2], "inc_0.1")
         k.rest_hand()
         k.wait(0.5)
@@ -297,7 +304,9 @@ def probe_features(plan: dict, setup_id: str) -> dict:
     """What each setup of nist-ftc-10 probes, and where its zero is (world mm, frame 0), from the plan's wcs.
 
     The plan's X and Y are the machine's. Op 50 stands the part on end with datum A facing along X, so datum A
-    can't give Y as its wcs says: there it gives X, and the front face Y."""
+    can't give Y as its wcs says: there it gives X, and the front face Y. The bar parts' are in PROBES."""
+    if (plan["part"], setup_id) in PROBES:
+        return g1_features(plan, setup_id)
     pose = part_pose(plan, setup_id)
     R, O, c, h = pose["R"], pose["origin_mm"], pose["centre_mm"], pose["size_mm"] / 2
     world = lambda p: O + R @ np.asarray(p, float)           # noqa: E731  a point of the part's model
@@ -333,6 +342,76 @@ def probe_features(plan: dict, setup_id: str) -> dict:
     return out
 
 
+# What the bar parts' setups probe (planning/plans/<part>.json wcs), in each model's frame (mm): per axis, a point on
+# the face the ball touches and the face's outward normal; for z, the point it comes down on (the box's top, off its
+# middle, if none); and the zero's point. A side's touch stands 10 mm below the top, above the jaws.
+PROBES = {
+    ("ct-slbeam", "op10"): {"datum": (38.1, 19.05, -3.175)},                     # the top of the blank
+    ("ct-slbeam", "op20"): {"x": ((69.375, 19.05, 0.0), "-Z"), "y": ((69.375, 0.0, 26.99), "-Y"),
+                            "datum": (79.375, 0.0, 0.0)},                        # the faced bottom; the top of the end
+    ("ct-slbeam", "op30"): {"x": ((6.825, 19.05, 0.0), "-Z"), "y": ((6.825, 0.0, 26.99), "-Y"),
+                            "datum": (0.0, 0.0, 0.0)},                           # the vise floor, plus 76.2
+    ("ct-slbeam", "op40"): {"x": ((0.0, 19.05, 43.975), "-X"), "y": ((38.1, 0.0, 43.975), "-Y"),
+                            "datum": (0.0, 0.0, 50.8)},                          # the back; the bottom, plus 50.8
+    ("ll-1007223", "op10"): {"datum": (24.5, 40.0, 0.0)},                        # the top of the faced stock
+    # Op 20 off the fixed soft jaw (the user's decision, 2026-11-04): its end, and its face past the part's end, as
+    # world points (FIXED_JAW); the zero at the finished end and the flange's edge, the top on the parallels plus 40
+    ("ll-1007223", "op20"): {"x": "jaw_end", "y": "jaw_face", "datum": (0.0, 0.0, -37.5)},
+    # Op 30 on its flange's edge: X off the top, Y off the end above the fixed jaw (the flange, below the top's
+    # chamfer), Z off the stem's side, down in the T's notch: a cut in the box that the probe senses through
+    ("ll-1007223", "op30"): {"x": ((10.0, 40.0, 0.0), "+Y"), "y": ((2.4, 33.0, -37.5), "-Z"),
+                             "z": (24.0, 10.0, 0.0), "cuts": [((-50.0, 24.0), (-50.0, 20.0), (-60.0, 60.0))],
+                             "datum": (24.0, 40.0, -37.5)},
+}
+# the fixed jaw's -x end, and its face 17 mm past the end of a part up to 83 mm long: 5 and 3 mm below its top
+FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
+                         [-1.0, 0.0, 0.0]),
+             "jaw_face": ([vise.VISE["x"] - 58.7, vise.VISE["fixed_face_y"], JAW_TOP_MM - 3.0], [0.0, -1.0, 0.0])}
+# the square checks that sweep the part's right side, a stop against its left: from 15 mm above the vise's floor
+SQUARE = {("ct-slbeam", "op20"), ("ct-slbeam", "op30")}
+
+
+def square_sweep(plan: dict, setup_id: str, part: dict) -> dict:
+    """SquareCheck's side, start and length for a setup: the left side above the jaws, unless SQUARE has the right."""
+    if (plan["part"], setup_id) not in SQUARE:
+        return {}
+    top = part["centre_mm"][2] + part["half_mm"][2]
+    start = vise.VISE["seat_z"] + 15.0
+    # a whole number of clicks at .1, so the jog home at .1 ends on Z's home, not past it
+    sweep = math.floor(min(SWEEP_MM, top - 6.0 - start) / INC["inc_0.1"]) * INC["inc_0.1"]
+    return {"side": 1, "from_z": start, "sweep_mm": sweep}
+
+
+def g1_features(plan: dict, setup_id: str) -> dict:
+    """probe_features for a PROBES setup: its touches, cuts and zero as world points (mm, frame 0)."""
+    spec, pose = PROBES[(plan["part"], setup_id)], part_pose(plan, setup_id)
+    R, O, c, h = pose["R"], pose["origin_mm"], pose["centre_mm"], pose["size_mm"] / 2
+    world = lambda p: O + R @ np.asarray(p, float)           # noqa: E731  a point of the part's model
+    out = {}
+    for a in "xy":
+        if a not in spec:
+            continue
+        if isinstance(spec[a], str):
+            face, normal = (np.asarray(v, float) for v in FIXED_JAW[spec[a]])
+        else:
+            point, n = spec[a]
+            face, normal = world(point), R @ (np.eye(3)["XYZ".index(n[1])] * (1.0 if n[0] == "+" else -1.0))
+        assert abs(abs(normal["xy".index(a)]) - 1) < 1e-9, f"{setup_id}: the {a} touch's face doesn't face along {a}"
+        out[a] = {"face_mm": face.tolist(), "normal": normal.tolist(), "z_mm": float(face[2])}
+    if "z" in spec:
+        p = world(spec["z"])
+        out["z"] = {"at_xy": p[:2].tolist(), "z_mm": float(p[2])}
+    else:
+        out["z"] = {"at_xy": (c[:2] + [h[0] / 2, 0]).tolist()}
+    out["cuts"] = []
+    for box in spec.get("cuts", []):
+        corners = np.array([world(q) for q in np.array(np.meshgrid(*box)).reshape(3, -1).T])
+        lo, hi = corners.min(0), corners.max(0)
+        out["cuts"].append({"centre_mm": ((lo + hi) / 2).tolist(), "half_mm": ((hi - lo) / 2).tolist()})
+    out["datum_mm"] = world(spec["datum"]).tolist()
+    return out
+
+
 def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> PendantTake:
     plan = load_plan(part)
     step = next(s for s in expand(plan) if s["id"] == step_id)
@@ -348,11 +427,12 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         pr = Probing(take, p, f)
         sets = pr.plan("xy" if step["title"] == "Find X and Y" else "z")
         tool = PROBE
-        extra = {"vps": pr.vps, "bores": [f["bore"]] if "bore" in f else [],
+        extra = {"vps": pr.vps, "bores": [f["bore"]] if "bore" in f else [], "cuts": f.get("cuts", []),
                  "tool_length": {str(PROBE["number"]): PROBE["length_mm"]}}
     elif step["title"] == "Check it's square":
-        sets = SquareCheck(take, p).plan()
-        tool = INDICATOR
+        sq = SquareCheck(take, p, **square_sweep(plan, setup, p))
+        sets = sq.plan()
+        tool = sq.tool
     else:
         raise NotImplementedError(f"{step_id}: {step['title']} by {step['facts']} isn't planned yet")
     take.clip(step["title"], 0.0, take.t, step["caption"])

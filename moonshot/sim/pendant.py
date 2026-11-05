@@ -111,6 +111,8 @@ class PendantRunner(TakeRunner):
         c0 = np.array(s["centre_mm"], float)
         self.bores = [{"rel": (np.array(b["centre_mm"], float) - c0[:2]) / 1000, "r": b["r_mm"] / 1000,
                        "top": (b["top_z_mm"] - c0[2]) / 1000} for b in s.get("bores", [])]
+        self.cuts = [((np.array(b["centre_mm"], float) - c0) / 1000, np.array(b["half_mm"], float) / 1000)
+                     for b in s.get("cuts", [])]
         if (s.get("tool") or {}).get("ball"):
             self.machine.sensor = self.probe_touch
         # the vise clamped on the part: the jaw at its width, the screw locked
@@ -200,8 +202,9 @@ class PendantRunner(TakeRunner):
         return glbs_in_bodies(self.model, "vf2", vf2.render_links())
 
     def probe_touch(self) -> bool:
-        """Is the probe's ball touching the part? Its centre against the part's box, or inside a bore its wall: the
-        machine's sensing, read from the geometry (the probe doesn't collide)."""
+        """Is the probe's ball touching the part or a jaw? Its centre against the part's box less its cuts, or inside a
+        bore its wall, and against each jaw's box: the machine's sensing, read from the geometry (the probe doesn't
+        collide)."""
         m, d = self.model, self.data
         tip, part = m.geom("tool_tip").id, m.geom("blank").id
         r = self.tk["setup"]["tool"]["tip_r"] / 1000
@@ -210,8 +213,17 @@ class PendantRunner(TakeRunner):
             q = np.hypot(*(p[:2] - b["rel"]))
             if q < b["r"] and p[2] < b["top"]:
                 return q + r >= b["r"]
-        out = np.abs(p) - m.geom_size[part]
-        return float(np.linalg.norm(np.maximum(out, 0)) + min(out.max(), 0)) <= r
+
+        def gap(v, half):                                        # signed distance from a box's surface
+            out = np.abs(v) - half
+            return float(np.linalg.norm(np.maximum(out, 0)) + min(out.max(), 0))
+        g = gap(p, m.geom_size[part])
+        for c, half in self.cuts:
+            g = max(g, -gap(p - c, half))
+        for jaw in ("fixed_jaw", "moving_jaw"):                  # neither turns
+            j = m.geom(jaw).id
+            g = min(g, gap(d.geom_xpos[tip] - d.geom_xpos[j], m.geom_size[j]))
+        return g <= r
 
     # --- each step ---------------------------------------------------------------------------------------
     def key_forces(self) -> dict[str, float]:

@@ -361,6 +361,9 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - The send-outs pass as they are: the `carry_part` weld engages 0.2 s before the pinch closes (otherwise the closing
     fingers shove the part 17-23 mm), and the arm takes a carried part's weight through its own actuators.
   - nist-ftc-10's deburr re-renders after G1's deburrs, its bench calipers drawn whole (they were the bare beam).
+  - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
+    blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
+    re-run per G1 setup with its own part, or its plate on the spoilboard.
   - The band saw's clamp: the gate takes the lower jaw force the cut shows holds the bar (it snugs at 44-50 N; the
     gate asked 82.5, which the arm can't give at a knob by the thigh).
   - The G1 deburrs' tool pickup, loading in 100-133 ms against people's 163-265, is a recorded exception; each take

@@ -13,6 +13,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
 import { toError } from '@/lib/supabaseErrors';
 import { CATEGORY_LABELS, gatherList, stepsUsing, type Catalog } from './catalog';
+import PilotRequest from './PilotRequest';
 import { mediaUrl, ready, type LivePart, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -150,6 +151,7 @@ function PlanPanel({ cat, part }: { cat: Catalog; part: LivePart }) {
       <Button variant="contained" size="large" fullWidth onClick={() => openStep(0)} sx={{ mt: 4 }}>
         Start with step 1
       </Button>
+      <PilotRequest sx={{ mt: 4 }} />
     </>
   );
 }

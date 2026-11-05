@@ -113,25 +113,30 @@ BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infee
                                                     # before the right hip, where the hand hangs, the body clear of the
                                                     # motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
-END_LUMBAR = np.array([-1150.0, 240.0, 955.0])     # at the left end, facing the station's +X: the handwheel's knob
-                                                    # ahead at the thigh, under the right shoulder, the thighs 90 mm
-                                                    # short of it. Crouched 115 mm (the body model has no legs), the
-                                                    # knob turn was no more like people's
+END_LUMBAR = np.array([-1150.0, 195.0, 955.0])     # at the left end, facing the station's +X: the handwheel's knob
+                                                    # ahead at the thigh, 110 mm right of the body's middle, the thighs
+                                                    # 90 mm short of it. With the knob under the right shoulder (155 mm
+                                                    # right) the replayed forearm went past its maximum pushing it over
+                                                    # the top (1.13-1.36), with it 215 right to 0.99, 110 right 0.93.
+                                                    # Crouched 115 mm (the body model has no legs), the knob turn was
+                                                    # no more like people's
 KNOB_TURN_DEG = 180.0       # the card's half turn, at most
 SNUG_DEG = 20.0             # the handwheel turned this far past where the jaw meets the bar: snug (the card's end)
 KNOB_START_DEG = -104.2     # where the handwheel is left: its knob level on the operator's left (at joint zero it is
                             # 14.2 deg past the top), so the half turn takes it over the top to their right, not down
                             # to their knees
-KNOB_TURN_S = 6.5           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
+KNOB_TURN_S = 8.0           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
                             # to 1.2 N m at its speed, 45 N at the knob on top of its friction's 20, more than the arm
                             # reaching down to the thigh can push past the top of the wheel (the replayed forearm past
-                            # its maximum); at 4 and 5 s a 30 N push fell behind there, the push rose to 60 N and the
-                            # forearm to 1.33 of its maximum (the wheel alone turns at 50 deg/s under 30 N)
+                            # its maximum); at 4-6.5 s a 30 N push fell behind there, the push rose to 38-60 N and the
+                            # forearm to 1.33-1.36 of its maximum (the wheel alone turns at 50 deg/s under 30 N)
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
 KNOB_EFFORT = 0.4           # the fist's effort on the knob, which also stiffens the arm: at 0.15 the arm followed its
                             # plan so loosely that the wheel stalled near the top of its turn, short of the bar
-KNOB_SKIN = False           # the knob meets the skin while welded to the fist (trial)
-KNOB_APPROACH_MM = (70.0, 40.0)   # the hand comes onto the knob from this far back and up
+KNOB_SKIN = False           # the knob doesn't meet the skin while welded to the fist: meeting it, the fist's friction
+                            # held the wheel back (at 9 N, and in a later trial 0 N on the bar)
+KNOB_APPROACH_MM = (95.0, 60.0)   # the hand comes onto the knob from this far back and up: from 70 and 40, the ring's
+                                  # and middle's tips brushed the knob before the hand came onto it
 KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
                             # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
 KNOB_N = 30.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
@@ -447,9 +452,9 @@ def on_knob(a, u, r, lo, hi, comp=2.0, w=1.0):
 class ClampPlan(SawPlan):
     place = SC.END
     lumbar_station = END_LUMBAR
-    # people's likelihood weighed more again: bent to the knob at the thigh, the arm's median was 28.9 at 1.5 (their
-    # 95th percentile 28.7)
-    solver_w = SawPlan.solver_w | {"prior": 2.5}
+    # people's likelihood weighed more again: bent to the knob at the thigh, the arm's median was 28.9 at 1.5 and 29.7
+    # at 2.5 with the knob 110 mm right of the body's middle (their 95th percentile 28.7); 26.9 at 4
+    solver_w = SawPlan.solver_w | {"prior": 4.0}
 
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["clamp"], state, verbose)
@@ -538,7 +543,7 @@ class ClampPlan(SawPlan):
         # hand came onto it, as it moved in at 0.8 m/s
         tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 160, approach=Wg + back * KNOB_APPROACH_MM[0]
                         + up * KNOB_APPROACH_MM[1],
-                        opened=0.7, lead=0.25, reach_s=0.6, rise_s=2.0, still_s=0.45)
+                        opened=0.7, lead=0.235, reach_s=0.6, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "knob")
         self.effort("R", tg + 0.25, KNOB_EFFORT, "knob")
         eased = open_like(self.hand, g["q"], KNOB_EASE)
@@ -560,11 +565,15 @@ class ClampPlan(SawPlan):
         self.effort("R", t_off + 0.1, 0.0, "knob")
         W = W0 + self.knob_mid(t_off) - mid0
         self.fingers("R", t_off, eased)
-        self.release_keys(eased, t_off, t_off + 0.05, t_off + 0.5)
+        # the fingers open round the knob first, then the hand slides off its free end along it, toward the person:
+        # drawn back and up at once, the fingers swept through the knob before it met the skin again
+        self.release_keys(eased, t_off, t_off + 0.05, t_off + 0.3)
+        self.hold("R", t_off, t_off + 0.25, H0, W)
         self.wrist["R"] = W
-        self.transit("R", t_off + 0.05, t_off + 0.5, W + back * 60 + up * 30)
-        self.clip("clamp", 0.0, t_off + 0.4, "CLAMP  the handwheel turned until the jaw is snug on the bar")
-        self.t = t_off + 0.5
+        self.transit("R", t_off + 0.25, t_off + 0.6, W + back * 75)
+        self.transit("R", t_off + 0.6, t_off + 0.8, W + back * 90 + up * 40)
+        self.clip("clamp", 0.0, t_off + 0.7, "CLAMP  the handwheel turned until the jaw is snug on the bar")
+        self.t = t_off + 0.8
         self.to_rest("R", self.t, self.t + 1.1)
         self.t += 1.3
 

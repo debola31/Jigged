@@ -12,9 +12,9 @@ the station's frame.
   it is one body; the cut is the machine's own work and not modelled (the scope rule: only the person's work is
   rendered), so after it the bar is two bodies, the piece in front of the blade and the rest behind it, a kerf
   apart (KERF_MM): the blade's set teeth cut wider than the band.
-- The head and the stock don't collide. The bow's collider spans its C-frame's open window, where the work passes
-  (moonshot/world/bandsaw.py): lowered, its box would meet the bar 37 mm before the blade does. The head is driven by
-  the feed cylinder, and the blade's way through the bar is the cut, the machine's work.
+- The head and the stock don't collide: the blade's way through the bar is the cut, the machine's work, and the head
+  is driven by the feed cylinder. (The bow's colliders leave its window open, where the work passes, so of the head
+  only the blade would meet the bar.)
 - The bench: a steel-topped bench to the right of the work stop for the cut pieces (layout furniture, as the shop's
   benches are; the station has none), at the shop benches' height.
 

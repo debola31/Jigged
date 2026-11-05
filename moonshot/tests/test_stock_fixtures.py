@@ -59,6 +59,25 @@ def test_nist_ftc_09_exempts_ten_regions_its_letters_inside_corners_within_the_e
         assert len(on) == 2 and all(f.geomType() == "PLANE" and exemption(f, fx) == "letter corner" for f in on)
 
 
+def test_nist_ftc_10_exempts_five_regions_datum_a_s_rim_round_the_side_slot_s_mouth():
+    """The extended mask (the user's decision, 2026-11-05): datum A's five edges round the +Z side slot's mouth (the
+    masked plan gap, 2026-11-03), each within the slot's 3 mm depth, and no more: each an edge of datum A's own
+    face (y = 0), at the slot."""
+    import cadquery as cq
+    import numpy as np
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    regions = fixture("nist-ftc-10")["regions"]
+    assert len(regions) == 5 and {r["what"] for r in regions} == {"plan gap mouth"}
+    datum_a = next(f for f in load_part("nist-ftc-10").Faces()
+                   if f.geomType() == "PLANE" and f.normalAt().y < -0.99 and abs(f.Center().y) < 1e-6)
+    for r in regions:
+        assert r["within_mm"] == pytest.approx(3.0)
+        a, b = (np.asarray(v, float) for v in r["edge"])
+        assert a[1] == b[1] == pytest.approx(0.0) and all(44.0 <= p[0] <= 56.0 and p[2] >= 34.0 for p in (a, b))
+        line = cq.Edge.makeLine(cq.Vector(*a), cq.Vector(*b))
+        assert BRepExtrema_DistShapeShape(datum_a.wrapped, line.wrapped).Value() < 1e-3   # on datum A's own rim
+
+
 def test_a_region_takes_only_points_near_its_edge_on_the_faces_that_meet_it():
     import cadquery as cq
     import numpy as np

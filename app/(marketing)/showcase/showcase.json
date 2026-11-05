@@ -2970,7 +2970,7 @@
       "type": "video",
       "path": "video/ct-slbeam/saw-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-start",

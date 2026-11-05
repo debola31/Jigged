@@ -101,7 +101,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -130,7 +130,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-seat.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -159,7 +159,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op10-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",

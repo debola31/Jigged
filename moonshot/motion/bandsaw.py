@@ -336,12 +336,12 @@ class LoadPlan(SawPlan):
         self.look(0.0, p0 + back * (SC.bar_mm() / 2 - 40))
         # up off the thigh to over the tail and back from it, a pause, then onto it: the rise slower than the reach
         # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
-        # 0.16 s before it comes to rest (its fingers meet the end 0.05 s before the wrist stops, and the hand is
-        # widest 0.04 s before its key: 0.22 s before, it was widest 58% of the way)
+        # 0.10 s before it comes to rest (its fingers meet the end as the wrist stops, and the hand is
+        # widest 0.04 s before its key: 0.16 s before, it was widest 66% of the way)
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
-                        opened=0.6, lead=0.16, rise_s=2.0, still_s=0.45)
+                        opened=0.6, lead=0.10, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
         t_slide = tg + 0.3

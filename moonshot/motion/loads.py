@@ -61,10 +61,9 @@ STOCK_MM = {"ll-1007223": ((-4.075, 53.075), (-2.225, 42.225), (-41.275, 41.275)
             "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975)),
             "ll-1005337": ((-403.2, 3.2), (-30.2, 630.2), (-20.0, -0.95))}
 # ll-1007223: Op 10 faces the top to 40 and profiles the flange's edges and both ends to 49 x 75 down to 1 mm above
-# the jaws (y 17.475); Op 20 holds it by the flange in soft jaws, on the faced top, its box the 49 x 75 the jaws and
-# the parallels touch: the skirt Op 10 couldn't reach (y -2.225..17.475, 4.1 mm wider each side, 3.8 longer each
-# end) stands above the jaws, left out [declared shortcut]; Op 30 holds the finished part
-ENVELOPE_MM |= {("ll-1007223", "op20"): ((0.0, 49.0), (-2.225, 40.0), (-37.5, 37.5)),
+# the jaws (y 17.475), leaving the skirt below them the stock's own size, which Op 20 holds above its soft jaws; Op 30
+# holds the finished part
+ENVELOPE_MM |= {("ll-1007223", "op20"): ((-4.075, 53.075), (-2.225, 40.0), (-41.275, 41.275)),
                 ("ll-1007223", "op30"): ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5))}
 # ct-slbeam: Op 10 faces the bottom (z 0), Op 20 the long leg's end (x 76.2), Op 30 the back (x 0)
 ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.975)),

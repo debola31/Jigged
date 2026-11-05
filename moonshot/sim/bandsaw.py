@@ -39,8 +39,12 @@ AIM_LEAD_S = 0.5            # ... from this long before its press
 TURN_N_PER_RAD = 150.0      # the push on the handwheel's knob grows this much per radian the wheel is behind its plan:
                             # little for the few degrees it trails on its way round, to TURN_N_MAX as the jaw snugs and
                             # the wheel stalls short of the plan's half turn
-TURN_N_MAX = 80.0           # ... to at most this (proposed: a firm push down, snugging the jaw: at 40 N it closed on the
-                            # bar at 10 N, at 80 at 106-175 N, and the gate's 82.5 N takes 2 N m through the screw)
+TURN_N_MAX = 38.0           # ... to at most this (proposed: the forearm's strength, reaching down to the thigh: at 45 N
+                            # past the top of the wheel the replayed forearm went to 1.24 of its maximum, at 60 to 1.33.
+                            # The jaw snugs at 20-50 N, which holds the bar still through the cut: the gate's clamp_n,
+                            # the user's decision, 2026-11-05)
+TWIST_NM_PER_RAD = 3.0      # a knob twisted by the fingers: the twist grows this much per radian it is behind its plan
+TWIST_NM_MAX = 0.8          # ... to at most this (proposed: a firm pinch's twist on a 26 mm knob)
 NEVER_HELD = ["saw_blade", "saw_head"]   # the band's collider, and the head that carries it (the checks read what a
                                          # hand touches by body, validate/objects.py touched)
 DRIVEN = ["saw", "saw_base", "saw_head", "saw_cover_idler", "saw_cover_drive", "saw_blade", "saw_jaw",
@@ -76,6 +80,7 @@ class SawRun(BenchRun):
         m = self.model
         self.buttons = [e for e in self.tk["events"] if e["kind"] == "button"]
         self.turns = [e for e in self.tk["events"] if e["kind"] == "turn"]
+        self.twists = [e for e in self.tk["events"] if e["kind"] == "twist"]
         self.drags = [e for e in self.tk["events"] if e["kind"] == "drag"]
         self.pad = {dg: m.geom(f"R_g_dis{i}").id for dg, i in (("thumb", 1), ("index", 2))}
         # the saw's links are the machine's, driven, not objects riding on one another: touching its bed isn't touching
@@ -97,6 +102,21 @@ class SawRun(BenchRun):
             if e.get("skin") and e["t0"] <= tt < e["t1"]:
                 for g in self.body_geoms[e["obj"]]:
                     m.geom_contype[g], m.geom_conaffinity[g] = self.contact_bits[g]
+
+    def anchor_weld(self, e: dict, eq: int, tt: float) -> None:
+        """BenchRun's, but a knob that spins in the fist is held on its own axis: at the pinch, off the axis, the hold
+        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob."""
+        super().anchor_weld(e, eq, tt)
+        if e["obj"] != "saw_handwheel":
+            return
+        m, d = self.model, self.data
+        hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("saw_handwheel").id
+        j, kg = m.joint("saw_handwheel").id, m.geom("saw_handwheel_knob").id
+        axis, centre = d.xaxis[j], d.geom_xpos[kg]
+        pinch = np.mean([d.geom_xpos[m.geom(f"R_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
+        on_axis = centre + axis * ((pinch - centre) @ axis)
+        m.eq_data[eq, 0:3] = d.xmat[ob].reshape(3, 3).T @ (on_axis - d.xpos[ob])
+        m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (on_axis - d.xpos[hb])
 
     def scene(self, loose, carried, skip):
         return SC.with_body(self.body.xml, self.place, loose, carried)
@@ -218,6 +238,21 @@ class SawRun(BenchRun):
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, p, hand)
             tau += jacp[:, self.act_dof].T @ (tangent * push)
+        for e in self.twists:
+            if not e["t0"] <= tt < e["t1"]:
+                continue
+            # the fingers twisting a knob about its axis, harder the further it is behind its plan, through the arm's
+            # turn: the hand's turn alone trailed its plan's quarter turn by 10 deg at the end
+            j = m.joint(e["obj"]).id
+            x = min(1.0, max(0.0, (tt - e["t0"]) / e["turn_s"]))
+            planned = e["q0"] + e["turn_rad"] * x * x * x * (10 - 15 * x + 6 * x * x)
+            behind = planned - d.qpos[m.jnt_qposadr[j]]
+            ease = min(1.0, (tt - e["t0"]) / 0.15, (e["t1"] - tt) / 0.15)
+            torque = float(np.clip(e["torque"] + TWIST_NM_PER_RAD * behind, 0.0, TWIST_NM_MAX)) * ease
+            hand = m.body(f"{e['side']}_hand").id
+            jacr = np.zeros((3, m.nv))
+            mujoco.mj_jac(m, d, None, jacr, d.xpos[hand], hand)
+            tau += jacr[:, self.act_dof].T @ (d.xaxis[j] * torque)
         return tau
 
     def measure(self, _run, k: int) -> None:

@@ -98,8 +98,9 @@ FRONT_LUMBAR = np.array([-200.0, -490.0, 955.0])   # the station's mm: at the fr
                                                     # before the right shoulder, the knees at the base's recessed front
                                                     # (233 mm in front of the blade from 300 to 600 mm up, its foot at
                                                     # 450), the hanging hand clear of the work stop's arm
-BACK_LUMBAR = np.array([200.0, 525.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
-                                                    # before the right shoulder, the body clear of the motor
+BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infeed, facing it (BACK): the bar's tail
+                                                    # before the right hip, where the hand hangs, the body clear of the
+                                                    # motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
 END_LUMBAR = np.array([-1200.0, 170.0, 955.0])     # at the left end, facing the station's +X: the handwheel ahead, the
                                                     # control box to the right. Crouched 115 mm (the body model has no
@@ -316,8 +317,12 @@ class LoadPlan(SawPlan):
         cols.append(oriented_box(self.place.world((over[0] + over[1]) / 2), self.place.R, (over[1] - over[0]) / 2))
         return {"bar": dict(of="bar", obj=self.place.world(c), q0=q0, iters=1000, colliders=cols,
                             targets={"thumb": on_face(-16, 16), "index": on_face(-16, 16), "middle": on_face(-16, 16)},
-                            starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (15, 30) for pl in (40, 70)
-                                    for r in (-20,) for p in (40, 75)])}
+                            # from the arm hanging nearly straight, turned palm forward, as people's hand goes down
+                            # to the end of a bar at their thigh: reaching from a bent elbow and a leaning trunk, the
+                            # arm was less likely than people's 95th percentile, and the left, hanging from that
+                            # trunk, too
+                            starts=[S(f, 0, 0, 20, el, -30, eb, p, 15, 0) for f in (5, 12) for el in (15, 28)
+                                    for eb in (20, 40) for p in (-45, -20)])}
 
     def compose(self):
         self.t = 0.5
@@ -328,11 +333,12 @@ class LoadPlan(SawPlan):
         self.look(0.0, p0 + back * (SC.bar_mm() / 2 - 40))
         # up off the thigh to over the tail and back from it, a pause, then onto it: the rise slower than the reach
         # (a reach is timed from the last stop before the fastest frame of the 2 s before contact), the hand widest
-        # 0.185 s before it comes to rest (0.15 s before, it was widest 81% of the way)
+        # 0.22 s before it comes to rest (its fingers meet the end 0.1 s before the wrist stops; 0.185 s before, it
+        # was widest 80% of the way)
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
-                        opened=0.6, lead=0.185, rise_s=2.0, still_s=0.45)
+                        opened=0.6, lead=0.22, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, 0.3, "bar")
         t_slide = tg + 0.3

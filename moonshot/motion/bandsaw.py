@@ -162,7 +162,14 @@ class SawPlan(BenchPlan):
         super().__init__(out, verbose)
 
     def solver_boxes(self) -> list:
-        return [world_box(self.place, n) for n in ("bed_front", "bed_back", "fixed_jaw_front", "work_stop")]
+        x0, x1 = SC.bar_x()
+        B = SC.STOP_BLOCK
+        lo = np.array([x0, SC.stop_face_y() - B["depth"], SC.bed_z()])
+        hi = np.array([x1, SC.stop_face_y(), SC.bed_z() + B["height"]])
+        corners = self.place.world(np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1])
+                                             for z in (lo[2], hi[2])]))
+        block = ((corners.min(0) + corners.max(0)) / 2, (corners.max(0) - corners.min(0)) / 2)
+        return [world_box(self.place, n) for n in ("bed_front", "bed_back", "fixed_jaw_front", "work_stop")] + [block]
 
     def theta0(self, n) -> np.ndarray:
         """The body solve's start: the right arm as its first grip holds it while it has a task, hanging relaxed
@@ -247,26 +254,27 @@ class LoadPlan(SawPlan):
         self.solve_grips(self.grip_specs(), {"bar": (self.place.world(self.bar0), self.place.R)})
 
     def grip_specs(self) -> dict:
-        """The right hand flat on the bar where it shows past the blade, the fingers along it toward the blade: the
-        ring and little fingers' pads on its top, the hand's thumb side over the bed to its left, clear of the fixed
-        jaw's plate that stands 113 mm over the bar on its right."""
+        """The right hand's fingers on the bar's top by its end, which the last cut left at the blade, their tips
+        toward it: the index's, middle's and ring's pads pressing on it to draw it toward the stop. Only the fingers go
+        in under the raised bow (its box spans the window from 33.6 mm in front of the blade, 47 mm over a 1-1/2 in
+        bar), the palm in front of it, clear of the fixed jaw's plate that stands 100 mm over the bar on its right.
+        Lying along the bar 120 mm in, the whole hand was under the bow, and lifted it 2.5 deg."""
         S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
         c = self.bar0
         end = c[1] - SC.bar_mm() / 2
-        # the bar's end is where the last cut left it, at the blade: the hand lies along it with its heel over the end,
-        # partly under the raised bow (its box 60 mm over the fingers), and stays clear of the stop block as it arrives
-        top = self.place.world([c[0], end + 120.0, SC.bed_z() + SC.STOCK["h"]])
+        top = self.place.world([c[0], end + 22.0, SC.bed_z() + SC.STOCK["h"]])
         up = self.place.vec([0.0, 0.0, 1.0])
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
-            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"] = 20.0, 15.0
-        q0.update(thumb_cmc_abd=20.0, thumb_cmc_flex=0.0, thumb_mcp_flex=10.0, thumb_ip=5.0)
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 35.0, 35.0, 15.0
+        q0.update(little_mcp_flex=55.0, little_pip=60.0, thumb_cmc_abd=20.0, thumb_cmc_flex=5.0, thumb_mcp_flex=15.0,
+                  thumb_ip=10.0)
         hw = SC.STOCK["w"] / 2
         on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 3, hw - 3), y=(lo, hi)))   # noqa: E731
-        cols = [self.bar_box(c), self.stop_block_box()] + [saw_box(self.place, n) for n in
-                                                           ("bed_front", "fixed_jaw_front", "fixed_jaw_back")]
+        cols = [self.bar_box(c), self.stop_block_box(), saw_box(self.place, "bow", q_head=math.radians(RAISED_DEG))]
+        cols += [saw_box(self.place, n) for n in ("bed_front", "fixed_jaw_front", "fixed_jaw_back")]
         return {"bar": dict(of="bar", obj=self.place.world(c), q0=q0, iters=1000, colliders=cols,
-                            targets={"ring": on_top(-10, 15), "little": on_top(-30, 0), "middle": on_top(0, 30)},
+                            targets={"index": on_top(-8, 8), "middle": on_top(-4, 12), "ring": on_top(-12, 4)},
                             starts=[S(f, 0, 0, pl, 40, r, 50, p, 0, 0) for f in (25, 40) for pl in (60, 80)
                                     for r in (-20,) for p in (60, 85)])}
 
@@ -285,8 +293,7 @@ class LoadPlan(SawPlan):
         # fingers caught on the block and came to rest on the fixed jaw's plate)
         # the rise slower than the reach down: a reach is timed from the last stop before the fastest frame of the 2 s
         # before contact, and risen in 1.4 s (806 mm/s, the reach 463) it was timed from the thigh. Paused low and
-        # 150 mm back from the grip, then in under the raised bow: the fingers pointing at the blade stay below the
-        # bow's box, which spans its window 60 mm over the bar
+        # 150 mm back from the grip, then the fingers in under the raised bow, below its box
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 40 + back * 150, approach=Wg + up * 25 + back * 40,
                         opened=0.6, lead=0.21, rise_s=2.0, still_s=0.45, rise_via=[self.rest + up * 140 + back * -60])
         self.effort("R", tg, 0.0, "bar")

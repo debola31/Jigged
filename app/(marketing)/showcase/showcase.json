@@ -1711,7 +1711,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/op10-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -3408,7 +3408,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op20-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-xy",

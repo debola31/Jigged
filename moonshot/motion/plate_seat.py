@@ -8,7 +8,7 @@ In progress (2026-11-04): one clamp's move lands level and square on its stud bu
 3-7 mm deep the hand's curled fingers met the heel block; the nuts aren't turned yet, as how the nut's thread is
 modelled waits on the user's decision (a free nut on its stud needs `clamp_thread_<i>`, which isn't declared).
 
-    python -m moonshot.motion.plate_seat ll-1005337 op10      # plans <data root>/takes/ll-1005337-op10-seat
+    python -m moonshot.motion.plate_seat ll-1005337 op10      # plans <data root>/takes/ll-1005337-op10-set-clamps
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from moonshot.config import data_root
 from moonshot.motion import plate_clamps as PC
 from moonshot.motion import plates
 from moonshot.motion.step_take import StepTake
+from moonshot.planning.takes import PLATE_TAKES, plate_take
 
 TAKES = data_root() / "takes"
 
@@ -32,7 +33,7 @@ class PlateSeat(StepTake):
         self.part, self.setup = part, setup
         self.plate = plates.plate(part, setup)
         self.clamps = [c for c in plates.clamps(part, setup) if not only or c.name in only]
-        super().__init__(out or TAKES / f"{part}-{setup}-seat", PC.LUMBAR, verbose)
+        super().__init__(out or TAKES / plate_take(part, setup, PLATE_TAKES["seat"]), PC.LUMBAR, verbose)
         self.solve_grips({f"pinch_{c.name}": self.pinch_spec(c.name) for c in self.clamps}, source=self.pinch_spec,
                          depends=(PC,))
 

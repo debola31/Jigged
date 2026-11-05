@@ -52,6 +52,27 @@ def shared(step: dict, take: str) -> Span:
     return (take if m == "vf2" else f"{m}-{take}", None, None)
 
 
+# a plate setup's own takes (the plates' planners: moonshot/motion/plate_blow_off.py, plate_seat.py, ...), by the step
+# that plays each, named per setup as the cell takes are, so that no take's folder is a step's video's folder
+# (<part>-<step id>): an unload's joined video written there overwrote its own take's (the coordinator's report,
+# 2026-11-05; moonshot/render/step_video.py now refuses it)
+PLATE_TAKES = {"clean": "clean-blow-off", "load": "lay-plate", "seat": "set-clamps", "shift": "shift-plate"}
+PLATE_UNLOAD = ("unload-blow-off", "lift-off-plate")      # the chips blown off the clamped plate; then the clamps
+                                                          # loosened and the plate lifted off, unless it stays
+
+
+def plate_take(part: str, setup: str, take: str) -> str:
+    """A plate setup's own take's folder: takes/<part>-<setup>-<take> (take: PLATE_TAKES's or PLATE_UNLOAD's)."""
+    return f"{part}-{setup}-{take}"
+
+
+def plate_stays(part: str, setup: str) -> bool:
+    """Does the setup's plate stay clamped for the next, which slides it along the table (moonshot/planning/steps.py)?"""
+    setups = load_plan(part)["setups"]
+    i = [s["id"] for s in setups].index(setup)
+    return i + 1 < len(setups) and "shift" in setups[i + 1].get("workholding", {})
+
+
 def per_setup(part: str, step: dict, take: str) -> Span:
     """The step's setup's own run of a cell take (`take`: door-close, cycle-start, door-open, clean-blow-off,
     unload-blow-off, set-parallels, set-stop, loosen), its part or plate on the table, in takes/<part>-<setup>-<take>;
@@ -96,8 +117,12 @@ def spans(part: str, step: dict) -> list[Span]:
     start = [cell("door-close"), cell("cycle-start")]
     tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
-        return {"clean": own, "load": own, "seat": own, "check": setting, "shift": own, "xy": setting, "z": setting,
-                "tools": tools, "start": start, "unload": [cell("door-open"), *own]}[kind]
+        plate = lambda take: (plate_take(part, setup, take), None, None)       # noqa: E731
+        if kind in PLATE_TAKES:
+            return [plate(PLATE_TAKES[kind])]
+        if kind == "unload":
+            return [cell("door-open"), *[plate(t) for t in PLATE_UNLOAD[:1 if plate_stays(part, setup) else 2]]]
+        return {"check": setting, "xy": setting, "z": setting, "tools": tools, "start": start}[kind]
     if "stop" in facts.get("parallels", ""):                # on the vise floor against a stop (op50)
         if kind == "clean":
             return [cell("clean-blow-off"), cell("set-stop")]
@@ -119,13 +144,17 @@ def spans(part: str, step: dict) -> list[Span]:
 def played(kind: str) -> list[str]:
     """Every take of a cell take's kind (door-close, cycle-start, door-open, clean-blow-off, unload-blow-off,
     set-parallels, set-stop, loosen) the plans' steps play, in plan order: the shared take nist-ftc-10 plays, and each
-    other part's setups' own runs (per_setup). A blow-off's shared take is both step kinds' (`blow-off`)."""
+    other part's setups' own runs (per_setup). A blow-off's shared take is both step kinds' (`blow-off`). A plate's own
+    takes (plate_take: its blow-offs too) aren't the cell's, and aren't listed."""
     from moonshot.planning.validate import PLANS
     shared_name = kind.split("-", 1)[1] if kind.endswith("-blow-off") else kind
+    plate_own = (*PLATE_TAKES.values(), *PLATE_UNLOAD)
     out: list[str] = []
     for f in sorted(PLANS.glob("*.json")):
         for s in expand(load_plan(f.stem)):
             for t, _, _ in spans(f.stem, s):
+                if "clamps" in s.get("facts", {}) and any(t.endswith(f"-{p}") for p in plate_own):
+                    continue
                 if (t == shared_name or t.endswith(f"-{kind}")) and t not in out:
                     out.append(t)
     return out

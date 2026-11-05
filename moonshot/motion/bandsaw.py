@@ -774,10 +774,10 @@ class UnloadPlan(SawPlan):
         end = c[1] - self.length / 2                       # its end against the stop block
         hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
         up = self.place.vec([0.0, 0.0, 1.0])
-        # the pads 18 mm from its end at the stop block, the fingertips 12 mm short of the bow's box, and the hand
+        # the pads 24 mm from its end at the stop block, the fingertips 6 mm short of the bow's box, and the hand
         # 14 mm off the fixed jaw's plate: 30 mm in, the tips reached into the box, and the hand jammed between it,
         # the plate and the block and slid the piece 6 mm
-        top = self.place.world([c[0], end + 18.0, c[2] + hh])
+        top = self.place.world([c[0], end + 24.0, c[2] + hh])
         on_top = lambda lo, hi: G.plane_target(top, up, 2.0, bands(top, x=(-hw + 4, hw - 14), y=(lo, hi)))   # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
@@ -845,16 +845,15 @@ class UnloadPlan(SawPlan):
         # its friction on the bed, pushed against as it slides, and the fingers' press down on it (a press, not a
         # grasp: the grasp is the next; moonshot/validate/grasp_timing.py)
         friction = SC.STOCK["friction"] * SC.stock_kg(self.length) * 9.81
-        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -0.25]), (t_pull, t_off - 0.05, [0.0, -1.0])):
+        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, -0.6]), (t_pull, t_off - 0.05, [0.0, -1.0])):
             along = np.array([*way, -DOWN_N / friction])
             self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
                        force=round(float(np.linalg.norm(along)) * friction, 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="top")
-        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`), keeping its own turn
-        # (`loose`): held to the hand's, it wedged between the stop block and the rest of the bar 1.4 mm off its other
-        # end, and slid 5 mm of 65
+        # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`), held square by the hand and
+        # pressed to the stop block's face: let turn (`loose`), pushed off its middle it yawed and wedged between the
+        # block and the rest of the bar 1.4 mm off its other end, and slid 3 mm of 65
         self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
-        self.event("loose", tg + 0.05, t_off, obj="piece")
         self.effort("R", t_off - 0.1, PUSH_EFFORT, "top")
         self.effort("R", t_off + 0.1, 0.0, "top")
         _, W = self.grip_pose("top", t_off)

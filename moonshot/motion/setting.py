@@ -56,6 +56,9 @@ LEVER_DROP_MM = 2.5         # a straight check's indicator lever angles down thi
                             # down beside the ball, into the plate where the Y travel kept it near (ll-1005337)
 LEVER_OUT_MM = 0.5          # and the lever runs along the edge this far out from it, clear of the plate
 DOWEL_R_MM = 4.0            # ll-1005337's reamed 8.000 mm dowel holes
+LEVEL_SWEEP_MM = 220 * 0.01 * vf2.INCH     # a level check's sweep across a face facing up: 220 clicks at .01, 55.88 mm
+LEVEL_OUT_MM = 5.0          # its lever runs along the sweep this far, and angles down this far to its ball, so its
+LEVEL_DROP_MM = 5.0         # stem stays in the notch the face is the floor of, clear of the jaws at either end
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -329,6 +332,58 @@ class SquareCheck:
         return {}
 
 
+class LevelCheck:
+    """Check it's square across a face that faces up (ll-1007223 Op 30: the stem's side, the floor of the T's notch,
+    the part on its flange's edge between the jaws): the test indicator down into the notch onto the face, in at .001
+    to the preload, swept along Y between the jaws at .01, a look at the needle, then up off it and home.
+
+    Its lever runs LEVEL_OUT_MM along the sweep and angles LEVEL_DROP_MM down to its ball, so its stem stands in the
+    open notch over the face; a level stylus 35 mm long reached into the flange, the stop or a jaw, whichever way it
+    pointed. The sweep is centred between the jaws, the stem and the ball the same distance off each."""
+
+    def __init__(self, take: PendantTake, part: dict, face: np.ndarray):
+        self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
+        self.face = np.asarray(face, float)                     # a point of the face (world mm, frame 0), its z the face's
+        r = INDICATOR["tip_r"]
+        self.tool = INDICATOR | {"offset_mm": [0.0, LEVEL_OUT_MM], "lever_drop_mm": LEVEL_DROP_MM}
+        self.ball0 = SPINDLE + [*self.tool["offset_mm"], -INDICATOR["length_mm"] + r]
+        # the span from the stem's far side (LEVEL_OUT_MM + shank_r behind the ball) to the ball's lead, centred on the part
+        back, lead = LEVEL_OUT_MM + INDICATOR["shank_r"], r
+        self.y0 = self.c[1] - (LEVEL_SWEEP_MM + back + lead) / 2 + back
+
+    def ball(self) -> np.ndarray:
+        return self.ball0 + self.k.axis_mm
+
+    def jog(self, axis: str, mm: float, inc: str, deg_s: float = STROKE_DEG_S) -> None:
+        k = self.k
+        k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
+        k.look(k.t, self.ball())
+        k.turn(clicks(mm, inc), deg_s)
+
+    def plan(self) -> dict:
+        k, r = self.k, INDICATOR["tip_r"]
+        gap = lambda: self.ball()[2] - r - self.face[2]            # noqa: E731  the ball over the face
+        k.look(0.0, key_at("handle_jog"))
+        k.wait(0.5)
+        k.keys(["handle_jog", "inc_0.1"])
+        k.inc_mm = INC["inc_0.1"]
+        approach(self, "x", self.face[0])
+        approach(self, "y", self.y0)
+        approach(self, "z", self.face[2] + r + STANDOFF_MM)
+        self.jog("z", -max(0.0, gap() - CLOSE_MM), "inc_0.01")
+        self.jog("z", -(gap() + PRELOAD_MM), "inc_0.001", 150.0)
+        self.jog("y", LEVEL_SWEEP_MM, "inc_0.01", 200.0)
+        k.look(k.t, self.ball())
+        k.wait(1.0)
+        self.jog("z", 2 * INC["inc_0.1"], "inc_0.1")
+        for inc in ("inc_0.1", "inc_0.01"):                        # home: whole clicks at each, the rest at .001,
+            self.jog("z", math.trunc(-k.axis_mm[2] / INC[inc]) * INC[inc], inc)     # which the preload's clicks need
+        self.jog("z", -k.axis_mm[2], "inc_0.001", 150.0)
+        k.rest_hand()
+        k.wait(0.5)
+        return {}
+
+
 def approach(s, axis: str, to: float) -> None:
     """s's ball (a Probing's, a StraightCheck's) to `to` along axis: at .1 to short of it, a click's rounding never
     taking it past (into a sheet, past the Y travel's front), then at .01."""
@@ -476,6 +531,8 @@ PROBES |= {
 FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
                          [-1.0, 0.0, 0.0]),
              "jaw_face": ([vise.VISE["x"] - 58.7, vise.VISE["fixed_face_y"], JAW_TOP_MM - 3.0], [0.0, -1.0, 0.0])}
+# the square checks across a face that faces up (LevelCheck): ll-1007223 Op 30's stem's side, PROBES's z touch
+LEVEL = {("ll-1007223", "op30")}
 # the square checks that sweep the part's right side, a stop against its left: from 15 mm above the vise's floor
 SQUARE = {("ct-slbeam", "op20"), ("ct-slbeam", "op30")}
 
@@ -557,6 +614,12 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         sq = StraightCheck(take, p)
         sets = sq.plan()
         tool = sq.tool
+    elif step["title"] == "Check it's square" and (part, setup) in LEVEL:
+        f = probe_features(plan, setup)
+        lv = LevelCheck(take, p, [*f["z"]["at_xy"], f["z"]["z_mm"]])
+        sets = lv.plan()
+        tool = lv.tool
+        extra = {"cuts": f["cuts"]}
     elif step["title"] == "Check it's square":
         sq = SquareCheck(take, p, **square_sweep(plan, setup, p))
         sets = sq.plan()

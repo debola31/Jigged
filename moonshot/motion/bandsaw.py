@@ -511,9 +511,10 @@ class ClampPlan(SawPlan):
                              # the 62 mm knob takes three fingers, the little curled past its end. Turned the other
                              # way, the index at its free end, the fist was pronated 60 deg and the wrist bent 65,
                              # far from people's (the posture's likelihood 47 against their 28.7)
-                             # the index 10 mm off the wheel: at 6, its side pressed 3-5 mm into the wheel's face
-                             targets={"index": on(10, 22), "middle": on(26, 38), "ring": on(42, 54),
-                                      "thumb": on(12, 42, w=0.2)},
+                             # the index 16 mm off the wheel: at 6 and 10, its side pressed 3-5 mm into the wheel's
+                             # face
+                             targets={"index": on(16, 28), "middle": on(32, 44), "ring": on(47, 59),
+                                      "thumb": on(16, 46, w=0.2)},
                              # from a deeper lean, the arm raised and the elbow bent, as people's arms work in front
                              # of them: from the arm hanging nearly straight under a 35 deg lean, the turn was still
                              # less likely than people's (30.7)
@@ -529,11 +530,11 @@ class ClampPlan(SawPlan):
         _, Wg = self.grip_pose("knob", self.t)
         up, back = np.array([0, 0, 1.0]), np.array([0, -1.0, 0])
         # timed as the bar's: the rise slower than the reach, and the fingers meeting the knob 0.1-0.25 s before the
-        # wrist stops (widest 0.12 s before that, it was widest as it touched; 0.36, at 43% of the reach)
+        # wrist stops (widest 0.12 s before that, it was widest as it touched; 0.36, at 43% of the reach; 0.33, 60%)
         # in from 70 mm back and 40 up: from 50 back and 10 up, the middle's tip brushed the knob 0.2 s before the
         # hand came onto it, as it moved in at 0.8 m/s
         tg = self.reach("R", "knob", self.t, ready=Wg + up * 150 + back * 160, approach=Wg + back * 70 + up * 40,
-                        opened=0.7, lead=0.33, reach_s=0.6, rise_s=2.0, still_s=0.45)
+                        opened=0.7, lead=0.25, reach_s=0.6, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "knob")
         self.effort("R", tg + 0.25, KNOB_EFFORT, "knob")
         eased = open_like(self.hand, g["q"], KNOB_EASE)

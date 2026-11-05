@@ -3,7 +3,7 @@ in the vise, on both parallels whether set down short or slid home."""
 import numpy as np
 import pytest
 
-from moonshot.motion.loads import part_pose, vise_load
+from moonshot.motion.loads import envelope, part_pose, vise_load
 from moonshot.motion.setup_take import PLACE_GAP
 from moonshot.planning.validate import load_plan
 from moonshot.world.vise import PARALLEL_T, REFERENCE, VISE
@@ -48,9 +48,52 @@ def test_a_part_standing_on_end_sits_on_the_vise_floor(setup):
     assert part_pose(load_plan("nist-ftc-10"), setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + 79.0)
 
 
-@pytest.mark.parametrize("setup", ["op10", "op20", "op30", "op40", "op50"])
-def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(setup):
-    plan = load_plan("nist-ftc-10")
+# the bar parts' vise setups, and their finished parts' boxes in their models' frames (their STEP models' bounding boxes)
+BARS = {"ll-1007223": ("op10", "op20", "op30"), "ct-slbeam": ("op10", "op20", "op30", "op40")}
+FINISHED = {"ll-1007223": ((0.0, 49.0), (0.0, 40.0), (-37.5, 37.5)), "ct-slbeam": ((0.0, 76.2), (0.0, 38.1), (0.0, 50.8))}
+VISE_SETUPS = [("nist-ftc-10", s) for s in ("op10", "op20", "op30", "op40", "op50")]
+VISE_SETUPS += [(p, s) for p, ss in BARS.items() for s in ss]
+
+
+def contains(outer, inner) -> bool:
+    outer, inner = np.asarray(outer, float), np.asarray(inner, float)
+    return bool(np.all(outer[:, 0] <= inner[:, 0] + 1e-9) and np.all(inner[:, 1] <= outer[:, 1] + 1e-9))
+
+
+@pytest.mark.parametrize("part", list(BARS))
+def test_a_bar_part_comes_off_the_saw_and_onto_the_mill_as_its_stock(part):
+    plan = load_plan(part)
+    for setup in ("saw", BARS[part][0]):
+        env = envelope(plan, setup)
+        assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
+        assert contains(env, FINISHED[part]), f"{setup}: the stock doesn't hold the part"
+
+
+@pytest.mark.parametrize("part", list(BARS))
+def test_each_setup_holds_the_finished_part_inside_the_last_setups_box(part):
+    plan = load_plan(part)
+    boxes = [envelope(plan, s) for s in BARS[part]]
+    for setup, box in zip(BARS[part], boxes):
+        assert contains(box, FINISHED[part]), f"{setup}: the box doesn't hold the finished part"
+    for setup, a, b in zip(BARS[part][1:], boxes, boxes[1:]):
+        assert contains(a, b), f"{setup}: the box grew from the last setup's"
+
+
+@pytest.mark.parametrize("part, setup", [(p, s) for p, s in VISE_SETUPS if p in BARS])
+def test_a_bar_part_sits_on_both_parallels_or_on_the_vise_floor(part, setup):
+    plan = load_plan(part)
+    load = vise_load(plan, setup)
+    if load.parallel_h:
+        assert on_both(load, 0.0) and on_both(load, PLACE_GAP)
+    else:
+        assert not load.parallels_y
+        assert part_pose(plan, setup)["centre_mm"][2] == pytest.approx(VISE["seat_z"] + load.size_mm[2] / 2)
+    assert load.opening0 > load.size_mm[1]
+
+
+@pytest.mark.parametrize("part, setup", VISE_SETUPS)
+def test_every_setup_poses_the_part_as_a_rotation_with_its_face_up(part, setup):
+    plan = load_plan(part)
     s = next(x for x in plan["setups"] if x["id"] == setup)
     p = part_pose(plan, setup)
     R = p["R"]

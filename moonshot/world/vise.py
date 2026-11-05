@@ -24,7 +24,8 @@ VISE = dict(x=-381.5, fixed_face_y=-230.8, seat_z=926.2, jaw_top_z=970.3, half_w
             screw_axis=np.array([-381.5, -636.4, 892.29]), lever=120.0, knob_r=13.5, knob_len=90.0, knob_grip=58.0,
             lead=6.35)
 CRANK0_DEG = 55.0
-ENCLOSE_SOLREF_S = 0.02     # the knob weld's time constant (s): how stiffly the fist holds the knob
+ENCLOSE_SOLREF_S = 0.005    # the knob weld's time constant (s): how stiffly the fist holds the knob; at 0.02 the final
+                            # pull's push moved the knob 2-3 mm in the fist, onto the index (skin 3.9 mm, op10)
 PARALLEL_T, PARALLEL_L = 3.1, 152.4
 # the stop a part stood on the vise's floor is set against (nist-ftc-10 op50): a steel block (x along the jaws, y
 # across, z up; mm), tall enough to be pinched by its top over the jaws, narrower across than such a part, so the jaws

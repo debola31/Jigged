@@ -268,10 +268,10 @@ class SawPlan(BenchPlan):
         self.fingers(side, (t0 + t1) / 2, open_like(self.hand, mid, 0.3))
         self.fingers(side, t1, self.q_relax)
 
-    def travel_keys(self, q, t0, t1, side="R"):
+    def travel_keys(self, q, t0, t1, side="R", widest=0.4):
         """A hand carried between controls pre-shaped for the next: opened a little half way, as people's hands are
         widest about half way through a movement (the card's footage), then the grip's shape opened 0.2 on arrival."""
-        self.fingers(side, (t0 + t1) / 2, open_like(self.hand, q, 0.4))
+        self.fingers(side, (t0 + t1) / 2, open_like(self.hand, q, widest))
         self.fingers(side, t1, open_like(self.hand, q, 0.2))
 
     def release_keys(self, q, t_off, t0, t1, side="R"):
@@ -629,7 +629,7 @@ class StartPlan(SawPlan):
         k = KNOBS[name]
         return self.place.world([*k["at"], k["top"]])
 
-    def onto(self, grip, t0, t_on, t_off, rise=35.0, pose_off=None, press_mm=0.0):
+    def onto(self, grip, t0, t_on, t_off, rise=35.0, pose_off=None, press_mm=0.0, travel_open=0.4):
         """A hand onto a control from above and off it again: down over its last rise mm onto the grip (press_mm
         past it, a button's travel), held (unless the caller holds it: pose_off, the hand's pose (H, W) at t_off), up."""
         g = self.grips[grip]
@@ -644,7 +644,7 @@ class StartPlan(SawPlan):
         Ho, Wo = pose_off or (H, W)
         self.add("R", t_off, t_off + 0.3, lambda t: [("pose", Ho, Wo + up * rise * min_jerk((t - t_off) / 0.25), 2.0)])
         self.wrist["R"] = Wo + up * rise
-        self.travel_keys(g["q"], t0, t_on - 0.35)
+        self.travel_keys(g["q"], t0, t_on - 0.35, widest=travel_open)
         self.fingers("R", t_on - 0.05, g["q"])
         self.release_keys(g["q"], t_off, t_off, t_off + 0.3)
 
@@ -655,7 +655,9 @@ class StartPlan(SawPlan):
         # held down through the button's travel for 0.6 s: for 0.35 s, the arm arriving late, the pad came within 13 mm
         # of its top and went
         t_on, t_off = t0 + 1.0, t0 + 1.6
-        self.onto("start", t0, t_on, t_off, press_mm=START_TRAVEL_MM)
+        # opened wide on the way: the press's shape, the index out and the rest curled, is wider than the hand opened
+        # 0.4, and it was widest as it arrived, unlike the footage (half way)
+        self.onto("start", t0, t_on, t_off, press_mm=START_TRAVEL_MM, travel_open=0.85)
         self.event("button", t_on - 0.05, t_off, side="R", button="start", digit="index",
                    at=self.knob_top("start").tolist(), force=5.0, travel_mm=START_TRAVEL_MM)
         self.clip("start", t0, t_off + 0.4, "START  the blade runs up to speed before the bow comes down")
@@ -704,9 +706,9 @@ class StartPlan(SawPlan):
         self.look(self.t, knob)
         _, Wg = self.grip_pose("valve", self.t)
         up, back = np.array([0, 0, 1.0]), np.array([0, -1.0, 0])
-        # the hand widest 0.10 s before it stops on the knob (0.2 s before, it was widest 56% of the way)
+        # the hand widest 0.08 s before it stops on the knob (0.2 s before, it was widest 56% of the way; 0.10, 70%)
         tg = self.reach("R", "valve", self.t, ready=Wg + up * 90 + back * 60, approach=Wg + up * 30, opened=0.6,
-                        lead=0.10, rise_s=1.0, still_s=0.35, reach_s=0.5)
+                        lead=0.08, rise_s=1.0, still_s=0.35, reach_s=0.5)
         self.effort("R", tg, 0.0, "valve")
         self.effort("R", tg + 0.2, 0.3, "valve")
         self.t_turn = tg + 0.25
@@ -716,6 +718,8 @@ class StartPlan(SawPlan):
         self.carry("valve", tg, t_off)
         self.event("grip", tg, t_off + 0.1, side="R", grip="valve", on="saw_feed_valve")
         self.event("carry", tg + 0.05, t_off, obj="saw_feed_valve", grip="valve", side="R")
+        self.event("twist", self.t_turn, t_off - 0.05, side="R", obj="saw_feed_valve", q0=self.valve0,
+                   turn_rad=math.radians(VALVE_TURN_DEG), turn_s=VALVE_TURN_S, torque=0.1)
         self.effort("R", t_off - 0.1, 0.3, "valve")
         self.effort("R", t_off + 0.1, 0.0, "valve")
         H, W = self.grip_pose("valve", t_off)

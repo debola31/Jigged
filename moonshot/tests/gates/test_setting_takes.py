@@ -6,7 +6,9 @@ on the takes the runners write to the data root (takes/<part>/<step id>/).
 
 So does Check it's square, where a setup stands the part on the vise floor (nist-ftc-10's op50, ct-slbeam's op20 and
 op30): a test indicator in the spindle, its ball pressed against the part's side, swept up it by jogging Z with the
-handle; the needle stays put. ll-1007223's op30 checks a face that stands level, by a sweep across it: not this one.
+handle; the needle stays put. So does Check it's straight, where a plate lies on the spoilboard (nist-ftc-09's op10,
+ll-1005337's op10 and op20): the ball against its long edge, swept along it by jogging X. ll-1007223's op30 checks a
+face that stands level, by a sweep across it: not this one.
 
 What each take carries besides its record (take.npz, scene.json):
     take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z]}}, the
@@ -41,7 +43,8 @@ TAKES = data_root() / "takes" / "nist-ftc-10"
 PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
 STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
 SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")]
-CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] == "Check it's square" and f"{p}/{s['id']}" != "ll-1007223/op30-check"]
+CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Check it's square", "Check it's straight")
+          and f"{p}/{s['id']}" != "ll-1007223/op30-check"]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
 
@@ -137,11 +140,11 @@ def test_every_planned_key_press_registers_and_no_other(take):
             f"{k} registered at {t:.2f} s, planned {e['t0']:.2f}-{e['t1']:.2f}"
 
 
-def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
+def test_the_needle_stays_put_through_a_sweep_along_the_side(square):
     tk = _json(square, "take.json")
     s, d = tk["setup"], np.load(square / "take.npz")
     names = [str(b) for b in d["bodies"]]
-    tool, blank, head = (names.index(b) for b in ("tool", "blank", "vf2_head"))
+    tool, blank = (names.index(b) for b in ("tool", "blank"))
     r = s["tool"]["tip_r"]
     w, v = d["quat"][:, tool, :1], d["quat"][:, tool, 1:]
     down = np.array([*s["tool"].get("offset_mm", (0.0, 0.0)), -(s["tool"]["length_mm"] - r)])   # the ball, tool frame
@@ -154,10 +157,13 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
     on = np.flatnonzero(needle > 0)
     assert on.size, "the indicator never touches the part"
     assert np.all(np.diff(on) == 1), f"the ball leaves the side mid-sweep, at frame {on[np.argmax(np.diff(on) > 1)]}"
-    z = d["pos"][on, head, 2]
-    rise = z[-1] - z[0]
-    assert rise >= threshold("setting.sweep_mm").value, f"swept {rise:.1f} mm up the side"
-    sweep = (z > z[0] + 0.5) & (z < z[-1] - 0.5)                        # while the head rises, not the ball's way in or out
+    # the sweep: the ball's way over the side, along whichever of its directions it went farthest (up a square check's
+    # side by Z, along a straight check's edge by X)
+    q = p[on]
+    a = max((i for i in range(3) if i != np.argmax(out[on].mean(axis=0))), key=lambda i: abs(q[-1, i] - q[0, i]))
+    lo, hi = sorted((q[0, a], q[-1, a]))
+    assert hi - lo >= threshold("setting.sweep_mm").value, f"swept {hi - lo:.1f} mm along the side"
+    sweep = (q[:, a] > lo + 0.5) & (q[:, a] < hi - 0.5)                  # not the ball's way in or out
     spread = np.ptp(needle[on][sweep])
     assert spread <= threshold("setting.indicator_mm").value, f"the needle moved {spread:.4f} mm"
 

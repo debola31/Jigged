@@ -416,7 +416,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op20-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-start",

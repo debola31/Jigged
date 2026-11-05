@@ -39,8 +39,10 @@ AIM_LEAD_S = 0.5            # ... from this long before its press
 TURN_N_PER_RAD = 150.0      # the push on the handwheel's knob grows this much per radian the wheel is behind its plan:
                             # little for the few degrees it trails on its way round, to TURN_N_MAX as the jaw snugs and
                             # the wheel stalls short of the plan's half turn
-TURN_N_MAX = 80.0           # ... to at most this (proposed: a firm push down, snugging the jaw: at 40 N it closed on the
-                            # bar at 10 N, at 80 at 106-175 N, and the gate's 82.5 N takes 2 N m through the screw)
+TURN_N_MAX = 38.0           # ... to at most this (proposed: the forearm's strength, reaching down to the thigh: at 45 N
+                            # past the top of the wheel the replayed forearm went to 1.24 of its maximum, at 60 to 1.33.
+                            # The jaw snugs at 20-50 N, which holds the bar still through the cut: the gate's clamp_n,
+                            # the user's decision, 2026-11-05)
 NEVER_HELD = ["saw_blade", "saw_head"]   # the band's collider, and the head that carries it (the checks read what a
                                          # hand touches by body, validate/objects.py touched)
 DRIVEN = ["saw", "saw_base", "saw_head", "saw_cover_idler", "saw_cover_drive", "saw_blade", "saw_jaw",
@@ -97,6 +99,21 @@ class SawRun(BenchRun):
             if e.get("skin") and e["t0"] <= tt < e["t1"]:
                 for g in self.body_geoms[e["obj"]]:
                     m.geom_contype[g], m.geom_conaffinity[g] = self.contact_bits[g]
+
+    def anchor_weld(self, e: dict, eq: int, tt: float) -> None:
+        """BenchRun's, but a knob that spins in the fist is held on its own axis: at the pinch, off the axis, the hold
+        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob."""
+        super().anchor_weld(e, eq, tt)
+        if e["obj"] != "saw_handwheel":
+            return
+        m, d = self.model, self.data
+        hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("saw_handwheel").id
+        j, kg = m.joint("saw_handwheel").id, m.geom("saw_handwheel_knob").id
+        axis, centre = d.xaxis[j], d.geom_xpos[kg]
+        pinch = np.mean([d.geom_xpos[m.geom(f"R_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
+        on_axis = centre + axis * ((pinch - centre) @ axis)
+        m.eq_data[eq, 0:3] = d.xmat[ob].reshape(3, 3).T @ (on_axis - d.xpos[ob])
+        m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (on_axis - d.xpos[hb])
 
     def scene(self, loose, carried, skip):
         return SC.with_body(self.body.xml, self.place, loose, carried)

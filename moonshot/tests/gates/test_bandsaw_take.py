@@ -28,7 +28,6 @@ PARTS = ("ct-slbeam", "ll-1007223")         # G1's parts sawn from bar
 PERSON = ("load", "clamp", "start", "unload")
 SHOP = Path(__file__).resolve().parents[2] / "library" / "records" / "shop.json"
 IN = 25.4
-SLIDE_N = 15.0              # the card's push that slides the bar (bandsaw-cut-to-length phase 6)
 STILL_MM = 0.1              # clamped, the rest moves no more than this while it is cut
 LIFT_MM = 20.0              # taken away, the piece rises this far off the bed at least
 
@@ -39,10 +38,17 @@ def folders(part: str) -> dict[str, Path]:
             "cut": t / f"{part}-saw-cut", "unload": t / f"lift-out-{part}-saw"}
 
 
+CLAMP_N = 15.0              # the jaw's force on the bar, snug and while it is cut. The user's decision (2026-11-05): the
+                            # force the physics shows holds the bar, not the card's "the hand can no longer slide it"
+                            # with people's grip margin (82.5 N, which takes 60-80 N at the knob, past the forearm's
+                            # strength reaching to it at the thigh). The cut (ct-slbeam, 2026-11-05) held the rest of the
+                            # bar to 1 um with the jaw at 18-50 N, and the hand snugs it to 44-50 N; 15 N is under the
+                            # least the cut held it still at
+
+
 def clamp_n() -> float:
-    """Snug, as the card ends the clamp: the hand can no longer slide the bar. Both jaws' friction holds it against the
-    card's slide force with people's own grip margin over slipping (physics.grip_safety_margin, its top)."""
-    return SLIDE_N * threshold("physics.grip_safety_margin").band[1] / (2 * SC.STOCK["friction"])
+    """Snug, as the take ends the clamp, and holding the bar while it is cut (CLAMP_N)."""
+    return CLAMP_N
 
 
 def shop_tolerance_mm() -> float:

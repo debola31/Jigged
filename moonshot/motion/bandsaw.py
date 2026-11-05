@@ -121,24 +121,29 @@ SNUG_DEG = 20.0             # the handwheel turned this far past where the jaw m
 KNOB_START_DEG = -104.2     # where the handwheel is left: its knob level on the operator's left (at joint zero it is
                             # 14.2 deg past the top), so the half turn takes it over the top to their right, not down
                             # to their knees
-KNOB_TURN_S = 5.0           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
+KNOB_TURN_S = 6.5           # the half turn's time: the card's 2.5 s took the screw's damping (0.5 N m s, the record's)
                             # to 1.2 N m at its speed, 45 N at the knob on top of its friction's 20, more than the arm
-                            # reaching down to the thigh can push sideways over the top of the wheel (the replayed
-                            # forearm past its maximum); at 4 s a 30 N push still fell behind there (the wheel alone
-                            # turns at 50 deg/s under 30 N, 110 under 40)
+                            # reaching down to the thigh can push past the top of the wheel (the replayed forearm past
+                            # its maximum); at 4 and 5 s a 30 N push fell behind there, the push rose to 60 N and the
+                            # forearm to 1.33 of its maximum (the wheel alone turns at 50 deg/s under 30 N)
 START_TRAVEL_MM = 6.0       # Start pressed this far past its top (proposed: a mushroom button's travel)
 KNOB_EFFORT = 0.4           # the fist's effort on the knob, which also stiffens the arm: at 0.15 the arm followed its
                             # plan so loosely that the wheel stalled near the top of its turn, short of the bar
 KNOB_EASE = 0.15            # ... its fingers eased this far open from the planned fist while it is welded to the knob,
                             # off the skin: closed to the plan, which overlaps the knob, they sank 11 mm into it
-KNOB_N = 32.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
+KNOB_N = 30.0               # the push at the knob along its way round (the card's 40 N, less), and harder only as the
                             # jaw snugs (moonshot/sim/bandsaw.py TURN_N_PER_RAD), the knob coming down the wheel's
                             # right side, pushed down
 VALVE_TURN_DEG = 90.0       # the feed valve opened a quarter turn, to the cutting feed (bandsaw.json feed_valve)
 VALVE_TURN_S = 0.9          # ... over this long
-SLIDE_OFF_MM = 35.0         # the cut piece slid this far off the fixed jaw's plate before it is taken: its far side lies
-                            # against the plate its whole length, and the index and middle need the gap
+SLIDE_OFF_MM = 65.0         # the cut piece slid this far off the fixed jaw's plate, its far side 8 mm clear of the stop
+                            # block's width, then pulled PULL_MM toward the person past the block: with the bow down its
+                            # box spans the window from 33.6 mm in front of the blade, and slid 35 mm and taken where
+                            # it lay, 50 mm of it was clear of the box and the block, the pinch solved 106-185 off its
+                            # pads and the arm couldn't follow it
 SLIDE_OFF_S = 1.0           # ... over this long
+PULL_MM = 100.0
+PULL_S = 1.0
 PINCH_EFFORT = 0.3          # the pinch's squeeze on the piece as it is carried (welded, off the skin)
 
 
@@ -506,8 +511,9 @@ class ClampPlan(SawPlan):
                              # the 62 mm knob takes three fingers, the little curled past its end. Turned the other
                              # way, the index at its free end, the fist was pronated 60 deg and the wrist bent 65,
                              # far from people's (the posture's likelihood 47 against their 28.7)
-                             targets={"index": on(6, 18), "middle": on(22, 34), "ring": on(38, 50),
-                                      "thumb": on(10, 40, w=0.2)},
+                             # the index 10 mm off the wheel: at 6, its side pressed 3-5 mm into the wheel's face
+                             targets={"index": on(10, 22), "middle": on(26, 38), "ring": on(42, 54),
+                                      "thumb": on(12, 42, w=0.2)},
                              # from a deeper lean, the arm raised and the elbow bent, as people's arms work in front
                              # of them: from the arm hanging nearly straight under a 35 deg lean, the turn was still
                              # less likely than people's (30.7)
@@ -689,16 +695,18 @@ class StartPlan(SawPlan):
         self.effort("R", tg, 0.0, "valve")
         self.effort("R", tg + 0.2, 0.3, "valve")
         self.t_turn = tg + 0.25
-        t_off = self.t_turn + VALVE_TURN_S + 0.15
+        # held a moment at the end of its turn, then lifted straight off it, the hand as it was: let go at once and
+        # turned back on the way up, the fingers took it back from 79 to 72 deg
+        t_off = self.t_turn + VALVE_TURN_S + 0.4
         self.carry("valve", tg, t_off)
         self.event("grip", tg, t_off + 0.1, side="R", grip="valve", on="saw_feed_valve")
         self.event("carry", tg + 0.05, t_off, obj="saw_feed_valve", grip="valve", side="R")
         self.effort("R", t_off - 0.1, 0.3, "valve")
         self.effort("R", t_off + 0.1, 0.0, "valve")
-        _, W = self.grip_pose("valve", t_off)
+        H, W = self.grip_pose("valve", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.45)
-        self.wrist["R"] = W
-        self.transit("R", t_off + 0.05, t_off + 0.45, W + up * 50)
+        self.add("R", t_off, t_off + 0.45, lambda t: [("pose", H, W + up * 50 * min_jerk((t - t_off) / 0.45), 3.0)])
+        self.wrist["R"] = W + up * 50
         self.clip("feed", tg - 1.5, t_off + 0.4, "FEED  the valve a quarter turn open: the bow comes down")
         self.to_rest("R", t_off + 0.45, t_off + 1.5)
         self.look(t_off + 0.5, self.place.world([60.0, 0.0, 750.0]))
@@ -708,8 +716,9 @@ class StartPlan(SawPlan):
 
 # --- 5. lift-out: the cut piece to the bench ------------------------------------------------------------------------
 class UnloadPlan(SawPlan):
-    """The cut piece off the bed and onto the bench: slid off the fixed jaw's plate by the fingers on its top, then taken
-    by its sides, thumb against index and middle, lifted over the stop block and set down beside the right hip."""
+    """The cut piece off the bed and onto the bench: slid off the fixed jaw's plate and pulled toward the person past
+    the stop block by the fingers on its top, then taken by its sides, thumb against index and middle, lifted and set
+    down beside the right hip."""
 
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["unload"], state, verbose)
@@ -718,7 +727,8 @@ class UnloadPlan(SawPlan):
         self.length = s["length"]
         self.head = state["q"]["head"]
         c, R = self.piece0
-        self.slid = c + np.array([-SLIDE_OFF_MM, 0.0, 0.0])
+        self.off = c + np.array([-SLIDE_OFF_MM, 0.0, 0.0])
+        self.slid = self.off + np.array([0.0, -PULL_MM, 0.0])
         self.paths["piece"] = [(0.0, self.place.R @ R, self.place.world(c))]
         specs = self.grip_specs()
         specs["pinch"]["at"] = (self.place.world(self.slid), self.place.R @ R)
@@ -752,7 +762,7 @@ class UnloadPlan(SawPlan):
                              targets={"index": on_top(-6, 10), "middle": on_top(-6, 10), "ring": on_top(-12, 6)},
                              starts=starts)}
         cs = self.slid
-        at = np.array([cs[0], end + 24.0, cs[2]])
+        at = cs.copy()                                     # by its middle, the whole of it clear now
         near, far = self.place.world(at - [hw, 0, 0]), self.place.world(at + [hw, 0, 0])
         nx = self.place.vec([1.0, 0.0, 0.0])
         side = lambda p, n, lo, hi: G.plane_target(p, n, 2.0, bands(p, y=(lo, hi), z=(-hh + 7, hh - 3)))  # noqa: E731
@@ -764,8 +774,8 @@ class UnloadPlan(SawPlan):
         q0.update(thumb_cmc_abd=40.0, thumb_cmc_flex=20.0, thumb_mcp_flex=15.0, thumb_ip=10.0)
         specs["pinch"] = dict(of="piece", obj=self.place.world(at), q0=q0, iters=1000, colliders=self.colliders(cs),
                               load=round(SC.stock_kg(self.length), 2),
-                              targets={"thumb": side(near, -nx, -8, 6), "index": side(far, nx, 3, 11),
-                                       "middle": side(far, nx, -14, -6)},
+                              targets={"thumb": side(near, -nx, -8, 8), "index": side(far, nx, 4, 14),
+                                       "middle": side(far, nx, -14, -4)},
                               starts=[S(f, 0, 0, pl, 40, r, 60, p, 0, 0) for f in (25, 40) for pl in (60, 80)
                                       for r in (-20,) for p in (70, 95)])
         return specs
@@ -793,15 +803,18 @@ class UnloadPlan(SawPlan):
         self.effort("R", tg, 0.0, "top")
         self.effort("R", tg + 0.25, PUSH_EFFORT, "top")
         t_slide = tg + 0.3
-        self.move("piece", t_slide, t_slide + SLIDE_OFF_S, R0, p1)
-        t_off = t_slide + SLIDE_OFF_S + 0.15
+        t_pull = t_slide + SLIDE_OFF_S
+        self.move("piece", t_slide, t_pull, R0, self.place.world(self.off))
+        self.move("piece", t_pull, t_pull + PULL_S, R0, p1)
+        t_off = t_pull + PULL_S + 0.15
         self.carry("top", tg, t_off)
         # its friction on the bed, pushed against as it slides, and the fingers' press down on it (a press, not a
         # grasp: the grasp is the next; moonshot/validate/grasp_timing.py)
         friction = SC.STOCK["friction"] * SC.stock_kg(self.length) * 9.81
-        along = np.array([-1.0, 0.0, -DOWN_N / friction])
-        self.event("drag", t_slide - 0.1, t_off - 0.05, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
-                   force=round(float(np.linalg.norm(along)) * friction, 2))
+        for t0_, t1_, way in ((t_slide - 0.1, t_pull, [-1.0, 0.0]), (t_pull, t_off - 0.05, [0.0, -1.0])):
+            along = np.array([*way, -DOWN_N / friction])
+            self.event("drag", t0_, t1_, side="R", direction=(self.place.vec(along) / np.linalg.norm(along)).tolist(),
+                       force=round(float(np.linalg.norm(along)) * friction, 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="top")
         # pushed by the fingers' contact, the weld assisting, as the load's bar (`skin`)
         self.event("carry", tg + 0.05, t_off, obj="piece", grip="top", side="R", skin=True)
@@ -811,8 +824,8 @@ class UnloadPlan(SawPlan):
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.4)
         self.wrist["R"] = W
         self.transit("R", t_off + 0.05, t_off + 0.4, W + up * 45 + left * 10)
-        self.clip("slide", 0.0, t_off + 0.3, "SLIDE  the cut piece off the fixed jaw's plate")
-        # 2. round its sides from above, thumb to the near side, index and middle into the gap by the plate
+        self.clip("slide", 0.0, t_off + 0.3, "SLIDE  the cut piece off the fixed jaw's plate and toward you")
+        # 2. round its sides from above, thumb to the near side, index and middle to the far
         g = self.grips["pinch"]
         _, Wg = self.grip_pose("pinch", t_off)
         t0 = t_off + 0.5
@@ -822,7 +835,7 @@ class UnloadPlan(SawPlan):
         self.effort("R", tg + 0.25, PINCH_EFFORT, "pinch")
         self.t_lift = tg + PRELOAD_S
         self.move("piece", self.t_lift, self.t_lift + TAKE_S, R0, p1 + up * TAKE_MM)
-        self.move("piece", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p1 + up * 50)    # over the stop block
+        self.move("piece", self.t_lift + TAKE_S, self.t_lift + LIFT_S, R0, p1 + up * 50)
         down = self.set_down_at()
         # back from the saw and up over the work stop's arm, to over the bench, then down onto it
         t_over = self.t_lift + LIFT_S + 1.4

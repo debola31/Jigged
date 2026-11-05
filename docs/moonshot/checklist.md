@@ -356,6 +356,13 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - ll-1005337's stock compare leaves out the dowel holes' back countersinks (cut by hand at the bench) and the
     undercut's R15 corners above the wall's foot (a vertical dovetail cutter leaves R15 narrowing to R8.1; R15 isn't
     on the drawing), each named.
+    So do nist-ftc-09's 17 letter-wall faces, where the 1/32 in end mill leaves its radius (0.156 mm) in the
+    letters' square inside corners, and ll-1005337's four short notch side walls, where the dovetail's 20 deg
+    flank leaves a wedge (up to 0.98 mm): what a round tool leaves.
+  - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
+    by its end faces and a slide went into the skin and overloaded the arms).
+  - A plate's clamp nuts are spun down by the fingertips and snugged with a 3/4 in box-end wrench, in full;
+    the seat, shift and unload takes land when they pass, caption and a still until then.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
     ll-1007223 op10's 8 retries didn't pass, so it shows caption and a still too: the best run failed only skin,

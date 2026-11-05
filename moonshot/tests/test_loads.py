@@ -3,7 +3,7 @@ in the vise, on both parallels whether set down short or slid home."""
 import numpy as np
 import pytest
 
-from moonshot.motion.loads import envelope, part_pose, vise_load
+from moonshot.motion.loads import density, envelope, part_pose, vise_load
 from moonshot.motion.setup_take import PLACE_GAP
 from moonshot.planning.validate import load_plan
 from moonshot.world.vise import PARALLEL_T, REFERENCE, VISE
@@ -16,12 +16,31 @@ def on_both(load, shift_mm):
 
 
 def test_the_reference_rules_reproduce_the_reference():
-    plan = {"stock": {"size_mm": list(REFERENCE.size_mm)},
+    plan = {"stock": {"size_mm": list(REFERENCE.size_mm), "material": "6061-T6 aluminium"},
             "setups": [{"id": "s", "face_up": "+Z", "workholding": {"parallels_in": 1.0, "jaw_on": "Y faces"}}]}
     load = vise_load(plan, "s")
     assert load.size_mm == pytest.approx(REFERENCE.size_mm)
     assert load.opening0 == pytest.approx(REFERENCE.opening0)
     assert load.parallels_y == pytest.approx(REFERENCE.parallels_y)
+    assert load.mass_kg == pytest.approx(REFERENCE.mass_kg)
+
+
+def test_nist_ftc_10s_loads_weigh_what_they_did():
+    """Each setup's part weighs as it did before the density came from the stock's material (6061-T6, 2700 kg/m^3)."""
+    plan = load_plan("nist-ftc-10")
+    kg = {"op10": 1.402016, "op20": 1.203012, "op30": 0.991845, "op40": 0.991845, "op50": 0.991845}
+    assert {s: round(vise_load(plan, s).mass_kg, 6) for s in kg} == kg
+
+
+@pytest.mark.parametrize("part, rho", [("ct-slbeam", 7850.0), ("ll-1007223", 7850.0), ("ll-1005337", 1410.0),
+                                       ("nist-ftc-09", 8000.0), ("nist-ftc-10", 2700.0)])
+def test_a_parts_density_is_its_stock_materials(part, rho):
+    assert density(load_plan(part)) == rho
+
+
+def test_a_stock_material_without_a_density_fails_loudly():
+    with pytest.raises(ValueError, match="no density"):
+        density({"stock": {"material": "unobtainium"}})
 
 
 def test_nist_ftc_10_op10_loads_the_stock_on_one_inch_parallels():

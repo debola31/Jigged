@@ -181,6 +181,26 @@ def plate_pose(plan: dict, setup_id: str, env=None) -> dict:
     return {"R": R, "centre_mm": centre, "size_mm": size, "origin_mm": centre - R @ env.mean(1), "envelope_mm": env}
 
 
+# each stock material's density (kg/m^3), found by its key as a word in the plan's stock material, with its source
+DENSITY = {
+    "6061": (2700.0, "6061-T6 aluminium 2.70 g/cm^3: ASM Aerospace Specification Metals, Aluminum 6061-T6 data sheet"),
+    "4140": (7850.0, "AISI 4140 steel 7.85 g/cm^3: MatWeb, AISI 4140 Steel (ASM Handbook vol. 1 values)"),
+    "304": (8000.0, "AISI 304 stainless 8.00 g/cm^3: MatWeb, AISI Type 304 Stainless Steel (ASM Handbook vol. 1 values)"),
+    "acetal": (1410.0, "acetal 1.41 g/cm^3 (copolymer; Delrin homopolymer 1.42): MatWeb, Overview of materials for Acetal"),
+    "delrin": (1410.0, "Delrin acetal 1.41-1.42 g/cm^3: DuPont Delrin 150 product information; as acetal above"),
+}
+
+
+def density(plan: dict) -> float:
+    """The stock's density (kg/m^3) from its material (DENSITY). A material the table doesn't know raises: taken as
+    the Load's default, aluminium, G1's 4140 steel parts weighed a third of what they do."""
+    material = str(plan.get("stock", {}).get("material", ""))
+    for key, (rho, _source) in DENSITY.items():
+        if re.search(rf"\b{key}\b", material.lower()):
+            return rho
+    raise ValueError(f"no density for the stock material {material!r}: add it to loads.DENSITY, with its source")
+
+
 def vise_load(plan: dict, setup_id: str) -> Load:
     w = _setup(plan, setup_id)["workholding"]
     along, width, up = (float(v) for v in part_pose(plan, setup_id)["size_mm"])
@@ -189,4 +209,4 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     paras = {"para_a": fy - to_a, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width
-                                  else OPENING_MARGIN))
+                                  else OPENING_MARGIN), density=density(plan))

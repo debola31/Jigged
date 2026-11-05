@@ -73,6 +73,13 @@ NOSE_IN_MM = 12.0                                        # the nose's reach onto
 SIDE_IN_MM = 24.0                                        # ... and its tip at least this far in from a long edge: at
                                                          # 18 a swung nose's back corner stood 1.5 mm off the sheet
 PARK_NUT_GAP_MM = 6.0                                    # a parked clamp's nut run up this far over its clamped place
+NUT_FRICTION_NM = 0.008      # [proposed] a loose flange nut's drag on a clean stud: at 0.02 a fingertip pinch's twist
+                             # turned it half as far as the hand
+NUT_FRICTION = 0.6           # [proposed] dry steel's: a fingertip on the nut's flange, and the flange on the strap (as
+                             # "steel", 0.25, the fingertip slid round the rim, turning it 10-30 deg a stroke)
+NUT_ARMATURE = 5e-5          # [proposed] the nut's turn's added inertia (kg m^2), for the thread's stability: a 3/4 in
+                             # flange nut's own is ~3e-6; at 5e-4 it weighed like 2.7 kg at its rim, and a fingertip's
+                             # stroke turned it 2-20 deg and the stroke back turned it back
 STEEL_KG_M3 = 7850.0
 PLATE_RGBA = {8000.0: "0.72 0.72 0.74 1", 1410.0: "0.06 0.06 0.07 1"}    # stainless sheet; black Delrin
 
@@ -293,24 +300,26 @@ def _nut_geoms(name: str, ind: str) -> str:
     kg_flange = STEEL_KG_M3 * math.pi * FLANGE_R ** 2 * FLANGE_T * 1e-9
     side = NUT_AF / math.sqrt(3)
     kg_hex = STEEL_KG_M3 * 1.5 * side * NUT_AF * NUT_HEX_H * 1e-9
+    fr = f'friction="{NUT_FRICTION} 0.004 0.0001"'
     out = (f'{ind}<geom name="{name}_flange" class="steel" type="cylinder" size="{_f([FLANGE_R, FLANGE_T / 2])}" '
-           f'pos="0 0 {FLANGE_T / 2 * M:.5f}" mass="{kg_flange:.5f}" rgba="0.3 0.3 0.32 1"/>\n')
+           f'pos="0 0 {FLANGE_T / 2 * M:.5f}" mass="{kg_flange:.5f}" {fr} rgba="0.3 0.3 0.32 1"/>\n')
     for j in range(3):
         out += (f'{ind}<geom name="{name}_hex_{j}" class="steel" type="box" size="{_f([side / 2, NUT_AF / 2, NUT_HEX_H / 2])}" '
                 f'pos="0 0 {(FLANGE_T + NUT_HEX_H / 2) * M:.5f}" quat="{_quat_z(j * math.pi / 3)}" '
-                f'mass="{kg_hex / 3:.5f}" rgba="0.3 0.3 0.32 1"/>\n')
+                f'mass="{kg_hex / 3:.5f}" {fr} rgba="0.3 0.3 0.32 1"/>\n')
     return out
 
 
 def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple[str, ...] = (),
-           nuts: tuple[str, ...] | None = None) -> str:
+           nuts: tuple[str, ...] | None = None, nut_up: dict[str, float] | None = None) -> str:
     """What is bolted to the table (bodies fixed in the table body, whose frame is the world's at the loading position;
     each its own body, with no GLB, so the take record draws it from its geoms): the spoilboard with each clamp's T-nut,
     stud and heel block (body `spoilboard`), each clamp not in `free` in its pose, and each clamp's nut where the pose
     has it: on its thread (a body on a slide and a hinge along the stud, its frame at the flange's underside) if its
     clamp is in `nuts` (by default the free clamps), fixed otherwise. The spoilboard's top is the plate's underside
     (its clamps' board when the plate isn't on it), on its riser if that is above the table's own (riser_mm)."""
-    board = plate.bottom if plate is not None else (clamps[0].board_z if clamps else TOP_Z)
+    board = clamps[0].board_z if clamps else (plate.bottom if plate is not None else TOP_Z)   # the clamps' board:
+                                                                     # a plate in the hands isn't on it yet
     rise = riser_mm(board)
     c = np.r_[TABLE_MID, board - SPOILBOARD_MM[2] / 2]
     out = (f'        <body name="spoilboard">\n'
@@ -340,7 +349,7 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
         s = np.asarray(k.stud, float)
         z1 = k.stud_z()[1]
         at, R = k.pose(state)
-        nz = k.nut_z(state)
+        nz = k.nut_z(state) if k.name not in (nut_up or {}) else k.nut_z("clamped") + nut_up[k.name]
         if k.name not in free:
             out += (f'        <body name="{k.name}" pos="{_f(at)}" quat="{_quat(R)}">\n'
                     + _strap_geoms(k.name, ind="          ") + '        </body>\n')
@@ -350,7 +359,7 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
                     f'range="{-(nz - k.nut_z()) * M - 0.004:.5f} {(z1 - nz - NUT_HEX_H - FLANGE_T) * M:.5f}" '
                     f'damping="2"/>\n'
                     f'          <joint name="{k.name}_nut_turn" type="hinge" axis="0 0 1" limited="false" '
-                    f'damping="0.002" frictionloss="0.02" armature="0.0005"/>\n'
+                    f'damping="0.002" frictionloss="{NUT_FRICTION_NM}" armature="{NUT_ARMATURE}"/>\n'
                     + _nut_geoms(f"{k.name}_nut", "          ") + '        </body>\n')
         else:
             out += (f'        <body name="{k.name}_nut" pos="{_f(np.r_[s, nz])}">\n'
@@ -389,14 +398,15 @@ def excludes(clamps: list[Clamp], free: tuple[str, ...] = ()) -> str:
 
 
 def with_body(body_xml: str, plate: Plate | None, clamps: list[Clamp], state: str = "clamped",
-              free: tuple[str, ...] = (), nuts: tuple[str, ...] | None = None) -> str:
+              free: tuple[str, ...] = (), nuts: tuple[str, ...] | None = None,
+              nut_up: dict[str, float] | None = None) -> str:
     """The body model's MJCF with the VF-2 cell set up for the plate: the machine carrying the spoilboard and the
     clamps, the floor, the plate (None: the table bare), the free clamps and the nuts on their threads, and the
     machine's actuators after the body's. The vise isn't on the table. state: the clamps' pose (`clamped` or
     `parked`); free: the clamps a take moves; nuts: the clamps whose nuts turn on their threads (default: free's)."""
     from moonshot.world.cell import LOAD_X_MM
     nuts = free if nuts is None else nuts
-    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free, nuts))
+    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free, nuts, nut_up))
     machine = f'    <body name="vf2" pos="{-LOAD_X_MM * vf2.M:.4f} 0 0">\n{machine}    </body>\n'
     head, _, tail = body_xml.rpartition("\n  </default>")
     xml = head + "\n" + V.STEEL_DEFAULT + "\n  </default>" + tail

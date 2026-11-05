@@ -76,11 +76,10 @@ def site_mm(name: str) -> np.ndarray:
     return np.array({**r["sites"], **r["affordances"]}[name]["at_mm"], float)
 
 
-def use_part(part: str) -> None:
-    """Set the cell for a part's bar (its plan's stock): the bar lying flat, its wider side down, the blank's length,
-    and its density from the plan's material (G1's bars are 4140: steel, near three times aluminium's weight)."""
-    from moonshot.planning.validate import load_plan
-    st = load_plan(part)["stock"]
+def use_stock(part: str, st: dict) -> None:
+    """Set the cell for a part's bar, from its plan's stock (moonshot/motion/bandsaw.py use_part reads it): the bar
+    lying flat, its wider side down, the blank's length, and its density from the plan's material (G1's bars are
+    4140: steel, near three times aluminium's weight)."""
     w, h = max(st["bar_mm"]), min(st["bar_mm"])
     length = next(x for x in st["size_mm"] if all(abs(x - b) > 0.01 for b in st["bar_mm"]))
     STOCK.update(w=w, h=h, blank_mm=float(length), part=part, material=f"{st['material']}, {st['bar']}",

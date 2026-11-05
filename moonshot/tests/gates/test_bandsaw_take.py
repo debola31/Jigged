@@ -83,7 +83,8 @@ def takes(request):
     missing = [str(f[k]) for k in f if not (f[k] / ("cut.npz" if k == "cut" else "take.npz")).exists()]
     if missing:
         pytest.skip(f"no physics run in {missing}")
-    SC.use_part(part)
+    from moonshot.motion import bandsaw as P
+    P.use_part(part)
     out = {k: load_take(f[k]) for k in PERSON}
     out["cut"] = dict(np.load(f["cut"] / "cut.npz"))
     out["part"], out["folders"] = part, f

@@ -73,8 +73,9 @@ OUT: dict = {"start": TAKES / "saw-start"}       # the part's takes by use_part 
 
 
 def use_part(part: str) -> None:
-    """Plan for a part's bar: its stock (saw_cell.use_part) and its takes' folders."""
-    SC.use_part(part)
+    """Plan for a part's bar: its plan's stock (saw_cell.use_stock) and its takes' folders."""
+    from moonshot.planning.validate import load_plan
+    SC.use_stock(part, load_plan(part)["stock"])
     OUT.update(load=TAKES / f"{part}-saw", clamp=TAKES / f"{part}-saw-clamp", cut=TAKES / f"{part}-saw-cut",
                unload=TAKES / f"lift-out-{part}-saw")
 

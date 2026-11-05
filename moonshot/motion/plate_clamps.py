@@ -56,7 +56,10 @@ def grip_spec(take: StepTake, clamp: SB.Clamp, state: str, plate: SB.Plate | Non
               ring_pip=80.0, little_mcp_flex=65.0, little_pip=85.0, thumb_cmc_abd=20.0, thumb_cmc_flex=10.0,
               thumb_mcp_flex=20.0, thumb_ip=15.0)
     cols = [obox(at + R @ c, R, hh) for _, c, hh in SB.strap_boxes()]
-    cols.append(obox(np.r_[SB.TABLE_MID, SB.TABLE_Z + SB.SPOILBOARD_MM[2] / 2], np.eye(3), SB.SPOILBOARD_MM / 2))
+    # no fingertip under the strap: the far fingers curled under its edge onto the heel block, and dragged on it
+    cols.append(obox(at + R @ [0.0, 0.0, -SB.CLAMP_T / 2 - 15.0], R, [SB.CLAMP_L / 2, SB.CLAMP_W / 2 + 2.0, 15.0]))
+    cols.append(obox(np.r_[SB.TABLE_MID, SB.TABLE_Z + SB.SPOILBOARD_MM[2] / 2], np.eye(3),
+                     SB.SPOILBOARD_MM / 2 + [0.0, 0.0, 4.0]))         # and the little finger kept off the board
     u3 = np.r_[clamp.u, 0.0]
     for a, b, rise in clamp.heel_steps():
         mid = np.r_[clamp.stud, SB.TOP_Z + rise / 2] + u3 * (a + b) / 2

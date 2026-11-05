@@ -66,6 +66,8 @@ class Job:
     take_mm: float = TAKE_MM               # the tool's first rise off the bench, over TAKE_S, as it takes its weight
     settle_s: float = 0.1                  # the blade set on its edge this long before it is drawn; the stroke
                                            # starts (t0) 0.1 s before the draw
+    hold_to_end: bool = False              # the left hand still on the part as the take ends, the tool put back and
+                                           # the right hand at its side
 
     @property
     def bisector(self) -> np.ndarray:
@@ -89,7 +91,7 @@ def end_hold(top, near, far, along=(-6.0, 1.0)) -> Steady:
     return Steady(at=top[0], push=top[1],
                   pads=(("index", *across(*top, "y")), ("thumb", *across(*near, "z")),
                         ("middle", *across(*far, "z"))),
-                  starts=HAND_FROM_LEFT)
+                  starts=HAND_FROM_LEFT, rise=G1_RISE, away=G1_AWAY)
 
 
 # G1's first rise, as nist-ftc-10's: its load came on in 133 ms (167 once; people's 163-265), the tool off the bench 4
@@ -99,6 +101,12 @@ G1_TAKE_MM = 4.5
 # ... and its blade set on each edge for longer: on ll-1007223's low step it landed 2 mm high and out and settled onto
 # the edge under its press over 0.3 s, 3 of the draw's first frames off it
 G1_SETTLE_S = 0.4
+# G1's left hand up from the thigh and off the part again further out to its side (mirrored +x): risen as nist-ftc-10's,
+# its shoulder turned in past people's (31-35 deg, theirs 31) for 7-16 frames, as many again as it left, and their
+# single-stroke takes are 340 frames
+G1_RISE, G1_AWAY = (90.0, 60.0, 160.0), (40.0, -25.0, 110.0)
+# ... and ct-slbeam's holds its part until the take ends: lifting off as the right hand put the tool back at its far
+# right, its shoulder turned in past people's for 7-10 frames however it went, and its take has one stroke
 # the shoulder turned in, the forearm palm down: the left hand comes from the left, fingers to the right
 HAND_FROM_LEFT = tuple((20, 0, 0, 40, 35, sr, 95, p, 0, 0) for sr in (15, 40) for p in (70, 90))
 JOBS["ll-1007223"] = Job(
@@ -110,23 +118,25 @@ JOBS["ll-1007223"] = Job(
     face_out=(1.0, 0.0, 0.0), up=(0.0, -1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
     steady=end_hold(((29.5, 0.0, -31.0), (0.0, -1.0, 0.0)), ((35.0, 8.0, -31.0), (1.0, 0.0, 0.0)),
                     ((24.0, 8.0, -31.0), (-1.0, 0.0, 0.0))),
-    # 40 mm right of where nist-ftc-10 lies and 20 mm back: there the hand holding the tool to the low step's edge, its
-    # curled little finger 100 mm right of the blade and 80 mm nearer the operator, came down on the micrometer
-    at_xy=(-40.0, -90.0))
+    # 40 mm back from where nist-ftc-10 lies: there the hand holding the tool to the low step's edge, its curled little
+    # finger 100 mm right of the blade and 80 mm nearer the operator, came down on the micrometer; 40 mm right, the
+    # left hand held the part's end nearer the body's middle and the left arm's posture was past people's (median 28.9,
+    # theirs 28.7)
+    at_xy=(-80.0, -70.0))
 JOBS["ct-slbeam"] = Job(
     BC.CT_SLBEAM,
     # the base's near top edge, 50 of its 57 mm right of the upright: its one long edge facing the operator
     strokes=(((25.0, 0.0, 19.05), (75.0, 0.0, 19.05)),),
-    face_out=(0.0, -1.0, 0.0), up=(0.0, 0.0, 1.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
+    face_out=(0.0, -1.0, 0.0), up=(0.0, 0.0, 1.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S, hold_to_end=True,
     # held down by the upright's top, flat, fingers forward, as nist-ftc-10's rim is: fingers pointing right along it,
     # its 51 mm top took the left arm past people's (posture median 30-34, theirs 28.7), and pinched by its faces as
     # ll-1007223's stem is, the arm's sway lifted the part 2.3 mm off the mat
-    steady=Steady(at=(9.5, 19.05, 50.8), push=(0.0, 0.0, 1.0),
+    steady=Steady(at=(9.5, 19.05, 50.8), push=(0.0, 0.0, 1.0), rise=G1_RISE, away=G1_AWAY,
                   pads=tuple((f, (9.5, 19.05, 50.8), (0.0, 0.0, 1.0), (("x", b), ("y", (-10, 10))))
                              for f, b in (("index", (2, 8)), ("middle", (-8, -2))))),
-    # 40 mm right of and 25 mm back from nist-ftc-10's: there the hand holding the tool to the edge, 19 mm up, came
-    # down on the micrometer (ll-1007223's)
-    at_xy=(-78.0, -122.0))
+    # 25 mm back from nist-ftc-10's near face: there the hand holding the tool to the edge, 19 mm up, came down on the
+    # micrometer. 40 mm right, the left hand on the upright nearer the body's middle turned its shoulder in past people's
+    at_xy=(-118.0, -122.0))
 JOBS["nist-ftc-09"] = Job(
     BC.NIST_FTC_09,
     # the near long side's top edge, toward the right; the sheet overhangs the mat 25 mm all round, so the hook's
@@ -135,14 +145,16 @@ JOBS["nist-ftc-09"] = Job(
     # two strokes along it, one after the other: with one, the take's start (the trunk's sway as the body settles,
     # common to the bench's takes) was 7% of its frames, past people's for the left arm
     # the hand trailing 100 mm right of the blade clear of the rough-surface block (52 mm tall) at the second's end
-    strokes=(((-95.25, 3.04, -30.0), (-95.25, 3.04, 20.0)), ((-95.25, 3.04, 21.0), (-95.25, 3.04, 71.0))),
+    strokes=(((-95.25, 3.04, 10.0), (-95.25, 3.04, 60.0)), ((-95.25, 3.04, 61.0), (-95.25, 3.04, 111.0))),
     face_out=(-1.0, 0.0, 0.0), up=(0.0, 1.0, 0.0), take_mm=G1_TAKE_MM, settle_s=G1_SETTLE_S,
     # flat on the sheet, fingers forward, nearer the body and its middle than nist-ftc-10's hand on its rim: there,
     # 27 mm lower, the trunk leant to the left past people's for 25 frames
-    steady=Steady(at=(-75.0, 3.04, -95.0), push=(0.0, 1.0, 0.0),
-                  pads=tuple((f, (-75.0, 3.04, -95.0), (0.0, 1.0, 0.0), (("x", b), ("y", (-12, 14))))
+    steady=Steady(at=(-75.0, 3.04, -101.0), push=(0.0, 1.0, 0.0), rise=G1_RISE, away=G1_AWAY,
+                  pads=tuple((f, (-75.0, 3.04, -101.0), (0.0, 1.0, 0.0), (("x", b), ("y", (-12, 14))))
                              for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))),
-    at_xy=(20.0, -52.0))                                     # its near side where nist-ftc-10's is
+    # its near side where nist-ftc-10's is, the steadying hand where nist-ftc-10's is: 46 mm nearer the body's middle,
+    # the left arm's posture was past people's (median 29.0, theirs 28.7)
+    at_xy=(-20.0, -52.0))
 
 
 def out(part: str) -> Path:
@@ -348,8 +360,13 @@ class DeburrPlan(BenchPlan):
         for i, (frm, to) in enumerate(self.job.strokes):
             self.stroke(i, frm, to)
         t_down = self.put_back()
-        self.steady(0.3, t_down + 0.2)
-        self.t = max(self.t, t_down + 1.8)
+        if self.job.hold_to_end:
+            t_end = t_down + 1.8
+            self.steady(0.3, t_end)
+            self.t = t_end - 0.2                     # the plan ends 0.3 s on (BenchPlan.solve), before the hand lifts
+        else:
+            self.steady(0.3, t_down + 0.2)
+            self.t = max(self.t, t_down + 1.8)
 
 
 def curled(q: dict) -> dict:

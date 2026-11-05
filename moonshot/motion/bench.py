@@ -19,7 +19,7 @@ import hashlib
 import inspect
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import mujoco
@@ -97,6 +97,10 @@ class Steady:
                         for f, b in (("index", (8, 20)), ("middle", (-7, 5)), ("ring", (-22, -10))))
     push: tuple = (0.0, -1.0, 0.0)
     starts: tuple = tuple((20, 0, r, 45, 45, -10, 75, p, 0, 0) for p in (40, 70) for r in (0, -10))
+    # the hand's way up from the thigh, from where it hangs (mirrored: +x out), and off again, from where it held: not
+    # the grip's, so out of the grips' cache key
+    rise: tuple = field(default=(40.0, 60.0, 160.0), repr=False)
+    away: tuple = field(default=(0.0, -25.0, 110.0), repr=False)
 
 
 def box(c, h):
@@ -264,7 +268,7 @@ class BenchPlan:
         # up out of the bench's way first: from the thigh, the knuckles catch its front edge. And out to its side as it
         # rises (+x, the mirrored world's outward): straight up in front of the thigh, the shoulder turned in to 35 deg
         # (people's 31)
-        self.transit("L", t_reach, tc, W, via=[self.rest + [40, 60, 160], W + [0, -30, 60]], fade=(H, 1.0))
+        self.transit("L", t_reach, tc, W, via=[self.rest + self.steady_on.rise, W + [0, -30, 60]], fade=(H, 1.0))
         self.fingers("L", t_reach + 0.3, open_like(self.hand, g["q"], 0.4))
         self.fingers("L", tc, g["q"])
         self.hold("L", tc, t_off, H, W)
@@ -281,9 +285,9 @@ class BenchPlan:
         self.fingers("L", t_off + 0.3, open_like(self.hand, g["q"], 0.3))
         # well up before back past the bench's edge: the wrist rests over the calipers, and lifted 40 mm the relaxing
         # fingers swept them 107 mm toward the operator and wedged them on the bench, which threw them
-        self.transit("L", t_off, t_off + 0.5, W + [0, -25, 110], via=[W + [0, 0, 18]])
+        self.transit("L", t_off, t_off + 0.5, W + self.steady_on.away, via=[W + [0, 0, 18]])
         self.fingers("L", t_off + 1.2, self.q_relax)
-        self.transit("L", t_off + 0.5, t_off + 1.6, self.rest, via=[W + [0, -230, 110]])
+        self.transit("L", t_off + 0.5, t_off + 1.6, self.rest, via=[W + np.add(self.steady_on.away, [0, -205, 0])])
         self.clip("steady", tc - 0.3, tc + 0.6, "STEADY  the left hand holds the part down on the bench")
 
     # --- building blocks ---------------------------------------------------------------------------------------

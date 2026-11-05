@@ -46,7 +46,7 @@ from moonshot.motion import kinematics as BM
 from moonshot.motion import solver as BS
 from moonshot.motion.primitives import FPS, PosePath, blend_q, min_jerk, open_for, open_like, relaxed, tremor
 from moonshot.world.vise import (CRANK0_DEG, PARALLEL_L, PARALLEL_T, REFERENCE, STOP_MM, TABLE_Z, VISE, Load,
-                                 crank_for_opening, knob_center)
+                                 crank_for_opening, knob_center, tip_y)
 
 MOONSHOT = Path(__file__).resolve().parents[1]
 TAKES = data_root() / "takes"
@@ -119,9 +119,10 @@ LETGO_WIDE = 0.75
 PRELOAD_FROM_TOUCH, PRELOAD_PRESS_N, PRELOAD_PRESS_LEAD_S, KNOB_LAG_MM = True, 1.5, 0.1, 4.0
 KNOB_HOLD_OPEN = 0.0
 STAND_MARGIN_MM = 3.0       # a part set down stands if its middle is this far inside the parallels under it
+TALL_TOP_CLEAR_MM = 4.0     # a tall part's grip keeps the hand this far over its top (_grip_specs)
 # a part standing far proud of the jaws is let go of (open_like PROUD_RELEASE_OPEN) PROUD_RELEASE_S before the hand
-# lifts off it, the hand backing PROUD_BACK_MM off its near face meanwhile (let_go)
-PROUD_RELEASE_S, PROUD_RELEASE_OPEN, PROUD_BACK_MM = 0.25, 0.25, 4.0
+# lifts off it (let_go)
+PROUD_RELEASE_S, PROUD_RELEASE_OPEN = 0.25, 0.25
 # a key closing the hand FINAL_CLOSE_MM before the final pull's touch, at FINAL_CLOSE_AT of the reach (0: none): closing
 # there, the index's tip met the knob at the lever's joint and stopped op10's hand 20-28 mm short of its grip
 FINAL_CLOSE_AT, FINAL_CLOSE_MM = 0.0, 8.0
@@ -308,12 +309,18 @@ class Take:
         depth = (4, 10) if proud < 30 else (proud / 2 - 3, proud / 2 + 3)
         if hx >= 30:            # straddling it from above across its width: thumb on the near face, fingers on the far
             far = lambda lo, hi: plane(c + [0, hy, 0], [0, 1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=(lo, hi)))  # noqa: E731
-            # the thumb opposite where the fingers' push lands: pinched halfway down a tall part, the index and middle
-            # press harder than the ring and little, 15 mm toward the index, and centred the thumb's push turned the part
-            # 27 degrees in the hand (op30)
-            tx = (-14, 14) if proud < 30 else (-24, -6)
+            # the thumb opposite where the fingers' push lands: each finger's force is regulated to its share, so it
+            # lands at their middle, 3-4 mm toward the little finger. With the thumb 15 mm toward the index (when the
+            # index and middle pressed harder, op30), the push twisted op40's part 16-20 deg as the grip closed, and it
+            # was carried leaning 5 deg
+            tx = (-14, 14) if proud < 30 else (-6, 12)
             targets = {"thumb": plane(c + [0, -hy, 0], [0, -1, 0], 2.0, bands(c + [0, 0, hz], depth=depth, x=tx)),
                        "index": far(-44, -24), "middle": far(-16, 2), "ring": far(8, 26), "little": far(30, 46)}
+            if proud >= 30:
+                # reaching down the far face from over the top, the fingers' bases clear the top's edge: solved on its
+                # skin, the little finger's proximal shell (proud of its skin) landed on op40's far top edge as the hand
+                # came down, held the hand 3 mm high and started the preload two frames early (67 ms)
+                cols[0] = box(c + [0, 0, TALL_TOP_CLEAR_MM / 2], self.half + [0, 0, TALL_TOP_CLEAR_MM / 2])
         else:                   # too short along the jaws for four fingers side by side (op50's 31 mm, standing on
             # end): held from its +x end, the index and middle round onto the far face one above the other, the thumb
             # on the near face opposite them; side by side at one depth, the index couldn't reach round the corner and
@@ -413,9 +420,13 @@ class Take:
         covered = self.half[0] >= PAR_L / 2      # a part longer than the parallels hides their tops: push an end instead
         for name in [n for n in ("para_b", "para_a") if n in self.parallels]:
             pc = self.parallels[name] + np.array([0, 0, self.par_h])
+            pc[1] = tip_y(self.parallels, name)
             if covered:                          # the pad on the parallel's end face, under the part's overhang
                 end = np.array([VISE["x"] + PAR_L / 2, pc[1], pc[2] - self.par_h / 2])
-                target = plane(end, [1, 0, 0], 1.5, bands(end, y=(-1.0, 1.0), z=(-4.0, 4.0)))
+                # low on it beside a neighbour (tip_y), under the part's overhang: aimed at the end's middle, the pad
+                # caught on the bottom edge of op40's part, 2.8 mm over the parallels' ends
+                shared = pc[1] != self.parallels[name][1]
+                target = plane(end, [1, 0, 0], 1.5, bands(end, y=(-1.0, 1.0), z=(-9.0, -3.0) if shared else (-4.0, 4.0)))
             else:
                 target = plane([x_end, pc[1], pc[2]], [0, 0, 1], 1.5, bands([x_end, pc[1], pc[2]], x=(-6, 6), y=(-1.0, 1.0)))
             specs[f"tip_{name}"] = dict(obj=self.parallels[name].copy(), q0=q0,
@@ -656,14 +667,11 @@ class Take:
         Hs = g["H_rel"]
         proud = self.set_down[2] + self.half[2] - JAW_TOP >= 30
         t_off = t_rel + (PROUD_RELEASE_S if proud else 0.0)
-        if proud:
-            # and the hand eased back off its near face as it opens: opened in place, the thumb's base still pressed
-            # that face 3-4 N above the part's middle as the fingers came off the far one, and tipped it over
+        if proud:                      # opened in place: the part, slid home (held_slide), leans on the fixed jaw if
+            # anything; backed off its near face as it opened, the fingers on the far one dragged op40's part 5.7 deg
+            # over toward the operator
             self.fingers(t_off, open_like(self.hand, g["q"], PROUD_RELEASE_OPEN))
-            back = np.array([0.0, -PROUD_BACK_MM, 0.0])
-            self.add(t_rel, t_off, lambda t, W=W_set: [("pose", Hs, W + back * min_jerk((t - t_rel) / PROUD_RELEASE_S),
-                                                        3.0)])
-            W_set = W_set + back
+            self.add(t_rel, t_off, lambda t, W=W_set: [("pose", Hs, W, 3.0)])
         self.fingers(t_off + 0.3, open_like(self.hand, g["q"], PROUD_RELEASE_OPEN if proud else 0.12))
         self.fingers(t_off + 0.6, open_like(self.hand, g["q"], 0.5))
         lift = PosePath(np.eye(3), W_set).to(t_off, 0.3, np.eye(3), W_set + [0, -4, 22]).to(t_off + 0.22, 0.45, np.eye(3), W_set + [0, -35, 70])

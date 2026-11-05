@@ -239,11 +239,20 @@ class ViseTake:
         half = m.geom(parallel).size
         n = np.asarray(normal, float)
         goal = local.copy()
-        goal[1] = 0.0
+        # on the strip's centre line, or off it away from a neighbour too near to press apart (world/vise.tip_y)
+        at = {p: d.body(p).xpos for p in self.paras}
+        y = V.tip_y(at, parallel, V.TIP_SHARE_MM * 0.001, V.TIP_OUT_MM * 0.001)
+        goal[1] = (R.T @ (np.array([c[0], y, c[2]]) - c))[1]
         if abs(n[2]) > 0.5:                                # its top: clear of the strip's ends
             goal[0] = np.clip(local[0], -half[0] + 0.015, half[0] - 0.015)
-        else:                                              # its end face: clear of the top and bottom edges
-            goal[2] = np.clip(local[2], -half[2] + 0.004, half[2] - 0.004)
+        else:                                              # its end face: clear of the top and bottom edges, and low
+            # on it beside a neighbour, under the part's overhang (the plan's tip grip)
+            shared = abs(goal[1]) > 1e-4
+            goal[2] = np.clip(local[2], -half[2] + 0.004, -0.003 if shared else half[2] - 0.004)
+            if shared:
+                # across the strips by the pad's middle, which noses onto the end: its nearest point, on its side
+                # where it already pressed the neighbour, moved op40's pad 2 mm of the 8 to para_b, and it read 0 N
+                local[1] = (R.T @ (d.geom_xpos[m.geom("R_g_dis2").id] - c))[1]
         shift = R @ (goal - local)
         return shift - n * (n @ shift)
 

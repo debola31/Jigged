@@ -178,14 +178,9 @@ def test_the_needle_stays_put_through_a_sweep_up_the_side(square):
 # Besides the record: take.json "load" (kind, tool, pocket, and the state the run starts from), outcome.json "pockets"
 # ({pocket: tool}), "spindle_tool", "tool_release_held_s" (when the machine read Tool Release held) and "pressed";
 # checks.json "touching_R", the right hand's touches.
-<<<<<<< HEAD
-TOOL_STEPS = [s for s in expand(load_plan("nist-ftc-10")) if s["title"] == "Load the tools"]
-TOOL_TAKES = [f"nist-ftc-10/{s['id']}/{t}" for s in TOOL_STEPS for t in tool_takes(s)]
-=======
 TOOL_STEPS = {f"{p}/{s['id']}": s for p in sorted(x.stem for x in PLANS.glob("*.json"))
               for s in expand(load_plan(p)) if s["title"] == "Load the tools"}      # by <part>/<step id>
 TOOL_TAKES = [f"{ps}/{t}" for ps, s in TOOL_STEPS.items() for t in tool_takes(s)]
->>>>>>> worktree-agent-aae51e344740d7c54
 SEATS = [t for t in TOOL_TAKES if "-seat-" in t or "-insert-" in t]          # the takes that seat a holder
 PICKS = [t for t in TOOL_TAKES if "-pick-" in t]
 PROBE_POCKET = 20                                   # moonshot/library/records/shop.json conventions.probe_tool_number

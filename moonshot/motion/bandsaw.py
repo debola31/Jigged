@@ -113,9 +113,10 @@ BACK_LUMBAR = np.array([255.0, 525.0, 955.0])      # behind the saw at its infee
                                                     # before the right hip, where the hand hangs, the body clear of the
                                                     # motor
 START_LUMBAR = np.array([-1540.0, -452.0, 955.0])  # in front of the control box, facing it (START place)
-END_LUMBAR = np.array([-1150.0, 195.0, 955.0])     # at the left end, facing the station's +X: the handwheel's knob
-                                                    # ahead at the thigh, 110 mm right of the body's middle, the thighs
-                                                    # 90 mm short of it. With the knob under the right shoulder (155 mm
+END_LUMBAR = np.array([-1230.0, 195.0, 955.0])     # at the left end, facing the station's +X: the handwheel's knob
+                                                    # ahead at the thigh, 110 mm right of the body's middle, the head
+                                                    # leaning over it short of the idler wheel's guard (80 mm nearer,
+                                                    # it rested on the guard and lifted the bow 4 deg straightening up). With the knob under the right shoulder (155 mm
                                                     # right) the replayed forearm went past its maximum pushing it over
                                                     # the top (1.13-1.36), with it 215 right to 0.99, 110 right 0.93.
                                                     # Crouched 115 mm (the body model has no legs), the knob turn was
@@ -565,13 +566,13 @@ class ClampPlan(SawPlan):
         self.effort("R", t_off + 0.1, 0.0, "knob")
         W = W0 + self.knob_mid(t_off) - mid0
         self.fingers("R", t_off, eased)
-        # the fingers open round the knob first, then the hand slides off its free end along it, toward the person:
-        # drawn back and up at once, the fingers swept through the knob before it met the skin again
-        self.release_keys(eased, t_off, t_off + 0.05, t_off + 0.3)
-        self.hold("R", t_off, t_off + 0.25, H0, W)
-        self.wrist["R"] = W
-        self.transit("R", t_off + 0.25, t_off + 0.6, W + back * 75)
-        self.transit("R", t_off + 0.6, t_off + 0.8, W + back * 90 + up * 40)
+        # the fist, still loosely closed, slides off the knob's free end along it, toward the person, and opens once
+        # clear of it: opened round the knob first, the index swept 14 mm into the wheel's face and the knob before
+        # they met the skin again
+        self.add("R", t_off, t_off + 0.4, lambda t: [("pose", H0, W + back * 80 * min_jerk((t - t_off) / 0.4), 3.0)])
+        self.release_keys(eased, t_off, t_off + 0.4, t_off + 0.7)
+        self.wrist["R"] = W + back * 80
+        self.transit("R", t_off + 0.4, t_off + 0.8, W + back * 95 + up * 40)
         self.clip("clamp", 0.0, t_off + 0.7, "CLAMP  the handwheel turned until the jaw is snug on the bar")
         self.t = t_off + 0.8
         self.to_rest("R", self.t, self.t + 1.1)

@@ -349,10 +349,8 @@ class LoadPlan(SawPlan):
         self.event("drag", t_held - 0.1, t_off - 0.05, side="R", direction=(self.place.vec(hold) / np.linalg.norm(hold)).tolist(),
                    force=round(float(np.linalg.norm(hold)), 2))
         self.event("grip", tg, t_off + 0.1, side="R", grip="bar", on="bar")
+        # held in the hand's turn: left its own (`loose`), the hand pivoted on its fingertips and the bar stayed put
         self.event("carry", tg + 0.05, t_off, obj="bar", grip="bar", side="R")
-        # pushed by its end, the bar keeps its own turn, which the bed and the jaws square: held to the hand's, a
-        # degree's roll and yaw from the fingers' touch wedged it between the jaws, 2.3 mm wider than it
-        self.event("loose", tg + 0.05, t_off, obj="bar")
         self.effort("R", t_off - 0.1, 0.3, "bar")
         self.effort("R", t_off + 0.1, 0.0, "bar")
         _, W = self.grip_pose("bar", t_off)

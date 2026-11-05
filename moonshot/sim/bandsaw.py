@@ -162,8 +162,11 @@ class SawRun(BenchRun):
             if e["t0"] <= tt < e["t1"]:
                 ease = min(1.0, (tt - e["t0"]) / 0.25, (e["t1"] - tt) / 0.25)
                 hand = m.body(f"{e['side']}_hand").id
+                # where the fingers hold it, between the thumb's, index's and middle's tips (the carry weld's anchor):
+                # pushed at the wrist against a bar held at the fingertips, the hand pivoted on them
+                at = np.mean([d.geom_xpos[m.geom(f"{e['side']}_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
                 jacp = np.zeros((3, m.nv))
-                mujoco.mj_jac(m, d, jacp, None, d.xpos[hand], hand)
+                mujoco.mj_jac(m, d, jacp, None, at, hand)
                 tau += jacp[:, self.act_dof].T @ (np.asarray(e["direction"], float) * e["force"] * ease)
         for e in self.turns:
             if not e["t0"] <= tt < e["t1"]:

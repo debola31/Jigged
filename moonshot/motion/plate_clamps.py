@@ -39,6 +39,7 @@ LIFT_DELAY_S = 0.08          # the strap starts up this long after the carry sta
                              # as it is levelled, and at the parallels' 0.16 s it was 300 ms coming off the board once
                              # loaded (people's 163-265)
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
+BOARD_CLEAR_MM = 4.0         # ... and off the spoilboard
 
 
 def side_of(clamp: SB.Clamp) -> str:
@@ -65,16 +66,26 @@ def grip_spec(take: StepTake, clamp: SB.Clamp, state: str, plate: SB.Plate | Non
     # no fingertip under the strap: the far fingers curled under its edge onto the heel block, and dragged on it
     cols.append(obox(at + R @ [0.0, 0.0, -SB.CLAMP_T / 2 - 15.0], R, [SB.CLAMP_L / 2, SB.CLAMP_W / 2 + 2.0, 15.0]))
     cols.append(obox(np.r_[SB.TABLE_MID, clamp.board_z - SB.SPOILBOARD_MM[2] / 2], np.eye(3),
-                     SB.SPOILBOARD_MM / 2 + [0.0, 0.0, 4.0]))         # and the little finger kept off the board
+                     SB.SPOILBOARD_MM / 2 + [0.0, 0.0, BOARD_CLEAR_MM]))      # and the little finger kept off the board
     u3 = np.r_[clamp.u, 0.0]
-    for a, b, rise in clamp.heel_steps():
-        mid = np.r_[clamp.stud, clamp.board_z + rise / 2] + u3 * (a + b) / 2
-        cols.append(obox(mid, SB._rot(clamp.yaw), [abs(b - a) / 2, SB.BLOCK_W / 2, rise / 2]))
-    nz = clamp.nut_z(state)
-    cols.append(obox(np.r_[clamp.stud, nz + (SB.FLANGE_T + SB.NUT_HEX_H) / 2], np.eye(3),
-                     np.array([SB.FLANGE_R, SB.FLANGE_R, (SB.FLANGE_T + SB.NUT_HEX_H) / 2]) + NUT_CLEAR_MM))
+    steps = [(np.r_[clamp.stud, clamp.board_z + rise / 2] + u3 * (a + b) / 2, SB._rot(clamp.yaw),
+              np.array([abs(b - a) / 2, SB.BLOCK_W / 2, rise / 2])) for a, b, rise in clamp.heel_steps()]
+    cols += [obox(*s) for s in steps]
+
+    def nut(z):
+        return (np.r_[clamp.stud, z + (SB.FLANGE_T + SB.NUT_HEX_H) / 2], np.eye(3),
+                np.array([SB.FLANGE_R, SB.FLANGE_R, (SB.FLANGE_T + SB.NUT_HEX_H) / 2]) + NUT_CLEAR_MM)
+    cols.append(obox(*nut(clamp.nut_z(state))))
+    fixed = [(np.r_[clamp.stud, clamp.board_z - 15.0], np.eye(3), np.array([150.0, 150.0, 15.0 + BOARD_CLEAR_MM])),
+             *steps, nut(clamp.nut_z("parked"))]
     if plate is not None:
         cols.append(obox(plate.centre, np.eye(3), plate.size / 2))
+        fixed.append((np.asarray(plate.centre, float), np.eye(3), np.asarray(plate.size, float) / 2))
+    # and all of it as the strap sees it carried level over its place: the grip is solved where the strap lies, tipped,
+    # and levelled the fingers come down on what lies under them (nist-ftc-09's pinch 5 mm lower over the board)
+    for pc, Rc in (clamp.pose_at(SB.PARK_SLIDE_MM, CLEAR_MM), clamp.pose_at(0.0, CLEAR_MM)):
+        M = R @ Rc.T
+        cols += [obox(at + M @ (c - pc), M @ Rb, h) for c, Rb, h in fixed]
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     lo, hi = DEPTH_MM
     return dict(obj=grab, side=side_of(clamp), q0=q0, colliders=cols, load=SB.clamp_kg(),

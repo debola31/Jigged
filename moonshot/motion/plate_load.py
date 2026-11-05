@@ -33,16 +33,19 @@ from moonshot.world import spoilboard as SB
 
 TAKES = data_root() / "takes"
 LUMBAR = np.array([-381.0, -960.0, 955.0])       # in the doorway, square to the table's middle
-STANCE_MM: dict[str, np.ndarray] = {}            # nearer the table for ll-1005337, its likelihood went from 29.1 to 30.5
+STANCE_MM: dict[str, np.ndarray] = {}            # nearer the table for ll-1005337 (60 mm), its shoulders still fell
+                                                 # 40-66 mm behind the plan in the lowering, the wrists overloaded
 OVER_MM = 60.0                                   # the plate carried in this high over the parked clamps' studs
 FINGERS_UNDER_MM = 20.0                          # a plate pinched by its edge is let go this far over the spoilboard:
                                                  # the fingers under it clear the board
 BOARD_CLEAR_MM = 25.0                            # the elbows and forearms this far off the spoilboard (and its riser)
 # where the plate is let go, from its place over the board: as people set a plate down where they know it settles.
-# Let go square over its place, ll-1005337's plate settled 1.4 mm toward the operator and 0.4 mm to the left as it
-# dropped clear of the fingers on its end faces, and nist-ftc-09's sheet, tipped onto its far side first, 1.3 mm
-# toward them, the same each run
+# Let go square over its place, ll-1005337's plate settled 1.4 mm toward the operator and 0.4 mm to the left, and
+# nist-ftc-09's sheet, tipped onto its far side first, 1.3 mm toward them, the same each run
 SETTLE_LEAD_MM = {"ll-1005337": np.array([0.4, 1.4, 0.0]), "nist-ftc-09": np.array([1.0, 1.3, 0.0])}
+# a plate's ends held this far back from their middles, away from the near clamps: at the middles, the left hand came
+# down on the near left clamp's nut as the plate was lined up and held it 8-11 mm off its place
+ENDS_BACK_MM = 30.0
 # ... let go this far over the board: the sheet less high, so it drops less onto the fingers (at 20, 3.8 mm of skin in
 # the sheet for a frame), but high enough that its weight on them doesn't press them into the board (at 16, 4.6 mm);
 # ll-1005337's plate, held by its ends' faces, set down to just over the board
@@ -136,7 +139,7 @@ class PlateLoad(StepTake):
         cols = [obox(c, np.eye(3), half + (ENDS_SKIN_MM if self.ends else 0.0)),    # the plate where it's let go,
                 obox(np.r_[SB.TABLE_MID, p.bottom - 30.0], np.eye(3), np.r_[SB.SPOILBOARD_MM[:2] / 2, 30.0])]  # board
         if self.ends:
-            at = np.array([c[0] + sign * half[0], c[1], top])
+            at = np.array([c[0] + sign * half[0], c[1] + ENDS_BACK_MM, top])
             # the fingertips' pads on the end's face, high on it, the hand over the end and the thumb on top, so it drops
             # clear of them when let go: held with the fingers under its ends, it fell through them when let go over the
             # board, and set down on them, they stuck under it or threw it off; held by the end faces low down, the
@@ -236,8 +239,10 @@ class PlateLoad(StepTake):
         t = t_down + let_go + 1.25
         for s in ("R", "L"):
             # back toward the operator before dropping to rest: straight to it, the hand came down on the riser's
-            # front edge
-            self.transit(s, t, t + 1.3, self.rest_of(s), via=[self.at(s, self.side[s]["wrist"] + [0.0, -120.0, 0.0])])
+            # front edge (and a plate's ends' hands, further in and lower, a little higher still: the fingers dipped
+            # 3.7 mm into the board's front edge)
+            back = [0.0, -120.0, 60.0 if self.ends else 0.0]
+            self.transit(s, t, t + 1.3, self.rest_of(s), via=[self.at(s, self.side[s]["wrist"] + back)])
             self.fingers(s, t + 1.3, self.q_relax)
         self.clip("load", 0.0, t + 0.5, "Lay the plate on the spoilboard")
         self.t = t + 1.5

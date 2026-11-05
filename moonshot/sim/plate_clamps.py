@@ -32,6 +32,7 @@ from moonshot.world import wrench as WR
 TAKES = data_root() / "takes"
 DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
+WRENCH_PUSH_MM = 2.0         # the eye pushes the wrench's box end down onto a nut by at most this much error
 
 
 class PlateClamps(FirmGrip, TakeRunner):
@@ -53,7 +54,9 @@ class PlateClamps(FirmGrip, TakeRunner):
         self.welded = set(self.encloses)
         super().__init__(folder)
         self.firm_setup()
-        self.carry = {e["obj"]: e for e in self.tk["events"] if e["kind"] == "carry" and e["obj"] != "blank"}
+        # each carry (the wrench may be carried more than once: picked up, laid down, picked up again)
+        self.carries = [e for e in self.tk["events"] if e["kind"] == "carry" and e["obj"] != "blank"]
+        self.carry = {e["obj"]: e for e in self.carries}
         k = np.load(self.folder / "clamp_keys.npz")
         self.keys = {n: list(zip(k[f"{n}_t"], k[f"{n}_R"], k[f"{n}_p"])) for n in (*self.free, "wrench")
                      if f"{n}_t" in k.files}
@@ -83,36 +86,63 @@ class PlateClamps(FirmGrip, TakeRunner):
         return glbs_in_bodies(self.model, "vf2", vf2.render_links())
 
     def carry_of(self, grip_event: dict) -> dict:
-        return self.carry[grip_event["on"]]
+        return next(e for e in self.carries if e["obj"] == grip_event["on"] and e["side"] == grip_event["side"]
+                    and grip_event["t0"] <= e["t0"] <= grip_event["t1"])
+
+    def carrying(self, side: str, t: float) -> dict | None:
+        """The carry the side's hand is in at t, if any."""
+        return next((e for e in self.carries if e["side"] == side and e["t0"] <= t < e["t1"]), None)
 
     def planned(self, name: str, t: float) -> tuple[np.ndarray, np.ndarray]:
         return PC.key_at(self.keys[name], t)
 
     def held_error(self, side: str, t: float):
         """While a clamp or the wrench is carried, the eye is on it: its middle and its turn against the plan (its
-        keys); the wrench's box end, over a nut, turned onto the nut's flats where they really are."""
+        keys). The wrench's box end, over a nut and not swinging, is turned onto the nut's flats where they really are;
+        and over a nut the eye never pushes it down more than WRENCH_PUSH_MM: come down on the hex's top, it is felt,
+        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp."""
         self._now = t
         m, d = self.model, self.data
-        held = next((n for n, e in self.carry.items() if e["side"] == side and e["t0"] <= t < e["t1"]), None)
-        if held is None:
+        e = self.carrying(side, t)
+        if e is None:
             return None
+        held = e["obj"]
         R, p = self.planned(held, t)
-        if held == "wrench":
+        over = held == "wrench" and self.nut_under(p)
+        if over and not self.swinging(t):
             R = self.onto_flats(R, p) @ R
         b = m.body(held).id
-        return np.r_[p * 0.001 - d.xpos[b], Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
+        err = np.r_[p * 0.001 - d.xpos[b], Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
+        if over:
+            err[2] = max(err[2], -WRENCH_PUSH_MM * 0.001)
+        return err
+
+    def nut_under(self, p: np.ndarray):
+        """The clamp whose nut the wrench's planned box end (middle p mm) is over, if any."""
+        return next((c for c in self.clamps if c.name in self.nuts and np.linalg.norm(p[:2] - np.asarray(c.stud)) < 5.0),
+                    None)
+
+    def swinging(self, t: float) -> bool:
+        """Is the wrench's planned turn changing at t (a stroke's swing, or its swing back in the air)?"""
+        k = self.keys["wrench"]
+        i = next((i for i in range(len(k) - 1) if k[i][0] <= t < k[i + 1][0]), None)
+        return i is not None and not np.allclose(k[i][1], k[i + 1][1], atol=1e-9)
+
+    def stroking(self, side: str, t: float) -> bool:
+        """Is the side's hand swinging the wrench's handle with its box end on a nut (a stroke, turn_nut)?"""
+        return any(e["kind"] == "turn_nut" and e["side"] == side and e["t0"] <= t < e["t1"] for e in self.tk["events"])
 
     def onto_flats(self, R: np.ndarray, p: np.ndarray) -> np.ndarray:
         """The turn about z that brings the wrench's planned box end (frame R, middle p mm) square on the flats of the
         nut it is over, as the nut stands now: its walls face in at 30 + 60k deg from its yaw, the nut's flats out at
         30 + 60k deg from its turn (moonshot/world/wrench.py boxes, spoilboard._nut_geoms); none away from a nut."""
         m, d = self.model, self.data
-        for c in self.clamps:
-            if c.name in self.nuts and np.linalg.norm(p[:2] - np.asarray(c.stud)) < 5.0:
-                turn = float(d.qpos[m.jnt_qposadr[m.joint(f"{c.name}_nut_turn").id]])
-                off = (turn - math.atan2(R[1, 0], R[0, 0]) + math.pi / 6) % (math.pi / 3) - math.pi / 6
-                return Rotation.from_rotvec([0.0, 0.0, off]).as_matrix()
-        return np.eye(3)
+        c = self.nut_under(p)
+        if c is None:
+            return np.eye(3)
+        turn = float(d.qpos[m.jnt_qposadr[m.joint(f"{c.name}_nut_turn").id]])
+        off = (turn - math.atan2(R[1, 0], R[0, 0]) + math.pi / 6) % (math.pi / 3) - math.pi / 6
+        return Rotation.from_rotvec([0.0, 0.0, off]).as_matrix()
 
     def firm_setup(self) -> None:
         super().firm_setup()
@@ -124,8 +154,16 @@ class PlateClamps(FirmGrip, TakeRunner):
         return bool(v[min(len(v) - 1, int(round(t * self.fps)))] > 250.0)       # as FirmGrip.fast, either hand
 
     def touching(self, side: str) -> bool:
-        if self.fast_side(side, self._now):
+        """When the eye's steering pauses (TakeRunner.correction): as FirmGrip's while the hand moves fast, either
+        hand; while the hand strokes the wrench on a nut, as on a mechanism's handle (the vise's crank): the nut, not
+        the eye, says where the box end goes, and steered there the eye wound up against it and the hand flailed once
+        the box end came off. Otherwise, while the hand carries a clamp or the wrench, the eye keeps steering it
+        whatever the hand brushes: paused by a little finger's touch on the spoilboard (0.7 N) through a carry, the
+        left hand's 11 mm lag stood and the strap stalled 17 mm short of its place and fell back off the plate."""
+        if self.fast_side(side, self._now) or self.stroking(side, self._now):
             return True
+        if self.carrying(side, self._now) is not None:
+            return False
         return super().touching(side)
 
     def before_step(self, t: float) -> None:
@@ -153,7 +191,7 @@ class PlateClamps(FirmGrip, TakeRunner):
 
     def hand_force(self, side, t):
         """The strap's weight or the wrench's, carried, taken up over people's loading time (as the parallels')."""
-        e = next((e for e in self.carry.values() if e["side"] == side and e["t0"] <= t < e["t1"]), None)
+        e = self.carrying(side, t)
         if e is None:
             return None
         from moonshot.motion import set_parallels as SP

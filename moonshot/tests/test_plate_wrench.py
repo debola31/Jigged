@@ -16,12 +16,32 @@ PARTS = ["ll-1005337", "nist-ftc-09"]
 
 
 def test_the_box_end_fits_over_the_nut_square_on_its_flats():
-    rings = [(c, a) for n, c, _, a in WR.boxes() if n.startswith("ring_")]
+    rings = [(c, R) for n, c, _, R in WR.boxes() if n.startswith("ring_")]
     assert len(rings) == 6
-    for c, a in rings:
+    for c, R in rings:
         inner = np.linalg.norm(c[:2]) - WR.WALL / 2
         assert SB.NUT_AF / 2 < inner < SB.NUT_AF / 2 + 1.0
+        a = math.atan2(R[1, 0], R[0, 0])
         assert min(abs(((a - math.pi / 6) % (math.pi / 3)) - x) for x in (0.0, math.pi / 3)) < 1e-9
+    assert 0.0 < WR.play() < math.radians(8.0)                   # it turns the nut, a little loose on it
+
+
+def test_the_box_ends_chamfer_leads_it_onto_the_nut_without_reaching_below_it():
+    """Every solid of the box end stays above its underside and outside the nut's hex, and the chamfer's face runs
+    from the wall's inner face CHAMFER_MM up to CHAMFER_MM out on the underside."""
+    r_in, h = WR.AF_IN / 2, WR.HEIGHT / 2
+    for n, c, hh, R in WR.boxes():
+        corners = np.array([c + R @ (hh * s) for s in np.array(np.meshgrid(*[[-1, 1]] * 3)).T.reshape(-1, 3)])
+        assert corners[:, 2].min() > -h - 1e-9, n
+        if n.startswith(("ring_", "foot_", "chamfer_")):
+            u = c[:2] / np.linalg.norm(c[:2])
+            assert (corners[:, :2] @ u).min() > r_in - 1e-9, n           # never inside the hexagon's opening
+    for k in range(6):
+        _, c, hh, R = next(b for b in WR.boxes() if b[0] == f"chamfer_{k}")
+        u = np.r_[c[:2] / np.linalg.norm(c[:2]), 0.0]
+        face = [c - R[:, 0] * hh[0] + R[:, 2] * s * hh[2] for s in (-1, 1)]   # its face's low and high edges
+        assert face[0] @ u == pytest.approx(r_in + WR.CHAMFER_MM) and face[0][2] == pytest.approx(-h)
+        assert face[1] @ u == pytest.approx(r_in) and face[1][2] == pytest.approx(-h + WR.CHAMFER_MM)
 
 
 @pytest.mark.parametrize("part", PARTS)
@@ -59,7 +79,8 @@ def test_on_each_nut_the_box_end_is_on_the_stud_and_turns_it_the_whole_run(part,
             assert pa[2] == pytest.approx(z + SB.FLANGE_T + WR.HEIGHT / 2 + 0.5)       # seated on the nut as it is
             z += SB.LEAD_MM * rad / (2 * math.pi)
             turn = math.atan2(Rb[1, 0], Rb[0, 0]) - math.atan2(Ra[1, 0], Ra[0, 0])
-            assert (turn - rad + math.pi) % (2 * math.pi) - math.pi == pytest.approx(0.0, abs=1e-9)
+            swing = rad + math.copysign(WR.play(), rad)                 # the nut's turn and the box end's play
+            assert (turn - swing + math.pi) % (2 * math.pi) - math.pi == pytest.approx(0.0, abs=1e-9)
         assert z == pytest.approx(c.nut_z("clamped") - SB.LEAD_MM * PW.SNUG / (2 * math.pi) if direction == "tighten"
                                   else c.nut_z("parked") + SB.LEAD_MM * PW.SNUG / (2 * math.pi))
     assert np.allclose(keys[0][2], keys[-1][2])                  # laid back where it lay

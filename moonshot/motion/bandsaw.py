@@ -86,7 +86,11 @@ JAW_GAP_MM = 2.3            # the jaw left open this far past the bar, so the ha
 CUT_FEED_MM_S = 1.5         # the feed valve opened to this (proposed): the blade down through 1 in of 4140 in about
                             # 17 s, 3.5 sq in a minute, and the whole stroke from the raised bow in under 3 minutes (the
                             # card: 1-3)
-SLIDE_S = 4.5               # the card's bar slide, from Dake's footage
+SLIDE_S = 3.0               # the bar's slide, 45 mm: the card's 4.5 s, from Dake's footage, was for 50 mm of a lighter
+                            # bar, and pushing 4140 that long held the arm past people's sustained effort (0.42 of a
+                            # muscle's maximum for 5.4 s, against 0.30 held 5 s or more)
+PUSH_EFFORT = 0.05          # the fingers on the bar's end barely squeezed: welded to the hand it no longer meets the
+                            # skin, and at the grips' 0.3 the pads sank 5.5 mm into it
 STOP_INTO_MM = 2.0          # the slide is aimed this far past the stop's face, and JAW_INTO_MM into the fixed jaw, so
 JAW_INTO_MM = 1.0           # the bar meets both, as people push a bar up to a stop and its fence: aimed 0.5 mm in and
                             # at the jaw's face, it ended 0.64 mm short of the stop and 1.25 mm off the jaw
@@ -303,7 +307,7 @@ class LoadPlan(SawPlan):
         face = self.place.world([c[0], tail, c[2]])
         out = self.place.vec([0.0, 1.0, 0.0])             # its outward normal, toward the person
         hw, hh = SC.STOCK["w"] / 2, SC.STOCK["h"] / 2
-        on_face = lambda x0, x1: G.plane_target(face, out, 2.0, bands(face, x=(x0, x1), z=(-hh + 6, hh - 5)))  # noqa: E731
+        on_face = lambda x0, x1: G.plane_target(face, out, 1.0, bands(face, x=(x0, x1), z=(-hh + 6, hh - 5)))  # noqa: E731
         q0 = self.hand.neutral()
         for nm in ("index", "middle", "ring", "little"):
             q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 30.0, 25.0, 10.0
@@ -343,7 +347,7 @@ class LoadPlan(SawPlan):
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 110, approach=Wg + back * 35,
                         opened=0.6, lead=0.10, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
-        self.effort("R", tg + 0.25, 0.3, "bar")
+        self.effort("R", tg + 0.25, PUSH_EFFORT, "bar")
         t_slide = tg + 0.3
         slide = SC.stop_face_y() - STOP_INTO_MM - (self.bar0[1] - SC.bar_mm() / 2)        # along +Y: negative
         self.look(t_slide, self.place.world([SC.fixed_face_x(), SC.stop_face_y(), SC.bed_z() + 20]))
@@ -371,7 +375,7 @@ class LoadPlan(SawPlan):
         # degree's yaw from the arm wedged it between the jaws, 2.3 mm wider than it (the push is fed forward at the
         # fingers, moonshot/sim/bandsaw.py hand_forces, so the hand doesn't pivot on them)
         self.event("loose", tg + 0.05, t_off, obj="bar")
-        self.effort("R", t_off - 0.1, 0.3, "bar")
+        self.effort("R", t_off - 0.1, PUSH_EFFORT, "bar")
         self.effort("R", t_off + 0.1, 0.0, "bar")
         _, W = self.grip_pose("bar", t_off)
         self.release_keys(g["q"], t_off, t_off + 0.05, t_off + 0.55)

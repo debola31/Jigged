@@ -66,10 +66,12 @@ def min_jerk(x: float) -> float:
 
 class BenchRun:
     def __init__(self, folder: Path, loose: str, carried: tuple[str, ...] = (), skip: tuple[str, ...] = (),
-                 grip_objects: dict[str, tuple[str, ...]] | None = None, cell=BC):
+                 grip_objects: dict[str, tuple[str, ...]] | None = None, cell=BC, anticipate: tuple[str, ...] = ()):
         """grip_objects: each grip's name -> the bodies its digits squeeze into. cell: the scene, a module with
-        bench_cell's with_body (the inspection bench's, unless another's)."""
+        bench_cell's with_body (the inspection bench's, unless another's). anticipate: the carried objects whose
+        weight the carrying arm takes on as it lifts them (carry_load)."""
         self.onsets: TouchOnsets | None = None             # from run(): when, between frames, each touch began
+        self.anticipate = tuple(anticipate)
         self.folder = Path(folder)
         self.tk = json.loads((self.folder / "take.json").read_text(encoding="utf-8"))
         self.rd = np.load(self.folder / "reference.npz")
@@ -248,7 +250,28 @@ class BenchRun:
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jac(m, d, jacp, None, point, body)
             tau += jacp[:, self.act_dof].T @ (-np.asarray(e["normal"], float) * mag)
-        return tau + self.point_push(tt)
+        return tau + self.point_push(tt) + self.carry_load(tt)
+
+    def carry_load(self, tt: float) -> np.ndarray:
+        """The weight of a carried object the arm knows it lifts (`anticipate`), fed forward through the carrying arm at
+        the object's centre of mass, as people anticipate a load they know: taken on over the carry's `load_s` from its
+        start (the lift's loading), and let go of over its last `unload_s` as it is set down. The plan's inverse
+        dynamics are the body's alone, so without it a 0.6 kg part sagged the arm 49 mm and was carried through the rim
+        it was planned to clear."""
+        m, d = self.model, self.data
+        tau = np.zeros(len(self.acts))
+        for e in self.carries:
+            if e["obj"] not in self.anticipate or not e["t0"] <= tt < e["t1"]:
+                continue
+            w = min_jerk((tt - e["t0"]) / max(e.get("load_s", 0.2), 1e-6))
+            w *= 1 - min_jerk((tt - (e["t1"] - e.get("unload_s", 0.3))) / max(e.get("unload_s", 0.3), 1e-6))
+            tree = self.tree(e["obj"])
+            kg = float(sum(m.body_mass[b] for b in tree))
+            com = sum(m.body_mass[b] * d.xipos[b] for b in tree) / kg
+            jacp = np.zeros((3, m.nv))
+            mujoco.mj_jac(m, d, jacp, None, com, m.body(f"{e.get('side', 'R')}_hand").id)
+            tau += jacp[:, self.act_dof].T @ np.array([0.0, 0.0, kg * 9.81 * w])
+        return tau
 
     def steady_hold(self, tt: float) -> np.ndarray:
         """Joint offsets for a hand holding a part still by pressing on it: once it has landed it holds where it is,

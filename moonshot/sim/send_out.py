@@ -22,7 +22,8 @@ def run(part: str, replan: bool = False, seconds: float | None = None, out=None)
     out = Path(out) if out else plan.out_dir(part)
     if replan or not (out / "reference.npz").exists():
         plan.build(part, out=out)
-    r = BenchRun(out, plan.loose(part), carried=("part",), grip_objects={"part": ("part",)}, cell=OC)
+    r = BenchRun(out, plan.loose(part), carried=("part",), grip_objects={"part": ("part",)}, cell=OC,
+                 anticipate=("part",))
     r.run(seconds)
     r.export("outproc_rack", NEVER_HELD, SOLIDS, OC.render_glbs(r.model, OC.SEND_OUT[part]), {})
     return json.loads((out / "report.json").read_text(encoding="utf-8"))

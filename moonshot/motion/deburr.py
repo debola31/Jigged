@@ -63,6 +63,7 @@ class Job:
     steady: Steady = Steady()
     keep_off: tuple = ("mic1", "cal6")
     at_xy: tuple = (-80.0, -110.0)
+    skip: tuple = ()               # the station's instruments put away for it: a big part takes their place
 
     @property
     def bisector(self) -> np.ndarray:
@@ -75,6 +76,22 @@ JOBS = {"nist-ftc-10": Job(
     strokes=(((-5.0, 0.0, 37.5), (-55.0, 0.0, 37.5)),       # the outer near top edge, toward the right
              ((12.0, 0.0, -25.0), (-50.0, 0.0, -25.0))),    # the pocket's far edge, toward the right
     face_out=(0.0, 0.0, 1.0), up=(0.0, -1.0, 0.0))}          # the near side and the pocket's far wall; datum A
+# ll-1005337, the 600 x 400 Delrin plate, along the bench's front, its near long edge 83 mm in from the bench's edge
+# and its far edge clear of the gauge-block case: the calipers, the micrometer and the thread gauge are put away, as
+# it lies where they were kept. The left hand flat on its top, fingers forward, the middle along the 10 mm rib between
+# the near column's fifth and sixth recesses (STEP Y 475-485): on the near margin alone (26.5 mm, between the edge and
+# the recesses) the pads could find no place (the grip's pads 58-302 against nist-ftc-10's under 1). The blade along
+# the near top edge twice. The caption says the tabs cut and filed, and the rest
+JOBS["ll-1005337"] = Job(
+    BC.LL_1005337,
+    strokes=(((-398.0, 190.0, -0.95), (-398.0, 110.0, -0.95)),      # the near top edge, toward the right
+             ((-398.0, 330.0, -0.95), (-398.0, 260.0, -0.95))),     # ... and again, further left
+    face_out=(-1.0, 0.0, 0.0), up=(0.0, 0.0, 1.0),
+    steady=Steady(at=(-360.0, 480.0, -0.95),
+                  pads=tuple((f, (-360.0, 480.0, -0.95), (0.0, 0.0, 1.0), (("x", b), ("y", (-25, 25))))
+                             for f, b in (("index", (8, 20)), ("middle", (-5, 5)), ("ring", (-22, -10)))),
+                  push=(0.0, 0.0, 1.0)),
+    keep_off=(), at_xy=(150.0, 100.0), skip=("cal6", "mic1", "thread"))
 
 
 def out(part: str) -> Path:
@@ -119,10 +136,10 @@ class DeburrPlan(BenchPlan):
     # its skin, both arms held to people's, the left steadying hand's shoulder turned past theirs for 34 frames
     solver_w = {"range": 3.5}
 
-    def __init__(self, job: Job, verbose=True):
-        super().__init__(out(job.part.name), verbose)
+    def __init__(self, job: Job, verbose=True, folder=None):
+        super().__init__(folder or out(job.part.name), verbose)
         self.job, self.bench_part, self.steady_on = job, job.part, job.steady
-        rest = self.rests = settle(loose(job))
+        rest = self.rests = settle(loose(job), skip=job.skip)
         self.part, self.tool0 = rest["part"], rest["deburr_tool"]
         self.paths["deburr_tool"] = [(0.0, self.tool0[1], self.tool0[0])]
         self.solve_grips(self.grip_specs(), rest)
@@ -288,9 +305,10 @@ def curled(q: dict) -> dict:
     return q | {"ring_mcp_flex": 75.0, "ring_pip": 90.0, "little_mcp_flex": 75.0, "little_pip": 90.0}
 
 
-def build(part: str = "nist-ftc-10", solve=True, verbose=True) -> DeburrPlan:
+def build(part: str = "nist-ftc-10", solve=True, verbose=True, folder=None) -> DeburrPlan:
+    """folder: where the take is planned, if not its own folder under takes/ (a trial's)."""
     job = JOBS[part]
-    plan = DeburrPlan(job, verbose=verbose)
+    plan = DeburrPlan(job, verbose=verbose, folder=folder)
     plan.compose()
     if solve:
         plan.solve()
@@ -300,4 +318,5 @@ def build(part: str = "nist-ftc-10", solve=True, verbose=True) -> DeburrPlan:
 
 
 if __name__ == "__main__":
-    build(*sys.argv[1:2])
+    argv = sys.argv[1:]
+    build(*argv[:1], folder=argv[argv.index("--out") + 1] if "--out" in argv else None)

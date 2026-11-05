@@ -102,6 +102,13 @@ def part(name: str = "nist-ftc-10") -> dict:
     shape = cq.importers.importStep(str(data_root() / "parts" / name / "part.step")).val()
     verts, faces = shape.tessellate(0.05, 0.3)
     mesh = trimesh.Trimesh(np.array([(p.x, p.y, p.z) for p in verts]), np.array(faces), process=True)
+    # drawn in what it's made of where that isn't steel (a GLB with no material is drawn as bare steel): the acetal
+    # plate black, as its drawing has it
+    record = json.loads((data_root() / "parts" / name / "part.json").read_text(encoding="utf-8"))
+    if any(w in (record.get("material") or "").lower() for w in ("acetal", "delrin")):
+        from trimesh.visual.material import PBRMaterial
+        mesh.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
+            name="acetal_black", baseColorFactor=[0.02, 0.02, 0.022, 1.0], metallicFactor=0.0, roughnessFactor=0.4))
     return write(mesh, data_root() / "parts" / name / "finished.glb")
 
 

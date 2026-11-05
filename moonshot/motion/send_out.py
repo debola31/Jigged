@@ -24,12 +24,20 @@ from moonshot.motion.step_take import HANGING
 from moonshot.world import outproc_cell as OC
 
 TAKES = data_root() / "takes"
-LUMBAR = np.array([-60.0, -575.0, 955.0])   # standing at the rack's front, as at the bench: 270 mm behind the shelf's
-                                            # front edge, the coating shelf's work in front of the belly
+LUMBAR = np.array([-100.0, -575.0, 955.0])  # standing at the rack's front, as at the bench: 270 mm behind the shelf's
+                                            # front edge, the bag in front of the right side of the belly: 40 mm
+                                            # further right, set in at the body's middle, the right arm crossed it
+                                            # (shoulder plane 53 deg) and was less like people's (median NLL 29.1)
 OVER_RIM_MM = 25.0          # carried over the bag, the part's underside this far over its rim
 IN_FROM_NEAR_MM = 38.0      # set in, the part's near side this far from the bag's near wall: the thumb is behind it
+RIGHT_OF_MIDDLE_MM = 15.0   # ... and this far right of the bag's middle: the fingers lie to the part's left, the hand
+                            # coming from the right
 LOWER_S, SET_S = 0.8, 0.5   # down into the bag to 15 mm over its floor, then the last 15 mm onto it, slower
-GRIP_EFFORT = 0.4           # the pinch's effort while it carries the part (the deburring tool's 0.3 for 50 g)
+GRIP_EFFORT = 0.2           # the pinch's effort while it carries the part: carried, the part leaves the skin, and at
+                            # 0.4 the squeeze took the thumb 5.8 mm into it (the skin's 3.5)
+LOAD_S, UNLOAD_S = 0.3, 0.3 # the arm takes the part's weight on over this long as it lifts it (people's loading
+                            # 163-265 ms), and lets it go over this long as it sets it down (moonshot/sim/bench.py
+                            # carry_load): at 0.2 s the 0.6 kg part left the shelf 167 ms after its load began
 
 
 def loose(part: str) -> str:
@@ -45,7 +53,10 @@ class SendOutPlan(BenchPlan):
     lumbar = LUMBAR
     # the grip weighs people's posture at 3, and its pads x3 to keep contact, as the deburring tool's grip does
     grip_weights = (3.0, 3.0)
-    solver_w = {"range": 3.5}
+    # the body people's range at 3.5, as the bench takes', and their posture at 2 (BodySolver.W["prior"], 0.3): the
+    # palm-down pinch the whole take long, the shoulder turned in where people's isn't, the median NLL was 29.1 at
+    # 0.3 and 28.1-28.9 at 1 (people's 28.7)
+    solver_w = {"range": 3.5, "prior": 2.0}
 
     def __init__(self, part: str, out=None, verbose=True):
         self.spec = OC.SEND_OUT[part]
@@ -79,7 +90,7 @@ class SendOutPlan(BenchPlan):
         p, R = self.bag0
         lo_in, hi_in = OC.bag_inside()
         lo, hi = self.spec.world_extent()
-        x = (lo_in[0] + hi_in[0]) / 2 - (lo[0] + hi[0]) / 2
+        x = (lo_in[0] + hi_in[0]) / 2 - (lo[0] + hi[0]) / 2 + RIGHT_OF_MIDDLE_MM
         y = lo_in[1] + IN_FROM_NEAR_MM - lo[1]
         z = lo_in[2] - lo[2] + 0.3
         return p + R @ np.array([x, y, z])
@@ -101,8 +112,9 @@ class SendOutPlan(BenchPlan):
                              colliders=self.part_colliders() + [box((lo + hi) / 2, (hi - lo) / 2), self.bag_box(5.0)],
                              targets={"thumb": on(thumb, n, (-4, 4)), "index": on(fing, -n, (-b, -a)),
                                       "middle": on(fing, -n, (a, b))},
-                             starts=[S(20, 0, r, 45, 45, sr, 75, p, 0, 0) for p in (30, 60) for sr in (-35, -10)
-                                     for r in (0, 15)])}
+                             # four starts, from the shoulder turned out: eight took 20 minutes a grip on the shared
+                             # hub, and both parts' best grips turned the trunk 7-8 deg, between eight's two
+                             starts=[S(20, 0, 0, 45, 45, sr, 75, p, 0, 0) for p in (30, 60) for sr in (-35, -10)])}
 
     # --- the verbs ------------------------------------------------------------------------------------------------
     def pick_up(self):
@@ -114,9 +126,12 @@ class SendOutPlan(BenchPlan):
         lo, hi = self.spec.world_extent()
         self.look(t0, p0 + R0 @ np.zeros(3) + (lo + hi) / 2)
         # ready in front of the shelf's edge, high enough that the hanging fingers clear it, and onto the part from
-        # above as the deburring tool is taken off the bench
-        tg = self.reach("R", "part", t0, ready=Wg + [0, -170, 140], approach=Wg + [0, -30, 45], opened=0.8, lead=0.09,
-                        above=5.0)
+        # above, coming to rest at the grip and closing there: closing 5 mm down onto it, the fingers dragged the
+        # L-block down 1.3 N and threw the jaw 4.6 mm up, so the load began at the touch (preload 0 and 67 ms, people's
+        # 139-321). Widest 0.11 s before it comes to rest: 0.09 s was 71% of the way with the touch on the way down,
+        # and closing from 0.6 open in 0.06 s the fingers snapped shut on the parts and threw them 21-23 mm
+        tg = self.reach("R", "part", t0, ready=Wg + [0, -130, 110], approach=Wg + [0, -30, 45], opened=0.8, lead=0.11,
+                        close_s=0.12)
         self.effort("R", tg, 0.0, "part")
         self.effort("R", tg + 0.25, GRIP_EFFORT, "part")
         self.t_grab = tg
@@ -146,13 +161,17 @@ class SendOutPlan(BenchPlan):
         self.effort("R", t_down - 0.1, GRIP_EFFORT, "part")
         self.effort("R", t_down + 0.05, 0.0, "part")
         self.event("grip", self.t_grab, t_down + 0.15, side="R", grip="part", on="part")
-        self.event("carry", self.t_lift, t_down + 0.05, obj="part", grip="part", ease_in=CARRY_EASE_S)
+        self.event("carry", self.t_lift, t_down + 0.05, obj="part", grip="part", ease_in=CARRY_EASE_S,
+                   load_s=LOAD_S, unload_s=UNLOAD_S)
         self.fingers("R", t_down + 0.05, g["q"])
-        self.fingers("R", t_down + 0.4, open_like(self.hand, g["q"], 0.5))
+        # the fingers only let go in the bag, and open once the hand is up out of it: opened as it rose, the thumb
+        # swung out into the bag's wall and pushed the bag 15 mm
+        self.fingers("R", t_down + 0.3, open_like(self.hand, g["q"], 0.2))
+        self.fingers("R", t_down + 0.9, open_like(self.hand, g["q"], 0.5))
         _, W = self.grip_pose("part", t_down)
         self.wrist["R"] = W
         # straight up out of the bag first, clear of its rim, then back past the shelf's edge and down to the side
-        self.transit("R", t_down + 0.1, t_down + 0.7, W + [0, -15, 95], via=[W + [0, 0, 25]])
+        self.transit("R", t_down + 0.1, t_down + 0.7, W + [0, -10, 110], via=[W + [0, 0, 45]])
         self.fingers("R", t_down + 1.4, self.q_relax)
         self.transit("R", t_down + 0.7, t_down + 1.8, self.rest, via=[W + [0, -230, 80]])
         self.t = t_down + 1.8

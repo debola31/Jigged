@@ -170,9 +170,10 @@ class SawPlan(BenchPlan):
     # shoulder out to 53 deg (people's 99th percentile, 31), 92% of the load take's frames in their range. And their
     # likelihood more than the shared 0.3: the hanging left arm's plane of elevation, which means little while it
     # hangs, went to 37 deg toward the comfort centre's 50 (people's hanging arms ~15), less likely than their 95th
-    # percentile all through the load take (30.0 against 28.7). Range at 8: reaching down, the trunk's side-bend went
-    # past the left arm's view of people's range (-8.4 deg) for up to a quarter of a take
-    solver_w = {"range": 8.0, "prior": 1.5}
+    # percentile all through the load take (30.0 against 28.7). Range at 30: rising to reach down, the trunk's
+    # side-bend went past the left arm's view of people's range (-8.4 deg) for up to a quarter of a take at 3, and
+    # 11% at 8, where a degree past it cost a third of a frame's posture
+    solver_w = {"range": 30.0, "prior": 1.5}
 
     def __init__(self, out, state: dict | None = None, verbose: bool = True):
         self.lumbar = self.place.world(self.lumbar_station)
@@ -346,9 +347,10 @@ class LoadPlan(SawPlan):
         # level onto the end face over its last 35 mm: coming down onto it, the fingers caught its top edge, rolled the
         # bar 2.6 deg and lifted its tail 4 mm, and it jammed between the jaws
         # in from 50 mm back, the hand opened 0.45: from 35 mm and 0.6, the thumb's open tip brushed the 1-3/4 in
-        # bar's end 0.2 s before the fingers came onto it
+        # bar's end 0.2 s before the fingers came onto it. The thumb still meets the end first, 0.17 s before the
+        # wrist stops, so the hand is widest 0.24 s before (0.10 s before, it was widest as the thumb touched)
         tg = self.reach("R", "bar", self.t, ready=Wg + up * 50 + back * 120, approach=Wg + back * 50,
-                        opened=0.45, lead=0.10, rise_s=2.0, still_s=0.45)
+                        opened=0.45, lead=0.24, rise_s=2.0, still_s=0.45)
         self.effort("R", tg, 0.0, "bar")
         self.effort("R", tg + 0.25, PUSH_EFFORT, "bar")
         t_slide = tg + 0.3

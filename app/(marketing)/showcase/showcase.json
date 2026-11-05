@@ -602,7 +602,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-seat",
@@ -620,7 +620,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-seat.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-check",
@@ -638,7 +638,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op30-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-xy",
@@ -802,7 +802,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-load.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-seat",
@@ -820,7 +820,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-seat.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-check",
@@ -838,7 +838,7 @@
       "type": "video",
       "path": "video/nist-ftc-10/op40-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-xy",

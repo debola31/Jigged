@@ -103,7 +103,8 @@ OPS = {                                                                     # it
     ("ll-1005337", "op20", "far_edge"): {"in": [[-23.0, -60.0, -60.0], [60.0, 660.0, 40.0]], "ring": 0.02},
     ("ll-1007223", "op10", "outline"): {"to_jaws": 1.0},
     ("ll-1007223", "op20", "underside"): {"levels": True},
-    ("ll-1007223", "op20", "radius"): {"ball": {"along": [0, 0, 1], "across": [1, 0, 0], "profile_at": 0.0,
+    # the section at z = 20, clear of every hole (at z = 0 the Ø11 breaks through the R10 and the profile dips)
+    ("ll-1007223", "op20", "radius"): {"ball": {"along": [0, 0, 1], "across": [1, 0, 0], "profile_at": 20.0,
                                                 "stations": (13.0, 20.8), "span": (-42.0, 42.0)}},
     ("ll-1007223", "op30", "spot"): {"countersink": {6.5: 9.5}},
     ("ct-slbeam", "op40", "notch"): {"x": (10.0, 95.0), "floor": 19.05},
@@ -593,8 +594,9 @@ class Planner:
 
     # --- levels: clear an area level by level, clear of the part ---
 
-    def levels(self, ps: PartInSetup, sw, t: Tool, area, floor: float | None = None) -> Pass:
-        """Clear an area level by level down to its lowest floor, or to `floor` (world mm: through a plate)."""
+    def levels(self, ps: PartInSetup, sw, t: Tool, area, floor: float | None = None, slack: float = 0.0) -> Pass:
+        """Clear an area level by level down to its lowest floor, or to `floor` (world mm: through a plate). The tool's
+        centre stays r less `slack` off the part, so a slot exactly its width leaves it a line to run along."""
         top = sw.zmax
         flat = [f for f in ps.faces_in(grow(area, t.r)) if f.geomType() == "PLANE"]
         ups = [f for f in flat if f.BoundingBox().zlen < 1e-3 and f.normalAt().z > 0.99]
@@ -622,7 +624,7 @@ class Planner:
             new = [h for h in crit if h > z + 1e-3 and h not in used] + [z + 0.01]
             used |= set(new)
             shadow = union(_faces(shadow) + _faces(ps.shadow(new)))
-            centres = minus(area, grow(shadow, t.r)) if shadow is not None else area
+            centres = minus(area, grow(shadow, t.r - slack)) if shadow is not None else area
             if centres is None:
                 continue
             self._follow(p, raster(centres, 0.8 * t.r) + loops(centres), z, top)
@@ -712,7 +714,7 @@ class Planner:
             p.to([*xy, top + CLEAR_MM])
             h = top + CLEAR_MM - full
             solid = cq.Solid.makeCylinder(r_cut, h, cq.Vector(xy[0], xy[1], full), cq.Vector(0, 0, 1))
-            if t.kind == "drill":
+            if t.kind == "drill" and full - tip > 1e-6:          # a flat-bottomed drill (180 deg) has no point
                 solid = solid.fuse(cq.Solid.makeCone(r_cut, 0.0, full - tip, cq.Vector(xy[0], xy[1], full),
                                                      cq.Vector(0, 0, -1)))
             p.cut(solid, ps.frame)
@@ -905,9 +907,9 @@ class Planner:
                 p[up] = cfg["floor"]
                 floor = float(ps.frame.world(p)[2])
             passes.append(self.levels(ps, sw, t, _model_to_world_area(ps.frame, ps.world.BoundingBox(), cfg), floor))
-        if "voids" in cfg:
+        if "voids" in cfg:                                      # 5 µm slack: a slot the tool's own width
             area = union([f for box in cfg["voids"] for f in _faces(self.voids(ps, box))])
-            passes.append(self.levels(ps, sw, t, area, sw.zmin - 0.5 if cfg.get("through") else None))
+            passes.append(self.levels(ps, sw, t, area, sw.zmin - 0.5 if cfg.get("through") else None, slack=0.005))
         if kind in ("drill", "ream", "tap", "counterbore") or "holes" in cfg:
             by_dia: dict[float, list] = {}
             for xy, lo, through, dia in self.selected_holes(ps, setup, op, cfg):
@@ -1006,9 +1008,7 @@ class Planner:
             p.to([*xy, s + 2.0])
             p.to([*xy, tip], t.feed)
             p.to([*xy, top + CLEAR_MM])
-            h = top + CLEAR_MM - tip
-            p.cut(cq.Solid.makeCone(0.0, h * math.tan(half), h, cq.Vector(xy[0], xy[1], tip), cq.Vector(0, 0, 1)),
-                  ps.frame)
+            p.cut(point_and_shank(xy, tip, t.r, half, top + CLEAR_MM), ps.frame)
         return p
 
     def chamfer(self, ps: PartInSetup, sw, t: Tool) -> Pass:
@@ -1045,10 +1045,9 @@ class Planner:
                 if key in seen:                                # OCC splits a cone in halves: one cut a hole
                     continue
                 seen.add(key)
-                r0 = max(r_lo - 0.05, 0.0)
-                h = top + 1.0 - b.zmin + 0.05
-                cones.append(cq.Solid.makeCone(r0, r0 + h, h, cq.Vector(ax[0], ax[1], b.zmin - 0.05),
-                                               cq.Vector(0, 0, 1)))
+                apex = b.zmin - r_lo                           # the 45 deg cone's point, on the hole's axis; a
+                reach = max(r_at(b.zmax), t.r)                 # countersink wider than the tool, it goes round it
+                cones.append(point_and_shank(ax, apex, reach, math.radians(45.0), top + 1.0))
                 p.to([*ax, top + CLEAR_MM])
                 for a in np.linspace(0, 2 * math.pi, 13):
                     p.to([ax[0] + (r_lo - 0.5) * math.cos(a), ax[1] + (r_lo - 0.5) * math.sin(a), b.zmin], t.feed)
@@ -1105,6 +1104,16 @@ class Planner:
         face = cq.Face(BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(*o), gp_Dir(*a_w)), w.wrapped, True).Face())
         p.cut(cq.Solid.extrudeLinear(face, cq.Vector(*((z1 - z0) * a_w))), f)
         return p
+
+
+def point_and_shank(xy, tip: float, r: float, half: float, top: float):
+    """A pointed tool's cut, its point at `tip` (world z) on axis xy: the point's cone (half angle `half`) out to the
+    tool's radius, then the tool's cylinder up to `top`."""
+    h = r / math.tan(half)
+    cone = cq.Solid.makeCone(0.0, r, h, cq.Vector(xy[0], xy[1], tip), cq.Vector(0, 0, 1))
+    if tip + h >= top:
+        return cone
+    return cone.fuse(cq.Solid.makeCylinder(r, top - tip - h, cq.Vector(xy[0], xy[1], tip + h), cq.Vector(0, 0, 1)))
 
 
 def merged(passes) -> Pass:

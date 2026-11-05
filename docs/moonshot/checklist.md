@@ -359,6 +359,12 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     So do nist-ftc-09's 17 letter-wall faces, where the 1/32 in end mill leaves its radius (0.156 mm) in the
     letters' square inside corners, and ll-1005337's four short notch side walls, where the dovetail's 20 deg
     flank leaves a wedge (up to 0.98 mm): what a round tool leaves.
+  - The plate parts' back-row tool holders, picked from under the bracket's front row, are eased in the hand
+    toward the planned grip while in the air, ending within 6 deg of it (`carry_holder`'s declaration extended):
+    the hand closes on them 13-20 deg off. The bracket's front row stands at y -690, 10 mm past the -680 named,
+    so a hand reaching round a front holder clears the back one.
+  - The band saw's lift-out slides the cut piece 65 mm off the jaw's plate past the stop block, pulls it 35 mm
+    toward the operator and takes it by its ends: across its width the hand would point 90 deg off the forearm.
   - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
     by its end faces and a slide went into the skin and overloaded the arms).
   - A plate's clamp nuts are run down and snugged with a 3/4 in box-end wrench, in strokes (a fingertip spin

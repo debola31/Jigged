@@ -320,7 +320,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   on the table isn't held to the vise's 2 mm (op20's lands 2.8 mm off). op20's vise load passes every per-frame
   check and physics outcome, its grip margin 2.48 against people's 1.7-2.2: published as a recorded exception (your
   decision); every load has over-gripped so since the colliders were fitted to the skin (the 5.5 deg base squeeze
-  was tuned for capsules 2.5 mm inside the pads), to bring back into the band after Nov 5.
+  was tuned for capsules 2.5 mm inside the pads), to bring back into the band after Nov 5. The exception covers
+  every vise load tonight (your decision, 16:30). The thumb's fingertip collider refit to its pad as it carries
+  (your decision): in the carry grips its pad stood 2.1-2.5 mm outside it at the median, so carried parts read
+  3.6-3.9 mm of skin; moved 2.5 mm, 1.0-1.9 at worst.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts**
 - [ ] Nov 6: G1 (5 parts) on the web
 - [ ] Nov 7: G2 (3 parts) on the web

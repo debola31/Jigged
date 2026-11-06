@@ -1,16 +1,18 @@
 {
  "asset": "em12",
- "about": "Helical H45AL 3-flute square end mill for aluminium, 1/2 x 1 x 3 in (#03452), modelled from scratch (no vendor CAD): a ground cross-section (cutting edge, margin, eccentric relief, the gullet) swept along the 45 deg helix, run out into the shank along the wheel's arc, the end dished with clearance facets; standing tip down as its placeholder does. Sources: Helical Solutions #03452 (H45AL-SR-30500) product page and images, helicaltool.com: 1/2 in, 3 flutes, 45 deg helix, 1 in LOC, 3 in OAL, ZPLUS; the images show ZPLUS gold over the flutes and a band past their runout, the shank bare ground carbide with a chamfered end. ",
- "reviewed": "2026-11-05: draft; flutes, runout and coating band checked against Helical's product images",
+ "about": "Helical H45AL 3-flute square end mill for aluminium, 1/2 x 1 x 3 in (#03452), modelled from scratch (no vendor CAD): a ground cross-section (cutting edge, margin, eccentric relief, the gullet) swept along the 45 deg helix, run out into the shank along the wheel's arc, the end dished with clearance facets, Helical's italic logo laser-etched on the shank (a decal 0.05 mm proud); standing tip down as its placeholder does. Sources: Helical Solutions #03452 (H45AL-SR-30500) product page and images, helicaltool.com: 1/2 in, 3 flutes, 45 deg helix, 1 in LOC, 3 in OAL, ZPLUS; the images show ZPLUS gold over the flutes and a band past their runout, the shank bare ground carbide with a chamfered end. ",
+ "reviewed": "2026-11-05: flutes, runout, coating band and logo checked against Helical's product images",
  "source": {
   "path": "realism/sources/em12/em12.glb"
  },
+ "double_sided": false,
  "fallback": "em12_carbide",
  "cad": {
   "*": {
    "zplus": "em12_zplus",
    "zplus_land": "em12_zplus_land",
-   "carbide": "em12_carbide"
+   "carbide": "em12_carbide",
+   "etch": "em12_etch"
   }
  },
  "rules": [],
@@ -53,6 +55,19 @@
    "tile_m": 0.05,
    "normal": 0.5,
    "about": "bare cylindrical-ground tungsten carbide shank: greyer and darker than steel"
+  },
+  "em12_etch": {
+   "family": "ground",
+   "color": [
+    0.27,
+    0.275,
+    0.29
+   ],
+   "rough": 0.5,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.6,
+   "about": "Helical's laser-etched logo on the shank: frosted, darker than the ground carbide"
   }
  },
  "unsure": [

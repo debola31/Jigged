@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/mic1/mic1.glb"
  },
+ "double_sided": false,
  "fallback": "mic1_satin_chrome",
  "cad": {
   "*": {
@@ -39,9 +40,9 @@
     0.008,
     0.009
    ],
-   "rough": 0.3,
+   "rough": 0.55,
    "tile_m": 0.2,
-   "about": "the black oval nameplate"
+   "about": "the black oval nameplate: satin, so it stays black at a glance"
   },
   "mic1_print": {
    "family": "flat",
@@ -97,5 +98,11 @@
   {
    "what": "engravings and the nameplate's legend are decals 0.05 mm proud of their surfaces: crisp up close, but they may shimmer from far off"
   }
- ]
+ ],
+ "check_views": {
+  "sleeve": {
+   "eye": "0.03,0.07,0.09",
+   "target": "0.0,0.009,-0.015"
+  }
+ }
 }

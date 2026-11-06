@@ -130,13 +130,46 @@ def source_normals(me) -> np.ndarray:
     return np.add.reduceat(cn.reshape(-1, 3), ls)
 
 
+def open_parts(me, part: np.ndarray):
+    """Per part, whether it is an open shell (a sheet, a surface model) rather than a closed solid: some edge of it,
+    its vertices welded by position, has only one face. Also the pairs of faces across every edge two faces share."""
+    co = np.empty(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    _, vid = np.unique(np.round(co.reshape(-1, 3) / 1e-5).astype(np.int64), axis=0, return_inverse=True)
+    vid = vid.ravel()
+    vi = np.empty(len(me.loops), np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    ls = np.empty(len(me.polygons), np.int32)
+    me.polygons.foreach_get("loop_start", ls)
+    lt = np.empty(len(me.polygons), np.int32)
+    me.polygons.foreach_get("loop_total", lt)
+    face = np.repeat(np.arange(len(lt)), lt)
+    nxt = np.arange(len(vi)) + 1
+    last = ls + lt - 1
+    nxt[last] = ls                                   # each loop's next corner, wrapping round its face
+    a, b = vid[vi], vid[vi[nxt]]
+    e = np.stack([np.minimum(a, b), np.maximum(a, b)], 1)
+    _, inv, cnt = np.unique(e, axis=0, return_inverse=True, return_counts=True)
+    inv = inv.ravel()
+    single = cnt[inv] == 1
+    out = np.zeros(int(part.max()) + 1, bool)
+    out[np.unique(part[face[single]])] = True
+    # faces across each edge two faces share: sort the corners by edge, pair neighbours
+    two = np.nonzero(cnt[inv] == 2)[0]
+    o = two[np.argsort(inv[two], kind="stable")]
+    pairs = np.stack([face[o[0::2]], face[o[1::2]]], 1)
+    return out, pairs
+
+
 def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
     """Vendor CAD faces some surfaces inward, and a face wound inward bakes its AO from inside the machine (the
     laser's doors came out black). normals_make_consistent is no fix: on unwelded CAD every face is its own island and
     it turned 22-65% of batch A's assets inward. Instead:
-    1. vote: a face whose winding disagrees with the source's own normals (where it has them) is turned to agree;
-    2. a part (connected solid or sheet) is turned over whole only when rays leave the model from its back far more
-       often than from its front: a sheet modelled facing into the machine. A closed solid's back rays hit itself.
+    1. vote: a face whose winding disagrees with the source's own normals is turned to agree;
+    2. a closed solid is left as the CAD wound it (outward to within 0.2%, batch B) unless rays show it inside out
+       as a whole: then it is turned whole;
+    3. on open shells (sheets, surface models, where the CAD's own normals can face into the machine, and even mix
+       within one shell), each face is turned over when rays leave the model from its back and not from its front.
     Returns the shares of area flipped and the share left opposite the source, which check() gates."""
     me = obj.data
     a = me.attributes.get("src_normal")
@@ -144,37 +177,63 @@ def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
         # no source normals to vote with (a positions-only simplification, stripped of them): its winding is the
         # source's, which batch B measured outward to within 0.2%. Leave it as it came.
         log("winding: left as imported (no source normals)")
-        return {"vote_flipped_share": 0.0, "part_flipped_share": 0.0, "parts_flipped": 0, "against_source_share": 0.0,
+        return {"vote_flipped_share": 0.0, "outside_flipped_share": 0.0, "against_source_share": 0.0,
                 "unintended_share": 0.0, "source_normals": False}
     src = np.empty(len(me.polygons) * 3, np.float32)
     a.data.foreach_get("vector", src)
     src = src.reshape(-1, 3)
-    _, fn, ar = face_arrays(me)
+    ce, fn, ar = face_arrays(me)
     total = float(ar.sum()) or 1.0
     vote = np.einsum("ij,ij->i", fn, src) < 0
-    # the part test on the voted winding: sample each part's biggest faces, cast both ways
     fv = np.where(vote[:, None], -fn, fn)
-    ce = face_arrays(me)[0]
+    is_open, pairs = open_parts(me, part)
+    shell = is_open[part]
     tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
-    lo, hi = ce.min(0), ce.max(0)
-    reach = float(np.linalg.norm(hi - lo)) * 3 + 1.0
-    eps = max(float(np.linalg.norm(hi - lo)) * 1e-5, 1e-6)
-    flip_part = np.zeros(int(part.max()) + 1, bool)
+    size = float(np.linalg.norm(ce.max(0) - ce.min(0)))
+    reach, eps = size * 3 + 1.0, max(size * 1e-5, 1e-6)
+    rng = np.random.default_rng(7)
+    score = np.zeros(len(fv))                         # rays out of the back minus rays out of the front
+    for f in np.nonzero(shell)[0]:
+        d0, c = Vector(fv[f]), Vector(ce[f])
+        for j in rng.normal(0, 0.15, (3, 3)):        # three rays a side, a little apart, so one graze can't decide
+            d = (d0 + Vector(j)).normalized()
+            score[f] += (tree.ray_cast(c - d0 * eps, -d, reach)[0] is None) -                 (tree.ray_cast(c + d0 * eps, d, reach)[0] is None)
+    # decide by patch, not by face: a flat or smooth stretch of shell (neighbours within ~25 deg, either winding)
+    # turns together, by its area's vote, so one triangle can't come out the other way round from its neighbour
+    keep = pairs[(np.abs(np.einsum("ij,ij->i", fn[pairs[:, 0]], fn[pairs[:, 1]])) > 0.9)
+                 & shell[pairs[:, 0]] & shell[pairs[:, 1]]]
+    root = np.arange(len(fv))
+
+    def find(x):
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+    for i, j in keep:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            root[ri] = rj
+    patch = np.array([find(x) for x in range(len(fv))])
+    vote_area = np.bincount(patch, weights=score * ar, minlength=len(fv))
+    outside = shell & (vote_area[patch] > 0)
+    # a closed solid can be inside out as a whole (the laser's thin door slabs: every face wound into the slab, the
+    # CAD's normals with them). Turned whole when its biggest faces' rays leave from the back far more than the front;
+    # a right-way-out solid's back rays hit its own inside, so it never is.
+    n_parts = int(part.max()) + 1
     order = np.lexsort((-ar, part))
-    starts = np.searchsorted(part[order], np.arange(len(flip_part)))
+    starts = np.searchsorted(part[order], np.arange(n_parts))
     ends = np.append(starts[1:], len(order))
-    for p in range(len(flip_part)):
-        faces = order[starts[p]:ends[p]][:24]
+    inverted = np.zeros(n_parts, bool)
+    for p in np.nonzero(~is_open)[0]:
         front = back = 0
+        faces = order[starts[p]:ends[p]][:24]
         for f in faces:
-            d = Vector(fv[f])
-            c = Vector(ce[f])
-            if tree.ray_cast(c + d * eps, d, reach)[0] is None:
-                front += 1
-            if tree.ray_cast(c - d * eps, -d, reach)[0] is None:
-                back += 1
-        flip_part[p] = back >= 2 * front + 2 and back >= 0.25 * len(faces)
-    flip = vote ^ flip_part[part]
+            d, c = Vector(fv[f]), Vector(ce[f])
+            front += tree.ray_cast(c + d * eps, d, reach)[0] is None
+            back += tree.ray_cast(c - d * eps, -d, reach)[0] is None
+        inverted[p] = back >= 2 * front + 2 and back >= 0.25 * len(faces)
+    outside |= inverted[part]
+    flip = vote ^ outside
     if flip.any():
         bm = bmesh.new()
         bm.from_mesh(me)
@@ -190,10 +249,11 @@ def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
     _, fn2, _ = face_arrays(me)
     against = np.einsum("ij,ij->i", fn2, src) < 0
     out = {"vote_flipped_share": round(float(ar[vote].sum()) / total, 4),
-           "part_flipped_share": round(float(ar[flip_part[part]].sum()) / total, 4),
-           "parts_flipped": int(flip_part.sum()),
+           "outside_flipped_share": round(float(ar[outside].sum()) / total, 4),
+           "open_shell_share": round(float(ar[shell].sum()) / total, 4),
+           "solids_turned": int(inverted.sum()),
            "against_source_share": round(float(ar[against].sum()) / total, 4),
-           "unintended_share": round(float(ar[against & ~flip_part[part]].sum()) / total, 4)}
+           "unintended_share": round(float(ar[against & ~outside].sum()) / total, 4)}
     log(f"winding: {out}")
     return out
 

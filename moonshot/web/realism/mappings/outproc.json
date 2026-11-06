@@ -1,0 +1,112 @@
+{
+ "asset": "outproc",
+ "about": "Outside-process staging rack: a 48 x 24 x 72 in boltless steel shelving unit (1.5 in slotted angle posts, dark grey, on foot plates; orange step beams round 5/8 in particle-board decks with two centre supports) at three levels labelled HEAT TREAT, ANODIZE and COATING, each holding two 20 x 15 x 9 in stack-and-nest totes, blue for parts going out and red for parts back from the vendor, a traveller in a sleeve on each tote's front; turned shafts, black-oxided blocks, machined aluminium plates and blocks, and yellow powder-coated parts inside. Self-made in Blender (sources/outproc/build_outproc.py) where the placeholder (planner.placeholders.outside_process_rack) has its boxes.",
+ "reviewed": "2026-11-05: modelled; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/outproc/outproc.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "outproc_post",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "outproc_beam": "outproc_beam",
+   "outproc_board": "outproc_board",
+   "outproc_label": "outproc_label",
+   "outproc_paper": "outproc_paper",
+   "outproc_post": "outproc_post",
+   "outproc_tote_blue": "outproc_tote_blue",
+   "outproc_tote_red": "outproc_tote_red",
+   "plastic_black": "plastic_black",
+   "steel_black_oxide": "steel_black_oxide",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "outproc_post": {
+   "family": "paint",
+   "color": [
+    0.05,
+    0.053,
+    0.058
+   ],
+   "rough": 0.45,
+   "about": "the shelving's slotted angle posts and foot plates: dark grey powder coat"
+  },
+  "outproc_beam": {
+   "family": "paint",
+   "color": [
+    0.62,
+    0.17,
+    0.012
+   ],
+   "rough": 0.42,
+   "about": "the shelving's step beams and centre supports: safety orange powder coat"
+  },
+  "outproc_board": {
+   "family": "paint_cast",
+   "color": [
+    0.33,
+    0.235,
+    0.135
+   ],
+   "rough": 0.6,
+   "normal": 0.5,
+   "tile_m": 0.3,
+   "about": "5/8 in particle-board decks"
+  },
+  "outproc_label": {
+   "family": "paint",
+   "color": [
+    0.78,
+    0.6,
+    0.03
+   ],
+   "rough": 0.4,
+   "tile_m": 0.5,
+   "about": "the levels' yellow process labels; yellow powder-coated parts back from coating"
+  },
+  "outproc_tote_blue": {
+   "family": "plastic",
+   "color": [
+    0.012,
+    0.06,
+    0.24
+   ],
+   "rough": 0.45,
+   "about": "stack-and-nest totes, blue: parts going out to the vendor"
+  },
+  "outproc_tote_red": {
+   "family": "plastic",
+   "color": [
+    0.3,
+    0.018,
+    0.012
+   ],
+   "rough": 0.45,
+   "about": "stack-and-nest totes, red: parts back from the vendor, to inspect"
+  },
+  "outproc_paper": {
+   "family": "paint",
+   "color": [
+    0.74,
+    0.74,
+    0.71
+   ],
+   "rough": 0.6,
+   "about": "the travellers taped to the totes"
+  }
+ },
+ "sources_used": [
+  "the record (48 x 24 x 72 in rack, three shelves; heat treat, coating, anodize) and its placeholder for every post, shelf and tote",
+  "boltless rivet shelving catalogues (Edsal, Uline, Global Industrial): slotted angle uprights, step beams carrying particle-board decks, centre supports",
+  "stack-and-nest totes (Akro-Mils, Uline): tapered ribbed walls, a rolled rim, end hand holds"
+ ],
+ "unsure": [
+  {
+   "what": "the blue-out / red-back tote convention and the level labels are invented to make the rack's job readable"
+  }
+ ]
+}

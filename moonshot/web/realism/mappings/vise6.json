@@ -1,0 +1,98 @@
+{
+ "asset": "vise6",
+ "about": "Kurt HDL6AL two-station 6 in vise: one CAD mesh in 7 solids, no colours, the body welded to its jaws. By height and facing: the ductile-iron body in Kurt blue, its ways ground, everything above the bed (z 79.4 mm) the machinable aluminium jaws, the screw and pins steel.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "paint_kurt_blue",
+ "cad": {
+  "*": {
+   "mat_0": "paint_kurt_blue"
+  }
+ },
+ "rules": [
+  {
+   "why": "the bed's ways and the stations' floors: up-facing at z 77-80 mm, ground",
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.077
+    ],
+    "hi": [
+     1,
+     1,
+     0.0797
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the machinable aluminium jaws: everything above the bed",
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.0797
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "vise6_alu_jaw"
+  },
+  {
+   "why": "the thin plates on the stations' floors (parts 0, 2)",
+   "parts": [
+    0,
+    2
+   ],
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the lead screw and its hex (part 3)",
+   "parts": [
+    3
+   ],
+   "material": "steel_machined"
+  },
+  {
+   "why": "pins and screws at the handle end (parts 4-6)",
+   "parts": [
+    4,
+    5,
+    6
+   ],
+   "material": "steel_black_oxide"
+  }
+ ],
+ "materials": {
+  "vise6_alu_jaw": {
+   "family": "ground",
+   "color": [
+    0.86,
+    0.865,
+    0.87
+   ],
+   "rough": 0.32,
+   "metal": 1.0,
+   "tile_m": 0.15,
+   "normal": 0.5,
+   "about": "Kurt's 1.735 in machinable aluminium jaws: milled 6061"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the body's paint: Kurt blue assumed on every non-ground body face, as on Kurt's other vises; the HDL6's sides may be ground bare",
+   "picture": "checks/vise6_front_before_after.png"
+  }
+ ]
+}

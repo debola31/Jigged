@@ -1,0 +1,42 @@
+{
+ "asset": "edmfix",
+ "about": "Generic 12 x 8 in wire-EDM fixture plate on two risers with two edge clamps: ground stainless plate, machined stainless risers, black clamps (the CAD's), stainless cap screws.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "edmfix_ground_ss",
+ "cad": {
+  "plate": {
+   "mat_1": "edmfix_ground_ss"
+  },
+  "riser_-3": {
+   "mat_0": "steel_machined"
+  },
+  "edge_clamp_-3": {
+   "mat_2": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the clamps' cap screws (parts 0 and 2, in the plate's link)",
+   "parts": [
+    0,
+    2
+   ],
+   "material": "steel_machined"
+  }
+ ],
+ "materials": {
+  "edmfix_ground_ss": {
+   "family": "ground",
+   "color": [
+    0.6,
+    0.605,
+    0.615
+   ],
+   "rough": 0.22,
+   "metal": 1.0,
+   "tile_m": 0.2,
+   "normal": 0.5,
+   "about": "the fixture plate: surface-ground stainless"
+  }
+ }
+}

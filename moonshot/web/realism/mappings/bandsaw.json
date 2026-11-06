@@ -1,7 +1,7 @@
 {
  "asset": "bandsaw",
  "about": "McMaster-Carr 8962N13 horizontal band saw. McMaster's STEP has no colours at all (one flat compound of 262 solids), so every material here is by link and by part, from the parts sheet.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: parts and materials sheets; one machine grey (coordinator); capped at 250k triangles for headroom",
  "source": {
   "links": [
    "base",
@@ -131,8 +131,9 @@
  ],
  "unsure": [
   {
-   "what": "the paint colour: McMaster's STEP has none and its listing gives none; machine grey assumed (paint_saw_grey)",
+   "what": "the paint colour: McMaster's STEP has none and its listing gives none; machine grey assumed (paint_saw_grey) Decided 2026-11-05: the single grey stays.",
    "picture": "checks/bandsaw_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 250000
 }

@@ -71,7 +71,7 @@ texel), phones to ASTC; the manifest's GPU bytes assume 1 byte a texel plus mipm
   `DirectionalLight`) supplies the direct light and its shadows.
 - **Metals need an environment map** (`scene.environment`), or they render black. The pilot was checked with the
   step videos' HDRI (`machine_shop_02`, intensity 0.6, rotated by π); RoomEnvironment works too, flatter.
-- Checked under **AgX**; ACESFilmic (the page today) renders the same materials more saturated and contrasty.
+- Checked under **AgX**, which the page is moving to.
 
 ## Swap-in
 
@@ -83,15 +83,15 @@ texel), phones to ASTC; the manifest's GPU bytes assume 1 byte a texel plus mipm
    the next frame. Then, in one frame, replace the light model under every item of that asset, dispose the light
    geometry and materials, and redraw the shadow map once (`shadowMap.needsUpdate = true`).
 4. A failed full model keeps its light one: report it once, as model failures are reported today.
-5. **Phones:** the shop on cellular is a different budget. Suggested: no realistic models when
-   `navigator.connection?.saveData`, a 2G/3G `effectiveType` or `deviceMemory < 4`; heroes only on other phones
-   (about 21 MB with the tiles, 70 MB of GPU); everything on desktop. The page's call.
+5. **Phones get no realistic models**: light models only, no swap (decided 2026-11-05). The page already tells a
+   phone from a desktop for its controls (touch gets no orbit); the same test gates the stream. A phone on
+   cellular can't spend ~66 MB and a phone GPU ~0.3 GB on what is a few hundred pixels across.
 
 ## Picking, highlighting and shadows
 
-- Same frame and box as the light model, checked per asset against the record's bbox (`validation.checks.frame`). Two
-  stand proud of it on purpose: the VF-2's left door, slid open 0.55 m, by 33 mm; the vise's handle by 90 mm (x) and
-  55 mm (z). Picking by the record's box and the outlines need no change.
+- Same frame and box as the light model, checked per asset against the record's bbox (`validation.checks.frame`). One
+  stands proud of it on purpose: the vise's handle, by 90 mm (x) and 55 mm (z). Picking by the record's box and the
+  outlines need no change. The VF-2's doors are shut, as in the light model, so the swap changes no silhouette.
 - One mesh per material, nothing named per part: highlighting stays the box outline. Keep `raycast = () => {}`.
 - `castShadow` on every mesh except transparent ones (the VF-2's door panes); `receiveShadow` on all.
 

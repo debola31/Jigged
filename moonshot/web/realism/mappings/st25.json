@@ -1,0 +1,30 @@
+{
+ "asset": "st25",
+ "about": "Haas ST-25 lathe (Haas's file): the CAD's default blue-grey is Haas white sheet metal; its dark parts Haas dark grey; the screen dark glass; the chuck machined steel; windows glass.",
+ "reviewed": "2026-11-05: natural sheet (look/<asset>_natural.png) against the CAD's colours; metal parts by CAD colour, face count and extent",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "paint_haas_white",
+   "mat_1": "paint_haas_white",
+   "mat_2": "paint_haas_dark",
+   "mat_3": "paint_haas_white",
+   "mat_4": "screen_lcd",
+   "mat_5": "steel_brushed",
+   "mat_6": "paint_haas_dark",
+   "mat_7": "glass_clear",
+   "mat_8": "plastic_black",
+   "mat_9": "steel_machined",
+   "mat_10": "paint_haas_red"
+  }
+ },
+ "rules": [],
+ "unsure": [
+  {
+   "what": "nearly everything is one CAD colour (mat_1, 239k faces), so the enclosure and the parts inside it all get Haas white",
+   "picture": "checks/st25_front_before_after.png"
+  }
+ ],
+ "triangles": 85000,
+ "triangles_why": "at the class's 100k its many split normals made 3.2 MB, over the large class's 3 MB"
+}

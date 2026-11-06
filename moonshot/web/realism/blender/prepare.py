@@ -26,6 +26,7 @@ from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 UNDO_Y_UP = Matrix.Rotation(math.radians(-90), 4, "X")
+UV1_FLOOR = 0.2              # an AO atlas using less of its square than this is mostly margin
 T0 = time.perf_counter()
 
 
@@ -64,7 +65,10 @@ def import_source(src: dict) -> list:
     for o in new:
         if o.type != "MESH":
             bpy.data.objects.remove(o)
-    return meshes
+    dropped = [o for o in meshes if o["link"] in src.get("drop_links", [])]
+    for o in dropped:                                     # the mapping's drop_links: hidden or needless detail
+        bpy.data.objects.remove(o)
+    return [o for o in meshes if o not in dropped]
 
 
 # --- per-face data -----------------------------------------------------------------------------------------------------
@@ -394,10 +398,23 @@ def main():
     a = J["atlas"]
     side = 2 ** math.ceil(math.log2(math.sqrt(float(face_arrays(me)[2].sum()) / 0.45) / (a["texel_mm"] / 1000)))
     side = min(max(side, a["atlas_min"]), a["atlas_max"])
+    # thousands of tiny islands (a spring, a thread) can still eat the square in margins: below UV1_FLOOR the pack
+    # is redone with half the gap, down to half a texel, rather than baking an atlas of nothing (edgef baked black)
     t = time.perf_counter()
-    uv1_atlas(obj, a["margin_px"] / side)
+    margin_px = a["margin_px"]
+    uv1_atlas(obj, margin_px / side)
     util = uv_area(me, "UV1")
-    log(f"UV1: {util:.3f} of the square used, margin {a['margin_px']} px at {side} ({time.perf_counter() - t:.0f} s)")
+    while util < UV1_FLOOR and margin_px > 0.5:
+        margin_px /= 2
+        log(f"UV1: {util:.3f} of the square used: packing again with a {margin_px} px gap")
+        obj.data.uv_layers.active = obj.data.uv_layers["UV1"]
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=margin_px / side, shape_method="CONCAVE")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        obj.data.uv_layers.active = obj.data.uv_layers["UV0"]
+        util = uv_area(me, "UV1")
+    log(f"UV1: {util:.3f} of the square used, margin {margin_px} px at {side} ({time.perf_counter() - t:.0f} s)")
     # the floor the asset stands on, for the AO only: never exported
     lo = np.min(ce, 0)
     hi = np.max(ce, 0)
@@ -417,7 +434,7 @@ def main():
         sel = names == lname
         by_mat[lname] = {"faces": int(sel.sum()), "area_m2": round(float(ar[sel].sum()), 4)}
     stats = {"asset": J["asset"], "triangles": len(me.loop_triangles), "vertices": len(me.vertices),
-             "area_m2": round(float(ar.sum()), 4), "uv1_utilisation": round(util, 4),
+             "area_m2": round(float(ar.sum()), 4), "uv1_utilisation": round(util, 4), "uv1_margin_px": margin_px,
              "bbox_m": [co.min(0).round(4).tolist(), co.max(0).round(4).tolist()], "links": links, "cads": cads,
              "parts": n_parts, "materials": by_mat, "unmapped": unmapped, "rules": rule_hits,
              "seconds": round(time.perf_counter() - T0, 1)}

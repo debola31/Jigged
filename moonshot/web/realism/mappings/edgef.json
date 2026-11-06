@@ -25,5 +25,11 @@
    "mat_2": "steel_machined"
   }
  },
- "rules": []
+ "rules": [],
+ "unsure": [
+  {
+   "what": "NOT SHIPPABLE: the hidden spring inside the body (link NAUO4, 10,607 of 12,090 triangles after simplify) breaks the AO atlas: smart-project makes thousands of islands, the 3 px FRACTION margins collapse the pack to 0.000 of the square, the AO bakes black and the page draws the finder black. Without the spring the same pack uses 0.339 (checked in Blender) and the model is 1,483 triangles. Needs a way to drop a hidden link in prepare (not a mapping change); the GLB was withheld from models-full",
+   "picture": "checks/edgef_front_before_after.png"
+  }
+ ]
 }

@@ -1,0 +1,34 @@
+{
+ "asset": "drill-3p3",
+ "about": "Chicago-Latrobe 47843, 3.30 mm cobalt (HSS-Co) jobber drill, one CAD solid, no colours: the straw/bronze oxide finish cobalt jobbers wear, over flutes and shank alike.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "drill-3p3_bronze",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "drill-3p3_bronze",
+   "none": "drill-3p3_bronze"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "drill-3p3_bronze": {
+   "family": "ground",
+   "color": [
+    0.46,
+    0.27,
+    0.085
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "HSS-Co with a straw/bronze oxide finish, the usual cobalt jobber's"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the finish: cobalt jobbers come bright, black-and-gold or straw/bronze; bronze assumed (Dormer A777's and the usual Chicago-Latrobe cobalt). Bright would be the *_hss look.",
+   "picture": "checks/drill-3p3_close_before_after.png"
+  }
+ ]
+}

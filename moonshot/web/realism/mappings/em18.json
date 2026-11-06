@@ -1,0 +1,58 @@
+{
+ "asset": "em18",
+ "about": "Harvey Tool 72125: 1/8 in 2-flute square end mill, uncoated solid carbide; flutes 0-11 mm, h6 shank above.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "em18_carbide",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "em18_carbide",
+   "none": "em18_carbide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the shank above the flute run-out (z > 11.6 mm)",
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.0116
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "em18_carbide_shank"
+  }
+ ],
+ "materials": {
+  "em18_carbide": {
+   "family": "ground",
+   "color": [
+    0.3,
+    0.3,
+    0.31
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.3,
+   "about": "ground uncoated tungsten carbide: a darker, slightly warm grey than steel"
+  },
+  "em18_carbide_shank": {
+   "family": "ground",
+   "color": [
+    0.34,
+    0.34,
+    0.35
+   ],
+   "rough": 0.32,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.3,
+   "about": "the h6 shank, cylindrical-ground carbide: satin, a touch lighter"
+  }
+ }
+}

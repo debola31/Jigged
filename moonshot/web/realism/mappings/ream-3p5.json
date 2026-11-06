@@ -1,0 +1,28 @@
+{
+ "asset": "ream-3p5",
+ "about": "Generic 3.5 mm G6 machine reamer, solid carbide, 6 flutes: uncoated carbide grey.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "ream-3p5_carbide",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "ream-3p5_carbide",
+   "none": "ream-3p5_carbide"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "ream-3p5_carbide": {
+   "family": "ground",
+   "color": [
+    0.3,
+    0.3,
+    0.31
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.3,
+   "about": "ground uncoated tungsten carbide: a darker, slightly warm grey than steel"
+  }
+ }
+}

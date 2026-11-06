@@ -58,13 +58,22 @@ function positionsOnly(doc) {
 	}
 }
 
+// The ratio applies to every primitive alike, and the small ones (bolts, a CAD material's few faces) can't come
+// down: so the total lands above the cap, by more the higher the ratio. Each pass that misses the cap scales the
+// ratio by cap / result for the next (not below 0.6 of the first) and doubles the error bound, up to the largest
+// allowed; it stops once a pass gains under 3%.
+const PASSES = 8;
+
 async function simplifyAll() {
 	const total = (await Promise.all(job.inputs.map((s) => readSource(s.src)))).reduce((n, d) => n + triangles(d), 0);
-	const ratio = Math.min(1, job.cap / total);
+	let ratio = Math.min(1, job.cap / total);
 	let error = job.error;
-	let out;
-	for (;;) {
-		out = { cap: job.cap, before: total, ratio, error, dropped: job.drop_links ?? [], files: [] };
+	const maxError = (job.max_error ?? MAX_ERROR) + 1e-12;
+	// below this the ratio only crushes the parts that can still come down (the laser lost 4% of its area at 0.03)
+	const ratioFloor = 0.6 * ratio;
+	let out, last;
+	for (let pass = 0; pass < PASSES; pass++) {
+		out = { cap: job.cap, before: total, ratio, error, passes: pass + 1, dropped: job.drop_links ?? [], files: [] };
 		for (const s of job.inputs) {
 			const doc = await readSource(s.src);
 			const before = triangles(doc);
@@ -80,9 +89,11 @@ async function simplifyAll() {
 			out.files.push({ src: s.src, before, after: triangles(doc) });
 		}
 		out.after = out.files.reduce((n, f) => n + f.after, 0);
-		console.log(`[simplify] error ${error}: ${total} -> ${out.after} triangles (cap ${job.cap})`);
-		if (out.after <= job.cap * 1.05 || error * 2 > (job.max_error ?? MAX_ERROR) + 1e-12) break;
-		error *= 2;
+		console.log(`[simplify] ratio ${ratio.toFixed(3)}, error ${error}: ${total} -> ${out.after} triangles (cap ${job.cap})`);
+		if (out.after <= job.cap * 1.05 || out.after > 0.97 * (last ?? Infinity)) break;   // there, or stuck
+		last = out.after;
+		ratio = Math.max(ratio * job.cap / out.after, ratioFloor);
+		if (error * 2 <= maxError) error *= 2;
 	}
 	fs.writeFileSync(job.report, JSON.stringify(out, null, 1));
 }

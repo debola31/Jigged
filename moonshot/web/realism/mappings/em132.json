@@ -7,11 +7,11 @@
   "em132_carbide": {
    "family": "ground",
    "color": [
-    0.25,
-    0.255,
-    0.265
+    0.36,
+    0.365,
+    0.375
    ],
-   "rough": 0.3,
+   "rough": 0.32,
    "metal": 1.0,
    "tile_m": 0.04,
    "normal": 0.4,

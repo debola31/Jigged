@@ -7577,6 +7577,14 @@
     "facts": []
    },
    {
+    "item": "ratchet-wrench-1",
+    "asset": "ratchet-wrench",
+    "x": 26120,
+    "y": 5523,
+    "z": 863.6,
+    "rot": 180
+   },
+   {
     "item": "deburr-1",
     "asset": "deburr",
     "x": 25897.8,
@@ -12544,6 +12552,22 @@
       "value": "optical"
      }
     ]
+   },
+   "ratchet-wrench": {
+    "name": "3/4 in ratcheting combination wrench",
+    "model": "models/ratchet-wrench.glb",
+    "bbox": {
+     "min": [
+      -17.01,
+      -20.66,
+      -0.0
+     ],
+     "max": [
+      226.17,
+      20.66,
+      11.2
+     ]
+    }
    },
    "ream-1-4": {
     "name": "1/4 in chucking reamer",

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -430,6 +431,81 @@ def caliper(c: Caliper) -> list[tuple[str, cq.Workplane, list[int]]]:
     return [(n, s.translate(move), col) for n, s, col in parts]
 
 
+# --- hand tools ------------------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RatchetWrench:
+    """A ratcheting combination wrench from its maker's published dimensions (the record's key specs): the ratcheting
+    box end's head round its ring, the ring's 12-point opening, the handle, the open end's jaws at their angle. In the
+    wrench's frame (moonshot/world/wrench.py's): the box end's middle at the origin, the handle along +X, the head's
+    mid-plane at z = 0."""
+    id: str
+    across_flats_mm: float        # the fastener it fits
+    length_mm: float              # overall
+    head_w_mm: float              # the box end's width across its head
+    head_t_mm: float              # ... and its thickness
+    open_w_mm: float              # the open end's width across its jaws
+    open_t_mm: float              # ... and its thickness
+    open_deg: float = 15.0        # the open end's jaws' angle to the handle
+    handle_w_mm: float = 17.0     # [proposed]
+    handle_t_mm: float = 7.0      # [proposed]
+    ring_r_mm: float = 13.0       # [proposed] the ratchet ring's outside radius in the head
+
+
+RATCHET_WRENCHES = [RatchetWrench("ratchet-wrench", 0.75 * INCH, 9.594 * INCH, 1.339 * INCH, 0.441 * INCH,
+                                  1.626 * INCH, 0.374 * INCH)]
+
+
+def ratchet_wrench(w: RatchetWrench) -> list[tuple[str, cq.Workplane, list[int]]]:
+    """The wrench's two parts in its frame: its body (head, handle, open end) and the ring that turns in its head
+    (moonshot/world/wrench.py's ratchet), each a node of its own as the take record draws them on their bodies."""
+    h, r_out = w.head_t_mm, w.head_w_mm / 2
+    head = cq.Workplane("XY").circle(r_out).circle(w.ring_r_mm).extrude(h).translate((0, 0, -h / 2))
+    open_r = w.open_w_mm / 2
+    x_open = w.length_mm - r_out - open_r                       # the open end's middle: overall from head to jaw tips
+    x0, x1 = r_out - 2.0, x_open - open_r + 2.0
+    handle = (cq.Workplane("XY").box(x1 - x0, w.handle_w_mm, w.handle_t_mm).translate(((x0 + x1) / 2, 0, 0))
+              .edges("|X").fillet(2.0))
+    gap = w.across_flats_mm + 0.25
+    jaw = (cq.Workplane("XY").circle(open_r).extrude(w.open_t_mm).translate((0, 0, -w.open_t_mm / 2))
+           .cut(cq.Workplane("XY").circle(gap / 2).extrude(w.open_t_mm * 2).translate((0, 0, -w.open_t_mm)))
+           .cut(cq.Workplane("XY").box(open_r * 2, gap, w.open_t_mm * 2).translate((open_r, 0, 0))))
+    jaw = jaw.rotate((0, 0, 0), (0, 0, 1), w.open_deg).translate((x_open, 0, 0))
+    body = head.union(handle).union(jaw)
+    across_corners = (w.across_flats_mm + 0.2) / math.cos(math.pi / 6)
+    hole = (cq.Workplane("XY").polygon(6, across_corners).extrude(h * 2)
+            .union(cq.Workplane("XY").transformed(rotate=(0, 0, 30)).polygon(6, across_corners).extrude(h * 2))
+            .translate((0, 0, -h)))
+    ring = (cq.Workplane("XY").circle(w.ring_r_mm - 0.2).extrude(h - 1.0).translate((0, 0, -(h - 1.0) / 2))
+            .cut(hole))
+    return [("ratchet_wrench", body, STEEL), ("ratchet_wrench_ring", ring, [170, 170, 178, 255])]
+
+
+def write_hand_tool(w: RatchetWrench) -> Path:
+    """The wrench's STEP, its library GLB lying on the bench (z = 0 its underside, each part a node), the same as its
+    rig's GLB, its parts' GLBs in its own frame for a take record (links/<part>.glb), and its record's build."""
+    parts = ratchet_wrench(w)
+    src, lib = _dirs("hand_tools", w.id)
+    compound = cq.Workplane("XY").add(cq.Compound.makeCompound([s.val() for _, s, _ in parts]))
+    cq.exporters.export(compound, str(src / f"{w.id}.step"))
+    lift = w.head_t_mm / 2
+    lying = [(n, s.translate((0, 0, lift)), c) for n, s, c in parts]
+    triangles = write_parts_glb(lying, lib / f"{w.id}.glb", tolerance_mm=0.02, max_triangles=MAX_TRIANGLES)
+    shutil.copy2(lib / f"{w.id}.glb", lib / f"{w.id}_rig.glb")
+    (lib / "links").mkdir(exist_ok=True)
+    for n, s, c in parts:
+        write_parts_glb([(n, s, c)], lib / "links" / f"{n}.glb", tolerance_mm=0.02, max_triangles=MAX_TRIANGLES)
+    out = _record_path("hand_tools", w.id)
+    rec = json.loads(out.read_text(encoding="utf-8"))
+    rec.pop("pending", None)
+    bbox = _bbox(cq.Workplane("XY").add(cq.Compound.makeCompound([s.val() for _, s, _ in lying])))
+    rec |= {"source_files": [f"{w.id}.step"], "triangles": triangles, "bbox": bbox,
+            "build": {"from": f"source/{w.id}.step", "placeholder": "generators.ratchet_wrench", "up": "+Z",
+                      "max_triangles": MAX_TRIANGLES}}
+    _save(out, rec)
+    return out
+
+
 # --- writing ---------------------------------------------------------------------------------------------------------
 
 def _mesh(shape: cq.Workplane, tolerance_mm: float, color: list[int], angle_rad: float = 0.08):
@@ -553,10 +629,16 @@ def write_inspection(item: PlugGauge | Caliper) -> Path:
 
 
 def main(ids: list[str]) -> None:
-    every = {t.id: t for t in TOOLS + SOURCED} | {g.id: g for g in GAUGES + CALIPERS}
+    every = ({t.id: t for t in TOOLS + SOURCED} | {g.id: g for g in GAUGES + CALIPERS}
+             | {w.id: w for w in RATCHET_WRENCHES})
     for i in ids or list(every):
         item = every[i]
-        print("wrote", write(item) if isinstance(item, Tool) else write_inspection(item))
+        if isinstance(item, Tool):
+            print("wrote", write(item))
+        elif isinstance(item, RatchetWrench):
+            print("wrote", write_hand_tool(item))
+        else:
+            print("wrote", write_inspection(item))
 
 
 if __name__ == "__main__":

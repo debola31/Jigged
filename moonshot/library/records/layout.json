@@ -80,6 +80,7 @@
     {"item":"live-center-1","asset":"livectr","zone":"benches","x":26988.2,"y":5428,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"spin-indexer-1","asset":"spindex","zone":"benches","x":26747.4,"y":5453.2,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"wrenches-1","asset":"wrench","zone":"benches","x":26369.6,"y":5523,"z":863.6,"rot":180,"on":"bench-lathe"},
+    {"item":"ratchet-wrench-1","asset":"ratchet-wrench","zone":"benches","x":26120,"y":5523,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"deburr-1","asset":"deburr","zone":"benches","x":25897.8,"y":5526.2,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"bench-grinder-1","asset":"bgrind","zone":"finishing","x":45540.4,"y":7567,"z":863.6,"rot":180,"on":"bench-finishing"},
     {"item":"belt-sander-1","asset":"belt","zone":"finishing","x":45127.5,"y":7510.4,"z":863.6,"rot":180,"on":"bench-finishing"},

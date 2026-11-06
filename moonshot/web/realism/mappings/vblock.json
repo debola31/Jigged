@@ -1,0 +1,68 @@
+{
+ "asset": "vblock",
+ "about": "McMaster 2361A61 hardened V-blocks with screw clamps, a composed pair (one mesh, no colours): the blocks hardened and ground bright all over; the U-clamps and their knurled screws black oxide.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/vblock_*.png); page check checks/vblock_*_before_after.png",
+ "fallback": "steel_ground",
+ "materials": {
+  "vblock_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.5,
+   "about": "hardened V-block, ground all over"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "vblock_tool_steel"
+  }
+ },
+ "rules": [
+  {
+   "why": "the U-shaped clamp straps (60 x 13 x 51 mm)",
+   "part_size": {
+    "max_max_side": 0.062,
+    "min_max_side": 0.055,
+    "max_mid_side": 0.052,
+    "max_min_side": 0.014
+   },
+   "material": "steel_black_oxide"
+  },
+  {
+   "why": "the clamp screws (43 mm long, 10 mm across)",
+   "part_size": {
+    "max_max_side": 0.045,
+    "max_mid_side": 0.011
+   },
+   "material": "steel_black_oxide"
+  },
+  {
+   "why": "the clamps' retaining cap screws, standing above the blocks' 50.8 mm tops: the part finder joins them to the blocks, so by height",
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.0515
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "steel_black_oxide"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 44,728 triangles, the library mesh is a decimated soup (1.5 mm deflection) that barely simplifies: 34k even at eight times the error bound; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
+   "picture": "checks/vblock_close_before_after.png"
+  }
+ ]
+}

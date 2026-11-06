@@ -89,6 +89,7 @@
    "material": "steel_black_oxide"
   }
  ],
+ "atlas": 512,
  "simplify_positions_only": true,
  "simplify_why": "positions only (opt-in, solid parts): solid castings, shafts and fasteners, no sheet: with its seams kept the threads stall the simplifier",
  "unsure": [

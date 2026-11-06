@@ -41,6 +41,12 @@ STROKE = math.radians(40.0)              # a stroke's swing, kept in front of th
 SNUG = math.radians(12.0)                # the last swing past a nut's run onto its strap, that snugs it (or the first,
                                          # that breaks it loose): at 25, the hand stalled on the snug nut pulled the
                                          # wrist's muscles to twice their most
+SNUG_MARGIN = 1.25                       # tightening, strokes enough to run a nut this many times its gap: the hand
+                                         # pulls till the nut is snug, the strokes past it stalling on it, as people
+                                         # feel a nut come snug. Counted to the gap, a hand's strokes on a far nut
+                                         # turned it 7-13 deg a stroke short of their plan or past it (by where the
+                                         # flats set the box end down, and the arm at its reach), and the nut stood
+                                         # 1 mm off its strap, or seated early and slipped its thread
 LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 1.2, 0.5, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
                                                          # hand took it, past people's 265), over to a nut, held over
                                                          # it while the eye lines the box end up on it, down onto it
@@ -171,10 +177,12 @@ def by_hand(clamps: list[SB.Clamp]) -> list[tuple[str, list[SB.Clamp]]]:
 
 def strokes(direction: str, gap_mm: float = SB.PARK_NUT_GAP_MM) -> list[float]:
     """Each stroke's turn of the nut (rad, negative clockwise from above) to run it gap_mm (by default from parked)
-    down onto its strap and snug it ("tighten"), or to break it loose and run it back up gap_mm ("loosen")."""
+    down onto its strap and snug it ("tighten": strokes enough for SNUG_MARGIN times the gap, the hand pulling till
+    the nut is snug, the strokes past it stalling on it), or to break it loose and run it back up gap_mm ("loosen")."""
     run = SB.LEAD_MM * STROKE / (2 * math.pi)
-    n = int(gap_mm // run)
-    rest_turn = (gap_mm - n * run) / SB.LEAD_MM * 2 * math.pi + SNUG
+    reach = gap_mm * (SNUG_MARGIN if direction == "tighten" else 1.0)
+    n = int(reach // run)
+    rest_turn = (reach - n * run) / SB.LEAD_MM * 2 * math.pi + SNUG
     tighten = [-STROKE] * n + [-rest_turn]
     return tighten if direction == "tighten" else [-a for a in reversed(tighten)]
 
@@ -205,8 +213,11 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
               (t + MOVE_S + OVER_S + DOWN_S + DWELL_S, Rs, ps)]
         t += MOVE_S + OVER_S + DOWN_S + DWELL_S
         t_on = t
+        seated = c.nut_z("clamped") - SB.LEAD_MM * SNUG / (2 * math.pi)     # snug on its strap, its bite taken
         for i, a in enumerate(swings):
-            z1 = z + SB.LEAD_MM * a / (2 * math.pi)                  # the nut's run with the swing
+            z1 = z + SB.LEAD_MM * a / (2 * math.pi)                  # the nut's run with the swing, to its strap
+            if direction == "tighten":
+                z1 = max(z1, seated)
             b = start + a + math.copysign(WR.play(), a)   # the ring's play on the nut taken up each stroke: swung
                                                           # back, the ratchet's drag turns the ring back through it
             k.append((t + SWING_S, turned(b), on_nut(c, b, z1)[1]))

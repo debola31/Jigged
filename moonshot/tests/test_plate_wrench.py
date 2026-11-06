@@ -89,7 +89,9 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
     plate = plates.plate(part, "op10")
     clamps = plates.clamps(part, "op10")
     keys, done, work = PW.keys(plate, clamps, 0.0, direction)
-    whole = (SB.PARK_NUT_GAP_MM / SB.LEAD_MM * 2 * math.pi + PW.SNUG) * (-1 if direction == "tighten" else 1)
+    # tightening, strokes for SNUG_MARGIN times the gap, the box end planned down to the snug nut and no further
+    gap = SB.PARK_NUT_GAP_MM * (PW.SNUG_MARGIN if direction == "tighten" else 1.0)
+    whole = (gap / SB.LEAD_MM * 2 * math.pi + PW.SNUG) * (-1 if direction == "tighten" else 1)
     for c in clamps:
         (t_on, t_off), = [(a, b) for k, a, b in work if k.name == c.name]
         mine = [(a, b, rad) for k, a, b, rad in done if k.name == c.name]
@@ -106,11 +108,14 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
             off = (math.atan2(R[1, 0], R[0, 0]) - start + math.pi) % (2 * math.pi) - math.pi
             assert abs(off) <= PW.STROKE + PW.SNUG + WR.play() + 1e-9 and off * whole >= -1e-9
         z = c.nut_z("parked") if direction == "tighten" else c.nut_z("clamped")
+        seated = c.nut_z("clamped") - SB.LEAD_MM * PW.SNUG / (2 * math.pi)
         at = {round(t, 9): (R, p) for t, R, p in keys}
         for i, (a, b, rad) in enumerate(mine):
             (Ra, pa), (Rb, pb) = at[round(a, 9)], at[round(b, 9)]
             assert pa[2] == pytest.approx(z + SB.FLANGE_T + WR.HEIGHT / 2 + 0.5)       # seated on the nut as it is
             z += SB.LEAD_MM * rad / (2 * math.pi)
+            if direction == "tighten":
+                z = max(z, seated)
             turn = math.atan2(Rb[1, 0], Rb[0, 0]) - math.atan2(Ra[1, 0], Ra[0, 0])
             swing = rad + math.copysign(WR.play(), rad)                 # the ring's play taken up each stroke
             assert (turn - swing + math.pi) % (2 * math.pi) - math.pi == pytest.approx(0.0, abs=1e-9)

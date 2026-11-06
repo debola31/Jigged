@@ -119,6 +119,22 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
 
 @pytest.mark.parametrize("direction", ["tighten", "loosen"])
 @pytest.mark.parametrize("part", PARTS)
+def test_each_ends_nuts_are_its_own_hands_and_its_grip_is_solved_mid_stroke_on_its_first(part, direction):
+    from moonshot.motion import plate_clamps as PC
+    plate, clamps = plates.plate(part, "op10"), plates.clamps(part, "op10")
+    rounds = PW.by_hand(clamps)
+    assert [s for s, _ in rounds] == ["R", "L"]
+    assert sorted(c.name for _, nuts in rounds for c in nuts) == sorted(c.name for c in clamps)
+    for side, nuts in rounds:
+        assert all(PC.side_of(c) == side for c in nuts)
+        p, yaw = PW.grip_at(plate, clamps, side, direction)
+        assert np.allclose(p[:2], nuts[0].stud)                      # the box end on the hand's first nut
+        half = (yaw - PW.nut_yaw(nuts[0], plate, direction) + math.pi) % (2 * math.pi) - math.pi
+        assert half == pytest.approx(PW.STROKE / 2 * (-1 if direction == "tighten" else 1))
+
+
+@pytest.mark.parametrize("direction", ["tighten", "loosen"])
+@pytest.mark.parametrize("part", PARTS)
 def test_carried_between_nuts_the_wrench_clears_the_studs(part, direction):
     clamps = plates.clamps(part, "op10")
     keys, _, _ = PW.keys(plates.plate(part, "op10"), clamps, 0.0, direction)

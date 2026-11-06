@@ -130,13 +130,14 @@ def key_at(keys, t: float) -> tuple[np.ndarray, np.ndarray]:
     return keys[-1][1], keys[-1][2]
 
 
-def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None) -> tuple[float, np.ndarray]:
+def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None, R=None) -> tuple[float, np.ndarray]:
     """A hand's reach to a grip from wherever it is at t0, as the parallels' (motion/set_parallels.py reach), either
     hand: up to a ready point back from and over the grip, a pause, the paced reach down onto it, the fingers opening
     widest ~75% of the way for an object size_mm across. obj: where the grip's object is now (world), if it has
-    moved since the grip was solved. Returns when the reach ends (the grip closes) and the grip's wrist (world)."""
+    moved since the grip was solved; R: how it has turned since (world). Returns when the reach ends (the grip closes)
+    and the grip's wrist (world)."""
     g = take.grips[grip]
-    H, W = take.grip_pose(grip, obj)                             # the side's (mirrored for the left) world
+    H, W = take.grip_pose(grip, obj, R)                          # the side's (mirrored for the left) world
     Ww = take.at(s, W)                                           # ... as a world point
     ready = Ww + np.array([0.0, -120.0, 70.0])
     # a long way to the ready point taken no faster than the reach itself: from the hand hanging at rest in 1.2 s,

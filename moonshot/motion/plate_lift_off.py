@@ -99,7 +99,7 @@ class PlateLiftOff(StepTake):
         on the plate where it's taken up (name: the side; a sheet's once slid), or a hand's fingers pressed flat on a
         sheet's near edge where it lies."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate, name)
+            return PW.grip_spec(self, self.plate, name, self.clamps, "loosen")
         if kind == "plate":
             g = PL.PlateLoad.grip_spec(self, name)
             g["colliders"] = g["colliders"] + self.wrench_cols(self.slid)        # the wrench rides on it

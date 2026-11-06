@@ -64,7 +64,7 @@ class PlateShift(StepTake):
     def grip_spec(self, kind: str, side: str) -> dict:
         """A hand's pinch on the wrench's handle where it lies, or a hand's hold on the plate where it lies."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate0, side)
+            return PW.grip_spec(self, self.plate0, side, self.clamps, "loosen")
         return PL.PlateLoad.grip_spec(self, side)
 
     def to_rest(self, side: str, t0: float) -> float:

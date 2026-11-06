@@ -84,7 +84,7 @@ class PlateSeat(StepTake):
     def grip_spec(self, kind: str, name: str) -> dict:
         """A clamp's pinch on its strap where it lies parked, or a hand's (name: its side) on the wrench's handle."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate, name)
+            return PW.grip_spec(self, self.plate, name, self.clamps)
         c = next(k for k in self.clamps if k.name == name)
         return PC.grip_spec(self, c, "parked", self.plate)
 

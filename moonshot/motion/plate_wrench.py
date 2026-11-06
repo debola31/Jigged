@@ -62,11 +62,28 @@ def grab_at() -> np.ndarray:
     return np.array([GRAB_MM, 0.0, 0.0])
 
 
-def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R") -> dict:
-    """A hand's pinch on the handle where the wrench lies: thumb on its near edge, index and middle on its far edge,
-    across its width (the left hand's index on the right of its middle finger, the right's on the left)."""
+def grip_at(plate: SB.Plate, nuts: list[SB.Clamp], side: str, direction: str = "tighten") -> tuple[np.ndarray, float]:
+    """Where the wrench stands as a hand's pinch on it is solved (its box end's middle mm, its yaw): on the hand's
+    first nut (by_hand), seated, halfway through a stroke, where the hand works it. Solved where the wrench lies on
+    the plate, the hand took it as a pickup there has it, and turned with it onto a nut: the right forearm pronated
+    10 deg past people's range on the right end's nuts, the left wrist stood out past the stud on the left end's, and
+    the trunk bent 12-15 deg to the side."""
+    c = next(ns[0] for s, ns in by_hand(nuts) if s == side)
+    sweep = STROKE / 2 * (-1 if direction == "tighten" else 1)
+    z = c.nut_z("clamped") + (SB.PARK_NUT_GAP_MM / 2 if direction == "tighten" else 0.0)
+    yaw = nut_yaw(c, plate, direction) + sweep
+    return on_nut(c, yaw, z)[1], yaw
+
+
+def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R", nuts: list[SB.Clamp] | None = None,
+              direction: str = "tighten") -> dict:
+    """A hand's pinch on the handle, where it works its first nut (grip_at; where the wrench lies if no nuts given):
+    thumb on its near edge, index and middle on its far edge, across its width (the left hand's index on the right of
+    its middle finger, the right's on the left), the box end on the nut; solved among the wrench, the plate, the
+    spoilboard, and the nut's clamp. The take keeps where it was solved (wrench_grip_at), for use."""
     h = take.hand
-    p, yaw = rest(plate)
+    p, yaw = grip_at(plate, nuts, side, direction) if nuts else rest(plate)
+    take.__dict__.setdefault("wrench_grip_at", {})[f"wrench_{side}"] = (p, yaw)
     R = turned(yaw)
     g = p + R @ grab_at()
     half_w = WR.HANDLE_W / 2
@@ -79,6 +96,11 @@ def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R") -> dict:
               thumb_mcp_flex=20.0, thumb_ip=15.0)
     cols = [obox(p + R @ c, R @ Rb, hh) for _, c, hh, Rb in WR.boxes()]
     cols.append(obox(plate.centre, np.eye(3), plate.size / 2))
+    board = plate.bottom
+    cols.append(obox(np.r_[SB.TABLE_MID, board - SB.SPOILBOARD_MM[2] / 2], np.eye(3), SB.SPOILBOARD_MM / 2))
+    for c in nuts or ():                                     # the clamps, clamped, under the handle
+        at, Rc = c.pose("clamped")
+        cols += [obox(at + Rc @ b, Rc, hh) for _, b, hh in SB.strap_boxes()]
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     depth = (1.0, 4.0)
     return dict(obj=g, side=side, q0=q0, colliders=cols, load=WR.kg(),
@@ -182,12 +204,14 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     grip = grip or f"wrench_{side}"
     g = take.grips[grip]
     p_rest, y_rest = rest(plate)
-    t_c, _ = PC.reach(take, side, grip, t0, WR.HANDLE_W, obj=p_rest + turned(y_rest) @ grab_at())
+    # the grip's frame as it was solved (grip_spec: on the hand's first nut, or where the wrench lies)
+    R0 = turned(take.__dict__.get("wrench_grip_at", {}).get(grip, rest(plate))[1])
+    t_c, _ = PC.reach(take, side, grip, t0, WR.HANDLE_W, obj=p_rest + turned(y_rest) @ grab_at(),
+                      R=turned(y_rest) @ R0.T)
     take.effort(side, t_c, 0.0, grip)
     take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S
     k, swings, work = keys(plate, clamps, t_load + SP.LIFT_DELAY_S, direction, gap_mm)
-    R0 = k[0][1]
     grab = grab_at()
     take.follow(side, t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
                 lambda tt: PC.key_at(k, tt)[0] @ R0.T)

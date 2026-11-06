@@ -7582,7 +7582,13 @@
     "x": 26120,
     "y": 5523,
     "z": 863.6,
-    "rot": 180
+    "rot": 180,
+    "name": "3/4 in ratcheting combination wrench",
+    "category": "hand_tools",
+    "kind": "ratcheting_wrench",
+    "zone": "benches",
+    "on": "bench-lathe",
+    "facts": []
    },
    {
     "item": "deburr-1",
@@ -12567,7 +12573,64 @@
       20.66,
       11.2
      ]
-    }
+    },
+    "description": "Ratcheting box end and open end, 3/4 in, for running the step clamps' flange nuts down and snugging them without lifting the wrench off between strokes.",
+    "key_specs": [
+     {
+      "name": "Size",
+      "value": "3/4 in"
+     },
+     {
+      "name": "Overall length",
+      "value": 9.594,
+      "unit": "in",
+      "note": "9532N listings; the non-reversible 9024's is 9.764 in"
+     },
+     {
+      "name": "Box end width",
+      "value": 1.339,
+      "unit": "in"
+     },
+     {
+      "name": "Box end thickness",
+      "value": 0.441,
+      "unit": "in"
+     },
+     {
+      "name": "Open end width",
+      "value": 1.626,
+      "unit": "in"
+     },
+     {
+      "name": "Open end thickness",
+      "value": 0.374,
+      "unit": "in"
+     },
+     {
+      "name": "Ratchet teeth",
+      "value": 72,
+      "unit": "teeth"
+     },
+     {
+      "name": "Swing arc",
+      "value": 5,
+      "unit": "deg"
+     },
+     {
+      "name": "Box end",
+      "value": "12-point, 0 deg offset"
+     },
+     {
+      "name": "Reversible",
+      "value": "yes: a lever on the head sets which way the ratchet drives"
+     },
+     {
+      "name": "Weight",
+      "value": 0.47,
+      "unit": "lb",
+      "note": "the 9024's catalogue weight"
+     }
+    ]
    },
    "ream-1-4": {
     "name": "1/4 in chucking reamer",

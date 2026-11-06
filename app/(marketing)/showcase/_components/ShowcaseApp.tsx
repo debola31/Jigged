@@ -107,11 +107,17 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
     posthog.capture('showcase part picked', { part: id, source });
   }, []);
   const generated = useCallback(() => useShowcase.setState({ phase: 'plan', sheet: 'need' }), []);
+  // A machine from the example shop's list: down to the shop, where the camera flies to it.
+  const showMachine = useCallback((id: string) => {
+    shop.current?.scrollIntoView({ behavior: 'smooth' });
+    useShowcase.getState().openItem(id);
+    posthog.capture('showcase item opened', { category: 'machines', source: 'intro' });
+  }, []);
 
   const props = { cat, part, parts, onPick: pick, onGenerated: generated };
   return (
     <>
-      <Intro parts={parts} onPick={pick} />
+      <Intro cat={cat} parts={parts} onPick={pick} onMachine={showMachine} />
       <Box
         component="section"
         ref={shop}

@@ -140,10 +140,10 @@ function PickPrompt() {
   return (
     <Box>
       <Typography component="h2" sx={{ fontWeight: 600, fontSize: '1.3rem' }}>
-        Pick a part to see it made
+        Try an example part
       </Typography>
       <Button variant="contained" startIcon={<ArrowUpwardIcon />} onClick={toTheParts} sx={{ mt: 2 }}>
-        Choose a part
+        Choose one
       </Button>
     </Box>
   );

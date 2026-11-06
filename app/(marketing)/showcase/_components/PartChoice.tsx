@@ -22,6 +22,13 @@ import { finishedStill, type LivePart } from './showcaseData';
 /** Where a part was picked from: the intro's carousel, the Change part menu, or the closing card's. */
 export type PickSource = 'intro' | 'menu' | 'finished';
 
+/**
+ * Whether visitors can send their own part. Off until the privacy policy covers pilot requests
+ * (PR #882's "Before this can merge"): every way to upload shows "Coming soon" and opens nothing.
+ * The form, its Route Handlers and the `pilot_requests` table stay as they are for when it's on.
+ */
+export const UPLOADS_OPEN = false;
+
 const MENU_BG = 'rgba(17, 20, 57, 0.98)';
 
 /** The pilot-request form in a dialog: the visitor's own part. */
@@ -102,6 +109,7 @@ export function PartMenu({
             </ListItemButton>
           ))}
           <ListItemButton
+            disabled={!UPLOADS_OPEN}
             onClick={() => {
               setAnchor(null);
               setPilot(true);
@@ -111,11 +119,15 @@ export function PartMenu({
             <ListItemIcon sx={{ minWidth: 0, width: 72, justifyContent: 'center', color: EYEBROW_COLOR }}>
               <UploadFileOutlinedIcon />
             </ListItemIcon>
-            <ListItemText primary="Your own part" secondary="Send a CAD file or drawing" slotProps={{ primary: { sx: { fontWeight: 600 } } }} />
+            <ListItemText
+              primary="Your own part"
+              secondary={UPLOADS_OPEN ? 'Send a CAD file or drawing' : 'Coming soon'}
+              slotProps={{ primary: { sx: { fontWeight: 600 } } }}
+            />
           </ListItemButton>
         </List>
       </Popover>
-      <PilotDialog open={pilot} onClose={() => setPilot(false)} />
+      {UPLOADS_OPEN && <PilotDialog open={pilot} onClose={() => setPilot(false)} />}
     </>
   );
 }

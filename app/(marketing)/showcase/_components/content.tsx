@@ -29,7 +29,7 @@ import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingSty
 import { toError } from '@/lib/supabaseErrors';
 import { gatherList, stepsUsing, type Catalog } from './catalog';
 import { CategoryIcon, KindIcon, PartFacts, setupColour, shortName } from './glyphs';
-import { PartMenu, PilotDialog, type PickSource } from './PartChoice';
+import { PartMenu, PilotDialog, UPLOADS_OPEN, type PickSource } from './PartChoice';
 import { finishedStill, mediaUrl, ready, type LivePart, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -431,8 +431,8 @@ export function DoneContent({ part, parts, onPick }: { part: LivePart; parts: Li
       <Box sx={{ mt: 1.5 }}>
         <PartFacts part={part} />
       </Box>
-      <Button variant="contained" size="large" fullWidth startIcon={<UploadFileOutlinedIcon />} onClick={() => setPilot(true)} sx={{ mt: 3 }}>
-        Send us your own part
+      <Button variant="contained" size="large" fullWidth startIcon={<UploadFileOutlinedIcon />} disabled={!UPLOADS_OPEN} onClick={() => setPilot(true)} sx={{ mt: 3 }}>
+        {UPLOADS_OPEN ? 'Send us your own part' : 'Upload your own part: coming soon'}
       </Button>
       <PartMenu
         parts={parts}
@@ -440,9 +440,9 @@ export function DoneContent({ part, parts, onPick }: { part: LivePart; parts: Li
         onPick={onPick}
         source="finished"
         label="Try another part"
-        buttonProps={{ variant: 'outlined', size: 'large', fullWidth: true, sx: { mt: 1.5 } }}
+        buttonProps={{ variant: UPLOADS_OPEN ? 'outlined' : 'contained', size: 'large', fullWidth: true, sx: { mt: 1.5 } }}
       />
-      <PilotDialog open={pilot} onClose={() => setPilot(false)} />
+      {UPLOADS_OPEN && <PilotDialog open={pilot} onClose={() => setPilot(false)} />}
     </>
   );
 }
@@ -454,6 +454,8 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
   const thing = cat.spots.get(id)?.[0];
   const step = useShowcase((s) => s.step);
   const sheet = useShowcase((s) => s.sheet);
+  // Before a part is picked (a machine opened from the example shop's list), no part's steps apply.
+  const picked = useShowcase((s) => s.phase) === 'plan';
   const finePointer = useFinePointer();
   const [shown, setShown] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
@@ -478,7 +480,7 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
           </Typography>
         </Box>
       )}
-      {used.length > 0 && (
+      {picked && used.length > 0 && (
         <Section title={`In ${shortName(part)}'s steps`}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
             {used.map((n) => (

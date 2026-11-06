@@ -1,0 +1,94 @@
+{
+ "asset": "hurco",
+ "about": "Hurco VM1, self-made in Blender (sources/hurco/build_hurco.py) from dealer photos (warm-white enclosure; the left panel lettered HURCO over a tall blue panel with 'VM1'; two doors with tall round-cornered windows in rubber gaskets and bar handles over a black kick stripe; the slate blue-grey MAX pendant hung off the right front on its arm, with its screen, coloured keys, keypad, jog knob, beige keyboard tray and grab handle; on the roof the tool changer's rounded hood, the electrical box, the head cover, spindle motor and black cable carrier) and the record's specs: inside, the 29 x 14 in table with three T-slots on its saddle, way covers, a blue vise holding a part, the spindle with a CAT40 holder and end mill, coolant hoses and the side-mount 16-tool carousel; behind, the coolant tank and pump, the chip auger and the electrical cabinet door. Doors closed: the work zone shows through the glass.",
+ "reviewed": "2026-11-05: modelled against dealer photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/hurco/hurco.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "hurco_white",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "cast_iron_ground": "cast_iron_ground",
+   "cast_iron_painted": "cast_iron_painted",
+   "cast_iron_raw": "cast_iron_raw",
+   "glass_polycarbonate": "glass_polycarbonate",
+   "hurco_blue": "hurco_blue",
+   "hurco_keyboard": "hurco_keyboard",
+   "hurco_pendant": "hurco_pendant",
+   "hurco_red": "hurco_red",
+   "hurco_white": "hurco_white",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "plastic_green": "plastic_green",
+   "rubber_black": "rubber_black",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "hurco_white": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.59,
+    0.55
+   ],
+   "rough": 0.4,
+   "about": "Hurco's warm white enclosure sheet metal and covers"
+  },
+  "hurco_blue": {
+   "family": "paint",
+   "color": [
+    0.012,
+    0.06,
+    0.4
+   ],
+   "rough": 0.36,
+   "about": "Hurco blue: the left panel, a key, the vise, the coolant hoses, the pump"
+  },
+  "hurco_pendant": {
+   "family": "paint",
+   "color": [
+    0.15,
+    0.19,
+    0.25
+   ],
+   "rough": 0.42,
+   "about": "the MAX pendant's slate blue-grey housing and keyboard tray"
+  },
+  "hurco_keyboard": {
+   "family": "plastic",
+   "color": [
+    0.56,
+    0.48,
+    0.27
+   ],
+   "rough": 0.5,
+   "about": "the pendant's beige keyboard"
+  },
+  "hurco_red": {
+   "family": "flat",
+   "color": [
+    0.45,
+    0.02,
+    0.015
+   ],
+   "rough": 0.35,
+   "about": "the pendant's red keys and stop"
+  }
+ },
+ "sources_used": [
+  "the record (26 x 14 x 18 in travels, 29 x 14 in table, 8,000 rpm, CAT40, 16-tool side mount) and its placeholder's box",
+  "dealer photos of the VM1 (Ironside Machinery, Wisconsin Metalworking Machinery, Surplus Record, eBay listings found by image search): colours, the HURCO / VM1 panel, the MAX pendant on its arm, the roof's hood, box and cable carrier"
+ ],
+ "unsure": [
+  {
+   "what": "the back (coolant tank, auger, cabinet) and the inside are plausible, not photographed; the enclosure front sits 40 mm behind the placeholder's so the handles and the keyboard tray stay inside the record's box"
+  }
+ ]
+}

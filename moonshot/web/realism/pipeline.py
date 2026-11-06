@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import numpy as np
+
 from moonshot.config import blender, data_root
 from moonshot.web.export import asset_record
 from moonshot.web.realism import budgets, locks, matlib
@@ -56,6 +58,7 @@ def _timed(asset: str, step: str, seconds: float, **extra) -> None:
 
 
 def _run(args: list[str], log: Path, cwd: Path | None = None) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "w", encoding="utf-8") as f:
         r = subprocess.run(args, stdout=f, stderr=subprocess.STDOUT, cwd=cwd, text=True)
     if r.returncode:
@@ -102,8 +105,9 @@ def sources(asset: str, mp: dict, rec: dict) -> list[dict]:
     if "links" in s:
         return [{"path": str(lib / "links" / f"{ln}.glb"), "link": ln, "undo_y_up": True,
                  "translate_mm": s.get("translate_mm", [0, 0, 0]), "move_mm": s.get("move_mm", {}).get(ln)}
-                for ln in s["links"]]
-    return [{"path": str(lib / s.get("file", rec["file"])), "link": None, "undo_y_up": False}]
+                for ln in s["links"] if ln not in mp.get("drop_links", [])]
+    return [{"path": str(lib / s.get("file", rec["file"])), "link": None, "undo_y_up": False,
+             "drop_links": mp.get("drop_links", [])}]
 
 
 def asset_class(asset: str) -> str:
@@ -120,7 +124,9 @@ def simplify(asset: str) -> list[dict]:
         s["dst"] = str(out / Path(s["path"]).name)
     cap = mp.get("triangles", budgets.CLASSES[cls]["triangles"])
     job = _write_job(asset, "simplify", {"inputs": [{"src": s["path"], "dst": s["dst"]} for s in srcs], "cap": cap,
-                                         "error": SIMPLIFY_ERROR[cls], "report": str(work_dir(asset) / "simplify.json")})
+                                         "error": mp.get("simplify_error", SIMPLIFY_ERROR[cls]),
+                                         "drop_links": mp.get("drop_links", []),
+                                         "report": str(work_dir(asset) / "simplify.json")})
     t = time.perf_counter()
     node(asset, "simplify", job)
     _timed(asset, "simplify", time.perf_counter() - t, kind="cpu")
@@ -222,6 +228,24 @@ def validate(asset: str) -> dict:
     return report
 
 
+UV1_FLOOR = 0.1             # an atlas using less of its square than this is mostly margin (prepare.py repacks under 0.2)
+AO_LIT = 0.25                # an AO texel above this is lit; a healthy bake has most of its islands' texels above it
+
+
+def ao_health(asset: str, st: dict) -> dict:
+    """Whether the AO bake is usable: its atlas isn't mostly margin, and its islands aren't black. edgef's spring
+    shattered into thousands of islands, its pack fell to 0.000 and it baked black, and every other check passed."""
+    util = st["uv1_utilisation"]
+    png = work_dir(asset) / "ao.png"
+    if not png.exists():
+        return {"ok": False, "uv1_utilisation": util, "why": "no AO bake"}
+    from PIL import Image
+    a = np.asarray(Image.open(png).convert("L"), np.float32) / 255
+    lit = float((a > AO_LIT).mean())
+    ok = util >= UV1_FLOOR and lit >= 0.4 * util
+    return {"ok": bool(ok), "uv1_utilisation": util, "lit_share": round(lit, 4), "mean": round(float(a.mean()), 4)}
+
+
 def check(asset: str) -> dict:
     """The asset against its budgets: the validator's verdict, size, triangles, its frame against the record's."""
     rec, mp = asset_record(asset), mapping(asset)
@@ -241,21 +265,25 @@ def check(asset: str) -> dict:
     frame = {k: [round(g - r, 1) for g, r in zip(got[k], rec["bbox"][k])] for k in ("min", "max")}
     bad = [m for m in va["messages"] if m["severity"] <= 1 and (m["code"] not in BENIGN_WARNINGS or (
         m["code"] == "VALUE_NOT_IN_LIST" and "image/ktx2" not in m["message"]))]
-    ktx_ok = subprocess.run([str(ktx()), "validate", str(w / "ao.ktx2")], capture_output=True).returncode == 0         if (w / "ao.ktx2").exists() else True
+    ktx_ok = not (w / "ao.ktx2").exists() or         subprocess.run([str(ktx()), "validate", str(w / "ao.ktx2")], capture_output=True).returncode == 0
+    health = ao_health(asset, st)
+    cap_bytes = mp.get("download_bytes", c["download_bytes"])
     checks = {
         "validator": va["errors"] == 0 and not bad and ktx_ok,
-        "download": pk["bytes"] <= c["download_bytes"],
-        "triangles": pk["triangles"] <= c["triangles"] * 1.05,
+        "download": pk["bytes"] <= cap_bytes,
+        "triangles": pk["triangles"] <= mp.get("triangles", c["triangles"]) * 1.05,
         "frame": all(abs(d) <= tol for k in frame for d in frame[k]),
         "mapped": not set(st["unmapped"]) - set(mp.get("fallback_ok", [])),
+        "ao": health["ok"],
     }
+    allowance = {k: mp[k] for k in ("download_bytes", "download_why", "triangles", "triangles_why") if k in mp}
     return {"asset": asset, "class": cls, "status": "ok" if all(checks.values()) else "failed: " + ", ".join(
         k for k, v in checks.items() if not v), "checks": checks, "bytes": pk["bytes"], "triangles": pk["triangles"],
         "draw_calls": pk["draw_calls"], "gpu_texture_bytes": gpu_tex, "gpu_geometry_bytes": pk["geometry_gpu_bytes"],
         "ao": ao, "tiles": pk["tiles"], "materials": pk["materials"], "frame_delta_mm": frame,
         "validator": {**{k: va[k] for k in ("errors", "warnings", "infos", "hints")},
                       "not_benign": [f"{m['code']} {m.get('pointer', '')}" for m in bad][:20]},
-        "unmapped": st["unmapped"],
+        "unmapped": st["unmapped"], "ao_health": health, "allowance": allowance,
         "budget": c}
 
 

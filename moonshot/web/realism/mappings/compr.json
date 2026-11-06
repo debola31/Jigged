@@ -1,0 +1,77 @@
+{
+ "about": "150 L horizontal-tank piston compressor (GrabCAD, no colours): the tank and belt guard in red enamel, the pump and motor dark, feet and wheels black. A generic compressor; the colour is a choice.",
+ "fallback": "paint_dark_grey",
+ "cad": {
+  "*": {
+   "none": "paint_dark_grey"
+  }
+ },
+ "materials": {
+  "compr_red": {
+   "family": "paint",
+   "color": [
+    0.3,
+    0.02,
+    0.015
+   ],
+   "rough": 0.3,
+   "about": "compressor tank red enamel, glossy"
+  }
+ },
+ "rules": [
+  {
+   "why": "the tank (part 34)",
+   "parts": [
+    34
+   ],
+   "material": "compr_red"
+  },
+  {
+   "why": "the belt guard (part 57, the flat cover on the tank's back)",
+   "parts": [
+    57,
+    47,
+    48
+   ],
+   "material": "compr_red"
+  },
+  {
+   "why": "the pump's cast block (parts 13, 27, 36)",
+   "parts": [
+    13,
+    27,
+    36
+   ],
+   "material": "cast_painted_grey"
+  },
+  {
+   "why": "feet and wheels",
+   "parts": [
+    1,
+    2,
+    56,
+    68,
+    63,
+    11,
+    21
+   ],
+   "material": "rubber_black"
+  },
+  {
+   "why": "the copper discharge line and small fittings (thin parts)",
+   "part_size": {
+    "max_mid_side": 0.03,
+    "min_max_side": 0.1
+   },
+   "material": "copper"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the tank colour (red) is a choice: the CAD has none",
+   "picture": "checks/compr_front_before_after.png"
+  }
+ ],
+ "asset": "compr",
+ "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+}

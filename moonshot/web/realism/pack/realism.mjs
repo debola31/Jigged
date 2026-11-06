@@ -28,25 +28,61 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
 const triangles = (doc) => doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())
 	.reduce((n, p) => n + (p.getIndices() ? p.getIndices().getCount() : p.getAttribute('POSITION').getCount()) / 3, 0);
 
-// The sources together to the cap, each by the same ratio; under the cap they are copied as they are.
-async function simplifyAll() {
-	const docs = await Promise.all(job.inputs.map((s) => io.read(s.src)));
-	const total = docs.reduce((n, d) => n + triangles(d), 0);
-	const ratio = Math.min(1, job.cap / total);
-	const out = { cap: job.cap, before: total, ratio, files: [] };
-	for (const [i, s] of job.inputs.entries()) {
-		const doc = docs[i];
-		const before = triangles(doc);
-		if (ratio < 1 && before > 500) {
-			await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio, error: job.error }));
-			await io.write(s.dst, doc);
-		} else {
-			fs.copyFileSync(s.src, s.dst);
+// The sources together to the cap, each by the same ratio; under the cap they are copied as they are. The error
+// bound stops the simplifier before it spoils a silhouette, so on dense CAD it can stall above the cap: then the
+// bound is doubled and the sources simplified again, up to MAX_ERROR (1.6% of the radius), and the report says so.
+const MAX_ERROR = 0.016;
+
+// A source as the asset uses it: without the links its mapping drops (hidden springs, thread detail), by node name.
+async function readSource(src) {
+	const doc = await io.read(src);
+	const drop = new Set(job.drop_links ?? []);
+	if (drop.size) {
+		for (const node of doc.getRoot().listNodes()) {
+			if (drop.has(node.getName().replace(/\.\d+$/, ''))) node.dispose();
 		}
-		out.files.push({ src: s.src, before, after: triangles(doc) });
-		console.log(`[simplify] ${path.basename(s.src)}: ${before} -> ${triangles(doc)} triangles`);
+		await doc.transform(prune());
 	}
-	out.after = out.files.reduce((n, f) => n + f.after, 0);
+	return doc;
+}
+
+// Positions only, welded: the simplifier won't collapse across a normal or UV seam, and vendor meshes (pre-decimated
+// with split normals, the V-block's) are all seams, so it stalled far above the cap. prepare.py recomputes normals
+// for every simplified source anyway, and Blender lays out both UV sets. Material borders stay: they are primitives.
+function positionsOnly(doc) {
+	for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
+		for (const semantic of prim.listSemantics()) {
+			if (semantic !== 'POSITION') prim.setAttribute(semantic, null);
+		}
+	}
+}
+
+async function simplifyAll() {
+	const total = (await Promise.all(job.inputs.map((s) => readSource(s.src)))).reduce((n, d) => n + triangles(d), 0);
+	const ratio = Math.min(1, job.cap / total);
+	let error = job.error;
+	let out;
+	for (;;) {
+		out = { cap: job.cap, before: total, ratio, error, dropped: job.drop_links ?? [], files: [] };
+		for (const s of job.inputs) {
+			const doc = await readSource(s.src);
+			const before = triangles(doc);
+			if (ratio < 1 && before > 500) {
+				positionsOnly(doc);
+				await doc.transform(weld(), prune(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
+				await io.write(s.dst, doc);
+			} else if (job.drop_links?.length) {
+				await io.write(s.dst, doc);
+			} else {
+				fs.copyFileSync(s.src, s.dst);
+			}
+			out.files.push({ src: s.src, before, after: triangles(doc) });
+		}
+		out.after = out.files.reduce((n, f) => n + f.after, 0);
+		console.log(`[simplify] error ${error}: ${total} -> ${out.after} triangles (cap ${job.cap})`);
+		if (out.after <= job.cap * 1.05 || error * 2 > MAX_ERROR) break;
+		error *= 2;
+	}
 	fs.writeFileSync(job.report, JSON.stringify(out, null, 1));
 }
 

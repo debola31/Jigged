@@ -12,6 +12,7 @@ people find the flats with a wrench.
 """
 from __future__ import annotations
 
+import json
 import math
 
 import numpy as np
@@ -175,26 +176,28 @@ def by_hand(clamps: list[SB.Clamp]) -> list[tuple[str, list[SB.Clamp]]]:
     return [(s, nuts) for s, nuts in (("R", right), ("L", left)) if nuts]
 
 
-def strokes(direction: str, gap_mm: float = SB.PARK_NUT_GAP_MM) -> list[float]:
+def strokes(direction: str, gap_mm: float = SB.PARK_NUT_GAP_MM, turn: float | None = None) -> list[float]:
     """Each stroke's turn of the nut (rad, negative clockwise from above) to run it gap_mm (by default from parked)
-    down onto its strap and snug it ("tighten": strokes enough for SNUG_MARGIN times the gap, the hand pulling till
-    the nut is snug, the strokes past it stalling on it), or to break it loose and run it back up gap_mm ("loosen")."""
-    run = SB.LEAD_MM * STROKE / (2 * math.pi)
-    reach = gap_mm * (SNUG_MARGIN if direction == "tighten" else 1.0)
-    n = int(reach // run)
-    rest_turn = (reach - n * run) / SB.LEAD_MM * 2 * math.pi + SNUG
-    tighten = [-STROKE] * n + [-rest_turn]
+    down onto its strap and snug it ("tighten"), or to break it loose and run it back up gap_mm ("loosen"): strokes
+    enough for SNUG_MARGIN times the gap; or, where a first physics run has shown the strokes that take this nut
+    there (turn: their whole planned turn, rad; moonshot/motion/plate_strokes.py), those, as the operator stops when
+    the nut is snug or run up."""
+    if turn is None:
+        turn = gap_mm * SNUG_MARGIN / SB.LEAD_MM * 2 * math.pi + SNUG
+    n = int((turn - SNUG) // STROKE) if turn > SNUG else 0
+    tighten = [-STROKE] * n + [-(turn - n * STROKE)]           # the last the remainder, the snug's (or the break's) in it
     return tighten if direction == "tighten" else [-a for a in reversed(tighten)]
 
 
 def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "tighten",
-         gap_mm: float = SB.PARK_NUT_GAP_MM):
+         gap_mm: float = SB.PARK_NUT_GAP_MM, turns: dict[str, float] | None = None):
     """The wrench's planned path from t0, (t, frame, box end's middle) keys; each stroke's (clamp, t0, t1, rad); and
     each nut's work on it (clamp, t0, t1): up off the plate, over each nut in turn, held there a moment, and down onto
     it; each stroke swung about the stud by the nut's turn rad (the first by the ring's play on the nut too), the nut
     running down (or up) its thread with it, and swung back, the box end staying on the nut, the ratchet freewheeling;
     up off it after its last; then back down where it lay. Carried, the wrench is clear of the studs' tops
-    (STUD_CLEAR_MM)."""
+    (STUD_CLEAR_MM). turns: each nut's (by clamp name) strokes' whole planned turn (rad), learned from a first
+    physics run (strokes)."""
     p0, y0 = rest(plate)
     R0 = turned(y0)
     high = max(c.stud_z()[1] for c in clamps) + STUD_CLEAR_MM + WR.HEIGHT / 2     # its middle, carried
@@ -202,8 +205,8 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
     k = [(t0, R0, p0), (t0 + LIFT_S, R0, up(p0 + [0.0, 0.0, 40.0]))]
     t = t0 + LIFT_S
     done, work = [], []
-    swings = strokes(direction, gap_mm)
     for c in clamps:
+        swings = strokes(direction, gap_mm, (turns or {}).get(c.name))
         start = nut_yaw(c, plate, direction, clamps)
         z = c.nut_z("clamped") + (gap_mm if direction == "tighten" else 0.0)
         Ra, pa = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
@@ -237,7 +240,8 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
 
 
 def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "tighten",
-        grip: str | None = None, gap_mm: float = SB.PARK_NUT_GAP_MM, side: str = "R") -> tuple[float, list]:
+        grip: str | None = None, gap_mm: float = SB.PARK_NUT_GAP_MM, side: str = "R",
+        turns: dict[str, float] | None = None) -> tuple[float, list]:
     """A hand (the right, or the left on a long plate's left end's nuts, in that end's own take: moonshot/motion/
     plate_seat.py) from wherever it is at t0: the reach to the wrench's handle (as a clamp's), the pinch firming, the
     wrench carried along its keys, turning each nut in turn, and laid back down, let go, and the hand up off it.
@@ -252,7 +256,7 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     take.effort(side, t_c, 0.0, grip)
     take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S
-    k, swings, work = keys(plate, clamps, t_load + SP.LIFT_DELAY_S, direction, gap_mm)
+    k, swings, work = keys(plate, clamps, t_load + SP.LIFT_DELAY_S, direction, gap_mm, turns)
     grab = grab_at()
     take.follow(side, t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
                 lambda tt: PC.key_at(k, tt)[0] @ R0.T)
@@ -297,8 +301,29 @@ def use_ends(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float,
     clear of it, and the wrench's keys, its carries one after the other."""
     t = dict(free or {})
     keys: list = []
+    turns = learned(take, direction)
     for side, nuts in by_hand(clamps):
-        t[side], k = use(take, plate, nuts, max(t0, t.get(side, t0)), direction, gap_mm=gap_mm, side=side)
+        t[side], k = use(take, plate, nuts, max(t0, t.get(side, t0)), direction, gap_mm=gap_mm, side=side,
+                         turns=turns)
         keys += k
         t0 = k[-1][0] + 0.3                     # laid down, the hand off it, before the other's reaches for it
     return t, keys
+
+
+STROKES_FILE = "strokes.json"
+
+
+def learned(take: StepTake, direction: str) -> dict[str, float] | None:
+    """Each nut's strokes' whole planned turn (rad, by clamp name) that a physics run of this take has shown takes
+    it snug ("tighten") or run back up ("loosen"), as the operator feels it go and stops: the take's STROKES_FILE
+    (written by moonshot/motion/plate_strokes.py), None before a first run. Recorded in the take's record
+    (take.json "strokes"): which pass the counts came from, and what they stand for."""
+    f = take.out / STROKES_FILE
+    if not f.exists():
+        take.extra["strokes"] = {"pass": 1, "counts": "SNUG_MARGIN times each nut's run, the first pass"}
+        return None
+    s = json.loads(f.read_text(encoding="utf-8"))
+    take.extra["strokes"] = {"pass": s["pass"] + 1, "learned_from_pass": s["pass"], "turn_deg": s["turn_deg"],
+                             "note": "each nut's strokes stop where the physics run of the pass before had it snug "
+                                     "on its strap (or run back up): they stand for the operator's feel of the nut"}
+    return {n: math.radians(d) for n, d in s["turn_deg"].get(direction, {}).items()} or None

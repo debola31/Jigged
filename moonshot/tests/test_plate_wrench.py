@@ -89,8 +89,9 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
     plate = plates.plate(part, "op10")
     clamps = plates.clamps(part, "op10")
     keys, done, work = PW.keys(plate, clamps, 0.0, direction)
-    # tightening, strokes for SNUG_MARGIN times the gap, the box end planned down to the snug nut and no further
-    gap = SB.PARK_NUT_GAP_MM * (PW.SNUG_MARGIN if direction == "tighten" else 1.0)
+    # a first pass: strokes for SNUG_MARGIN times the gap (moonshot/motion/plate_strokes.py learns where to stop),
+    # tightening the box end planned down to the snug nut and no further
+    gap = SB.PARK_NUT_GAP_MM * PW.SNUG_MARGIN
     whole = (gap / SB.LEAD_MM * 2 * math.pi + PW.SNUG) * (-1 if direction == "tighten" else 1)
     for c in clamps:
         (t_on, t_off), = [(a, b) for k, a, b in work if k.name == c.name]
@@ -120,8 +121,17 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
             swing = rad + math.copysign(WR.play(), rad)                 # the ring's play taken up each stroke
             assert (turn - swing + math.pi) % (2 * math.pi) - math.pi == pytest.approx(0.0, abs=1e-9)
         assert z == pytest.approx(c.nut_z("clamped") - SB.LEAD_MM * PW.SNUG / (2 * math.pi) if direction == "tighten"
-                                  else c.nut_z("parked") + SB.LEAD_MM * PW.SNUG / (2 * math.pi))
+                                  else c.nut_z("clamped") + gap + SB.LEAD_MM * PW.SNUG / (2 * math.pi))
     assert np.allclose(keys[0][2], keys[-1][2])                  # laid back where it lay
+
+
+@pytest.mark.parametrize("direction", ["tighten", "loosen"])
+def test_a_learned_turn_is_stroked_whole_the_last_stroke_taking_the_rest(direction):
+    for deg in (500.0, 1100.0, 1117.5, 1360.0):
+        swings = PW.strokes(direction, turn=math.radians(deg))
+        assert sum(abs(a) for a in swings) == pytest.approx(math.radians(deg))
+        assert all(abs(a) <= PW.STROKE + PW.SNUG + 1e-9 for a in swings)
+        assert all(a < 0 for a in swings) if direction == "tighten" else all(a > 0 for a in swings)
 
 
 @pytest.mark.parametrize("direction", ["tighten", "loosen"])

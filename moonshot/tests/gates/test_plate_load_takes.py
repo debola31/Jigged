@@ -43,6 +43,11 @@ def test_the_plate_is_carried_and_not_dropped(run):
 
 
 def test_the_plate_stays_where_it_was_let_go(run):
+    # "let go" is when it comes to rest off the hands: 0.3 s after the last frame a hand touches it, or a second after
+    # the carry ends if later (moonshot/sim/plate_load.py let_go_frame). Laid from underneath, a plate rests on the
+    # fingers under its ends after the carry and drops their thickness onto the board as they come out; measured from
+    # a second after the carry, mid draw-out, that drop counted. A measurement fix, the 0.5 mm limit unchanged
+    # (accepted by the coordinator, 2026-11-06)
     assert run.outcome()["moved_after_let_go_mm"] < 0.5
 
 

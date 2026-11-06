@@ -36,6 +36,10 @@ END_IN_MM = 250.0            # a split take's stance this far in from its end's 
                              # plate's middle in reach (from the plate's middle, ll-1005337's far right nut's strokes
                              # turned the trunk 15 deg past people's range; at 190 with the right hand on the left
                              # end's nuts too, it reached across the body and the trunk turned and bent 17 deg left)
+END_IN_OWN_MM = {("nist-ftc-09", "right"): 120.0}   # ... or this far, where an end's far nuts are stroked from
+                                                    # pointing out past the end (moonshot/motion/plate_wrench.py
+                                                    # nut_yaw: nist-ftc-09's right end, three clamps 125 mm apart),
+                                                    # the hand's strokes then in front of that shoulder
 SIDE_OF_END = {"left": "L", "right": "R"}
 
 
@@ -77,7 +81,8 @@ class PlateSeat(StepTake):
         if self.end is None:
             return np.asarray(PC.LUMBAR, float)
         x = self.clamps[0].stud[0]
-        return np.r_[x + (END_IN_MM if self.end == "left" else -END_IN_MM), PC.LUMBAR[1:]]
+        d = END_IN_OWN_MM.get((self.part, self.end), END_IN_MM)
+        return np.r_[x + (d if self.end == "left" else -d), PC.LUMBAR[1:]]
 
     def table_state(self) -> str | dict[str, str]:
         """The clamps as the take starts (spoilboard.state_of): all parked, or for the right end's take, the left

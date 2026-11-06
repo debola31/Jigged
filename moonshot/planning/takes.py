@@ -62,8 +62,10 @@ PLATE_UNLOAD = ("unload-blow-off", "lift-off-plate")      # the chips blown off 
 # a plate too long for one stance to reach both ends' far clamps has its clamps set in two takes, one per end, each from
 # its own stance in front of that end's clamps, joined across a cut as the operator steps over (the user's rule from
 # the tool loads, 2026-11-04: the body doesn't walk, so one take per stance; the coordinator's decision for ll-1005337,
-# 2026-11-05: from the doorway's middle, its far right nut's strokes turned the trunk 15 deg past people's range)
-SPLIT_SEAT = {"ll-1005337"}
+# 2026-11-05: from the doorway's middle, its far right nut's strokes turned the trunk 15 deg past people's range; and
+# for nist-ftc-09, 2026-11-06: its right end's far nuts, stroked from pointing out to the right to clear the next nut,
+# stood the hand 310-340 mm right of the doorway's middle, the right arm out of people's range)
+SPLIT_SEAT = {"ll-1005337", "nist-ftc-09"}
 SEAT_ENDS = ("left", "right")
 
 

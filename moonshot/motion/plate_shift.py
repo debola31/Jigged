@@ -138,7 +138,8 @@ class PlateShift(StepTake):
         H, W = np.asarray(g["H"], float), np.asarray(g["W"], float)
         tk |= {"table": {"part": self.part, "setup": self.prev, "state": "clamped",
                          "free": [c.name for c in self.clamps], "plate": True,
-                         "wrench": {"at": at.tolist(), "yaw": yaw}},
+                         "wrench": {"at": at.tolist(), "yaw": yaw},
+                         "gap_mm": {"loosen": LOOSE_MM, "tighten": LOOSE_MM}},     # each nut's run (plate_strokes)
                "plate_force_at": (H.T @ np.array([0.0, self.land[1] - W[1], 0.0])).tolist(),
                "plate_to": self.plate.centre.tolist()}
         f.write_text(json.dumps(tk, indent=1), encoding="utf-8")

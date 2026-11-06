@@ -57,9 +57,9 @@ EFFORT = 0.8                 # the hand's hold on the handle while it strokes, t
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut
 PINCH_W = 4.0                # the planned pinch kept on the handle's arc while the hand strokes (use), against the pose
-REACH_PEAK = {"R": SP.REACH_PEAK, "L": 0.8}   # where in its reach for the handle each hand opens widest (people's
+REACH_PEAK = {"R": SP.REACH_PEAK, "L": 0.85}  # where in its reach for the handle each hand opens widest (people's
                                                # 71-77%, person.peak_aperture_reach_frac): the left's from where it
-                                               # hung, at the right's 0.76, measured widest at 70%
+                                               # hung, at the right's 0.76, measured widest at 70%, at 0.8 at 70.5
 PAD_IN_MM = 0.5              # the pinch's pads this far into the handle's edges as it is solved: at 1.0, gripped with
                              # EFFORT through the strokes, the left hand's skin stood 3.4-3.6 mm in it (the limit 3.5)
 

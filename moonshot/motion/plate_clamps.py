@@ -49,6 +49,9 @@ LIFT_DELAY_S = 0.04          # the strap starts up this long after the carry sta
 REACH_S = {"R": SP.REACH_S, "L": 0.52}   # the reach onto a grip, each hand in its people's time (person.reach_to_grasp
                                          # _right_s 0.32-0.67, _left_s 0.26-0.62): at the right's 0.58 the left hand's
                                          # reaches measured 0.63-0.67 s
+OFF_AT_S = 0.45              # the hand moves up off a strap this long after it is set down, the pinch opened first:
+                             # moved off from 0.3 s as it opened, a fingertip dragged on the strap's heel (3.5 mm of
+                             # skin in it) and turned the strap 1.1 deg off its place
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
 BOARD_CLEAR_MM = 4.0         # ... and off the spoilboard
 
@@ -188,20 +191,21 @@ def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tu
     keys = keys_from(t_load + LIFT_DELAY_S)
     R0 = keys[0][1]
     grab = np.array([GRAB_MM, 0.0, 0.0])
-    take.follow(s, t_c, keys[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*key_at(keys, tt)),
-                lambda tt: key_at(keys, tt)[0] @ R0.T)
     t_down = keys[-1][0]
+    t_off = t_down + OFF_AT_S
+    take.follow(s, t_c, t_off, grip, lambda tt: (lambda R, p: p + R @ grab)(*key_at(keys, tt)),
+                lambda tt: key_at(keys, tt)[0] @ R0.T)
     take.load(s, t_load, t_down, SB.clamp_kg())
     take.event("grip", t_on, t_down + 0.25, side=s, grip=grip, on=clamp.name)
     take.event("carry", t_load, t_down, side=s, obj=clamp.name)
     take.effort(s, t_down - 0.1, 0.6, grip)
     take.effort(s, t_down + 0.2, 0.0, None)
     take.fingers(s, t_down + 0.25, g["q"])
-    take.fingers(s, t_down + 0.6, open_like(take.hand, g["q"], 0.4))
+    take.fingers(s, t_off - 0.05, open_like(take.hand, g["q"], 0.4))
     R1, p1 = key_at(keys, t_down)
     H1, W1 = take.grip_pose(grip, p1 + R1 @ grab, R1 @ R0.T)
     off = W1 + np.array([0.0, -30.0, 90.0])
-    take.add(s, t_down + 0.3, t_down + 0.8, lambda tt, a=t_down + 0.3, H1=H1, W1=W1, off=off:
+    take.add(s, t_off, t_off + 0.5, lambda tt, a=t_off, H1=H1, W1=W1, off=off:
              [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.5), 2.0)])
     take.side[s]["wrist"] = off
-    return t_down + 0.8, keys
+    return t_off + 0.5, keys

@@ -1,0 +1,45 @@
+{
+ "asset": "cat40",
+ "about": "CAT40 end mill holder, standing taper-down in the crib: one CAD solid and a set screw, no colours; the ground taper by height, the turned body above it.",
+ "reviewed": "2026-11-05: parts sheet (look/cat40_parts.png): part 0 the holder, part 1 the Weldon set screw",
+ "fallback": "steel_machined",
+ "cad": {
+  "*": {
+   "none": "steel_machined"
+  }
+ },
+ "rules": [
+  {
+   "why": "the 7/24 taper, ground: its cone faces (half-angle 8.3 deg, so their normals lean 0.14 down) below the flange",
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     -1
+    ],
+    "hi": [
+     1,
+     1,
+     0.075
+    ]
+   },
+   "normal": {
+    "dir": [
+     0,
+     0,
+     -1
+    ],
+    "min": 0.08,
+    "max": 0.22
+   },
+   "material": "steel_ground"
+  },
+  {
+   "why": "the Weldon set screw",
+   "parts": [
+    1
+   ],
+   "material": "steel_black_oxide"
+  }
+ ]
+}

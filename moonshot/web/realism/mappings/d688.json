@@ -1,0 +1,20 @@
+{
+ "asset": "d688",
+ "about": "Kurt D688 6 in vise, from trainual's rig (d688_rig.glb: Kurt's STEP split into body, jaw and handle, with its materials named) rather than the plain d688.glb, so the body, the hardened jaws and the handle come apart by name. The handle is on, at the rig's rest pose, as on a bench.",
+ "reviewed": "2026-11-05: rig materials mapped one to one (the spike's VISE table)",
+ "source": {
+  "file": "d688_rig.glb"
+ },
+ "fallback": "steel_ground",
+ "cad": {
+  "*": {
+   "kurt_blue": "paint_kurt_blue",
+   "ground_steel": "steel_ground",
+   "handle_steel": "steel_bright",
+   "grip_black": "plastic_black"
+  }
+ },
+ "rules": [],
+ "bbox_tolerance_mm": 95,
+ "bbox_why": "the handle, which the record's box (d688.glb's, handle off) leaves out, reaches 90 mm past the body in x and 55 mm above it"
+}

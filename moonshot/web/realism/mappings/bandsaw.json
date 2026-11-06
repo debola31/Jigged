@@ -1,0 +1,138 @@
+{
+ "asset": "bandsaw",
+ "about": "McMaster-Carr 8962N13 horizontal band saw. McMaster's STEP has no colours at all (one flat compound of 262 solids), so every material here is by link and by part, from the parts sheet.",
+ "reviewed": "2026-11-05: draft",
+ "source": {
+  "links": [
+   "base",
+   "head",
+   "blade",
+   "jaw",
+   "handwheel",
+   "cover_drive",
+   "cover_idler"
+  ],
+  "translate_mm": [
+   225.4,
+   118.8,
+   0
+  ],
+  "why_translate": "the links are in the saw station's frame (blade plane at y = 0, moonshot/library/stations/extract.py); the library GLB is centred on its box"
+ },
+ "smooth_deg": 35,
+ "fallback": "paint_saw_grey",
+ "cad": {
+  "base": {
+   "none": "paint_saw_grey"
+  },
+  "head": {
+   "none": "paint_saw_grey"
+  },
+  "blade": {
+   "none": "steel_blade"
+  },
+  "jaw": {
+   "none": "paint_saw_cast"
+  },
+  "handwheel": {
+   "none": "chrome"
+  },
+  "cover_drive": {
+   "none": "paint_saw_grey"
+  },
+  "cover_idler": {
+   "none": "paint_saw_grey"
+  }
+ },
+ "rules": [
+  {
+   "why": "the vise bed and turntable: their up-facing machined faces, where the stock lies, are bare cast iron",
+   "links": [
+    "base"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.95
+   },
+   "inside": {
+    "lo": [
+     -0.5,
+     -0.15,
+     0.55
+    ],
+    "hi": [
+     0.7,
+     0.42,
+     0.7
+    ]
+   },
+   "material": "cast_iron_raw"
+  },
+  {
+   "why": "rods and shafts (work stop, vise screw, feed cylinder rod, levers): long and thin, bright steel",
+   "links": [
+    "base",
+    "head",
+    "jaw"
+   ],
+   "part_size": {
+    "min_max_side": 0.12,
+    "max_mid_side": 0.03
+   },
+   "material": "steel_bright"
+  },
+  {
+   "why": "small hardware: bolts, nuts, set screws, pins (every side under 25 mm)",
+   "links": [
+    "base",
+    "head",
+    "jaw",
+    "cover_drive",
+    "cover_idler"
+   ],
+   "part_size": {
+    "max_max_side": 0.025
+   },
+   "material": "steel_black_oxide"
+  },
+  {
+   "why": "the control box's buttons and knobs: small parts on the box at the end of the arm",
+   "part_inside": {
+    "lo": [
+     -1.16,
+     -0.31,
+     0.69
+    ],
+    "hi": [
+     -0.81,
+     0.05,
+     0.9
+    ]
+   },
+   "part_size": {
+    "max_max_side": 0.06
+   },
+   "material": "plastic_black"
+  },
+  {
+   "why": "the handwheel's spinner grip",
+   "links": [
+    "handwheel"
+   ],
+   "part_size": {
+    "max_max_side": 0.09
+   },
+   "material": "plastic_black"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the paint colour: McMaster's STEP has none and its listing gives none; machine grey assumed (paint_saw_grey)",
+   "picture": "checks/bandsaw_front_before_after.png"
+  }
+ ]
+}

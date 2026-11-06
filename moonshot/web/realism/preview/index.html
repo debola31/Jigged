@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Realism Load Check</title>
+<style>
+  :root { --bg: #15171b; --fg: #e8e8e6; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font: 13px/1.4 system-ui, sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 10px; top: 8px; background: rgba(0,0,0,.55); padding: 6px 9px; border-radius: 6px; }
+  body.clean #hud { display: none; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">loading…</div>
+<script type="module">
+// The realism pipeline's page-side check (moonshot/web/realism/loadcheck.py serves this beside <data>/web): loads the
+// models the way SPEC.md tells the page to (meshopt, KTX2, the shared-tile cache), lights them as the shop will
+// (environment + one shadowed key light, AgX), and reports load time, triangles, draws and GPU frame time.
+//   ?scene=asset&asset=vf2&mode=full|light&view=front|close|side      one asset on a floor
+//   ?scene=shop&mode=full|light                                       every placed item (full where built)
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const q = new URLSearchParams(location.search);
+const SCENE = q.get('scene') || 'asset', MODE = q.get('mode') || 'full', VIEW = q.get('view') || 'front';
+const W = Number(q.get('w')) || innerWidth, H = Number(q.get('h')) || innerHeight;
+if (q.get('clean')) document.body.classList.add('clean');
+const hud = document.getElementById('hud');
+const toScene = (x, y, z) => new THREE.Vector3(x / 1000, z / 1000, -y / 1000);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15171b);
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.02, 400);
+
+// --- loaders, as SPEC.md has them ---------------------------------------------------------------------------------
+const ktx2 = new KTX2Loader().setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/basis/')
+  .detectSupport(renderer);
+// The shared tiles: every GLB names the same tiles/<family>_<map>.ktx2 files. GLTFLoader caches images per file it
+// parses, so without this each model would upload its own copy of every tile to the GPU. One promise per tile URL
+// for the page; each model gets a clone, which shares the GPU texture (three.js keys uploads by Source).
+const tileCache = new Map();
+function sharedTiles(parser) {
+  const load = parser.loadImageSource.bind(parser);
+  parser.loadImageSource = (index, loader) => {
+    const uri = parser.json.images[index].uri;
+    if (!uri || !uri.includes('tiles/')) return load(index, loader);
+    const url = THREE.LoaderUtils.resolveURL(uri, parser.options.path);
+    if (!tileCache.has(url)) tileCache.set(url, load(index, loader));
+    return tileCache.get(url).then((t) => t.clone());
+  };
+  return { name: 'jigged_shared_tiles' };
+}
+const gltf = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).setKTX2Loader(ktx2).register(sharedTiles);
+
+// --- light: the HDRI the step videos use, at their strength, and one key light --------------------------------
+const pmrem = new THREE.PMREMGenerator(renderer);
+const hdr = await new HDRLoader().loadAsync('env/machine_shop_02_1k.hdr');
+hdr.mapping = THREE.EquirectangularReflectionMapping;
+scene.environment = pmrem.fromEquirectangular(hdr).texture;
+scene.environmentIntensity = 0.6;
+scene.environmentRotation.set(0, Math.PI, 0);
+const key = new THREE.DirectionalLight(0xfff4e6, 2.2);
+key.castShadow = true;
+key.shadow.mapSize.set(4096, 4096);
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
+scene.add(key, key.target);
+
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x6c6d6e, roughness: 0.85 });
+const t0 = performance.now();
+const manifest = await (await fetch('models-full/manifest.json')).json().catch(() => ({ assets: {} }));
+let bounds = new THREE.Box3();
+
+if (SCENE === 'asset') {
+  const asset = q.get('asset');
+  const url = MODE === 'full' ? `models-full/${asset}.glb` : `models/${asset}.glb`;
+  const g = await gltf.loadAsync(url);
+  scene.add(g.scene);
+  bounds.setFromObject(g.scene);
+  const size = bounds.getSize(new THREE.Vector3()), c = bounds.getCenter(new THREE.Vector3());
+  const r = Math.max(size.x, size.y, size.z);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(r * 8, r * 8), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.y = bounds.min.y; floor.receiveShadow = true;
+  scene.add(floor);
+  const dirs = { front: [0.55, 0.45, 1.0], side: [1.0, 0.35, 0.25], close: [0.3, 0.25, 1.0], back: [-0.6, 0.5, -1.0] };
+  const d = new THREE.Vector3(...(dirs[VIEW] || dirs.front)).normalize();
+  const dist = r / Math.tan(THREE.MathUtils.degToRad(20)) * (VIEW === 'close' ? 0.42 : 0.72);
+  const target = c.clone();
+  if (q.get('target')) target.fromArray(q.get('target').split(',').map(Number));
+  camera.position.copy(target).addScaledVector(d, dist);
+  if (q.get('eye')) camera.position.fromArray(q.get('eye').split(',').map(Number));
+  camera.lookAt(target);
+  key.position.copy(c).add(new THREE.Vector3(-0.4 * r - 2, 1.5 * r + 3, 0.8 * r + 2));
+  key.target.position.copy(c);
+  Object.assign(key.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 0.1, far: 8 * r + 10 });
+} else {
+  // the whole shop: every placed item, its full model where the manifest lists one (unless mode=light)
+  const shop = (await (await fetch('shop.json')).json()).shop;
+  const loads = new Map();
+  const load = (a) => {
+    const full = MODE === 'full' && manifest.assets[a];
+    if (!loads.has(a)) loads.set(a, gltf.loadAsync(full ? `models-full/${a}.glb` : `models/${a}.glb`));
+    return loads.get(a);
+  };
+  await Promise.all(shop.items.map(async (it) => {
+    const g = await load(it.asset);
+    const grp = new THREE.Group();
+    grp.position.copy(toScene(it.x, it.y, it.z));
+    grp.rotation.y = THREE.MathUtils.degToRad(it.rot);
+    grp.add(g.scene.clone(true));
+    scene.add(grp);
+  }));
+  const [w, dd] = shop.building.size;
+  // stress: N more copies of every realistic model, spread over the floor, to measure what each million
+  // triangles costs a frame (the projection for the whole shop built)
+  const extra = Number(q.get('extra') || 0);
+  let k = 0;
+  for (const a of Object.keys(manifest.assets)) {
+    const g = await load(a);
+    for (let i = 0; i < extra * (manifest.assets[a].items || 1); i++, k++) {
+      const c = g.scene.clone(true);
+      c.position.set(3 + ((k * 7.3) % (w / 1000 - 6)), 0, -(2 + ((k * 3.7) % (dd / 1000 - 4))));
+      scene.add(c);
+    }
+  }
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w / 1000, dd / 1000), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.set(w / 2000, 0, -dd / 2000); floor.receiveShadow = true;
+  scene.add(floor);
+  const c = new THREE.Vector3(w / 2000, 0, -dd / 2000);
+  camera.position.copy(c).add(new THREE.Vector3(-w / 1000 * 0.45, w / 1000 * 0.3, w / 1000 * 0.32));
+  camera.lookAt(c);
+  key.position.copy(c).add(new THREE.Vector3(-10, 30, 15)); key.target.position.copy(c);
+  Object.assign(key.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 80 });
+}
+let tris = 0, meshes = 0;
+scene.traverse((o) => {
+  if (!o.isMesh) return;
+  meshes++;
+  o.castShadow = !(o.material.transparent);
+  o.receiveShadow = true;
+  tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+});
+const loadMs = performance.now() - t0;
+const render = () => renderer.render(scene, camera);
+window.__bench = (n = 60) => {
+  const g = renderer.getContext(), px = new Uint8Array(4);
+  const sync = () => g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
+  render(); sync();
+  const t = performance.now();
+  for (let i = 0; i < n; i++) { render(); sync(); }
+  return +((performance.now() - t) / n).toFixed(2);
+};
+let frames = 0;
+renderer.setAnimationLoop(() => {
+  // shadow=static: the shadow map drawn once, as the page does (it redraws it only when a model arrives)
+  if (q.get('shadow') === 'static' && frames === 2) renderer.shadowMap.autoUpdate = false;
+  render();
+  if (++frames === 20) {
+    const i = renderer.info;
+    const d = renderer.getContext().getExtension('WEBGL_debug_renderer_info');
+    window.__stats = { scene: SCENE, mode: MODE, asset: q.get('asset'), view: VIEW, load_ms: Math.round(loadMs),
+      triangles: tris, meshes, draw_calls: i.render.calls, textures: i.memory.textures, geometries: i.memory.geometries,
+      shared_tiles: tileCache.size, gpu: d ? renderer.getContext().getParameter(d.UNMASKED_RENDERER_WEBGL) : '' };
+    hud.textContent = `${SCENE} ${MODE} · ${Math.round(tris / 1000)}k tris · ${i.render.calls} draws · ${Math.round(loadMs)} ms load`;
+    window.__ready = true;
+  }
+});
+</script>
+</body>
+</html>

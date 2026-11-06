@@ -170,5 +170,7 @@
    "what": "the work tank's front reads black in the CAD; on the real machine it's a door, often with a window",
    "picture": "checks/wedm_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 135000,
+ "triangles_why": "its many small CAD primitives keep their borders: at 1.6% of the radius the simplifier stops at 130k triangles, which still fits the large class's 3 MB"
 }

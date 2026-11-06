@@ -166,5 +166,7 @@
    "what": "mat_11 (71k faces, light grey) taken for the bed's ways and mat_7 for the chip tray; mat_14-16 (amber) for a brass workpiece",
    "picture": "checks/mlathe_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 95000,
+ "triangles_why": "at the class's 100k it came to 3.0006 MB, a hair over the large class's 3 MB"
 }

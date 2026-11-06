@@ -62,5 +62,7 @@
    "what": "the stand is a plain box in the CAD; mat_2 (a white disc) taken for the wheel",
    "picture": "checks/pgrind_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 120000,
+ "triangles_why": "the grinding head's dense small parts keep their borders: at 1.6% of the radius the simplifier stops at 115k triangles, 2.6 MB, inside the large class's 3 MB"
 }

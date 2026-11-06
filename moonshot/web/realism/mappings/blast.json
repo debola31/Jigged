@@ -47,9 +47,8 @@
    "material": "glass_clear"
   },
   {
-   "why": "the grate and the hopper's floor (parts 0, 34)",
+   "why": "the grate inside the cabinet (part 34); the shelf below the hopper (part 0) stays painted",
    "parts": [
-    0,
     34
    ],
    "material": "steel_machined"
@@ -69,5 +68,5 @@
   }
  ],
  "asset": "blast",
- "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+ "reviewed": "2026-11-05: parts sheet, then the before/after (checks/blast_front_before_after.png): part 0 is the shelf, not the grate"
 }

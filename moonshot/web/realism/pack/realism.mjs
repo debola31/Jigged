@@ -33,18 +33,45 @@ const triangles = (doc) => doc.getRoot().listMeshes().flatMap((m) => m.listPrimi
 // bound is doubled and the sources simplified again, up to MAX_ERROR (1.6% of the radius), and the report says so.
 const MAX_ERROR = 0.016;
 
+// A source as the asset uses it: without the links its mapping drops (hidden springs, thread detail), by node name.
+async function readSource(src) {
+	const doc = await io.read(src);
+	const drop = new Set(job.drop_links ?? []);
+	if (drop.size) {
+		for (const node of doc.getRoot().listNodes()) {
+			if (drop.has(node.getName().replace(/\.\d+$/, ''))) node.dispose();
+		}
+		await doc.transform(prune());
+	}
+	return doc;
+}
+
+// Positions only, welded: the simplifier won't collapse across a normal or UV seam, and vendor meshes (pre-decimated
+// with split normals, the V-block's) are all seams, so it stalled far above the cap. prepare.py recomputes normals
+// for every simplified source anyway, and Blender lays out both UV sets. Material borders stay: they are primitives.
+function positionsOnly(doc) {
+	for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
+		for (const semantic of prim.listSemantics()) {
+			if (semantic !== 'POSITION') prim.setAttribute(semantic, null);
+		}
+	}
+}
+
 async function simplifyAll() {
-	const total = (await Promise.all(job.inputs.map((s) => io.read(s.src)))).reduce((n, d) => n + triangles(d), 0);
+	const total = (await Promise.all(job.inputs.map((s) => readSource(s.src)))).reduce((n, d) => n + triangles(d), 0);
 	const ratio = Math.min(1, job.cap / total);
 	let error = job.error;
 	let out;
 	for (;;) {
-		out = { cap: job.cap, before: total, ratio, error, files: [] };
+		out = { cap: job.cap, before: total, ratio, error, dropped: job.drop_links ?? [], files: [] };
 		for (const s of job.inputs) {
-			const doc = await io.read(s.src);
+			const doc = await readSource(s.src);
 			const before = triangles(doc);
 			if (ratio < 1 && before > 500) {
-				await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
+				positionsOnly(doc);
+				await doc.transform(weld(), prune(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
+				await io.write(s.dst, doc);
+			} else if (job.drop_links?.length) {
 				await io.write(s.dst, doc);
 			} else {
 				fs.copyFileSync(s.src, s.dst);

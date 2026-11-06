@@ -21,16 +21,18 @@
  },
  "rules": [
   {
-   "why": "the table (part 0): bare cast iron",
+   "why": "the table (parts 0 and 1, its T-slotted top and its body): bare cast iron",
    "parts": [
-    0
+    0,
+    1
    ],
    "material": "cast_iron_raw"
   },
   {
    "why": "... its top, ground",
    "parts": [
-    0
+    0,
+    1
    ],
    "normal": {
     "dir": [
@@ -43,9 +45,8 @@
    "material": "cast_iron_ground"
   },
   {
-   "why": "the leadscrew handwheels, the knee crank and the saddle handwheel: chrome",
+   "why": "the knee crank, the saddle handwheel and the table's end handwheel: chrome",
    "parts": [
-    1,
     5,
     15,
     23,
@@ -80,5 +81,5 @@
   }
  ],
  "asset": "kmill",
- "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+ "reviewed": "2026-11-05: parts sheet, then the before/after (checks/kmill_front_before_after.png): part 1 is the table's body, not a handwheel"
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
@@ -13,10 +13,8 @@ import CheckIcon from '@mui/icons-material/Check';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
-import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
 import { CATEGORY_LABELS, type Catalog } from './catalog';
@@ -43,62 +41,6 @@ const ITEM_CARD = 360;
 // leaves under the card's header, the step's title and the Details button (about 340px with the
 // marketing header), between the narrow card's width and a little over half the screen.
 const STEP_CARD = 'clamp(420px, calc((100dvh - 340px) * 16 / 9 + 40px), 58vw)';
-// How much of a dragged card stays in the shop: enough of its header to grab it again.
-const KEEP_X = 120;
-const KEEP_Y = 56;
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-/**
- * A card the visitor can drag by its header, anywhere over the shop. Pressing a control in the
- * header doesn't drag; a double-click puts the card back.
- */
-function useDraggable() {
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const drag = useRef<{ px: number; py: number; x: number; y: number; box: { x0: number; x1: number; y0: number; y1: number } } | null>(null);
-  const reset = useCallback(() => setOffset({ x: 0, y: 0 }), []);
-  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, input, [role="button"]')) return;
-    const card = e.currentTarget.closest('aside');
-    const shop = card?.parentElement;
-    if (!card || !shop) return;
-    const c = card.getBoundingClientRect();
-    const s = shop.getBoundingClientRect();
-    drag.current = {
-      px: e.clientX,
-      py: e.clientY,
-      x: offset.x,
-      y: offset.y,
-      box: {
-        x0: offset.x - (c.left - s.left) - (c.width - KEEP_X),
-        x1: offset.x + (s.right - c.left) - KEEP_X,
-        y0: offset.y - (c.top - s.top),
-        y1: offset.y + (s.bottom - c.top) - KEEP_Y,
-      },
-    };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const d = drag.current;
-    if (!d) return;
-    setOffset({ x: clamp(d.x + e.clientX - d.px, d.box.x0, d.box.x1), y: clamp(d.y + e.clientY - d.py, d.box.y0, d.box.y1) });
-  };
-  const onPointerUp = () => {
-    drag.current = null;
-  };
-  const onDoubleClick = (e: React.MouseEvent<HTMLElement>) => {
-    if (!(e.target as HTMLElement).closest('button, a, input, [role="button"]')) reset();
-  };
-  return {
-    offset,
-    moved: offset.x !== 0 || offset.y !== 0,
-    reset,
-    handle: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick },
-    handleSx: { cursor: 'grab', touchAction: 'none', userSelect: 'none', '&:active': { cursor: 'grabbing' } },
-    transform: `translate(${offset.x}px, ${offset.y}px)`,
-  };
-}
-
 const floatSx = {
   position: 'absolute',
   bgcolor: CARD_BG,
@@ -198,17 +140,18 @@ function ShopHeader({ cat, toShop }: { cat: Catalog; toShop(): void }) {
       <Typography component="h2" sx={{ mt: 0.75, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: { xs: '1.5rem', md: '1.85rem' }, lineHeight: 1.15 }}>
         {cat.shop.name}
       </Typography>
-      <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1 }}>
+      <Typography sx={{ mt: 1.5, color: 'text.secondary', fontSize: '0.9rem' }}>Its {machines.length} machines, by area</Typography>
+      <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1 }}>
         {areas.map((a) => {
           const here = a.zone.id === area;
           return (
             <Chip
               key={a.zone.id}
-              icon={<CategoryIcon category="machines" sx={{ fontSize: 18 }} />}
+              icon={<CategoryIcon category="machines" sx={{ fontSize: 20 }} />}
               label={
                 <>
                   {a.zone.name}
-                  <Box component="span" sx={{ ml: 1, color: here ? 'inherit' : 'text.secondary' }}>
+                  <Box component="span" sx={{ ml: 1, px: 0.75, minWidth: 22, display: 'inline-block', textAlign: 'center', borderRadius: 999, fontSize: '0.8rem', fontWeight: 600, lineHeight: '20px', bgcolor: here ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.1)' }}>
                     {a.machines.length}
                   </Box>
                 </>
@@ -224,44 +167,52 @@ function ShopHeader({ cat, toShop }: { cat: Catalog; toShop(): void }) {
                 look({ kind: 'zone', where: { name: a.zone.name, x: (x0 + x1) / 2, y: (y0 + y1) / 2 } });
                 posthog.capture('showcase area opened', { zone: a.zone.id });
               }}
+              sx={{ height: 40, fontSize: '0.95rem', borderColor: 'rgba(255, 255, 255, 0.28)', '& .MuiChip-icon': { ml: 1.25 }, '& .MuiChip-label': { pl: 1, pr: 1.5 } }}
             />
           );
         })}
       </Box>
       {open && (
-        <Box id="showcase-area-machines" role="group" aria-label={`${open.zone.name} machines`} sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.75 }}>
-          {open.machines.map((m) => (
-            <Chip
-              key={m.item}
-              size="small"
-              label={m.name}
-              variant={item === m.item ? 'filled' : 'outlined'}
-              color={item === m.item ? 'secondary' : 'default'}
-              onClick={() => {
-                openItem(m.item);
-                posthog.capture('showcase item opened', { category: 'machines', source: 'area' });
-              }}
-              sx={{ borderColor: 'rgba(255, 255, 255, 0.25)' }}
-            />
-          ))}
+        <Box id="showcase-area-machines" role="group" aria-label={`Machines in ${open.zone.name}`} sx={{ mt: 1.75 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>Machines in {open.zone.name}</Typography>
+          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1 }}>
+            {open.machines.map((m) => {
+              const shown = item === m.item;
+              return (
+                <Chip
+                  key={m.item}
+                  label={m.name}
+                  aria-pressed={shown}
+                  onClick={() => {
+                    openItem(m.item);
+                    posthog.capture('showcase item opened', { category: 'machines', source: 'area' });
+                  }}
+                  // Quieter than the areas: no outline, a tint, and the one open in the secondary colour.
+                  sx={{
+                    height: 36,
+                    borderRadius: 1.5,
+                    bgcolor: shown ? 'secondary.main' : 'rgba(255, 255, 255, 0.07)',
+                    color: shown ? 'secondary.contrastText' : 'text.primary',
+                    '&:hover': { bgcolor: shown ? 'secondary.dark' : 'rgba(255, 255, 255, 0.14)' },
+                    '& .MuiChip-label': { px: 1.75 },
+                  }}
+                />
+              );
+            })}
+          </Box>
         </Box>
       )}
     </Box>
   );
 }
 
-/** Over the shop, top right: the cards back where they were, the parts, walk, and back to the whole shop. */
-function ShopButtons({ part, onSnapBack, onWholeShop }: { part: LivePart; onSnapBack?(): void; onWholeShop(): void }) {
+/** Over the shop, top right: the parts, walk, and back to the whole shop. */
+function ShopButtons({ part, onWholeShop }: { part: LivePart; onWholeShop(): void }) {
   const walking = useShowcase((s) => s.walking);
   const phase = useShowcase((s) => s.phase);
   const { setWalking } = useShowcase.getState();
   return (
     <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
-      {onSnapBack && (
-        <Button size="small" variant="contained" color="inherit" startIcon={<RestartAltIcon />} onClick={onSnapBack} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
-          Put the cards back
-        </Button>
-      )}
       {/* Before a part, the pill at the bottom says this. */}
       {phase !== 'pick' && (
         <Button size="small" variant="contained" color="inherit" startIcon={<ArrowDownwardIcon />} onClick={toTheParts} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
@@ -377,10 +328,9 @@ function ZoomHint({ shown }: { shown: boolean }) {
 }
 
 /**
- * The shop fills the section, with cards over it: the step card on the left, which opens out to its
- * video's size while a step is open, and a thing's card on the right. Either can be dragged by its
- * header and put back. The camera centres what it flies to in the space the cards leave where they
- * start.
+ * The shop fills the section under its header, with cards over it: the step card on the left, which
+ * opens out to its video's size while a step is open and closes the part from its header, and a
+ * thing's card on the right. The camera centres what it flies to in the space the cards leave.
  */
 export default function ShopLayout(props: ShopProps) {
   const { cat, part, parts, onPick } = props;
@@ -410,8 +360,12 @@ export default function ShopLayout(props: ShopProps) {
     overview();
   };
   const last = step === part.steps.length - 1;
-  const stepDrag = useDraggable();
-  const itemDrag = useDraggable();
+  // Done with this part: the card goes, the shop stands back, and the pill points to the parts again.
+  const closePart = () => {
+    setFolded(null);
+    useShowcase.setState({ phase: 'pick', sheet: 'need', step: null, item: null });
+    overview();
+  };
   const thing = item ? cat.spots.get(item)?.[0] : undefined;
   useEffect(() => {
     if (body.current) body.current.scrollTop = 0;
@@ -432,18 +386,7 @@ export default function ShopLayout(props: ShopProps) {
         <Box ref={view} role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
           <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
         </Box>
-        <ShopButtons
-          part={part}
-          onWholeShop={wholeShop}
-          onSnapBack={
-            stepDrag.moved || itemDrag.moved
-              ? () => {
-                  stepDrag.reset();
-                  itemDrag.reset();
-                }
-              : undefined
-          }
-        />
+        <ShopButtons part={part} onWholeShop={wholeShop} />
         <WalkStatus />
         <Box
           component="aside"
@@ -460,16 +403,11 @@ export default function ShopLayout(props: ShopProps) {
             // Not before a part is picked; kept mounted, so its width is measured from the start.
             display: phase === 'pick' ? 'none' : 'flex',
             flexDirection: 'column',
-            transform: stepDrag.transform,
             transition: 'width 0.3s ease',
           }}
         >
           {phase === 'plan' && (
-            <Box
-              {...stepDrag.handle}
-              sx={{ ...stepDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, p: 1.5, pl: 0.75, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
-            >
-              <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.5, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
               <StepPicker part={part} />
               {sheet === 'step' && (
                 <Button size="small" onClick={showNeed}>
@@ -498,6 +436,9 @@ export default function ShopLayout(props: ShopProps) {
               <IconButton size="small" onClick={() => (collapsed ? setFolded(null) : fold())} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
                 {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
               </IconButton>
+              <IconButton size="small" onClick={closePart} aria-label={`Close ${part.name}`}>
+                <CloseIcon />
+              </IconButton>
             </Box>
           )}
           {!collapsed && (
@@ -510,13 +451,9 @@ export default function ShopLayout(props: ShopProps) {
           <Box
             component="aside"
             aria-label="The thing"
-            sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column', transform: itemDrag.transform }}
+            sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column' }}
           >
-            <Box
-              {...itemDrag.handle}
-              sx={{ ...itemDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 0.75, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
-            >
-              <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 1.5, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
               <CategoryIcon category={thing?.category} sx={{ fontSize: 20, color: 'secondary.main' }} />
               <Typography sx={{ flex: 1, color: 'secondary.main', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.04em' }}>
                 {thing ? (CATEGORY_LABELS[thing.category] ?? thing.category) : ''}

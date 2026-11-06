@@ -21,8 +21,6 @@ const TURN_MS = 900;
 const HOLD_MS = 1800;
 // A vertical mill's table, from the floor: where a person at the door looks for the vise.
 const TABLE_MM = 950;
-/** The shop's walls as drawn: low, so the overview sees in (the real walls come with the realism pass). */
-export const WALL_MM = 1200;
 
 const add = (a: Vec3, b: Vec3, k = 1): Vec3 => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 
@@ -56,10 +54,13 @@ function fitDistance(corners: Vec3[], target: Vec3, dir: Vec3, tanH: number, tan
  */
 export function overviewPose(cat: Catalog, aspect = 1.6, fovDeg = 40): Pose {
   const [w, d] = cat.shop.building.size;
+  const h = cat.shop.building.wall_height;
   const target = toScene(w / 2, d / 2, 0);
   const tanV = Math.tan((fovDeg * Math.PI) / 360) * 0.92;
   const tanH = tanV * aspect;
-  const corners = [0, w].flatMap((x) => [0, d].flatMap((y) => [toScene(x, y, 0), toScene(x, y, WALL_MM)]));
+  // The walls' full height at every corner: only the south wall, between them, is cut down while
+  // the camera is south of the building (Room.tsx).
+  const corners = [0, w].flatMap((x) => [0, d].flatMap((y) => [toScene(x, y, 0), toScene(x, y, h)]));
   // 38° above the floor, from between 25° and 70° west of south.
   const rise = (38 * Math.PI) / 180;
   const fits = [25, 35, 45, 55, 70].map((deg) => {

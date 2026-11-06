@@ -41,5 +41,6 @@
    ],
    "material": "steel_black_oxide"
   }
- ]
+ ],
+ "double_sided": false
 }

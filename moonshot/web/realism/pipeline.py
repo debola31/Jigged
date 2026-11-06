@@ -192,6 +192,14 @@ def bake(asset: str, device: str = "OPTIX", samples: int | None = None) -> dict:
     return json.loads((work_dir(asset) / "bake.json").read_text())
 
 
+def double_sided(mp: dict) -> bool:
+    """Vendor CAD tessellations face some surfaces inward (single-sheet panels, flipped B-rep faces), so the library
+    GLBs are double-sided and the light models draw them so; single-sided, the laser's doors and the EDM's panels
+    were culled away and showed the inside. The station links (moonshot/library/stations/extract.py) and the rigs
+    are clean solids: single-sided, cheaper. A mapping may say otherwise once its faces are checked."""
+    return mp.get("double_sided", "links" not in mp.get("source", {}))
+
+
 def encode_ao(asset: str) -> Path:
     """The AO atlas to KTX2: ETC1S (grey, smooth: its blocks don't show), linear, mipmapped."""
     png, dst = work_dir(asset) / "ao.png", work_dir(asset) / "ao.ktx2"
@@ -219,6 +227,7 @@ def pack(asset: str) -> dict:
         "raw": str(work_dir(asset) / "raw.glb"), "out": str(models_dir() / f"{asset}.glb"),
         "ao_ktx2": str(ao) if ao else None, "tiles_uri": "../tiles/", "families": tiles["families"],
         "materials": matlib.resolve_all(tiles["src_means"], mapping(asset).get("materials")),
+        "double_sided": double_sided(mapping(asset)),
         "report": str(work_dir(asset) / "pack.json")})
     node(asset, "pack", job)
     _timed(asset, "pack", time.perf_counter() - t, kind="cpu")

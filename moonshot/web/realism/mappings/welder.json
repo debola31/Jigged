@@ -17,6 +17,7 @@
   }
  },
  "rules": [],
+ "atlas": 512,
  "materials": {
   "welder_case": {
    "family": "paint",

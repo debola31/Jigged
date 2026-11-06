@@ -96,6 +96,7 @@
    "material": "cast_iron_raw"
   }
  ],
+ "atlas": 512,
  "materials": {
   "bgrind_paint": {
    "family": "paint",

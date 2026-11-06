@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/deburr/deburr.glb"
  },
+ "double_sided": false,
  "fallback": "rubber_black",
  "cad": {
   "*": {

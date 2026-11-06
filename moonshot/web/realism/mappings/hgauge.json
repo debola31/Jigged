@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/hgauge/hgauge.glb"
  },
+ "double_sided": false,
  "fallback": "steel_ground",
  "cad": {
   "*": {

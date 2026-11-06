@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/wrench/wrench.glb"
  },
+ "double_sided": false,
  "fallback": "steel_black_oxide",
  "cad": {
   "*": {

@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/chamf/chamf.glb"
  },
+ "double_sided": false,
  "fallback": "chamf_carbide",
  "cad": {
   "*": {

@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/rough/rough.glb"
  },
+ "double_sided": false,
  "fallback": "plastic_black",
  "cad": {
   "*": {

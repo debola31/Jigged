@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/clamps/clamps.glb"
  },
+ "double_sided": false,
  "fallback": "steel_black_oxide",
  "cad": {
   "*": {

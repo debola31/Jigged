@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/para/para.glb"
  },
+ "double_sided": false,
  "fallback": "steel_ground",
  "cad": {
   "*": {

@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/sine/sine.glb"
  },
+ "double_sided": false,
  "fallback": "steel_ground",
  "cad": {
   "*": {

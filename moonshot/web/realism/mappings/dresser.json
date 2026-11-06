@@ -5,6 +5,7 @@
  "source": {
   "path": "realism/sources/dresser/dresser.glb"
  },
+ "double_sided": false,
  "fallback": "steel_machined",
  "cad": {
   "*": {

@@ -155,7 +155,7 @@ def prepare(asset: str) -> dict:
     job = _write_job(asset, "prepare", {
         "asset": asset, "mapping": mp, "sources": srcs, "blend": str(work_dir(asset) / "asset.blend"),
         "stats": str(work_dir(asset) / "prepare.json"), "parts_json": str(work_dir(asset) / "parts.json"),
-        "bbox_min_z": rec["bbox"]["min"][2] / 1000,
+        "bbox_min_z": rec["bbox"]["min"][2] / 1000, "recalc_normals": double_sided(mp),
         "atlas": {**{k: budgets.CLASSES[asset_class(asset)][k] for k in ("texel_mm", "atlas_min", "atlas_max")},
                   "margin_px": 3}, "colours": {k: v + [1] for k, v in natural.items()}})
     t = time.perf_counter()
@@ -190,8 +190,9 @@ def bake(asset: str, device: str = "OPTIX", samples: int | None = None) -> dict:
 def double_sided(mp: dict) -> bool:
     """Vendor CAD tessellations face some surfaces inward (single-sheet panels, flipped B-rep faces), so the library
     GLBs are double-sided and the light models draw them so; single-sided, the laser's doors and the EDM's panels
-    were culled away and showed the inside. The station links (moonshot/library/stations/extract.py) and the rigs
-    are clean solids: single-sided, cheaper. A mapping may say otherwise once its faces are checked."""
+    were culled away and showed the inside. Such sources are also wound outward in prepare.py before the AO bake (or
+    the inward faces bake black). The station links (moonshot/library/stations/extract.py) and the rigs are clean
+    solids: single-sided, cheaper, normals kept. A mapping may say otherwise once its faces are checked."""
     return mp.get("double_sided", "links" not in mp.get("source", {}))
 
 

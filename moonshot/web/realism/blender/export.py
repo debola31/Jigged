@@ -18,7 +18,7 @@ for o in list(bpy.data.objects):
     if o.get("occluder_only") or o.type != "MESH":
         bpy.data.objects.remove(o)
 obj = bpy.data.objects[J["asset"]]
-for name in ("link_idx", "cad_idx", "part_idx"):          # review data, not for the page
+for name in ("link_idx", "cad_idx", "part_idx", "src_normal"):          # review data, not for the page
     if name in obj.data.attributes:
         obj.data.attributes.remove(obj.data.attributes[name])
 for s in obj.material_slots:

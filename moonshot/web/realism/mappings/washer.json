@@ -1,0 +1,78 @@
+{
+ "asset": "washer",
+ "about": "Parts washer, self-made in Blender (sources/washer/build_washer.py) from photos of drum-mounted solvent washers (Graymills DMS336A class, Penn Tool Co. listing) and the record: a 30-gal drum with rolling hoops and chimes, the tapered adapter, the 34 x 22 in sink with its rolled rim, back splash, parts grate, drain strainer and a pool of solvent, the flexible spigot, the pump's switch box and cord, a warning label, and the lid propped open on its fusible-link stay. Where the placeholder (planner.placeholders.parts_washer) has its boxes.",
+ "reviewed": "2026-11-05: modelled against washer photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/washer/washer.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "washer_red",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "plastic_black": "plastic_black",
+   "steel_bright": "steel_bright",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground",
+   "washer_label": "washer_label",
+   "washer_lid": "washer_lid",
+   "washer_red": "washer_red",
+   "washer_solvent": "washer_solvent"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "washer_red": {
+   "family": "paint",
+   "color": [
+    0.36,
+    0.022,
+    0.016
+   ],
+   "rough": 0.4,
+   "about": "the washer's red enamel: drum, adapter, sink"
+  },
+  "washer_lid": {
+   "family": "paint",
+   "color": [
+    0.55,
+    0.56,
+    0.56
+   ],
+   "rough": 0.38,
+   "about": "the lid and the pump's switch box: light grey"
+  },
+  "washer_label": {
+   "family": "paint",
+   "color": [
+    0.78,
+    0.6,
+    0.03
+   ],
+   "rough": 0.45,
+   "tile_m": 0.5,
+   "about": "yellow warning labels and the fusible link"
+  },
+  "washer_solvent": {
+   "family": "glass",
+   "color": [
+    0.09,
+    0.06,
+    0.02
+   ],
+   "rough": 0.05,
+   "about": "the solvent pooled in the tub: dark amber, glossy"
+  }
+ },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (34 x 22 in sink, 30 gal drum) and its placeholder's boxes",
+  "drum-mount parts washer product photos (Graymills DMS336A at penntoolco.com; ClearMaster, Justrite listings) found by image search"
+ ],
+ "unsure": [
+  {
+   "what": "generic: no maker's name; the sink is red like the photos, where the placeholder drew it grey"
+  }
+ ]
+}

@@ -1,0 +1,109 @@
+{
+ "asset": "hone",
+ "about": "Bore hone, self-made in Blender (sources/hone/build_hone.py) from photos of Sunnen's ML-5000 power-stroked horizontal hone (Liberty Machinery, The Equipment Hub, Exapro listings) and the record: the off-white base cabinet with the SUNNEN logotype and sunburst on castors with its foot pedal; the dark grey work tray with its corner hooks; the head with its blue control face (load dial, knobs, pilot lamps, lit size readout) and the horizontal spindle carrying the mandrel with its stones and a part in the stroking fixture on its rail; the coolant unit to the right with its tray top and access panel; the raised blue control panel (readout, knobs, buttons, e-stop) on its conduit. The spindle points -X at the placeholder's mandrel height (planner.placeholders.honing_machine).",
+ "reviewed": "2026-11-05: modelled against ML-5000 listing photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/hone/hone.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "hone_white",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "chrome": "chrome",
+   "hone_blue": "hone_blue",
+   "hone_dial": "hone_dial",
+   "hone_grey": "hone_grey",
+   "hone_lcd": "hone_lcd",
+   "hone_red": "hone_red",
+   "hone_white": "hone_white",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_green": "plastic_green",
+   "steel_ground": "steel_ground",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "hone_white": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.6,
+    0.57
+   ],
+   "rough": 0.42,
+   "about": "Sunnen's off-white cabinets, head and panel housing"
+  },
+  "hone_grey": {
+   "family": "paint",
+   "color": [
+    0.07,
+    0.075,
+    0.08
+   ],
+   "rough": 0.45,
+   "about": "the dark grey work tray, hooks, fixture and pedal base"
+  },
+  "hone_blue": {
+   "family": "paint",
+   "color": [
+    0.012,
+    0.075,
+    0.55
+   ],
+   "rough": 0.38,
+   "about": "Sunnen blue: the control faces, a lamp, the coolant line"
+  },
+  "hone_red": {
+   "family": "flat",
+   "color": [
+    0.45,
+    0.02,
+    0.015
+   ],
+   "rough": 0.35,
+   "about": "the dial's needle, red lamps and buttons, the e-stop"
+  },
+  "hone_dial": {
+   "family": "paint",
+   "color": [
+    0.72,
+    0.55,
+    0.12
+   ],
+   "rough": 0.45,
+   "about": "the load dial's face and the mandrel's honing stones"
+  },
+  "hone_lcd": {
+   "family": "flat",
+   "color": [
+    0.05,
+    0.12,
+    0.06
+   ],
+   "rough": 0.2,
+   "emissive": [
+    [
+     0.06,
+     0.2,
+     0.08
+    ],
+    1.0
+   ],
+   "about": "the size readout's lit green LCD"
+  }
+ },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (ML-5000 class; bore range 0.06-6.5 in, size control 0.0001 in) and its placeholder's box",
+  "used-machine photos of the Sunnen ML-5000 (libertymachinery.com, theequipmenthub.com, exapro.com, machinespotter) found by image search"
+ ],
+ "unsure": [
+  {
+   "what": "the record is 'ML-5000 class', generic: the SUNNEN logotype is kept because the record names the make; the panel layouts are simplified"
+  }
+ ]
+}

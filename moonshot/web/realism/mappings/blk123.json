@@ -26,9 +26,18 @@
  "rules": [
   {
    "why": "block at +y: its outer faces (centres within 0.3 mm of its box), ground",
-   "parts": [
-    0
-   ],
+   "part_inside": {
+    "lo": [
+     -0.04,
+     0.012,
+     -0.001
+    ],
+    "hi": [
+     0.04,
+     0.04,
+     0.052
+    ]
+   },
    "outside": {
     "lo": [
      -0.0378,
@@ -45,9 +54,18 @@
   },
   {
    "why": "block at -y: its outer faces, ground",
-   "parts": [
-    1
-   ],
+   "part_inside": {
+    "lo": [
+     -0.04,
+     -0.04,
+     -0.001
+    ],
+    "hi": [
+     0.04,
+     -0.012,
+     0.052
+    ]
+   },
    "outside": {
     "lo": [
      -0.0378,
@@ -63,10 +81,5 @@
    "material": "blk123_tool_steel"
   }
  ],
- "unsure": [
-  {
-   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 21,094 triangles, mostly the 23 holes and the five tapped holes' threads; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
-   "picture": "checks/blk123_close_before_after.png"
-  }
- ]
+ "atlas": 512
 }

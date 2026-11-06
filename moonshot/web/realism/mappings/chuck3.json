@@ -84,14 +84,11 @@
    "material": "chuck3_soft_jaw"
   }
  ],
+ "atlas": 512,
  "unsure": [
   {
    "what": "the body's finish: Kitagawa's STEP has no colours; plain turned steel assumed, soft jaws a darker milled grey",
    "picture": "checks/chuck3_front_before_after.png"
-  },
-  {
-   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 23,392 triangles, the library mesh is already decimated (96k to 47k) and its many hard edges are seams meshopt won't collapse; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
-   "picture": "checks/chuck3_close_before_after.png"
   }
  ]
 }

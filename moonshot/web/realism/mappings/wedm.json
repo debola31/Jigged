@@ -172,5 +172,5 @@
   }
  ],
  "triangles": 135000,
- "triangles_why": "its many small CAD primitives keep their borders: the simplifier stops near 131k at its largest error bound"
+ "triangles_why": "its many small CAD primitives keep their borders: with seams kept the simplifier bottoms out near 130k (area kept 100%)"
 }

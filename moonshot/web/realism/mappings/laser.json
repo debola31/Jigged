@@ -203,5 +203,5 @@
   }
  ],
  "triangles": 145000,
- "triangles_why": "its 36 CAD materials' many small primitives keep their borders: the simplifier stops near 141k at its largest error bound; inside the large class's 3 MB"
+ "triangles_why": "its 36 CAD materials' many small primitives keep their borders: with seams kept the simplifier bottoms out near 138k"
 }

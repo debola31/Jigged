@@ -62,7 +62,5 @@
    "what": "the stand is a plain box in the CAD; mat_2 (a white disc) taken for the wheel",
    "picture": "checks/pgrind_front_before_after.png"
   }
- ],
- "triangles": 120000,
- "triangles_why": "the grinding head's dense small parts keep their borders: the simplifier stops near 115k at its largest error bound, 2.6 MB"
+ ]
 }

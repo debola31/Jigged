@@ -1,0 +1,41 @@
+{
+ "asset": "c5",
+ "about": "Royal Products 42057 5C pull-back collet chuck for an A2-6 spindle, axis along x (Royal's STEP, one solid, no colours): turned steel; its cylindrical faces (flange rim, nose, pilot) ground.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/c5_*.png); page check checks/c5_*_before_after.png",
+ "fallback": "steel_machined",
+ "materials": {
+  "c5_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.6,
+    0.61,
+    0.625
+   ],
+   "rough": 0.22,
+   "metal": 1.0,
+   "tile_m": 0.1,
+   "normal": 0.45,
+   "about": "ground steel diameters"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "steel_machined"
+  }
+ },
+ "rules": [
+  {
+   "why": "faces round the axis (normals square to x): ground diameters",
+   "normal": {
+    "dir": [
+     1,
+     0,
+     0
+    ],
+    "min": -0.12,
+    "max": 0.12
+   },
+   "material": "c5_tool_steel"
+  }
+ ]
+}

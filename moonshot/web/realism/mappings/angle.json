@@ -1,8 +1,9 @@
 {
  "asset": "angle",
  "about": "McMaster 2353A67 webbed cast-iron angle plate, 4-1/2 x 6 x 5 in, 4 slots: one CAD solid, no colours. Its six working faces ground; the slots milled, not ground; the web between the legs painted, as cast.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 42% inward",
  "fallback": "cast_iron_ground",
+ "double_sided": false,
  "cad": {
   "*": {
    "none": "cast_iron_ground"

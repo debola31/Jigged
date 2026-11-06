@@ -1,8 +1,9 @@
 {
  "asset": "thread",
  "about": "McMaster 2366A113 1/4-20 UNC 2B go/no-go thread plug gauge with a double-ended taperlock handle: one CAD solid, no colours. Ground steel members at each end, the handle between by a box.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 33% inward",
  "fallback": "steel_ground",
+ "double_sided": false,
  "cad": {
   "*": {
    "none": "steel_ground"

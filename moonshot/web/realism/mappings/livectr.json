@@ -1,8 +1,9 @@
 {
  "asset": "livectr",
  "about": "Generic MT4 live center (McMaster 3229A34 class): a bearing body and a point link (taper shank, nose, 60 deg point). Ground taper and point, turned body and nose.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 2% inward",
  "fallback": "steel_machined",
+ "double_sided": false,
  "cad": {
   "body": {
    "mat_1": "steel_machined"

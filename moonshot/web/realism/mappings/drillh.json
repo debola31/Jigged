@@ -1,8 +1,9 @@
 {
  "asset": "drillh",
  "about": "Dormer A777 (McMaster 27995A617) H, 0.266 in cobalt (HSS-Co) jobber drill, one CAD solid, no colours: the straw/bronze oxide finish cobalt jobbers wear, over flutes and shank alike.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 65% inward",
  "fallback": "drillh_bronze",
+ "double_sided": false,
  "cad": {
   "*": {
    "DefaultMaterial": "drillh_bronze",

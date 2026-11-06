@@ -1,8 +1,9 @@
 {
  "asset": "softjaw",
  "about": "McMaster 1005N29 6061 aluminium machinable soft jaws, 6 x 2 x 1-1/2 in, a pair: one CAD mesh, no colours. Milled aluminium all over.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 34% inward",
  "fallback": "softjaw_alu",
+ "double_sided": false,
  "cad": {
   "*": {
    "none": "softjaw_alu"

@@ -1,8 +1,9 @@
 {
  "asset": "bgrind",
  "about": "Generic 8 in bench grinder with a belt-sander arm (the CAD's): motor and guards painted grey, the pedestal a darker cast grey; by CAD material and, inside the default one, by part box: the belt, the grinding wheel, the eye shield, the tool rest.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 99.7% of the area, and re-winding (normals_make_consistent) would turn 18% inward",
  "fallback": "bgrind_paint",
+ "double_sided": false,
  "cad": {
   "*": {
    "mat_0": "bgrind_paint",

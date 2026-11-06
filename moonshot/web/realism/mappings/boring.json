@@ -1,8 +1,9 @@
 {
  "asset": "boring",
  "about": "Borite 3249A208 (McMaster) 3/4 in shank boring bar with a TPMT-221 insert: one welded CAD solid, no colours. Black-oxide steel bar; the insert at the -x tip by a box (it stands on the bar's flat, rake face toward +y).",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 5% inward",
  "fallback": "steel_black_oxide",
+ "double_sided": false,
  "cad": {
   "*": {
    "none": "steel_black_oxide"

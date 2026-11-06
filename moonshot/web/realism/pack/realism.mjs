@@ -283,7 +283,9 @@ async function shots() {
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(String(e)));
 		page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-		await page.goto(`${job.base}/index.html?${s.query}&w=${s.w}&h=${s.h}&clean=1`);
+		// the page's module script awaits every model before it finishes, which can outlast goto's 30 s for 'load'
+		await page.goto(`${job.base}/index.html?${s.query}&w=${s.w}&h=${s.h}&clean=1`,
+			{ waitUntil: 'commit', timeout: s.timeout_ms ?? 180000 });
 		try {
 			await page.waitForFunction(() => window.__ready === true, null, { timeout: s.timeout_ms ?? 180000 });
 		} catch (e) {

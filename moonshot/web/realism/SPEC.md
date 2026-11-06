@@ -95,12 +95,14 @@ texel), phones to ASTC; the manifest's GPU bytes assume 1 byte a texel plus mipm
 - One mesh per material, nothing named per part: highlighting stays the box outline. Keep `raycast = () => {}`.
 - `castShadow` on every mesh except transparent ones (the VF-2's door panes); `receiveShadow` on all.
 
-## Measured (pilot, 1080p, GTX 1070, shadows drawn once as the page does)
+## Measured (1080p, GTX 1070, three.js r186 in headless Chromium)
 
-| | today, all light | 4 realistic | 4 realistic + 2 more copies each | projection, all 95 built |
+| Whole shop | triangles drawn | draws | frame, shadows drawn once (as the page does) | frame, shadows every frame |
 |---|---|---|---|---|
-| triangles drawn | 0.99 M | 1.50 M | 2.75 M | 2.26 M |
-| frame | 6.1 ms | 8.3 ms | 11.5 ms | ~10.4 ms (3.2 ms per million triangles) |
+| today, all light | 0.99 M | 432 | 6.2 ms | 5.8-7.6 ms |
+| pilot: 4 realistic | 1.50 M | 443 | 8.3 ms | 10.4 ms |
+| 73 realistic (2026-11-05, 20:50) | 2.48 M | 546 | **12.1 ms** | 15.0 ms |
 
-Download, all 95 projected: about 66 MB (tiles 7.8 MB); GPU textures about 0.27 GB; see `projection.json` in
-`<data>/realism/`. Regenerate with `python -m moonshot.web.realism project`.
+About 3.2 ms per million triangles drawn. The projection for all 95 and the download and GPU totals are in
+`<data>/realism/projection.json` (`python -m moonshot.web.realism project`); the page's own room and
+post-processing come on top, so keep shadows static.

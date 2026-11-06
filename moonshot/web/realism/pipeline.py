@@ -229,21 +229,24 @@ def validate(asset: str) -> dict:
 
 
 UV1_FLOOR = 0.1             # an atlas using less of its square than this is mostly margin (prepare.py repacks under 0.2)
-AO_LIT = 0.25                # an AO texel above this is lit; a healthy bake has most of its islands' texels above it
+AO_DARK = 0.15              # the islands' mean AO under this is a failed bake; an enclosed cabinet's runs ~0.4
 
 
 def ao_health(asset: str, st: dict) -> dict:
-    """Whether the AO bake is usable: its atlas isn't mostly margin, and its islands aren't black. edgef's spring
-    shattered into thousands of islands, its pack fell to 0.000 and it baked black, and every other check passed."""
+    """Whether the AO bake is usable: its atlas isn't mostly margin, its islands baked at all (a texel above 0.02
+    is covered), and they aren't black on average. edgef's spring shattered into thousands of islands, its pack fell
+    to 0.000 and it baked black, and every other check passed."""
     util = st["uv1_utilisation"]
     png = work_dir(asset) / "ao.png"
     if not png.exists():
         return {"ok": False, "uv1_utilisation": util, "why": "no AO bake"}
     from PIL import Image
     a = np.asarray(Image.open(png).convert("L"), np.float32) / 255
-    lit = float((a > AO_LIT).mean())
-    ok = util >= UV1_FLOOR and lit >= 0.4 * util
-    return {"ok": bool(ok), "uv1_utilisation": util, "lit_share": round(lit, 4), "mean": round(float(a.mean()), 4)}
+    covered = a > 0.02
+    share = float(covered.mean())
+    mean = float(a[covered].mean()) if covered.any() else 0.0
+    ok = util >= UV1_FLOOR and share >= 0.5 * util and mean >= AO_DARK
+    return {"ok": bool(ok), "uv1_utilisation": util, "covered_share": round(share, 4), "covered_mean": round(mean, 4)}
 
 
 def check(asset: str) -> dict:

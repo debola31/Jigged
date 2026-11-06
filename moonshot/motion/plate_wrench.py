@@ -78,11 +78,13 @@ def grab_at() -> np.ndarray:
 
 def grip_at(plate: SB.Plate, nuts: list[SB.Clamp], side: str, direction: str = "tighten") -> tuple[np.ndarray, float]:
     """Where the wrench stands as a hand's pinch on it is solved (its box end's middle mm, its yaw): on the hand's
-    first nut (by_hand), seated, halfway through a stroke, where the hand works it. Solved where the wrench lies on
-    the plate, the hand took it as a pickup there has it, and turned with it onto a nut: the right forearm pronated
-    10 deg past people's range on the right end's nuts, the left wrist stood out past the stud on the left end's, and
-    the trunk bent 12-15 deg to the side."""
-    c = next(ns[0] for s, ns in by_hand(nuts) if s == side)
+    nut nearest the operator (by_hand's), seated, halfway through a stroke, where the hand works it. Solved where the
+    wrench lies on the plate, the hand took it as a pickup there has it, and turned with it onto a nut: the right
+    forearm pronated 10 deg past people's range on the right end's nuts, the left wrist stood out past the stud on
+    the left end's, and the trunk bent 12-15 deg to the side."""
+    # (on the hand's nut nearest the operator, where the arm is most cramped: solved on the right end's far nut,
+    # on its near nut the planned wrist stood 187 mm right of the shoulder and the arm fell 61 mm short of the handle)
+    c = min(next(ns for s, ns in by_hand(nuts) if s == side), key=lambda k: k.stud[1])
     sweep = STROKE / 2 * (-1 if direction == "tighten" else 1)
     z = c.nut_z("clamped") + (SB.PARK_NUT_GAP_MM / 2 if direction == "tighten" else 0.0)
     yaw = nut_yaw(c, plate, direction, next(ns for s, ns in by_hand(nuts) if s == side)) + sweep

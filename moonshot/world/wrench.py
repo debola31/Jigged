@@ -10,8 +10,8 @@ it drives, the take saying which (tighten or loosen). Its open end isn't among i
 model, which the take record draws, has it (moonshot/library/generators.py ratchet_wrench, LINKS). It lies flat where a
 take puts it.
 
-The ring's inside is modelled as the hexagon it drives the nut by (the real one's 12 points fit the hex every 30
-deg; its six flats, every 60), a little wider than the nut's, its underside's edge chamfered.
+The ring's inside is modelled as the twelve points it drives the nut by, as the real one's, fitting the hex every 30
+deg, a little wider than the nut's, its underside's edge chamfered.
 
 Its frame (the head's): the box end's middle at the origin, the handle along +x, z up; the head's underside at
 z = -HEIGHT/2.
@@ -68,27 +68,39 @@ def head_boxes() -> list[tuple[str, np.ndarray, np.ndarray, np.ndarray]]:
     return out
 
 
+POINTS = 12                              # the ring's inside: twelve points, as the real one's, fitting the hex every
+                                         # 30 deg (modelled as its hexagon's six flats, every 60, the box end set down
+                                         # on a nut was turned up to 30 deg onto its flats, and swung off it)
+
+
 def ring_boxes() -> list[tuple[str, np.ndarray, np.ndarray, np.ndarray]]:
-    """The ratchet ring's solids in its frame (the head's, turned by the ratchet): its inside's six flats, AF_IN / 2
-    from its middle facing in at 30 + 60k deg (the nut's flats' normals, moonshot/world/spoilboard.py _nut_geoms), each
-    above its chamfer: the flat's foot, set back CHAMFER_MM, and the chamfer's face between them."""
+    """The ratchet ring's solids in its frame (the head's, turned by the ratchet): its inside's twelve points, the
+    union of two hexagons AF_IN across, a 30 deg turn apart, their flats AF_IN / 2 from its middle facing in at 30k deg
+    (the nut's flats' normals at 30 + 60k, moonshot/world/spoilboard.py _nut_geoms, either hexagon's). Each flat is
+    solid on two stretches, from the tooth between it and its neighbour (tan 15 deg out along it) to the notch where
+    the next corner of its hexagon is (tan 30 deg out), the nut's corners sitting in the notches; each stretch above
+    its chamfer: its foot, set back CHAMFER_MM, and the chamfer's face between them."""
     r_in, c, h = AF_IN / 2, CHAMFER_MM, HEIGHT / 2 - 0.5
     wall = RING_R - r_in
-    half_side = RING_R * math.tan(math.pi / 6)
+    s0, s1 = r_in * math.tan(math.pi / 12), r_in * math.tan(math.pi / 6)
+    half_s, mid_s = (s1 - s0) / 2, (s0 + s1) / 2
     out = []
-    for k in range(6):
-        a = math.pi / 6 + k * math.pi / 3
+    for k in range(POINTS):
+        a = k * math.pi / 6
         u, R = np.array([math.cos(a), math.sin(a), 0.0]), turned(a)
-        out.append((f"ring_{k}", u * (r_in + wall / 2) + [0.0, 0.0, c / 2], np.array([wall / 2, half_side, h - c / 2]),
-                    R))
-        out.append((f"foot_{k}", u * (r_in + (c + wall) / 2) + [0.0, 0.0, -h + c / 2],
-                    np.array([(wall - c) / 2, half_side, c / 2]), R))
-        # the chamfer's face through the flat's inner edge c up and the foot's c out, its solid behind it: the slab's
-        # x out and up (into the ring), y along the flat, z up the face toward the middle
         x_l, z_l = (u + [0.0, 0.0, 1.0]) / math.sqrt(2), ([0.0, 0.0, 1.0] - u) / math.sqrt(2)
-        face = u * (r_in + c / 2) + [0.0, 0.0, -h + c / 2]
-        out.append((f"chamfer_{k}", face + x_l * SLAB_MM / 2, np.array([SLAB_MM / 2, half_side, c * math.sqrt(2) / 2]),
-                    np.column_stack([x_l, R[:, 1], z_l])))
+        for j, side in enumerate((1.0, -1.0)):
+            along = R[:, 1] * side * mid_s
+            n = f"{k}_{j}"
+            out.append((f"ring_{n}", u * (r_in + wall / 2) + along + [0.0, 0.0, c / 2],
+                        np.array([wall / 2, half_s, h - c / 2]), R))
+            out.append((f"foot_{n}", u * (r_in + (c + wall) / 2) + along + [0.0, 0.0, -h + c / 2],
+                        np.array([(wall - c) / 2, half_s, c / 2]), R))
+            # the chamfer's face through the stretch's inner edge c up and the foot's c out, its solid behind it: the
+            # slab's x out and up (into the ring), y along the flat, z up the face toward the middle
+            face = u * (r_in + c / 2) + along + [0.0, 0.0, -h + c / 2]
+            out.append((f"chamfer_{n}", face + x_l * SLAB_MM / 2, np.array([SLAB_MM / 2, half_s, c * math.sqrt(2) / 2]),
+                        np.column_stack([x_l, R[:, 1], z_l])))
     return out
 
 

@@ -167,13 +167,14 @@ class PlateClamps(FirmGrip, TakeRunner):
 
     def onto_flats(self, R: np.ndarray, c: SB.Clamp) -> float:
         """The turn about z (rad) that brings the wrench's planned head (frame R) square on the flats of a clamp's nut,
-        as the nut stands now: the ratchet ring's flats face in at 30 + 60k deg from its yaw (the head's and the
-        ratchet's), the nut's out at 30 + 60k deg from its turn (moonshot/world/wrench.py ring_boxes,
-        spoilboard._nut_geoms)."""
+        as the nut stands now: the ratchet ring's twelve points fit the nut every 30 deg from its yaw (the head's and
+        the ratchet's), the nut's flats out at 30 + 60k deg from its turn (moonshot/world/wrench.py ring_boxes,
+        spoilboard._nut_geoms): no more than 15 deg either way."""
         m, d = self.model, self.data
         turn = float(d.qpos[m.jnt_qposadr[m.joint(f"{c.name}_nut_turn").id]])
         ring = math.atan2(R[1, 0], R[0, 0]) + self.ratchet_q()
-        return (turn - ring + math.pi / 6) % (math.pi / 3) - math.pi / 6
+        fit = 2 * math.pi / WR.POINTS
+        return (turn - ring + fit / 2) % fit - fit / 2
 
     def to_flats(self, side: str, t: float, R: np.ndarray) -> np.ndarray:
         """The turn onto the flats of the next nut the side's hand works (onto_flats), eased in (min-jerk) from as the

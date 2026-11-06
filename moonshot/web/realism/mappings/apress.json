@@ -93,10 +93,6 @@
   {
    "what": "the frame's blue: the GrabCAD modeller's colour, kept as Palmgren blue enamel; Palmgren's own listing shows no colour I could confirm",
    "picture": "checks/apress_front_before_after.png"
-  },
-  {
-   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 16,610 triangles, 10,600 of them the bolts' and nuts' modelled threads; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
-   "picture": "checks/apress_close_before_after.png"
   }
  ]
 }

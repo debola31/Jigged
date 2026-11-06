@@ -5,9 +5,9 @@ import type { Showcase } from './_components/showcaseData';
 import showcase from './showcase.json';
 
 export const metadata: Metadata = {
-  title: 'Upload a part. Get its instructions for your shop.',
+  title: 'Upload a part. Get instructions for making it.',
   description:
-    'A research preview of Jigged: a part planned for the machines a shop has, with every step shown being done. Try it on an example shop and parts already run through it.',
+    'A research preview of Jigged: upload a part and get instructions for making it with your machines and tools, every step shown being done. Try it on an example shop.',
   alternates: { canonical: '/showcase' },
 };
 

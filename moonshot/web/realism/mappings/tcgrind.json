@@ -1,76 +1,114 @@
 {
- "about": "ANCA TX7 tool and cutter grinder (GrabCAD, 6,160 triangles, no colours): a coarse block model. White enclosure, dark base, a glass front door, a dark control panel; its shape is the limit here, not the materials.",
- "fallback": "paint_white",
+ "asset": "tcgrind",
+ "about": "ANCA TX7 tool and cutter grinder, self-made in Blender (sources/tcgrind/build_tcgrind.py) from dealer photos of the TX7 / TX7+ (kdmachinery.com, IndiaMART product image, Liberty Machinery listings) and the record's specs, replacing the GrabCAD block model (6,160 triangles, no colours) that read as a box; the library keeps that model, and this one is in its frame. The slate-blue flared base, the cream faceted enclosure with the big amber window on its left chamfer and a second on its front, the sliding door with two tall angled windows on its rails, the stainless rail lettered TX7+, the blue right-hand column with the ANCA logotype, the charcoal pendant (lit LCD, keyboard, jog knob, e-stop), the signal tower, the raised rear hood; inside, the wheel head with its wheel pack and the workhead holding an end-mill blank; behind, the electrical cabinet and the oil / filtration unit with its filter, pump and mist extractor ducted to the hood.",
+ "reviewed": "2026-11-05: modelled against dealer photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/tcgrind/tcgrind.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "tcgrind_cream",
+ "smooth_deg": 35,
  "cad": {
   "*": {
-   "none": "paint_white"
+   "cast_iron_painted": "cast_iron_painted",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_green": "plastic_green",
+   "rubber_black": "rubber_black",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground",
+   "tcgrind_blue": "tcgrind_blue",
+   "tcgrind_cream": "tcgrind_cream",
+   "tcgrind_dark": "tcgrind_dark",
+   "tcgrind_glass": "tcgrind_glass",
+   "tcgrind_lcd": "tcgrind_lcd",
+   "tcgrind_red": "tcgrind_red"
   }
  },
- "rules": [
-  {
-   "why": "the base and lower cabinet (parts 3, 4 below 0.6 m)",
-   "parts": [
-    3,
-    4
+ "rules": [],
+ "materials": {
+  "tcgrind_cream": {
+   "family": "paint",
+   "color": [
+    0.58,
+    0.565,
+    0.51
    ],
-   "inside": {
-    "lo": [
-     -9,
-     -9,
-     -1
-    ],
-    "hi": [
-     9,
-     9,
-     0.6
-    ]
-   },
-   "material": "paint_dark_grey"
+   "rough": 0.4,
+   "about": "ANCA's cream enclosure panels, the door, the wheel head cover, the pendant's keys"
   },
-  {
-   "why": "the front door: glass",
-   "parts": [
-    1
+  "tcgrind_blue": {
+   "family": "paint",
+   "color": [
+    0.1,
+    0.16,
+    0.3
    ],
-   "normal": {
-    "dir": [
-     0,
-     -1,
-     0
-    ],
-    "min": 0.9
-   },
-   "material": "glass_clear"
+   "rough": 0.42,
+   "about": "ANCA slate blue: the flared base, the right-hand column, the cabinets behind, the coolant line"
   },
-  {
-   "why": "the control panel",
-   "parts": [
-    2
+  "tcgrind_dark": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.032,
+    0.036
    ],
-   "material": "plastic_black"
+   "rough": 0.45,
+   "about": "charcoal: the pendant housing, the ANCA logotype, vents, grinding wheels"
   },
-  {
-   "why": "... its screen, facing the operator",
-   "parts": [
-    2
+  "tcgrind_red": {
+   "family": "paint",
+   "color": [
+    0.55,
+    0.02,
+    0.02
    ],
-   "normal": {
-    "dir": [
-     0,
-     -1,
-     0
+   "rough": 0.35,
+   "about": "the red TX7+ lettering, the e-stop, the door button, the tower's red"
+  },
+  "tcgrind_glass": {
+   "family": "glass",
+   "color": [
+    0.62,
+    0.45,
+    0.16
+   ],
+   "rough": 0.06,
+   "alpha": 0.35,
+   "about": "the windows: polycarbonate tinted amber by oil mist, alpha-blended"
+  },
+  "tcgrind_lcd": {
+   "family": "flat",
+   "color": [
+    0.06,
+    0.09,
+    0.1
+   ],
+   "rough": 0.2,
+   "emissive": [
+    [
+     0.12,
+     0.18,
+     0.2
     ],
-    "min": 0.9
-   },
-   "material": "screen_lcd"
+    1.0
+   ],
+   "about": "the pendant's lit LCD"
   }
+ },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (5 axes, 8 in wheels, max tool 8 in x 15.75 in, 36.5 kW spindle) and its library model's box (2354.6 x 1917.6 x 2243 mm), whose part layout placed the door, the pendant and the units behind",
+  "dealer and product photos of the ANCA TX7 / TX7+ found by image search (kdmachinery.com 'Used Anca TX7 Plus 8073310', IndiaMART, Liberty Machinery): colours, the faceted cream enclosure, amber windows, the blue column with the ANCA logotype and pendant"
  ],
  "unsure": [
   {
-   "what": "a 6,160-triangle block model: materials can't make it detailed; a candidate for better CAD",
-   "picture": "checks/tcgrind_front_before_after.png"
+   "what": "the units behind (electrical cabinet, oil / filtration with mist extractor) fill the library model's rear blocks; their shapes are plausible, not photographed"
+  },
+  {
+   "what": "the enclosure's facets are simplified to one big chamfer and a sloped top front; the real TX7+ has more panel breaks"
   }
- ],
- "asset": "tcgrind",
- "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+ ]
 }

@@ -2607,7 +2607,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tools",

@@ -32,9 +32,12 @@ TORQUESCALE = 20.0
 WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.95, 0.99, 0.001)
 DRAW_S = 0.85                # the fingers drawn out from under a plate's end (motion/plate_load.py's let-go)
 SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers
-DRAW_PULL = 1.5              # ... the pull fed forward that many times its drag, to break it free: at its drag alone the
+DRAW_PULL = 1.35             # ... the pull fed forward that many times its drag, to break it free: at its drag alone the
                              # fingers stayed under the plate and the hands drew it back toward the operator 34 mm; at
-                             # twice (on the board too), the right wrist's muscles ran 1.33 times their most
+                             # twice (on the board too), the right wrist's muscles ran 1.33 times their most, at 1.5
+                             # 1.12 for a frame
+SETTLE_S = 0.3               # a plate let go comes to rest this long after the hands are off it: off the fingers under
+                             # its ends, it drops their thickness onto the board
 
 
 class PlateLoad(TakeRunner):
@@ -57,6 +60,7 @@ class PlateLoad(TakeRunner):
         self.HAND_FORCE_AT = np.asarray(tk["hand_force_at"], float)     # the plate's weight's turn fed to the wrists
         super().__init__(folder)
         self.at_t: list[np.ndarray] = []
+        self.touched: list[bool] = []             # either hand on the plate, each frame
         self.tilt: list[float] = []
         self.in_hand = {s: [] for s in ("R", "L")}
         self.carry = {e["side"]: e for e in self.tk["events"] if e["kind"] == "carry"}
@@ -178,14 +182,23 @@ class PlateLoad(TakeRunner):
         for s in ("R", "L"):
             hb = m.body(f"{s}_hand").id
             self.in_hand[s].append(d.xmat[hb].reshape(3, 3).T @ (d.xpos[b] - d.xpos[hb]) * 1000)
+        self.touched.append(self.hand_on_plate("R") or self.hand_on_plate("L"))
+
+    def let_go_frame(self) -> int:
+        """The frame the plate is let go at, come to rest: the later of a second after the carry ends and SETTLE_S
+        after the last frame a hand touches it. Laid from underneath, it rests on the fingers under its ends for
+        a second or more after the carry, and drops onto the board as they come out."""
+        after = int((max(e["t1"] for e in self.carry.values()) + 1.0) * self.fps)
+        touched = [k for k, on in enumerate(self.touched) if on]
+        off = touched[-1] + int(SETTLE_S * self.fps) if touched else 0
+        return min(len(self.at_t) - 1, max(after, off))
 
     def outcome(self) -> dict:
         t = np.arange(len(self.at_t)) / self.fps
         P = np.array(self.at_t)
         out = {"off_mm": [round(float(v), 2) for v in P[-1] - self.place.centre],
                "tilt_deg": round(self.tilt[-1], 2),
-               "moved_after_let_go_mm": round(float(np.linalg.norm(P[-1] - P[int(min(len(P) - 1, (max(
-                   e["t1"] for e in self.carry.values()) + 1.0) * self.fps))])), 2)}
+               "moved_after_let_go_mm": round(float(np.linalg.norm(P[-1] - P[self.let_go_frame()])), 2)}
         for s, e in self.carry.items():
             Hh = np.array(self.in_hand[s])
             held = (t >= max(e["t0"], 0.0) + 0.2) & (t < e["t1"] - 0.2)

@@ -68,6 +68,9 @@ ENDS_SKIN_MM = 1.5                               # ... and the rest of the hand 
                                                  # round its end's bottom edge was 3.3 mm into it
 UNDER_IN_MM = (10.0, 35.0)                       # a plate laid down by its ends from underneath: the fingers' pads
                                                  # under its end this far in from it, drawn out past it when let go
+UNDER_COMP_MM = 0.0                              # ... just touching its underside as the hold is solved: at
+                                                 # ENDS_COMP_MM, its 7.2 kg on them pressed the fingertips 3.4-3.85
+                                                 # mm into it as it was lowered (the skin's limit 3.5)
 UNDER_OPEN_S = 0.35                              # ... the hand opened this long after it lets go before they're
                                                  # drawn out (moonshot/sim/plate_load.py pulls them out from then)
 UNDER_LIFT_MM = 2.0                              # ... drawn out a little up, off the board: drawn out on it too,
@@ -183,7 +186,7 @@ class PlateLoad(StepTake):
             targets = {
                 "thumb": plane(at, [0, 0, 1.0], ENDS_COMP_MM,
                                local_bands(at, np.eye(3), x=sorted([-sign * 45.0, -sign * 15.0]), y=(-15, 15))),
-                **{f: plane(bottom, [0, 0, -1.0], ENDS_COMP_MM, local_bands(at, np.eye(3), x=inward, y=(-45, 45)))
+                **{f: plane(bottom, [0, 0, -1.0], UNDER_COMP_MM, local_bands(at, np.eye(3), x=inward, y=(-45, 45)))
                    for f in ("index", "middle", "ring", "little")}}
         elif self.ends:
             at = np.array([c[0] + sign * half[0], c[1] + getattr(self, "ends_back", ENDS_BACK_MM), top])

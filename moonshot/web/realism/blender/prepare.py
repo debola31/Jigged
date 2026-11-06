@@ -166,7 +166,8 @@ def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
     laser's doors came out black). normals_make_consistent is no fix: on unwelded CAD every face is its own island and
     it turned 22-65% of batch A's assets inward. Instead:
     1. vote: a face whose winding disagrees with the source's own normals is turned to agree;
-    2. closed solids are left alone: their winding is the CAD's, outward to within 0.2% (batch B);
+    2. a closed solid is left as the CAD wound it (outward to within 0.2%, batch B) unless rays show it inside out
+       as a whole: then it is turned whole;
     3. on open shells (sheets, surface models, where the CAD's own normals can face into the machine, and even mix
        within one shell), each face is turned over when rays leave the model from its back and not from its front.
     Returns the shares of area flipped and the share left opposite the source, which check() gates."""
@@ -215,6 +216,23 @@ def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
     patch = np.array([find(x) for x in range(len(fv))])
     vote_area = np.bincount(patch, weights=score * ar, minlength=len(fv))
     outside = shell & (vote_area[patch] > 0)
+    # a closed solid can be inside out as a whole (the laser's thin door slabs: every face wound into the slab, the
+    # CAD's normals with them). Turned whole when its biggest faces' rays leave from the back far more than the front;
+    # a right-way-out solid's back rays hit its own inside, so it never is.
+    n_parts = int(part.max()) + 1
+    order = np.lexsort((-ar, part))
+    starts = np.searchsorted(part[order], np.arange(n_parts))
+    ends = np.append(starts[1:], len(order))
+    inverted = np.zeros(n_parts, bool)
+    for p in np.nonzero(~is_open)[0]:
+        front = back = 0
+        faces = order[starts[p]:ends[p]][:24]
+        for f in faces:
+            d, c = Vector(fv[f]), Vector(ce[f])
+            front += tree.ray_cast(c + d * eps, d, reach)[0] is None
+            back += tree.ray_cast(c - d * eps, -d, reach)[0] is None
+        inverted[p] = back >= 2 * front + 2 and back >= 0.25 * len(faces)
+    outside |= inverted[part]
     flip = vote ^ outside
     if flip.any():
         bm = bmesh.new()
@@ -233,6 +251,7 @@ def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
     out = {"vote_flipped_share": round(float(ar[vote].sum()) / total, 4),
            "outside_flipped_share": round(float(ar[outside].sum()) / total, 4),
            "open_shell_share": round(float(ar[shell].sum()) / total, 4),
+           "solids_turned": int(inverted.sum()),
            "against_source_share": round(float(ar[against].sum()) / total, 4),
            "unintended_share": round(float(ar[against & ~outside].sum()) / total, 4)}
     log(f"winding: {out}")

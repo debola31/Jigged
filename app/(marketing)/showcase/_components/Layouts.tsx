@@ -7,12 +7,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
-import List from '@mui/material/List';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemText from '@mui/material/ListItemText';
-import ListSubheader from '@mui/material/ListSubheader';
-import Popover from '@mui/material/Popover';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CheckIcon from '@mui/icons-material/Check';
@@ -23,13 +17,13 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import SearchIcon from '@mui/icons-material/Search';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
-import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
+import { CATEGORY_LABELS, type Catalog } from './catalog';
 import { CARD_BG, DoneContent, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
 import { CategoryIcon } from './glyphs';
+import { toTheParts } from './Intro';
 import { PartMenu, type PickSource } from './PartChoice';
 import type { LivePart } from './showcaseData';
 import { useShowcase } from './store';
@@ -136,22 +130,22 @@ function Sheet({ cat, part, parts, onPick, onGenerated }: ShopProps) {
   return sheet === 'step' && step !== null ? <StepContent cat={cat} part={part} index={step} /> : <NeedContent cat={cat} part={part} />;
 }
 
-/** Down to the parts, under the shop: the carousel is the one place a part is picked or uploaded. */
-const toTheParts = () => document.getElementById('showcase-parts')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
 /**
  * Before a part is picked: the shop is clear, and this says where to go next. It sits at the foot
- * of the window, not of the shop (whose foot starts below the fold), until the parts are in sight.
+ * of the window, not of the shop (whose foot starts below the fold), while neither the intro's own
+ * way down nor the parts are in sight.
  */
 function PartsPill() {
-  const [partsInSight, setPartsInSight] = useState(false);
+  const [inSight, setInSight] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    const parts = document.getElementById('showcase-parts');
-    if (!parts) return;
-    const seen = new IntersectionObserver(([e]) => setPartsInSight(e.isIntersecting), { threshold: 0.25 });
-    seen.observe(parts);
+    const seen = new IntersectionObserver((entries) => setInSight((s) => ({ ...s, ...Object.fromEntries(entries.map((e) => [e.target.id, e.isIntersecting])) })), { threshold: 0.25 });
+    for (const id of ['showcase-hero-cta', 'showcase-parts']) {
+      const el = document.getElementById(id);
+      if (el) seen.observe(el);
+    }
     return () => seen.disconnect();
   }, []);
+  const partsInSight = Object.values(inSight).some(Boolean);
   return (
     <Button
       variant="contained"
@@ -180,120 +174,84 @@ function PartsPill() {
 }
 
 /**
- * The example shop's name and its areas, across the top of the shop view, so they stay in sight
- * while the view is in use. An area flies the camera there; the one in view is marked.
+ * The example shop over its own 3D view: its name, then its areas, which steer the view below. An
+ * area flies the camera there and lists its machines, and a machine flies there and opens it. It
+ * stays in sight while the view is in use, as the top of the shop's section.
  */
-function ShopStrip({ cat, toShop }: { cat: Catalog; toShop(): void }) {
-  const view = useShowcase((s) => s.view);
+function ShopHeader({ cat, toShop }: { cat: Catalog; toShop(): void }) {
   const look = useShowcase((s) => s.look);
+  const openItem = useShowcase((s) => s.openItem);
+  const item = useShowcase((s) => s.item);
+  const [area, setArea] = useState<string | null>(null);
   const machines = cat.things.filter((t) => t.category === 'machines');
-  const areas = cat.shop.zones.map((z) => ({ zone: z, count: machines.filter((m) => m.zone === z.id).length })).filter((a) => a.count > 0);
+  const areas = cat.shop.zones.map((z) => ({ zone: z, machines: machines.filter((m) => m.zone === z.id) })).filter((a) => a.machines.length > 0);
+  const open = areas.find((a) => a.zone.id === area);
   return (
     <Box
       component="nav"
-      aria-label="The example shop's areas"
-      sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 3, rowGap: 1, px: 2, py: 1.25, bgcolor: SUBHEADER_BG, borderBottom: '1px solid rgba(255, 255, 255, 0.09)', flexShrink: 0 }}
+      aria-label="The example shop"
+      sx={{ px: 2, pt: { xs: 2.5, md: 3 }, pb: 2, textAlign: 'center', bgcolor: SUBHEADER_BG, borderBottom: '1px solid rgba(255, 255, 255, 0.09)', flexShrink: 0 }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
-        <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
-          Example shop
-        </Typography>
-        <Typography component="h2" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.2rem' }}>
-          {cat.shop.name}
-        </Typography>
-      </Box>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-        {areas.map(({ zone, count }) => {
-          const here = view.kind === 'zone' && view.where.name === zone.name;
+      <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
+        Example shop
+      </Typography>
+      <Typography component="h2" sx={{ mt: 0.75, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: { xs: '1.5rem', md: '1.85rem' }, lineHeight: 1.15 }}>
+        {cat.shop.name}
+      </Typography>
+      <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1 }}>
+        {areas.map((a) => {
+          const here = a.zone.id === area;
           return (
             <Chip
-              key={zone.id}
+              key={a.zone.id}
               icon={<CategoryIcon category="machines" sx={{ fontSize: 18 }} />}
               label={
                 <>
-                  {zone.name}
-                  <Box component="span" sx={{ ml: 1, color: 'text.secondary' }}>
-                    {count}
+                  {a.zone.name}
+                  <Box component="span" sx={{ ml: 1, color: here ? 'inherit' : 'text.secondary' }}>
+                    {a.machines.length}
                   </Box>
                 </>
               }
               variant={here ? 'filled' : 'outlined'}
               color={here ? 'primary' : 'default'}
               aria-pressed={here}
+              aria-controls={here ? 'showcase-area-machines' : undefined}
               onClick={() => {
                 toShop();
-                const [x0, y0, x1, y1] = zone.rect;
-                look({ kind: 'zone', where: { name: zone.name, x: (x0 + x1) / 2, y: (y0 + y1) / 2 } });
-                posthog.capture('showcase area opened', { zone: zone.id });
+                setArea(a.zone.id);
+                const [x0, y0, x1, y1] = a.zone.rect;
+                look({ kind: 'zone', where: { name: a.zone.name, x: (x0 + x1) / 2, y: (y0 + y1) / 2 } });
+                posthog.capture('showcase area opened', { zone: a.zone.id });
               }}
             />
           );
         })}
       </Box>
+      {open && (
+        <Box id="showcase-area-machines" role="group" aria-label={`${open.zone.name} machines`} sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.75 }}>
+          {open.machines.map((m) => (
+            <Chip
+              key={m.item}
+              size="small"
+              label={m.name}
+              variant={item === m.item ? 'filled' : 'outlined'}
+              color={item === m.item ? 'secondary' : 'default'}
+              onClick={() => {
+                openItem(m.item);
+                posthog.capture('showcase item opened', { category: 'machines', source: 'area' });
+              }}
+              sx={{ borderColor: 'rgba(255, 255, 255, 0.25)' }}
+            />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
 
-/** Find any machine or tool and fly to it. */
-function FindThings({ cat }: { cat: Catalog }) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [query, setQuery] = useState('');
-  const openItem = useShowcase((s) => s.openItem);
-  const shown = cat.things.filter((t) => matches(t, query, cat.zoneName(t.zone)));
-  const zones = cat.shop.zones.filter((z) => shown.some((t) => t.zone === z.id));
-  return (
-    <>
-      <Button size="small" variant="contained" color="inherit" startIcon={<SearchIcon />} onClick={(e) => setAnchor(e.currentTarget)} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
-        Find a machine or tool
-      </Button>
-      <Popover
-        open={!!anchor}
-        anchorEl={anchor}
-        onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { width: 360, maxHeight: '65vh', bgcolor: SUBHEADER_BG, colorScheme: 'dark', display: 'flex', flexDirection: 'column' } } }}
-      >
-        <Box sx={{ p: 1.5, flexShrink: 0 }}>
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            type="search"
-            placeholder="Vise, edge finder, Haas…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            slotProps={{ htmlInput: { 'aria-label': 'Find a machine or tool' } }}
-          />
-        </Box>
-        <Box sx={{ overflowY: 'auto' }}>
-          {zones.map((z) => (
-            <List key={z.id} dense disablePadding subheader={<ListSubheader sx={{ bgcolor: SUBHEADER_BG, color: 'text.secondary', fontWeight: 600 }}>{z.name}</ListSubheader>}>
-              {shown
-                .filter((t) => t.zone === z.id)
-                .map((t) => (
-                  <ListItemButton
-                    key={t.item}
-                    onClick={() => {
-                      setAnchor(null);
-                      openItem(t.item);
-                      posthog.capture('showcase item opened', { category: t.category, source: 'search' });
-                    }}
-                  >
-                    <ListItemText primary={t.name} secondary={CATEGORY_LABELS[t.category] ?? t.category} />
-                  </ListItemButton>
-                ))}
-            </List>
-          ))}
-          {shown.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary' }}>Nothing matches “{query}”.</Typography>}
-        </Box>
-      </Popover>
-    </>
-  );
-}
-
-/** Over the shop, top right: the cards back where they were, find, walk, and back to the whole shop. */
-function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; part: LivePart; onSnapBack?(): void; onWholeShop(): void }) {
+/** Over the shop, top right: the cards back where they were, the parts, walk, and back to the whole shop. */
+function ShopButtons({ part, onSnapBack, onWholeShop }: { part: LivePart; onSnapBack?(): void; onWholeShop(): void }) {
   const walking = useShowcase((s) => s.walking);
   const phase = useShowcase((s) => s.phase);
   const { setWalking } = useShowcase.getState();
@@ -310,7 +268,6 @@ function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; par
           The parts
         </Button>
       )}
-      <FindThings cat={cat} />
       <Button
         size="small"
         variant="contained"
@@ -469,14 +426,13 @@ export default function ShopLayout(props: ShopProps) {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <ShopStrip cat={cat} toShop={props.toShop} />
+      <ShopHeader cat={cat} toShop={props.toShop} />
       <Box sx={{ position: 'relative', flex: 1, minHeight: 0 }}>
         {/* Its own stacking context, so the labels over the shop (z-index 0-20) stay under the cards. */}
         <Box ref={view} role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
           <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
         </Box>
         <ShopButtons
-          cat={cat}
           part={part}
           onWholeShop={wholeShop}
           onSnapBack={

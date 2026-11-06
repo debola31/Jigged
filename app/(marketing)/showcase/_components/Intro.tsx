@@ -7,6 +7,7 @@ import ButtonBase from '@mui/material/ButtonBase';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -176,17 +177,26 @@ function Carousel({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** What Jigged does with a part, in one line, above the example shop. */
+/** Down to the parts, under the shop: where a part is uploaded or an example picked. */
+export const toTheParts = () => document.getElementById('showcase-parts')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+/** What Jigged does with a part, above the example shop, and the way down to the parts. */
 export default function Intro() {
   return (
     <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 4, md: 5 } }}>
-      <Box sx={{ maxWidth: 900, mx: 'auto', textAlign: 'center' }}>
+      <Box sx={{ maxWidth: 820, mx: 'auto', textAlign: 'center' }}>
         <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
           Research preview
         </Typography>
         <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4vw, 3.2rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
-          Upload a part. Get instructions for making it with your machines and tools.
+          Upload a part, get manufacturing instructions
         </Typography>
+        <Typography sx={{ mt: 2.5, color: 'rgba(255, 255, 255, 0.8)', fontSize: { xs: '1.05rem', md: '1.15rem' }, lineHeight: 1.6, textWrap: 'balance' }}>
+          Jigged plans each part for the machines and tools you have, then shows every step being done. Try it on the example shop below.
+        </Typography>
+        <Button id="showcase-hero-cta" variant="contained" size="large" endIcon={<ArrowDownwardIcon />} onClick={toTheParts} sx={{ ...gradientButtonSx, mt: 3.5, px: 3 }}>
+          Upload or try a part
+        </Button>
       </Box>
     </Section>
   );

@@ -1,14 +1,15 @@
 """Clamp the plate down (a plate setup's "Set <n> step clamps on its margin and tighten each nut"), planned for both
 hands on one trunk from the doorway: each clamp, parked slid back off the plate's end and tipped onto the spoilboard,
 brought up level by its end's hand and slid onto the plate's margin and its heel block (moonshot/motion/
-plate_clamps.py), the -x end's by the left hand and the +x end's by the right, one clamp at a time; then the right
-hand takes the wrench off the plate and runs each nut down its stud onto its strap and snugs it, in strokes (the
-user's decision, 2026-11-05: the wrench does it all; moonshot/motion/plate_wrench.py), and lays the wrench back.
+plate_clamps.py), the -x end's by the left hand and the +x end's by the right, one clamp at a time; then each end's
+hand in turn, the right's first, takes the wrench off the plate and runs that end's nuts down their studs onto their
+straps and snugs them, in strokes (the user's decision, 2026-11-05: the wrench does it all; moonshot/motion/
+plate_wrench.py use_ends), and lays the wrench back.
 
 A plate too long for one stance (moonshot/planning/takes.py SPLIT_SEAT) is clamped in two takes, the left end's then
 the right's, each from a stance in front of that end's clamps (END_IN_MM), joined across a cut as the operator steps
-over: in each, that end's hand sets its clamps and the right hand runs their nuts down; the right end's take starts
-with the left end's clamps down.
+over: in each, that end's hand sets its clamps and runs their nuts down; the right end's take starts with the left
+end's clamps down.
 
     python -m moonshot.motion.plate_seat ll-1005337 op10 --end=left   # plans takes/ll-1005337-op10-set-clamps-left
 """
@@ -29,10 +30,11 @@ from moonshot.world import spoilboard as SB
 
 TAKES = data_root() / "takes"
 BOARD_CLEAR_MM = 10.0        # the forearms this much further off the spoilboard than the solver's own 45 mm
-END_IN_MM = 190.0            # a split take's stance this far in from its end's studs toward the plate's middle: that
-                             # end's shoulder in front of its clamps, the right hand's strokes on the left end's nuts
-                             # just across the body's middle (from the plate's middle, ll-1005337's far right nut's
-                             # strokes turned the trunk 15 deg past people's range)
+END_IN_MM = 250.0            # a split take's stance this far in from its end's studs toward the plate's middle: that
+                             # end's shoulder in front of its clamps and its nuts' strokes, and the wrench on the
+                             # plate's middle in reach (from the plate's middle, ll-1005337's far right nut's strokes
+                             # turned the trunk 15 deg past people's range; at 190 with the right hand on the left
+                             # end's nuts too, it reached across the body and the trunk turned and bent 17 deg left)
 SIDE_OF_END = {"left": "L", "right": "R"}
 
 
@@ -61,8 +63,8 @@ class PlateSeat(StepTake):
         self.boxes = [(np.r_[SB.TABLE_MID, (SB.TABLE_Z + b) / 2 - 30.0],
                        np.r_[SB.SPOILBOARD_MM[:2] / 2, (b - SB.TABLE_Z) / 2 + 30.0] + BOARD_CLEAR_MM)]
         specs = {f"pinch_{c.name}": self.grip_spec("pinch", c.name) for c in self.clamps}
-        self.solve_grips(specs | {"wrench_R": self.grip_spec("wrench", "")}, source=self.grip_spec,
-                         depends=(PC, PW, SB))
+        specs |= {f"wrench_{s}": self.grip_spec("wrench", s) for s, _ in PW.by_hand(self.clamps)}
+        self.solve_grips(specs, source=self.grip_spec, depends=(PC, PW, SB))
 
     def stance(self) -> np.ndarray:
         """Where the body stands (its lumbar pivot, mm): the doorway's middle, or for one end's take, END_IN_MM in from
@@ -80,9 +82,9 @@ class PlateSeat(StepTake):
         return {c.name: "parked" if PC.side_of(c) == "R" else "clamped" for c in self.all_clamps}
 
     def grip_spec(self, kind: str, name: str) -> dict:
-        """A clamp's pinch on its strap where it lies parked, or the right hand's pinch on the wrench's handle."""
+        """A clamp's pinch on its strap where it lies parked, or a hand's (name: its side) on the wrench's handle."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate)
+            return PW.grip_spec(self, self.plate, name)
         c = next(k for k in self.clamps if k.name == name)
         return PC.grip_spec(self, c, "parked", self.plate)
 
@@ -97,11 +99,12 @@ class PlateSeat(StepTake):
             out += [x for x in (b, a) if x is not None]
         return out
 
-    def nut_order(self) -> list:
-        """The right hand's round of the nuts with the wrench: its own end's far then near, then the left end's near
-        then far."""
-        return (sorted([c for c in self.clamps if PC.side_of(c) == "R"], key=lambda c: -c.stud[1])
-                + sorted([c for c in self.clamps if PC.side_of(c) == "L"], key=lambda c: c.stud[1]))
+    def to_rest(self, side: str, t0: float) -> float:
+        """The hand back toward the operator, over the clamps now down, then dropped to rest by the thigh."""
+        self.transit(side, t0, t0 + 1.4, self.rest_of(side),
+                     via=[self.at(side, self.side[side]["wrist"] + [0.0, -150.0, 40.0])])
+        self.fingers(side, t0 + 1.4, self.q_relax)
+        return t0 + 1.4
 
     def plan(self):
         t = {"L": 0.3, "R": 0.3}
@@ -113,14 +116,12 @@ class PlateSeat(StepTake):
             t_end, keys = PC.move(self, c, f"pinch_{c.name}", start, lambda t0, c=c: PC.on_keys(c, t0))
             self.keys[c.name] = keys
             t[s] = last = t_end
-        t["R"], self.keys["wrench"] = PW.use(self, self.plate, self.nut_order(), max(t["R"], last))
-        for s in ("L", "R"):            # back toward the operator, over the clamps now down, before dropping to rest
-            if t[s] == 0.3:             # (a hand with nothing to do in this take, the other end's, left at rest)
-                continue
-            self.transit(s, t[s], t[s] + 1.4, self.rest_of(s),
-                         via=[self.at(s, self.side[s]["wrist"] + [0.0, -150.0, 40.0])])
-            self.fingers(s, t[s] + 1.4, self.q_relax)
-        end = max(t.values()) + 1.4
+        # each end's hand runs its nuts in turn (PW.use_ends); a hand whose turn waits on the other's rests meanwhile
+        # (a hand with nothing to do in this take, the other end's, stays at rest throughout)
+        worked = [s for s, _ in PW.by_hand(self.clamps)]
+        free = {s: self.to_rest(s, t[s]) if s != worked[0] else t[s] for s in worked}
+        done, self.keys["wrench"] = PW.use_ends(self, self.plate, self.clamps, last, free=free)
+        end = max(self.to_rest(s, done[s]) for s in worked)
         self.clip("seat", 0.0, end, "Set the step clamps on its margin")
         self.t = end + 0.3
 

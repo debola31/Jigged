@@ -2,7 +2,7 @@
 use (moonshot/motion/plate_wrench.py): its ring fits over a clamp's nut, square on its flats, inside its head; it lies
 on the plate clear of every clamp; and on each nut its box end stays on the stud's axis through every stroke and swing
 back, seated as far down as the nut has run, the strokes turning the nut from parked down onto its strap and on by
-the snug (or back), each within the sector in front of the stud."""
+the snug (or back), each within the sector in front of the stud; carried between them, it clears the studs."""
 import math
 
 import numpy as np
@@ -115,3 +115,14 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
         assert z == pytest.approx(c.nut_z("clamped") - SB.LEAD_MM * PW.SNUG / (2 * math.pi) if direction == "tighten"
                                   else c.nut_z("parked") + SB.LEAD_MM * PW.SNUG / (2 * math.pi))
     assert np.allclose(keys[0][2], keys[-1][2])                  # laid back where it lay
+
+
+@pytest.mark.parametrize("direction", ["tighten", "loosen"])
+@pytest.mark.parametrize("part", PARTS)
+def test_carried_between_nuts_the_wrench_clears_the_studs(part, direction):
+    clamps = plates.clamps(part, "op10")
+    keys, _, _ = PW.keys(plates.plate(part, "op10"), clamps, 0.0, direction)
+    top = max(c.stud_z()[1] for c in clamps)
+    for t, R, p in keys[1:-1]:
+        if all(np.linalg.norm(p[:2] - np.asarray(c.stud)) > 5.0 for c in clamps):     # not on or over a nut
+            assert p[2] - WR.HEIGHT / 2 >= top + PW.STUD_CLEAR_MM - 1e-9, (t, p)

@@ -1,13 +1,14 @@
 """Running the step clamps' nuts down and snugging them with the 3/4 in ratcheting combination wrench (moonshot/world/
 wrench.py), and breaking them loose and running them up (the user's decisions, 2026-11-05: the wrench does it all, no
-fingertip spin; a ratcheting one, the plain box end's lift-and-reseat strokes failing on the far nuts): the right
-hand picks the wrench up off the plate by its handle and, on each nut in turn, sets the box end down over it and
-turns it in short strokes, the box end staying on it: the handle swung STROKE about the stud (clockwise from above to
-tighten, the other way to loosen), the ratchet driving the nut, and swung back, the ratchet freewheeling, the nut
-lower (or higher) by its thread's run each stroke; a last swing snugs it (or a first one breaks it loose). Then it
-lays the wrench back where it was. The wrench is welded to the hand while it is carried (carry_wrench, the declared
-grip assist); its ring turns the nut by its flats on the nut's; the eye turns the wrench onto the flats as the box
-end comes down (moonshot/sim/plate_clamps.py), as people find the flats with a wrench.
+fingertip spin; a ratcheting one, the plain box end's lift-and-reseat strokes failing on the far nuts): each end's
+own hand in turn (by_hand, use_ends) picks the wrench up off the plate by its handle and, on each of that end's nuts
+in turn, sets the box end down over it and turns it in short strokes, the box end staying on it: the handle swung
+STROKE about the stud (clockwise from above to tighten, the other way to loosen), the ratchet driving the nut, and
+swung back, the ratchet freewheeling, the nut lower (or higher) by its thread's run each stroke; a last swing snugs
+it (or a first one breaks it loose). Then it lays the wrench back where it was. The wrench is welded to the hand
+while it is carried (carry_wrench_R, carry_wrench_L, the declared grip assist); its ring turns the nut by its flats
+on the nut's; the eye turns the wrench onto the flats as the box end comes down (moonshot/sim/plate_clamps.py), as
+people find the flats with a wrench.
 """
 from __future__ import annotations
 
@@ -30,6 +31,10 @@ GRAB_MM = 135.0                          # the pinch on the handle this far from
                                          # far nut, the arm reached its full length at the stroke's end and stalled
                                          # 80-100 mm short of the handle; at 160 the hand met the near clamp's nut
 OVER_MM = 15.0                           # the box end this high over the hex's top on its way to and from a nut
+STUD_CLEAR_MM = 8.0                      # ... and the wrench's underside this far over the studs' tops while carried:
+                                         # nist-ftc-09's studs stand 20 mm over a parked nut's hex, and carried 15 mm
+                                         # over it, the head and handle caught the right end's studs on the way to the
+                                         # far nut, the box end came down off it, swung loose and dragged the sheet
 FLATS = math.pi / 3                      # the ring's flats a sixth of a turn apart: where it sits square on a nut
 STROKE = math.radians(40.0)              # a stroke's swing, kept in front of the stud: the plain box end's sixth of a
                                          # turn took the arm to its full length on a far nut, and it stalled
@@ -57,9 +62,9 @@ def grab_at() -> np.ndarray:
     return np.array([GRAB_MM, 0.0, 0.0])
 
 
-def grip_spec(take: StepTake, plate: SB.Plate) -> dict:
-    """The right hand's pinch on the handle where the wrench lies: thumb on its near edge, index and middle on its far
-    edge, across its width."""
+def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R") -> dict:
+    """A hand's pinch on the handle where the wrench lies: thumb on its near edge, index and middle on its far edge,
+    across its width (the left hand's index on the right of its middle finger, the right's on the left)."""
     h = take.hand
     p, yaw = rest(plate)
     R = turned(yaw)
@@ -67,6 +72,7 @@ def grip_spec(take: StepTake, plate: SB.Plate) -> dict:
     half_w = WR.HANDLE_W / 2
     top = g + [0.0, 0.0, WR.HANDLE_T / 2]
     near, far = g - R[:, 1] * half_w, g + R[:, 1] * half_w
+    index, middle = ((-18, -2), (2, 18)) if side == "R" else ((2, 18), (-18, -2))
     q0 = h.neutral()
     q0.update(index_mcp_flex=35.0, index_pip=40.0, middle_mcp_flex=35.0, middle_pip=40.0, ring_mcp_flex=60.0,
               ring_pip=80.0, little_mcp_flex=65.0, little_pip=85.0, thumb_cmc_abd=20.0, thumb_cmc_flex=10.0,
@@ -75,10 +81,10 @@ def grip_spec(take: StepTake, plate: SB.Plate) -> dict:
     cols.append(obox(plate.centre, np.eye(3), plate.size / 2))
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     depth = (1.0, 4.0)
-    return dict(obj=g, side="R", q0=q0, colliders=cols, load=WR.kg(),
+    return dict(obj=g, side=side, q0=q0, colliders=cols, load=WR.kg(),
                 targets={"thumb": plane(near, -R[:, 1], 1.0, local_bands(top, R, x=(-8, 8), depth=depth)),
-                         "index": plane(far, R[:, 1], 1.0, local_bands(top, R, x=(-18, -2), depth=depth)),
-                         "middle": plane(far, R[:, 1], 1.0, local_bands(top, R, x=(2, 18), depth=depth))},
+                         "index": plane(far, R[:, 1], 1.0, local_bands(top, R, x=index, depth=depth)),
+                         "middle": plane(far, R[:, 1], 1.0, local_bands(top, R, x=middle, depth=depth))},
                 iters=1500, starts=[S(20, 0, r, 50, 50, -15, 65, pr, -10, 5) for pr in (0, 35, 60) for r in (0, 15)])
 
 
@@ -91,12 +97,24 @@ def on_nut(clamp: SB.Clamp, yaw: float, nut_z: float, lift: float = 0.0) -> tupl
 def nut_yaw(clamp: SB.Clamp, plate: SB.Plate, direction: str = "tighten") -> float:
     """The handle's yaw where the box end is set down on a nut and each stroke starts: square on the flats of a nut
     at turn 0 (the eye finds where they really are), the strokes swinging the handle across in front of the stud, the
-    hand pulling it toward the operator: tightening, from pointing back toward the operator and out to the right on the
-    right end's (from pointing in toward the plate's middle on the left end's); loosening, from a sixth of a turn
-    further round, back the other way. (From pointing back and in on the right end's, the far nut beyond the arm's
-    reach, the strokes didn't turn it.)"""
-    y = 0.0 if clamp.stud[0] < plate.centre[0] else -FLATS
-    return y if direction == "tighten" else y - FLATS
+    end's own hand (by_hand) pulling it toward the operator: tightening, clockwise from above, from pointing back toward
+    the operator and out to the right on the right end's, from pointing in toward the plate's middle on the left end's;
+    loosening, the other way, on either end from pointing back toward the operator and to the left. (From pointing back
+    and in on the right end's, the far nut beyond the arm's reach, the strokes didn't turn it; loosening the left end's
+    a sixth of a turn round from its tightening, the strokes pushed the handle away.)"""
+    if direction != "tighten":
+        return -2 * FLATS
+    return 0.0 if clamp.stud[0] < plate.centre[0] else -FLATS
+
+
+def by_hand(clamps: list[SB.Clamp]) -> list[tuple[str, list[SB.Clamp]]]:
+    """Each end's nuts and the hand that runs them, in turn: the right end's by the right hand, far then near, then the
+    left end's by the left, near then far. Each end's own hand, as the clamps' (moonshot/motion/plate_clamps.py): the
+    right hand on the left end's nuts reached across the body, and the trunk turned and bent 15-19 deg left, past
+    people's range (nist-ftc-09 from the doorway's middle, ll-1005337 from in front of its left end)."""
+    right = sorted([c for c in clamps if PC.side_of(c) == "R"], key=lambda c: -c.stud[1])
+    left = sorted([c for c in clamps if PC.side_of(c) == "L"], key=lambda c: c.stud[1])
+    return [(s, nuts) for s, nuts in (("R", right), ("L", left)) if nuts]
 
 
 def strokes(direction: str, gap_mm: float = SB.PARK_NUT_GAP_MM) -> list[float]:
@@ -115,10 +133,13 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
     each nut's work on it (clamp, t0, t1): up off the plate, over each nut in turn, held there a moment, and down onto
     it; each stroke swung about the stud by the nut's turn rad (the first by the ring's play on the nut too), the nut
     running down (or up) its thread with it, and swung back, the box end staying on the nut, the ratchet freewheeling;
-    up off it after its last; then back down where it lay."""
+    up off it after its last; then back down where it lay. Carried, the wrench is clear of the studs' tops
+    (STUD_CLEAR_MM)."""
     p0, y0 = rest(plate)
     R0 = turned(y0)
-    k = [(t0, R0, p0), (t0 + LIFT_S, R0, p0 + [0.0, 0.0, 40.0])]
+    high = max(c.stud_z()[1] for c in clamps) + STUD_CLEAR_MM + WR.HEIGHT / 2     # its middle, carried
+    up = lambda p: np.r_[p[:2], max(p[2], high)]                                # noqa: E731
+    k = [(t0, R0, p0), (t0 + LIFT_S, R0, up(p0 + [0.0, 0.0, 40.0]))]
     t = t0 + LIFT_S
     done, work = [], []
     swings = strokes(direction, gap_mm)
@@ -126,6 +147,7 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
         start = nut_yaw(c, plate, direction)
         z = c.nut_z("clamped") + (gap_mm if direction == "tighten" else 0.0)
         Ra, pa = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
+        pa = up(pa)
         Rs, ps = on_nut(c, start, z)
         k += [(t + MOVE_S, Ra, pa), (t + MOVE_S + OVER_S, Ra, pa), (t + MOVE_S + OVER_S + DOWN_S, Rs, ps),
               (t + MOVE_S + OVER_S + DOWN_S + DWELL_S, Rs, ps)]
@@ -145,56 +167,73 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
             z = z1
         work.append((c, t_on, t))
         Ru, pu = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
-        k.append((t + UP_S, Ru, pu))
+        k.append((t + UP_S, Ru, up(pu)))
         t += UP_S
-    k += [(t + MOVE_S, R0, p0 + [0.0, 0.0, 40.0]), (t + MOVE_S + LIFT_S, R0, p0)]
+    k += [(t + MOVE_S, R0, up(p0 + [0.0, 0.0, 40.0])), (t + MOVE_S + LIFT_S, R0, p0)]
     return k, done, work
 
 
 def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "tighten",
-        grip: str = "wrench_R", gap_mm: float = SB.PARK_NUT_GAP_MM) -> tuple[float, list]:
-    """The right hand from wherever it is at t0: the reach to the wrench's handle (as a clamp's), the pinch firming,
-    the wrench carried along its keys, turning each nut in turn, and laid back down, let go, and the hand up off it.
+        grip: str | None = None, gap_mm: float = SB.PARK_NUT_GAP_MM, side: str = "R") -> tuple[float, list]:
+    """A hand (the right, or the left on a long plate's left end's nuts, in that end's own take: moonshot/motion/
+    plate_seat.py) from wherever it is at t0: the reach to the wrench's handle (as a clamp's), the pinch firming, the
+    wrench carried along its keys, turning each nut in turn, and laid back down, let go, and the hand up off it.
     Returns when the hand is clear of it, and the wrench's keys."""
+    grip = grip or f"wrench_{side}"
     g = take.grips[grip]
     p_rest, y_rest = rest(plate)
-    t_c, _ = PC.reach(take, "R", grip, t0, WR.HANDLE_W, obj=p_rest + turned(y_rest) @ grab_at())
-    take.effort("R", t_c, 0.0, grip)
-    take.effort("R", t_c + 0.2, EFFORT, grip)
+    t_c, _ = PC.reach(take, side, grip, t0, WR.HANDLE_W, obj=p_rest + turned(y_rest) @ grab_at())
+    take.effort(side, t_c, 0.0, grip)
+    take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S
     k, swings, work = keys(plate, clamps, t_load + SP.LIFT_DELAY_S, direction, gap_mm)
     R0 = k[0][1]
     grab = grab_at()
-    take.follow("R", t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
+    take.follow(side, t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
                 lambda tt: PC.key_at(k, tt)[0] @ R0.T)
     # while it works a nut, the pinch held on the handle's arc about the stud, the hand's turn about the vertical free
     # (the handle turns in the fist): followed by the hand's pose alone, the planned hand turned 30 deg past the
     # stroke while its wrist kept to it, its pinch 70 mm off the arc, and the box end, on the nut, swung with it
+    # (the grip's frame, and the arc's points, in the side's world: the left hand's mirrored)
     pinch = np.asarray(g["H"], float).T @ (np.asarray(g["obj"], float) - np.asarray(g["W"], float))
     up = np.asarray(g["H"], float).T @ np.array([0.0, 0.0, 1.0])
     for c, a, b in work:
-        take.add("R", a, b, lambda tt: [("tsr", pinch, (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)), up,
-                                          np.array([0.0, 0.0, 1.0]), PINCH_W)])
+        take.add(side, a, b, lambda tt: [("tsr", pinch, take.at(side, (lambda R, p: p + R @ grab)(*PC.key_at(k, tt))),
+                                          up, np.array([0.0, 0.0, 1.0]), PINCH_W)])
     t_down = k[-1][0]
-    take.load("R", t_load, t_down, WR.kg())
-    take.event("grip", t_c - 0.1, t_down + 0.25, side="R", grip=grip, on="wrench")
-    take.event("carry", t_load, t_down, side="R", obj="wrench")
+    take.load(side, t_load, t_down, WR.kg())
+    take.event("grip", t_c - 0.1, t_down + 0.25, side=side, grip=grip, on="wrench")
+    take.event("carry", t_load, t_down, side=side, obj="wrench")
     looked = set()
     for c, a, b, rad in swings:
         if c.name not in looked:                                     # the eye on each nut as the wrench goes to it
             looked.add(c.name)
             take.look(a - DWELL_S - DOWN_S - OVER_S - MOVE_S / 2, np.r_[c.stud, c.nut_z("clamped")])
-        take.event("turn_nut", a, b, side="R", obj=f"{c.name}_nut", rad=rad)
+        take.event("turn_nut", a, b, side=side, obj=f"{c.name}_nut", rad=rad)
     for c, a, b in work:          # the box end on the nut, the ratchet set to drive it this way (its reversing lever)
-        take.event("work_nut", a, b, side="R", obj=f"{c.name}_nut", direction=direction)
-    take.effort("R", t_down - 0.1, EFFORT, grip)
-    take.effort("R", t_down + 0.2, 0.0, None)
-    take.fingers("R", t_down + 0.25, g["q"])
-    take.fingers("R", t_down + 0.6, open_like(take.hand, g["q"], 0.4))
+        take.event("work_nut", a, b, side=side, obj=f"{c.name}_nut", direction=direction)
+    take.effort(side, t_down - 0.1, EFFORT, grip)
+    take.effort(side, t_down + 0.2, 0.0, None)
+    take.fingers(side, t_down + 0.25, g["q"])
+    take.fingers(side, t_down + 0.6, open_like(take.hand, g["q"], 0.4))
     R1, p1 = PC.key_at(k, t_down)
     H1, W1 = take.grip_pose(grip, p1 + R1 @ grab, R1 @ R0.T)
     off = W1 + np.array([0.0, -30.0, 90.0])
-    take.add("R", t_down + 0.3, t_down + 0.8, lambda tt, a=t_down + 0.3: [
+    take.add(side, t_down + 0.3, t_down + 0.8, lambda tt, a=t_down + 0.3: [
         ("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.5), 2.0)])
-    take.side["R"]["wrist"] = off
+    take.side[side]["wrist"] = off
     return t_down + 0.8, k
+
+
+def use_ends(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "tighten",
+             gap_mm: float = SB.PARK_NUT_GAP_MM, free: dict[str, float] | None = None) -> tuple[dict[str, float], list]:
+    """Each end's own hand (by_hand) in turn runs that end's nuts with the wrench (use), each picking it up where the
+    other laid it: from t0, or later if the hand is busy until then (free, each side's). Returns when each hand is
+    clear of it, and the wrench's keys, its carries one after the other."""
+    t = dict(free or {})
+    keys: list = []
+    for side, nuts in by_hand(clamps):
+        t[side], k = use(take, plate, nuts, max(t0, t.get(side, t0)), direction, gap_mm=gap_mm, side=side)
+        keys += k
+        t0 = k[-1][0] + 0.3                     # laid down, the hand off it, before the other's reaches for it
+    return t, keys

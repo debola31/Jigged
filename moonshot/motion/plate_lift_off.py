@@ -1,8 +1,8 @@
 """Lift the plate off (a plate setup's unload, after its blow-off, when the plate doesn't stay clamped for the next
 setup: moonshot/planning/takes.py PLATE_UNLOAD's lift-off-plate), planned for both hands on one trunk from the
-doorway: the right hand takes the wrench off the plate and breaks each nut loose and runs it back up its stud in
-strokes (moonshot/motion/plate_wrench.py, the user's decision of 2026-11-05: the wrench does it all), and lays the
-wrench back on the plate; each clamp is slid back off the plate and tipped onto the spoilboard to park by its end's
+doorway: each end's hand in turn, the right's first, takes the wrench off the plate and breaks that end's nuts loose
+and runs them back up their studs in strokes (moonshot/motion/plate_wrench.py use_ends, the user's decision of
+2026-11-05: the wrench does it all), and lays the wrench back on the plate; each clamp is slid back off the plate and tipped onto the spoilboard to park by its end's
 hand (moonshot/motion/plate_clamps.py off_keys); then both hands take the plate as it was laid down (moonshot/
 motion/plate_load.py's grips) and carry it up and out through the doorway, the wrench lying on it, the take ending
 with it in both hands.
@@ -70,7 +70,8 @@ class PlateLiftOff(StepTake):
         self.boxes = [(np.r_[SB.TABLE_MID, (SB.TABLE_Z + b) / 2 - 30.0],
                        np.r_[SB.SPOILBOARD_MM[:2] / 2, (b - SB.TABLE_Z) / 2 + 30.0] + 10.0)]
         specs = {f"pinch_{c.name}": self.grip_spec("pinch", c.name) for c in self.clamps}
-        specs |= {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R")}
+        specs |= {f"wrench_{s}": self.grip_spec("wrench", s) for s, _ in PW.by_hand(self.clamps)}
+        specs |= {"plate_R": self.grip_spec("plate", "R")}
         specs |= {f"slide_{s}": self.grip_spec("slide", s) for s in ("R", "L")}
         self.solve_grips(specs, source=self.grip_spec, depends=(PC, PW, PL, SB, WR))
         PL.mirror_grip(self, "plate_R", "plate_L")            # the left's hold on the plate the right's mirrored
@@ -94,11 +95,11 @@ class PlateLiftOff(StepTake):
         return [obox(p + shift + R @ c, R @ Rb, hh) for _, c, hh, Rb in WR.boxes()]
 
     def grip_spec(self, kind: str, name: str) -> dict:
-        """A clamp's pinch on its strap where it lies clamped, the right hand's on the wrench's handle, a hand's hold
+        """A clamp's pinch on its strap where it lies clamped, a hand's on the wrench's handle, a hand's hold
         on the plate where it's taken up (name: the side; a sheet's once slid), or a hand's fingers pressed flat on a
         sheet's near edge where it lies."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate)
+            return PW.grip_spec(self, self.plate, name)
         if kind == "plate":
             g = PL.PlateLoad.grip_spec(self, name)
             g["colliders"] = g["colliders"] + self.wrench_cols(self.slid)        # the wrench rides on it
@@ -166,12 +167,6 @@ class PlateLiftOff(StepTake):
             out += [x for x in (b, a) if x is not None]
         return out
 
-    def nut_order(self) -> list:
-        """The right hand's round of the nuts with the wrench: its own end's near then far, then the left end's far
-        then near."""
-        return (sorted([c for c in self.clamps if PC.side_of(c) == "R"], key=lambda c: c.stud[1])
-                + sorted([c for c in self.clamps if PC.side_of(c) == "L"], key=lambda c: -c.stud[1]))
-
     def plate_path(self, t0: float):
         """The plate's planned path once both hands hold it, (t, middle): up off the board from where it's taken up,
         then back and up to where the load's take started, out through the doorway."""
@@ -229,8 +224,14 @@ class PlateLiftOff(StepTake):
     def plan(self):
         t = {"L": 0.3, "R": 0.3}
         self.keys = {}
-        t["R"], self.keys["wrench"] = PW.use(self, self.plate, self.nut_order(), 0.3, direction="loosen")
-        last = t["R"]
+        done, self.keys["wrench"] = PW.use_ends(self, self.plate, self.clamps, 0.3, direction="loosen")
+        t |= done
+        for s, _ in PW.by_hand(self.clamps)[:-1]:     # a hand whose nuts are done first rests while the other's are
+            self.transit(s, t[s], t[s] + 1.4, self.rest_of(s),                      # loosened
+                         via=[self.at(s, self.side[s]["wrist"] + [0.0, -150.0, 40.0])])
+            self.fingers(s, t[s] + 1.4, self.q_relax)
+            t[s] += 1.4
+        last = max(done.values())
         for c in self.order():
             s = PC.side_of(c)
             start = max(t[s], last)

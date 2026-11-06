@@ -1,10 +1,11 @@
 """Shift the plate (a plate setup whose plate is the setup before's, slid along the table: "Loosen the clamps, slide
 the plate <shift> and clamp it again"; moonshot/planning/takes.py PLATE_TAKES's shift-plate), planned for both hands
-on one trunk from the doorway: the right hand takes the wrench off the plate and breaks each nut loose, a little
-(moonshot/motion/plate_wrench.py, the user's decision of 2026-11-05: the wrench does it all), and lays it back on the
-plate; both hands take the plate by its ends' faces at their middles (moonshot/motion/plate_load.py's grips) and slide
-it along the spoilboard to the setup's place, under the clamps' noses, pulling against its drag on the board, and let
-it go; then the right hand snugs each nut again, the wrench where the plate has carried it.
+on one trunk from the doorway: each end's hand in turn takes the wrench off the plate and breaks that end's nuts
+loose, a little (moonshot/motion/plate_wrench.py use_ends, the user's decision of 2026-11-05: the wrench does it all),
+and lays it back on the plate; both hands take the plate by its ends' faces at their middles (moonshot/motion/
+plate_load.py's grips) and slide it along the spoilboard to the setup's place, under the clamps' noses, pulling
+against its drag on the board, and let it go; then each end's hand in turn snugs its nuts again, the wrench where the
+plate has carried it.
 
     python -m moonshot.motion.plate_shift ll-1005337 op20     # plans <data root>/takes/ll-1005337-op20-shift-plate
 """
@@ -55,23 +56,32 @@ class PlateShift(StepTake):
         b = self.plate.bottom
         self.boxes = [(np.r_[SB.TABLE_MID, (SB.TABLE_Z + b) / 2 - 30.0],
                        np.r_[SB.SPOILBOARD_MM[:2] / 2, (b - SB.TABLE_Z) / 2 + 30.0] + 10.0)]
-        specs = {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R")}
+        specs = {f"wrench_{s}": self.grip_spec("wrench", s) for s, _ in PW.by_hand(self.clamps)}
+        specs |= {"plate_R": self.grip_spec("plate", "R")}
         self.solve_grips(specs, source=self.grip_spec, depends=(PC, PW, PL, SB))
         PL.mirror_grip(self, "plate_R", "plate_L")            # the left's hold on the plate the right's mirrored
 
     def grip_spec(self, kind: str, side: str) -> dict:
-        """The right hand's pinch on the wrench's handle where it lies, or a hand's hold on the plate where it lies."""
+        """A hand's pinch on the wrench's handle where it lies, or a hand's hold on the plate where it lies."""
         if kind == "wrench":
-            return PW.grip_spec(self, self.plate0)
+            return PW.grip_spec(self, self.plate0, side)
         return PL.PlateLoad.grip_spec(self, side)
 
-    def nut_order(self) -> list:
-        return (sorted([c for c in self.clamps if PC.side_of(c) == "R"], key=lambda c: c.stud[1])
-                + sorted([c for c in self.clamps if PC.side_of(c) == "L"], key=lambda c: -c.stud[1]))
+    def to_rest(self, side: str, t0: float) -> float:
+        """The hand back toward the operator and dropped to rest by the thigh, while the other works the wrench."""
+        self.transit(side, t0, t0 + 1.4, self.rest_of(side),
+                     via=[self.at(side, self.side[side]["wrist"] + [0.0, -150.0, 40.0])])
+        self.fingers(side, t0 + 1.4, self.q_relax)
+        return t0 + 1.4
 
     def plan(self):
         self.keys = {}
-        t, loosen = PW.use(self, self.plate0, self.nut_order(), 0.3, "loosen", gap_mm=LOOSE_MM)
+        # each end's hand in turn breaks its nuts loose (PW.use_ends), the one done first resting meanwhile
+        worked = [s for s, _ in PW.by_hand(self.clamps)]
+        done, loosen = PW.use_ends(self, self.plate0, self.clamps, 0.3, "loosen", gap_mm=LOOSE_MM)
+        for s in worked[:-1]:
+            self.to_rest(s, done[s])
+        t = max(done.values())
         t_c = 0.0
         for s in ("R", "L"):                            # both hands to the plate's ends, the grips closing at once
             tc, _ = PC.reach(self, s, f"plate_{s}", t, self.plate0.size[2])
@@ -106,14 +116,14 @@ class PlateShift(StepTake):
                      [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.5), 2.0)])
             self.side[s]["wrist"] = off
         t = t_end + 1.0
-        self.transit("L", t, t + 1.3, self.rest_of("L"))
-        self.fingers("L", t + 1.3, self.q_relax)
-        t, tighten = PW.use(self, self.plate, self.nut_order(), t, "tighten", gap_mm=LOOSE_MM)
-        self.keys["wrench"] = loosen + tighten          # its two carries' paths, one after the other
-        self.transit("R", t, t + 1.3, self.rest_of("R"))
-        self.fingers("R", t + 1.3, self.q_relax)
-        self.clip("shift", 0.0, t + 1.3, "Loosen the clamps, slide the plate and clamp it again")
-        self.t = t + 1.6
+        # then each end's hand snugs its nuts again in turn, the wrench where the plate has carried it; the hands
+        # off the plate rest meanwhile
+        free = {s: t if s == worked[0] else self.to_rest(s, t) for s in ("R", "L")}
+        done, tighten = PW.use_ends(self, self.plate, self.clamps, t, "tighten", gap_mm=LOOSE_MM, free=free)
+        self.keys["wrench"] = loosen + tighten          # its carries' paths, one after the other
+        end = max(self.to_rest(s, done[s]) for s in worked)
+        self.clip("shift", 0.0, end, "Loosen the clamps, slide the plate and clamp it again")
+        self.t = end + 0.3
 
     def save(self):
         super().save()

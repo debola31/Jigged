@@ -3,12 +3,12 @@ plate_clamps.py and plate_wrench.py; the Clamp it down step, moonshot/motion/pla
 the plate (moonshot/world/spoilboard.py), its doors open, the plate on the spoilboard, each clamp a take moves a free
 body on its stud, its nut on its thread (clamp_thread_<i>), and the ratcheting wrench lying on the plate, its ring on
 the ratchet's hinge in its head, the pawl the hinge's limit (pawl, moonshot/world/wrench.py). The pinch holds a
-clamp, or the wrench, by a declared soft constraint while it is carried (carry_<clamp>, carry_wrench, as the
+clamp, or the wrench, by a declared soft constraint while it is carried (carry_<clamp>, carry_wrench_<side>, as the
 parallels' and the stop's, sim/set_parallels.py FirmGrip); the eye steers it along its planned path, turns the
 wrench's box end onto a nut's flats where they really are, and the physics decides where a clamp lands and how far a
 nut turns.
 
-    python -m moonshot.sim.plate_clamps ll-1005337-op10-set-clamps     # runs the take in the data root's takes/
+    python -m moonshot.sim.plate_clamps ll-1005337-op10-set-clamps-left    # runs the take in the data root's takes/
 """
 from __future__ import annotations
 
@@ -51,8 +51,10 @@ class PlateClamps(FirmGrip, TakeRunner):
         self.nuts = tuple(self.table.get("nuts", self.free))    # nuts on their threads, turned by hand
         self.nut_up = self.table.get("nut_up")                  # ... starting this far over the clamped strap
         self.wrench = self.table.get("wrench")                  # where the wrench lies, if the take uses it
-        self.encloses = {f"pinch_{n}": n for n in self.free} | ({"wrench_R": "wrench"} if self.wrench else {}) \
-            | self.more_encloses()
+        # the wrench in each end's own hand in turn (moonshot/motion/plate_wrench.py use_ends), each hand's weld its
+        # own (eq_name)
+        self.encloses = {f"pinch_{n}": n for n in self.free} \
+            | ({"wrench_R": "wrench", "wrench_L": "wrench"} if self.wrench else {}) | self.more_encloses()
         self.welded = set(self.encloses)
         super().__init__(folder)
         self.firm_setup()
@@ -65,10 +67,15 @@ class PlateClamps(FirmGrip, TakeRunner):
         self.pose_at = {n: [] for n in self.free}
         self.in_hand = {n: [] for n in self.free}
         self._now = 0.0
+        self.wrench_sides = sorted({e["side"] for e in self.grip_events if e["grip"].startswith("wrench_")})
 
     def more_encloses(self) -> dict:
         """More grips held by a declared constraint, for a step that also carries something else (the plate)."""
         return {}
+
+    def eq_name(self, grip: str) -> str:
+        """Each hand's weld on the wrench its own, carry_wrench_R and carry_wrench_L: the hands take it in turn."""
+        return f"carry_wrench_{grip[-1]}" if grip.startswith("wrench_") else super().eq_name(grip)
 
     def scene(self, body_xml: str) -> str:
         xml = SB.with_body(body_xml, self.plate, self.clamps, self.table["state"], self.free, nuts=self.nuts,
@@ -178,7 +185,7 @@ class PlateClamps(FirmGrip, TakeRunner):
         m = self.model
         j = m.joint("wrench_ratchet").id
         q = self.ratchet_q()
-        e = self.working("R", t)
+        e = next((w for w in (self.working(s, t) for s in self.wrench_sides) if w is not None), None)
         if e is None:
             if self._pawl is not None or self._lock is None:      # held where it stood as the box end came off
                 self._lock = q
@@ -200,33 +207,32 @@ class PlateClamps(FirmGrip, TakeRunner):
         the hand say how it stands. Held stiffly in turn through a stroke, the arm, a little behind its arc about the
         stud, turned the hand off it and tipped the box end 20-30 deg up off the nut."""
         super().enclose(t)
-        if not self.wrench:
-            return
+        from moonshot.motion import plate_wrench as PW
         m, d = self.model, self.data
-        eq = m.equality(self.eq_name("wrench_R")).id
-        if not d.eq_active[eq]:
-            self._stroke_anchor = None
-            return
-        stroking = self.stroking("R", t)
-        if stroking and self._stroke_anchor is None:
-            from moonshot.motion import plate_wrench as PW
-            hb, wb = m.body("R_hand").id, m.body("wrench").id
-            pinch = d.xpos[wb] + d.xmat[wb].reshape(3, 3) @ PW.grab_at() * 0.001
-            # the weld's point (MuJoCo's eq_data: 0:3 in the hand, body2; 3:6 the same point in the wrench, body1)
-            # moved from the hand's origin to the pinch, where they are now
-            self._stroke_anchor = m.eq_data[eq, 3:6].copy()
-            m.eq_data[eq, 0:3] = d.xmat[hb].reshape(3, 3).T @ (pinch - d.xpos[hb])
-            m.eq_data[eq, 3:6] = PW.grab_at() * 0.001
-            m.eq_data[eq, 10] = WRENCH_TURN_SCALE
-        elif not stroking and self._stroke_anchor is not None:
-            m.eq_data[eq, 0:3] = 0.0
-            m.eq_data[eq, 3:6] = self._stroke_anchor
-            m.eq_data[eq, 10] = self.TORQUESCALE
-            self._stroke_anchor = None
+        for side in self.wrench_sides:
+            eq = m.equality(self.eq_name(f"wrench_{side}")).id
+            if not d.eq_active[eq]:
+                self._stroke_anchor[side] = None
+                continue
+            stroking = self.stroking(side, t)
+            if stroking and self._stroke_anchor.get(side) is None:
+                hb, wb = m.body(f"{side}_hand").id, m.body("wrench").id
+                pinch = d.xpos[wb] + d.xmat[wb].reshape(3, 3) @ PW.grab_at() * 0.001
+                # the weld's point (MuJoCo's eq_data: 0:3 in the hand, body2; 3:6 the same point in the wrench,
+                # body1) moved from the hand's origin to the pinch, where they are now
+                self._stroke_anchor[side] = m.eq_data[eq, 3:6].copy()
+                m.eq_data[eq, 0:3] = d.xmat[hb].reshape(3, 3).T @ (pinch - d.xpos[hb])
+                m.eq_data[eq, 3:6] = PW.grab_at() * 0.001
+                m.eq_data[eq, 10] = WRENCH_TURN_SCALE
+            elif not stroking and self._stroke_anchor.get(side) is not None:
+                m.eq_data[eq, 0:3] = 0.0
+                m.eq_data[eq, 3:6] = self._stroke_anchor[side]
+                m.eq_data[eq, 10] = self.TORQUESCALE
+                self._stroke_anchor[side] = None
 
     def firm_setup(self) -> None:
         super().firm_setup()
-        self._stroke_anchor = None
+        self._stroke_anchor: dict[str, np.ndarray | None] = {}
         self._pawl = self._lock = None
         self._speed = {s: np.linalg.norm(np.gradient(self.rd[f"{s}_W"], 1.0 / self.fps, axis=0), axis=1)
                        for s in ("R", "L")}

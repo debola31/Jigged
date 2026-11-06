@@ -1,0 +1,27 @@
+{
+ "asset": "softjaw",
+ "about": "McMaster 1005N29 6061 aluminium machinable soft jaws, 6 x 2 x 1-1/2 in, a pair: one CAD mesh, no colours. Milled aluminium all over.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "softjaw_alu",
+ "cad": {
+  "*": {
+   "none": "softjaw_alu"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "softjaw_alu": {
+   "family": "ground",
+   "color": [
+    0.86,
+    0.865,
+    0.87
+   ],
+   "rough": 0.32,
+   "metal": 1.0,
+   "tile_m": 0.15,
+   "normal": 0.5,
+   "about": "milled 6061 aluminium: bright, fine tool marks"
+  }
+ }
+}

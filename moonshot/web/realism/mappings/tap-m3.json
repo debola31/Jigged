@@ -1,0 +1,28 @@
+{
+ "asset": "tap-m3",
+ "about": "Generic M3x0.5 spiral-point tap, HSS, bright finish.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "tap-m3_hss",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "tap-m3_hss",
+   "none": "tap-m3_hss"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "tap-m3_hss": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.625,
+    0.64
+   ],
+   "rough": 0.22,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "bright ground HSS"
+  }
+ }
+}

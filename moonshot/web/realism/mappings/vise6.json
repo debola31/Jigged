@@ -1,0 +1,122 @@
+{
+ "asset": "vise6",
+ "about": "Kurt HDL6AL two-station 6 in vise: one CAD mesh in 7 solids, no colours, the body welded to its jaws. As Kurt's HDL6 photos show it: the ductile-iron body ground bare all over, Kurt blue only on the recessed band along each side (y +-60.3 mm, where the HDL decal sits); everything above the bed (z 79.4 mm) the machinable aluminium jaws; the screw and pins steel.",
+ "reviewed": "2026-11-05: corrected to the real product: body ground bare with a blue side band, from a Kurt HDL6 product photo (was Kurt blue all over)",
+ "fallback": "cast_iron_ground",
+ "cad": {
+  "*": {
+   "mat_0": "cast_iron_ground"
+  }
+ },
+ "rules": [
+  {
+   "why": "the recessed band along the +y side, between the top rail and the base flange: Kurt blue",
+   "normal": {
+    "dir": [
+     0,
+     1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     0.0595,
+     -1
+    ],
+    "hi": [
+     1,
+     0.0611,
+     1
+    ]
+   },
+   "material": "paint_kurt_blue"
+  },
+  {
+   "why": "... and along the -y side",
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -0.0611,
+     -1
+    ],
+    "hi": [
+     1,
+     -0.0595,
+     1
+    ]
+   },
+   "material": "paint_kurt_blue"
+  },
+  {
+   "why": "the machinable aluminium jaws: everything above the bed",
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.0797
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "vise6_alu_jaw"
+  },
+  {
+   "why": "the thin plates on the stations' floors (parts 0, 2)",
+   "parts": [
+    0,
+    2
+   ],
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the lead screw and its hex (part 3)",
+   "parts": [
+    3
+   ],
+   "material": "steel_machined"
+  },
+  {
+   "why": "pins and screws at the handle end (parts 4-6)",
+   "parts": [
+    4,
+    5,
+    6
+   ],
+   "material": "steel_black_oxide"
+  }
+ ],
+ "materials": {
+  "vise6_alu_jaw": {
+   "family": "ground",
+   "color": [
+    0.86,
+    0.865,
+    0.87
+   ],
+   "rough": 0.32,
+   "metal": 1.0,
+   "tile_m": 0.15,
+   "normal": 0.5,
+   "about": "Kurt's 1.735 in machinable aluminium jaws: milled 6061"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the blue band's exact height: taken as the recessed side face; the photo also shows the HDL CarvLock decal on it, not modelled",
+   "picture": "checks/vise6_front_before_after.png"
+  }
+ ]
+}

@@ -1,0 +1,174 @@
+{
+ "asset": "bgrind",
+ "about": "Generic 8 in bench grinder with a belt-sander arm (the CAD's): motor and guards painted grey, the pedestal a darker cast grey; by CAD material and, inside the default one, by part box: the belt, the grinding wheel, the eye shield, the tool rest.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "bgrind_paint",
+ "cad": {
+  "*": {
+   "mat_0": "bgrind_paint",
+   "mat_1": "bgrind_base",
+   "mat_2": "rubber_black",
+   "mat_3": "bgrind_switch",
+   "mat_4": "plastic_black",
+   "mat_5": "bgrind_red",
+   "mat_6": "bgrind_switch",
+   "mat_7": "bgrind_switch",
+   "mat_8": "steel_machined",
+   "mat_9": "plastic_black",
+   "mat_10": "steel_machined",
+   "mat_11": "steel_machined",
+   "mat_12": "steel_machined",
+   "mat_13": "plastic_black"
+  }
+ },
+ "rules": [
+  {
+   "why": "the sanding belt: the 40 mm-wide loop (about 194 x 40 x 194 mm) around the arm's two wheels",
+   "part_inside": {
+    "lo": [
+     -0.046,
+     -0.192,
+     0.095
+    ],
+    "hi": [
+     0.152,
+     -0.148,
+     0.293
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.15
+   },
+   "material": "bgrind_belt"
+  },
+  {
+   "why": "the grinding wheel: the 150 x 20 mm disc inside the +y guard",
+   "part_inside": {
+    "lo": [
+     -0.075,
+     0.137,
+     0.066
+    ],
+    "hi": [
+     0.079,
+     0.1605,
+     0.22
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.14
+   },
+   "material": "bgrind_wheel"
+  },
+  {
+   "why": "the eye shield over the wheel: polycarbonate",
+   "part_inside": {
+    "lo": [
+     -0.159,
+     0.088,
+     0.273
+    ],
+    "hi": [
+     -0.03,
+     0.21,
+     0.293
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.1
+   },
+   "material": "glass_polycarbonate"
+  },
+  {
+   "why": "the tool rest at the wheel",
+   "part_inside": {
+    "lo": [
+     -0.11,
+     0.106,
+     0.119
+    ],
+    "hi": [
+     -0.071,
+     0.171,
+     0.151
+    ]
+   },
+   "material": "cast_iron_raw"
+  }
+ ],
+ "atlas": 512,
+ "materials": {
+  "bgrind_paint": {
+   "family": "paint",
+   "color": [
+    0.15,
+    0.16,
+    0.17
+   ],
+   "rough": 0.42,
+   "tile_m": 0.5,
+   "about": "the grinder's grey enamel on its motor housing, guards and arm: smooth, orange peel (the sand-cast family read as stone at this size)"
+  },
+  "bgrind_base": {
+   "family": "paint_cast",
+   "color": [
+    0.05,
+    0.053,
+    0.057
+   ],
+   "rough": 0.48,
+   "normal": 0.3,
+   "tile_m": 0.4,
+   "about": "the cast pedestal: dark grey enamel, the casting's texture softened under it"
+  },
+  "bgrind_switch": {
+   "family": "plastic",
+   "color": [
+    0.7,
+    0.55,
+    0.05
+   ],
+   "rough": 0.45,
+   "about": "the switch box: yellow"
+  },
+  "bgrind_red": {
+   "family": "plastic",
+   "color": [
+    0.4,
+    0.02,
+    0.02
+   ],
+   "rough": 0.4,
+   "about": "the switch's red paddle"
+  },
+  "bgrind_belt": {
+   "family": "rubber",
+   "color": [
+    0.075,
+    0.048,
+    0.032
+   ],
+   "rough": 0.95,
+   "tile_m": 0.1,
+   "about": "the sanding belt: brown-black aluminium-oxide grit"
+  },
+  "bgrind_wheel": {
+   "family": "rubber",
+   "color": [
+    0.3,
+    0.3,
+    0.29
+   ],
+   "rough": 0.95,
+   "tile_m": 0.1,
+   "normal": 1.0,
+   "about": "a vitrified aluminium-oxide grinding wheel: grey, gritty"
+  }
+ },
+ "unsure": [
+  {
+   "what": "colours: the CAD paints almost everything one default lavender; machine grey assumed for the motor and guards, darker grey for the pedestal",
+   "picture": "checks/bgrind_front_before_after.png"
+  }
+ ]
+}

@@ -24,5 +24,7 @@
    "what": "nearly everything is one CAD colour (mat_1, 239k faces), so the enclosure and the parts inside it all get Haas white",
    "picture": "checks/st25_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 85000,
+ "triangles_why": "at the class's 100k its many split normals made 3.2 MB, over the large class's 3 MB"
 }

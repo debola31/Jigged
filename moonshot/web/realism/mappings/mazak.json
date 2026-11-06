@@ -1,7 +1,7 @@
 {
  "asset": "mazak",
- "about": "Mazak QT-Primos 100 CNC lathe: draft from the CAD's colours",
- "reviewed": "draft: not reviewed",
+ "about": "Mazak QT-Primos 100 (GrabCAD, 220 triangles): a block model. White and black as drawn, the orange trim kept; materials can't add the detail it lacks.",
+ "reviewed": "2026-11-05: natural sheet (look/mazak_natural.png)",
  "fallback": "paint_mid_grey",
  "cad": {
   "*": {
@@ -22,5 +22,11 @@
    "rough": 0.38,
    "about": "the CAD's mat_2 colour [0.6, 0.14, 0], toned to an enamel"
   }
- }
+ },
+ "unsure": [
+  {
+   "what": "a 220-triangle block: as coarse as the placeholders, a candidate for better CAD",
+   "picture": "checks/mazak_front_before_after.png"
+  }
+ ]
 }

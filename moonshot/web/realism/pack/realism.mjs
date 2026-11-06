@@ -28,25 +28,34 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
 const triangles = (doc) => doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())
 	.reduce((n, p) => n + (p.getIndices() ? p.getIndices().getCount() : p.getAttribute('POSITION').getCount()) / 3, 0);
 
-// The sources together to the cap, each by the same ratio; under the cap they are copied as they are.
+// The sources together to the cap, each by the same ratio; under the cap they are copied as they are. The error
+// bound stops the simplifier before it spoils a silhouette, so on dense CAD it can stall above the cap: then the
+// bound is doubled and the sources simplified again, up to MAX_ERROR (1.6% of the radius), and the report says so.
+const MAX_ERROR = 0.016;
+
 async function simplifyAll() {
-	const docs = await Promise.all(job.inputs.map((s) => io.read(s.src)));
-	const total = docs.reduce((n, d) => n + triangles(d), 0);
+	const total = (await Promise.all(job.inputs.map((s) => io.read(s.src)))).reduce((n, d) => n + triangles(d), 0);
 	const ratio = Math.min(1, job.cap / total);
-	const out = { cap: job.cap, before: total, ratio, files: [] };
-	for (const [i, s] of job.inputs.entries()) {
-		const doc = docs[i];
-		const before = triangles(doc);
-		if (ratio < 1 && before > 500) {
-			await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio, error: job.error }));
-			await io.write(s.dst, doc);
-		} else {
-			fs.copyFileSync(s.src, s.dst);
+	let error = job.error;
+	let out;
+	for (;;) {
+		out = { cap: job.cap, before: total, ratio, error, files: [] };
+		for (const s of job.inputs) {
+			const doc = await io.read(s.src);
+			const before = triangles(doc);
+			if (ratio < 1 && before > 500) {
+				await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
+				await io.write(s.dst, doc);
+			} else {
+				fs.copyFileSync(s.src, s.dst);
+			}
+			out.files.push({ src: s.src, before, after: triangles(doc) });
 		}
-		out.files.push({ src: s.src, before, after: triangles(doc) });
-		console.log(`[simplify] ${path.basename(s.src)}: ${before} -> ${triangles(doc)} triangles`);
+		out.after = out.files.reduce((n, f) => n + f.after, 0);
+		console.log(`[simplify] error ${error}: ${total} -> ${out.after} triangles (cap ${job.cap})`);
+		if (out.after <= job.cap * 1.05 || error * 2 > MAX_ERROR) break;
+		error *= 2;
 	}
-	out.after = out.files.reduce((n, f) => n + f.after, 0);
 	fs.writeFileSync(job.report, JSON.stringify(out, null, 1));
 }
 

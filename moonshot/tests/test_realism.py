@@ -9,7 +9,7 @@ import time
 import pytest
 
 from moonshot.config import data_root
-from moonshot.web.export import RECORDS, _json, build, shop_assets
+from moonshot.web.export import RECORDS, _json, asset_record, build, shop_assets
 from moonshot.web.media import GLTF_TRANSFORM
 from moonshot.web.realism import budgets, locks, matlib
 from moonshot.web.realism.paths import HERE
@@ -18,7 +18,8 @@ from moonshot.web.realism.pipeline import MAPPINGS, mapped_assets
 RULE_KEYS = {"why", "material", "links", "cads", "from", "inside", "outside", "normal", "toward", "part_inside",
              "part_size", "parts"}
 MAPPING_KEYS = {"asset", "about", "reviewed", "source", "fallback", "cad", "rules", "ops", "smooth_deg", "triangles",
-                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials"}
+                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials",
+                "simplify_error", "simplify_why", "triangles_why"}
 
 
 def test_the_material_library_is_consistent():
@@ -57,6 +58,9 @@ def test_every_mapping_names_real_assets_materials_and_rule_keys():
             assert op["op"] == "pane" and op.get("why"), asset
         if mp.get("bbox_tolerance_mm", 10) > 10:
             assert mp.get("bbox_why"), f"{asset}: a looser frame check says why"
+        cls = budgets.budget_class(asset, asset_record(asset)["bbox"])
+        if mp.get("triangles", 0) > budgets.CLASSES[cls]["triangles"]:
+            assert mp.get("triangles_why"), f"{asset}: a cap above its class's says why"
 
 
 def test_the_heroes_are_the_live_parts_stations():

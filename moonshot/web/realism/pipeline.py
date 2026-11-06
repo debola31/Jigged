@@ -115,7 +115,8 @@ def simplify(asset: str) -> list[dict]:
         s["dst"] = str(out / Path(s["path"]).name)
     cap = mp.get("triangles", budgets.CLASSES[cls]["triangles"])
     job = _write_job(asset, "simplify", {"inputs": [{"src": s["path"], "dst": s["dst"]} for s in srcs], "cap": cap,
-                                         "error": SIMPLIFY_ERROR[cls], "report": str(work_dir(asset) / "simplify.json")})
+                                         "error": mp.get("simplify_error", SIMPLIFY_ERROR[cls]),
+                                         "report": str(work_dir(asset) / "simplify.json")})
     t = time.perf_counter()
     node(asset, "simplify", job)
     _timed(asset, "simplify", time.perf_counter() - t, kind="cpu")
@@ -240,7 +241,7 @@ def check(asset: str) -> dict:
     checks = {
         "validator": va["errors"] == 0 and not bad and ktx_ok,
         "download": pk["bytes"] <= c["download_bytes"],
-        "triangles": pk["triangles"] <= c["triangles"] * 1.05,
+        "triangles": pk["triangles"] <= mp.get("triangles", c["triangles"]) * 1.05,
         "frame": all(abs(d) <= tol for k in frame for d in frame[k]),
         "mapped": not set(st["unmapped"]) - set(mp.get("fallback_ok", [])),
     }

@@ -1,12 +1,12 @@
 {
  "asset": "wedm",
- "about": "Wire EDM: draft from the CAD's colours",
- "reviewed": "draft: not reviewed",
+ "about": "Mitsubishi MD+PRO II wire EDM (GrabCAD): the CAD's own scheme kept (light grey body, black work tank with the red stripe); the head's default blue-grey machined steel, the light control box brushed stainless.",
+ "reviewed": "2026-11-05: natural sheet (look/wedm_natural.png) against the CAD's colours",
  "fallback": "paint_mid_grey",
  "cad": {
   "*": {
    "mat_0": "paint_light_grey",
-   "mat_1": "wedm_cad_1",
+   "mat_1": "steel_machined",
    "mat_2": "paint_light_grey",
    "mat_3": "paint_dark_grey",
    "mat_4": "paint_white",
@@ -18,7 +18,7 @@
    "mat_10": "wedm_cad_10",
    "mat_11": "paint_white",
    "mat_12": "wedm_cad_12",
-   "mat_13": "wedm_cad_13",
+   "mat_13": "steel_brushed",
    "mat_14": "wedm_cad_14",
    "mat_15": "wedm_cad_15",
    "mat_16": "wedm_cad_16",
@@ -34,16 +34,6 @@
  },
  "rules": [],
  "materials": {
-  "wedm_cad_1": {
-   "family": "paint",
-   "color": [
-    0.414,
-    0.447,
-    0.6
-   ],
-   "rough": 0.38,
-   "about": "the CAD's mat_1 colour [0.59, 0.64, 0.85], toned to an enamel"
-  },
   "wedm_cad_5": {
    "family": "paint",
    "color": [
@@ -83,16 +73,6 @@
    ],
    "rough": 0.38,
    "about": "the CAD's mat_12 colour [0.22, 0, 0], toned to an enamel"
-  },
-  "wedm_cad_13": {
-   "family": "paint",
-   "color": [
-    0.579,
-    0.579,
-    0.6
-   ],
-   "rough": 0.38,
-   "about": "the CAD's mat_13 colour [0.96, 0.96, 1], toned to an enamel"
   },
   "wedm_cad_14": {
    "family": "paint",
@@ -184,5 +164,11 @@
    "rough": 0.38,
    "about": "the CAD's mat_24 colour [0.65, 0.4, 0.02], toned to an enamel"
   }
- }
+ },
+ "unsure": [
+  {
+   "what": "the work tank's front reads black in the CAD; on the real machine it's a door, often with a window",
+   "picture": "checks/wedm_front_before_after.png"
+  }
+ ]
 }

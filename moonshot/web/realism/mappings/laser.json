@@ -201,5 +201,7 @@
    "what": "which grey CAD materials are the aluminium extrusions: mat_3 (44,961 faces, the slotted profiles) and mat_10 taken as aluminium, the rest painted",
    "picture": "checks/laser_front_before_after.png"
   }
- ]
+ ],
+ "triangles": 145000,
+ "triangles_why": "36 CAD materials make many small primitives whose borders the simplifier keeps: even at 1.6% of the radius it stops at 141k triangles. Within the large class's 3 MB all the same."
 }

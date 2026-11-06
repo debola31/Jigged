@@ -32,10 +32,10 @@ TORQUESCALE = 20.0
 WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.95, 0.99, 0.001)
 DRAW_S = 0.85                # the fingers drawn out from under a plate's end (motion/plate_load.py's let-go)
 SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers
-DRAW_PULL = 1.35             # ... the pull fed forward that many times its drag, to break it free: at its drag alone the
-                             # fingers stayed under the plate and the hands drew it back toward the operator 34 mm; at
-                             # twice (on the board too), the right wrist's muscles ran 1.33 times their most, at 1.5
-                             # 1.12 for a frame
+DRAW_PULL = 1.45             # ... the pull fed forward that many times its drag, to break it free: at its drag alone the
+                             # fingers stayed under the plate and the hands drew it back toward the operator 34 mm (at
+                             # 1.35, 15 mm); at twice (on the board too), the right wrist's muscles ran 1.33 times
+                             # their most, at 1.5 1.12 for a frame
 SETTLE_S = 0.3               # a plate let go comes to rest this long after the hands are off it: off the fingers under
                              # its ends, it drops their thickness onto the board
 

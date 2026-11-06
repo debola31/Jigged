@@ -52,7 +52,10 @@ ENDS_BACK_MM = 30.0
 # the sheet for a frame), but high enough that its weight on them doesn't press them into the board (at 16, 4.6 mm);
 # ll-1005337's plate, its ends held from underneath, as high: its fingers under them over the board
 FINGERS_UNDER_PART_MM = {"nist-ftc-09": 18.0, "ll-1005337": 21.0}     # (ll's 7.2 kg on the fingers dipped 2.4 mm
-                                                                       # under where it was held, at 18 onto the board)
+                                                                       # under where it was held, at 18 onto the board;
+                                                                       # at 24, held from underneath, the hold came out
+                                                                       # with the fingers 9 mm in it, and it was let go
+                                                                       # onto a clamp)
 HOLD_ENDS_S = 1.6            # a plate held by its ends held this long where it's let go, the eye lining it up
 START_BACK_MM = 160.0                            # at the take's start the plate is this much nearer than where it lands
 END_GRIP = {"ll-1005337": True, "nist-ftc-09": False}    # held by its ends (a plate), or by its near edge (a sheet)
@@ -68,9 +71,8 @@ ENDS_SKIN_MM = 1.5                               # ... and the rest of the hand 
                                                  # round its end's bottom edge was 3.3 mm into it
 UNDER_IN_MM = (10.0, 35.0)                       # a plate laid down by its ends from underneath: the fingers' pads
                                                  # under its end this far in from it, drawn out past it when let go
-UNDER_COMP_MM = 0.0                              # ... just touching its underside as the hold is solved: at
-                                                 # ENDS_COMP_MM, its 7.2 kg on them pressed the fingertips 3.4-3.85
-                                                 # mm into it as it was lowered (the skin's limit 3.5)
+UNDER_COMP_MM = 0.0                              # ... just touching its underside as the hold is solved (1 mm off
+                                                 # it, the solved hold came out with the fingers 9 mm in it)
 UNDER_OPEN_S = 0.35                              # ... the hand opened this long after it lets go before they're
                                                  # drawn out (moonshot/sim/plate_load.py pulls them out from then)
 UNDER_LIFT_MM = 2.0                              # ... drawn out a little up, off the board: drawn out on it too,
@@ -245,6 +247,8 @@ class PlateLoad(StepTake):
         # (a plate held from underneath brought down to 20 mm over where it's let go: at 8, its 7.2 kg carried down
         # past the plan 10 mm, onto the fingers under it, on the board)
         over = np.r_[self.land[:2], self.land[2] + (20.0 if self.under else 8.0)]
+        # (the last of it lowered in 1.0 s: in 1.6, it came to rest on the fingers 5 mm into them and was let go 4.9 mm
+        # off its place)
         k += [(3.8, over, 0.0), (4.4, over, 0.0), (5.4, self.land, 0.0)]
         if self.ends:          # held there while the eye lines it up: in 0.8 s, it was let go 6-13 mm off and 10-18 high
             return k + [(HOLD_ENDS_S + 5.4, self.land, 0.0)]

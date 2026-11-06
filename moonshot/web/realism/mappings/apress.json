@@ -1,0 +1,102 @@
+{
+ "asset": "apress",
+ "about": "Palmgren No. 1 arbor press (GrabCAD, three bodies with the modeller's colours): the frame blue enamel over the casting, as the model has it; the rotating anvil plate machined iron, its top ground; the ram, pinion shaft and handwheel turned steel, the lever bright; bolts and nuts black oxide; the locking knob red plastic.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/apress_*.png); page check checks/apress_*_before_after.png",
+ "fallback": "steel_machined",
+ "materials": {
+  "apress_paint_blue": {
+   "family": "paint_cast",
+   "color": [
+    0.025,
+    0.045,
+    0.2
+   ],
+   "rough": 0.4,
+   "normal": 0.45,
+   "tile_m": 0.3,
+   "metal": 0.0,
+   "about": "Palmgren blue enamel over the cast frame"
+  },
+  "apress_knob_red": {
+   "family": "plastic",
+   "color": [
+    0.42,
+    0.03,
+    0.025
+   ],
+   "rough": 0.35,
+   "metal": 0.0,
+   "tile_m": 0.1,
+   "normal": 1.0,
+   "about": "red moulded plastic knob"
+  }
+ },
+ "cad": {
+  "=>[0:1:1:5]": {
+   "mat_1": "apress_paint_blue",
+   "mat_2": "cast_iron_raw"
+  },
+  "92505A583:1": {
+   "mat_0": "steel_machined"
+  },
+  "Straight Handle Knob:1": {
+   "mat_3": "apress_knob_red"
+  }
+ },
+ "rules": [
+  {
+   "why": "the anvil plate's top, where the work sits: ground",
+   "cads": [
+    "mat_2"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.95
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the lever bar through the pinion hub: bright steel",
+   "links": [
+    "92505A583:1"
+   ],
+   "part_inside": {
+    "lo": [
+     0.05,
+     -0.2,
+     0.2
+    ],
+    "hi": [
+     0.1,
+     0.15,
+     0.27
+    ]
+   },
+   "material": "steel_bright"
+  },
+  {
+   "why": "bolts and nuts: every side under 32 mm",
+   "links": [
+    "92505A583:1"
+   ],
+   "part_size": {
+    "max_max_side": 0.032
+   },
+   "material": "steel_black_oxide"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the frame's blue: the GrabCAD modeller's colour, kept as Palmgren blue enamel; Palmgren's own listing shows no colour I could confirm",
+   "picture": "checks/apress_front_before_after.png"
+  },
+  {
+   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 16,610 triangles, 10,600 of them the bolts' and nuts' modelled threads; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
+   "picture": "checks/apress_close_before_after.png"
+  }
+ ]
+}

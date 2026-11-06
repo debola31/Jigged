@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from moonshot.planning.steps import expand
+from moonshot.planning.steps import TOOL_NAMES, expand
 from moonshot.planning.validate import load_plan
 
 REPO = Path(__file__).resolve().parents[2]
@@ -31,6 +31,17 @@ PARTS = ["nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223", 
 LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223"}
 # Where a finishing station's steps happen: its zone in layout.json.
 STATION_ZONES = {"bench": "benches", "inspection": "inspection", "outside": "shipping"}
+# shop.json's lists of things, in the order the page lists them.
+CATEGORIES = ["machines", "workholding", "holders", "tools", "inspection", "consumables", "hand_tools", "support",
+              "outside_processes"]
+# What a setup step uses besides its machine, by the shop.json kind that holds it, after the step's id
+# (moonshot/planning/steps.py). The vise, a cutter and a loaded tool are named by the plan itself.
+STEP_KINDS = {"xy": ["edge_finder"], "z": ["tool_setter"]}
+FINISH_KINDS = {"deburr": ["deburring_kit"]}
+# A machine step happens at its table (inside the door), or at its pendant: loading tools and starting the cycle.
+AT_PENDANT = {"tools", "start"}
+# shop.json fields that are bookkeeping or shown elsewhere, not facts about the thing.
+NOT_FACTS = {"id", "name", "kind", "asset", "make", "model", "description", "guide_support", "note", "location"}
 
 
 def _json(path: Path):
@@ -53,16 +64,106 @@ def shop_assets(layout: dict) -> list[str]:
     return sorted({i["asset"] for i in shop_items(layout)})
 
 
+def entries(shop_json: dict) -> dict[str, dict]:
+    """Every shop.json thing by id, with its list's name as its category."""
+    return {e["id"]: e | {"category": c} for c in CATEGORIES for e in shop_json.get(c, [])}
+
+
+def _humanize(v) -> str:
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, list):
+        return ", ".join(_humanize(x) for x in v)
+    return str(v).replace("_", " ")
+
+
+def entry_facts(entry: dict) -> list[list[str]]:
+    """A shop.json thing's own facts as label and value rows; a capability's basis and source are dropped."""
+    rows = []
+
+    def walk(obj: dict, prefix: str):
+        for k, v in obj.items():
+            if k in NOT_FACTS or k in ("category", "basis", "source"):
+                continue
+            label = f"{prefix} {_humanize(k)}".strip()
+            if isinstance(v, dict):
+                walk(v, label)
+            else:
+                label = label.removesuffix(" values").removesuffix(" value")   # "Materials values" reads "Materials"
+                rows.append([label[:1].upper() + label[1:], _humanize(v)])
+
+    walk(entry, "")
+    return rows
+
+
+def item_name(entry: dict, asset: dict) -> str:
+    return entry.get("name") or entry.get("description") or asset["name"]
+
+
 def shop(layout: dict, shop_json: dict) -> dict:
     assets = {}
     for a in shop_assets(layout):
         rec = asset_record(a)
-        assets[a] = {"name": rec["name"], "model": f"models/{a}.glb", "bbox": rec["bbox"]}
+        assets[a] = {"name": rec["name"], "model": f"models/{a}.glb", "bbox": rec["bbox"],
+                     "description": rec["description"], "key_specs": rec["key_specs"]}
+    things, zones = entries(shop_json), {}
+    for p in layout["placements"]:
+        zones[p["item"]] = (p["zone"], p.get("on"))
+    for s in layout["surfaces"]:
+        if s.get("item"):
+            zones.setdefault(s["item"], (s["zone"], None))
+    items = []
+    for i in shop_items(layout):
+        e = things[i["item"]]
+        zone, on = zones[i["item"]]
+        items.append(i | {"name": item_name(e, assets[i["asset"]]), "category": e["category"], "kind": e["kind"],
+                          "zone": zone, **({"on": on} if on else {}),
+                          **{k: e[k] for k in ("make", "model") if k in e}, "facts": entry_facts(e)})
     return {"name": shop_json["shop"]["name"], "fictional": shop_json["shop"]["fictional"],
-            "building": layout["building"], "zones": layout["zones"], "aisles": layout["aisles"],
-            "furniture": [{k: s[k] for k in ("id", "kind", "x", "y", "rot", "size")}
+            "categories": CATEGORIES, "building": layout["building"], "zones": layout["zones"],
+            "aisles": layout["aisles"],
+            "furniture": [{k: s[k] for k in ("id", "kind", "name", "x", "y", "rot", "size")}
                           for s in layout["surfaces"] if not s.get("item")],
-            "items": shop_items(layout), "assets": assets}
+            "surfaces": {s["id"]: s["name"] for s in layout["surfaces"]},
+            "items": items, "assets": assets}
+
+
+def uses(step: dict, setups: dict, shop_json: dict, layout: dict) -> list[dict]:
+    """What a step uses besides its station, each with the shop item that holds it when the shop has one placed:
+    the setup's vise and parallels (or stop, or clamps), the edge finder and tool setter, and the plan's cutters."""
+    placed = {i["item"] for i in shop_items(layout)}
+    things = [e for e in entries(shop_json).values() if e["id"] in placed]
+    by_asset = {e["asset"]: e for e in reversed(things)}
+    by_kind = {e["kind"]: e for e in reversed(things)}
+
+    def thing(e: dict | None, name: str | None = None) -> list[dict]:
+        if e is None:
+            return [{"name": name}] if name else []
+        return [{"name": name or item_name(e, asset_record(e["asset"])), "item": e["id"]}]
+
+    def tool(asset: str) -> list[dict]:
+        return thing(by_asset.get(asset), TOOL_NAMES.get(asset, asset).removeprefix("the "))
+
+    if "setup" not in step:
+        return [u for k in FINISH_KINDS.get(step["id"], []) for u in thing(by_kind.get(k))]
+    setup = setups[step["setup"]]
+    what = step["id"].removeprefix(f"{setup['id']}-")
+    if step["kind"] == "cycle":
+        op = next(o for o in setup["operations"] if o["id"] == step["operation"])
+        # A saw's blade is the saw: the station itself.
+        return [] if op["tool"] == setup["machine"] else tool(op["tool"])
+    if what == "tools":
+        return [u for t in step["facts"]["tool_ids"] for u in tool(t)]
+    if what in STEP_KINDS:
+        return [u for k in STEP_KINDS[what] for u in thing(by_kind.get(k))]
+    # A saw holds the bar in its own vise.
+    if what not in ("clean", "load", "seat", "check", "shift") or "workholding" not in setup:
+        return []
+    w = setup["workholding"]
+    if "vise" in w:
+        held = thing(by_asset.get(w["vise"])) + thing(by_kind.get("parallel_set" if w["parallels_in"] else "vise_stop"))
+        return held + (thing(by_kind.get("test_indicator")) if what == "check" and not w["parallels_in"] else [])
+    return thing(by_kind.get("clamp_kit")) + (thing(by_kind.get("test_indicator")) if what == "check" else [])
 
 
 def where_machine(machine: str, layout: dict, shop_json: dict) -> dict:
@@ -93,19 +194,27 @@ def media_paths(media: dict) -> list[str]:
 def live_part(part: str, layout: dict, shop_json: dict) -> dict:
     plan = load_plan(part)
     published = set(_json(PUBLISHED)["media"])
-    machine = {s["id"]: s["machine"] for s in plan["setups"]}
-    groups = [{"id": s["id"], "title": s["title"]} for s in plan["setups"]]
+    setups = {s["id"]: s for s in plan["setups"]}
+    groups = [{"id": s["id"], "title": s["title"], "where": where_machine(s["machine"], layout, shop_json)["name"]}
+              for s in plan["setups"]]
     if plan.get("finish"):
         groups.append({"id": "finish", "title": "Finishing"})
     steps = []
     for s in expand(plan):
-        where = (where_machine(machine[s["setup"]], layout, shop_json) if "setup" in s
-                 else where_zone(STATION_ZONES[s["station"]], layout))
+        if "setup" in s:
+            at = "pendant" if s["id"].removeprefix(f"{s['setup']}-") in AT_PENDANT else "table"
+            where = where_machine(setups[s["setup"]]["machine"], layout, shop_json) | {"at": at}
+        else:
+            where = where_zone(STATION_ZONES[s["station"]], layout)
         media = step_media(part, s)
         steps.append({"id": s["id"], "title": s["title"], "caption": s["caption"], "kind": s["kind"],
-                      "group": s.get("setup", "finish"), "where": where, "media": media,
+                      "group": s.get("setup", "finish"), "where": where,
+                      "uses": uses(s, setups, shop_json, layout), "media": media,
                       "published": all(p in published for p in media_paths(media))})
-    return {"material": plan["stock"]["material"], "groups": groups, "steps": steps}
+    stock = plan["stock"]
+    return {"material": stock["material"],
+            "stock": {"material": stock["material"], "size": stock["size_in"], "from": stock["from"]},
+            "groups": groups, "steps": steps}
 
 
 def build() -> dict:

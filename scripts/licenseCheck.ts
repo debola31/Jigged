@@ -54,6 +54,10 @@ const ALLOWED = new Set([
   'FSL-1.1-MIT',
   '(Apache-2.0 AND MIT)',
   '(MIT AND Zlib)',
+  // zlib/libpng licence (the showcase scene's postprocessing): permissive, like MIT. It allows use in a
+  // closed-source commercial product; it asks only that the origin not be misrepresented, that altered
+  // versions be marked, and that the notice stay in redistributed source, none of which touches our code.
+  'Zlib',
   '(MIT OR CC0-1.0)',
   // sharp's prebuilt libvips binaries, pulled in by Next.js image optimisation.
   // LGPL is satisfied by dynamic linking to an unmodified prebuilt library, which

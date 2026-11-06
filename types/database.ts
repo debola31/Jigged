@@ -2996,6 +2996,54 @@ export type Database = {
           },
         ]
       }
+      pilot_requests: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          email: string
+          file_name: string
+          file_size_bytes: number
+          file_type: string
+          id: string
+          ip_hash: string | null
+          name: string | null
+          note: string | null
+          notified_at: string | null
+          storage_path: string
+          uploaded_at: string | null
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          email: string
+          file_name: string
+          file_size_bytes: number
+          file_type: string
+          id?: string
+          ip_hash?: string | null
+          name?: string | null
+          note?: string | null
+          notified_at?: string | null
+          storage_path: string
+          uploaded_at?: string | null
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          email?: string
+          file_name?: string
+          file_size_bytes?: number
+          file_type?: string
+          id?: string
+          ip_hash?: string | null
+          name?: string | null
+          note?: string | null
+          notified_at?: string | null
+          storage_path?: string
+          uploaded_at?: string | null
+        }
+        Relationships: []
+      }
       quickbooks_connections: {
         Row: {
           access_expires_at: string

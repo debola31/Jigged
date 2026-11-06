@@ -2432,7 +2432,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-z",
@@ -2498,7 +2498,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -3694,7 +3694,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tools",

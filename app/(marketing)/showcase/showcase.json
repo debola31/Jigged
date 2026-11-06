@@ -3172,7 +3172,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op10-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-z",

@@ -19,6 +19,8 @@
   }
  },
  "rules": [],
+ "triangles": 15000,
+ "triangles_why": "the stand's knurled clamp knobs, the indicator's knurled bezel and the rods' knurls hold the seams-kept simplifier at 14.8k even at its 1.6 % bound; positions-only (11.1k) would risk the thin pointer, stylus and label, and no link is hidden enough to drop (4 links, all visible)",
  "materials": {
   "dti_black": {
    "family": "paint",

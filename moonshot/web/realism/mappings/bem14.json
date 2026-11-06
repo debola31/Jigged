@@ -24,5 +24,6 @@
    "none": "bem14_carbide"
   }
  },
- "rules": []
+ "rules": [],
+ "double_sided": false
 }

@@ -24,5 +24,6 @@
    "none": "ream-8_hss"
   }
  },
- "rules": []
+ "rules": [],
+ "double_sided": false
 }

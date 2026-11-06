@@ -24,5 +24,6 @@
    "none": "tap-m4_steam_oxide"
   }
  },
- "rules": []
+ "rules": [],
+ "double_sided": false
 }

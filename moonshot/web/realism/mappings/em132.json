@@ -24,5 +24,6 @@
    "none": "em132_carbide"
   }
  },
- "rules": []
+ "rules": [],
+ "double_sided": false
 }

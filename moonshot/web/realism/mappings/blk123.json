@@ -82,6 +82,7 @@
   }
  ],
  "atlas": 512,
+ "double_sided": false,
  "simplify_positions_only": true,
  "simplify_why": "positions only (opt-in, solid parts): two solid blocks: with seams kept the holes' split normals stall it at 21k"
 }

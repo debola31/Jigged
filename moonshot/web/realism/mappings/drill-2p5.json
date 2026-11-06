@@ -25,6 +25,7 @@
   }
  },
  "rules": [],
+ "double_sided": false,
  "unsure": [
   {
    "what": "straw finish assumed: the record says cobalt HSS, finish not given",

@@ -24,5 +24,6 @@
    "none": "drill-5-32_straw"
   }
  },
- "rules": []
+ "rules": [],
+ "double_sided": false
 }

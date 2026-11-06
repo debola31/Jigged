@@ -8,8 +8,8 @@
    "mat_0": "cal6_stainless",
    "mat_6": "cal6_stainless",
    "mat_4": "plastic_black",
-   "mat_7": "cal6_scale",
-   "mat_2": "cal6_print_yellow",
+   "mat_7": "cal6_stainless",
+   "mat_2": "cal6_print_black",
    "mat_8": "cal6_lcd",
    "mat_1": "cal6_button_green",
    "mat_3": "cal6_button_grey",
@@ -17,7 +17,46 @@
    "mat_9": "steel_machined"
   }
  },
- "rules": [],
+ "rules": [
+  {
+   "why": "mat_7 above the beam (z > 6.5 mm) is the slider's LCD frame and the beam's end cap, not the scale strip: black",
+   "cads": [
+    "mat_7"
+   ],
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.0065
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "plastic_black"
+  },
+  {
+   "why": "mat_2 on the slider's top (z > 9 mm) is a button, not the beam's graduations: keep the CAD's yellow",
+   "cads": [
+    "mat_2"
+   ],
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.009
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "cal6_button_yellow"
+  }
+ ],
  "materials": {
   "cal6_stainless": {
    "family": "ground",
@@ -30,19 +69,19 @@
    "metal": 1.0,
    "tile_m": 0.06,
    "normal": 0.3,
-   "about": "hardened stainless beam and jaws: satin"
+   "about": "hardened stainless beam and jaws: satin; the beam's scale face too (the CAD draws it as a black strip, the 500-196-30 has none)"
   },
-  "cal6_scale": {
-   "family": "plastic",
+  "cal6_print_black": {
+   "family": "flat",
    "color": [
-    0.018,
-    0.018,
-    0.02
+    0.02,
+    0.02,
+    0.022
    ],
-   "rough": 0.35,
-   "about": "the beam's printed scale strip: black (the CAD's)"
+   "rough": 0.4,
+   "about": "the beam's graduations and figures: black on the stainless"
   },
-  "cal6_print_yellow": {
+  "cal6_button_yellow": {
    "family": "flat",
    "color": [
     0.62,
@@ -50,7 +89,7 @@
     0.03
    ],
    "rough": 0.4,
-   "about": "the scale's graduations and figures, yellow on the black strip (the CAD's)"
+   "about": "the yellow button (the CAD's)"
   },
   "cal6_lcd": {
    "family": "glass",
@@ -93,9 +132,10 @@
    "about": "the housing's ABSOLUTE print: light grey on black"
   }
  },
+ "corrected": "2026-11-05: the beam made satin stainless with black graduations, as a real 500-196-30 (the CAD's black strip with yellow print dropped)",
  "unsure": [
   {
-   "what": "the beam: the CAD gives it a black strip with yellow graduations, which the light model shows too; a real 500-196-30 beam reads as satin stainless with dark graduations. Kept the CAD's.",
+   "what": "the two buttons keep the CAD's green and yellow",
    "picture": "checks/cal6_close_before_after.png"
   }
  ]

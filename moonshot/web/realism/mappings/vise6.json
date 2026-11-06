@@ -1,37 +1,61 @@
 {
  "asset": "vise6",
- "about": "Kurt HDL6AL two-station 6 in vise: one CAD mesh in 7 solids, no colours, the body welded to its jaws. By height and facing: the ductile-iron body in Kurt blue, its ways ground, everything above the bed (z 79.4 mm) the machinable aluminium jaws, the screw and pins steel.",
+ "about": "Kurt HDL6AL two-station 6 in vise: one CAD mesh in 7 solids, no colours, the body welded to its jaws. As Kurt's HDL6 photos show it: the ductile-iron body ground bare all over, Kurt blue only on the recessed band along each side (y +-60.3 mm, where the HDL decal sits); everything above the bed (z 79.4 mm) the machinable aluminium jaws; the screw and pins steel.",
  "reviewed": "2026-11-05: draft",
- "fallback": "paint_kurt_blue",
+ "fallback": "cast_iron_ground",
  "cad": {
   "*": {
-   "mat_0": "paint_kurt_blue"
+   "mat_0": "cast_iron_ground"
   }
  },
  "rules": [
   {
-   "why": "the bed's ways and the stations' floors: up-facing at z 77-80 mm, ground",
+   "why": "the recessed band along the +y side, between the top rail and the base flange: Kurt blue",
    "normal": {
     "dir": [
      0,
-     0,
-     1
+     1,
+     0
     ],
     "min": 0.98
    },
    "inside": {
     "lo": [
      -1,
-     -1,
-     0.077
+     0.0595,
+     -1
     ],
     "hi": [
      1,
-     1,
-     0.0797
+     0.0611,
+     1
     ]
    },
-   "material": "cast_iron_ground"
+   "material": "paint_kurt_blue"
+  },
+  {
+   "why": "... and along the -y side",
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -0.0611,
+     -1
+    ],
+    "hi": [
+     1,
+     -0.0595,
+     1
+    ]
+   },
+   "material": "paint_kurt_blue"
   },
   {
    "why": "the machinable aluminium jaws: everything above the bed",
@@ -89,9 +113,10 @@
    "about": "Kurt's 1.735 in machinable aluminium jaws: milled 6061"
   }
  },
+ "corrected": "2026-11-05: body ground bare with a blue side band, from a Kurt HDL6 product photo (was Kurt blue all over)",
  "unsure": [
   {
-   "what": "the body's paint: Kurt blue assumed on every non-ground body face, as on Kurt's other vises; the HDL6's sides may be ground bare",
+   "what": "the blue band's exact height: taken as the recessed side face; the photo also shows the HDL CarvLock decal on it, not modelled",
    "picture": "checks/vise6_front_before_after.png"
   }
  ]

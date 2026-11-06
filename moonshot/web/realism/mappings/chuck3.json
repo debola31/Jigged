@@ -1,0 +1,97 @@
+{
+ "asset": "chuck3",
+ "about": "Kitagawa BR10 10 in hydraulic 3-jaw power chuck, jaws closed, axis along x, face toward +x (Kitagawa's STEP as one mesh, no colours; parts by size and place): a turned steel body; the serrated master jaws hardened and ground; the soft jaws (standing proud of the face) milled mild steel; the jaw bolts, mounting bolts and small fittings black oxide.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/chuck3_*.png); page check checks/chuck3_*_before_after.png",
+ "fallback": "steel_machined",
+ "materials": {
+  "chuck3_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.35,
+   "about": "hardened, ground master jaws"
+  },
+  "chuck3_soft_jaw": {
+   "family": "ground",
+   "color": [
+    0.46,
+    0.465,
+    0.475
+   ],
+   "rough": 0.4,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.8,
+   "about": "soft jaws: milled mild steel"
+  }
+ },
+ "cad": {
+  "*": {
+   "none": "steel_machined"
+  }
+ },
+ "rules": [
+  {
+   "why": "jaw bolts (42 x 18 mm), mounting bolts (116 x 24 mm) and the small fittings: black oxide",
+   "part_size": {
+    "max_mid_side": 0.025
+   },
+   "material": "steel_black_oxide"
+  },
+  {
+   "why": "the three master jaws in their slots (22 x 52 x 22 mm, x 20-42 mm)",
+   "part_inside": {
+    "lo": [
+     0.019,
+     -0.13,
+     -0.13
+    ],
+    "hi": [
+     0.044,
+     0.13,
+     0.13
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.05,
+    "max_max_side": 0.054
+   },
+   "material": "chuck3_tool_steel"
+  },
+  {
+   "why": "the soft jaws standing proud of the face (x 38-80 mm)",
+   "part_inside": {
+    "lo": [
+     0.035,
+     -0.13,
+     -0.13
+    ],
+    "hi": [
+     0.085,
+     0.13,
+     0.13
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.08
+   },
+   "material": "chuck3_soft_jaw"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the body's finish: Kitagawa's STEP has no colours; plain turned steel assumed, soft jaws a darker milled grey",
+   "picture": "checks/chuck3_front_before_after.png"
+  },
+  {
+   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 23,392 triangles, the library mesh is already decimated (96k to 47k) and its many hard edges are seams meshopt won't collapse; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
+   "picture": "checks/chuck3_close_before_after.png"
+  }
+ ]
+}

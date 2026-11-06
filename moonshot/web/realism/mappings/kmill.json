@@ -1,0 +1,84 @@
+{
+ "about": "Bridgeport-type turret knee mill (GrabCAD, no colours): castings in machine grey, the table bare cast iron (its top ground), handwheels and cranks chrome, quill and tool steel. Part numbers are after simplification (parts.json): re-check them if the source or the triangle cap changes.",
+ "fallback": "kmill_grey",
+ "cad": {
+  "*": {
+   "none": "kmill_grey"
+  }
+ },
+ "materials": {
+  "kmill_grey": {
+   "family": "paint_cast",
+   "color": [
+    0.15,
+    0.17,
+    0.17
+   ],
+   "rough": 0.45,
+   "normal": 0.6,
+   "about": "Bridgeport-style machine grey over the castings"
+  }
+ },
+ "rules": [
+  {
+   "why": "the table (part 0): bare cast iron",
+   "parts": [
+    0
+   ],
+   "material": "cast_iron_raw"
+  },
+  {
+   "why": "... its top, ground",
+   "parts": [
+    0
+   ],
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.95
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the leadscrew handwheels, the knee crank and the saddle handwheel: chrome",
+   "parts": [
+    1,
+    5,
+    15,
+    23,
+    24
+   ],
+   "material": "chrome"
+  },
+  {
+   "why": "quill, drawbar and the tool in the spindle",
+   "parts": [
+    9,
+    10,
+    18,
+    21
+   ],
+   "material": "steel_ground"
+  },
+  {
+   "why": "the vise on the table",
+   "parts": [
+    2,
+    7,
+    12
+   ],
+   "material": "steel_machined"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "parts 2, 7 and 12 taken for the vise on the table and 21 for the tool; the castings' grey is assumed",
+   "picture": "checks/kmill_front_before_after.png"
+  }
+ ],
+ "asset": "kmill",
+ "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+}

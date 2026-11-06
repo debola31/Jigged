@@ -1,0 +1,73 @@
+{
+ "about": "Sand-blast cabinet (GrabCAD DIY design, no colours): powder-coated sheet steel, a window on the sloped top, a steel grate inside, legs in the same paint.",
+ "fallback": "blast_blue",
+ "cad": {
+  "*": {
+   "none": "blast_blue"
+  }
+ },
+ "materials": {
+  "blast_blue": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.07,
+    0.16
+   ],
+   "rough": 0.45,
+   "about": "blast-cabinet blue-grey powder coat (a choice: the CAD has no colour)"
+  }
+ },
+ "rules": [
+  {
+   "why": "the viewing window: the cabinet's sloped front face above 1.1 m",
+   "parts": [
+    23
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -0.7,
+     0.7
+    ],
+    "min": 0.9
+   },
+   "inside": {
+    "lo": [
+     -0.55,
+     -0.31,
+     1.1
+    ],
+    "hi": [
+     0.55,
+     0.0,
+     1.5
+    ]
+   },
+   "material": "glass_clear"
+  },
+  {
+   "why": "the grate and the hopper's floor (parts 0, 34)",
+   "parts": [
+    0,
+    34
+   ],
+   "material": "steel_machined"
+  },
+  {
+   "why": "glove-port rings and small hardware",
+   "part_size": {
+    "max_max_side": 0.03
+   },
+   "material": "rubber_black"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the cabinet colour is a choice, and the window is found by its slope (look at the before/after)",
+   "picture": "checks/blast_front_before_after.png"
+  }
+ ],
+ "asset": "blast",
+ "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+}

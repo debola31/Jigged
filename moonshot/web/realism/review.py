@@ -50,3 +50,25 @@ def side_by_side(pairs: list[tuple[str, Path]], out: Path, title: str, width: in
     out.parent.mkdir(parents=True, exist_ok=True)
     out_im.save(out)
     return out
+
+
+def iso_sheet(look_dir: Path, names: list[str], views: list[str], labels: dict[str, str], out: Path,
+              title: str, cols: int = 6) -> Path:
+    """Each CAD material alone (magenta), in each view, captioned with the material the mapping gives it."""
+    tiles = [(n, v) for n in names for v in views]
+    w, h = 320, 240
+    rows = (len(tiles) + cols - 1) // cols
+    im = Image.new("RGB", (cols * w, rows * h + 30), (24, 24, 26))
+    d = ImageDraw.Draw(im)
+    d.text((8, 8), title, fill=(240, 240, 240))
+    for i, (n, v) in enumerate(tiles):
+        x, y = (i % cols) * w, (i // cols) * h + 30
+        p = look_dir / f"iso_{n}_{v}.png"
+        if p.exists():
+            im.paste(Image.open(p).convert("RGB").resize((w, h)), (x, y))
+        cap = f"{n} {v}: {labels.get(n, '?')}"
+        d.rectangle([x, y, x + 7 * len(cap) + 8, y + 16], fill=(0, 0, 0))
+        d.text((x + 4, y + 2), cap, fill=(255, 220, 90))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    im.save(out)
+    return out

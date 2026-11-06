@@ -1,0 +1,81 @@
+{
+ "about": "Haas EC-400 horizontal machining centre (Haas's file, no colours): Haas white sheet metal with a dark skirt, as the VF-2; the chip conveyor and tank dark; the machine inside in dark cast paint.",
+ "fallback": "paint_haas_white",
+ "cad": {
+  "*": {
+   "none": "paint_haas_white"
+  }
+ },
+ "rules": [
+  {
+   "why": "the enclosure's skirt, below 0.35 m: Haas dark grey",
+   "parts": [
+    9
+   ],
+   "inside": {
+    "lo": [
+     -9,
+     -9,
+     -1
+    ],
+    "hi": [
+     9,
+     9,
+     0.35
+    ]
+   },
+   "material": "paint_haas_dark"
+  },
+  {
+   "why": "the chip conveyor and coolant tank (parts 0, 15)",
+   "parts": [
+    0,
+    15
+   ],
+   "material": "paint_haas_dark"
+  },
+  {
+   "why": "the machine inside the enclosure: base, column, saddle (parts 3, 12, 13, 17, 18)",
+   "parts": [
+    3,
+    12,
+    13,
+    17,
+    18
+   ],
+   "material": "cast_iron_painted"
+  },
+  {
+   "why": "pallets and the rotary table (parts 10, 11, 19, 22): machined steel",
+   "parts": [
+    10,
+    11,
+    19,
+    22
+   ],
+   "material": "steel_machined"
+  },
+  {
+   "why": "levelling feet",
+   "parts": [
+    4,
+    5,
+    7,
+    8,
+    24,
+    25,
+    26,
+    27
+   ],
+   "material": "steel_black_oxide"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "no CAD colours: which parts are pallets and which castings is read off the parts sheet; the door's window has no pane (its opening shows the inside)",
+   "picture": "checks/hmc_front_before_after.png"
+  }
+ ],
+ "asset": "hmc",
+ "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+}

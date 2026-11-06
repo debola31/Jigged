@@ -1,0 +1,26 @@
+{
+ "asset": "mazak",
+ "about": "Mazak QT-Primos 100 CNC lathe: draft from the CAD's colours",
+ "reviewed": "draft: not reviewed",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "paint_white",
+   "mat_1": "paint_black",
+   "mat_2": "mazak_cad_2"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "mazak_cad_2": {
+   "family": "paint",
+   "color": [
+    0.513,
+    0.115,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_2 colour [0.6, 0.14, 0], toned to an enamel"
+  }
+ }
+}

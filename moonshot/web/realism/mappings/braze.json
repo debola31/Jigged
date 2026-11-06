@@ -148,5 +148,7 @@
   {
    "what": "cylinder paint: US suppliers vary (acetylene maroon, red or black; oxygen green); kept the placeholder's red and green"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

@@ -86,5 +86,7 @@
   {
    "what": "a generic unit: no maker named in the record, so the panel layout, colours and the 'ETCH-MARK' lettering are invented"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

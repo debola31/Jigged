@@ -111,5 +111,7 @@
   {
    "what": "the optics as a fork round the cutting edge (camera and backlight either side) is the common arrangement; the placeholder's head points along X at the spindle"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

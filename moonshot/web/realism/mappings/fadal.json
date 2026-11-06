@@ -85,5 +85,7 @@
   {
    "what": "the back (coolant tank, electrical cabinet) is plausible, not from photos"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

@@ -108,5 +108,7 @@
   {
    "what": "the blue-out / red-back tote convention and the level labels are invented to make the rack's job readable"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

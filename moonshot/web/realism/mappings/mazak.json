@@ -71,5 +71,7 @@
   {
    "what": "another worker drafted a mapping for mazak from the GrabCAD model (in the merged shared fixes); this self-made one replaces it"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

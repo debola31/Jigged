@@ -139,5 +139,7 @@
   }
  ],
  "atlas": 2048,
- "atlas_why": "2048 rather than the hero class's 4096: at 16k triangles of mostly flat sheet and wood the AO is ~3 mm a texel either way visually the same, and it saves 1.3 MB of download and 17 MB of GPU memory"
+ "atlas_why": "2048 rather than the hero class's 4096: at 16k triangles of mostly flat sheet and wood the AO is ~3 mm a texel either way visually the same, and it saves 1.3 MB of download and 17 MB of GPU memory",
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

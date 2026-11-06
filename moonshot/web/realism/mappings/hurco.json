@@ -90,5 +90,7 @@
   {
    "what": "the back (coolant tank, auger, cabinet) and the inside are plausible, not photographed; the enclosure front sits 40 mm behind the placeholder's so the handles and the keyboard tray stay inside the record's box"
   }
- ]
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
 }

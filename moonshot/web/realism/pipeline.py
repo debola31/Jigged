@@ -29,6 +29,10 @@ MAPPINGS = HERE / "mappings"
 BLENDER_DIR = HERE / "blender"
 PACK_DIR = HERE / "pack"
 SIMPLIFY_ERROR = {"hero": 0.0005, "large": 0.001, "small": 0.002}   # a fraction of the mesh's radius
+# Positions-only simplification (a mapping's `simplify_positions_only`) gets past split-normal seams, but a thin sheet
+# collapses through its own thickness: the wire EDM lost whole enclosure panels at 1.6% (2.1% of its area) and 0.3%
+# at 0.4%. So it is opt-in, for solid parts, and its error bound stops at 0.4%; seams-kept goes on to 1.6%.
+POSITIONS_ONLY_MAX_ERROR = 0.004
 # Validator warnings that are the validator's gap, not the model's: 2.0.0-dev.3.10 predates KHR_texture_basisu, so
 # it rejects image/ktx2 and can't read KTX2 (ktx validate checks those files instead); and a normal map without
 # tangents, which glTF allows and three.js handles (derivative-based tangent space). Any other warning fails.
@@ -121,6 +125,8 @@ def simplify(asset: str) -> list[dict]:
     job = _write_job(asset, "simplify", {"inputs": [{"src": s["path"], "dst": s["dst"]} for s in srcs], "cap": cap,
                                          "error": mp.get("simplify_error", SIMPLIFY_ERROR[cls]),
                                          "drop_links": mp.get("drop_links", []),
+                                         "positions_only": mp.get("simplify_positions_only", False),
+                                         "max_error": POSITIONS_ONLY_MAX_ERROR if mp.get("simplify_positions_only") else None,
                                          "report": str(work_dir(asset) / "simplify.json")})
     t = time.perf_counter()
     node(asset, "simplify", job)

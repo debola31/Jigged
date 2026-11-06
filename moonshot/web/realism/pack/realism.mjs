@@ -46,9 +46,10 @@ async function readSource(src) {
 	return doc;
 }
 
-// Positions only, welded: the simplifier won't collapse across a normal or UV seam, and vendor meshes (pre-decimated
-// with split normals, the V-block's) are all seams, so it stalled far above the cap. prepare.py recomputes normals
-// for every simplified source anyway, and Blender lays out both UV sets. Material borders stay: they are primitives.
+// Positions only, welded (a mapping's opt-in): the simplifier won't collapse across a normal or UV seam, and some
+// vendor meshes (pre-decimated with split normals, the V-block's) are all seams, so it stalled far above the cap.
+// prepare.py recomputes normals for every simplified source anyway, and Blender lays out both UV sets. But a thin
+// sheet then collapses through its thickness (the wire EDM's panels vanished): solid parts only, small error bounds.
 function positionsOnly(doc) {
 	for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
 		for (const semantic of prim.listSemantics()) {
@@ -68,7 +69,7 @@ async function simplifyAll() {
 			const doc = await readSource(s.src);
 			const before = triangles(doc);
 			if (ratio < 1 && before > 500) {
-				positionsOnly(doc);
+				if (job.positions_only) positionsOnly(doc);
 				await doc.transform(weld(), prune(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
 				await io.write(s.dst, doc);
 			} else if (job.drop_links?.length) {
@@ -80,7 +81,7 @@ async function simplifyAll() {
 		}
 		out.after = out.files.reduce((n, f) => n + f.after, 0);
 		console.log(`[simplify] error ${error}: ${total} -> ${out.after} triangles (cap ${job.cap})`);
-		if (out.after <= job.cap * 1.05 || error * 2 > MAX_ERROR) break;
+		if (out.after <= job.cap * 1.05 || error * 2 > (job.max_error ?? MAX_ERROR) + 1e-12) break;
 		error *= 2;
 	}
 	fs.writeFileSync(job.report, JSON.stringify(out, null, 1));

@@ -7,11 +7,14 @@ hand (moonshot/motion/plate_clamps.py off_keys); then both hands take the plate 
 motion/plate_load.py's grips) and carry it up and out through the doorway, the wrench lying on it, the take ending
 with it in both hands.
 
-A sheet (nist-ftc-09's 3 mm stainless) lies wholly on its spoilboard, nothing under its edge to get the fingers
-under: both hands' fingers pressed flat on its near edge first slide it toward the operator until that edge stands
-out over the board's front edge (the hand holding it to the sheet by the same declared constraint as the carry,
-carry_blank_R and carry_blank_L, for the fingers' friction), as people take a sheet off a table; they let go, and
-take it by that edge as it was laid down.
+Nothing gets under a plate lying on its board where the hands take it up, so both hands first slide it toward the
+operator, pulling against its drag on the board, as people take a plate off a table, let go, and take it as it was
+laid down (plate_load.py): a sheet (nist-ftc-09's 3 mm stainless, wholly on its board) by its fingers pressed flat on
+its near edge, until that edge stands out over the board's front edge, then pinched by that edge; a plate held by its
+ends (ll-1005337's) by its near edge, pinched where it already stands out over the board, until its ends stand out
+over the board's front edge at their near corners while its middle is still on the board, then by its ends from
+underneath there. Each hand holds it through the slide by the same declared constraint as the carry, carry_blank_R
+and carry_blank_L.
 
     python -m moonshot.motion.plate_lift_off ll-1005337 op20  # plans <data root>/takes/ll-1005337-op20-lift-off-plate
 """
@@ -41,7 +44,11 @@ LIFT_MM = 40.0               # the plate lifted straight up off the board this f
 LIFT_S, OUT_S = 0.8, 2.0     # ... and carried out to where the load's take started
 OUT_OVER_MM = 25.0           # a sheet slid toward the operator until its near edge stands this far out over the board's
                              # front edge: the fingers under it, 3-13 mm in from it (plate_load.py), clear of the board
-SLIDE_S = 1.4                # ... unhurried
+ON_BOARD_MM = 15.0           # a plate held by its ends slid until its middle is this far in from the board's front edge,
+                             # still resting on it, its ends standing out over it at their near corners
+UNDER_OUT_MM = 28.0          # ... and taken from underneath there, its ends' hold this far out over that edge
+SLIDE_S = 1.4                # ... unhurried; a plate's 165 mm a little longer
+PLATE_SLIDE_S = 2.2
 PRESS_BAND_MM = (5.0, 22.0)  # the pressing fingers' pads this far in from its near edge: clear of the wrench (30 in)
 BOARD_PALM_MM = 6.0          # the pressing hand's palm kept this far over the board in front of the sheet
 
@@ -54,23 +61,31 @@ class PlateLiftOff(StepTake):
         self.plate = plates.plate(part, setup)
         self.clamps = plates.clamps(part, setup)
         self.ends = PL.END_GRIP[part]
-        self.slid = np.zeros(3) if self.ends else np.array([0.0, -self.slide_mm(), 0.0])
-        self.land = self.plate.centre + self.slid       # the plate's grips where it lies (PlateLoad.grip_spec's own)
+        self.slid = np.array([0.0, -self.slide_mm(), 0.0])
+        self.land = self.plate.centre + self.slid       # the plate's grips where it's taken up (PlateLoad.grip_spec's own)
+        self.under = self.ends                          # a plate's ends from underneath, as it was laid down
+        self.under_y = self.board_front() - UNDER_OUT_MM   # ... where they stand out over the board's front edge
         super().__init__(out or TAKES / plate_take(part, setup, PLATE_UNLOAD[1]), PC.LUMBAR, verbose)
         b = self.plate.bottom                           # the elbows and forearms over the spoilboard (as the seat's)
         self.boxes = [(np.r_[SB.TABLE_MID, (SB.TABLE_Z + b) / 2 - 30.0],
                        np.r_[SB.SPOILBOARD_MM[:2] / 2, (b - SB.TABLE_Z) / 2 + 30.0] + 10.0)]
         specs = {f"pinch_{c.name}": self.grip_spec("pinch", c.name) for c in self.clamps}
-        specs |= {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R"),
-                  "plate_L": self.grip_spec("plate", "L")}
-        if not self.ends:
-            specs |= {f"press_{s}": self.grip_spec("press", s) for s in ("R", "L")}
+        specs |= {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R")}
+        specs |= {f"slide_{s}": self.grip_spec("slide", s) for s in ("R", "L")}
         self.solve_grips(specs, source=self.grip_spec, depends=(PC, PW, PL, SB, WR))
+        PL.mirror_grip(self, "plate_R", "plate_L")            # the left's hold on the plate the right's mirrored
+
+    @staticmethod
+    def board_front() -> float:
+        return SB.TABLE_MID[1] - SB.SPOILBOARD_MM[1] / 2
 
     def slide_mm(self) -> float:
-        """How far a sheet is slid toward the operator: its near edge OUT_OVER_MM out over the board's front edge."""
+        """How far the plate is slid toward the operator: a sheet's near edge OUT_OVER_MM out over the board's front
+        edge; a plate held by its ends till its middle is ON_BOARD_MM in from that edge, still resting on it."""
+        if self.ends:
+            return self.plate.centre[1] - self.board_front() - ON_BOARD_MM
         near = self.plate.centre[1] - self.plate.size[1] / 2
-        return near - (SB.TABLE_MID[1] - SB.SPOILBOARD_MM[1] / 2) + OUT_OVER_MM
+        return near - self.board_front() + OUT_OVER_MM
 
     def wrench_cols(self, shift) -> list:
         """The wrench lying on the plate, moved by shift (mm), as colliders for a hand's grip on the plate."""
@@ -88,8 +103,8 @@ class PlateLiftOff(StepTake):
             g = PL.PlateLoad.grip_spec(self, name)
             g["colliders"] = g["colliders"] + self.wrench_cols(self.slid)        # the wrench rides on it
             return g
-        if kind == "press":
-            return self.press_spec(name)
+        if kind == "slide":
+            return self.edge_spec(name) if self.ends else self.press_spec(name)
         c = next(k for k in self.clamps if k.name == name)
         return PC.grip_spec(self, c, "clamped", self.plate)
 
@@ -116,6 +131,29 @@ class PlateLiftOff(StepTake):
                   ring_pip=25.0, little_mcp_flex=30.0, little_pip=30.0, thumb_cmc_abd=40.0, thumb_cmc_flex=10.0)
         S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
         return dict(obj=c, side=side, q0=q0, colliders=cols, load=0.0, targets=targets, iters=1500,
+                    starts=[S(20, 0, r, 50, 50, -15, 65, pr, -10, 5) for pr in (-30, 0, 30) for r in (0, 20)])
+
+    def edge_spec(self, side: str) -> dict:
+        """A plate's near edge pinched where it stands out over the board's front edge, either side of its middle,
+        the thumb on top and the index and middle under it (as plate_load.py's sheet): to slide it."""
+        h, p = self.hand, self.plate
+        c, half = p.centre, p.size / 2
+        sign = 1.0 if side == "R" else -1.0
+        top = c[2] + half[2]
+        at = np.array([c[0] + sign * PL.EDGE_X_MM, c[1] - half[1], top])
+        over = at[1] - self.board_front()                      # how far its near edge stands out: the fingers within
+        under = (3.0, min(13.0, -over - 6.0))
+        I = np.eye(3)
+        cols = [obox(c, I, half),
+                obox(np.r_[SB.TABLE_MID, p.bottom - 30.0], I, np.r_[SB.SPOILBOARD_MM[:2] / 2, 30.0]),
+                *self.wrench_cols(np.zeros(3))]
+        targets = {"thumb": plane(at + [0.0, 15.0, 0.0], [0, 0, 1.0], 1.5, local_bands(at, I, x=(-12, 12), y=(8, 24))),
+                   "index": plane(at + [0.0, 8.0, -p.size[2]], [0, 0, -1.0], 1.5,
+                                  local_bands(at, I, x=(-22, -2), y=under)),
+                   "middle": plane(at + [0.0, 8.0, -p.size[2]], [0, 0, -1.0], 1.5,
+                                   local_bands(at, I, x=(2, 22), y=under))}
+        S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
+        return dict(obj=c, side=side, q0=PL._q0(h), colliders=cols, load=0.0, targets=targets, iters=1500,
                     starts=[S(20, 0, r, 50, 50, -15, 65, pr, -10, 5) for pr in (-30, 0, 30) for r in (0, 20)])
 
     def order(self) -> list:
@@ -156,19 +194,22 @@ class PlateLiftOff(StepTake):
         return end
 
     def slide_off(self, t0: float) -> float:
-        """A sheet slid toward the operator by both hands' fingers pressed flat on its near edge, let go, and the
-        hands up off it: when they are. Its keys start self.keys["blank"]."""
-        t_c = self.both_take("press", t0, 10.0)
+        """The plate slid toward the operator by both hands at its near edge (a sheet's fingers pressed flat on it, a
+        plate's near edge pinched), pulling against its drag on the board, let go, and the hands up off it: when they
+        are. Its keys start self.keys["blank"]."""
+        t_c = self.both_take("slide", t0, self.plate.size[2] if self.ends else 10.0)
         t_load = t_c + SP.PRELOAD_S
         c = self.plate.centre
-        path = [(t_load, c), (t_load + SLIDE_S, c + self.slid)]
+        T = PLATE_SLIDE_S if self.ends else SLIDE_S
+        path = [(t_load, c), (t_load + T, c + self.slid)]
         self.keys["blank"] = [(tt, np.eye(3), p) for tt, p in path]
         t_end = path[-1][0]
         drag = SB.MDF_FRICTION * (self.plate.mass_kg + WR.kg()) * 9.81
         for s in ("R", "L"):
-            g = f"press_{s}"
-            self.follow(s, t_c, t_end + 0.3, g, lambda tt, path=path: path[0][1] + self.slid * float(np.clip(
-                min_jerk((tt - path[0][0]) / SLIDE_S), 0.0, 1.0)))
+            g = f"slide_{s}"
+            self.follow(s, t_c, t_end + 0.3, g, lambda tt, path=path, T=T: path[0][1] + self.slid * float(np.clip(
+                min_jerk((tt - path[0][0]) / T), 0.0, 1.0)))
+            self.load(s, t_load, t_end, drag / 2 / 9.81)
             self.effort(s, t_c, 0.0, g)
             self.effort(s, t_c + 0.2, 0.5, g)
             self.effort(s, t_end, 0.5, g)
@@ -196,9 +237,7 @@ class PlateLiftOff(StepTake):
             t_end, keys = PC.move(self, c, f"pinch_{c.name}", start, lambda t0, c=c: PC.off_keys(c, t0))
             self.keys[c.name] = keys
             t[s] = last = t_end
-        t0 = max(t.values())
-        if not self.ends:
-            t0 = self.slide_off(t0)
+        t0 = self.slide_off(max(t.values()))
         t_c = self.both_take("plate", t0, self.plate.size[2])
         t_load = t_c + SP.PRELOAD_S
         path = self.plate_path(t_load + SP.LIFT_DELAY_S)
@@ -232,7 +271,7 @@ class PlateLiftOff(StepTake):
         g = self.grips["plate_R"]                       # its weight's half out at its middle, as the load's
         H, W = np.asarray(g["H"], float), np.asarray(g["W"], float)
         tk |= {"table": {"part": self.part, "setup": self.setup, "state": "clamped",
-                         "free": [c.name for c in self.clamps], "plate": True,
+                         "free": [c.name for c in self.clamps], "plate": True, "under": self.under,
                          "wrench": {"at": at.tolist(), "yaw": yaw}},
                "plate_force_at": (H.T @ np.array([0.0, self.land[1] - W[1], 0.0])).tolist()}
         f.write_text(json.dumps(tk, indent=1), encoding="utf-8")

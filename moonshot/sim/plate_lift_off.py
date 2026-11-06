@@ -23,13 +23,13 @@ TAKES = data_root() / "takes"
 
 class PlateLiftOff(PlateClamps):
     def more_encloses(self) -> dict:
-        """The hands' holds on the plate: each taken up by its edge (plate_), and a sheet's fingers pressed flat on it
-        to slide it first (press_), each hand's one weld on it (eq_name)."""
-        return {f"{g}_{s}": "blank" for g in ("plate", "press") for s in ("R", "L")}
+        """The hands' holds on the plate: each sliding it toward the operator first by its near edge (slide_), then
+        taking it up (plate_), each hand's one weld on it (eq_name)."""
+        return {f"{g}_{s}": "blank" for g in ("plate", "slide") for s in ("R", "L")}
 
     def eq_name(self, grip: str) -> str:
         """Each hand's weld on the one plate, whichever hold: carry_blank_R and carry_blank_L, as the load's."""
-        return f"carry_blank_{grip[-1]}" if grip.startswith(("plate_", "press_")) else super().eq_name(grip)
+        return f"carry_blank_{grip[-1]}" if grip.startswith(("plate_", "slide_")) else super().eq_name(grip)
 
     def __init__(self, folder):
         super().__init__(folder)

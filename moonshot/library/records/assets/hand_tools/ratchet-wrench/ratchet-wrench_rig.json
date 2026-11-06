@@ -1,0 +1,49 @@
+{
+ "schema": "setupguide.rig/0.1",
+ "glb": "ratchet-wrench_rig.glb",
+ "units": "mm",
+ "up": "+Z",
+ "root": "ratchet_wrench",
+ "nodes": {
+  "ratchet_wrench": {
+   "parent": null,
+   "t": [0.0, 0.0, 0.0],
+   "q": [0.0, 0.0, 0.0, 1.0]
+  },
+  "ratchet_wrench_ring": {
+   "parent": "ratchet_wrench",
+   "t": [0.0, 0.0, 0.0],
+   "q": [0.0, 0.0, 0.0, 1.0]
+  }
+ },
+ "grips": {
+  "wrench_grip": {
+   "node": "ratchet_wrench",
+   "t": [135.0, 0.0, 5.6],
+   "q": [0.0, 0.0, 0.0, 1.0],
+   "grasp": "pinch",
+   "radius_mm": 8.5
+  },
+  "box_end": {
+   "node": "ratchet_wrench_ring",
+   "t": [0.0, 0.0, 0.0],
+   "q": [0.0, 0.0, 0.0, 1.0],
+   "grasp": "flat"
+  }
+ },
+ "params": {
+  "ratchet_joint": "ratchet_wrench_ring turns in ratchet_wrench about +Z through the box end's middle (the hinge in the head)",
+  "ratchet_axis": [0, 0, 1],
+  "ratchet_teeth": 72,
+  "swing_arc_deg": 5.0,
+  "pawl": "the hinge's limit, set by the physics run on the side the reversing lever drives; free the other way",
+  "reversible": true,
+  "drive_points": 12,
+  "drive_modelled_flats": 6,
+  "across_flats_in": 0.75,
+  "overall_length_mm": 243.7,
+  "head_width_mm": 34.0,
+  "head_thickness_mm": 11.2,
+  "ring_outside_mm": 26.0
+ }
+}

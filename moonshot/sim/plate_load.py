@@ -29,6 +29,8 @@ DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
 TORQUESCALE = 20.0
 WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.95, 0.99, 0.001)
+DRAW_S = 0.85                # the fingers drawn out from under a plate's end (motion/plate_load.py's let-go)
+SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers and the board below
 
 
 class PlateLoad(TakeRunner):
@@ -117,15 +119,31 @@ class PlateLoad(TakeRunner):
     def hand_force(self, side: str, t: float):
         """Half the plate's weight while it's held, acting out at its middle (motion/plate_load.py hand_force_at),
         to the last: until the hand's grip lets go, though the carry (the eye on it) ends as it is set down: unborne
-        from then, it dropped 17 mm in the hands."""
+        from then, it dropped 17 mm in the hands. A plate let go onto the fingers under its ends: then each hand's pull
+        out from under its end, against the skin's friction on the plate above and the board below (DRAW_S): drawn
+        out by the arm's tracking alone, the fingers stayed under it, and drew it back toward the operator 32 mm."""
         e = self.carry.get(side)
-        if e is None or not (e["t0"] <= t < self.held_to[side]):
+        if e is None:
             return None
-        return np.array([0.0, 0.0, self.place.mass_kg / 2 * 9.81])
+        if e["t0"] <= t < self.held_to[side]:
+            return np.array([0.0, 0.0, self.place.mass_kg / 2 * 9.81])
+        if self.table.get("under") and self.held_to[side] <= t < self.held_to[side] + DRAW_S:
+            out = 1.0 if side == "R" else -1.0                    # past its end, away from the plate's middle
+            fade = 1.0 - (t - self.held_to[side]) / DRAW_S        # less as the fingers come out from under it
+            return np.array([out * 2 * SKIN_FRICTION * self.place.mass_kg / 2 * 9.81 * fade, 0.0, 0.0])
+        return None
 
     def enclose(self, t: float) -> None:
         super().enclose(t)
         self.weld_stiffly()
+
+    def hold_apart(self, body: int, mode: int) -> None:
+        """The runner's; but a plate whose ends are held from underneath (take.json table "under") touches the hands
+        again as they let go, so it rests on the fingers under its ends and slips off them onto the board as they are
+        drawn out: kept apart while they let go, it fell through them (9.5 mm of skin in it)."""
+        if mode == 2 and self.table.get("under"):
+            mode = 0
+        super().hold_apart(body, mode)
 
     def touching(self, side: str) -> bool:
         """While the plate is carried the eye steers it whatever the hand brushes (the runner pauses the steering

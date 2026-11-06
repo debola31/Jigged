@@ -2,8 +2,8 @@
 the plate <shift> and clamp it again"; moonshot/planning/takes.py PLATE_TAKES's shift-plate), planned for both hands
 on one trunk from the doorway: the right hand takes the wrench off the plate and breaks each nut loose, a little
 (moonshot/motion/plate_wrench.py, the user's decision of 2026-11-05: the wrench does it all), and lays it back on the
-plate; both hands take the plate by its ends (moonshot/motion/plate_load.py's grips) and slide it along the
-spoilboard to the setup's place, under the clamps' noses, the arms bearing its weight so it slides lightly, and let
+plate; both hands take the plate by its ends' faces at their middles (moonshot/motion/plate_load.py's grips) and slide
+it along the spoilboard to the setup's place, under the clamps' noses, pulling against its drag on the board, and let
 it go; then the right hand snugs each nut again, the wrench where the plate has carried it.
 
     python -m moonshot.motion.plate_shift ll-1005337 op20     # plans <data root>/takes/ll-1005337-op20-shift-plate
@@ -26,6 +26,7 @@ from moonshot.motion.step_take import StepTake
 from moonshot.planning.takes import PLATE_TAKES, plate_take
 from moonshot.planning.validate import load_plan
 from moonshot.world import spoilboard as SB
+from moonshot.world import wrench as WR
 
 TAKES = data_root() / "takes"
 LOOSE_MM = 0.5               # each nut run up this far: the clamps' bite off the plate, so it slides under their noses
@@ -49,13 +50,14 @@ class PlateShift(StepTake):
         self.clamps = plates.clamps(part, setup)
         self.ends = PL.END_GRIP[part]
         self.land = self.plate0.centre.copy()         # its grips where it lies (PlateLoad.grip_spec's own)
+        self.ends_back = 0.0                           # by its ends' faces at their middles (plate_lift_off.py)
         super().__init__(out or TAKES / plate_take(part, setup, PLATE_TAKES["shift"]), PC.LUMBAR, verbose)
         b = self.plate.bottom
         self.boxes = [(np.r_[SB.TABLE_MID, (SB.TABLE_Z + b) / 2 - 30.0],
                        np.r_[SB.SPOILBOARD_MM[:2] / 2, (b - SB.TABLE_Z) / 2 + 30.0] + 10.0)]
-        specs = {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R"),
-                 "plate_L": self.grip_spec("plate", "L")}
+        specs = {"wrench_R": self.grip_spec("wrench", ""), "plate_R": self.grip_spec("plate", "R")}
         self.solve_grips(specs, source=self.grip_spec, depends=(PC, PW, PL, SB))
+        PL.mirror_grip(self, "plate_R", "plate_L")            # the left's hold on the plate the right's mirrored
 
     def grip_spec(self, kind: str, side: str) -> dict:
         """The right hand's pinch on the wrench's handle where it lies, or a hand's hold on the plate where it lies."""
@@ -82,6 +84,9 @@ class PlateShift(StepTake):
 
         def at(tt, a=a, b=b, t0=t_load + SP.LIFT_DELAY_S):
             return a + (b - a) * min_jerk((tt - t0) / SLIDE_S)
+        # slid on the board, its weight on it: the hands pull against its drag, not bearing its weight (borne, by its
+        # ends' faces, the wrists were overloaded: plate_load.py)
+        drag = SB.MDF_FRICTION * (self.plate.mass_kg + WR.kg()) * 9.81
         for s in ("R", "L"):
             g = f"plate_{s}"
             q = self.grips[g]["q"]
@@ -90,9 +95,9 @@ class PlateShift(StepTake):
             self.effort(s, t_c + 0.2, 0.5, g)
             self.effort(s, t_end + 0.3, 0.5, g)
             self.effort(s, t_end + 0.5, 0.0, None)
-            self.load(s, t_load, t_end + 0.3, self.plate.mass_kg / 2)
+            self.load(s, t_load, t_end + 0.3, drag / 2 / 9.81)
             self.event("grip", t_c - 0.1, t_end + 0.55, side=s, grip=g, on="blank")
-            self.event("carry", t_load, t_end + 0.3, side=s, obj="blank")
+            self.event("carry", t_load, t_end + 0.3, side=s, obj="blank", drag_N=drag / 2)
             self.fingers(s, t_end + 0.55, q)
             self.fingers(s, t_end + 0.9, open_like(self.hand, q, 0.4))
             H1, W1 = self.grip_pose(g, b)

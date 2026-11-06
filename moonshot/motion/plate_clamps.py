@@ -23,8 +23,11 @@ from moonshot.motion.setup_take import plane
 from moonshot.motion.step_take import StepTake
 from moonshot.world import spoilboard as SB
 
-LUMBAR = np.array([-381.0, -980.0, 955.0])   # in the doorway, square to the table's middle: either hand reaches its
-                                             # end's clamps (planner, 2026-11-04)
+LUMBAR = np.array([-381.0, -920.0, 955.0])   # in the doorway, square to the table's middle: either hand reaches its
+                                             # end's clamps (planner, 2026-11-04); 60 mm nearer than at first, as the
+                                             # load's was tried: swinging the wrench on a far nut from 60 mm further
+                                             # back, the elbow straightened to 3 deg and the arm fell 50-70 mm behind
+                                             # the handle, the box end tipped 26 deg off the nut
 GRAB_MM = -36.0              # the pinch's middle this far along the strap from its middle (toward the heel): behind
                              # the stud, clear of the nut's flange both parked and clamped
 DEPTH_MM = (3.0, 7.0)        # the pads this far down the strap's sides from its top, well above what it rests on

@@ -1,7 +1,8 @@
 """The physics of setting step clamps on their studs and turning their nuts with the wrench (moonshot/motion/
 plate_clamps.py and plate_wrench.py; the Clamp it down step, moonshot/motion/plate_seat.py): the VF-2 cell set up for
 the plate (moonshot/world/spoilboard.py), its doors open, the plate on the spoilboard, each clamp a take moves a free
-body on its stud, its nut on its thread (clamp_thread_<i>), and the wrench lying on the plate. The pinch holds a
+body on its stud, its nut on its thread (clamp_thread_<i>), and the ratcheting wrench lying on the plate, its ring on
+the ratchet's hinge in its head, the pawl the hinge's limit (pawl, moonshot/world/wrench.py). The pinch holds a
 clamp, or the wrench, by a declared soft constraint while it is carried (carry_<clamp>, carry_wrench, as the
 parallels' and the stop's, sim/set_parallels.py FirmGrip); the eye steers it along its planned path, turns the
 wrench's box end onto a nut's flats where they really are, and the physics decides where a clamp lands and how far a
@@ -33,6 +34,7 @@ TAKES = data_root() / "takes"
 DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
 WRENCH_PUSH_MM = 2.0         # the eye pushes the wrench's box end down onto a nut by at most this much error
+WRENCH_TURN_SCALE = 0.02     # the wrench's weld's turn against its place while the hand strokes it (MuJoCo's torquescale)
 
 
 class PlateClamps(FirmGrip, TakeRunner):
@@ -83,7 +85,13 @@ class PlateClamps(FirmGrip, TakeRunner):
             d.qpos[self.ctl.q[k]] = DOORS_OPEN_MM * 0.001
 
     def glbs(self):
-        return glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        """The machine's links, and the wrench's body and ring from its model (moonshot/library/generators.py
+        ratchet_wrench, its parts in the wrench's own frame), stored Y up: the turn to Z up in each in_body."""
+        out = glbs_in_bodies(self.model, "vf2", vf2.render_links())
+        if self.wrench:
+            for body, part in (("wrench", "ratchet_wrench"), ("wrench_ring", "ratchet_wrench_ring")):
+                out[body] = [{"path": f"{WR.LINKS}/{part}.glb", "in_body": WR.Y_UP_IN_BODY, "link": part}]
+        return out
 
     def carry_of(self, grip_event: dict) -> dict:
         return next(e for e in self.carries if e["obj"] == grip_event["on"] and e["side"] == grip_event["side"]
@@ -128,24 +136,91 @@ class PlateClamps(FirmGrip, TakeRunner):
         i = next((i for i in range(len(k) - 1) if k[i][0] <= t < k[i + 1][0]), None)
         return i is not None and not np.allclose(k[i][1], k[i + 1][1], atol=1e-9)
 
+    def working(self, side: str, t: float) -> dict | None:
+        """The side's hand's work on a nut at t, its box end on it, stroking (work_nut), if any."""
+        return next((e for e in self.tk["events"] if e["kind"] == "work_nut" and e["side"] == side
+                     and e["t0"] <= t < e["t1"]), None)
+
     def stroking(self, side: str, t: float) -> bool:
-        """Is the side's hand swinging the wrench's handle with its box end on a nut (a stroke, turn_nut)?"""
-        return any(e["kind"] == "turn_nut" and e["side"] == side and e["t0"] <= t < e["t1"] for e in self.tk["events"])
+        """Is the side's hand swinging the wrench's handle, or swinging it back, its box end on a nut?"""
+        return self.working(side, t) is not None
+
+    def ratchet_q(self) -> float:
+        m, d = self.model, self.data
+        return float(d.qpos[m.jnt_qposadr[m.joint("wrench_ratchet").id]])
 
     def onto_flats(self, R: np.ndarray, p: np.ndarray) -> np.ndarray:
         """The turn about z that brings the wrench's planned box end (frame R, middle p mm) square on the flats of the
-        nut it is over, as the nut stands now: its walls face in at 30 + 60k deg from its yaw, the nut's flats out at
-        30 + 60k deg from its turn (moonshot/world/wrench.py boxes, spoilboard._nut_geoms); none away from a nut."""
+        nut it is over, as the nut stands now: the ratchet ring's flats face in at 30 + 60k deg from its yaw (the head's
+        and the ratchet's), the nut's out at 30 + 60k deg from its turn (moonshot/world/wrench.py ring_boxes,
+        spoilboard._nut_geoms); none away from a nut."""
         m, d = self.model, self.data
         c = self.nut_under(p)
         if c is None:
             return np.eye(3)
         turn = float(d.qpos[m.jnt_qposadr[m.joint(f"{c.name}_nut_turn").id]])
-        off = (turn - math.atan2(R[1, 0], R[0, 0]) + math.pi / 6) % (math.pi / 3) - math.pi / 6
+        ring = math.atan2(R[1, 0], R[0, 0]) + self.ratchet_q()
+        off = (turn - ring + math.pi / 6) % (math.pi / 3) - math.pi / 6
         return Rotation.from_rotvec([0.0, 0.0, off]).as_matrix()
+
+    def pawl(self, t: float) -> None:
+        """The ratchet's pawl: the ring's hinge in the head limited, while the box end works a nut, on the side it
+        drives, at where the ring last stood that way (tightening, the head turning clockwise from above, the ring
+        held from turning back in it, ratchet_q no higher; loosening, no lower), and free the other way, so the handle
+        swung back leaves the ring on the nut; off a nut, the ring held where it stands in the head."""
+        m = self.model
+        j = m.joint("wrench_ratchet").id
+        q = self.ratchet_q()
+        e = self.working("R", t)
+        if e is None:
+            if self._pawl is not None or self._lock is None:      # held where it stood as the box end came off
+                self._lock = q
+            self._pawl = None
+            m.jnt_range[j] = [self._lock - 1e-5, self._lock + 1e-5]
+            return
+        if self._pawl is None:
+            self._pawl = q
+        if e["direction"] == "tighten":
+            self._pawl = min(self._pawl, q)
+            m.jnt_range[j] = [-1e3, self._pawl]
+        else:
+            self._pawl = max(self._pawl, q)
+            m.jnt_range[j] = [self._pawl, 1e3]
+
+    def enclose(self, t: float) -> None:
+        """FirmGrip's, and while the hand works the wrench on a nut its weld holds the handle at the pinch, turning
+        freely in it (WRENCH_TURN_SCALE), as a wrench's handle turns in the fist: the box end on the nut, the nut and
+        the hand say how it stands. Held stiffly in turn through a stroke, the arm, a little behind its arc about the
+        stud, turned the hand off it and tipped the box end 20-30 deg up off the nut."""
+        super().enclose(t)
+        if not self.wrench:
+            return
+        m, d = self.model, self.data
+        eq = m.equality(self.eq_name("wrench_R")).id
+        if not d.eq_active[eq]:
+            self._stroke_anchor = None
+            return
+        stroking = self.stroking("R", t)
+        if stroking and self._stroke_anchor is None:
+            from moonshot.motion import plate_wrench as PW
+            hb, wb = m.body("R_hand").id, m.body("wrench").id
+            pinch = d.xpos[wb] + d.xmat[wb].reshape(3, 3) @ PW.grab_at() * 0.001
+            # the weld's point (MuJoCo's eq_data: 0:3 in the hand, body2; 3:6 the same point in the wrench, body1)
+            # moved from the hand's origin to the pinch, where they are now
+            self._stroke_anchor = m.eq_data[eq, 3:6].copy()
+            m.eq_data[eq, 0:3] = d.xmat[hb].reshape(3, 3).T @ (pinch - d.xpos[hb])
+            m.eq_data[eq, 3:6] = PW.grab_at() * 0.001
+            m.eq_data[eq, 10] = WRENCH_TURN_SCALE
+        elif not stroking and self._stroke_anchor is not None:
+            m.eq_data[eq, 0:3] = 0.0
+            m.eq_data[eq, 3:6] = self._stroke_anchor
+            m.eq_data[eq, 10] = self.TORQUESCALE
+            self._stroke_anchor = None
 
     def firm_setup(self) -> None:
         super().firm_setup()
+        self._stroke_anchor = None
+        self._pawl = self._lock = None
         self._speed = {s: np.linalg.norm(np.gradient(self.rd[f"{s}_W"], 1.0 / self.fps, axis=0), axis=1)
                        for s in ("R", "L")}
 
@@ -168,7 +243,7 @@ class PlateClamps(FirmGrip, TakeRunner):
 
     def before_step(self, t: float) -> None:
         """FirmGrip's: each gripping hand keeps its grip's shape from as the carry closes until off the strap, here
-        for either hand (FirmGrip's is the right's alone); then the machine's control."""
+        for either hand (FirmGrip's is the right's alone); the wrench's pawl (pawl); then the machine's control."""
         from moonshot.sim.set_parallels import COUPLE_EASE_S, COUPLE_HOLD_S, COUPLE_OFF_S
         from moonshot.motion.primitives import min_jerk
         m = self.model
@@ -187,6 +262,8 @@ class PlateClamps(FirmGrip, TakeRunner):
                 eq = m.equality(f"couple_{side}_{cp.follower}").id
                 m.eq_data[eq, 0] = math.radians(cp.k * jl.rest + c - jf.rest)
                 m.eq_data[eq, 1] = cp.k
+        if self.wrench:
+            self.pawl(t)
         self.ctl.apply()
 
     def hand_force(self, side, t):

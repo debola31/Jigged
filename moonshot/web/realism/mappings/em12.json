@@ -1,0 +1,64 @@
+{
+ "asset": "em12",
+ "about": "Helical H45AL 3-flute square end mill for aluminium, 1/2 x 1 x 3 in (#03452), modelled from scratch (no vendor CAD): a ground cross-section (cutting edge, margin, eccentric relief, the gullet) swept along the 45 deg helix, run out into the shank along the wheel's arc, the end dished with clearance facets; standing tip down as its placeholder does. Sources: Helical Solutions #03452 (H45AL-SR-30500) product page and images, helicaltool.com: 1/2 in, 3 flutes, 45 deg helix, 1 in LOC, 3 in OAL, ZPLUS; the images show ZPLUS gold over the flutes and a band past their runout, the shank bare ground carbide with a chamfered end. ",
+ "reviewed": "2026-11-05: draft; flutes, runout and coating band checked against Helical's product images",
+ "source": {
+  "path": "realism/sources/em12/em12.glb"
+ },
+ "fallback": "em12_carbide",
+ "cad": {
+  "*": {
+   "zplus": "em12_zplus",
+   "zplus_land": "em12_zplus_land",
+   "carbide": "em12_carbide"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "em12_zplus": {
+   "family": "ground",
+   "color": [
+    0.74,
+    0.57,
+    0.27
+   ],
+   "rough": 0.16,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.3,
+   "about": "ZPLUS (Helical's pale-gold PVD coat) over the polished flutes"
+  },
+  "em12_zplus_land": {
+   "family": "ground",
+   "color": [
+    0.7,
+    0.54,
+    0.25
+   ],
+   "rough": 0.26,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.5,
+   "about": "ZPLUS over the ground lands, the end and the coated band past the runout"
+  },
+  "em12_carbide": {
+   "family": "ground",
+   "color": [
+    0.44,
+    0.45,
+    0.47
+   ],
+   "rough": 0.27,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.5,
+   "about": "bare cylindrical-ground tungsten carbide shank: greyer and darker than steel"
+  }
+ },
+ "unsure": [
+  {
+   "what": "tip down, as the placeholder stands (the Helical STEP's frame): a crib would usually stand it shank down; kept, since the frame is the placeholder's"
+  }
+ ],
+ "atlas": 512
+}

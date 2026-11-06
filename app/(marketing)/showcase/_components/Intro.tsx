@@ -5,27 +5,20 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
 import IconButton from '@mui/material/IconButton';
-import List from '@mui/material/List';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemText from '@mui/material/ListItemText';
-import ListSubheader from '@mui/material/ListSubheader';
-import Popover from '@mui/material/Popover';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PrecisionManufacturingOutlinedIcon from '@mui/icons-material/PrecisionManufacturingOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import Section from '@/components/marketing/Section';
-import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
-import type { Catalog } from './catalog';
+import { BRAND_GRADIENT, DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx, gradientButtonSx } from '@/components/marketing/marketingStyles';
 import { PartFacts, shortName } from './glyphs';
 import { PilotDialog, UPLOADS_OPEN, type PickSource } from './PartChoice';
 import { finishedStill, type LivePart } from './showcaseData';
-
-const MENU_BG = 'rgba(17, 20, 57, 0.98)';
 
 const slideSx = {
   flex: '0 0 auto',
@@ -35,6 +28,9 @@ const slideSx = {
   border: '1px solid rgba(255, 255, 255, 0.12)',
   bgcolor: 'rgba(17, 20, 57, 0.7)',
 } as const;
+
+// A card that says what it is rather than showing a part: narrower, centred, no picture.
+const signSx = { ...slideSx, width: { xs: '60%', sm: 230 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5, p: 2.5, textAlign: 'center' } as const;
 
 /** One of our parts: the part itself, then what it is at a glance. The whole slide picks it. */
 function PartSlide({ part, onPick }: { part: LivePart; onPick(): void }) {
@@ -66,28 +62,43 @@ function PartSlide({ part, onPick }: { part: LivePart; onPick(): void }) {
   );
 }
 
-/** The visitor's own part, first and narrower: it has nothing to show yet, and stays shut until uploads open. */
+/** The visitor's own part, first: the site's gradient call to action, shut ("Coming soon") until uploads open. */
 function OwnPart() {
   const [open, setOpen] = useState(false);
   return (
-    <Box component="article" sx={{ ...slideSx, width: { xs: '60%', sm: 230 }, borderStyle: 'dashed', bgcolor: 'transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5, p: 2.5, textAlign: 'center' }}>
-      <UploadFileOutlinedIcon sx={{ fontSize: 44, color: UPLOADS_OPEN ? EYEBROW_COLOR : 'text.secondary' }} />
+    <Box component="article" sx={{ ...signSx, borderStyle: 'dashed', bgcolor: 'transparent' }}>
+      <UploadFileOutlinedIcon sx={{ fontSize: 44, color: EYEBROW_COLOR }} />
       <Typography component="h3" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
         Upload your part
       </Typography>
       <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>A CAD file or drawing.</Typography>
       {UPLOADS_OPEN ? (
         <>
-          <Button variant="outlined" onClick={() => setOpen(true)}>
+          <Button variant="contained" onClick={() => setOpen(true)} sx={gradientButtonSx}>
             Send a part
           </Button>
           <PilotDialog open={open} onClose={() => setOpen(false)} />
         </>
       ) : (
-        <Button variant="outlined" disabled>
+        // In the gradient, as the site's other "Request access" buttons, but not pressable yet.
+        <Button variant="contained" disabled sx={{ ...gradientButtonSx, '&.Mui-disabled': { background: BRAND_GRADIENT, color: 'common.white', opacity: 0.8 } }}>
           Coming soon
         </Button>
       )}
+    </Box>
+  );
+}
+
+/** Where ours begin: a sign, not a part, pointing along the row. */
+function ExamplesSign() {
+  return (
+    <Box component="article" sx={signSx}>
+      <PlayCircleOutlineIcon sx={{ fontSize: 44, color: EYEBROW_COLOR }} />
+      <Typography component="h3" sx={{ fontWeight: 600, fontSize: '1.1rem' }}>
+        Select an example part
+      </Typography>
+      <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>Parts already run through this shop.</Typography>
+      <ArrowForwardIcon aria-hidden sx={{ color: EYEBROW_COLOR }} />
     </Box>
   );
 }
@@ -165,84 +176,33 @@ function Carousel({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** The example shop: its name, and its machines a click away, by area, each opening where it stands in 3D. */
-function ShopName({ cat, onMachine }: { cat: Catalog; onMachine(id: string): void }) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const machines = cat.things.filter((t) => t.category === 'machines');
-  const areas = cat.shop.zones.map((z) => ({ zone: z, machines: machines.filter((m) => m.zone === z.id) })).filter((a) => a.machines.length > 0);
+/** What Jigged does with a part, in one line, above the example shop. */
+export default function Intro() {
   return (
-    <Box component="section" aria-label="The example shop" sx={{ mt: { xs: 4, md: 5 }, textAlign: 'center' }}>
-      <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
-        Example shop
-      </Typography>
-      <Typography component="h2" sx={{ mt: 1, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: { xs: '1.5rem', md: '1.85rem' }, lineHeight: 1.15 }}>
-        {cat.shop.name}
-      </Typography>
-      <Button
-        size="small"
-        startIcon={<PrecisionManufacturingOutlinedIcon />}
-        endIcon={<ExpandMoreIcon />}
-        aria-haspopup="menu"
-        onClick={(e) => setAnchor(e.currentTarget)}
-        sx={{ mt: 1 }}
-      >
-        {machines.length} machines
-      </Button>
-      <Popover
-        open={!!anchor}
-        anchorEl={anchor}
-        onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-        // Short enough to open under the button, not over the shop's name.
-        slotProps={{ paper: { sx: { width: 340, maxHeight: 'min(45vh, 440px)', bgcolor: MENU_BG, colorScheme: 'dark' } } }}
-      >
-        {areas.map((a) => (
-          <List key={a.zone.id} dense disablePadding subheader={<ListSubheader sx={{ bgcolor: MENU_BG, color: 'text.secondary', fontWeight: 600 }}>{a.zone.name}</ListSubheader>}>
-            {a.machines.map((m) => (
-              <ListItemButton
-                key={m.item}
-                onClick={() => {
-                  setAnchor(null);
-                  onMachine(m.item);
-                }}
-              >
-                <ListItemText primary={m.name} />
-              </ListItemButton>
-            ))}
-          </List>
-        ))}
-      </Popover>
-    </Box>
+    <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 4, md: 5 } }}>
+      <Box sx={{ maxWidth: 900, mx: 'auto', textAlign: 'center' }}>
+        <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
+          Research preview
+        </Typography>
+        <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4vw, 3.2rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
+          Upload a part. Get instructions for making it with your machines and tools.
+        </Typography>
+      </Box>
+    </Section>
   );
 }
 
-/**
- * The page's way in: what Jigged does with a part, the example shop it's shown in, then one row
- * across the page: the visitor's own part first, then ours to try.
- */
-export default function Intro({ cat, parts, onPick, onMachine }: { cat: Catalog; parts: LivePart[]; onPick(id: string, source: PickSource): void; onMachine(id: string): void }) {
+/** Under the shop, one row across the page: the visitor's own part, then a sign, then ours to try. */
+export function PartsRow({ parts, onPick }: { parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
   return (
-    <>
-      <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 3, md: 4 } }}>
-        <Box sx={{ maxWidth: 900, mx: 'auto', textAlign: 'center' }}>
-          <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
-            Research preview
-          </Typography>
-          <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4vw, 3.2rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
-            Upload a part. Get instructions for making it with your machines and tools.
-          </Typography>
-        </Box>
-        <ShopName cat={cat} onMachine={onMachine} />
-      </Section>
-      <Box id="showcase-parts" sx={{ pb: { xs: 5, md: 7 } }}>
-        <Carousel label="Your part, or an example">
-          <OwnPart />
-          {parts.map((p) => (
-            <PartSlide key={p.id} part={p} onPick={() => onPick(p.id, 'intro')} />
-          ))}
-        </Carousel>
-      </Box>
-    </>
+    <Box id="showcase-parts" sx={{ py: { xs: 5, md: 6 } }}>
+      <Carousel label="Your part, or an example">
+        <OwnPart />
+        <ExamplesSign />
+        {parts.map((p) => (
+          <PartSlide key={p.id} part={p} onPick={() => onPick(p.id, 'intro')} />
+        ))}
+      </Carousel>
+    </Box>
   );
 }

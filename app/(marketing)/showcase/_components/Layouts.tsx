@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -13,7 +14,7 @@ import ListSubheader from '@mui/material/ListSubheader';
 import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CheckIcon from '@mui/icons-material/Check';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -24,6 +25,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SearchIcon from '@mui/icons-material/Search';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import { DISPLAY_FONT, EYEBROW_COLOR, eyebrowSx } from '@/components/marketing/marketingStyles';
 import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
 import { CARD_BG, DoneContent, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
@@ -119,32 +121,115 @@ export interface ShopProps {
   parts: LivePart[];
   onPick(id: string, source: PickSource): void;
   onGenerated(skipped: boolean): void;
+  /** Brings the whole shop into view. */
+  toShop(): void;
 }
 
-/** What the card shows: the parts to pick, the instructions being made, what you'll need, the step, or the part made. */
+/** What the card shows, once a part is picked: its instructions being made, what you'll need, the step, or the part made. */
 function Sheet({ cat, part, parts, onPick, onGenerated }: ShopProps) {
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
   const step = useShowcase((s) => s.step);
-  if (phase === 'pick') return <PickPrompt />;
+  if (phase === 'pick') return null;
   if (phase === 'generating') return <Generating part={part} cat={cat} onDone={onGenerated} />;
   if (sheet === 'done') return <DoneContent part={part} parts={parts} onPick={onPick} />;
   return sheet === 'step' && step !== null ? <StepContent cat={cat} part={part} index={step} /> : <NeedContent cat={cat} part={part} />;
 }
 
-/** Up to the parts: the carousel is the one place a part is picked. */
+/** Down to the parts, under the shop: the carousel is the one place a part is picked or uploaded. */
 const toTheParts = () => document.getElementById('showcase-parts')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-/** Before a part is picked: a visitor who scrolled straight here is pointed up to the parts. */
-function PickPrompt() {
+/**
+ * Before a part is picked: the shop is clear, and this says where to go next. It sits at the foot
+ * of the window, not of the shop (whose foot starts below the fold), until the parts are in sight.
+ */
+function PartsPill() {
+  const [partsInSight, setPartsInSight] = useState(false);
+  useEffect(() => {
+    const parts = document.getElementById('showcase-parts');
+    if (!parts) return;
+    const seen = new IntersectionObserver(([e]) => setPartsInSight(e.isIntersecting), { threshold: 0.25 });
+    seen.observe(parts);
+    return () => seen.disconnect();
+  }, []);
   return (
-    <Box>
-      <Typography component="h2" sx={{ fontWeight: 600, fontSize: '1.3rem' }}>
-        Try an example part
-      </Typography>
-      <Button variant="contained" startIcon={<ArrowUpwardIcon />} onClick={toTheParts} sx={{ mt: 2 }}>
-        Choose one
-      </Button>
+    <Button
+      variant="contained"
+      size="large"
+      startIcon={<ArrowDownwardIcon />}
+      onClick={toTheParts}
+      tabIndex={partsInSight ? -1 : 0}
+      aria-hidden={partsInSight}
+      sx={{
+        position: 'fixed',
+        left: '50%',
+        bottom: 24,
+        zIndex: 2,
+        transform: 'translateX(-50%)',
+        borderRadius: 999,
+        px: 3,
+        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
+        opacity: partsInSight ? 0 : 1,
+        pointerEvents: partsInSight ? 'none' : 'auto',
+        transition: 'opacity 0.25s',
+      }}
+    >
+      Choose or upload a part
+    </Button>
+  );
+}
+
+/**
+ * The example shop's name and its areas, across the top of the shop view, so they stay in sight
+ * while the view is in use. An area flies the camera there; the one in view is marked.
+ */
+function ShopStrip({ cat, toShop }: { cat: Catalog; toShop(): void }) {
+  const view = useShowcase((s) => s.view);
+  const look = useShowcase((s) => s.look);
+  const machines = cat.things.filter((t) => t.category === 'machines');
+  const areas = cat.shop.zones.map((z) => ({ zone: z, count: machines.filter((m) => m.zone === z.id).length })).filter((a) => a.count > 0);
+  return (
+    <Box
+      component="nav"
+      aria-label="The example shop's areas"
+      sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 3, rowGap: 1, px: 2, py: 1.25, bgcolor: SUBHEADER_BG, borderBottom: '1px solid rgba(255, 255, 255, 0.09)', flexShrink: 0 }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5 }}>
+        <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
+          Example shop
+        </Typography>
+        <Typography component="h2" sx={{ fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: '1.2rem' }}>
+          {cat.shop.name}
+        </Typography>
+      </Box>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        {areas.map(({ zone, count }) => {
+          const here = view.kind === 'zone' && view.where.name === zone.name;
+          return (
+            <Chip
+              key={zone.id}
+              icon={<CategoryIcon category="machines" sx={{ fontSize: 18 }} />}
+              label={
+                <>
+                  {zone.name}
+                  <Box component="span" sx={{ ml: 1, color: 'text.secondary' }}>
+                    {count}
+                  </Box>
+                </>
+              }
+              variant={here ? 'filled' : 'outlined'}
+              color={here ? 'primary' : 'default'}
+              aria-pressed={here}
+              onClick={() => {
+                toShop();
+                const [x0, y0, x1, y1] = zone.rect;
+                look({ kind: 'zone', where: { name: zone.name, x: (x0 + x1) / 2, y: (y0 + y1) / 2 } });
+                posthog.capture('showcase area opened', { zone: zone.id });
+              }}
+            />
+          );
+        })}
+      </Box>
     </Box>
   );
 }
@@ -210,6 +295,7 @@ function FindThings({ cat }: { cat: Catalog }) {
 /** Over the shop, top right: the cards back where they were, find, walk, and back to the whole shop. */
 function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; part: LivePart; onSnapBack?(): void; onWholeShop(): void }) {
   const walking = useShowcase((s) => s.walking);
+  const phase = useShowcase((s) => s.phase);
   const { setWalking } = useShowcase.getState();
   return (
     <Box sx={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 1 }}>
@@ -218,9 +304,12 @@ function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; par
           Put the cards back
         </Button>
       )}
-      <Button size="small" variant="contained" color="inherit" startIcon={<ArrowUpwardIcon />} onClick={toTheParts} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
-        Back to the parts
-      </Button>
+      {/* Before a part, the pill at the bottom says this. */}
+      {phase !== 'pick' && (
+        <Button size="small" variant="contained" color="inherit" startIcon={<ArrowDownwardIcon />} onClick={toTheParts} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
+          The parts
+        </Button>
+      )}
       <FindThings cat={cat} />
       <Button
         size="small"
@@ -379,111 +468,116 @@ export default function ShopLayout(props: ShopProps) {
   }, []);
 
   return (
-    <Box sx={{ position: 'relative', height: '100%' }}>
-      {/* Its own stacking context, so the labels over the shop (z-index 0-20) stay under the cards. */}
-      <Box ref={view} role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-        <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
-      </Box>
-      <ShopButtons
-        cat={cat}
-        part={part}
-        onWholeShop={wholeShop}
-        onSnapBack={
-          stepDrag.moved || itemDrag.moved
-            ? () => {
-                stepDrag.reset();
-                itemDrag.reset();
-              }
-            : undefined
-        }
-      />
-      <WalkStatus />
-      <Box
-        component="aside"
-        ref={card}
-        aria-label="The step"
-        sx={{
-          ...floatSx,
-          top: 16,
-          left: 16,
-          // Folded, just its header, on one line.
-          width: watching ? STEP_CARD : collapsed ? 'max-content' : { md: 380, xl: 420 },
-          '& button': { whiteSpace: 'nowrap' },
-          maxHeight: 'calc(100% - 32px)',
-          display: 'flex',
-          flexDirection: 'column',
-          transform: stepDrag.transform,
-          transition: 'width 0.3s ease',
-        }}
-      >
-        {phase === 'plan' && (
-          <Box
-            {...stepDrag.handle}
-            sx={{ ...stepDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, p: 1.5, pl: 0.75, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
-          >
-            <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
-            <StepPicker part={part} />
-            {sheet === 'step' && (
-              <Button size="small" onClick={showNeed}>
-                What you&apos;ll need
-              </Button>
-            )}
-            <PartMenu parts={parts} current={part.id} onPick={onPick} source="menu" label="Change part" buttonProps={{ startIcon: <SwapHorizIcon /> }} />
-            <Box sx={{ flex: 1 }} />
-            {/* Up here, so stepping on never scrolls away under a long step. */}
-            {sheet === 'step' && step !== null && (
-              <>
-                <IconButton size="small" aria-label="Previous step" disabled={step === 0} onClick={() => openStepTracked(part, step - 1)}>
-                  <ChevronLeftIcon />
-                </IconButton>
-                {last ? (
-                  <Button size="small" variant="contained" endIcon={<CheckIcon />} onClick={showDone}>
-                    Finish
-                  </Button>
-                ) : (
-                  <Button size="small" variant="contained" endIcon={<ChevronRightIcon />} onClick={() => openStepTracked(part, step + 1)}>
-                    Next step
-                  </Button>
-                )}
-              </>
-            )}
-            <IconButton size="small" onClick={() => (collapsed ? setFolded(null) : fold())} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
-              {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
-            </IconButton>
-          </Box>
-        )}
-        {!collapsed && (
-          <Box ref={body} sx={{ p: 2.5, overflowY: 'auto', minHeight: 0 }}>
-            <Sheet {...props} />
-          </Box>
-        )}
-      </Box>
-      {item && (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <ShopStrip cat={cat} toShop={props.toShop} />
+      <Box sx={{ position: 'relative', flex: 1, minHeight: 0 }}>
+        {/* Its own stacking context, so the labels over the shop (z-index 0-20) stay under the cards. */}
+        <Box ref={view} role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+          <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
+        </Box>
+        <ShopButtons
+          cat={cat}
+          part={part}
+          onWholeShop={wholeShop}
+          onSnapBack={
+            stepDrag.moved || itemDrag.moved
+              ? () => {
+                  stepDrag.reset();
+                  itemDrag.reset();
+                }
+              : undefined
+          }
+        />
+        <WalkStatus />
         <Box
           component="aside"
-          aria-label="The thing"
-          sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column', transform: itemDrag.transform }}
+          ref={card}
+          aria-label="The step"
+          sx={{
+            ...floatSx,
+            top: 16,
+            left: 16,
+            // Folded, just its header, on one line.
+            width: watching ? STEP_CARD : collapsed ? 'max-content' : { md: 380, xl: 420 },
+            '& button': { whiteSpace: 'nowrap' },
+            maxHeight: 'calc(100% - 32px)',
+            // Not before a part is picked; kept mounted, so its width is measured from the start.
+            display: phase === 'pick' ? 'none' : 'flex',
+            flexDirection: 'column',
+            transform: stepDrag.transform,
+            transition: 'width 0.3s ease',
+          }}
         >
-          <Box
-            {...itemDrag.handle}
-            sx={{ ...itemDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 0.75, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
-          >
-            <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
-            <CategoryIcon category={thing?.category} sx={{ fontSize: 20, color: 'secondary.main' }} />
-            <Typography sx={{ flex: 1, color: 'secondary.main', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.04em' }}>
-              {thing ? (CATEGORY_LABELS[thing.category] ?? thing.category) : ''}
-            </Typography>
-            <IconButton size="small" onClick={closeItem} aria-label={sheet === 'step' && step !== null ? 'Back to the step' : 'Close'}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-          <Box sx={{ p: 2.5, overflowY: 'auto', minHeight: 0 }}>
-            <ItemContent cat={cat} part={part} id={item} />
-          </Box>
+          {phase === 'plan' && (
+            <Box
+              {...stepDrag.handle}
+              sx={{ ...stepDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, p: 1.5, pl: 0.75, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
+            >
+              <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
+              <StepPicker part={part} />
+              {sheet === 'step' && (
+                <Button size="small" onClick={showNeed}>
+                  What you&apos;ll need
+                </Button>
+              )}
+              <PartMenu parts={parts} current={part.id} onPick={onPick} source="menu" label="Change part" buttonProps={{ startIcon: <SwapHorizIcon /> }} />
+              <Box sx={{ flex: 1 }} />
+              {/* Up here, so stepping on never scrolls away under a long step. */}
+              {sheet === 'step' && step !== null && (
+                <>
+                  <IconButton size="small" aria-label="Previous step" disabled={step === 0} onClick={() => openStepTracked(part, step - 1)}>
+                    <ChevronLeftIcon />
+                  </IconButton>
+                  {last ? (
+                    <Button size="small" variant="contained" endIcon={<CheckIcon />} onClick={showDone}>
+                      Finish
+                    </Button>
+                  ) : (
+                    <Button size="small" variant="contained" endIcon={<ChevronRightIcon />} onClick={() => openStepTracked(part, step + 1)}>
+                      Next step
+                    </Button>
+                  )}
+                </>
+              )}
+              <IconButton size="small" onClick={() => (collapsed ? setFolded(null) : fold())} aria-label={collapsed ? 'Show the card' : 'Fold the card away'}>
+                {collapsed ? <ExpandMoreIcon /> : <ExpandLessIcon />}
+              </IconButton>
+            </Box>
+          )}
+          {!collapsed && (
+            <Box ref={body} sx={{ p: 2.5, overflowY: 'auto', minHeight: 0 }}>
+              <Sheet {...props} />
+            </Box>
+          )}
         </Box>
-      )}
-      <ZoomHint shown={zoomHint} />
-      <Hint cat={cat} />
+        {item && (
+          <Box
+            component="aside"
+            aria-label="The thing"
+            sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column', transform: itemDrag.transform }}
+          >
+            <Box
+              {...itemDrag.handle}
+              sx={{ ...itemDrag.handleSx, display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 0.75, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}
+            >
+              <DragIndicatorIcon aria-hidden sx={{ color: 'text.secondary', fontSize: 20 }} />
+              <CategoryIcon category={thing?.category} sx={{ fontSize: 20, color: 'secondary.main' }} />
+              <Typography sx={{ flex: 1, color: 'secondary.main', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.04em' }}>
+                {thing ? (CATEGORY_LABELS[thing.category] ?? thing.category) : ''}
+              </Typography>
+              <IconButton size="small" onClick={closeItem} aria-label={sheet === 'step' && step !== null ? 'Back to the step' : 'Close'}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            <Box sx={{ p: 2.5, overflowY: 'auto', minHeight: 0 }}>
+              <ItemContent cat={cat} part={part} id={item} />
+            </Box>
+          </Box>
+        )}
+        {phase === 'pick' && <PartsPill />}
+        <ZoomHint shown={zoomHint} />
+        <Hint cat={cat} />
+      </Box>
     </Box>
   );
 }

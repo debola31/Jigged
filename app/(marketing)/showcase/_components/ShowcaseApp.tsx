@@ -7,7 +7,7 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import { DISPLAY_FONT } from '@/components/marketing/marketingStyles';
 import { catalog, type Catalog } from './catalog';
-import Intro from './Intro';
+import Intro, { PartsRow } from './Intro';
 import ShopLayout from './Layouts';
 import type { PickSource } from './PartChoice';
 import { ready, type LivePart, type Showcase } from './showcaseData';
@@ -107,17 +107,12 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
     posthog.capture('showcase part picked', { part: id, source });
   }, []);
   const generated = useCallback(() => useShowcase.setState({ phase: 'plan', sheet: 'need' }), []);
-  // A machine from the example shop's list: down to the shop, where the camera flies to it.
-  const showMachine = useCallback((id: string) => {
-    shop.current?.scrollIntoView({ behavior: 'smooth' });
-    useShowcase.getState().openItem(id);
-    posthog.capture('showcase item opened', { category: 'machines', source: 'intro' });
-  }, []);
+  const toShop = useCallback(() => shop.current?.scrollIntoView({ behavior: 'smooth' }), []);
 
-  const props = { cat, part, parts, onPick: pick, onGenerated: generated };
+  const props = { cat, part, parts, onPick: pick, onGenerated: generated, toShop };
   return (
     <>
-      <Intro cat={cat} parts={parts} onPick={pick} onMachine={showMachine} />
+      <Intro />
       <Box
         component="section"
         ref={shop}
@@ -126,6 +121,7 @@ export default function ShowcaseApp({ data }: { data: Showcase }) {
       >
         {narrow && !anyway ? <PhoneNotice onOpen={() => setAnyway(true)} /> : <ShopLayout {...props} />}
       </Box>
+      <PartsRow parts={parts} onPick={pick} />
     </>
   );
 }

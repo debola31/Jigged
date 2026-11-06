@@ -1,0 +1,34 @@
+{
+ "asset": "drill-2p5",
+ "about": "2.5 mm cobalt HSS jobber (generator model, one solid): a cobalt jobber's usual straw finish, all over.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/drill-2p5_*.png); page check checks/drill-2p5_*_before_after.png",
+ "fallback": "drill-2p5_straw",
+ "materials": {
+  "drill-2p5_straw": {
+   "family": "ground",
+   "color": [
+    0.56,
+    0.43,
+    0.24
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "straw (light oxide) finish on cobalt HSS: pale bronze-gold"
+  }
+ },
+ "cad": {
+  "*": {
+   "DefaultMaterial": "drill-2p5_straw",
+   "none": "drill-2p5_straw"
+  }
+ },
+ "rules": [],
+ "unsure": [
+  {
+   "what": "straw finish assumed: the record says cobalt HSS, finish not given",
+   "picture": "checks/drill-2p5_front_before_after.png"
+  }
+ ]
+}

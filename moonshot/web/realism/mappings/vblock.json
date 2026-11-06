@@ -59,10 +59,7 @@
    "material": "steel_black_oxide"
   }
  ],
- "unsure": [
-  {
-   "what": "the triangle cap (12,000 small): the simplifier stops at its error bound (SIMPLIFY_ERROR small, 0.2% of the radius) at 44,728 triangles, the library mesh is a decimated soup (1.5 mm deflection) that barely simplifies: 34k even at eight times the error bound; lowering the cap does nothing. Needs a per-asset error or cap in pipeline.py or budgets.py, not a mapping change",
-   "picture": "checks/vblock_close_before_after.png"
-  }
- ]
+ "atlas": 512,
+ "download_bytes": 540000,
+ "download_why": "the pair's hard-edged CAD keeps 26k vertices at the 12k-triangle cap (every sharp edge splits them): 451 KB of geometry before any AO; a 512 AO adds 74 KB. A 256 AO would fit the 0.5 MB class at ~1.7 mm a texel, blurring the holes and clamps"
 }

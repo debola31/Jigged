@@ -1,0 +1,35 @@
+{
+ "asset": "para",
+ "about": "A matched pair of 1/8 x 1 x 6 in hardened parallels (McMaster 8642A515), modelled from scratch standing on edge 88.9 mm apart as the placeholder (McMaster's STEP) has them, with its 8 mm holes 2 in either side of centre: precision-ground faces with the lay along the length, edges broken 0.25 mm, the cut ends darker, the size '1.000' and the pair letters 'A' / 'B' laser-etched near one end.",
+ "reviewed": "2026-11-05: draft; holes and spacing measured from the placeholder",
+ "source": {
+  "path": "realism/sources/para/para.glb"
+ },
+ "fallback": "steel_ground",
+ "cad": {
+  "*": {
+   "ground_steel": "steel_ground",
+   "cut_end": "steel_machined",
+   "etch": "para_etch"
+  }
+ },
+ "rules": [],
+ "atlas": 512,
+ "materials": {
+  "para_etch": {
+   "family": "flat",
+   "color": [
+    0.03,
+    0.03,
+    0.032
+   ],
+   "rough": 0.55,
+   "about": "laser etching on ground steel: a dark grey mark"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the etched markings are decals 0.04 mm proud of the face"
+  }
+ ]
+}

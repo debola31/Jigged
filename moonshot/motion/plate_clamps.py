@@ -104,7 +104,9 @@ def grip_spec(take: StepTake, clamp: SB.Clamp, state: str, plate: SB.Plate | Non
     k = PAD_IN_MM
     return dict(obj=grab, side=side_of(clamp), q0=q0, colliders=cols, load=SB.clamp_kg(),
                 targets={"thumb": plane(near, n_near, k, local_bands(top, R, x=(-8, 8), depth=(lo, hi))),
-                         "index": plane(far, -n_near, k, local_bands(top, R, x=(-18, -2), depth=(lo, hi))),
+                         # (the index's band stops 1 mm in from the heel's end: to 18 mm out it reached past it, and
+                         # let go, it swung into the end, 3.6 mm of skin in it)
+                         "index": plane(far, -n_near, k, local_bands(top, R, x=(-13, -2), depth=(lo, hi))),
                          "middle": plane(far, -n_near, k, local_bands(top, R, x=(2, 18), depth=(lo, hi)))},
                 iters=1500, starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
 

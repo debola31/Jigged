@@ -35,6 +35,10 @@ DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
 WRENCH_PUSH_MM = 2.0         # the eye pushes the wrench's box end down onto a nut by at most this much error
 WRENCH_TURN_SCALE = 0.02     # the wrench's weld's turn against its place while the hand strokes it (MuJoCo's torquescale)
+STRAP_TURN_GAIN = 3.0        # a strap's turn off its place, as the eye lines it up on its slot, weighed this many times
+                             # the eye's own (a radian as 100 mm, moonshot/sim/runner.py correction): at its own, a near
+                             # strap's 1.6 deg turn off on its way over the plate's end came out 1.1 deg past it as it
+                             # went down, where its place is 1 deg
 
 
 class PlateClamps(FirmGrip, TakeRunner):
@@ -143,6 +147,8 @@ class PlateClamps(FirmGrip, TakeRunner):
         if held == "wrench":
             hb = m.body(f"{side}_hand").id
             err[:3] += np.cross(turn, d.xpos[hb] - d.xpos[b])         # the hand's move for a turn about the box end
+        else:
+            err[3:] *= STRAP_TURN_GAIN
         if over:
             err[2] = max(err[2], -WRENCH_PUSH_MM * 0.001)
         return err

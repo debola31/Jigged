@@ -58,8 +58,9 @@ EFFORT = 0.8                 # the hand's hold on the handle while it strokes, t
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut
 PINCH_W = 4.0                # the planned pinch kept on the handle's arc while the hand strokes (use), against the pose
-LIFT_DELAY_S = 0.1           # the wrench starts up this long after the carry starts (the parallels' 0.16: it came off
-                             # the plate 267 ms after the load came on, people's 163-265)
+LIFT_DELAY_S = 0.14          # the wrench starts up this long after the carry starts (people's 163-265 ms from the load
+                             # coming on to its coming off the plate: at the parallels' 0.16 the right hand's took 267,
+                             # at 0.1 the left's 133)
 REACH_PEAK = 0.85            # where in its reach for the handle a hand opens widest (people's 71-77%,
                              # person.peak_aperture_reach_frac): from where it hung, at the parallels' 0.76 the right's
                              # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5

@@ -1,0 +1,83 @@
+{
+ "asset": "thread-m4",
+ "about": "Vermont Gage M4x0.7 go/no-go thread plug gauge on a #0 taperlock handle (generator model, parts named): the members ground tool steel, the handle plain aluminium, its ends anodised green (go) and red (no-go).",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/thread-m4_*.png); page check checks/thread-m4_*_before_after.png",
+ "fallback": "thread-m4_tool_steel",
+ "materials": {
+  "thread-m4_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "hardened tool steel, ground bright"
+  },
+  "thread-m4_aluminium": {
+   "family": "mill",
+   "color": [
+    0.8,
+    0.8,
+    0.81
+   ],
+   "rough": 0.38,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.4,
+   "about": "plain turned aluminium"
+  },
+  "thread-m4_anod_green": {
+   "family": "mill",
+   "color": [
+    0.03,
+    0.22,
+    0.06
+   ],
+   "rough": 0.35,
+   "metal": 0.7,
+   "tile_m": 0.05,
+   "normal": 0.4,
+   "about": "green anodised aluminium: the go end"
+  },
+  "thread-m4_anod_red": {
+   "family": "mill",
+   "color": [
+    0.4,
+    0.025,
+    0.025
+   ],
+   "rough": 0.35,
+   "metal": 0.7,
+   "tile_m": 0.05,
+   "normal": 0.4,
+   "about": "red anodised aluminium: the no-go end"
+  }
+ },
+ "cad": {
+  "go": {
+   "DefaultMaterial": "thread-m4_tool_steel",
+   "none": "thread-m4_tool_steel"
+  },
+  "nogo": {
+   "DefaultMaterial": "thread-m4_tool_steel",
+   "none": "thread-m4_tool_steel"
+  },
+  "handle": {
+   "DefaultMaterial": "thread-m4_aluminium",
+   "none": "thread-m4_aluminium"
+  },
+  "go_band": {
+   "DefaultMaterial": "thread-m4_anod_green",
+   "none": "thread-m4_anod_green"
+  },
+  "nogo_band": {
+   "DefaultMaterial": "thread-m4_anod_red",
+   "none": "thread-m4_anod_red"
+  }
+ },
+ "rules": []
+}

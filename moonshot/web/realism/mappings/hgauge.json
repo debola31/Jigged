@@ -1,0 +1,140 @@
+{
+ "asset": "hgauge",
+ "about": "A 12 in digital height gauge on an 18 x 12 x 3 in black granite plate, with the part it is checking, modelled from scratch where the placeholder has each: a cast base (grey enamel over a ground steel sole) with the beam's boss, a stainless beam, a satin slider wrapping it, the display unit (LCD reading 6.5000 in, the scriber's height above the plate; ON/OFF, ZERO and IN/MM keys), the knurled fine-feed wheel and lock knob, a clamped scriber with its carbide tip; the plate lapped on top, honed on its sides, edges radiused; the part a milled aluminium block.",
+ "reviewed": "2026-11-05: draft; layout and sizes checked against the placeholder",
+ "source": {
+  "path": "realism/sources/hgauge/hgauge.glb"
+ },
+ "fallback": "steel_ground",
+ "cad": {
+  "*": {
+   "granite_top": "hgauge_granite_lapped",
+   "granite_side": "hgauge_granite_honed",
+   "enamel_grey": "hgauge_enamel",
+   "sole_ground": "steel_ground",
+   "beam_stainless": "steel_ground",
+   "slider_satin": "hgauge_satin",
+   "display_body": "plastic_black",
+   "lcd": "hgauge_lcd",
+   "lcd_digits": "hgauge_lcd_digits",
+   "keys": "hgauge_keys",
+   "scriber": "steel_ground",
+   "carbide": "hgauge_carbide",
+   "knurl": "steel_machined",
+   "part_alu": "aluminium_brushed",
+   "print_white": "hgauge_print"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "hgauge_granite_lapped": {
+   "family": "plastic",
+   "color": [
+    0.012,
+    0.012,
+    0.013
+   ],
+   "rough": 0.56,
+   "tile_m": 0.3,
+   "normal": 0.2,
+   "about": "black granite, the lapped working face: near-black with a soft sheen"
+  },
+  "hgauge_granite_honed": {
+   "family": "plastic",
+   "color": [
+    0.018,
+    0.018,
+    0.02
+   ],
+   "rough": 0.6,
+   "tile_m": 0.3,
+   "normal": 0.3,
+   "about": "black granite, the honed sides and edges"
+  },
+  "hgauge_enamel": {
+   "family": "paint",
+   "color": [
+    0.16,
+    0.18,
+    0.19
+   ],
+   "rough": 0.42,
+   "tile_m": 0.3,
+   "about": "the gauge base's grey crinkle-free enamel"
+  },
+  "hgauge_satin": {
+   "family": "ground",
+   "color": [
+    0.6,
+    0.61,
+    0.63
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.1,
+   "normal": 0.4,
+   "about": "satin-chromed slider and clamp"
+  },
+  "hgauge_lcd": {
+   "family": "glass",
+   "color": [
+    0.2,
+    0.225,
+    0.19
+   ],
+   "rough": 0.12,
+   "about": "the LCD behind its window: grey-green, glossy"
+  },
+  "hgauge_lcd_digits": {
+   "family": "flat",
+   "color": [
+    0.008,
+    0.01,
+    0.01
+   ],
+   "rough": 0.3,
+   "about": "LCD segments"
+  },
+  "hgauge_keys": {
+   "family": "plastic",
+   "color": [
+    0.1,
+    0.1,
+    0.11
+   ],
+   "rough": 0.55,
+   "about": "rubbery grey keys"
+  },
+  "hgauge_print": {
+   "family": "flat",
+   "color": [
+    0.7,
+    0.7,
+    0.7
+   ],
+   "rough": 0.6,
+   "about": "the keys' white legends"
+  },
+  "hgauge_carbide": {
+   "family": "ground",
+   "color": [
+    0.42,
+    0.43,
+    0.45
+   ],
+   "rough": 0.25,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.4,
+   "about": "the scriber's brazed carbide tip"
+  }
+ },
+ "unsure": [
+  {
+   "what": "generic gauge: no maker named, so the common digital height gauge's form and colours are assumed (grey base, satin slider, dark display)"
+  },
+  {
+   "what": "the granite is black (grade A plates also come pink or grey)"
+  }
+ ]
+}

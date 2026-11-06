@@ -90,6 +90,32 @@ const floorMat = new THREE.MeshStandardMaterial({ color: 0x6c6d6e, roughness: 0.
 const t0 = performance.now();
 const manifest = await (await fetch('models-full/manifest.json')).json().catch(() => ({ assets: {} }));
 let bounds = new THREE.Box3();
+// The swap rule (SPEC.md "Level of detail"): an item's realistic model shows while its bounding sphere covers at
+// least LOD.enter of the view's height, until it falls under LOD.leave (hysteresis, so it doesn't flicker at the
+// edge); the biggest on screen first, within LOD.maxTriangles of realistic triangles in view.
+const LOD = { enter: Number(q.get('enter') || 0.2), leave: Number(q.get('leave') || 0.14), maxTriangles: 1.5e6 };
+const lodItems = [];
+const frustum = new THREE.Frustum(), sphere = new THREE.Sphere(), pv = new THREE.Matrix4();
+function lodUpdate() {
+  if (!lodItems.length) return;
+  camera.updateMatrixWorld();
+  frustum.setFromProjectionMatrix(pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const want = [];
+  for (const it of lodItems) {
+    if (!frustum.intersectsSphere(sphere.set(it.centre, it.radius))) continue;   // off screen: left as it is
+    const share = it.radius / (Math.max(camera.position.distanceTo(it.centre), it.radius) * tanHalf);
+    if (share >= (it.full ? LOD.leave : LOD.enter)) want.push([share, it]);
+    else it.show(false);
+  }
+  want.sort((a, b) => b[0] - a[0]);
+  let used = 0;
+  for (const [, it] of want) {
+    const ok = used + it.tris <= LOD.maxTriangles;
+    it.show(ok);
+    if (ok) used += it.tris;
+  }
+}
 
 if (SCENE === 'asset') {
   const asset = q.get('asset');
@@ -114,21 +140,34 @@ if (SCENE === 'asset') {
   key.target.position.copy(c);
   Object.assign(key.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near: 0.1, far: 8 * r + 10 });
 } else {
-  // the whole shop: every placed item, its full model where the manifest lists one (unless mode=light)
+  // the whole shop: every placed item. mode=light: the light models; full: the realistic one wherever the manifest
+  // lists it; lod: both resident, the realistic one shown only while the item is big enough on screen (SPEC.md)
   const shop = (await (await fetch('shop.json')).json()).shop;
   const loads = new Map();
-  const load = (a) => {
-    const full = MODE === 'full' && manifest.assets[a];
-    if (!loads.has(a)) loads.set(a, gltf.loadAsync(full ? `models-full/${a}.glb` : `models/${a}.glb`));
-    return loads.get(a);
+  const load = (url) => {
+    if (!loads.has(url)) loads.set(url, gltf.loadAsync(url));
+    return loads.get(url);
   };
   await Promise.all(shop.items.map(async (it) => {
-    const g = await load(it.asset);
     const grp = new THREE.Group();
     grp.position.copy(toScene(it.x, it.y, it.z));
     grp.rotation.y = THREE.MathUtils.degToRad(it.rot);
-    grp.add(g.scene.clone(true));
     scene.add(grp);
+    const hasFull = MODE !== 'light' && manifest.assets[it.asset];
+    const light = MODE === 'full' && hasFull ? null : (await load(`models/${it.asset}.glb`)).scene.clone(true);
+    const full = hasFull ? (await load(`models-full/${it.asset}.glb`)).scene.clone(true) : null;
+    if (light) grp.add(light);
+    if (full) grp.add(full);
+    if (MODE === 'lod' && full) {
+      const b = shop.assets[it.asset].bbox;
+      const centre = new THREE.Vector3((b.min[0] + b.max[0]) / 2000, (b.min[2] + b.max[2]) / 2000, -(b.min[1] + b.max[1]) / 2000);
+      grp.updateMatrixWorld(true);
+      const item = { centre: centre.applyMatrix4(grp.matrixWorld), full: false, tris: manifest.assets[it.asset].triangles,
+        radius: Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2000,
+        show(f) { this.full = f; full.visible = f; light.visible = !f; } };
+      item.show(false);
+      lodItems.push(item);
+    }
   }));
   const [w, dd] = shop.building.size;
   // stress: N more copies of every realistic model, spread over the floor, to measure what each million
@@ -136,7 +175,8 @@ if (SCENE === 'asset') {
   const extra = Number(q.get('extra') || 0);
   let k = 0;
   for (const a of Object.keys(manifest.assets)) {
-    const g = await load(a);
+    if (!extra) break;
+    const g = await load(`models-full/${a}.glb`);
     for (let i = 0; i < extra * (manifest.assets[a].items || 1); i++, k++) {
       const c = g.scene.clone(true);
       c.position.set(3 + ((k * 7.3) % (w / 1000 - 6)), 0, -(2 + ((k * 3.7) % (dd / 1000 - 4))));
@@ -147,8 +187,33 @@ if (SCENE === 'asset') {
   floor.rotation.x = -Math.PI / 2; floor.position.set(w / 2000, 0, -dd / 2000); floor.receiveShadow = true;
   scene.add(floor);
   const c = new THREE.Vector3(w / 2000, 0, -dd / 2000);
-  camera.position.copy(c).add(new THREE.Vector3(-w / 1000 * 0.45, w / 1000 * 0.3, w / 1000 * 0.32));
-  camera.lookAt(c);
+  // the page's views: the overview, a zone from the south, a machine from its operator side, the walk's aisle
+  const views = {
+    overview: () => [c.clone().add(new THREE.Vector3(-w / 1000 * 0.45, w / 1000 * 0.3, w / 1000 * 0.32)), c],
+    milling: () => {
+      const [x0, y0, x1, y1] = shop.zones.find((z) => z.id === 'milling').rect;
+      const t = toScene((x0 + x1) / 2, (y0 + y1) / 2, 0);
+      return [t.clone().add(new THREE.Vector3(0, 10, 13)), t];
+    },
+    vf2: () => {
+      const it = shop.items.find((i) => i.item === 'vf2-1');
+      const b = shop.assets.vf2.bbox;
+      const size = [(b.max[0] - b.min[0]) / 1000, (b.max[2] - b.min[2]) / 1000, (b.max[1] - b.min[1]) / 1000];
+      const radius = Math.max(...size) / 2, rot = THREE.MathUtils.degToRad(it.rot);
+      const [fx, fy] = [Math.sin(rot), -Math.cos(rot)];
+      const t = toScene(it.x, it.y, it.z); t.y += size[1] * 0.45;
+      const away = radius * 2.6 + 1.5;
+      return [t.clone().add(new THREE.Vector3(fx * away + away * 0.35, radius * 1.3 + 1.2, -fy * away)), t];
+    },
+    aisle: () => {
+      const [x0, y0, x1, y1] = shop.aisles.reduce((a, b2) => (b2.rect[2] - b2.rect[0] > a.rect[2] - a.rect[0] ? b2 : a)).rect;
+      const y = (y0 + y1) / 2;
+      return [toScene(x0 + 1500, y, 1600), toScene(x0 + 9500, y, 1600)];
+    },
+  };
+  const [eye, target] = (views[VIEW] || views.overview)();
+  camera.position.copy(eye);
+  camera.lookAt(target);
   key.position.copy(c).add(new THREE.Vector3(-10, 30, 15)); key.target.position.copy(c);
   Object.assign(key.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 80 });
 }
@@ -161,7 +226,7 @@ scene.traverse((o) => {
   tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
 });
 const loadMs = performance.now() - t0;
-const render = () => renderer.render(scene, camera);
+const render = () => { lodUpdate(); renderer.render(scene, camera); };
 window.__bench = (n = 60) => {
   const g = renderer.getContext(), px = new Uint8Array(4);
   const sync = () => g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
@@ -180,7 +245,7 @@ renderer.setAnimationLoop(() => {
     const d = renderer.getContext().getExtension('WEBGL_debug_renderer_info');
     window.__stats = { scene: SCENE, mode: MODE, asset: q.get('asset'), view: VIEW, load_ms: Math.round(loadMs),
       triangles: tris, meshes, draw_calls: i.render.calls, textures: i.memory.textures, geometries: i.memory.geometries,
-      shared_tiles: tileCache.size, gpu: d ? renderer.getContext().getParameter(d.UNMASKED_RENDERER_WEBGL) : '' };
+      shared_tiles: tileCache.size, drawn_triangles: i.render.triangles, realistic_items: lodItems.filter((x) => x.full).length, gpu: d ? renderer.getContext().getParameter(d.UNMASKED_RENDERER_WEBGL) : '' };
     hud.textContent = `${SCENE} ${MODE} · ${Math.round(tris / 1000)}k tris · ${i.render.calls} draws · ${Math.round(loadMs)} ms load`;
     window.__ready = true;
   }

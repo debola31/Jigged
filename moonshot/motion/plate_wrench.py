@@ -44,7 +44,9 @@ SNUG = math.radians(12.0)                # the last swing past a nut's run onto 
 LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 1.2, 0.5, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
                                                          # hand took it, past people's 265), over to a nut, held over
                                                          # it while the eye lines the box end up on it, down onto it
-SWING_S, BACK_S, UP_S = 0.5, 0.35, 0.3   # a stroke swung, and back, the ratchet freewheeling; up off the nut after
+SWING_S, BACK_S, UP_S = 0.7, 0.35, 0.3   # a stroke swung, and back, the ratchet freewheeling; up off the nut after
+                                         # (swung in 0.5 s, on a far nut at the arm's reach the hand ran 8-13 deg past
+                                         # each stroke, the nut seated early and the strokes after slipped its thread)
 EFFORT = 0.8                 # the hand's hold on the handle while it strokes, the arm braced with it (0.6 for a clamp)
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut

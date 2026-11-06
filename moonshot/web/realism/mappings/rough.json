@@ -1,0 +1,139 @@
+{
+ "asset": "rough",
+ "about": "A Mitutoyo Surftest SJ-210 roughness tester, modelled from scratch where the placeholder lays it out: the display unit (52.1 x 65.8 x 160 mm) lying screen up, its light-grey upper shell over a dark lower one, the nose chamfered, the backlit colour LCD in a glossy bezel (Ra 0.763 / Rq 0.948 / Rz 4.436 / Rp 2.059 um), the orange accent and the three keys, the ribbed battery lid, the orange logo; the standard drive unit (115 x 23 x 26 mm) on its cable, its detector's skid and stylus resting on a ground reference specimen.",
+ "reviewed": "2026-11-05: draft; checked against Mitutoyo's catalogue page and a dealer's photograph, and the placeholder's layout",
+ "source": {
+  "path": "realism/sources/rough/rough.glb"
+ },
+ "fallback": "plastic_black",
+ "cad": {
+  "*": {
+   "shell_light": "rough_shell_light",
+   "shell_dark": "rough_shell_dark",
+   "bezel": "plastic_black_gloss",
+   "lcd": "rough_lcd",
+   "lcd_ink": "rough_lcd_ink",
+   "lcd_blue": "rough_lcd_blue",
+   "keys": "rough_keys",
+   "orange": "rough_orange",
+   "drive_body": "rough_shell_dark",
+   "drive_nose": "aluminium_brushed",
+   "detector": "steel_bright",
+   "cable": "rubber_black",
+   "specimen": "steel_ground",
+   "specimen_patch": "steel_machined",
+   "print_grey": "rough_print"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "rough_shell_light": {
+   "family": "plastic",
+   "color": [
+    0.6,
+    0.6,
+    0.58
+   ],
+   "rough": 0.42,
+   "tile_m": 0.15,
+   "normal": 0.4,
+   "about": "the display unit's light-grey moulded upper shell"
+  },
+  "rough_shell_dark": {
+   "family": "plastic",
+   "color": [
+    0.035,
+    0.035,
+    0.038
+   ],
+   "rough": 0.48,
+   "tile_m": 0.15,
+   "about": "the dark lower shell and the drive unit's body"
+  },
+  "rough_lcd": {
+   "family": "flat",
+   "color": [
+    0.72,
+    0.76,
+    0.8
+   ],
+   "rough": 0.12,
+   "emissive": [
+    [
+     0.42,
+     0.45,
+     0.5
+    ],
+    1.0
+   ],
+   "about": "the colour LCD, backlit: a white page"
+  },
+  "rough_lcd_ink": {
+   "family": "flat",
+   "color": [
+    0.01,
+    0.012,
+    0.03
+   ],
+   "rough": 0.12,
+   "about": "the readings' dark figures"
+  },
+  "rough_lcd_blue": {
+   "family": "flat",
+   "color": [
+    0.04,
+    0.12,
+    0.45
+   ],
+   "rough": 0.12,
+   "emissive": [
+    [
+     0.02,
+     0.06,
+     0.25
+    ],
+    1.0
+   ],
+   "about": "the LCD's blue labels and bars"
+  },
+  "rough_keys": {
+   "family": "plastic",
+   "color": [
+    0.055,
+    0.055,
+    0.06
+   ],
+   "rough": 0.35,
+   "about": "the three dark grey keys"
+  },
+  "rough_orange": {
+   "family": "flat",
+   "color": [
+    0.8,
+    0.17,
+    0.02
+   ],
+   "rough": 0.45,
+   "about": "Mitutoyo orange: the logo and the accent line"
+  },
+  "rough_print": {
+   "family": "flat",
+   "color": [
+    0.3,
+    0.3,
+    0.31
+   ],
+   "rough": 0.6,
+   "about": "grey legends and the model name"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the LCD is emissive (a backlit page) at strength 1; the page's exposure decides whether it reads lit or glaring"
+  },
+  {
+   "what": "the specimen and the drive unit's height: the detector rests on a 5 mm specimen (the placeholder's is 7.6 mm, which the detector would cut into)"
+  }
+ ]
+}

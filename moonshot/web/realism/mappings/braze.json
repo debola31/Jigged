@@ -1,0 +1,152 @@
+{
+ "asset": "braze",
+ "about": "Torch braze station: a 48 x 30 in welding table (3/8 in hot-rolled plate on a 1.5 in angle frame, 2 in angle-iron legs on foot plates, a lower shelf), a hearth of six 9 x 4 x 2.5 in firebricks in a steel tray with a back wall where carbide-tipped tool shanks are brazed, an oxy-acetylene torch on the plate, its twin red/green hose run over the table's end, looped on the floor and up to two-gauge regulators, and the cylinders strapped to the table frame: acetylene (10 in, maroon) and oxygen (7 in, green), valves, handwheels and shoulder labels. A flux pot, silver braze rod, a striker and a galvanised quench pail. Self-made in Blender (sources/braze/build_braze.py) where the placeholder (planner.placeholders.braze_station) has its boxes.",
+ "reviewed": "2026-11-05: modelled; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/braze/braze.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "braze_frame",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "braze_acet_red": "braze_acet_red",
+   "braze_brass": "braze_brass",
+   "braze_firebrick": "braze_firebrick",
+   "braze_frame": "braze_frame",
+   "braze_hose_green": "braze_hose_green",
+   "braze_hose_red": "braze_hose_red",
+   "braze_oxy_green": "braze_oxy_green",
+   "braze_plate": "braze_plate",
+   "braze_water": "braze_water",
+   "braze_white": "braze_white",
+   "chrome": "chrome",
+   "plastic_black": "plastic_black",
+   "steel_black_oxide": "steel_black_oxide",
+   "steel_bright": "steel_bright",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "braze_plate": {
+   "family": "ground",
+   "color": [
+    0.17,
+    0.165,
+    0.16
+   ],
+   "rough": 0.5,
+   "metal": 0.9,
+   "tile_m": 0.5,
+   "normal": 1.2,
+   "about": "the welding table's hot-rolled plate: mill scale, heat-darkened, wire-brushed"
+  },
+  "braze_frame": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.032,
+    0.035
+   ],
+   "rough": 0.5,
+   "about": "the table's angle-iron frame and legs: black enamel"
+  },
+  "braze_firebrick": {
+   "family": "paint_cast",
+   "color": [
+    0.52,
+    0.4,
+    0.26
+   ],
+   "rough": 0.6,
+   "normal": 1.4,
+   "tile_m": 0.4,
+   "about": "hard firebrick: buff, porous, scorched by the AO's dark where the torch works"
+  },
+  "braze_brass": {
+   "family": "ground",
+   "color": [
+    0.78,
+    0.55,
+    0.24
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.1,
+   "normal": 0.4,
+   "about": "brass: the torch, valves and regulators"
+  },
+  "braze_hose_red": {
+   "family": "rubber",
+   "color": [
+    0.2,
+    0.018,
+    0.014
+   ],
+   "rough": 0.7,
+   "about": "the acetylene (fuel) hose and knobs: red rubber"
+  },
+  "braze_hose_green": {
+   "family": "rubber",
+   "color": [
+    0.018,
+    0.11,
+    0.03
+   ],
+   "rough": 0.7,
+   "about": "the oxygen hose and knob: green rubber"
+  },
+  "braze_acet_red": {
+   "family": "paint",
+   "color": [
+    0.24,
+    0.02,
+    0.016
+   ],
+   "rough": 0.45,
+   "about": "the acetylene cylinder: maroon enamel"
+  },
+  "braze_oxy_green": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.12,
+    0.05
+   ],
+   "rough": 0.45,
+   "about": "the oxygen cylinder: green enamel"
+  },
+  "braze_white": {
+   "family": "paint",
+   "color": [
+    0.66,
+    0.66,
+    0.62
+   ],
+   "rough": 0.5,
+   "about": "cylinder shoulder labels, gauge faces, the flux pot"
+  },
+  "braze_water": {
+   "family": "glass",
+   "color": [
+    0.02,
+    0.025,
+    0.025
+   ],
+   "rough": 0.05,
+   "about": "the quench pail's water"
+  }
+ },
+ "sources_used": [
+  "the record's key specs (48 x 30 in steel bench, oxygen and acetylene cylinders, silver braze with flux) and its placeholder for every part's position",
+  "standard firebrick 9 x 4.5 x 2.5 in; US cylinder practice: oxygen green, acetylene maroon/red, red fuel hose and green oxygen hose (CGA colour code)",
+  "two-gauge oxy-fuel regulators and a brass torch handle (Victor / Harris style) from catalogue photos"
+ ],
+ "unsure": [
+  {
+   "what": "cylinder paint: US suppliers vary (acetylene maroon, red or black; oxygen green); kept the placeholder's red and green"
+  }
+ ]
+}

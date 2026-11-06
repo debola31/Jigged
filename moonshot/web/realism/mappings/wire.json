@@ -5,17 +5,17 @@
  "fallback": "plastic_black",
  "materials": {
   "wire_wire": {
-   "family": "brushed",
+   "family": "flat",
    "color": [
     0.76,
     0.56,
     0.25
    ],
-   "rough": 0.32,
+   "rough": 0.3,
    "metal": 1.0,
-   "tile_m": 0.05,
+   "tile_m": 0.06,
    "normal": 0.35,
-   "about": "hard-brass EDM wire, wound: drawn brass, a fine sheen"
+   "about": "hard-brass EDM wire, wound: drawn brass, an even satin sheen (a tile reads as blotches or crosswise streaks on the winding)"
   }
  },
  "cad": {

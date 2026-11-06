@@ -1,9 +1,8 @@
 {
  "asset": "tsetter",
  "about": "Renishaw OTS optical tool setter (Haas A-5401-2001), one CAD link with 14 materials: black housing, stainless base and battery cap, dark window, white Renishaw/Haas/OTS print, black-oxide screws and stylus.",
- "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 99.9% of the area, and re-winding (normals_make_consistent) would turn 22% inward",
+ "reviewed": "2026-11-05: draft",
  "fallback": "tsetter_black",
- "double_sided": false,
  "cad": {
   "*": {
    "mat_6": "tsetter_black",

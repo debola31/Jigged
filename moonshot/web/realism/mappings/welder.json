@@ -1,9 +1,8 @@
 {
  "asset": "welder",
  "about": "PrimeWeld TIG225X AC/DC TIG welder (McMaster-sourced bumpers, handle, fan guards): nine CAD materials. Dark charcoal powder-coat case, black plastic corner bumpers, handle and knobs with red caps, brass Dinse and gas fittings, chrome fan guards.",
- "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 99.0% of the area, and re-winding (normals_make_consistent) would turn 22% inward",
+ "reviewed": "2026-11-05: draft",
  "fallback": "welder_case",
- "double_sided": false,
  "cad": {
   "*": {
    "mat_5": "welder_case",

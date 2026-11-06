@@ -1,9 +1,8 @@
 {
  "asset": "probe",
  "about": "Renishaw OMP40-2 spindle probe with a 6 mm ruby-ball stylus: stainless body (NAUO1 mat_0), its dark optical window panel (NAUO2 mat_1), the stylus by part and height.",
- "reviewed": "2026-11-05: draft; single-sided, wound as the CAD has it: its winding agrees with the CAD's own normals on 100.0% of the area, and re-winding (normals_make_consistent) would turn 45% inward",
+ "reviewed": "2026-11-05: draft",
  "fallback": "probe_stainless",
- "double_sided": false,
  "cad": {
   "NAUO1": {
    "mat_0": "probe_stainless"

@@ -63,6 +63,6 @@
    "picture": "checks/pgrind_front_before_after.png"
   }
  ],
- "triangles": 115000,
- "triangles_why": "even positions-only, at the largest error bound (1.6% of its radius) the simplifier stops at 111k triangles: the grinding head's dense small parts keep their borders. 2.63 MB, inside the large class's 3 MB"
+ "triangles": 120000,
+ "triangles_why": "the grinding head's dense small parts keep their borders: the simplifier stops near 115k at its largest error bound, 2.6 MB"
 }

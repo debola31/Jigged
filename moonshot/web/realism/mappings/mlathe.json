@@ -1,0 +1,172 @@
+{
+ "asset": "mlathe",
+ "about": "Gap-bed engine lathe (GrabCAD): the CAD's lathe green kept (toned to enamel), the bed's ways ground, rods, handwheels and chuck bright steel, the workpiece brass-coloured as drawn.",
+ "reviewed": "2026-11-05: natural sheet (look/<asset>_natural.png) against the CAD's colours; metal parts by CAD colour, face count and extent",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "mlathe_green",
+   "mat_1": "steel_bright",
+   "mat_2": "mlathe_cad_2",
+   "mat_3": "mlathe_cad_3",
+   "mat_4": "mlathe_cad_4",
+   "mat_5": "paint_light_grey",
+   "mat_6": "mlathe_cad_6",
+   "mat_7": "steel_brushed",
+   "mat_8": "mlathe_cad_8",
+   "mat_9": "steel_machined",
+   "mat_10": "steel_machined",
+   "mat_11": "cast_iron_ground",
+   "mat_12": "paint_dark_grey",
+   "mat_13": "paint_mid_grey",
+   "mat_14": "brass",
+   "mat_15": "brass",
+   "mat_16": "brass",
+   "mat_17": "mlathe_cad_17",
+   "mat_18": "mlathe_cad_18",
+   "mat_19": "mlathe_cad_19",
+   "mat_20": "mlathe_cad_20",
+   "mat_21": "steel_bright",
+   "mat_22": "paint_black",
+   "mat_23": "paint_light_grey",
+   "mat_24": "paint_white",
+   "mat_25": "paint_mid_grey",
+   "mat_26": "mlathe_cad_26",
+   "mat_27": "mlathe_cad_27",
+   "mat_28": "paint_light_grey",
+   "mat_29": "paint_black"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "mlathe_cad_2": {
+   "family": "paint",
+   "color": [
+    0.548,
+    0.035,
+    0.035
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_2 colour [0.64, 0.04, 0.04], toned to an enamel"
+  },
+  "mlathe_cad_3": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.402,
+    0.006
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_3 colour [0.97, 0.65, 0.01], toned to an enamel"
+  },
+  "mlathe_cad_4": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.311,
+    0.012
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_4 colour [0.81, 0.42, 0.02], toned to an enamel"
+  },
+  "mlathe_cad_6": {
+   "family": "paint",
+   "color": [
+    0.259,
+    0.355,
+    0.464
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_6 colour [0.3, 0.42, 0.55], toned to an enamel"
+  },
+  "mlathe_cad_8": {
+   "family": "paint",
+   "color": [
+    0.295,
+    0.32,
+    0.508
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_8 colour [0.35, 0.38, 0.6], toned to an enamel"
+  },
+  "mlathe_cad_17": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.437,
+    0.387
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_17 colour [0.85, 0.62, 0.55], toned to an enamel"
+  },
+  "mlathe_cad_18": {
+   "family": "paint",
+   "color": [
+    0.48,
+    0.143,
+    0.014
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_18 colour [0.56, 0.17, 0.02], toned to an enamel"
+  },
+  "mlathe_cad_19": {
+   "family": "paint",
+   "color": [
+    0.226,
+    0.072,
+    0.009
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_19 colour [0.27, 0.08, 0.01], toned to an enamel"
+  },
+  "mlathe_cad_20": {
+   "family": "paint",
+   "color": [
+    0.299,
+    0.171,
+    0.085
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_20 colour [0.35, 0.2, 0.1], toned to an enamel"
+  },
+  "mlathe_cad_26": {
+   "family": "paint",
+   "color": [
+    0.427,
+    0.271,
+    0.23
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_26 colour [0.5, 0.32, 0.27], toned to an enamel"
+  },
+  "mlathe_cad_27": {
+   "family": "paint",
+   "color": [
+    0.469,
+    0.03,
+    0.017
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_27 colour [0.55, 0.04, 0.02], toned to an enamel"
+  },
+  "mlathe_green": {
+   "family": "paint_cast",
+   "color": [
+    0.035,
+    0.12,
+    0.04
+   ],
+   "rough": 0.42,
+   "normal": 0.5,
+   "about": "machine-tool green enamel over the castings"
+  }
+ },
+ "unsure": [
+  {
+   "what": "mat_11 (71k faces, light grey) taken for the bed's ways and mat_7 for the chip tray; mat_14-16 (amber) for a brass workpiece",
+   "picture": "checks/mlathe_front_before_after.png"
+  }
+ ],
+ "triangles": 95000,
+ "triangles_why": "at the class's 100k it came to 3.0006 MB, a hair over the large class's 3 MB"
+}

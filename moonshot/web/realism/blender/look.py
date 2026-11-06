@@ -94,7 +94,28 @@ def face_colours(values: np.ndarray, colours: list):
 
 legend = {}
 mats = [s.material for s in obj.material_slots]
+
+
+def isolate(attr: str, names: list[str], views: list[str]):
+    """One small picture per value of a face attribute (CAD material, link): it in magenta, the rest grey."""
+    vals = np.empty(len(me.polygons), np.int32)
+    me.attributes[attr].data.foreach_get("value", vals)
+    sc.render.resolution_x, sc.render.resolution_y = 480, 360
+    sh.color_type = "VERTEX"
+    present = sorted(set(vals.tolist()))
+    for v in present:
+        face_colours((vals == v).astype(np.int32), [(0.5, 0.5, 0.5, 1.0), (1.0, 0.0, 0.8, 1.0)])
+        for view in views:
+            look(view)
+            sc.render.filepath = str(OUT / f"iso_{names[v]}_{view}.png")
+            bpy.ops.render.render(write_still=True)
+    legend["iso"] = [names[v] for v in present]
+
+
 for mode in J["modes"]:
+    if mode == "iso":
+        isolate("cad_idx", J["names"]["cads"], J.get("iso_views", ["front", "back"]))
+        continue
     if mode in ("materials", "natural"):
         sh.color_type = "MATERIAL"
         cols = palette(len(mats)) if mode == "materials" else [tuple(J["natural"].get(m.name, (0.5, 0.5, 0.5))[:3]) + (1,)

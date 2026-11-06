@@ -29,20 +29,20 @@ def coefficients(built: dict[str, dict]) -> dict:
 
 
 def frame_model() -> dict | None:
-    """ms per million triangles drawn, fitted on the shop shots with static shadows (as the page draws them)."""
-    p = work_root() / "checks" / "shop.json"
-    if not p.exists():
-        return None
-    pts = [(r["stats"]["triangles"], r["frame_ms"]) for r in json.loads(p.read_text())
-           if r.get("shadow") == "static" and r.get("mode") == "full" and r.get("frame_ms")]
+    """ms per million triangles drawn, fitted on every whole-shop run's shots with static shadows (as the page draws
+    them): the pilot's stress shots and each later run as more models were built."""
+    runs = sorted((work_root() / "checks").glob("shop_*.json"))
+    shots = [r for p in runs for r in json.loads(p.read_text()) if r.get("frame_ms") and r.get("stats")]
+    pts = sorted({(r["stats"]["triangles"], r["frame_ms"]) for r in shots
+                  if r.get("shadow") == "static" and r.get("mode") == "full"})
     if len(pts) < 2:
         return None
     n = len(pts)
     mx, my = sum(x for x, _ in pts) / n, sum(y for _, y in pts) / n
     slope = sum((x - mx) * (y - my) for x, y in pts) / sum((x - mx) ** 2 for x, _ in pts)
-    light = next((r["frame_ms"] for r in json.loads(p.read_text())
-                  if r.get("shadow") == "static" and r.get("mode") == "light"), None)
-    return {"ms_per_mtri": slope * 1e6, "intercept_ms": my - slope * mx, "points": pts, "light_shop_ms": light}
+    light = [r["frame_ms"] for r in shots if r.get("shadow") == "static" and r.get("mode") == "light"]
+    return {"ms_per_mtri": slope * 1e6, "intercept_ms": my - slope * mx, "points": pts,
+            "light_shop_ms": round(sum(light) / len(light), 2) if light else None}
 
 
 def project() -> dict:

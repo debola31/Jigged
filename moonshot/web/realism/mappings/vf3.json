@@ -1,0 +1,170 @@
+{
+ "asset": "vf3",
+ "about": "Haas VF-3SSYT (Haas's file): its CAD greys mapped onto the VF-2's Haas paints, light to Haas white and dark to Haas dark grey; the column-top block Haas red; the pendant's screen dark glass; the default blue-grey parts steel (way covers brushed, the rest machined).",
+ "reviewed": "2026-11-05: natural sheet (look/vf3_natural.png); the VF-2's palette applied to its greys",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "paint_haas_dark",
+   "mat_1": "paint_haas_dark",
+   "mat_2": "paint_haas_dark",
+   "mat_3": "paint_haas_white",
+   "mat_4": "glass_clear",
+   "mat_5": "paint_haas_white",
+   "mat_6": "steel_brushed",
+   "mat_7": "steel_machined",
+   "mat_8": "paint_haas_red",
+   "mat_9": "paint_haas_white",
+   "mat_10": "paint_haas_dark",
+   "mat_11": "glass_clear",
+   "mat_12": "paint_haas_red",
+   "mat_13": "vf3_cad_13",
+   "mat_14": "vf3_cad_14",
+   "mat_15": "steel_machined",
+   "mat_16": "paint_haas_dark",
+   "mat_17": "vf3_cad_17",
+   "mat_18": "paint_haas_white",
+   "mat_19": "paint_haas_white",
+   "mat_20": "vf3_cad_20",
+   "mat_21": "vf3_cad_21",
+   "mat_22": "paint_haas_dark",
+   "mat_23": "paint_haas_white",
+   "mat_24": "paint_haas_white",
+   "mat_25": "screen_lcd",
+   "mat_26": "paint_haas_white",
+   "mat_27": "paint_haas_dark",
+   "mat_28": "vf3_cad_28",
+   "mat_29": "vf3_cad_29",
+   "mat_30": "glass_clear",
+   "mat_31": "paint_haas_white",
+   "mat_32": "vf3_cad_32",
+   "mat_33": "vf3_cad_33",
+   "mat_34": "vf3_cad_34",
+   "mat_35": "paint_haas_white",
+   "mat_36": "vf3_cad_36",
+   "mat_37": "paint_haas_white",
+   "mat_38": "paint_haas_white",
+   "mat_39": "paint_haas_white",
+   "mat_40": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "vf3_cad_13": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.336,
+    0.109
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_13 colour [0.75, 0.42, 0.14], toned to an enamel"
+  },
+  "vf3_cad_14": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.205,
+    0.029
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_14 colour [1, 0.34, 0.05], toned to an enamel"
+  },
+  "vf3_cad_17": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.318,
+    0.031
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_17 colour [0.98, 0.52, 0.05], toned to an enamel"
+  },
+  "vf3_cad_20": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.6,
+    0.047
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_20 colour [1, 1, 0.08], toned to an enamel"
+  },
+  "vf3_cad_21": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.533,
+    0.484
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_21 colour [1, 0.89, 0.81], toned to an enamel"
+  },
+  "vf3_cad_28": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.6,
+    0.13
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_28 colour [1, 1, 0.22], toned to an enamel"
+  },
+  "vf3_cad_29": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.183,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_29 colour [0, 0.22, 0], toned to an enamel"
+  },
+  "vf3_cad_32": {
+   "family": "paint",
+   "color": [
+    0.13,
+    0.13,
+    0.6
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_32 colour [0.22, 0.22, 1], toned to an enamel"
+  },
+  "vf3_cad_33": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.044,
+    0.183
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_33 colour [0, 0.05, 0.22], toned to an enamel"
+  },
+  "vf3_cad_34": {
+   "family": "paint",
+   "color": [
+    0.13,
+    0.6,
+    0.13
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_34 colour [0.22, 1, 0.22], toned to an enamel"
+  },
+  "vf3_cad_36": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.183,
+    0.183
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_36 colour [0, 0.22, 0.22], toned to an enamel"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the CAD's default blue-grey (mat_6, 7, 15, 27, 40) split between way covers, machined parts and the chip conveyor by face count and extent only",
+   "picture": "checks/vf3_front_before_after.png"
+  }
+ ]
+}

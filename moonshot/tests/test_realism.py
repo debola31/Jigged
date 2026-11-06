@@ -9,16 +9,19 @@ import time
 import pytest
 
 from moonshot.config import data_root
-from moonshot.web.export import RECORDS, _json, build, shop_assets
+from moonshot.web.export import RECORDS, _json, asset_record, build, shop_assets
 from moonshot.web.media import GLTF_TRANSFORM
 from moonshot.web.realism import budgets, locks, matlib
 from moonshot.web.realism.paths import HERE
 from moonshot.web.realism.pipeline import MAPPINGS, mapped_assets
 
+ALLOWANCE_MAX = 1.5          # a justified download allowance may exceed its class's cap by half, no more
 RULE_KEYS = {"why", "material", "links", "cads", "from", "inside", "outside", "normal", "toward", "part_inside",
              "part_size", "parts"}
 MAPPING_KEYS = {"asset", "about", "reviewed", "source", "fallback", "cad", "rules", "ops", "smooth_deg", "triangles",
-                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials"}
+                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials",
+                "simplify_error", "simplify_why", "triangles_why", "download_bytes", "download_why", "drop_links",
+                "drop_links_why"}
 
 
 def test_the_material_library_is_consistent():
@@ -57,6 +60,14 @@ def test_every_mapping_names_real_assets_materials_and_rule_keys():
             assert op["op"] == "pane" and op.get("why"), asset
         if mp.get("bbox_tolerance_mm", 10) > 10:
             assert mp.get("bbox_why"), f"{asset}: a looser frame check says why"
+        cls = budgets.budget_class(asset, asset_record(asset)["bbox"])
+        if mp.get("triangles", 0) > budgets.CLASSES[cls]["triangles"]:
+            assert mp.get("triangles_why"), f"{asset}: a cap above its class's says why"
+        if "download_bytes" in mp:
+            assert mp.get("download_why"), f"{asset}: a download allowance says why"
+            assert mp["download_bytes"] <= ALLOWANCE_MAX * budgets.CLASSES[cls]["download_bytes"],                 f"{asset}: an allowance is a modest overage, not a new class"
+        if mp.get("drop_links"):
+            assert mp.get("drop_links_why"), f"{asset}: dropping links says why"
 
 
 def test_the_heroes_are_the_live_parts_stations():
@@ -88,6 +99,20 @@ def test_the_node_tools_are_pinned_as_the_spike_found_them_working():
     assert all(re.fullmatch(r"\d+\.\d+\.\d+(-[\w.]+)?", v) for v in pkg["dependencies"].values()), pkg
     assert pkg["dependencies"]["@gltf-transform/core"] == GLTF_TRANSFORM.rsplit("@", 1)[1]
     assert pkg["overrides"]["sharp"] == "0.35.5"
+
+
+def test_a_black_or_collapsed_ao_bake_fails_its_check(tmp_path, monkeypatch):
+    """edgef's spring shattered into thousands of islands, its pack fell to 0.000 and it baked black: that must
+    fail, and a healthy bake pass."""
+    import numpy as np
+    from PIL import Image
+    from moonshot.web.realism import pipeline
+    monkeypatch.setattr(pipeline, "work_dir", lambda asset: tmp_path / asset)
+    for name, util, img in (("black", 0.0, np.zeros((64, 64))), ("dark", 0.35, np.full((64, 64), 0.1)),
+                            ("healthy", 0.35, np.where(np.arange(64)[None, :] < 24, 0.8, 0.0) * np.ones((64, 1)))):
+        (tmp_path / name).mkdir()
+        Image.fromarray((img * 255).astype(np.uint8)).save(tmp_path / name / "ao.png")
+        assert pipeline.ao_health(name, {"uv1_utilisation": util})["ok"] == (name == "healthy"), name
 
 
 @pytest.fixture

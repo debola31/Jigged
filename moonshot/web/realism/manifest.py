@@ -15,7 +15,7 @@ from moonshot.web.realism.paths import HERE, models_dir, tiles_dir, work_dir
 RANK = {"hero": 0, "near": 1, "other": 2}
 
 
-def entries() -> dict[str, dict]:
+def entries(withheld: dict | None = None) -> dict[str, dict]:
     layout = _json(RECORDS / "layout.json")
     items = shop_items(layout)
     count = Counter(i["asset"] for i in items)
@@ -26,6 +26,9 @@ def entries() -> dict[str, dict]:
         if not rep.exists() or not glb.exists():
             continue
         r = json.loads(rep.read_text())
+        if withheld is not None and r["status"] != "ok":
+            withheld[asset] = r["status"]               # a model that failed its checks keeps the light one
+            continue
         tm = work_dir(asset) / "timings.json"
         out[asset] = {
             "name": asset_record(asset)["name"], "priority": pri[asset], "class": r["class"], "items": count[asset],
@@ -41,7 +44,8 @@ def entries() -> dict[str, dict]:
 
 
 def write() -> Path:
-    assets = entries()
+    withheld: dict[str, str] = {}
+    assets = entries(withheld)
     tiles = json.loads((tiles_dir() / "tiles.json").read_text())
     order = sorted(assets, key=lambda a: (RANK[assets[a]["priority"]], assets[a]["bytes"]))
     for i, a in enumerate(order):
@@ -66,6 +70,7 @@ def write() -> Path:
                  "SPEC.md beside this file. Written by python -m moonshot.web.realism manifest; don't edit.",
         "tiles": {"base": "tiles/", "files": used_files},
         "assets": {a: assets[a] for a in order},
+        "withheld": withheld,
         "totals": totals,
         "budgets": {"shop": budgets.SHOP, "classes": budgets.CLASSES},
     }

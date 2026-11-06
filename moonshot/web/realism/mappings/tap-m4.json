@@ -1,0 +1,28 @@
+{
+ "asset": "tap-m4",
+ "about": "OSG 1980401 M4x0.7 spiral-point tap, HSS with steam oxide (the record): generator model, one solid, all of it blue-black oxide.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/tap-m4_*.png); page check checks/tap-m4_*_before_after.png",
+ "fallback": "tap-m4_steam_oxide",
+ "materials": {
+  "tap-m4_steam_oxide": {
+   "family": "ground",
+   "color": [
+    0.075,
+    0.08,
+    0.095
+   ],
+   "rough": 0.36,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "steam-oxide HSS: blue-black, ground under the oxide"
+  }
+ },
+ "cad": {
+  "*": {
+   "DefaultMaterial": "tap-m4_steam_oxide",
+   "none": "tap-m4_steam_oxide"
+  }
+ },
+ "rules": []
+}

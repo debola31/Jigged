@@ -6,10 +6,11 @@ import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNo
 import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Typography from '@mui/material/Typography';
-import { AgXToneMapping, BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three';
+import { AgXToneMapping, BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3, type Group } from 'three';
 import { toError } from '@/lib/supabaseErrors';
 import { spotBox, toScene, type Catalog, type Vec3 } from './catalog';
-import Room, { roomStatus } from './Room';
+import Realistic, { FINE_POINTER, realisticStatus, type Slot } from './Realistic';
+import Room, { redrawRoom, roomStatus } from './Room';
 import { mediaUrl, type LivePart, type Rect, type ShopItem } from './showcaseData';
 import { useShowcase, type View } from './store';
 import { itemPose, overviewPose, stepPose, walkLegs, zoneCentre, zonePose, type Leg, type Pose } from './views';
@@ -57,18 +58,32 @@ function Model({ url }: { url: string }) {
   return <primitive object={useInstance(url)} />;
 }
 
-function Thing({ cat, spot }: { cat: Catalog; spot: ShopItem }) {
+/**
+ * A placed thing: its light model, and the box it is picked by. It registers its group in `slots`,
+ * where a realistic model can join the light one and swap with it (Realistic.tsx).
+ */
+function Thing({ cat, spot, index, slots }: { cat: Catalog; spot: ShopItem; index: number; slots: Map<number, Slot> }) {
   const hover = useShowcase((s) => s.hover);
   const openItem = useShowcase((s) => s.openItem);
   const { size, centre } = pickBox(cat, spot);
+  const outer = useRef<Group>(null);
+  const light = useRef<Group>(null);
+  useEffect(() => {
+    if (outer.current && light.current) slots.set(index, { spot, outer: outer.current, light: light.current });
+    return () => {
+      slots.delete(index);
+    };
+  }, [slots, index, spot]);
 
   return (
-    <group position={toScene(spot.x, spot.y, spot.z)} rotation-y={deg(spot.rot)} name={spot.item}>
-      <Skip onError={reportModel}>
-        <Suspense fallback={null}>
-          <Model url={mediaUrl(cat.shop.assets[spot.asset].model)} />
-        </Suspense>
-      </Skip>
+    <group ref={outer} position={toScene(spot.x, spot.y, spot.z)} rotation-y={deg(spot.rot)} name={spot.item}>
+      <group ref={light}>
+        <Skip onError={reportModel}>
+          <Suspense fallback={null}>
+            <Model url={mediaUrl(cat.shop.assets[spot.asset].model)} />
+          </Suspense>
+        </Skip>
+      </group>
       <mesh
         position={centre}
         // The room's contact shadows draw it as the thing's footprint; its reflection probe leaves it out.
@@ -586,6 +601,10 @@ function ScreenProbe({ cat }: { cat: Catalog }) {
       settled() {
         return roomStatus.settled;
       },
+      /** How far the realistic models have streamed in, and how many show now. */
+      realistic() {
+        return { ...realisticStatus };
+      },
       /** Put the camera where `camera()` said it was, as a drag would leave it. */
       pose({ position, looking }: { position: Vec3; looking: Vec3 }) {
         const controls = get().controls as CameraControls | null;
@@ -606,6 +625,17 @@ function ScreenProbe({ cat }: { cat: Catalog }) {
         const info = gl.info.render;
         return { ms: (performance.now() - start) / n, calls: info.calls, triangles: info.triangles };
       },
+      /** The GPU's time, in ms, to draw the shadows, contact shadows and probe again and then a frame, as a settled swap does. */
+      redrawMs() {
+        const g = gl.getContext();
+        const px = new Uint8Array(4);
+        g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
+        const start = performance.now();
+        redrawRoom();
+        gl.render(scene, camera);
+        g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
+        return performance.now() - start;
+      },
     };
     return () => {
       delete w.__showcase;
@@ -619,6 +649,10 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
   const sunTarget = useMemo(() => new Object3D(), []);
   const [bw, bd] = cat.shop.building.size;
   const centre = toScene(bw / 2, bd / 2, 0);
+  // Each placed thing's group, by its index, for the realistic models to join. A phone or a touch
+  // screen keeps the light models, even when its visitor opens the shop anyway.
+  const slots = useMemo(() => new Map<number, Slot>(), []);
+  const fine = useMemo(() => window.matchMedia(FINE_POINTER).matches, []);
   return (
     <>
       <color attach="background" args={[HALL]} />
@@ -647,8 +681,9 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
       <Room cat={cat} />
       <Building cat={cat} />
       {cat.shop.items.map((spot, i) => (
-        <Thing key={`${spot.item}#${i}`} cat={cat} spot={spot} />
+        <Thing key={`${spot.item}#${i}`} cat={cat} spot={spot} index={i} slots={slots} />
       ))}
+      {fine && <Realistic cat={cat} slots={slots} />}
       <Highlights cat={cat} part={part} />
       <Labels cat={cat} part={part} />
       <CameraRig cat={cat} part={part} left={left} right={right} />

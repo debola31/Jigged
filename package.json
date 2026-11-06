@@ -15,7 +15,7 @@
     "test:e2e:local": "node e2e/run-stack.mjs",
     "seed": "supabase db reset",
     "gen:db-types": "npx --yes supabase@2.109.0 gen types typescript --local > types/database.ts",
-    "postinstall": "node scripts/copy-scanner-wasm.mjs"
+    "postinstall": "node scripts/copy-scanner-wasm.mjs && node scripts/copy-basis-transcoder.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

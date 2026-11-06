@@ -1,0 +1,28 @@
+{
+ "asset": "ream-1-4",
+ "about": "Cleveland C25513 1/4 in HSS chucking reamer (generator model, one solid): bright ground HSS.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/ream-1-4_*.png); page check checks/ream-1-4_*_before_after.png",
+ "fallback": "ream-1-4_hss",
+ "materials": {
+  "ream-1-4_hss": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.63,
+    0.645
+   ],
+   "rough": 0.22,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "bright-finish HSS, ground flutes and shank"
+  }
+ },
+ "cad": {
+  "*": {
+   "DefaultMaterial": "ream-1-4_hss",
+   "none": "ream-1-4_hss"
+  }
+ },
+ "rules": []
+}

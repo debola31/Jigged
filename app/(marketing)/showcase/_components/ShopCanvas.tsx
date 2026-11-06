@@ -1,22 +1,22 @@
 'use client';
 
-import { CameraControls, Environment, Html, Lightformer, useGLTF, useProgress } from '@react-three/drei';
+import { CameraControls, Html, useGLTF, useProgress } from '@react-three/drei';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Typography from '@mui/material/Typography';
-import { BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three';
+import { AgXToneMapping, BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three';
 import { toError } from '@/lib/supabaseErrors';
 import { spotBox, toScene, type Catalog, type Vec3 } from './catalog';
+import Room, { roomStatus } from './Room';
 import { mediaUrl, type LivePart, type Rect, type ShopItem } from './showcaseData';
-import { useShowcase } from './store';
-import { itemPose, overviewPose, stepPose, walkLegs, WALL_MM, zoneCentre, zonePose, type Leg, type Pose } from './views';
+import { useShowcase, type View } from './store';
+import { itemPose, overviewPose, stepPose, walkLegs, zoneCentre, zonePose, type Leg, type Pose } from './views';
 
 const AMBER = '#D4872A';
 const TEAL = '#2BBCB3';
 const FOV = 40;
-const WALL_M = WALL_MM / 1000;
 // The building's own floor round the shop: dark concrete, gridded every metre and every 5 m, fading
 // into the dark well before the fog, so the shop reads as a cell in a larger hall.
 const HALL = '#16181d';
@@ -71,6 +71,8 @@ function Thing({ cat, spot }: { cat: Catalog; spot: ShopItem }) {
       </Skip>
       <mesh
         position={centre}
+        // The room's contact shadows draw it as the thing's footprint; its reflection probe leaves it out.
+        userData={{ pick: true }}
         onPointerOver={(e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation();
           hover(spot.item);
@@ -128,7 +130,8 @@ function Outline({ cat, id, color }: { cat: Catalog; id: string; color: string }
   return (
     <group position={toScene(spot.x, spot.y, spot.z)} rotation-y={deg(spot.rot)}>
       <lineSegments geometry={geometry} position={box.centre}>
-        <lineBasicMaterial color={color} />
+        {/* The page's own amber and teal, untouched by the tone mapping. */}
+        <lineBasicMaterial color={color} toneMapped={false} />
       </lineSegments>
     </group>
   );
@@ -254,73 +257,33 @@ function rectOnFloor(r: Rect, lift: number): { position: Vec3; size: [number, nu
   return { position: [x, lift, z], size: [(r[2] - r[0]) / 1000, (r[3] - r[1]) / 1000] };
 }
 
+/** What stands in the room: the zones marked on its floor, and the benches, cabinets and carts. */
 function Building({ cat }: { cat: Catalog }) {
-  const { building, zones, aisles } = cat.shop;
-  const [bw, bd] = building.size;
-  const floor = rectOnFloor([0, 0, bw, bd], 0);
-  const t = 0.2;
-  const walls: { position: Vec3; size: Vec3 }[] = [
-    { position: [floor.position[0], WALL_M / 2, t / 2], size: [bw / 1000, WALL_M, t] },
-    { position: [floor.position[0], WALL_M / 2, -bd / 1000 - t / 2], size: [bw / 1000, WALL_M, t] },
-    { position: [-t / 2, WALL_M / 2, floor.position[2]], size: [t, WALL_M, bd / 1000 + 2 * t] },
-    { position: [bw / 1000 + t / 2, WALL_M / 2, floor.position[2]], size: [t, WALL_M, bd / 1000 + 2 * t] },
-  ];
-  const doors = building.doors ?? [];
+  const { building, zones } = cat.shop;
+  const [, bd] = building.size;
   return (
     <group>
-      <mesh rotation-x={-Math.PI / 2} position={floor.position} receiveShadow>
-        <planeGeometry args={floor.size} />
-        <meshStandardMaterial color="#c9c6bf" roughness={0.9} />
-      </mesh>
-      {walls.map((w, i) => (
-        <mesh key={i} position={w.position} castShadow receiveShadow>
-          <boxGeometry args={w.size} />
-          <meshStandardMaterial color="#e4e1da" roughness={0.8} />
-        </mesh>
-      ))}
-      {doors.map((d) => {
-        const r = rectOnFloor(d.rect, 0);
-        return (
-          <mesh key={d.name} position={[r.position[0], WALL_M / 2 + 0.01, r.position[2]]}>
-            <boxGeometry args={[r.size[0] + 0.05, WALL_M + 0.02, r.size[1]]} />
-            <meshStandardMaterial color={AMBER} roughness={0.6} />
-          </mesh>
-        );
-      })}
       {zones.map((z) => {
         const r = rectOnFloor(z.rect, 0.004);
         const labelAt = toScene((z.rect[0] + z.rect[2]) / 2, z.rect[1] < bd / 2 ? z.rect[1] + 600 : z.rect[3] - 600, 0);
         return (
           <group key={z.id}>
-            <mesh rotation-x={-Math.PI / 2} position={r.position} receiveShadow>
+            <mesh rotation-x={-Math.PI / 2} position={r.position} receiveShadow userData={{ flat: true }}>
               <planeGeometry args={r.size} />
-              <meshStandardMaterial color={ZONE_TINT[z.id] ?? '#888888'} transparent opacity={0.13} roughness={1} depthWrite={false} />
+              <meshStandardMaterial
+                color={ZONE_TINT[z.id] ?? '#888888'}
+                transparent
+                opacity={0.13}
+                roughness={1}
+                depthWrite={false}
+                polygonOffset
+                polygonOffsetFactor={-1}
+                polygonOffsetUnits={-1}
+              />
             </mesh>
             <FloorLabel text={z.name} position={labelAt} />
           </group>
         );
-      })}
-      {aisles.flatMap((a) => {
-        // Yellow safety lines along both long edges of each aisle.
-        const horizontal = a.rect[2] - a.rect[0] > a.rect[3] - a.rect[1];
-        const edges: Rect[] = horizontal
-          ? [
-              [a.rect[0], a.rect[1], a.rect[2], a.rect[1] + 80],
-              [a.rect[0], a.rect[3] - 80, a.rect[2], a.rect[3]],
-            ]
-          : [
-              [a.rect[0], a.rect[1], a.rect[0] + 80, a.rect[3]],
-              [a.rect[2] - 80, a.rect[1], a.rect[2], a.rect[3]],
-            ];
-        return edges.map((e, i) => {
-          const r = rectOnFloor(e, 0.006);
-          return (
-            <mesh key={`${a.name}-${i}`} rotation-x={-Math.PI / 2} position={r.position}>
-              <planeGeometry args={r.size} />
-              <meshStandardMaterial color="#e8c22e" roughness={0.7} />
-            </mesh>
-          );
-        });
       })}
       {cat.shop.furniture.map((f) => {
         const [w, d, h] = f.size.map((v) => v / 1000);
@@ -435,9 +398,9 @@ function FloorLabel({ text, position }: { text: string; position: Vec3 }) {
   const h = 0.7;
   const w = (h * texture.image.width) / texture.image.height;
   return (
-    <mesh rotation-x={-Math.PI / 2} position={[position[0], 0.008, position[2]]} renderOrder={1}>
+    <mesh rotation-x={-Math.PI / 2} position={[position[0], 0.008, position[2]]} renderOrder={1} userData={{ flat: true }}>
       <planeGeometry args={[w, h]} />
-      <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} />
+      <meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} polygonOffset polygonOffsetFactor={-2} polygonOffsetUnits={-2} />
     </mesh>
   );
 }
@@ -561,6 +524,9 @@ function CameraRig({ cat, part, left, right }: { cat: Catalog; part: LivePart; l
       if (f.i >= f.legs.length) {
         flight.current = null;
         if (s.walking) s.setWalking(false);
+        // The controls move the camera on their next update: one more frame lands the last pose,
+        // which under reduced motion is the whole move.
+        invalidate();
         return;
       }
     }
@@ -588,37 +554,15 @@ function ViewOffset({ left, right }: { left: number; right: number }) {
   return null;
 }
 
-/** Nothing in the shop moves, so the shadow map is drawn again only when another model arrives. */
-function Shadows() {
-  const get = useThree((s) => s.get);
-  useEffect(() => {
-    const { gl, scene, invalidate } = get();
-    gl.shadowMap.autoUpdate = false;
-    let count = -1;
-    const id = window.setInterval(() => {
-      // Cheap: a count of meshes, checked twice a second while models stream in.
-      let n = 0;
-      scene.traverse((o) => {
-        if (o instanceof Mesh) n += 1;
-      });
-      if (n !== count) {
-        count = n;
-        gl.shadowMap.needsUpdate = true;
-        invalidate();
-      }
-    }, 500);
-    return () => {
-      window.clearInterval(id);
-      gl.shadowMap.autoUpdate = true;
-    };
-  }, [get]);
-  return null;
-}
-
-/** For scripts and tests: where a thing is on screen, so it can be clicked in 3D. */
+/**
+ * For scripts and tests: where a thing is on screen, so it can be clicked in 3D; where the camera
+ * is, and moving it; whether the room has finished dressing; and what a frame costs the GPU.
+ */
 function ScreenProbe({ cat }: { cat: Catalog }) {
   const camera = useThree((s) => s.camera);
   const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const get = useThree((s) => s.get);
   useEffect(() => {
     const w = window as unknown as { __showcase?: unknown };
     w.__showcase = {
@@ -634,11 +578,39 @@ function ScreenProbe({ cat }: { cat: Catalog }) {
       camera() {
         return { position: camera.position.toArray(), looking: camera.getWorldDirection(new Vector3()).toArray() };
       },
+      /** Move the camera as the page does: a zone, a thing, a step or the overview. */
+      look(view: View) {
+        useShowcase.getState().look(view);
+      },
+      /** The room's tiles and HDRI are on and its reflection probe drawn: the shop as it finally looks. */
+      settled() {
+        return roomStatus.settled;
+      },
+      /** Put the camera where `camera()` said it was, as a drag would leave it. */
+      pose({ position, looking }: { position: Vec3; looking: Vec3 }) {
+        const controls = get().controls as CameraControls | null;
+        void controls?.setLookAt(...position, position[0] + looking[0] * 5, position[1] + looking[1] * 5, position[2] + looking[2] * 5, false);
+        get().invalidate();
+      },
+      /** The GPU's time for a frame, in ms: n frames drawn back to back, each finished by reading a pixel back. */
+      frameMs(n = 60) {
+        const g = gl.getContext();
+        const px = new Uint8Array(4);
+        const frame = () => {
+          gl.render(scene, camera);
+          g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
+        };
+        frame();
+        const start = performance.now();
+        for (let i = 0; i < n; i++) frame();
+        const info = gl.info.render;
+        return { ms: (performance.now() - start) / n, calls: info.calls, triangles: info.triangles };
+      },
     };
     return () => {
       delete w.__showcase;
     };
-  }, [cat, camera, gl]);
+  }, [cat, camera, gl, scene, get]);
   return null;
 }
 
@@ -652,10 +624,11 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
       <color attach="background" args={[HALL]} />
       {/* Clear of the shop from as far as the whole-shop view stands. */}
       <fog attach="fog" args={[HALL, 130, 320]} />
-      <hemisphereLight args={['#ffffff', '#b9b2a6', 0.35]} />
+      {/* The high bays, as one key light from above the aisle: the one realtime light, with soft shadows. */}
       <directionalLight
         position={[centre[0] - 18, 40, centre[2] + 22]}
-        intensity={2.4}
+        intensity={3}
+        color="#fff4e6"
         castShadow
         shadow-mapSize={[4096, 4096]}
         shadow-bias={-0.0004}
@@ -670,12 +643,8 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
         target={sunTarget}
       />
       <primitive object={sunTarget} position={centre} />
-      <Environment resolution={128} frames={1} environmentIntensity={0.55}>
-        <Lightformer form="rect" intensity={2} position={[0, 12, 0]} rotation-x={Math.PI / 2} scale={[40, 20, 1]} />
-        <Lightformer form="rect" intensity={1} position={[-20, 6, 10]} rotation-y={Math.PI / 2} scale={[30, 6, 1]} />
-        <Lightformer form="rect" intensity={0.8} position={[20, 6, -10]} rotation-y={-Math.PI / 2} scale={[30, 6, 1]} color="#ffe2c2" />
-      </Environment>
       <Hall centre={centre} />
+      <Room cat={cat} />
       <Building cat={cat} />
       {cat.shop.items.map((spot, i) => (
         <Thing key={`${spot.item}#${i}`} cat={cat} spot={spot} />
@@ -684,7 +653,6 @@ function Scene({ cat, part, left, right }: { cat: Catalog; part: LivePart; left:
       <Labels cat={cat} part={part} />
       <CameraRig cat={cat} part={part} left={left} right={right} />
       <ViewOffset left={left} right={right} />
-      <Shadows />
       <ScreenProbe cat={cat} />
     </>
   );
@@ -717,7 +685,7 @@ export default function ShopCanvas({ cat, part, left = 0, right = 0 }: { cat: Ca
         frameloop="demand"
         dpr={[1, 2]}
         camera={{ fov: FOV, near: 0.05, far: 400, position: overviewPose(cat).position }}
-        gl={{ antialias: true }}
+        gl={{ antialias: true, toneMapping: AgXToneMapping }}
         onPointerMissed={() => useShowcase.getState().hover(null)}
       >
         <Scene cat={cat} part={part} left={left} right={right} />

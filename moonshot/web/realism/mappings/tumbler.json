@@ -1,32 +1,91 @@
 {
  "asset": "tumbler",
- "about": "1.5 cu ft vibratory finisher, self-made placeholder: the bowl in the CAD's blue, the base black, the media and the bowl's inside light grey.",
- "reviewed": "2026-11-06: natural sheet (look/<asset>_natural.png)",
- "fallback": "steel_bright",
+ "about": "Vibratory finisher, self-made in Blender (sources/tumbler/build_tumbler.py) from makers' photos of round-bowl vibratory finishers (CRW Finishing, Raytech and Kramer class, found by image search) and the record (30 in, 1.5 cu ft bowl): the black base drum on its foot ring with the motor's vent slots and the timer box (knob, start and stop), the black rubber skirt over the springs, the blue steel bowl with its rolled rim, the red polyurethane lining up its walls and round the centre column, the blue dome and its hold-down nut, a bed of ceramic triangle media with a few aluminium parts showing, the discharge gate with its lever, and the drain hose. Where the placeholder (planner.placeholders.vibratory_finisher) has its boxes.",
+ "reviewed": "2026-11-06: modelled against maker photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/tumbler/tumbler.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "tumbler_blue",
+ "smooth_deg": 35,
  "cad": {
   "*": {
-   "mat_0": "paint_black",
-   "mat_1": "tumbler_cad_1",
-   "mat_2": "paint_light_grey"
+   "aluminium_brushed": "aluminium_brushed",
+   "plastic_black": "plastic_black",
+   "plastic_green": "plastic_green",
+   "rubber_black": "rubber_black",
+   "steel_ground": "steel_ground",
+   "tumbler_black": "tumbler_black",
+   "tumbler_blue": "tumbler_blue",
+   "tumbler_grey": "tumbler_grey",
+   "tumbler_media": "tumbler_media",
+   "tumbler_red": "tumbler_red"
   }
  },
  "rules": [],
  "materials": {
-  "tumbler_cad_1": {
+  "tumbler_blue": {
    "family": "paint",
    "color": [
-    0.028,
-    0.076,
-    0.224
+    0.02,
+    0.075,
+    0.25
    ],
-   "rough": 0.38,
-   "about": "the CAD's mat_1 colour [0.03, 0.09, 0.26], toned to an enamel"
+   "rough": 0.4,
+   "about": "the finisher's blue steel bowl, centre dome and discharge gate"
+  },
+  "tumbler_red": {
+   "family": "rubber",
+   "color": [
+    0.4,
+    0.025,
+    0.02
+   ],
+   "rough": 0.6,
+   "about": "the bowl's red cast polyurethane lining; the stop button"
+  },
+  "tumbler_black": {
+   "family": "paint",
+   "color": [
+    0.025,
+    0.026,
+    0.028
+   ],
+   "rough": 0.45,
+   "about": "the base drum and its foot ring"
+  },
+  "tumbler_media": {
+   "family": "paint_cast",
+   "color": [
+    0.3,
+    0.27,
+    0.22
+   ],
+   "rough": 0.6,
+   "normal": 1.2,
+   "tile_m": 0.3,
+   "about": "ceramic triangle media: grey-brown, porous"
+  },
+  "tumbler_grey": {
+   "family": "paint",
+   "color": [
+    0.4,
+    0.41,
+    0.42
+   ],
+   "rough": 0.45,
+   "about": "the timer box"
   }
  },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (1.5 cu ft, 30 in bowl, 0.75 hp) and its placeholder's boxes",
+  "makers' photos of round-bowl vibratory finishers (crwfinishing.com, Raytech, Kramer listings) found by image search"
+ ],
  "unsure": [
   {
-   "what": "a self-made placeholder of boxes and cylinders (planner.placeholders): materials and AO only; it needs modelling to look like the machine",
-   "picture": "checks/tumbler_front_before_after.png"
+   "what": "generic: no maker; blue bowl and black base as the placeholder had them, the lining red as on most round bowls"
   }
  ]
 }

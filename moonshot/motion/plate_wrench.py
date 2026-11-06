@@ -152,13 +152,15 @@ def nut_yaw(clamp: SB.Clamp, plate: SB.Plate, direction: str = "tighten", others
     end's own hand (by_hand) pulling it toward the operator. Tightening, clockwise from above: on the right end's from
     pointing back toward the operator and out to the right, on the left end's from pointing in toward the plate's
     middle. Loosening, the other way, on either end from pointing back toward the operator and to the left. Where the
-    handle so swung would meet another clamp's nut (others; sweeps_clear), from a sixth of a turn round: on
+    handle so swung would meet another clamp's nut (others; sweeps_clear), from the next that clears them: on
     nist-ftc-09's ends, three clamps 125 mm apart, the right end's strokes from pointing back toward the operator ran
-    the handle into the next nut nearer the operator, and stopped there, the nut turned half as far. (From pointing
-    back and in on the right end's, the far nut beyond the arm's reach, the strokes didn't turn it; loosening the left
-    end's a sixth of a turn round from its tightening, the strokes pushed the handle away.)"""
+    the handle into the next nut nearer the operator, and stopped there, the nut turned half as far; there, tightening,
+    the hand pushes the handle away from pointing back and in (from pointing out to the right, the hand 310-340 mm right
+    of the stance, the arm fell 27 mm short of the handle and out of people's range). (From pointing back and in on the
+    right end's ll-1005337's far nut, the plate's middle's stance, the strokes didn't turn it; loosening the left end's
+    a sixth of a turn round from its tightening, the strokes pushed the handle away.)"""
     if direction == "tighten":
-        firsts = [-FLATS, 0.0] if clamp.stud[0] > plate.centre[0] else [0.0, -FLATS]
+        firsts = [-FLATS, -2 * FLATS] if clamp.stud[0] > plate.centre[0] else [0.0, -FLATS]
     else:
         firsts = [-2 * FLATS, -3 * FLATS]
     sweep = (STROKE + SNUG + WR.play()) * (-1 if direction == "tighten" else 1)

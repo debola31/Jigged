@@ -1,0 +1,68 @@
+{
+ "asset": "pgrind",
+ "about": "Deckel SO single-lip cutter grinder (GrabCAD): a plain box stand in Deckel grey-green under a detailed grinding head of machined and black-oxide steel; the wheel abrasive grey.",
+ "reviewed": "2026-11-05: natural sheet (look/<asset>_natural.png) against the CAD's colours; metal parts by CAD colour, face count and extent",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "pgrind_green",
+   "mat_1": "paint_dark_grey",
+   "mat_2": "pgrind_wheel",
+   "mat_3": "paint_dark_grey",
+   "mat_4": "paint_mid_grey",
+   "mat_5": "paint_light_grey",
+   "mat_6": "paint_light_grey",
+   "mat_7": "pgrind_cad_7",
+   "mat_8": "steel_black_oxide",
+   "mat_9": "steel_machined",
+   "mat_10": "steel_ground",
+   "mat_11": "paint_white",
+   "mat_12": "brass",
+   "mat_13": "steel_black_oxide",
+   "mat_14": "paint_light_grey",
+   "mat_15": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "pgrind_cad_7": {
+   "family": "paint",
+   "color": [
+    0.012,
+    0.186,
+    0.6
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_7 colour [0.02, 0.31, 1], toned to an enamel"
+  },
+  "pgrind_green": {
+   "family": "paint",
+   "color": [
+    0.11,
+    0.14,
+    0.12
+   ],
+   "rough": 0.42,
+   "about": "Deckel grey-green enamel"
+  },
+  "pgrind_wheel": {
+   "family": "paint_cast",
+   "color": [
+    0.42,
+    0.42,
+    0.4
+   ],
+   "rough": 0.6,
+   "normal": 1.0,
+   "about": "a vitrified grinding wheel: matte, grainy"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the stand is a plain box in the CAD; mat_2 (a white disc) taken for the wheel",
+   "picture": "checks/pgrind_front_before_after.png"
+  }
+ ],
+ "triangles": 120000,
+ "triangles_why": "the grinding head's dense small parts keep their borders: at 1.6% of the radius the simplifier stops at 115k triangles, 2.6 MB, inside the large class's 3 MB"
+}

@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from moonshot.web.realism import locks, manifest, pipeline, projection, review, tiles
+from moonshot.web.realism import draft, locks, manifest, pipeline, projection, review, tiles
 from moonshot.web.realism.paths import work_dir
 
 LOOK_VIEWS = ["front", "back", "left", "right", "top", "low"]
@@ -14,24 +14,32 @@ def look(asset: str, modes: list[str], views: list[str], out_dir=None) -> list:
     d = work_dir(asset) / "look"
     job = pipeline._write_job(asset, "look", {
         "asset": asset, "blend": str(work_dir(asset) / "asset.blend"), "out_dir": str(d), "modes": modes,
-        "views": views, "natural": json.loads((work_dir(asset) / "job_prepare.json").read_text())["colours"],
+        "views": views, "iso_views": views[:2], "natural": json.loads((work_dir(asset) / "job_prepare.json").read_text())["colours"],
         "extra_views": pipeline.mapping(asset).get("views", {}),
         "names": {"links": json.loads((work_dir(asset) / "prepare.json").read_text())["links"],
                   "cads": json.loads((work_dir(asset) / "prepare.json").read_text())["cads"]}})
     with locks.gpu(f"look {asset}"):            # Workbench draws on the GPU
         pipeline._blender(asset, "look.py", job)
     out = out_dir or d
-    return [review.sheet(d, m, views, out / f"{asset}_{m}.png", f"{asset}: {m}") for m in modes]
+    sheets = [review.sheet(d, m, views, out / f"{asset}_{m}.png", f"{asset}: {m}") for m in modes if m != "iso"]
+    if "iso" in modes:
+        mp = pipeline.mapping(asset)
+        legend = json.loads((d / "legend.json").read_text())
+        labels = {c: mp["cad"].get("*", {}).get(c, "") for c in legend["iso"]}
+        sheets.append(review.iso_sheet(d, legend["iso"], views[:2], labels, out / f"{asset}_iso.png",
+                                       f"{asset}: each CAD material alone, and what the mapping makes it"))
+    return sheets
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m moonshot.web.realism")
-    ap.add_argument("command", choices=["tiles", "build", "look", "manifest", "check", "project"])
+    ap.add_argument("command", choices=["tiles", "draft", "build", "look", "manifest", "check", "project"])
     ap.add_argument("assets", nargs="*")
     ap.add_argument("--steps", help="build: comma-separated steps (default all)")
     ap.add_argument("--device", default="OPTIX", help="bake: OPTIX, CUDA or CPU")
     ap.add_argument("--modes", default="materials,natural,parts")
     ap.add_argument("--views", default=",".join(LOOK_VIEWS))
+    ap.add_argument("--fallback", default="paint_mid_grey", help="draft: the material of faces nothing maps")
     a = ap.parse_args()
     if a.command == "tiles":
         tiles.build(set(a.assets) or None)
@@ -43,6 +51,10 @@ def main() -> None:
         for asset in a.assets:
             for p in look(asset, a.modes.split(","), a.views.split(",")):
                 print(p)
+    elif a.command == "draft":
+        for asset in a.assets:
+            draft.draft(asset, a.fallback)
+            print(f"wrote mappings/{asset}.json: review it")
     elif a.command == "check":
         for asset in a.assets or pipeline.mapped_assets():
             print(json.dumps(pipeline.check(asset), indent=1))

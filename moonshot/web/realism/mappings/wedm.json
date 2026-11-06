@@ -1,0 +1,176 @@
+{
+ "asset": "wedm",
+ "about": "Mitsubishi MD+PRO II wire EDM (GrabCAD): the CAD's own scheme kept (light grey body, black work tank with the red stripe); the head's default blue-grey machined steel, the light control box brushed stainless.",
+ "reviewed": "2026-11-05: natural sheet (look/wedm_natural.png) against the CAD's colours",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "paint_light_grey",
+   "mat_1": "steel_machined",
+   "mat_2": "paint_light_grey",
+   "mat_3": "paint_dark_grey",
+   "mat_4": "paint_white",
+   "mat_5": "wedm_cad_5",
+   "mat_6": "paint_black",
+   "mat_7": "paint_white",
+   "mat_8": "glass_clear",
+   "mat_9": "wedm_cad_9",
+   "mat_10": "wedm_cad_10",
+   "mat_11": "paint_white",
+   "mat_12": "wedm_cad_12",
+   "mat_13": "steel_brushed",
+   "mat_14": "wedm_cad_14",
+   "mat_15": "wedm_cad_15",
+   "mat_16": "wedm_cad_16",
+   "mat_17": "wedm_cad_17",
+   "mat_18": "paint_light_grey",
+   "mat_19": "paint_black",
+   "mat_20": "wedm_cad_20",
+   "mat_21": "wedm_cad_21",
+   "mat_22": "wedm_cad_22",
+   "mat_23": "wedm_cad_23",
+   "mat_24": "wedm_cad_24"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "wedm_cad_5": {
+   "family": "paint",
+   "color": [
+    0.448,
+    0.0,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_5 colour [0.53, 0, 0], toned to an enamel"
+  },
+  "wedm_cad_9": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.0,
+    0.6
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_9 colour [0, 0, 1], toned to an enamel"
+  },
+  "wedm_cad_10": {
+   "family": "paint",
+   "color": [
+    0.417,
+    0.089,
+    0.002
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_10 colour [0.49, 0.1, 0.0], toned to an enamel"
+  },
+  "wedm_cad_12": {
+   "family": "paint",
+   "color": [
+    0.183,
+    0.0,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_12 colour [0.22, 0, 0], toned to an enamel"
+  },
+  "wedm_cad_14": {
+   "family": "paint",
+   "color": [
+    0.32,
+    0.193,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_14 colour [0.38, 0.23, 0], toned to an enamel"
+  },
+  "wedm_cad_15": {
+   "family": "paint",
+   "color": [
+    0.183,
+    0.183,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_15 colour [0.22, 0.22, 0], toned to an enamel"
+  },
+  "wedm_cad_16": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.183,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_16 colour [0, 0.22, 0], toned to an enamel"
+  },
+  "wedm_cad_17": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.6,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_17 colour [1, 1, 0], toned to an enamel"
+  },
+  "wedm_cad_20": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.481,
+    0.205
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_20 colour [0.93, 0.75, 0.32], toned to an enamel"
+  },
+  "wedm_cad_21": {
+   "family": "paint",
+   "color": [
+    0.055,
+    0.337,
+    0.074
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_21 colour [0.06, 0.4, 0.09], toned to an enamel"
+  },
+  "wedm_cad_22": {
+   "family": "paint",
+   "color": [
+    0.578,
+    0.536,
+    0.448
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_22 colour [0.68, 0.63, 0.53], toned to an enamel"
+  },
+  "wedm_cad_23": {
+   "family": "paint",
+   "color": [
+    0.374,
+    0.008,
+    0.008
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_23 colour [0.44, 0.01, 0.01], toned to an enamel"
+  },
+  "wedm_cad_24": {
+   "family": "paint",
+   "color": [
+    0.554,
+    0.342,
+    0.013
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_24 colour [0.65, 0.4, 0.02], toned to an enamel"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the work tank's front reads black in the CAD; on the real machine it's a door, often with a window",
+   "picture": "checks/wedm_front_before_after.png"
+  }
+ ],
+ "triangles": 135000,
+ "triangles_why": "its many small CAD primitives keep their borders: at 1.6% of the radius the simplifier stops at 130k triangles, which still fits the large class's 3 MB"
+}

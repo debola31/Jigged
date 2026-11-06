@@ -1,0 +1,76 @@
+{
+ "about": "ANCA TX7 tool and cutter grinder (GrabCAD, 6,160 triangles, no colours): a coarse block model. White enclosure, dark base, a glass front door, a dark control panel; its shape is the limit here, not the materials.",
+ "fallback": "paint_white",
+ "cad": {
+  "*": {
+   "none": "paint_white"
+  }
+ },
+ "rules": [
+  {
+   "why": "the base and lower cabinet (parts 3, 4 below 0.6 m)",
+   "parts": [
+    3,
+    4
+   ],
+   "inside": {
+    "lo": [
+     -9,
+     -9,
+     -1
+    ],
+    "hi": [
+     9,
+     9,
+     0.6
+    ]
+   },
+   "material": "paint_dark_grey"
+  },
+  {
+   "why": "the front door: glass",
+   "parts": [
+    1
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.9
+   },
+   "material": "glass_clear"
+  },
+  {
+   "why": "the control panel",
+   "parts": [
+    2
+   ],
+   "material": "plastic_black"
+  },
+  {
+   "why": "... its screen, facing the operator",
+   "parts": [
+    2
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.9
+   },
+   "material": "screen_lcd"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "a 6,160-triangle block model: materials can't make it detailed; a candidate for better CAD",
+   "picture": "checks/tcgrind_front_before_after.png"
+  }
+ ],
+ "asset": "tcgrind",
+ "reviewed": "2026-11-05: parts sheet (look/<asset>_parts.png) and parts.json boxes; no CAD colours, so by part and region"
+}

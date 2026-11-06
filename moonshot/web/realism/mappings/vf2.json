@@ -1,7 +1,7 @@
 {
  "asset": "vf2",
- "about": "Haas VF-2, ported from the realism spike's mapping.py (worked out from per-link area, bbox and facing stats, reviewed in its Cycles renders). Doors open 0.55 m each, as the spike baked them, so the work zone shows from the aisle.",
- "reviewed": "2026-11-05: spike mapping re-checked on the materials sheet (look/vf2_materials.png)",
+ "about": "Haas VF-2, ported from the realism spike's mapping.py (worked out from per-link area, bbox and facing stats, reviewed in its Cycles renders). Doors shut, as the light model has them, so the swap doesn't visibly open the machine; their panes are fitted.",
+ "reviewed": "2026-11-05: spike mapping re-checked on the materials sheet; doors shut and side panels white (coordinator)",
  "source": {
   "links": [
    "base",
@@ -19,19 +19,7 @@
    "carousel",
    "coolant"
   ],
-  "why_no_spindle": "the head link already holds the spindle's faces (identical counts): both z-fight",
-  "move_mm": {
-   "door_left": [
-    -550,
-    0,
-    0
-   ],
-   "door_right": [
-    550,
-    0,
-    0
-   ]
-  }
+  "why_no_spindle": "the head link already holds the spindle's faces (identical counts): both z-fight"
  },
  "fallback": "paint_haas_dark",
  "cad": {
@@ -244,16 +232,10 @@
    "material": "plastic_black_gloss"
   }
  ],
- "bbox_tolerance_mm": 35,
- "bbox_why": "the left door, slid open 0.55 m, stands 33 mm proud of the record's box (which is the closed machine's)",
  "unsure": [
   {
-   "what": "side_doors mat_21: the CAD colours it glass-teal (0.35, 1.0, 0.72) and the light model shows teal panels standing above the roof at the back corners; the spike (and the step videos' look.py) paint it Haas white. Kept white; if those are side windows, map it to glass_polycarbonate.",
+   "what": "side_doors mat_21: the CAD colours it glass-teal (0.35, 1.0, 0.72) and the light model shows teal panels standing above the roof at the back corners; the spike (and the step videos' look.py) paint it Haas white. Kept white; if those are side windows, map it to glass_polycarbonate. Decided 2026-11-05: white, as in the videos.",
    "picture": "checks/vf2_close_before_after.png"
-  },
-  {
-   "what": "doors open 0.55 m each, as the spike baked them: the work zone shows from the aisle, but the light model's doors are shut, so the swap visibly opens them",
-   "picture": "checks/vf2_front_before_after.png"
   }
  ]
 }

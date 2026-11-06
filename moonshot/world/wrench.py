@@ -31,9 +31,9 @@ HEAD_W = 1.339 * IN                      # the box end's width across its head (
 HEIGHT = 0.441 * IN                      # ... and its thickness: 11.2 mm
 HANDLE_W, HANDLE_T = 17.0, 7.0           # the handle's width and thickness [proposed]: no source gives them
 RING_R = 13.0                            # the ratchet ring's outside radius in the head [proposed]
-AF_IN = NUT_AF + 1.6                     # the ring's inside across flats: 0.8 mm play a flat [proposed], a well used
-                                         # one's: set down by the hand 0.4-1 mm off the nut's middle, at 0.45 the box
-                                         # end sat on its chamfer and the swing tipped it off
+AF_IN = NUT_AF + 0.9                     # the ring's inside across flats: 0.45 mm play a flat [proposed]: the box end
+                                         # set down once on each nut, its chamfer leading it on; each stroke takes the
+                                         # play up again, the ring dragged back through it as the handle swings back
 CHAMFER_MM = 1.5                         # the ring's inside edge on its underside chamfered this far, at 45 deg
                                          # [proposed], as a box end's is: set down a millimetre or two off the nut's
                                          # middle, or turned off its flats, it is led onto them
@@ -43,7 +43,7 @@ STEEL_KG_M3 = 7850.0
 SLAB_MM = 1.0                           # the chamfer's solid's thickness, behind its face
 RATCHET_DAMPING = 0.0005                 # the ring's turn in the head: its damping (N m s / rad) and the pawl's drag
 RATCHET_DRAG_NM = 0.004                  # on its teeth as it freewheels (N m) [proposed]: under the nut's own drag on
-                                         # its stud (spoilboard.NUT_FRICTION_NM, 0.008), so the ring stays on the nut
+                                         # its stud (spoilboard.NUT_FRICTION_NM, 0.05), so the ring stays on the nut
                                          # as the handle swings back
 
 

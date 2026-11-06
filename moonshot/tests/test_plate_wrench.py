@@ -95,7 +95,8 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
         mine = [(a, b, rad) for k, a, b, rad in done if k.name == c.name]
         assert sum(rad for _, _, rad in mine) == pytest.approx(whole)
         assert all(abs(rad) <= PW.STROKE + PW.SNUG + 1e-9 for _, _, rad in mine)
-        assert mine[0][0] == pytest.approx(t_on) and mine[-1][1] == pytest.approx(t_off)
+        # the box end on the nut from its first stroke until the last's swing back (eased off the snug nut)
+        assert mine[0][0] == pytest.approx(t_on) and mine[-1][1] + PW.BACK_S == pytest.approx(t_off)
         on = [(t, R, p) for t, R, p in keys if t_on - 1e-9 <= t <= t_off + 1e-9]
         assert all(np.allclose(p[:2], c.stud) for _, _, p in on)        # the box end on the nut throughout
         start = PW.nut_yaw(c, plate, direction)
@@ -109,7 +110,7 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
             assert pa[2] == pytest.approx(z + SB.FLANGE_T + WR.HEIGHT / 2 + 0.5)       # seated on the nut as it is
             z += SB.LEAD_MM * rad / (2 * math.pi)
             turn = math.atan2(Rb[1, 0], Rb[0, 0]) - math.atan2(Ra[1, 0], Ra[0, 0])
-            swing = rad + (math.copysign(WR.play(), rad) if i == 0 else 0.0)   # the ring's play taken up once
+            swing = rad + math.copysign(WR.play(), rad)                 # the ring's play taken up each stroke
             assert (turn - swing + math.pi) % (2 * math.pi) - math.pi == pytest.approx(0.0, abs=1e-9)
         assert z == pytest.approx(c.nut_z("clamped") - SB.LEAD_MM * PW.SNUG / (2 * math.pi) if direction == "tighten"
                                   else c.nut_z("parked") + SB.LEAD_MM * PW.SNUG / (2 * math.pi))

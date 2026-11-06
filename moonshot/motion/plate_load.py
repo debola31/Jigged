@@ -51,7 +51,8 @@ ENDS_BACK_MM = 30.0
 # ... let go this far over the board: the sheet less high, so it drops less onto the fingers (at 20, 3.8 mm of skin in
 # the sheet for a frame), but high enough that its weight on them doesn't press them into the board (at 16, 4.6 mm);
 # ll-1005337's plate, its ends held from underneath, as high: its fingers under them over the board
-FINGERS_UNDER_PART_MM = {"nist-ftc-09": 18.0, "ll-1005337": 18.0}
+FINGERS_UNDER_PART_MM = {"nist-ftc-09": 18.0, "ll-1005337": 21.0}     # (ll's 7.2 kg on the fingers dipped 2.4 mm
+                                                                       # under where it was held, at 18 onto the board)
 HOLD_ENDS_S = 1.6            # a plate held by its ends held this long where it's let go, the eye lining it up
 START_BACK_MM = 160.0                            # at the take's start the plate is this much nearer than where it lands
 END_GRIP = {"ll-1005337": True, "nist-ftc-09": False}    # held by its ends (a plate), or by its near edge (a sheet)
@@ -67,7 +68,12 @@ ENDS_SKIN_MM = 1.5                               # ... and the rest of the hand 
                                                  # round its end's bottom edge was 3.3 mm into it
 UNDER_IN_MM = (10.0, 35.0)                       # a plate laid down by its ends from underneath: the fingers' pads
                                                  # under its end this far in from it, drawn out past it when let go
-UNDER_FAR_MM = 20.0                              # ... held this far toward the far side of the end's middle: the
+UNDER_OPEN_S = 0.35                              # ... the hand opened this long after it lets go before they're
+                                                 # drawn out (moonshot/sim/plate_load.py pulls them out from then)
+UNDER_LIFT_MM = 2.0                              # ... drawn out a little up, off the board: drawn out on it too,
+                                                 # against the board's friction below them and the plate's above,
+                                                 # the right wrist pulled at 1.33 times its muscles' most
+UNDER_FAR_MM = 40.0                              # ... held this far toward the far side of the end's middle: the
                                                  # hand, lying back along the end toward the operator, drawn out past
                                                  # the end ran into the near parked clamp's stud and nut, and the plate,
                                                  # still on its fingers, went back toward the operator with them 29 mm
@@ -233,7 +239,9 @@ class PlateLoad(StepTake):
         then tipped onto its far side, which comes to rest on the board, so it doesn't drop onto the fingers when it's
         let go (let go level, the impact pressed the skin 4 mm into it)."""
         k = [(0.0, self.start, 0.0), (0.6, self.start, 0.0), (2.4, self.high, 0.0)]
-        over = np.r_[self.land[:2], self.land[2] + 8.0]
+        # (a plate held from underneath brought down to 20 mm over where it's let go: at 8, its 7.2 kg carried down
+        # past the plan 10 mm, onto the fingers under it, on the board)
+        over = np.r_[self.land[:2], self.land[2] + (20.0 if self.under else 8.0)]
         k += [(3.8, over, 0.0), (4.4, over, 0.0), (5.4, self.land, 0.0)]
         if self.ends:          # held there while the eye lines it up: in 0.8 s, it was let go 6-13 mm off and 10-18 high
             return k + [(HOLD_ENDS_S + 5.4, self.land, 0.0)]
@@ -265,8 +273,8 @@ class PlateLoad(StepTake):
             self.effort(s, 0.0, 0.5, f"plate_{s}")
             self.effort(s, t_down, 0.5, f"plate_{s}")
             if self.under:          # braced while the fingers are drawn out from under its end
-                self.effort(s, t_down + let_go + 0.85, 0.5, f"plate_{s}")
-                self.effort(s, t_down + let_go + 1.05, 0.0, None)
+                self.effort(s, t_down + let_go + UNDER_OPEN_S + 0.8, 0.5, f"plate_{s}")
+                self.effort(s, t_down + let_go + UNDER_OPEN_S + 1.0, 0.0, None)
             else:
                 self.effort(s, t_down + 0.2, 0.0, None)
             self.load(s, 0.0, t_down, self.plate.mass_kg / 2)
@@ -274,23 +282,25 @@ class PlateLoad(StepTake):
             self.event("grip", -0.2, t_down + let_go, side=s, grip=f"plate_{s}", on="blank")
             self.event("carry", -0.2, t_down, side=s, obj="blank")
             self.fingers(s, t_down + 0.25, g["q"])
-            self.fingers(s, t_down + 0.7, open_like(self.hand, g["q"], 0.5))
+            # (a plate's ends held from underneath: the thumb off its top before the fingers are drawn out, the
+            # hand open: drawn out still closed, the thumb on top pinched it, and the hands drew it back 31 mm)
+            self.fingers(s, t_down + (let_go + UNDER_OPEN_S if self.under else 0.7), open_like(self.hand, g["q"], 0.5))
             H1, W1 = self.grip_pose(f"plate_{s}", at(t_down), turn(t_down))
             # the hands drawn out level, apart (in the side's world +x for either hand: out past its ends, or along
             # the sheet's near edge, the fingers out from under it), so any drag on it cancels: drawn out toward the
             # operator, the sheet came 6.6 mm with them; then the plate settled onto the board, the hands up off it
             # (a sheet's fingers a little down as they come out, off its weight: level, the skin went 3.6 mm into it)
             # (a plate's ends held from underneath rest on the fingers once let go, its ends slipping off them onto the
-            # board as they come out, a little down, off its weight)
-            out = np.array([60.0, 0.0, -3.0 if self.under else 0.0]) if self.ends else np.array([45.0, 0.0, -2.0])
+            # board as they come out, the hand a little up off the board, so only the plate drags on them)
+            out = np.array([60.0, 0.0, UNDER_LIFT_MM if self.under else 0.0]) if self.ends else np.array([45.0, 0.0, -2.0])
             off = W1 + out
-            a = t_down + let_go + 0.05
+            a = t_down + let_go + (UNDER_OPEN_S if self.under else 0.05)
             self.add(s, a, a + 0.8, lambda tt, a=a, H1=H1, W1=W1, off=off:
                      [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.8), 2.0)])
             self.add(s, a + 0.8, a + 1.2, lambda tt, a=a + 0.8, H1=H1, off=off:
                      [("pose", H1, off + [0.0, 0.0, 50.0 * min_jerk((tt - a) / 0.4)], 1.0)])
             self.side[s]["wrist"] = off + [0.0, 0.0, 50.0]
-        t = t_down + let_go + 1.25
+        t = t_down + let_go + 1.25 + (UNDER_OPEN_S - 0.05 if self.under else 0.0)
         for s in ("R", "L"):
             # back toward the operator before dropping to rest: straight to it, the hand came down on the riser's
             # front edge (and a plate's ends' hands, further in and lower, a little higher still: the fingers dipped

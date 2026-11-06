@@ -59,11 +59,23 @@ def shared(step: dict, take: str) -> Span:
 PLATE_TAKES = {"clean": "clean-blow-off", "load": "lay-plate", "seat": "set-clamps", "shift": "shift-plate"}
 PLATE_UNLOAD = ("unload-blow-off", "lift-off-plate")      # the chips blown off the clamped plate; then the clamps
                                                           # loosened and the plate lifted off, unless it stays
+# a plate too long for one stance to reach both ends' far clamps has its clamps set in two takes, one per end, each from
+# its own stance in front of that end's clamps, joined across a cut as the operator steps over (the user's rule from
+# the tool loads, 2026-11-04: the body doesn't walk, so one take per stance; the coordinator's decision for ll-1005337,
+# 2026-11-05: from the doorway's middle, its far right nut's strokes turned the trunk 15 deg past people's range)
+SPLIT_SEAT = {"ll-1005337"}
+SEAT_ENDS = ("left", "right")
 
 
 def plate_take(part: str, setup: str, take: str) -> str:
     """A plate setup's own take's folder: takes/<part>-<setup>-<take> (take: PLATE_TAKES's or PLATE_UNLOAD's)."""
     return f"{part}-{setup}-{take}"
+
+
+def seat_takes(part: str) -> list[str]:
+    """A plate's set-clamps take, or its two, one per end (SPLIT_SEAT), in the order they play."""
+    seat = PLATE_TAKES["seat"]
+    return [f"{seat}-{end}" for end in SEAT_ENDS] if part in SPLIT_SEAT else [seat]
 
 
 def plate_stays(part: str, setup: str) -> bool:
@@ -118,6 +130,8 @@ def spans(part: str, step: dict) -> list[Span]:
     tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                   # a plate clamped to the table: its own takes
         plate = lambda take: (plate_take(part, setup, take), None, None)       # noqa: E731
+        if kind == "seat":
+            return [plate(t) for t in seat_takes(part)]
         if kind in PLATE_TAKES:
             return [plate(PLATE_TAKES[kind])]
         if kind == "unload":
@@ -148,7 +162,7 @@ def played(kind: str) -> list[str]:
     takes (plate_take: its blow-offs too) aren't the cell's, and aren't listed."""
     from moonshot.planning.validate import PLANS
     shared_name = kind.split("-", 1)[1] if kind.endswith("-blow-off") else kind
-    plate_own = (*PLATE_TAKES.values(), *PLATE_UNLOAD)
+    plate_own = (*PLATE_TAKES.values(), *PLATE_UNLOAD, *(f"{PLATE_TAKES['seat']}-{e}" for e in SEAT_ENDS))
     out: list[str] = []
     for f in sorted(PLANS.glob("*.json")):
         for s in expand(load_plan(f.stem)):

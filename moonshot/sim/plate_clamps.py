@@ -84,6 +84,13 @@ class PlateClamps(FirmGrip, TakeRunner):
         for k in DOORS:
             d.qpos[self.ctl.q[k]] = DOORS_OPEN_MM * 0.001
 
+    def export(self, folder=None) -> None:
+        """The runner's take record, and in checks.json (moves_with) the wrench's ring riding with the wrench, as a
+        caliper's slider on its beam (moonshot/sim/bench.py): the ring is the wrench's, in its head."""
+        if self.wrench:
+            self.checks["moves_with"] = {"wrench": ["wrench_ring"], "wrench_ring": ["wrench"]}
+        super().export(folder)
+
     def glbs(self):
         """The machine's links, and the wrench's body and ring from its model (moonshot/library/generators.py
         ratchet_wrench, its parts in the wrench's own frame), stored Y up: the turn to Z up in each in_body."""
@@ -312,7 +319,8 @@ class PlateClamps(FirmGrip, TakeRunner):
         for n, rows in getattr(self, "nut_at", {}).items():
             run, turn = rows[-1]
             clamp = next(c for c in self.clamps if c.name == n)
-            up0 = (self.nut_up or {}).get(n, clamp.nut_z(self.table["state"]) - clamp.nut_z("clamped"))
+            up0 = (self.nut_up or {}).get(n, clamp.nut_z(SB.state_of(self.table["state"], clamp))
+                                          - clamp.nut_z("clamped"))
             out[f"{n}_nut"] = {"run_mm": round(run, 3), "turn_deg": round(turn, 1),
                                "over_strap_mm": round(up0 + run, 3)}
         return out

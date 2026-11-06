@@ -16,6 +16,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from moonshot.config import data_root
+from moonshot.motion import plate_load as PL
 from moonshot.motion import plates
 from moonshot.motion.primitives import min_jerk
 from moonshot.sim.door_cycle import NEVER_HELD
@@ -30,7 +31,10 @@ DOORS_OPEN_MM = 600.0
 TORQUESCALE = 20.0
 WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.95, 0.99, 0.001)
 DRAW_S = 0.85                # the fingers drawn out from under a plate's end (motion/plate_load.py's let-go)
-SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers and the board below
+SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers
+DRAW_PULL = 1.5              # ... the pull fed forward that many times its drag, to break it free: at its drag alone the
+                             # fingers stayed under the plate and the hands drew it back toward the operator 34 mm; at
+                             # twice (on the board too), the right wrist's muscles ran 1.33 times their most
 
 
 class PlateLoad(TakeRunner):
@@ -120,18 +124,26 @@ class PlateLoad(TakeRunner):
         """Half the plate's weight while it's held, acting out at its middle (motion/plate_load.py hand_force_at),
         to the last: until the hand's grip lets go, though the carry (the eye on it) ends as it is set down: unborne
         from then, it dropped 17 mm in the hands. A plate let go onto the fingers under its ends: then each hand's pull
-        out from under its end, against the skin's friction on the plate above and the board below (DRAW_S): drawn
+        out from under its end, a little up off the board, against the skin's friction on the plate (DRAW_S): drawn
         out by the arm's tracking alone, the fingers stayed under it, and drew it back toward the operator 32 mm."""
         e = self.carry.get(side)
         if e is None:
             return None
         if e["t0"] <= t < self.held_to[side]:
             return np.array([0.0, 0.0, self.place.mass_kg / 2 * 9.81])
-        if self.table.get("under") and self.held_to[side] <= t < self.held_to[side] + DRAW_S:
-            out = 1.0 if side == "R" else -1.0                    # past its end, away from the plate's middle
-            fade = 1.0 - (t - self.held_to[side]) / DRAW_S        # less as the fingers come out from under it
-            return np.array([out * 2 * SKIN_FRICTION * self.place.mass_kg / 2 * 9.81 * fade, 0.0, 0.0])
+        t0 = self.held_to[side] + PL.UNDER_OPEN_S                 # the hand opened, the thumb off its top, first
+        if (self.table.get("under") and t0 <= t < t0 + DRAW_S
+                and self.hand_on_plate(side)):                    # pulled while the fingers are still under it: pulled
+            out = 1.0 if side == "R" else -1.0                    # on once out, the hands flew 200 mm past the plan
+            return np.array([out * DRAW_PULL * SKIN_FRICTION * self.place.mass_kg / 2 * 9.81, 0.0, 0.0])
         return None
+
+    def hand_on_plate(self, side: str) -> bool:
+        """Does the side's hand touch the plate?"""
+        m, d = self.model, self.data
+        b, mine = m.body("blank").id, self.side_bodies[side]
+        return any((m.geom_bodyid[c.geom1] == b and m.geom_bodyid[c.geom2] in mine)
+                   or (m.geom_bodyid[c.geom2] == b and m.geom_bodyid[c.geom1] in mine) for c in d.contact[:d.ncon])
 
     def enclose(self, t: float) -> None:
         super().enclose(t)

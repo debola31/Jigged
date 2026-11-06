@@ -33,10 +33,12 @@ OVER_MM = 15.0                           # the box end this high over the hex's 
 FLATS = math.pi / 3                      # the ring's flats a sixth of a turn apart: where it sits square on a nut
 STROKE = math.radians(40.0)              # a stroke's swing, kept in front of the stud: the plain box end's sixth of a
                                          # turn took the arm to its full length on a far nut, and it stalled
-SNUG = math.radians(25.0)                # the last swing, that snugs a nut run down onto its strap (or the first, that
-                                         # breaks it loose)
-LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.5, 1.2, 0.5, 0.8     # up off the plate, over to a nut, held over it while the
-                                                         # eye lines the box end up on it, and down onto it
+SNUG = math.radians(12.0)                # the last swing past a nut's run onto its strap, that snugs it (or the first,
+                                         # that breaks it loose): at 25, the hand stalled on the snug nut pulled the
+                                         # wrist's muscles to twice their most
+LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 1.2, 0.5, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
+                                                         # hand took it, past people's 265), over to a nut, held over
+                                                         # it while the eye lines the box end up on it, down onto it
 SWING_S, BACK_S, UP_S = 0.5, 0.35, 0.3   # a stroke swung, and back, the ratchet freewheeling; up off the nut after
 EFFORT = 0.8                 # the hand's hold on the handle while it strokes, the arm braced with it (0.6 for a clamp)
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
@@ -91,7 +93,8 @@ def nut_yaw(clamp: SB.Clamp, plate: SB.Plate, direction: str = "tighten") -> flo
     at turn 0 (the eye finds where they really are), the strokes swinging the handle across in front of the stud, the
     hand pulling it toward the operator: tightening, from pointing back toward the operator and out to the right on the
     right end's (from pointing in toward the plate's middle on the left end's); loosening, from a sixth of a turn
-    further round, back the other way."""
+    further round, back the other way. (From pointing back and in on the right end's, the far nut beyond the arm's
+    reach, the strokes didn't turn it.)"""
     y = 0.0 if clamp.stud[0] < plate.centre[0] else -FLATS
     return y if direction == "tighten" else y - FLATS
 
@@ -130,16 +133,18 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
         t_on = t
         for i, a in enumerate(swings):
             z1 = z + SB.LEAD_MM * a / (2 * math.pi)                  # the nut's run with the swing
-            b = start + a + (math.copysign(WR.play(), a) if i == 0 else 0.0)   # the ring's play taken up once
+            b = start + a + math.copysign(WR.play(), a)   # the ring's play on the nut taken up each stroke: swung
+                                                          # back, the ratchet's drag turns the ring back through it
             k.append((t + SWING_S, turned(b), on_nut(c, b, z1)[1]))
             done.append((c, t, t + SWING_S, a))
             t += SWING_S
-            if i < len(swings) - 1:                                  # back, the box end on the nut
-                k.append((t + BACK_S, Rs, on_nut(c, start, z1)[1]))
-                t += BACK_S
+            # back, the box end on the nut, the ratchet freewheeling; after the last, eased off the snug nut too before
+            # it's lifted (lifted at the snug's end, the hand held there sprang up off it)
+            k.append((t + BACK_S, Rs, on_nut(c, start, z1)[1]))
+            t += BACK_S
             z = z1
         work.append((c, t_on, t))
-        Ru, pu = on_nut(c, b, z, OVER_MM + SB.NUT_HEX_H)
+        Ru, pu = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
         k.append((t + UP_S, Ru, pu))
         t += UP_S
     k += [(t + MOVE_S, R0, p0 + [0.0, 0.0, 40.0]), (t + MOVE_S + LIFT_S, R0, p0)]

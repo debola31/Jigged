@@ -85,6 +85,8 @@
   }
  ],
  "atlas": 512,
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): solid turned and milled parts, no sheet: the library mesh is pre-decimated, all seams (stalls at 18k+)",
  "unsure": [
   {
    "what": "the body's finish: Kitagawa's STEP has no colours; plain turned steel assumed, soft jaws a darker milled grey",

@@ -81,5 +81,7 @@
    "material": "blk123_tool_steel"
   }
  ],
- "atlas": 512
+ "atlas": 512,
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): two solid blocks: with seams kept the holes' split normals stall it at 21k"
 }

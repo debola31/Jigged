@@ -61,5 +61,7 @@
  ],
  "atlas": 512,
  "download_bytes": 540000,
- "download_why": "the pair's hard-edged CAD keeps 26k vertices at the 12k-triangle cap (every sharp edge splits them): 451 KB of geometry before any AO; a 512 AO adds 74 KB. A 256 AO would fit the 0.5 MB class at ~1.7 mm a texel, blurring the holes and clamps"
+ "download_why": "the pair's hard-edged CAD keeps 26k vertices at the 12k-triangle cap (every sharp edge splits them): 451 KB of geometry before any AO; a 512 AO adds 74 KB. A 256 AO would fit the 0.5 MB class at ~1.7 mm a texel, blurring the holes and clamps",
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): solid blocks, straps and screws, no sheet: the library mesh is a pre-decimated soup (stalls at 34k)"
 }

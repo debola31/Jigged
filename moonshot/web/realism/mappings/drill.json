@@ -23,5 +23,7 @@
    "none": "drill_tin"
   }
  },
- "rules": []
+ "rules": [],
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): one solid twist drill: welded, its UV1 atlas packs at 0.37 rather than 0.08"
 }

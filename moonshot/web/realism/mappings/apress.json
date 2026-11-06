@@ -89,6 +89,8 @@
    "material": "steel_black_oxide"
   }
  ],
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): solid castings, shafts and fasteners, no sheet: with its seams kept the threads stall the simplifier",
  "unsure": [
   {
    "what": "the frame's blue: the GrabCAD modeller's colour, kept as Palmgren blue enamel; Palmgren's own listing shows no colour I could confirm",

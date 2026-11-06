@@ -24,6 +24,8 @@
   }
  },
  "rules": [],
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): one solid twist drill: welded, its UV1 atlas packs at 0.30 rather than 0.07",
  "unsure": [
   {
    "what": "straw (oxide) finish: the record says cobalt, uncoated; its STEP is the TiN #7's resized",

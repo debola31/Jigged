@@ -1,0 +1,109 @@
+{
+ "schema": "jigged.station/1",
+ "id": "bandsaw",
+ "shop_id": "saw-1",
+ "name": "McMaster-Carr 8962N13 horizontal band saw",
+ "about": "Links from McMaster's own STEP (moonshot/library/stations/extract.py; bounds, volumes and inertias in bandsaw.links.json), in a world frame with the floor at z = 0, the blade's cutting plane at y = 0 and the operator at -Y. Joint zero is the STEP's pose: head raised, vise 111.9 mm open, guards shut. Stock lies along Y through the vise and is cut off toward the operator, where the work stop is. Sources: spec is McMaster's listing (library/records/assets/machines/bandsaw/bandsaw.json); cad is measured on the STEP, naming its solids by their index in the file.",
+ "gaps": [
+  "The head's mitre swivel (spec: 45 deg left, 60 deg right) is not modelled: no plan cuts a mitre",
+  "The work stop is fixed where the STEP has it; moving it along its rod is not modelled",
+  "The motor's rotor, turning through its gearbox, is left out of the blade's inertia: it changes only how fast the blade spins up"
+ ],
+ "density_g_cm3": 5.14,
+ "density_source": {"source": "proposed", "reason": "Steel's 7.85 scaled by 0.655, so the STEP's 77,617 cm3 weighs the spec's 880 lb: the STEP's solids are filled where the castings are hollow"},
+ "links": {
+  "base": {"parent": null}, "head": {"parent": "base"}, "jaw": {"parent": "base"}, "handwheel": {"parent": "base"},
+  "cover_idler": {"parent": "head"}, "cover_drive": {"parent": "head"}, "blade": {"parent": "head"},
+  "feed_valve": {"parent": "base"}
+ },
+ "masses_source": {"source": "cad", "reason": "Each moving link's CAD volume, centre of mass and inertia at 1 g/cm3 (bandsaw.links.json) times density_g_cm3: the head 108.5 kg, the jaw 8.0, the handwheel 1.8, each guard 2.8. The band (0.4 kg) is drawn on the head and weighed with nothing"},
+ "joints": {
+  "head": {"link": "head", "type": "hinge", "at_mm": [408.24, 169.8, 582.6], "axis": [0, -1, 0],
+           "source": "cad", "reason": "The head's 30 mm pin (solids 199, 202) turns in the swivel casting's 31 mm bore (solid 8); about -Y so that lowering is positive",
+           "range_deg": [0, 41.42],
+           "range_source": "proposed", "range_reason": "Top stop: the STEP's pose, which clears 9 x 16 in stock with 64 mm to spare. Bottom stop: where the blade's cutting run is level, 12.1 mm into the bed's slot and 6.1 mm above the castings under it, though it grazes a thin plate at the slot's end (solid 12) by 0.3 mm; the stop bolt isn't in the STEP",
+           "feed_mm_s": [0, 25],
+           "feed_source": "proposed", "feed_reason": "The hydraulic feed valve's range, as the vertical speed of the middle of the cutting edge: shut holds the head, fully open lowers it unloaded at about 1 in/s. Cutting feeds are far slower",
+           "counterbalance_blade_n": 100,
+           "counterbalance_source": "proposed", "counterbalance_reason": "The spring leaves the blade pressing 100 N at both stops and up to 131 N between them, so the head's weight feeds the cut and a hand lifts it with 38-51 N at the handle"},
+  "jaw": {"link": "jaw", "type": "slide", "axis": [1, 0, 0], "range_mm": [-294.5, 111.9], "friction_n": 12,
+          "source": "spec", "reason": "The 16 in rectangle capacity: from 406.4 mm open to shut against the fixed jaw, whose face is at x = 88.0 (solids 57, 81); the STEP has the jaw 111.9 mm open",
+          "friction_source": "proposed", "friction_reason": "An 8 kg jaw on oiled steel ways, about 0.15"},
+  "handwheel": {"link": "handwheel", "type": "hinge", "at_mm": [-882.5, 97.8, 575.3], "axis": [1, 0, 0],
+                "lead_mm": 5.08, "friction_n_m": 1.0, "damping_n_m_s": 0.5,
+                "source": "cad", "reason": "The vise screw's axis (solid 43, 22 mm); turning it clockwise as the operator sees it closes the jaw",
+                "lead_source": "proposed", "lead_reason": "7/8-5 ACME, the standard pitch for the STEP's 22 mm screw; the listing doesn't give it",
+                "friction_source": "proposed", "friction_reason": "Thread friction that makes the screw self-locking: a 40 N push on the jaw can't back-drive it, and a hand turns it at 1-2 turns a second"},
+  "blade": {"link": "blade", "type": "hinge", "at_mm": [600.11, 78.23, 716.59], "axis": [0.389, -0.809, 0.441],
+            "source": "cad", "reason": "The drive wheel's canted axis (solid 224); positive runs the cutting run toward the drive wheel and the fixed jaw, as the drive pulls the band"},
+  "cover_idler": {"link": "cover_idler", "type": "hinge", "at_mm": [-276.75, 237.21, 1751.49], "axis": [-0.7497, 0, 0.6618],
+                  "range_deg": [0, 100], "friction_n_m": 0.5,
+                  "source": "cad", "reason": "The 20 mm hinge line along the guard's top back edge, where it meets the bow's back plate (solid 157); positive lifts it toward the operator",
+                  "range_source": "proposed", "range_reason": "Opens past upright to reach the wheel; gravity shuts it (3.8 N m at rest) against light hinge friction"},
+  "cover_drive": {"link": "cover_drive", "type": "hinge", "at_mm": [566.14, 237.21, 1007.91], "axis": [-0.7497, 0, 0.6618],
+                  "range_deg": [0, 100], "friction_n_m": 0.5,
+                  "source": "cad", "reason": "The same hinge line as the idler guard's (solid 192)",
+                  "range_source": "proposed", "range_reason": "As the idler guard"},
+  "feed_valve": {"link": "feed_valve", "type": "hinge", "at_mm": [-1276.6, -164.4, 844.8], "axis": [0, 0, 1],
+                 "range_deg": [0, 1500], "mm_s_per_deg": 0.01667, "friction_n_m": 0.05, "kg": 0.02,
+                 "source": "cad", "reason": "The control box's third knob (solid 130), 26 mm across, turning on its own vertical axis; counterclockwise from above, positive, opens it",
+                 "range_source": "proposed", "range_reason": "A needle valve: 4.2 turns from shut to fully open (the feed's 25 mm/s), a quarter turn 1.5 mm/s; its friction holds it where a hand leaves it. The STEP's knob has no stem to measure, and the JET's rate knob opens a quarter turn for a material (the card's phase 4)"}
+ },
+ "blade": {
+  "speed_sfpm": [98, 262], "source": "spec", "reason": "McMaster 8962N13: variable blade speed, 98-262 sfpm",
+  "band_in": [131.5, 1.0, 0.035], "band_source": "spec", "band_reason": "McMaster 8962N13: 131-1/2 x 1 x 0.035 in",
+  "drive_radius_mm": 165.4, "radius_source": "cad", "radius_reason": "The wheels' 165 mm rims (solids 156, 224) plus half the band's thickness; with the wheels 1152.7 mm apart the loop is 3345 mm, against the spec's 3340",
+  "motor_hp": 1.5, "motor_source": "spec", "motor_reason": "McMaster 8962N13: 1.5 hp, direct drive; at 262 sfpm that is 139 N m at the drive wheel, the most the motor gives",
+  "inertia_kg_m2": 0.13, "inertia_source": "cad", "inertia_reason": "Both wheels as discs (8.8 kg at the density) and the band on their rims"
+ },
+ "capacity": {"round_in": 9, "rectangle_in": [9, 16], "source": "spec", "reason": "McMaster 8962N13: 9 in round, 9 x 16 in rectangular"},
+ "colliders": {
+  "bed_back": {"link": "base", "box_min_mm": [-44.0, 5.0, 651.2], "box_max_mm": [88.0, 233.0, 661.0], "reason": "Bed plate behind the slot (solid 7)"},
+  "bed_front": {"link": "base", "box_min_mm": [-44.0, -233.0, 651.2], "box_max_mm": [88.0, -5.0, 661.0], "reason": "Bed plate in front of the slot (solid 76)"},
+  "rail": {"link": "base", "box_min_mm": [-711.7, 37.8, 526.0], "box_max_mm": [-36.7, 157.8, 660.8], "reason": "The vise rail the jaw rides, flush with the bed (solid 3)"},
+  "fixed_jaw_back": {"link": "base", "box_min_mm": [88.0, 21.2, 662.1], "box_max_mm": [98.0, 227.3, 802.1], "reason": "Fixed jaw plate behind the slot (solid 57)"},
+  "fixed_jaw_front": {"link": "base", "box_min_mm": [88.0, -226.3, 659.6], "box_max_mm": [98.0, -20.3, 799.6], "reason": "Fixed jaw plate in front of the slot (solid 81)"},
+  "work_stop": {"link": "base", "box_min_mm": [29.9, -526.2, 646.8], "box_max_mm": [135.0, -302.0, 713.6], "reason": "The work stop's block on its rod (solid 14)"},
+  "jaw": {"link": "jaw", "box_min_mm": [-258.9, 27.3, 660.8], "box_max_mm": [-23.9, 167.3, 801.9], "reason": "The movable jaw, behind the slot only (solid 74)"},
+  "blade": {"link": "head", "centre_mm": [65.1, 0.0, 990.6], "half_mm": [357.5, 0.45, 12.7], "rot_y_deg": 41.42, "reason": "The cutting run between the guides, twisted square to the bed (solid 181): its edge runs from [-211.4, 0, 1217.6] to [324.8, 0, 744.6]"},
+  "bow_beam": {"link": "head", "centre_mm": [256.8, 241.7, 1192.8], "half_mm": [348.5, 35.0, 47.05], "rot_y_deg": 41.42, "reason": "The bow casting's beam over the window (solid 182 between its ends, 697 mm along the bow): its section, the same the window's length, is an 11 mm wall slanting up and back from 207 to 277 mm behind the blade's plane, 244 to 338 mm over the blade's edge; boxed. Below it and in front of it the window is open, as on the saw, for the work and the cut piece"},
+  "bow_idler_end": {"link": "head", "centre_mm": [-243.1, 122.0, 1470.9], "half_mm": [210.35, 155.45, 199.95], "rot_y_deg": 41.42, "reason": "The bow casting's idler end (solid 182, from its end to the window's edge, 421 mm along the bow), where it carries the idler wheel: the wheel's backing plate slants through the bow's whole depth there, so it is boxed by the casting's bounds"},
+  "bow_drive_end": {"link": "head", "centre_mm": [591.9, 122.0, 734.2], "half_mm": [206.15, 155.45, 199.95], "rot_y_deg": 41.42, "reason": "The bow casting's drive end (solid 182, from the window's edge to its end, 412 mm along the bow), where it carries the drive wheel: boxed by the casting's bounds, as the idler end"},
+  "guide_arm_idler": {"link": "head", "centre_mm": [-62.8, -14.3, 1343.3], "half_mm": [47.95, 33.9, 187.5], "rot_y_deg": 41.42, "reason": "The idler-side blade guide arm and its guide block (solids 174 and 173), hanging from the bow to the blade at the window's edge, 48 mm in front of the blade's plane to 20 behind; boxed by their bounds"},
+  "guide_arm_drive": {"link": "head", "centre_mm": [442.5, -14.2, 897.5], "half_mm": [48.0, 33.95, 187.5], "rot_y_deg": 41.42, "reason": "The drive-side blade guide arm and its guide block (solids 186 and 200), as the idler side's"},
+  "cover_idler": {"link": "cover_idler", "centre_mm": [-240.1, 83.9, 1512.1], "half_mm": [189.5, 163.3, 216.0], "rot_y_deg": 41.42, "reason": "The idler wheel's guard (solid 157), boxed along the bow"},
+  "cover_drive": {"link": "cover_drive", "centre_mm": [632.1, 83.9, 742.8], "half_mm": [185.8, 163.3, 216.0], "rot_y_deg": 41.42, "reason": "The drive wheel's guard (solid 192), boxed along the bow"},
+  "handwheel": {"link": "handwheel", "cylinder_x_mm": [-879.0, -823.8], "at_mm": [-882.5, 97.8, 575.3], "radius_mm": 66.0, "reason": "The handwheel's rim, spokes and hub (solid 59), as a disc of their bounds, x -879 to -824 on the GLB"},
+  "feed_valve": {"link": "feed_valve", "cylinder_z_mm": [837.1, 852.5], "at_mm": [-1276.6, -164.4, 844.8], "radius_mm": 13.0, "reason": "The feed valve's knob (solid 130), as a disc of its bounds on the GLB"},
+  "handwheel_knob": {"link": "handwheel", "cylinder_x_mm": [-941.3, -879.0], "at_mm": [-882.5, 85.5, 624.0], "radius_mm": 11.0, "reason": "The spinner knob on the rim (solid 59): 22 mm across, its axis 50 mm off the screw's, 14 deg from the top toward -Y at joint zero, measured on the GLB; boxed with the wheel, a hand on it read as inside the wheel"}
+ },
+ "sites": {
+  "blade_edge_a": {"link": "head", "at_mm": [-211.4, 0.0, 1217.6], "reason": "Where the cutting edge leaves the idler-side guide (solid 181)"},
+  "blade_edge_b": {"link": "head", "at_mm": [324.8, 0.0, 744.6], "reason": "Where the cutting edge enters the drive-side guide (solid 181)"},
+  "bed": {"link": "base", "at_mm": [22.0, 0.0, 661.0], "reason": "The bed's top, in the blade's slot (solids 7, 76)"},
+  "fixed_jaw_face": {"link": "base", "at_mm": [88.0, 124.2, 732.1], "reason": "The fixed jaw's face (solid 57)"},
+  "jaw_face": {"link": "jaw", "at_mm": [-23.9, 97.3, 731.3], "reason": "The movable jaw's face (solid 74)"}
+ },
+ "affordances": {
+  "start": {"link": "base", "at_mm": [-1172.1, -296.5, 853.4], "grip": "fingertip_press", "force_n": 5},
+  "stop": {"link": "base", "at_mm": [-1224.6, -240.8, 851.5], "grip": "fingertip_press", "force_n": 5},
+  "feed_valve": {"link": "base", "at_mm": [-1276.4, -164.6, 844.2], "grip": "tip_pinch", "turn": true},
+  "head_handle": {"link": "head", "at_mm": [-520.0, 125.0, 1557.0], "grip": "power", "lift": [0, 0, 1]},
+  "handwheel_rim": {"link": "handwheel", "at_mm": [-882.5, 97.8, 641.3], "grip": "power", "turn": true},
+  "quick_release": {"link": "jaw", "at_mm": [-296.2, 97.8, 696.4], "grip": "power", "pull": [0, 0, 1]},
+  "cover_idler_handle": {"link": "cover_idler", "at_mm": [-339.3, -66.1, 1399.6], "grip": "power", "lift": [0, -1, 1]},
+  "cover_drive_handle": {"link": "cover_drive", "at_mm": [532.9, -66.1, 630.3], "grip": "power", "lift": [0, -1, 1]}
+ },
+ "affordances_source": {"source": "proposed", "reason": "The STEP has three knobs on the control box (solids 92, 122, 130) but doesn't say which is which: start, stop and the feed valve are guesses in that order. It has no lift handle, so the handle is the bow's free end below the tension crank; the guards' handles are their low front edges; the quick release is the lever on the jaw (solid 4)"},
+ "logic": {
+  "states": ["idle", "running"],
+  "interlocks": [
+   "start runs the blade only with both wheel guards shut",
+   "opening a guard while the blade runs stops it",
+   "the blade stops when the head reaches its bottom stop (end of cut)"
+  ],
+  "guard_shut_deg": 2.0,
+  "end_of_cut_within_deg": 0.25,
+  "logic_source": "proposed", "logic_reason": "Wheel-guard switches and an end-of-cut stop are standard on horizontal band saws; McMaster's listing doesn't describe the controls. A guard counts as open once it lifts 2 deg; the end-of-cut switch trips 0.25 deg (about 2 mm at the blade) before the bottom stop"
+ }
+}

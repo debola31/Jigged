@@ -1,0 +1,76 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "drill-6",
+  "name": "6 mm jobber drill",
+  "category": "tooling",
+  "make": "Generic",
+  "model": "drill 6 mm",
+  "description": "6 mm jobber drill, cobalt HSS, 2 flutes.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Diameter",
+      "value": 6.0,
+      "unit": "mm"
+    },
+    {
+      "name": "Flute length",
+      "value": 63,
+      "unit": "mm"
+    },
+    {
+      "name": "Overall length",
+      "value": 93,
+      "unit": "mm"
+    },
+    {
+      "name": "Flutes",
+      "value": 2,
+      "unit": "flutes"
+    },
+    {
+      "name": "Material",
+      "value": "cobalt HSS"
+    },
+    {
+      "name": "Mass",
+      "value": 17.04,
+      "unit": "g",
+      "note": "volume x material density"
+    },
+    {
+      "name": "Point angle",
+      "value": 135.0,
+      "unit": "deg"
+    }
+  ],
+  "source_urls": [],
+  "source_files": [
+    "drill-6.step"
+  ],
+  "license": "self-made parametric generator (moonshot.library.generators, family drill)",
+  "notes": "Generated from its dimensions; replace with a vendor STEP when one is sourced.",
+  "file": "drill-6.glb",
+  "units": "mm",
+  "up": "+Z",
+  "bbox": {
+    "min": [
+      -3.01,
+      -3.02,
+      -0.02
+    ],
+    "max": [
+      3.01,
+      3.02,
+      93.0
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/drill-6.step",
+    "placeholder": "generators.drill",
+    "up": "+Z",
+    "max_triangles": 50000
+  },
+  "triangles": 70295
+}

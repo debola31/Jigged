@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 330" width="820" font-family="Helvetica, Arial, sans-serif" font-size="13">
+<rect width="820" height="330" fill="#ffffff"/>
+<defs><pattern id="m" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#607d8b" stroke-width="2" stroke-opacity="0.5"/></pattern></defs>
+<text x="135" y="28" text-anchor="middle" font-weight="bold" font-size="15">1. What MuJoCo sees</text>
+<rect x="15" y="200" width="240" height="70" fill="url(#m)" stroke="#455a64"/>
+<line x1="15" y1="200" x2="255" y2="200" stroke="#263238" stroke-width="2"/>
+<text x="250" y="262" text-anchor="end" fill="#37474f">the knob or the blank</text>
+<circle cx="135" cy="130" r="70" fill="#bbdefb" stroke="#1565c0" stroke-width="2"/>
+<text x="135" y="135" text-anchor="middle" fill="#0d47a1">capsule</text>
+<text x="135" y="222" text-anchor="middle" fill="#2e7d32">contact stops it here</text>
+<text x="135" y="296" text-anchor="middle" fill="#222">One capsule per finger bone,</text>
+<text x="135" y="312" text-anchor="middle" fill="#222">40th-percentile skin radius − 2 mm</text>
+<text x="410" y="28" text-anchor="middle" font-weight="bold" font-size="15">2. Where the skin is</text>
+<rect x="290" y="200" width="240" height="70" fill="url(#m)" stroke="#455a64"/>
+<line x1="290" y1="200" x2="530" y2="200" stroke="#263238" stroke-width="2"/>
+<text x="525" y="262" text-anchor="end" fill="#37474f">the knob or the blank</text>
+<clipPath id="below"><rect x="290" y="200" width="240" height="70"/></clipPath>
+<ellipse cx="410" cy="142" rx="96" ry="100" fill="#ffe0b2" stroke="#e65100" stroke-width="2" fill-opacity="0.85"/>
+<ellipse cx="410" cy="142" rx="96" ry="100" fill="#c62828" clip-path="url(#below)" fill-opacity="0.8"/>
+<circle cx="410" cy="130" r="70" fill="none" stroke="#1565c0" stroke-width="2" stroke-dasharray="5 4"/>
+<line x1="480" y1="130" x2="506" y2="130" stroke="#e65100" stroke-width="2"/>
+<text x="510" y="124" fill="#e65100">2–4 mm</text>
+<text x="510" y="140" fill="#e65100">(median)</text>
+<text x="410" y="224" text-anchor="middle" fill="#ffffff" font-weight="bold">inside the solid</text>
+<text x="410" y="296" text-anchor="middle" fill="#c62828">over 4 mm deep in 443 of 955 frames,</text>
+<text x="410" y="312" text-anchor="middle" fill="#c62828">8.27 mm at worst</text>
+<text x="685" y="28" text-anchor="middle" font-weight="bold" font-size="15">3. What the render shows</text>
+<rect x="565" y="200" width="240" height="70" fill="url(#m)" stroke="#455a64"/>
+<line x1="565" y1="200" x2="805" y2="200" stroke="#263238" stroke-width="2"/>
+<text x="800" y="262" text-anchor="end" fill="#37474f">the knob or the blank</text>
+<path d="M589,142 A96,100 0 0 1 781,142 L757,200 L613,200 Z" fill="#ffe0b2" stroke="#e65100" stroke-width="2"/>
+<line x1="613" y1="200" x2="757" y2="200" stroke="#e65100" stroke-width="4"/>
+<text x="685" y="135" text-anchor="middle" fill="#bf360c">pressed onto</text>
+<text x="685" y="151" text-anchor="middle" fill="#bf360c">the surface</text>
+<text x="685" y="222" text-anchor="middle" fill="#37474f">depth recorded per vertex …</text>
+<text x="685" y="296" text-anchor="middle" fill="#c62828">… and nothing fails on it:</text>
+<text x="685" y="312" text-anchor="middle" fill="#c62828">looks like contact, hides the depth</text>
+</svg>

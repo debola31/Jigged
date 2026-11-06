@@ -5,7 +5,7 @@ root_package = moonshot
 name = Stages import only downward, through the contracts (plan §5)
 type = layers
 layers =
-    moonshot.orchestrate
+    moonshot.orchestrate | moonshot.web
     moonshot.validate
     moonshot.render
     moonshot.sim

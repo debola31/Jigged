@@ -6,6 +6,9 @@ mujoco==3.17.0
 numpy==2.5.4
 scipy==1.18.1
 trimesh==5.2.0
+Pillow==12.3.0
+rtree==1.4.1
+embreex==4.4.0.post1      # trimesh's ray tests on Embree: the skin check's inside-muscle test 200x faster, same answer
 jsonschema==4.26.0
 cadquery==2.8.0
 cadquery-ocp==7.9.3.1.1
@@ -13,3 +16,4 @@ MyoSuite==3.0.0
 hypothesis==6.170.1
 import-linter==2.15
 pytest==9.1.1
+torch==2.15.0

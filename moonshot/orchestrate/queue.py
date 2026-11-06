@@ -72,6 +72,11 @@ class Queue:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
+        for col in ("progress TEXT", "started REAL"):     # added 2026-11-02: what a running job last reported
+            try:
+                self._db.execute(f"ALTER TABLE jobs ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass                                      # already there
 
     def close(self) -> None:
         self._db.close()
@@ -81,7 +86,7 @@ class Queue:
     @staticmethod
     def _job(row: sqlite3.Row) -> dict:
         d = dict(row)
-        for k in ("payload", "inputs", "requires", "result"):
+        for k in ("payload", "inputs", "requires", "result", "progress"):
             if d.get(k) is not None:
                 d[k] = json.loads(d[k])
         d["group"] = d.pop("grp")
@@ -158,8 +163,10 @@ class Queue:
                 raise
         return [self.get(j["id"]) for j in picked]
 
-    def heartbeat(self, worker: str, job_ids: Iterable[str]) -> list[str]:
-        """Extend the worker's leases. Returns the ids it no longer holds, so it can stop working on them."""
+    def heartbeat(self, worker: str, job_ids: Iterable[str], progress: dict | None = None) -> list[str]:
+        """Extend the worker's leases, and keep what each running job last reported (progress: job id -> {stage,
+        done, total, since}; the first report marks the job started). Returns the ids it no longer holds, so it
+        can stop working on them."""
         now, lost = self.clock(), []
         with self._lock:
             self._expire()
@@ -170,6 +177,9 @@ class Queue:
                     (now + self.lease_s, now, jid, worker))
                 if cur.rowcount == 0:
                     lost.append(jid)
+            for jid, p in (progress or {}).items():
+                self._db.execute("UPDATE jobs SET progress = ?, started = COALESCE(started, ?) WHERE id = ? AND "
+                                 "state = 'leased' AND worker = ?", (json.dumps(p), now, jid, worker))
         return lost
 
     def complete(self, worker: str, job_id: str, result: dict) -> bool:

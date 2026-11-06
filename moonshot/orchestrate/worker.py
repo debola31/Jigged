@@ -41,10 +41,13 @@ class Worker:
                  handlers: dict[str, Handler], lease_ahead: int = 2, options: dict | None = None):
         self.name, self.capabilities, self.token, self.hub = name, capabilities, token, hub.rstrip("/")
         self.handlers, self.lease_ahead, self.options = handlers, lease_ahead, options or {}
-        self.cache, self.outbox = home / "cache", home / "outbox"
+        # each worker's own outbox: two on one machine (a GPU and a CPU worker) sharing one, one sent and deleted a
+        # result the other was about to, and the other crashed on the missing file (the hub's GPU worker, 2026-11-03)
+        self.cache, self.outbox = home / "cache", home / "outbox" / name
         self.cache.mkdir(parents=True, exist_ok=True)
         self.outbox.mkdir(parents=True, exist_ok=True)
         self.held: list[dict] = []
+        self.progress: dict[str, dict] = {}              # job id -> what it last reported (report)
         self.lease_s = 120.0
         self._lock = threading.Lock()
 
@@ -84,6 +87,20 @@ class Worker:
         os.replace(tmp, dest)
         return dest
 
+    def upload(self, path: Path) -> str:
+        """Send a result file to the hub's blob store; returns its sha256, the name it goes by from now on."""
+        data = Path(path).read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        req = urllib.request.Request(f"{self.hub}/blobs", data=data, headers={
+            "Authorization": f"Bearer {self.token}", "X-Sha256": digest, "Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                return json.loads(r.read())["digest"]
+        except (urllib.error.URLError, OSError) as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code < 500:
+                raise
+            raise HubUnreachable(str(e)) from e
+
     def cached(self) -> list[str]:
         return [p.name for p in self.cache.iterdir() if len(p.name) == 64]
 
@@ -96,28 +113,45 @@ class Worker:
     def flush(self) -> int:
         sent = 0
         for p in sorted(self.outbox.glob("*.json")):
-            msg = json.loads(p.read_text())
+            try:
+                msg = json.loads(p.read_text())
+            except FileNotFoundError:                     # already sent
+                continue
             try:
                 self._request("/complete" if msg["op"] == "complete" else "/fail",
                               {"worker": self.name, "job": msg["job"],
                                **({"result": msg["result"]} if msg["op"] == "complete" else {"error": msg["error"]})})
             except HubUnreachable:
                 break
-            p.unlink()
+            p.unlink(missing_ok=True)
             sent += 1
         return sent
 
     # --- the loop ---
 
+    def report(self, job_id: str, stage: str, done: float | None = None, total: float | None = None) -> None:
+        """A running job's progress, for the dashboard's ETA: its stage and, where it can count, how far through.
+        Sent with the next heartbeat, and at once when the stage changes."""
+        with self._lock:
+            prev = self.progress.get(job_id, {})
+            since = prev["since"] if prev.get("stage") == stage else time.time()
+            self.progress[job_id] = {"stage": stage, "done": done, "total": total, "since": since}
+        if prev.get("stage") != stage:
+            self._beat()
+
+    def _beat(self) -> None:
+        with self._lock:
+            ids = [j["id"] for j in self.held]
+            progress = {j: p for j, p in self.progress.items() if j in ids}
+        if ids:
+            try:
+                self._request("/heartbeat", {"worker": self.name, "jobs": ids, "progress": progress})
+            except HubUnreachable:
+                pass
+
     def _heartbeat_loop(self, stop: threading.Event) -> None:
-        while not stop.wait(max(5.0, self.lease_s / 3)):
-            with self._lock:
-                ids = [j["id"] for j in self.held]
-            if ids:
-                try:
-                    self._request("/heartbeat", {"worker": self.name, "jobs": ids})
-                except HubUnreachable:
-                    pass
+        while not stop.wait(max(5.0, self.lease_s / 6)):
+            self._beat()
 
     def lease(self) -> None:
         want = self.lease_ahead - len(self.held)
@@ -137,6 +171,7 @@ class Worker:
             job = self.held[0]
         try:
             handler = self.handlers[job["kind"]]
+            self.report(job["id"], "starting")
             inputs = [self.fetch(d) for d in job["inputs"]]
             msg = {"op": "complete", "job": job["id"], "result": handler(self, job, inputs)}
         except HubUnreachable:
@@ -145,6 +180,7 @@ class Worker:
             msg = {"op": "fail", "job": job["id"], "error": f"{type(e).__name__}: {e}"[:2000]}
         with self._lock:
             self.held.remove(job)
+            self.progress.pop(job["id"], None)
         self._post_result(msg)
         return msg
 
@@ -204,7 +240,18 @@ def blender_bench(worker: Worker, job: dict, inputs: list[Path]) -> dict:
         return out
 
 
-HANDLERS: dict[str, Handler] = {"noop": noop, "probe": probe, "blender_bench": blender_bench}
+def _production(name: str) -> Handler:
+    """A production job kind (moonshot/orchestrate/jobs.py), imported only when one runs: they need the pipeline's
+    heavy dependencies, which this module doesn't."""
+    def run(worker: Worker, job: dict, inputs: list[Path]) -> dict:
+        from moonshot.orchestrate import jobs
+        return getattr(jobs, name)(worker, job, inputs)
+    return run
+
+
+HANDLERS: dict[str, Handler] = {"noop": noop, "probe": probe, "blender_bench": blender_bench,
+                                **{k: _production(k) for k in ("vise_take", "bake_render", "skin_bake", "render_frames",
+                                                               "encode_frames", "take_bake", "take_render")}}
 
 
 def main() -> None:
@@ -214,13 +261,14 @@ def main() -> None:
     ap.add_argument("--gpu-mem", type=float, default=0)
     ap.add_argument("--cache-only", action="store_true")
     ap.add_argument("--blender")
+    ap.add_argument("--trainual", help="trainual's checkout, whose renderer bake_render runs")
     ap.add_argument("--device", default="METAL")
     ap.add_argument("--home", type=Path, default=data_root() / "worker")
     ap.add_argument("--token-file", type=Path, default=data_root() / "queue" / "token")
     a = ap.parse_args()
     caps = {"kinds": a.kinds.split(","), "gpu_mem_gb": a.gpu_mem, "cache_only": a.cache_only, "device": a.device}
     w = Worker(a.name, caps, a.token_file.read_text().strip(), hub_url(), a.home, HANDLERS,
-               options={"blender": a.blender, "device": a.device})
+               options={"blender": a.blender, "device": a.device, "trainual": a.trainual})
     print(f"[worker {a.name}] hub {w.hub}, kinds {caps['kinds']}", flush=True)
     w.run_forever()
 

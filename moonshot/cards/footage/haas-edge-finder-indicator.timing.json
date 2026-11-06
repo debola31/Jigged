@@ -1,0 +1,19 @@
+{
+ "source": "Haas Automation, 'How to: Set a work offset with an edge finder and indicator', Haas Tip of the Day (YouTube -ZuRBppxRwU), 720p, downloaded through downr.org to C:\\jigged-data\\footage\\ and analysed locally with MediaPipe Hand Landmarker; the video is not in the repo",
+ "method": "trainual's motion/extract_hands.py, then its analyze_timing.py segmenting restricted to the windows where hands work the tools (the rest is talking to camera); the video is edited, so only uncut shots give durations",
+ "windows_s": [[108, 116], [120, 127.5], [154.6, 156.2], [372, 407], [421, 427]],
+ "measured": {
+  "Left": {"n": 12, "dur_median_s": 0.4, "dur_iqr": [0.32, 0.58], "peak_speed_frac_median": 0.52, "peak_aperture_frac_median": 0.32},
+  "Right": {"n": 4, "dur_median_s": 0.64, "dur_iqr": [0.29, 1.33], "peak_speed_frac_median": 0.52, "peak_aperture_frac_median": 0.48}
+ },
+ "observed": [
+  {"t_s": [155.1, 155.6], "what": "The jog handle at .001: thumb under the rim, index and middle fingertips over it (GRASP precision disk). The handle has a spinner knob near its rim for fast moves and a dial graduated 0-100."},
+  {"t_s": [139, 143], "what": "The right hand works the keys, then turns to the jog handle; the left hand stays off the pendant."},
+  {"t_s": [396, 398], "what": "Indicating at the .0001 increment (on-screen label)."},
+  {"t_s": [421, 427], "what": "The test indicator hangs from an indicator holder in the spindle, not a magnetic base; the hand swings it round by turning the spindle nose."}
+ ],
+ "used_for": [
+  "vf2-controls: the jog handle's grasp, no longer proposed",
+  "dti-sweep-face: Haas's own mounting (in the spindle) recorded against the card's proposed magnetic-base seat"
+ ]
+}

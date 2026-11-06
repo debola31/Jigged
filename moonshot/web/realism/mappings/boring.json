@@ -1,0 +1,88 @@
+{
+ "asset": "boring",
+ "about": "Borite 3249A208 (McMaster) 3/4 in shank boring bar with a TPMT-221 insert: one welded CAD solid, no colours. Black-oxide steel bar; the insert at the -x tip by a box (it stands on the bar's flat, rake face toward +y).",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "steel_black_oxide",
+ "cad": {
+  "*": {
+   "none": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the TPMT insert and its screw: the slab y -3.3..1.2 mm at the tip, x < -48.5 mm",
+   "inside": {
+    "lo": [
+     -0.0588,
+     -0.0034,
+     0.0035
+    ],
+    "hi": [
+     -0.0485,
+     0.0012,
+     0.0165
+    ]
+   },
+   "material": "boring_insert"
+  },
+  {
+   "why": "... less the bar's own chip face (y = 0), 0.2 mm under the insert's rake face, which that box crosses",
+   "normal": {
+    "dir": [
+     0,
+     1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -5e-05,
+     -1
+    ],
+    "hi": [
+     1,
+     5e-05,
+     1
+    ]
+   },
+   "material": "steel_black_oxide"
+  }
+ ],
+ "materials": {
+  "boring_insert": {
+   "family": "ground",
+   "color": [
+    0.3,
+    0.3,
+    0.31
+   ],
+   "rough": 0.25,
+   "metal": 1.0,
+   "tile_m": 0.03,
+   "normal": 0.3,
+   "about": "an uncoated carbide TPMT insert (and its screw): carbide grey"
+  }
+ },
+ "views": {
+  "tip": [
+   [
+    -0.078,
+    0.03,
+    0.032
+   ],
+   [
+    -0.054,
+    -0.001,
+    0.0095
+   ]
+  ]
+ },
+ "unsure": [
+  {
+   "what": "the bar's finish (black oxide assumed, as most steel boring bars) and the insert's grade (uncoated carbide grey; Borite also sells TiN gold)",
+   "picture": "checks/boring_close_before_after.png"
+  }
+ ]
+}

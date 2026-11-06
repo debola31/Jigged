@@ -112,15 +112,16 @@ The rule and the views are in `preview/index.html` (`lodUpdate`), measured with
 
 ## Measured (1080p, GTX 1070, three.js r186 in headless Chromium, shadows drawn once)
 
-With 73 realistic models built (2026-11-05, 21:10); frame time with the triangles drawn and the realistic items shown.
+With the realistic models built by 2026-11-05 21:50 (78 of 95, vendor CAD double-sided); frame time, then triangles
+drawn and the realistic items shown. Runs vary by about 15% with the PC's other load (all-light overview 5.3-6.1 ms).
 
 | View (the page's) | all light | all realistic | with the swap rule |
 |---|---|---|---|
-| Whole shop (overview) | 5.4 ms, 0.87 M | 12.6 ms, 2.27 M | **7.3 ms**, 1.15 M, 3 realistic |
-| Milling zone, from the south | 3.5 ms, 0.34 M | 6.8 ms, 0.87 M | **6.3 ms**, 0.77 M, 6 realistic |
-| VF-2 from its operator side | 2.5 ms, 0.07 M | 3.9 ms, 0.36 M | **3.7 ms**, 0.36 M, 3 realistic |
-| Main aisle at eye height | 6.0 ms, 0.94 M | 12.3 ms, 2.42 M | **7.5 ms**, 1.30 M, 7 realistic |
+| Whole shop (overview) | 6.1 ms, 0.87 M | 15.1 ms, 2.38 M | **8.6 ms**, 1.19 M, 5 realistic |
+| Milling zone, from the south | 4.3 ms, 0.34 M | 9.3 ms, 0.92 M | **8.1 ms**, 0.83 M, 9 realistic |
+| VF-2 from its operator side | 2.0 ms, 0.07 M | 4.1 ms, 0.39 M | **4.0 ms**, 0.39 M, 4 realistic |
+| Main aisle at eye height | 5.4 ms, 0.94 M | 14.4 ms, 2.54 M | **8.8 ms**, 1.37 M, 10 realistic |
 
-Shadows redrawn every frame add 2-3 ms; the page's room adds about 0.5 ms (the scene agent's measurement). About
-3.2 ms per million triangles drawn. The projection for all 95 and the download and GPU totals are in
-`<data>/realism/projection.json` (`python -m moonshot.web.realism project`).
+All realistic at once comes close to the 16 ms budget; the swap rule keeps every view near 9 ms. Shadows redrawn
+every frame add 2-3 ms; the page's room adds about 0.5 ms (the scene agent's measurement). The projection for all 95
+and the download and GPU totals are in `<data>/realism/projection.json` (`python -m moonshot.web.realism project`).

@@ -1,44 +1,131 @@
 {
  "asset": "screw",
- "about": "Screw slotting / cross-drilling machine, self-made placeholder: grey cabinet, the bowl feeder brushed stainless, the head and motor in the CAD's blue and green.",
- "reviewed": "2026-11-06: natural sheet (look/<asset>_natural.png)",
- "fallback": "steel_bright",
+ "about": "Screw secondary-op machine, self-made in Blender (sources/screw/build_screw.py) from makers' photos of bowl-fed slotting machines (Alight indexing slotting machines and similar, found by image search) and the record: the taupe cabinet on its plinth with louvred doors and a nameplate; the stainless table with its chip lip; the vibratory bowl feeder on its drive (stainless bowl, green-lined cone, the spiral track climbing its wall with parts on it, the orange overflow catch); the inclined rails down to the slotting head (escapement and its cylinder, the slitting saw under its yellow guard, the arbor, the blue drive motor on top); a coolant nozzle; the console with lit counters and buttons; the signal light; the finished-parts chute and tray. Where the placeholder (planner.placeholders.screw_slotter) has its boxes.",
+ "reviewed": "2026-11-06: modelled against maker photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/screw/screw.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "screw_taupe",
+ "smooth_deg": 35,
  "cad": {
   "*": {
-   "mat_0": "paint_light_grey",
-   "mat_1": "steel_brushed",
-   "mat_2": "paint_black",
-   "mat_3": "screw_cad_3",
-   "mat_4": "screw_cad_4"
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_green": "plastic_green",
+   "screw_blue": "screw_blue",
+   "screw_dark": "screw_dark",
+   "screw_green": "screw_green",
+   "screw_led": "screw_led",
+   "screw_orange": "screw_orange",
+   "screw_red": "screw_red",
+   "screw_taupe": "screw_taupe",
+   "screw_white": "screw_white",
+   "steel_bright": "steel_bright",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground"
   }
  },
  "rules": [],
  "materials": {
-  "screw_cad_3": {
+  "screw_taupe": {
    "family": "paint",
    "color": [
-    0.028,
-    0.076,
-    0.224
+    0.27,
+    0.25,
+    0.22
    ],
-   "rough": 0.38,
-   "about": "the CAD's mat_3 colour [0.03, 0.09, 0.26], toned to an enamel"
+   "rough": 0.45,
+   "about": "the cabinet's, feeder drive's and console's warm grey (taupe) enamel"
   },
-  "screw_cad_4": {
+  "screw_dark": {
+   "family": "paint_cast",
+   "color": [
+    0.03,
+    0.032,
+    0.035
+   ],
+   "rough": 0.5,
+   "about": "the slotting head's dark castings, the plinth, track supports and feet"
+  },
+  "screw_green": {
+   "family": "rubber",
+   "color": [
+    0.02,
+    0.12,
+    0.07
+   ],
+   "rough": 0.7,
+   "about": "the bowl feeder's green polyurethane lining"
+  },
+  "screw_blue": {
    "family": "paint",
    "color": [
-    0.05,
-    0.125,
-    0.076
+    0.02,
+    0.08,
+    0.28
    ],
-   "rough": 0.38,
-   "about": "the CAD's mat_4 colour [0.06, 0.15, 0.09], toned to an enamel"
+   "rough": 0.4,
+   "about": "the saw arbor's drive motor"
+  },
+  "screw_orange": {
+   "family": "plastic",
+   "color": [
+    0.7,
+    0.18,
+    0.012
+   ],
+   "rough": 0.45,
+   "about": "the bowl's overflow catch and the coolant nozzles"
+  },
+  "screw_red": {
+   "family": "flat",
+   "color": [
+    0.45,
+    0.02,
+    0.015
+   ],
+   "rough": 0.35,
+   "about": "stop buttons and the signal light's red"
+  },
+  "screw_led": {
+   "family": "flat",
+   "color": [
+    0.3,
+    0.01,
+    0.01
+   ],
+   "rough": 0.3,
+   "emissive": [
+    [
+     0.6,
+     0.03,
+     0.02
+    ],
+    1.0
+   ],
+   "about": "the console's lit counters"
+  },
+  "screw_white": {
+   "family": "plastic",
+   "color": [
+    0.65,
+    0.65,
+    0.62
+   ],
+   "rough": 0.45,
+   "about": "the finished-parts tray and the nameplate"
   }
  },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (vibratory bowl feed, slitting-saw slotting or cross drilling, 20-60 parts/min) and its placeholder's boxes",
+  "maker photos of bowl-fed screw-head slotting machines (alight.co.in 'Indexing Slotting Machine' and similar) found by image search"
+ ],
  "unsure": [
   {
-   "what": "a self-made placeholder of boxes and cylinders (planner.placeholders): materials and AO only; it needs modelling to look like the machine",
-   "picture": "checks/screw_front_before_after.png"
+   "what": "generic: no maker; colours follow the common taupe-cabinet, stainless-bowl, yellow-guard look, the motor blue as the placeholder had it"
   }
  ]
 }

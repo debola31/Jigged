@@ -15,7 +15,7 @@
    "mat_7": "laser_cad_7",
    "mat_8": "paint_light_grey",
    "mat_9": "paint_dark_grey",
-   "mat_10": "aluminium_brushed",
+   "mat_10": "paint_light_grey",
    "mat_11": "paint_dark_grey",
    "mat_12": "laser_cad_12",
    "mat_13": "paint_light_grey",
@@ -198,10 +198,12 @@
  },
  "unsure": [
   {
-   "what": "which grey CAD materials are the aluminium extrusions: mat_3 (44,961 faces, the slotted profiles) and mat_10 taken as aluminium, the rest painted",
+   "what": "mat_3 (the slotted extrusions) is aluminium; the column (mat_10), aluminium too in reality, is painted light grey because bare aluminium there mirrored the dark hall and read black",
    "picture": "checks/laser_front_before_after.png"
   }
  ],
  "triangles": 145000,
- "triangles_why": "its 36 CAD materials' many small primitives keep their borders: with seams kept the simplifier bottoms out near 138k"
+ "triangles_why": "its 36 CAD materials' many small primitives keep their borders: with seams kept the simplifier bottoms out near 138k",
+ "download_bytes": 3150000,
+ "download_why": "at its simplification floor (~146k triangles, seams kept) and with its faces re-wound outward the laser is 3.05 MB; under 3 MB means crushing its conveyor and cabinet. A 5% allowance in a shop far under budget"
 }

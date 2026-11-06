@@ -341,6 +341,19 @@ def main():
     obj = bpy.context.view_layer.objects.active
     obj.name = obj.data.name = J["asset"]
     me = obj.data
+    if J.get("recalc_normals"):
+        # vendor CAD faces some surfaces inward: drawn double-sided they show, but they bake their AO from inside the
+        # machine and come out black (the laser's doors, the EDM's panels). Wound outward, then smooth by angle.
+        if me.has_custom_normals:
+            with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
+                bpy.ops.mesh.customdata_custom_splitnormals_clear()
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        me.shade_smooth()
+        me.set_sharp_from_angle(angle=math.radians(mp.get("smooth_deg", 30)))
+        log("normals wound outward and smoothed by angle")
     log(f"joined: {len(me.polygons)} faces ({time.perf_counter() - T0:.0f} s)")
     # parts and the context the rules select from
     part = parts(me)

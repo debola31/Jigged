@@ -122,11 +122,15 @@ class PlateClamps(FirmGrip, TakeRunner):
         """While a clamp or the wrench is carried, the eye is on it: its middle and its turn against the plan (its
         keys). The wrench's box end, over a nut and not swinging, is turned onto the nut's flats where they really are;
         and over a nut the eye never pushes it down more than WRENCH_PUSH_MM: come down on the hex's top, it is felt,
-        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp."""
+        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp. While the hand
+        strokes the wrench on a nut, the eye is on the hand (None): the handle swings as far as the hand goes, the box
+        end held on the nut, and the hand's own lag at a far nut, unsteered, swung each stroke 8-13 deg past its plan
+        from where the flats had set the box end down, the nut seating early and the strokes after slipping its thread
+        (ll-1005337's far left nut, 50 deg over its run's turn)."""
         self._now = t
         m, d = self.model, self.data
         e = self.carrying(side, t)
-        if e is None:
+        if e is None or self.stroking(side, t):
             return None
         held = e["obj"]
         R, p = self.planned(held, t)
@@ -243,14 +247,15 @@ class PlateClamps(FirmGrip, TakeRunner):
 
     def touching(self, side: str) -> bool:
         """When the eye's steering pauses (TakeRunner.correction): as FirmGrip's while the hand moves fast, either
-        hand; while the hand strokes the wrench on a nut, as on a mechanism's handle (the vise's crank): the nut, not
-        the eye, says where the box end goes, and steered there the eye wound up against it and the hand flailed once
-        the box end came off. Otherwise, while the hand carries a clamp or the wrench, the eye keeps steering it
-        whatever the hand brushes: paused by a little finger's touch on the spoilboard (0.7 N) through a carry, the
-        left hand's 11 mm lag stood and the strap stalled 17 mm short of its place and fell back off the plate."""
-        if self.fast_side(side, self._now) or self.stroking(side, self._now):
+        hand; while the hand strokes the wrench on a nut, where the arm touches anything but the wrench (the eye on the
+        hand, held_error: steering the wrench itself there, onto its planned turn, the eye wound up against the nut and
+        the hand flailed once the box end came off). Otherwise, while the hand carries a clamp or the wrench, the eye
+        keeps steering it whatever the hand brushes: paused by a little finger's touch on the spoilboard (0.7 N)
+        through a carry, the left hand's 11 mm lag stood and the strap stalled 17 mm short of its place and fell back
+        off the plate."""
+        if self.fast_side(side, self._now):
             return True
-        if self.carrying(side, self._now) is not None:
+        if self.carrying(side, self._now) is not None and not self.stroking(side, self._now):
             return False
         return super().touching(side)
 

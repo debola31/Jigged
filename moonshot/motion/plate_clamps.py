@@ -31,6 +31,8 @@ LUMBAR = np.array([-381.0, -920.0, 955.0])   # in the doorway, square to the tab
 GRAB_MM = -36.0              # the pinch's middle this far along the strap from its middle (toward the heel): behind
                              # the stud, clear of the nut's flange both parked and clamped
 DEPTH_MM = (3.0, 7.0)        # the pads this far down the strap's sides from its top, well above what it rests on
+PAD_IN_MM = 0.5              # ... and this far into them as the pinch is solved: at 1.5, closing on a far clamp at the
+                             # arm's reach, a fingertip stood 4.2-4.3 mm into the strap's rail (the skin's limit 3.5)
 CLEAR_MM = 5.0               # the strap carried this high over where it lands: the pads clear the plate and the block
                              # (at 3, the physics hand ran 2-3 mm low and dragged the heel along the block)
 LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 0.5, 1.2, 0.9, 0.8     # unhurried, and a pause over its place while the eye lines it
@@ -97,10 +99,11 @@ def grip_spec(take: StepTake, clamp: SB.Clamp, state: str, plate: SB.Plate | Non
         cols += [obox(at + M @ (c - pc), M @ Rb, h) for c, Rb, h in fixed]
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     lo, hi = DEPTH_MM
+    k = PAD_IN_MM
     return dict(obj=grab, side=side_of(clamp), q0=q0, colliders=cols, load=SB.clamp_kg(),
-                targets={"thumb": plane(near, n_near, 1.5, local_bands(top, R, x=(-8, 8), depth=(lo, hi))),
-                         "index": plane(far, -n_near, 1.5, local_bands(top, R, x=(-18, -2), depth=(lo, hi))),
-                         "middle": plane(far, -n_near, 1.5, local_bands(top, R, x=(2, 18), depth=(lo, hi)))},
+                targets={"thumb": plane(near, n_near, k, local_bands(top, R, x=(-8, 8), depth=(lo, hi))),
+                         "index": plane(far, -n_near, k, local_bands(top, R, x=(-18, -2), depth=(lo, hi))),
+                         "middle": plane(far, -n_near, k, local_bands(top, R, x=(2, 18), depth=(lo, hi)))},
                 iters=1500, starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
 
 
@@ -136,12 +139,13 @@ def key_at(keys, t: float) -> tuple[np.ndarray, np.ndarray]:
     return keys[-1][1], keys[-1][2]
 
 
-def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None, R=None) -> tuple[float, np.ndarray]:
+def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None, R=None,
+          peak: float = SP.REACH_PEAK) -> tuple[float, np.ndarray]:
     """A hand's reach to a grip from wherever it is at t0, as the parallels' (motion/set_parallels.py reach), either
     hand: up to a ready point back from and over the grip, a pause, the paced reach down onto it, the fingers opening
     widest ~75% of the way for an object size_mm across. obj: where the grip's object is now (world), if it has
-    moved since the grip was solved; R: how it has turned since (world). Returns when the reach ends (the grip closes)
-    and the grip's wrist (world)."""
+    moved since the grip was solved; R: how it has turned since (world); peak: where in the reach the fingers open
+    widest. Returns when the reach ends (the grip closes) and the grip's wrist (world)."""
     g = take.grips[grip]
     H, W = take.grip_pose(grip, obj, R)                          # the side's (mirrored for the left) world
     Ww = take.at(s, W)                                           # ... as a world point
@@ -163,7 +167,7 @@ def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None
     t_c = t_reach + reach_s
     take.fingers(s, t0 + 0.2, take.q_relax)
     take.fingers(s, t_reach, take.q_relax)
-    take.fingers(s, t_reach + SP.REACH_PEAK * reach_s, open_for(take.hand, g["q"], size_mm))
+    take.fingers(s, t_reach + peak * reach_s, open_for(take.hand, g["q"], size_mm))
     take.fingers(s, t_c, g["q"])
     take.look(t0, Ww)
     return t_c, Ww

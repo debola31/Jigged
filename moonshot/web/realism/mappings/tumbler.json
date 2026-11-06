@@ -1,0 +1,32 @@
+{
+ "asset": "tumbler",
+ "about": "1.5 cu ft vibratory finisher, self-made placeholder: the bowl in the CAD's blue, the base black, the media and the bowl's inside light grey.",
+ "reviewed": "2026-11-06: natural sheet (look/<asset>_natural.png)",
+ "fallback": "steel_bright",
+ "cad": {
+  "*": {
+   "mat_0": "paint_black",
+   "mat_1": "tumbler_cad_1",
+   "mat_2": "paint_light_grey"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "tumbler_cad_1": {
+   "family": "paint",
+   "color": [
+    0.028,
+    0.076,
+    0.224
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_1 colour [0.03, 0.09, 0.26], toned to an enamel"
+  }
+ },
+ "unsure": [
+  {
+   "what": "a self-made placeholder of boxes and cylinders (planner.placeholders): materials and AO only; it needs modelling to look like the machine",
+   "picture": "checks/tumbler_front_before_after.png"
+  }
+ ]
+}

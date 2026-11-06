@@ -264,7 +264,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
 | C2 (ST-25, …) | [ ] | [ ] | [ ] |
 | C3 (grinders, …) | [ ] | [ ] | [ ] |
 | C4 (lasers, EDM, brake, …) | [ ] | [ ] | [ ] |
-| C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`); cutting to length (`test_bandsaw_take.py`, per G1 bar part, 2026-11-05) | [x] 2026-11-04 | [ ] band saw passes locally (2026-11-02); no CI run. Cutting to length for G1's bar parts, ct-slbeam and ll-1007223 (2026-11-05, `moonshot/motion/bandsaw.py`, `moonshot/sim/bandsaw.py`, `moonshot/world/saw_cell.py`): each part's bar, its own length (3-1/4 in) against a stop block on the bed (the saw's own stop can't come nearer than 226 mm), its 4140's weight. Load (`<part>-saw`, pushed from the infeed by the bar's tail): both parts pass every per-frame check, the bar 0.26 mm off the stop (shop tolerance ±0.38). Clamp (`<part>-saw-clamp`): the jaw snugs at 44-50 N, short of the gate's 82.5 N, and the arm reaching to the knob at the thigh goes past its muscles' maximum (1.37) and the fist into the welded knob; your decision (2026-11-05): the gate takes the lower force the cut shows holds the bar. Start (`saw-start`): runs, every quick check passing but the hand's opening; the valve 72 of its 90 deg; opening it lets the blade motor's reaction lift the bow 4 deg (the saw's model). The cut: 241 s, the rest still to 1 µm. Lift-out: its pinch grip unsolved, the piece set down off the bench. Since: both clamps pass every check, the jaw snug at about 150 N, so the gate is back at 82.5 N; the start passes; the saw's model fixed so that opening the valve only lets the bow descend (the gate keeps its assertion); the cuts and the lift-out in progress |
+| C5 (saw, weld, braze, …) | [ ] band saw's (2026-11-02, `test_bandsaw_conformance.py`); cutting to length (`test_bandsaw_take.py`, per G1 bar part, 2026-11-05) | [x] 2026-11-04 | [ ] band saw passes locally (11 tests, 2026-11-05); no CI run. Its model, 2026-11-05: the feed cylinder meters the bow down smoothly with the valve open (it chattered and threw the bow up 4 deg), and the bow is boxed as its beam, its two ends and its guide arms, its window open as on the saw, measured on McMaster's STEP (your decision). Cutting to length for G1's bar parts, ct-slbeam and ll-1007223 (`moonshot/motion/bandsaw.py`, `moonshot/sim/bandsaw.py`, `moonshot/world/saw_cell.py`): each part's bar, its own length (3-1/4 in) against a stop block on the bed (the saw's own stop can't come nearer than 226 mm), its 4140's weight. Load (`<part>-saw`), clamp (`<part>-saw-clamp`: the jaw snug at 156 N, past the gate's 82.5; the head 12 mm off the idler guard) and start (`saw-start`: the bow comes down as the valve opens): every per-frame check passes for both parts, and all five are queued for render. The cut (`<part>-saw-cut`): 178 s, the rest still to 1 µm, the jaw at 153 N or more. Unload, two takes since 2026-11-05 (your approval): the slide (`<part>-saw-slide`), the fingers on the cut piece's top sliding it off the fixed jaw's front plate past the stop block's edge and pulling it toward you, and the lift-out (`lift-out-<part>-saw`), planned from where the slide left it: taken by its two ends, thumb against index, middle and ring, and lifted straight up (your decision: from the front the hand can't span it across its width), then set down on the saw's bed in front of the vise, its far end 140 mm from the blade, not on the bench (your decision: by the hip it was past reach; the card asks that the place be away from the blade). Both parts' slides and lift-outs pass every per-frame check, and all four are queued for render; the per-part gate passes, all 26 tests, both parts, locally (2026-11-05) |
 | C6 (inspection, …) | [ ] inspection bench's (2026-11-02, `test_inspection_bench_conformance.py`) | [ ] | [ ] inspection bench passes locally (2026-11-02); the deburr take passes its gate and every per-frame check, you approved its draft (2026-11-03), and its final is on the web (2026-11-04); the pocket-depth inspect take in progress (the calipers regrasped on end), re-running with deburr on the new body; no CI run. 2026-11-05: nist-ftc-10's inspect passes and is published; the four G1 parts' deburrs pass every check (the pickup's load-up a recorded exception) and are rendered; G1's inspect steps caption and still (your decision); ct-slbeam's and ll-1007223's send-outs pass and are published |
 | D. Usage cards | [ ] | [ ] | [ ] |
 | E. Parts and plans | [ ] nist-ftc-10's vise loads, op10–op40 (`test_vise_take.py`) | [x] 2026-11-02 | [ ] Only people's work is rendered (your decision, 2026-11-03): the machine's own cutting is out of scope, its simulation kept only to give each later setup the part's shape. Vise takes (2026-11-03): the reference, op10 and op20 physically sound, op30 and op40 clamped since the corrections stopped steering the girdle (both still touch the lever, 65 frames on op30's run, and the pads go 5.3 mm into the part; op40's slide falls short of seating it); op50's grasp (parallels session) in progress. Lift-outs op10-op40 hold their parts; set-parallels and set-stop pass their gates (parallels session). 2026-11-04, on the new body: the vise loads re-running; set-parallels passes skin, posture and shortcuts. G1's five plans written (your decisions): nist-ftc-09, an 11 ga sheet clamped to the table, for nist-ctc-01, which fits no machine; ct-slbeam on the VF-2; ll-1005337 in two setups; the Kurt D688 named. 2026-11-05: every nist-ftc-10 vise load and lift-out passes (the grip margin a recorded exception) and is published. G1: the four parts' cutting simulations done, each finished stock within 0.1 mm of its STEP outside the faces you exempted; the bar parts' vise loads and lift-outs caption and still for Nov 6 (your decision); the plates' loads, clamps and unloads in progress |
@@ -359,9 +359,23 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     So do nist-ftc-09's 17 letter-wall faces, where the 1/32 in end mill leaves its radius (0.156 mm) in the
     letters' square inside corners, and ll-1005337's four short notch side walls, where the dovetail's 20 deg
     flank leaves a wedge (up to 0.98 mm): what a round tool leaves.
+  - The plate parts' back-row tool holders, picked from under the bracket's front row, are eased in the hand
+    toward the planned grip while in the air, ending within 6 deg of it (`carry_holder`'s declaration extended):
+    the hand closes on them 13-20 deg off. The bracket's front row stands at y -690, 10 mm past the -680 named,
+    so a hand reaching round a front holder clears the back one.
+  - The band saw's lift-out slides the cut piece 65 mm off the jaw's plate past the stop block, pulls it 35 mm
+    toward the operator and takes it by its ends: across its width the hand would point 90 deg off the forearm.
+    It sets the piece down within reach in front of the operator, not on the bench by the right hip (14-15 deg
+    of side lean and 15-22 deg of twist, past people's range); the bench stays where it is.
   - A plate's load sets it straight down, lined up over its place, and lets go: no slide on the board (a hold
     by its end faces and a slide went into the skin and overloaded the arms).
-  - A plate's clamp nuts are spun down by the fingertips and snugged with a 3/4 in box-end wrench, in full;
+  - A plate's clamp nuts are run down and snugged with a 3/4 in wrench, in strokes (a fingertip spin turned a nut
+    only 10-30 deg a stroke); a ratcheting combination wrench if the box-end's 70 deg strokes can't reach the far
+    nuts (the arm runs straight or hits the near clamp);
+    each end's clamps from their own stance, one take per end (the body doesn't walk), each end's own hand on
+    its nuts; and each nut's stroke count learned from a first physics run, the stroke it seats on, then run
+    again stopping there, as the operator's feel (your decision, Nov 6): the planned strokes run 7-13 deg each
+    off, and past snug the soft thread slips rather than stalls;
     the seat, shift and unload takes land when they pass, caption and a still until then.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).
@@ -375,6 +389,21 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's clean, start and unload steps don't reuse nist-ftc-10's shared takes (door close, Cycle Start, door open,
     blow-off, set-parallels, set-stop, loosen), whose scenes show its stock and parallels in the vise: each is
     re-run per G1 setup with its own part, or its plate on the spoilboard.
+  - nist-ftc-09's lettering also exempts small regions, not whole faces: within the 1/32 in end mill's radius
+    (0.397 mm) of each of its 10 inside corners' edges (`regions` in the stock fixture); the sheet's top reads
+    0.059 mm outside them.
+  - The band saw's bow collider follows the C-frame (its back and top), its window open as on the real saw,
+    so the lift-out lifts the piece straight up by its sides.
+  - ct-slbeam op10's and op40's clean steps show caption and a still: two parallels under its 38.1 mm part can't
+    both leave the setting hand room (it needs about 17.5 mm beside each, 42 mm in all), so their spacing stays
+    as its takes were made (moving them apart was tried and reverted).
+  - nist-ftc-10's masked +Z side slot also exempts small regions on datum A's edges round its mouth (within its
+    3 mm depth), where the uncut slot's stock ends flush: its finished-stock gate then reads 0.042 mm at worst.
+    Only the fixture changed; nothing re-ran or republished.
+  - A vise holding a part against a stop opens whole crank turns wider until the stop's setter has 45 mm to the
+    moving jaw (ll-1007223 op30, ct-slbeam op20/op30); nist-ftc-10's openings unchanged.
+  - ll-1007223 op20 keeps plain jaws in every take for now, consistent across its steps; its soft jaws (and
+    nist-ftc-10 op30's) after Nov 6.
   - The band saw's clamp: the gate may take the lower jaw force the cut shows holds the bar (it snugged at 44-50 N
     against the gate's 82.5). Since met in full: both clamps snug at about 150 N, and the gate is back at 82.5.
   - The band saw's model is fixed so that opening the feed valve only lets the bow descend: the blade motor's

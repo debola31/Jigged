@@ -79,6 +79,12 @@ def fingers_open_for(hand, q: dict, size_mm: float, lag_mm: float = 0.0) -> dict
     return hand.clamp({n: q[n] + hi * (ext[n] - q[n]) for n in q})
 
 
+def thumb_off(hand, q: dict, amount: float) -> dict:
+    """The pinch let go by the thumb alone: its joints as open_like opens them, the fingers as they pinch."""
+    opened = open_like(hand, q, amount)
+    return hand.clamp(q | {n: v for n, v in opened.items() if n.startswith("thumb")})
+
+
 def reach(take: StepTake, grip: str, t0: float, size_mm: float, start=None, lag_mm: float = 0.0,
           opening=open_for) -> float:
     """The right hand's reach to grasp `grip`'s block from wherever it is at t0: up to the ready point, a pause, the
@@ -145,12 +151,16 @@ def local_bands(c, R, **lims):
 LUMBAR = ST.LUMBAR + np.array([-90.0, 140.0, 0.0])
 
 class SetParallels(StepTake):
-    def __init__(self, out=TAKES / "set-parallels", load: V.Load = V.REFERENCE, verbose=True):
+    def __init__(self, out=TAKES / "set-parallels", load: V.Load = V.REFERENCE, verbose=True, grips_from=None):
+        """grips_from: a take's grips.json to take the pinches from (StepTake.take_grips), not solved again."""
         super().__init__(out, LUMBAR, verbose)
         self.vload = load
         self.rack, self.dest = RACK.slots(load), load.parallels()
         self.kg = STEEL * V.PARALLEL_L * V.PARALLEL_T * load.parallel_h * 1e-9
-        self.solve_grips({GRIP[n]: self.pinch_spec(n) for n in ORDER}, source=self.pinch_spec, depends=(RACK,))
+        if grips_from:
+            self.take_grips(grips_from, [GRIP[n] for n in ORDER])
+        else:
+            self.solve_grips({GRIP[n]: self.pinch_spec(n) for n in ORDER}, source=self.pinch_spec, depends=(RACK,))
 
     def centre(self, base) -> np.ndarray:
         return np.asarray(base, float) + np.array([0.0, 0.0, self.vload.parallel_h / 2])
@@ -256,9 +266,15 @@ class SetParallels(StepTake):
             self.effort("R", t_down + 0.2, 0.0, None)
             self.fingers("R", t_down + 0.25, g["q"])
             # just off it while the hand stays put, and open the rest of the way once up over the parallels' tops: open
-            # wide on the seat, the middle finger beside parallel b went 9 mm into parallel a, and knocked it over
-            self.fingers("R", t_down + 0.55, open_like(self.hand, g["q"], 0.06))
-            self.fingers("R", t_down + 0.8, open_like(self.hand, g["q"], 0.06))
+            # wide on the seat, the middle finger beside parallel b went 9 mm into parallel a, and knocked it over.
+            # With a set parallel nearer than NEAR_SET_MM on the fingers' side (they pinch the far face), the thumb lets
+            # go and the fingers stay as they pinch until the hand is up: opening them 6% on the seat, with ll-1007223
+            # op10's 24 mm between them, touched parallel a and set it rocking on its edge
+            crowded = any(abs(float(self.dest[b][1] - self.dest[name][1])) - V.PARALLEL_T < NEAR_SET_MM
+                          and self.dest[b][1] > self.dest[name][1] for b in ORDER[:ORDER.index(name)])
+            letgo = thumb_off if crowded else open_like
+            self.fingers("R", t_down + 0.55, letgo(self.hand, g["q"], 0.06))
+            self.fingers("R", t_down + 0.8, letgo(self.hand, g["q"], 0.06))
             self.fingers("R", t_down + 1.05, open_like(self.hand, g["q"], 0.4))
             H1, W1 = self.grip_pose(grip, c1, R_at(t_down))
             off = W1 + np.array([0.0, -20.0, 110.0])    # fingertips 60 mm over the jaws' tops: at 60 the hand, moving on
@@ -280,7 +296,14 @@ def build(verbose=True, part: str | None = None, setup: str | None = None):
     its part, as it enters the setup, waiting on the table (take.json "scene", loads.scene_spec)."""
     if part:
         load = vise_load(load_plan(part), setup)
-        take = SetParallels(out=TAKES / f"{part}-{setup}-set-parallels", load=load, verbose=verbose)
+        # parallels of the reference's height stand in the rack as the published take's do and are taken from the same
+        # stance, so they are pinched as it pinches them: solved again against ll-1007223 op10's narrower vise, the
+        # solver settled on another pinch for parallel a (its penetration term 53.6 against 23.0), which set it down
+        # 2.43 mm off where the published one sets it 0.8 mm off
+        published = TAKES / "set-parallels" / "grips.json"
+        same = abs(load.parallel_h - V.REFERENCE.parallel_h) < 1e-6 and published.exists()
+        take = SetParallels(out=TAKES / f"{part}-{setup}-set-parallels", load=load, verbose=verbose,
+                            grips_from=published if same else None)
         take.extra = scene_spec(part, setup, stock="in", vise="open")
     else:
         take = SetParallels(verbose=verbose)

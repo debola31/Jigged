@@ -32,3 +32,14 @@ export function getEmailBaseUrl(): string {
 export function getEmailFrom(): string {
   return Deno.env.get('JIGGED_FROM_EMAIL') ?? 'Jigged <hello@jigged.app>';
 }
+
+/**
+ * The team inbox that internal notifications go to (notify-pilot-request today). Deliberately NO
+ * default, unlike the From address above: notify-waitlist and notify-feedback hardcode their
+ * recipients, which leaves a person's inbox baked into code where the dashboard cannot show it.
+ * Unset means the caller refuses to send and says so, rather than mailing a guess.
+ */
+export function getNotifyEmail(): string | null {
+  const to = Deno.env.get('JIGGED_NOTIFY_EMAIL')?.trim();
+  return to ? to : null;
+}

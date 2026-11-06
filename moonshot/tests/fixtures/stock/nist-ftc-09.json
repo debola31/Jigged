@@ -327,5 +327,178 @@
   }
  ],
  "band_mm": 0.0,
- "band_why": "None: only the faces above are exempt (the user's decision, 2026-11-05)."
+ "band_why": "None: only the faces above are exempt (the user's decision, 2026-11-05).",
+ "regions": [
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     34.481,
+     1.768,
+     103.11
+    ],
+    [
+     34.481,
+     3.038,
+     103.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "A letter's inside corner, where two of its walls meet and the void turns less than half a turn: the 1/32 in end mill (em132, the smallest planned tool) can't reach into it and leaves its radius there, on the walls, the floor and the top face that meet at the edge (0.110 mm on the top face, the user's decision 2026-11-05: a region, not the whole face). Exempt within the tool's radius of the corner's edge, on those faces only."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     37.613,
+     1.768,
+     103.11
+    ],
+    [
+     37.613,
+     3.038,
+     103.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     69.567,
+     1.768,
+     103.11
+    ],
+    [
+     69.567,
+     3.038,
+     103.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     69.567,
+     1.768,
+     106.271
+    ],
+    [
+     69.567,
+     3.038,
+     106.271
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     63.158,
+     1.768,
+     118.11
+    ],
+    [
+     63.158,
+     3.038,
+     118.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     60.056,
+     1.768,
+     118.11
+    ],
+    [
+     60.056,
+     3.038,
+     118.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     15.802,
+     1.768,
+     118.11
+    ],
+    [
+     15.802,
+     3.038,
+     118.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     12.7,
+     1.768,
+     118.11
+    ],
+    [
+     12.7,
+     3.038,
+     118.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     29.338,
+     1.768,
+     103.11
+    ],
+    [
+     29.338,
+     3.038,
+     103.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  },
+  {
+   "what": "letter inside corner",
+   "edge": [
+    [
+     32.47,
+     1.768,
+     103.11
+    ],
+    [
+     32.47,
+     3.038,
+     103.11
+    ]
+   ],
+   "within_mm": 0.397,
+   "why": "As above."
+  }
+ ],
+ "regions_why": "A region exempts the samples within within_mm of its edge (a segment, the part's frame) on the faces that meet the edge (moonshot/tests/gates/test_cycle_stock.py in_regions), not the faces whole."
 }

@@ -4037,7 +4037,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op40-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-tools",

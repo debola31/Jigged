@@ -131,7 +131,7 @@ async function pack() {
 		const place = (info) => info.setTexCoord(0).setExtension('KHR_texture_transform',
 			tt.createTransform().setScale([s, s]).setOffset([0, 0]));
 		mat.setName(name).setBaseColorFactor(r.baseColorFactor).setRoughnessFactor(r.roughnessFactor)
-			.setMetallicFactor(r.metallicFactor).setDoubleSided(r.doubleSided)
+			.setMetallicFactor(r.metallicFactor).setDoubleSided(r.doubleSided || !!job.double_sided)
 			.setAlphaMode(r.baseColorFactor[3] < 1 ? 'BLEND' : 'OPAQUE');
 		if (fam.base) place(mat.setBaseColorTexture(tile(fam.base.file)).getBaseColorTextureInfo());
 		if (fam.mr) place(mat.setMetallicRoughnessTexture(tile(fam.mr.file)).getMetallicRoughnessTextureInfo());

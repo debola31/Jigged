@@ -16,5 +16,6 @@
  },
  "rules": [],
  "bbox_tolerance_mm": 95,
- "bbox_why": "the handle, which the record's box (d688.glb's, handle off) leaves out, reaches 90 mm past the body in x and 55 mm above it"
+ "bbox_why": "the handle, which the record's box (d688.glb's, handle off) leaves out, reaches 90 mm past the body in x and 55 mm above it",
+ "double_sided": false
 }

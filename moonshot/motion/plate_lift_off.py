@@ -35,6 +35,7 @@ from moonshot.motion.primitives import min_jerk, open_like
 from moonshot.motion.set_parallels import local_bands, obox, turned
 from moonshot.motion.setup_take import plane
 from moonshot.motion.step_take import StepTake
+from moonshot.motion.tool_load import InRange
 from moonshot.planning.takes import PLATE_UNLOAD, plate_take
 from moonshot.world import spoilboard as SB
 from moonshot.world import wrench as WR
@@ -54,7 +55,10 @@ BOARD_PALM_MM = 6.0          # the pressing hand's palm kept this far over the b
 
 
 class PlateLiftOff(StepTake):
-    SOLVER_W = {"range": 3.0, "prior": 2.0, "pose_rot": 1500.0}
+    # the seat's (moonshot/motion/plate_seat.py): the hips let shift toward the end it works, and the trunk held
+    # inside people's range as each arm's people see it, as the hands take turns on the nuts
+    SOLVER_W = {"range": 30.0, "prior": 2.0, "pose_rot": 1500.0, "pelvis": 0.005}
+    body_solver = InRange
 
     def __init__(self, part: str, setup: str, out=None, verbose=True):
         self.part, self.setup = part, setup

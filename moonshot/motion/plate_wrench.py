@@ -49,6 +49,8 @@ EFFORT = 0.8                 # the hand's hold on the handle while it strokes, t
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut
 PINCH_W = 4.0                # the planned pinch kept on the handle's arc while the hand strokes (use), against the pose
+PAD_IN_MM = 0.5              # the pinch's pads this far into the handle's edges as it is solved: at 1.0, gripped with
+                             # EFFORT through the strokes, the left hand's skin stood 3.4-3.6 mm in it (the limit 3.5)
 
 
 def rest(plate: SB.Plate) -> tuple[np.ndarray, float]:
@@ -71,7 +73,7 @@ def grip_at(plate: SB.Plate, nuts: list[SB.Clamp], side: str, direction: str = "
     c = next(ns[0] for s, ns in by_hand(nuts) if s == side)
     sweep = STROKE / 2 * (-1 if direction == "tighten" else 1)
     z = c.nut_z("clamped") + (SB.PARK_NUT_GAP_MM / 2 if direction == "tighten" else 0.0)
-    yaw = nut_yaw(c, plate, direction) + sweep
+    yaw = nut_yaw(c, plate, direction, next(ns for s, ns in by_hand(nuts) if s == side)) + sweep
     return on_nut(c, yaw, z)[1], yaw
 
 
@@ -103,10 +105,11 @@ def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R", nuts: list[SB.Cl
         cols += [obox(at + Rc @ b, Rc, hh) for _, b, hh in SB.strap_boxes()]
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     depth = (1.0, 4.0)
+    k = PAD_IN_MM
     return dict(obj=g, side=side, q0=q0, colliders=cols, load=WR.kg(),
-                targets={"thumb": plane(near, -R[:, 1], 1.0, local_bands(top, R, x=(-8, 8), depth=depth)),
-                         "index": plane(far, R[:, 1], 1.0, local_bands(top, R, x=index, depth=depth)),
-                         "middle": plane(far, R[:, 1], 1.0, local_bands(top, R, x=middle, depth=depth))},
+                targets={"thumb": plane(near, -R[:, 1], k, local_bands(top, R, x=(-8, 8), depth=depth)),
+                         "index": plane(far, R[:, 1], k, local_bands(top, R, x=index, depth=depth)),
+                         "middle": plane(far, R[:, 1], k, local_bands(top, R, x=middle, depth=depth))},
                 iters=1500, starts=[S(20, 0, r, 50, 50, -15, 65, pr, -10, 5) for pr in (0, 35, 60) for r in (0, 15)])
 
 
@@ -116,17 +119,39 @@ def on_nut(clamp: SB.Clamp, yaw: float, nut_z: float, lift: float = 0.0) -> tupl
     return turned(yaw), np.r_[clamp.stud, nut_z + SB.FLANGE_T + WR.HEIGHT / 2 + 0.5 + lift]
 
 
-def nut_yaw(clamp: SB.Clamp, plate: SB.Plate, direction: str = "tighten") -> float:
+def sweeps_clear(clamp: SB.Clamp, others: list[SB.Clamp], yaw0: float, sweep: float) -> bool:
+    """Does the handle, swung about the clamp's stud from yaw0 by sweep (rad), keep clear of the other clamps' nuts
+    (their flanges, PC.NUT_CLEAR_MM off)? It is carried at their height on its own nut, under their studs' tops."""
+    _, c, hh, _ = next(b for b in WR.boxes() if b[0] == "handle")
+    x0, x1 = c[0] - hh[0], c[0] + hh[0]
+    for a in np.linspace(yaw0, yaw0 + sweep, 13):
+        R = turned(a)[:2, :2]
+        for o in others:
+            if o is clamp:
+                continue
+            u, v = R.T @ (np.asarray(o.stud, float) - np.asarray(clamp.stud, float))   # in the wrench's frame
+            if math.hypot(max(x0 - u, 0.0, u - x1), max(abs(v) - hh[1], 0.0)) < SB.FLANGE_R + PC.NUT_CLEAR_MM:
+                return False
+    return True
+
+
+def nut_yaw(clamp: SB.Clamp, plate: SB.Plate, direction: str = "tighten", others: list[SB.Clamp] = ()) -> float:
     """The handle's yaw where the box end is set down on a nut and each stroke starts: square on the flats of a nut
     at turn 0 (the eye finds where they really are), the strokes swinging the handle across in front of the stud, the
-    end's own hand (by_hand) pulling it toward the operator: tightening, clockwise from above, from pointing back toward
-    the operator and out to the right on the right end's, from pointing in toward the plate's middle on the left end's;
-    loosening, the other way, on either end from pointing back toward the operator and to the left. (From pointing back
-    and in on the right end's, the far nut beyond the arm's reach, the strokes didn't turn it; loosening the left end's
-    a sixth of a turn round from its tightening, the strokes pushed the handle away.)"""
-    if direction != "tighten":
-        return -2 * FLATS
-    return 0.0 if clamp.stud[0] < plate.centre[0] else -FLATS
+    end's own hand (by_hand) pulling it toward the operator. Tightening, clockwise from above: on the right end's from
+    pointing back toward the operator and out to the right, on the left end's from pointing in toward the plate's
+    middle. Loosening, the other way, on either end from pointing back toward the operator and to the left. Where the
+    handle so swung would meet another clamp's nut (others; sweeps_clear), from a sixth of a turn round: on
+    nist-ftc-09's ends, three clamps 125 mm apart, the right end's strokes from pointing back toward the operator ran
+    the handle into the next nut nearer the operator, and stopped there, the nut turned half as far. (From pointing
+    back and in on the right end's, the far nut beyond the arm's reach, the strokes didn't turn it; loosening the left
+    end's a sixth of a turn round from its tightening, the strokes pushed the handle away.)"""
+    if direction == "tighten":
+        firsts = [-FLATS, 0.0] if clamp.stud[0] > plate.centre[0] else [0.0, -FLATS]
+    else:
+        firsts = [-2 * FLATS, -3 * FLATS]
+    sweep = (STROKE + SNUG + WR.play()) * (-1 if direction == "tighten" else 1)
+    return next((y for y in firsts if sweeps_clear(clamp, list(others), y, sweep)), firsts[0])
 
 
 def by_hand(clamps: list[SB.Clamp]) -> list[tuple[str, list[SB.Clamp]]]:
@@ -166,7 +191,7 @@ def keys(plate: SB.Plate, clamps: list[SB.Clamp], t0: float, direction: str = "t
     done, work = [], []
     swings = strokes(direction, gap_mm)
     for c in clamps:
-        start = nut_yaw(c, plate, direction)
+        start = nut_yaw(c, plate, direction, clamps)
         z = c.nut_z("clamped") + (gap_mm if direction == "tighten" else 0.0)
         Ra, pa = on_nut(c, start, z, OVER_MM + SB.NUT_HEX_H)
         pa = up(pa)

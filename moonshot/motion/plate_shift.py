@@ -24,6 +24,7 @@ from moonshot.motion import plates
 from moonshot.motion import set_parallels as SP
 from moonshot.motion.primitives import min_jerk, open_like
 from moonshot.motion.step_take import StepTake
+from moonshot.motion.tool_load import InRange
 from moonshot.planning.takes import PLATE_TAKES, plate_take
 from moonshot.planning.validate import load_plan
 from moonshot.world import spoilboard as SB
@@ -41,7 +42,10 @@ def before(part: str, setup: str) -> str:
 
 
 class PlateShift(StepTake):
-    SOLVER_W = {"range": 3.0, "prior": 2.0, "pose_rot": 1500.0}
+    # the seat's (moonshot/motion/plate_seat.py): the hips let shift toward the end it works, and the trunk held
+    # inside people's range as each arm's people see it, as the hands take turns on the nuts
+    SOLVER_W = {"range": 30.0, "prior": 2.0, "pose_rot": 1500.0, "pelvis": 0.005}
+    body_solver = InRange
 
     def __init__(self, part: str, setup: str, out=None, verbose=True):
         self.part, self.setup = part, setup

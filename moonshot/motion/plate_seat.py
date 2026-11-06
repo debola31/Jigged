@@ -25,6 +25,7 @@ from moonshot.motion import plate_clamps as PC
 from moonshot.motion import plate_wrench as PW
 from moonshot.motion import plates
 from moonshot.motion.step_take import StepTake
+from moonshot.motion.tool_load import InRange
 from moonshot.planning.takes import PLATE_TAKES, SEAT_ENDS, SPLIT_SEAT, plate_take
 from moonshot.world import spoilboard as SB
 
@@ -43,7 +44,11 @@ class PlateSeat(StepTake):
     # planned frame stood 13-20 deg off its pinch while the right's held it
     # ... and the hips let shift toward the end it works (the pelvis's own weight a quarter of the solver's): with the
     # hips kept over the stance, a far nut's strokes turned and bent the trunk past people's range
-    SOLVER_W = {"range": 3.0, "prior": 2.0, "pose_rot": 1500.0, "pelvis": 0.005}
+    # ... and the trunk held inside people's range as each arm's people see it, as the tool loads' (moonshot/motion/
+    # tool_load.py InRange, range 30): with one arm working a far nut, the trunk bent 10 deg toward it, inside the
+    # working arm's range and outside the idle one's (8.4), in 26-36% of the frames, where the checks allow 7%
+    SOLVER_W = {"range": 30.0, "prior": 2.0, "pose_rot": 1500.0, "pelvis": 0.005}
+    body_solver = InRange
 
     def __init__(self, part: str, setup: str, only: tuple[str, ...] = (), out=None, verbose=True,
                  end: str | None = None):

@@ -99,7 +99,9 @@ def test_on_each_nut_the_box_end_stays_on_the_stud_and_turns_it_the_whole_run(pa
         assert mine[0][0] == pytest.approx(t_on) and mine[-1][1] + PW.BACK_S == pytest.approx(t_off)
         on = [(t, R, p) for t, R, p in keys if t_on - 1e-9 <= t <= t_off + 1e-9]
         assert all(np.allclose(p[:2], c.stud) for _, _, p in on)        # the box end on the nut throughout
-        start = PW.nut_yaw(c, plate, direction)
+        start = PW.nut_yaw(c, plate, direction, clamps)
+        # the handle swung clear of the other clamps' nuts (nist-ftc-09's ends three clamps 125 mm apart)
+        assert PW.sweeps_clear(c, clamps, start, math.copysign(PW.STROKE + PW.SNUG + WR.play(), whole)), c.name
         for t, R, p in on:                                               # each swing within the sector before the stud
             off = (math.atan2(R[1, 0], R[0, 0]) - start + math.pi) % (2 * math.pi) - math.pi
             assert abs(off) <= PW.STROKE + PW.SNUG + WR.play() + 1e-9 and off * whole >= -1e-9
@@ -129,7 +131,7 @@ def test_each_ends_nuts_are_its_own_hands_and_its_grip_is_solved_mid_stroke_on_i
         assert all(PC.side_of(c) == side for c in nuts)
         p, yaw = PW.grip_at(plate, clamps, side, direction)
         assert np.allclose(p[:2], nuts[0].stud)                      # the box end on the hand's first nut
-        half = (yaw - PW.nut_yaw(nuts[0], plate, direction) + math.pi) % (2 * math.pi) - math.pi
+        half = (yaw - PW.nut_yaw(nuts[0], plate, direction, nuts) + math.pi) % (2 * math.pi) - math.pi
         assert half == pytest.approx(PW.STROKE / 2 * (-1 if direction == "tighten" else 1))
 
 

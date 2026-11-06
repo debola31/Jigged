@@ -33,14 +33,20 @@ GRAB_MM = -36.0              # the pinch's middle this far along the strap from 
 DEPTH_MM = (3.0, 7.0)        # the pads this far down the strap's sides from its top, well above what it rests on
 CLEAR_MM = 5.0               # the strap carried this high over where it lands: the pads clear the plate and the block
                              # (at 3, the physics hand ran 2-3 mm low and dragged the heel along the block)
-LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 0.5, 1.2, 0.4, 0.8     # unhurried, and a pause over its place while the eye lines it
+LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 0.5, 1.2, 0.9, 0.8     # unhurried, and a pause over its place while the eye lines it
                                                           # up: in 2.0 s it landed 4.2 mm long; brought up level in 1 s,
-                                                          # it took 400-570 ms to come up off the board once loaded
+                                                          # it took 400-570 ms to come up off the board once loaded;
+                                                          # held 0.4 s, a far clamp, slid 6.6 mm past its place, was
+                                                          # still 5.8 past as it went down, and the eye's pull back
+                                                          # landed it 4.4-4.8 mm short (ll-1005337's left take)
 RAISE_PEAK_MM_S = 380.0      # the hand's peak speed on its way to a reach's ready point, under the reach's own
 ARC_UP_MM = 80.0             # ... and how far over the higher of where it starts and the ready point it arcs
-LIFT_DELAY_S = 0.08          # the strap starts up this long after the carry starts: a tipped strap's middle rises slowly
+LIFT_DELAY_S = 0.04          # the strap starts up this long after the carry starts: a tipped strap's middle rises slowly
                              # as it is levelled, and at the parallels' 0.16 s it was 300 ms coming off the board once
-                             # loaded (people's 163-265)
+                             # loaded, at 0.08 267 ms (people's 163-265)
+REACH_S = {"R": SP.REACH_S, "L": 0.52}   # the reach onto a grip, each hand in its people's time (person.reach_to_grasp
+                                         # _right_s 0.32-0.67, _left_s 0.26-0.62): at the right's 0.58 the left hand's
+                                         # reaches measured 0.63-0.67 s
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
 BOARD_CLEAR_MM = 4.0         # ... and off the spoilboard
 
@@ -152,11 +158,12 @@ def reach(take: StepTake, s: str, grip: str, t0: float, size_mm: float, obj=None
     take.transit(s, t0, t_ready, ready, via=[over] if far > 150.0 else ())
     take.add(s, t_ready, t_ready + SP.SETTLE_S, lambda tt, p=take.at(s, ready): [("pos", p, 1.0)])
     t_reach = t_ready + SP.SETTLE_S
-    take.transit(s, t_reach, t_reach + SP.REACH_S, Ww, via=[Ww + np.array([0.0, -10.0, 40.0])], fade=(H, 1.0))
-    t_c = t_reach + SP.REACH_S
+    reach_s = REACH_S[s]
+    take.transit(s, t_reach, t_reach + reach_s, Ww, via=[Ww + np.array([0.0, -10.0, 40.0])], fade=(H, 1.0))
+    t_c = t_reach + reach_s
     take.fingers(s, t0 + 0.2, take.q_relax)
     take.fingers(s, t_reach, take.q_relax)
-    take.fingers(s, t_reach + SP.REACH_PEAK * SP.REACH_S, open_for(take.hand, g["q"], size_mm))
+    take.fingers(s, t_reach + SP.REACH_PEAK * reach_s, open_for(take.hand, g["q"], size_mm))
     take.fingers(s, t_c, g["q"])
     take.look(t0, Ww)
     return t_c, Ww

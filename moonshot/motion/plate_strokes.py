@@ -57,10 +57,9 @@ def learn(folder: Path) -> dict:
                 turn = done + abs(e["rad"]) * frac
                 break
             done += abs(e["rad"])
-        if turn is None:                          # never got there: the strokes' turn scaled to the run it made
-            made = abs(zz[int(round(mine[-1]["t1"] * fps))] - zz[int(round(mine[0]["t0"] * fps))])
-            need = run
-            turn = done * need / max(made, 1e-3)
+        if turn is None:                          # never got there: the strokes' turn scaled to the run it made, no more
+            made = abs(zz[int(round(mine[-1]["t1"] * fps))] - zz[int(round(mine[0]["t0"] * fps))])   # than half again
+            turn = done * min(run / max(made, 1e-3), 1.5)          # (a nut the box end never took barely moved)
         if d == "tighten":
             turn += PW.SNUG                       # the snug past it
         out.setdefault(d, {})[c.name] = round(math.degrees(turn), 2)
@@ -69,12 +68,47 @@ def learn(folder: Path) -> dict:
     return {"pass": tk.get("strokes", {}).get("pass", k), "turn_deg": out}
 
 
+SNUG_OK_MM, TURN_OK_DEG, RUN_OK_MM = 0.15, 20.0, 0.5   # a pass's nuts where its strokes stopped them well inside the
+                                                        # gates' limits (0.2 mm, 25 deg; the lift-off's 0.8 mm)
+
+
+def settled(folder: Path) -> list[str]:
+    """The nuts a take's last physics run (sim-report.json) left short of where they go: a tightened nut not snug on
+    its strap, or turned past its run (its thread slipped, the strokes past snug); a loosened one not run back up its
+    gap. Each nut by its last work's direction; a nut both loosened and tightened (the shift's) held to the snug alone.
+    Its strokes learned again from this run, the take planned and run again, they stop where it goes."""
+    tk = json.loads((folder / "take.json").read_text(encoding="utf-8"))
+    out = json.loads((folder / "sim-report.json").read_text(encoding="utf-8"))
+    gap = tk["table"].get("gap_mm", {})
+    works: dict[str, list[str]] = {}
+    for w in (e for e in tk["events"] if e["kind"] == "work_nut"):
+        works.setdefault(w["obj"], []).append(w["direction"])
+    off = []
+    for nut, dirs in works.items():
+        o = out[nut]
+        if dirs[-1] == "tighten":
+            whole = gap.get("tighten", PW.SB.PARK_NUT_GAP_MM) / PW.SB.LEAD_MM * 360.0
+            if abs(o["over_strap_mm"]) > SNUG_OK_MM or (len(dirs) == 1 and abs(-o["turn_deg"] - whole) > TURN_OK_DEG):
+                off.append(nut)
+        elif abs(o["over_strap_mm"] - gap.get("loosen", PW.SB.PARK_NUT_GAP_MM)) > RUN_OK_MM:
+            off.append(nut)
+    return off
+
+
 def main(argv: list[str]) -> int:
+    """Writes the take's strokes learned from its last run; with --if-unsettled, only if a nut isn't where it goes
+    (exit 0 settled, nothing written; 3 written, to be planned and run again)."""
     folder = TAKES / argv[0]
+    if "--if-unsettled" in argv:
+        off = settled(folder)
+        if not off:
+            print(argv[0], "settled")
+            return 0
+        print(argv[0], "unsettled:", off)
     s = learn(folder)
     (folder / PW.STROKES_FILE).write_text(json.dumps(s, indent=1), encoding="utf-8")
     print(argv[0], json.dumps(s))
-    return 0
+    return 3 if "--if-unsettled" in argv else 0
 
 
 if __name__ == "__main__":

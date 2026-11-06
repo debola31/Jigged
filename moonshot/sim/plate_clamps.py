@@ -122,7 +122,10 @@ class PlateClamps(FirmGrip, TakeRunner):
         """While a clamp or the wrench is carried, the eye is on it: its middle and its turn against the plan (its
         keys). The wrench's box end, over a nut and not swinging, is turned onto the nut's flats where they really are;
         and over a nut the eye never pushes it down more than WRENCH_PUSH_MM: come down on the hex's top, it is felt,
-        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp."""
+        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp. The wrench is
+        turned about its box end, as a hand turns a wrench onto a nut's flats: the eye's turn of the hand, which holds it
+        135 mm along its handle, comes with the hand's move that keeps the box end where it is (turned about the hand,
+        a 25 deg turn onto the flats over a near nut swung the box end 57 mm off it, onto the plate's edge)."""
         self._now = t
         m, d = self.model, self.data
         e = self.carrying(side, t)
@@ -134,7 +137,11 @@ class PlateClamps(FirmGrip, TakeRunner):
         if over and not self.swinging(t):
             R = self.onto_flats(R, p) @ R
         b = m.body(held).id
-        err = np.r_[p * 0.001 - d.xpos[b], Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()]
+        turn = Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()
+        err = np.r_[p * 0.001 - d.xpos[b], turn]
+        if held == "wrench":
+            hb = m.body(f"{side}_hand").id
+            err[:3] += np.cross(turn, d.xpos[hb] - d.xpos[b])         # the hand's move for a turn about the box end
         if over:
             err[2] = max(err[2], -WRENCH_PUSH_MM * 0.001)
         return err

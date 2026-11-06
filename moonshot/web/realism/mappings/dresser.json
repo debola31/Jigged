@@ -1,0 +1,80 @@
+{
+ "asset": "dresser",
+ "about": "A single-point diamond dresser in a switchable magnetic holder, and an Al2O3 dressing stick, modelled from scratch where the placeholder lays them: the 2-1/2 x 2 x 1-1/2 in holder (black enamel housing, ground pole plates top and bottom with the brass split, the on/off lever on its end), a collar block clamping the 7/16 in dresser shank at 15 deg under a socket set screw, the brass setting coned to a 1/2 carat stone; the 1 x 1 x 6 in vitrified stick with eased, chipped edges and its working end worn round.",
+ "reviewed": "2026-11-05: draft; layout and sizes checked against the placeholder",
+ "source": {
+  "path": "realism/sources/dresser/dresser.glb"
+ },
+ "fallback": "steel_machined",
+ "cad": {
+  "*": {
+   "enamel_black": "dresser_enamel_black",
+   "pole_ground": "steel_ground",
+   "collar": "steel_machined",
+   "shank": "steel_machined",
+   "brass": "dresser_brass",
+   "diamond": "dresser_diamond",
+   "stick": "dresser_stick",
+   "lever": "plastic_black",
+   "screw": "steel_black_oxide"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "dresser_enamel_black": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.032,
+    0.035
+   ],
+   "rough": 0.36,
+   "tile_m": 0.3,
+   "about": "the magnetic holder's black baked enamel"
+  },
+  "dresser_brass": {
+   "family": "ground",
+   "color": [
+    0.78,
+    0.56,
+    0.24
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.06,
+   "normal": 0.4,
+   "about": "the dresser's brass setting, turned"
+  },
+  "dresser_diamond": {
+   "family": "flat",
+   "color": [
+    0.82,
+    0.84,
+    0.86
+   ],
+   "rough": 0.03,
+   "about": "the diamond point: tiny, clear and glossy (factors only)"
+  },
+  "dresser_stick": {
+   "family": "paint_cast",
+   "color": [
+    0.36,
+    0.34,
+    0.31
+   ],
+   "rough": 0.6,
+   "normal": 1.4,
+   "tile_m": 0.25,
+   "about": "vitrified aluminium-oxide dressing stick: grainy, matte grey-beige (the sand-cast pits read as grit)"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the holder's form: the record says 'magnetic base' without a model; a switchable dresser holder of the common kind is assumed"
+  },
+  {
+   "what": "the stick's colour: Al2O3 sticks come grey, white or tan; grey-beige chosen"
+  }
+ ]
+}

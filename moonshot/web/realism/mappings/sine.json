@@ -1,0 +1,67 @@
+{
+ "asset": "sine",
+ "about": "A 6 x 6 in sine plate (McMaster 5216A24 class) set at 10 deg on a wrung gauge-block stack (0.750 + 0.100 + 0.018 = 0.868 in = 5 sin 10 deg), modelled from scratch in the placeholder's frame: ground base and top plate 3/4 in thick, the top's 4 x 4 grid of 3/8-16 tapped holes at 1-1/4 in, a ground end stop on two socket-head screws at its low end, both 1/2 in rolls in clamp blocks under the top plate 5 in apart, the hinge roll cradled in two knuckle blocks on the base; the stack's blocks lapped, the .750 etched.",
+ "reviewed": "2026-11-05: draft; the geometry reproduces the placeholder's box to 0.2 mm (its stack, 15.7 mm tall, is made the 22.05 mm the angle needs)",
+ "source": {
+  "path": "realism/sources/sine/sine.glb"
+ },
+ "fallback": "steel_ground",
+ "cad": {
+  "*": {
+   "ground": "steel_ground",
+   "roll": "steel_bright",
+   "tapped": "sine_tapped",
+   "screw": "steel_black_oxide",
+   "lapped": "sine_lapped",
+   "etch": "sine_etch"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "sine_tapped": {
+   "family": "ground",
+   "color": [
+    0.28,
+    0.285,
+    0.29
+   ],
+   "rough": 0.5,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 1.0,
+   "about": "the tapped holes' threaded walls: cut, unground, catching little light"
+  },
+  "sine_lapped": {
+   "family": "ground",
+   "color": [
+    0.72,
+    0.73,
+    0.74
+   ],
+   "rough": 0.07,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.15,
+   "about": "lapped gauge-block steel: a near mirror"
+  },
+  "sine_etch": {
+   "family": "flat",
+   "color": [
+    0.03,
+    0.03,
+    0.032
+   ],
+   "rough": 0.55,
+   "about": "a gauge block's etched size"
+  }
+ },
+ "unsure": [
+  {
+   "what": "no side locking clamps: they would stand ~10 mm proud of the record's box; plain sine plates without them exist"
+  },
+  {
+   "what": "the placeholder's gauge stack (15.7 mm) can't hold the roll at 10 deg; the model's is the 22.05 mm stack the angle needs"
+  }
+ ]
+}

@@ -1,0 +1,102 @@
+{
+ "asset": "cal6",
+ "about": "Mitutoyo 500-196-30 6 in ABSOLUTE digital caliper, its CAD's materials named mat_0-9: stainless beam and jaws, black slider housing, LCD, buttons, the beam's dark scale strip with its yellow print, the thumb roller.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "cal6_stainless",
+ "cad": {
+  "*": {
+   "mat_0": "cal6_stainless",
+   "mat_6": "cal6_stainless",
+   "mat_4": "plastic_black",
+   "mat_7": "cal6_scale",
+   "mat_2": "cal6_print_yellow",
+   "mat_8": "cal6_lcd",
+   "mat_1": "cal6_button_green",
+   "mat_3": "cal6_button_grey",
+   "mat_5": "cal6_print_grey",
+   "mat_9": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "cal6_stainless": {
+   "family": "ground",
+   "color": [
+    0.6,
+    0.605,
+    0.615
+   ],
+   "rough": 0.28,
+   "metal": 1.0,
+   "tile_m": 0.06,
+   "normal": 0.3,
+   "about": "hardened stainless beam and jaws: satin"
+  },
+  "cal6_scale": {
+   "family": "plastic",
+   "color": [
+    0.018,
+    0.018,
+    0.02
+   ],
+   "rough": 0.35,
+   "about": "the beam's printed scale strip: black (the CAD's)"
+  },
+  "cal6_print_yellow": {
+   "family": "flat",
+   "color": [
+    0.62,
+    0.47,
+    0.03
+   ],
+   "rough": 0.4,
+   "about": "the scale's graduations and figures, yellow on the black strip (the CAD's)"
+  },
+  "cal6_lcd": {
+   "family": "glass",
+   "color": [
+    0.2,
+    0.225,
+    0.18
+   ],
+   "rough": 0.1,
+   "about": "the LCD: grey-green under its window"
+  },
+  "cal6_button_green": {
+   "family": "flat",
+   "color": [
+    0.03,
+    0.28,
+    0.04
+   ],
+   "rough": 0.35,
+   "about": "the green button"
+  },
+  "cal6_button_grey": {
+   "family": "flat",
+   "color": [
+    0.18,
+    0.18,
+    0.185
+   ],
+   "rough": 0.4,
+   "about": "the small grey button"
+  },
+  "cal6_print_grey": {
+   "family": "flat",
+   "color": [
+    0.35,
+    0.35,
+    0.36
+   ],
+   "rough": 0.45,
+   "about": "the housing's ABSOLUTE print: light grey on black"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the beam: the CAD gives it a black strip with yellow graduations, which the light model shows too; a real 500-196-30 beam reads as satin stainless with dark graduations. Kept the CAD's.",
+   "picture": "checks/cal6_close_before_after.png"
+  }
+ ]
+}

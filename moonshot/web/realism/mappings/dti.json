@@ -1,0 +1,81 @@
+{
+ "asset": "dti",
+ "about": "Mitutoyo 513-404-10E lever dial test indicator on a magnetic stand: four links, eleven CAD materials. Black base, clamps and knob; chrome rods; satin-chrome indicator body; the CAD's yellow dial under its crystal; the base's label and ground pole pieces.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "dti_black",
+ "cad": {
+  "*": {
+   "mat_0": "dti_black",
+   "mat_1": "dti_label_white",
+   "mat_2": "dti_label_white",
+   "mat_3": "dti_label_blue",
+   "mat_4": "steel_ground",
+   "mat_6": "chrome",
+   "mat_7": "dti_black",
+   "mat_8": "steel_bright",
+   "mat_9": "dti_print",
+   "mat_10": "dti_dial",
+   "mat_12": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "dti_black": {
+   "family": "paint",
+   "color": [
+    0.022,
+    0.022,
+    0.024
+   ],
+   "rough": 0.45,
+   "normal": 0.6,
+   "about": "black enamel: the magnetic base, the clamps, the switch knob, the dial's bezel"
+  },
+  "dti_label_white": {
+   "family": "flat",
+   "color": [
+    0.72,
+    0.72,
+    0.7
+   ],
+   "rough": 0.4,
+   "about": "the base's label: white"
+  },
+  "dti_label_blue": {
+   "family": "flat",
+   "color": [
+    0.0,
+    0.11,
+    0.48
+   ],
+   "rough": 0.4,
+   "about": "the label's blue band"
+  },
+  "dti_print": {
+   "family": "flat",
+   "color": [
+    0.02,
+    0.02,
+    0.02
+   ],
+   "rough": 0.4,
+   "about": "the dial's figures and pointer"
+  },
+  "dti_dial": {
+   "family": "glass",
+   "color": [
+    0.62,
+    0.48,
+    0.02
+   ],
+   "rough": 0.06,
+   "about": "the dial face (the CAD's yellow) under its glossy crystal"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the dial and bezel keep the CAD's yellow and black (a stock 513-404 has a white dial and a chrome bezel)",
+   "picture": "checks/dti_close_before_after.png"
+  }
+ ]
+}

@@ -171,6 +171,8 @@
    "picture": "checks/wedm_front_before_after.png"
   }
  ],
- "triangles": 135000,
- "triangles_why": "its many small CAD primitives keep their borders: with seams kept the simplifier bottoms out near 130k (area kept 100%)"
+ "triangles": 125000,
+ "triangles_why": "its many small CAD primitives keep their borders: with seams kept the simplifier bottoms out near 130k (area kept 100%)",
+ "download_bytes": 3200000,
+ "download_why": "at its simplification floor (~130k triangles, seams kept, every panel intact) the EDM is about 3.1 MB: the only way under 3 MB is dropping or crushing parts. A 7% allowance in a shop far under its total budget"
 }

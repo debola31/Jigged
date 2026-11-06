@@ -1,0 +1,46 @@
+{
+ "asset": "chamf",
+ "about": "McMaster 3073A48 (Ultra Tool) 1/2 in 90 deg 2-flute uncoated carbide chamfer mill, 3 in overall, modelled from scratch: two straight flutes with a near-radial rake face through the 90 deg point, the lands relieved, the flutes run out 19.6 mm below the point as McMaster's STEP (the placeholder) has them; shank down, point up.",
+ "reviewed": "2026-11-05: draft; point, flute length and shank chamfer checked against the placeholder's profile",
+ "source": {
+  "path": "realism/sources/chamf/chamf.glb"
+ },
+ "double_sided": false,
+ "fallback": "chamf_carbide",
+ "cad": {
+  "*": {
+   "carbide_flute": "chamf_carbide_flute",
+   "carbide": "chamf_carbide"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "chamf_carbide_flute": {
+   "family": "ground",
+   "color": [
+    0.5,
+    0.51,
+    0.53
+   ],
+   "rough": 0.14,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.3,
+   "about": "uncoated carbide, the flutes' polished rake faces"
+  },
+  "chamf_carbide": {
+   "family": "ground",
+   "color": [
+    0.44,
+    0.45,
+    0.47
+   ],
+   "rough": 0.27,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.5,
+   "about": "uncoated cylindrical-ground carbide: shank and lands"
+  }
+ },
+ "atlas": 512
+}

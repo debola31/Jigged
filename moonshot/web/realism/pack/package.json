@@ -1,0 +1,17 @@
+{
+  "name": "jigged-realism-pack",
+  "private": true,
+  "type": "module",
+  "description": "gltf-transform packer, the glTF validator and the page-side load check (playwright-core, the browsers the repo's Playwright installs) for moonshot/web/realism; installed by pipeline.py into <data>/realism/node, never into the checkout",
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "gltf-validator": "2.0.0-dev.3.10",
+    "meshoptimizer": "1.2.0",
+    "playwright-core": "1.59.1"
+  },
+  "overrides": {
+    "sharp": "0.35.5"
+  }
+}

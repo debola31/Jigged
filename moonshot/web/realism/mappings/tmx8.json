@@ -1,0 +1,95 @@
+{
+ "asset": "tmx8",
+ "about": "Hurco TMX8MYi turning centre, self-made in Blender (sources/tmx8/build_tmx8.py) from Hurco's product photos of the TMX8MYSi / TMX8MYi and the record's specs: gunmetal-grey enclosure with silver frames on a black base; the left panel with the HURCO plate, vertical 'TMX8MYi' lettering, two air gauges and a service hatch; the large sliding door with its round-cornered window onto the headstock, 8 in chuck holding a bar and the 12-station live-tool turret; the right panel's cabinet door; the MAX5 pendant hung off the right front from its silver post (screen with a chuck graphic, keys, e-stop, jog) with the signal tower on the post and the blue coiled air hose below; the chip conveyor along the left side with its head, motor, chute, legs and casters; the electrical cabinet doors behind. Door closed: the work zone shows through the glass.",
+ "reviewed": "2026-11-05: modelled against Hurco's product photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/tmx8/tmx8.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "tmx8_grey",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "glass_polycarbonate": "glass_polycarbonate",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "plastic_green": "plastic_green",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground",
+   "tmx8_black": "tmx8_black",
+   "tmx8_blue": "tmx8_blue",
+   "tmx8_grey": "tmx8_grey",
+   "tmx8_red": "tmx8_red",
+   "tmx8_silver": "tmx8_silver"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "tmx8_grey": {
+   "family": "paint",
+   "color": [
+    0.135,
+    0.14,
+    0.15
+   ],
+   "rough": 0.4,
+   "about": "Hurco's gunmetal grey enclosure panels"
+  },
+  "tmx8_silver": {
+   "family": "paint",
+   "color": [
+    0.5,
+    0.51,
+    0.53
+   ],
+   "rough": 0.3,
+   "about": "the silver frames, door, post, keyboard section and lettering"
+  },
+  "tmx8_black": {
+   "family": "paint",
+   "color": [
+    0.018,
+    0.019,
+    0.021
+   ],
+   "rough": 0.45,
+   "about": "the black base, chip conveyor, turret body and casters"
+  },
+  "tmx8_blue": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.25,
+    0.62
+   ],
+   "rough": 0.35,
+   "about": "Hurco's sky blue: the logo square, the screen's graphic, the coiled air hose"
+  },
+  "tmx8_red": {
+   "family": "flat",
+   "color": [
+    0.45,
+    0.02,
+    0.015
+   ],
+   "rough": 0.35,
+   "about": "the e-stop and the signal tower's red"
+  }
+ },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (20 in swing, 10.9 in turning diameter, 20.7 in machining length, 8 in chuck, 4,500 rpm, live tools, Y axis) and its placeholder's box",
+  "Hurco's product images of the TMX8MYSi / TMX 8MYi (hurco.eu / hurco.com) and dealer listings (Equipt): colours, the HURCO plate, the MAX5 pendant on its post, the coiled hose, the conveyor"
+ ],
+ "unsure": [
+  {
+   "what": "the chip conveyor runs along the left side because the placeholder puts its box there; Hurco's photos show it leaving at the right rear"
+  },
+  {
+   "what": "the photos show the newer gunmetal-and-silver livery; older TMX8MYi machines were white and blue"
+  }
+ ]
+}

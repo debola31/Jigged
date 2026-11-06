@@ -1,0 +1,38 @@
+{
+ "asset": "clamps",
+ "about": "One setup from McMaster's 8957A43 clamping kit (5/8 in T-slots, 1/2-13), modelled from scratch: the 4999A32 step clamp (its 4 x 1-1/4 x 3/4 in strap, slot, serrated heel and undercut nose follow the placeholder, which is McMaster's STEP), a step block with 1/8 in serrations up its face, a fully threaded 6 in stud, a T-slot nut and a flange nut, all black oxide as kit pieces come.",
+ "reviewed": "2026-11-05: draft; layout and sizes checked against the placeholder piece by piece",
+ "source": {
+  "path": "realism/sources/clamps/clamps.glb"
+ },
+ "double_sided": false,
+ "fallback": "steel_black_oxide",
+ "cad": {
+  "*": {
+   "black_oxide": "steel_black_oxide",
+   "black_oxide_machined": "clamps_black_oxide_cut"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "clamps_black_oxide_cut": {
+   "family": "ground",
+   "color": [
+    0.1,
+    0.1,
+    0.105
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.7,
+   "about": "black oxide over the step block's machined serrations: a shade lighter, cut marks showing"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the finish: black oxide on every piece, as most kits ship; McMaster's listing photo was not checked"
+  }
+ ]
+}

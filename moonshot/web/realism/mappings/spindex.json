@@ -1,0 +1,54 @@
+{
+ "asset": "spindex",
+ "about": "5C spin / index fixture (placeholder: base, housing, handwheel): a ground steel base and riser, the spindle housing turned steel, the index plate ground; the drawbar knob at the back and the handwheel black oxide, the crank's grip black plastic.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/spindex_*.png); page check checks/spindex_*_before_after.png",
+ "fallback": "steel_machined",
+ "cad": {
+  "base": {
+   "mat_0": "steel_ground"
+  },
+  "housing": {
+   "mat_1": "steel_machined"
+  },
+  "handwheel": {
+   "mat_2": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the drawbar knob behind the housing",
+   "links": [
+    "base"
+   ],
+   "part_inside": {
+    "lo": [
+     -0.12,
+     -0.04,
+     0.04
+    ],
+    "hi": [
+     -0.08,
+     0.04,
+     0.12
+    ]
+   },
+   "material": "steel_black_oxide"
+  },
+  {
+   "why": "the crank handle's grip, standing off the handwheel",
+   "links": [
+    "handwheel"
+   ],
+   "part_size": {
+    "max_mid_side": 0.02
+   },
+   "material": "plastic_black"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "a generic placeholder: base and index plate ground, housing turned steel, handwheel black oxide; no specific maker's finish",
+   "picture": "checks/spindex_front_before_after.png"
+  }
+ ]
+}

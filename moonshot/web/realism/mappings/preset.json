@@ -1,0 +1,117 @@
+{
+ "asset": "preset",
+ "about": "Tool presetter: an optical CAT40 presetter of the Zoller smile / Parlec class on its two-door steel cabinet (drawer, bar handles, plinth): a white cast base with an anthracite top and three fascia keys, the precision spindle (black, a clamp lever) holding a CAT40 shrink-fit holder and a 20 mm four-flute end mill, the column at the right (Z guide, cover strip, cap), the Z-carriage with its fine-adjust knobs and release key, the X-arm ending in the optics fork round the tool's corner (camera lens in front, backlight behind), and the touch monitor on its post at the back left, lit, showing the backlit silhouette, a crosshair, X/Z/R readings and soft keys. No maker's name or logo: the record is generic. Self-made in Blender (sources/preset/build_preset.py) where the placeholder (planner.placeholders.tool_presetter) has its boxes.",
+ "reviewed": "2026-11-05: modelled; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/preset/preset.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "preset_white",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "preset_dark": "preset_dark",
+   "preset_green": "preset_green",
+   "preset_red": "preset_red",
+   "preset_screen_bg": "preset_screen_bg",
+   "preset_screen_ui": "preset_screen_ui",
+   "preset_white": "preset_white",
+   "steel_black_oxide": "steel_black_oxide",
+   "steel_ground": "steel_ground"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "preset_white": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.61,
+    0.6
+   ],
+   "rough": 0.38,
+   "about": "the presetter's and its cabinet's white powder coat"
+  },
+  "preset_dark": {
+   "family": "paint",
+   "color": [
+    0.04,
+    0.042,
+    0.046
+   ],
+   "rough": 0.42,
+   "about": "anthracite: the base top, the guide covers, the optics arm and fork, the cabinet's top and plinth"
+  },
+  "preset_green": {
+   "family": "flat",
+   "color": [
+    0.02,
+    0.3,
+    0.05
+   ],
+   "rough": 0.35,
+   "about": "the green keys and the screen's crosshair"
+  },
+  "preset_red": {
+   "family": "flat",
+   "color": [
+    0.45,
+    0.02,
+    0.015
+   ],
+   "rough": 0.35,
+   "about": "the stop button"
+  },
+  "preset_screen_bg": {
+   "family": "flat",
+   "color": [
+    0.006,
+    0.01,
+    0.018
+   ],
+   "rough": 0.2,
+   "emissive": [
+    [
+     0.012,
+     0.025,
+     0.05
+    ],
+    1.0
+   ],
+   "about": "the touch monitor's lit background"
+  },
+  "preset_screen_ui": {
+   "family": "flat",
+   "color": [
+    0.55,
+    0.6,
+    0.62
+   ],
+   "rough": 0.3,
+   "emissive": [
+    [
+     0.6,
+     0.68,
+     0.72
+    ],
+    1.0
+   ],
+   "about": "the monitor's backlit camera view and readings; the fork's backlight"
+  }
+ },
+ "sources_used": [
+  "the record (CAT40 spindle, Z 16 in x D 12 in range) and its placeholder for every part's position",
+  "Zoller smile 400 dealer listings (Surplus Record, Equipt, machinetools.com): 400 mm Z, 420 mm diameter, 13 in touch screen (Pilot 2.0), shipping 42 x 34 x 68 in",
+  "presetter photos (Zoller smile, Parlec): white body, anthracite guides and optics, column right, monitor on an arm"
+ ],
+ "unsure": [
+  {
+   "what": "the optics as a fork round the cutting edge (camera and backlight either side) is the common arrangement; the placeholder's head points along X at the spindle"
+  }
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
+}

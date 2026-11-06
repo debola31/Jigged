@@ -1,0 +1,133 @@
+{
+ "asset": "dpress",
+ "about": "Floor column drill press (GrabCAD): the CAD's own colours (grey head and base, blue motor and vise, yellow switch plate) kept; the column, spindle, chuck and bit are steel, the table's top machined.",
+ "reviewed": "2026-11-05: natural sheet (look/<asset>_natural.png) against the CAD's colours; metal parts by their CAD colour, extent and face count",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "steel_ground",
+   "mat_1": "paint_mid_grey",
+   "mat_2": "paint_light_grey",
+   "mat_3": "paint_light_grey",
+   "mat_4": "paint_black",
+   "mat_5": "dpress_cad_5",
+   "mat_6": "paint_dark_grey",
+   "mat_7": "paint_dark_grey",
+   "mat_8": "dpress_cad_8",
+   "mat_9": "dpress_cad_9",
+   "mat_10": "paint_white",
+   "mat_11": "dpress_cad_11",
+   "mat_12": "paint_black",
+   "mat_13": "dpress_cad_13",
+   "mat_14": "paint_dark_grey",
+   "mat_15": "paint_light_grey",
+   "mat_16": "dpress_cad_16",
+   "mat_17": "dpress_cad_17",
+   "mat_18": "paint_dark_grey",
+   "mat_19": "steel_bright",
+   "mat_20": "steel_ground",
+   "mat_21": "paint_light_grey",
+   "mat_22": "dpress_cad_22",
+   "mat_23": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the table's and the base's machined tops",
+   "cads": [
+    "mat_21"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.95
+   },
+   "material": "cast_iron_raw"
+  }
+ ],
+ "materials": {
+  "dpress_cad_5": {
+   "family": "paint",
+   "color": [
+    0.333,
+    0.0,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_5 colour [0.39, 0, 0], toned to an enamel"
+  },
+  "dpress_cad_8": {
+   "family": "paint",
+   "color": [
+    0.223,
+    0.223,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_8 colour [0.26, 0.26, 0], toned to an enamel"
+  },
+  "dpress_cad_9": {
+   "family": "paint",
+   "color": [
+    0.165,
+    0.165,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_9 colour [0.19, 0.19, 0], toned to an enamel"
+  },
+  "dpress_cad_11": {
+   "family": "paint",
+   "color": [
+    0.403,
+    0.403,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_11 colour [0.47, 0.47, 0], toned to an enamel"
+  },
+  "dpress_cad_13": {
+   "family": "paint",
+   "color": [
+    0.291,
+    0.291,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_13 colour [0.34, 0.34, 0], toned to an enamel"
+  },
+  "dpress_cad_16": {
+   "family": "paint",
+   "color": [
+    0.099,
+    0.165,
+    0.496
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_16 colour [0.12, 0.19, 0.58], toned to an enamel"
+  },
+  "dpress_cad_17": {
+   "family": "paint",
+   "color": [
+    0.448,
+    0.0,
+    0.0
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_17 colour [0.53, 0, 0], toned to an enamel"
+  },
+  "dpress_cad_22": {
+   "family": "paint",
+   "color": [
+    0.006,
+    0.034,
+    0.364
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_22 colour [0.01, 0.04, 0.43], toned to an enamel"
+  }
+ }
+}

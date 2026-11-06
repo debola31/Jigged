@@ -1,0 +1,115 @@
+{
+ "asset": "facem",
+ "about": "McMaster 8826A11 2 in indexable face mill body, standing on its back face (one solid, no colours; inserts not shown): a black-oxide body, its back face and arbor bore ground bright where they seat on the arbor.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/facem_*.png); page check checks/facem_*_before_after.png",
+ "fallback": "steel_black_oxide",
+ "materials": {
+  "facem_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "hardened tool steel, ground bright"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the back face it stands on: ground, seats on the arbor's flange",
+   "inside": {
+    "lo": [
+     -0.03,
+     -0.03,
+     -0.001
+    ],
+    "hi": [
+     0.03,
+     0.03,
+     0.0015
+    ]
+   },
+   "normal": {
+    "dir": [
+     0,
+     0,
+     -1
+    ],
+    "min": 0.95
+   },
+   "material": "facem_tool_steel"
+  },
+  {
+   "why": "the arbor bore and its counterbore: ground; their wall faces (centres within 14.5 mm of the axis, normals level and facing it), not the chip gullets' faces whose centres fall there too",
+   "inside": {
+    "lo": [
+     -0.0145,
+     -0.0145,
+     -0.001
+    ],
+    "hi": [
+     0.0145,
+     0.0145,
+     0.05
+    ]
+   },
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": -0.2,
+    "max": 0.2
+   },
+   "toward": {
+    "point": [
+     0,
+     0,
+     0.0215
+    ],
+    "min": 0.6
+   },
+   "material": "facem_tool_steel"
+  },
+  {
+   "why": "the counterbore's shoulder, where the arbor screw's head seats: ground",
+   "inside": {
+    "lo": [
+     -0.0145,
+     -0.0145,
+     0.003
+    ],
+    "hi": [
+     0.0145,
+     0.0145,
+     0.04
+    ]
+   },
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.95
+   },
+   "material": "facem_tool_steel"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "a black-oxide body assumed (McMaster gives no finish); some bodies are nickel-plated bright",
+   "picture": "checks/facem_front_before_after.png"
+  }
+ ]
+}

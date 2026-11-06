@@ -29,7 +29,9 @@ TAKES = data_root() / "takes"
 DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
 TORQUESCALE = 20.0
-WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.95, 0.99, 0.001)
+WELD_SOLREF, WELD_SOLIMP = (0.002, 1.0), (0.98, 0.995, 0.001)   # (at 0.95-0.99, held from underneath, the plate
+                                                                 # settling at the lowering's end sagged in the hands
+                                                                 # onto the fingertips under its ends, 3.9-4.1 mm in it)
 DRAW_S = 0.85                # the fingers drawn out from under a plate's end (motion/plate_load.py's let-go)
 SKIN_FRICTION = 0.6          # the skin's (moonshot/body/skeleton.py), on the plate above the fingers
 DRAW_PULL = 1.45             # ... the pull fed forward that many times its drag, to break it free: at its drag alone the

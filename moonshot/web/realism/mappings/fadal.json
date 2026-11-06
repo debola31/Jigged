@@ -1,0 +1,89 @@
+{
+ "asset": "fadal",
+ "about": "Fadal VMC 4020, self-made in Blender (sources/fadal/build_fadal.py) from dealer photos (white enclosure, the red vertical 'Fadal' script on the left panel, blue foot bands lettered 'VMC 4020', two sliding doors with large windows over a stainless apron and sill, the CNC 88HS pendant built into the right panel with its CRT, keyboard, e-stop, buttons, override knobs and handwheel, 'COOL POWER' lettering) and the record's specs: the head (white, 'Fadal') with the spindle motor standing through the roof, the column, Z bellows and counterbalance behind it, the 21-tool carousel at the left under the roof, the 48 x 20 in table with three T-slots on its saddle, telescopic way covers, a blue vise holding a part, a CAT40 holder and end mill in the spindle, coolant hoses, the coolant tank and pump behind on the left and the electrical cabinet behind on the right. Doors closed: the work zone shows through the glass.",
+ "reviewed": "2026-11-05: modelled against dealer photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/fadal/fadal.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "fadal_white",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "cast_iron_ground": "cast_iron_ground",
+   "cast_iron_painted": "cast_iron_painted",
+   "cast_iron_raw": "cast_iron_raw",
+   "fadal_blue": "fadal_blue",
+   "fadal_pendant": "fadal_pendant",
+   "fadal_red": "fadal_red",
+   "fadal_white": "fadal_white",
+   "glass_polycarbonate": "glass_polycarbonate",
+   "paint_kurt_blue": "paint_kurt_blue",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "plastic_green": "plastic_green",
+   "rubber_black": "rubber_black",
+   "steel_black_oxide": "steel_black_oxide",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "fadal_white": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.605,
+    0.595
+   ],
+   "rough": 0.38,
+   "about": "Fadal's white enclosure sheet metal, the head cover and the electrical cabinet"
+  },
+  "fadal_blue": {
+   "family": "paint",
+   "color": [
+    0.012,
+    0.12,
+    0.48
+   ],
+   "rough": 0.36,
+   "about": "Fadal blue: the foot bands, 'COOL POWER', the pump motor and the coolant hoses"
+  },
+  "fadal_red": {
+   "family": "paint",
+   "color": [
+    0.5,
+    0.02,
+    0.022
+   ],
+   "rough": 0.34,
+   "about": "Fadal red: the script logos, the e-stop and red keys"
+  },
+  "fadal_pendant": {
+   "family": "paint",
+   "color": [
+    0.5,
+    0.49,
+    0.44
+   ],
+   "rough": 0.42,
+   "about": "the CNC 88HS pendant's warm grey housing and CRT bezel"
+  }
+ },
+ "sources_used": [
+  "the record (40 x 20 x 20 in travels, 48 x 20 in table, 10,000 rpm, CAT40, 21-pocket changer) and its placeholder's box (117 x 84.6 x 104 in)",
+  "dealer listings' dimensions: 116 x 87 x 104 in (Surplus Record, 2005 unit), 117 x 88 x 110 in, 2950 x 2200 x 2900 mm (Exapro)",
+  "dealer and auction photos of the VMC 4020 / 4020HT (bidspotter, eBay listings found by image search): colours, logo placement, pendant layout"
+ ],
+ "unsure": [
+  {
+   "what": "the door opening is centred under the head as the placeholder's tower is (x -216 mm), a little left of the photos' proportions; the pendant sits in the right panel as photographed, not hung off its side as the placeholder's box suggested"
+  },
+  {
+   "what": "the back (coolant tank, electrical cabinet) is plausible, not from photos"
+  }
+ ]
+}

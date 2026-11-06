@@ -21,7 +21,9 @@ RULE_KEYS = {"why", "material", "links", "cads", "from", "inside", "outside", "n
 MAPPING_KEYS = {"asset", "about", "reviewed", "source", "fallback", "cad", "rules", "ops", "smooth_deg", "triangles",
                 "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials",
                 "simplify_error", "simplify_why", "triangles_why", "download_bytes", "download_why", "drop_links",
-                "drop_links_why", "simplify_positions_only", "double_sided"}
+                "drop_links_why", "simplify_positions_only", "double_sided",
+                # A self-made model's provenance and the reasons for its settings.
+                "sources_used", "atlas_why", "double_sided_why"}
 
 
 def test_the_material_library_is_consistent():

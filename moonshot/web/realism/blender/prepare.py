@@ -61,6 +61,9 @@ def import_source(src: dict) -> list:
         o.matrix_world = Matrix()
         o["link"] = src.get("link") or o.name.split(".")[0]
         o["simplified"] = bool(src.get("simplified"))
+        if o.data.has_custom_normals:                     # kept for wind_outward's vote: cleared further on
+            a = o.data.attributes.new("src_normal", "FLOAT_VECTOR", "FACE")
+            a.data.foreach_set("vector", source_normals(o.data).ravel())
         meshes.append(o)
     for o in new:
         if o.type != "MESH":
@@ -115,6 +118,84 @@ def parts(me) -> np.ndarray:
     roots = np.array([find(v) for v in range(len(parent))])
     _, part = np.unique(roots[lv[start]], return_inverse=True)
     return part.ravel()
+
+
+def source_normals(me) -> np.ndarray:
+    """Each face's normal as the source drew it: its corners' normals summed (the CAD's own). Taken at import, as
+    the face attribute src_normal, before a simplified source's custom normals are cleared."""
+    cn = np.empty(len(me.loops) * 3, np.float32)
+    me.corner_normals.foreach_get("vector", cn)
+    ls = np.empty(len(me.polygons), np.int32)
+    me.polygons.foreach_get("loop_start", ls)
+    return np.add.reduceat(cn.reshape(-1, 3), ls)
+
+
+def wind_outward(obj, part: np.ndarray, smooth_deg: float) -> dict:
+    """Vendor CAD faces some surfaces inward, and a face wound inward bakes its AO from inside the machine (the
+    laser's doors came out black). normals_make_consistent is no fix: on unwelded CAD every face is its own island and
+    it turned 22-65% of batch A's assets inward. Instead:
+    1. vote: a face whose winding disagrees with the source's own normals (where it has them) is turned to agree;
+    2. a part (connected solid or sheet) is turned over whole only when rays leave the model from its back far more
+       often than from its front: a sheet modelled facing into the machine. A closed solid's back rays hit itself.
+    Returns the shares of area flipped and the share left opposite the source, which check() gates."""
+    me = obj.data
+    a = me.attributes.get("src_normal")
+    if a is None:
+        # no source normals to vote with (a positions-only simplification, stripped of them): its winding is the
+        # source's, which batch B measured outward to within 0.2%. Leave it as it came.
+        log("winding: left as imported (no source normals)")
+        return {"vote_flipped_share": 0.0, "part_flipped_share": 0.0, "parts_flipped": 0, "against_source_share": 0.0,
+                "unintended_share": 0.0, "source_normals": False}
+    src = np.empty(len(me.polygons) * 3, np.float32)
+    a.data.foreach_get("vector", src)
+    src = src.reshape(-1, 3)
+    _, fn, ar = face_arrays(me)
+    total = float(ar.sum()) or 1.0
+    vote = np.einsum("ij,ij->i", fn, src) < 0
+    # the part test on the voted winding: sample each part's biggest faces, cast both ways
+    fv = np.where(vote[:, None], -fn, fn)
+    ce = face_arrays(me)[0]
+    tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    lo, hi = ce.min(0), ce.max(0)
+    reach = float(np.linalg.norm(hi - lo)) * 3 + 1.0
+    eps = max(float(np.linalg.norm(hi - lo)) * 1e-5, 1e-6)
+    flip_part = np.zeros(int(part.max()) + 1, bool)
+    order = np.lexsort((-ar, part))
+    starts = np.searchsorted(part[order], np.arange(len(flip_part)))
+    ends = np.append(starts[1:], len(order))
+    for p in range(len(flip_part)):
+        faces = order[starts[p]:ends[p]][:24]
+        front = back = 0
+        for f in faces:
+            d = Vector(fv[f])
+            c = Vector(ce[f])
+            if tree.ray_cast(c + d * eps, d, reach)[0] is None:
+                front += 1
+            if tree.ray_cast(c - d * eps, -d, reach)[0] is None:
+                back += 1
+        flip_part[p] = back >= 2 * front + 2 and back >= 0.25 * len(faces)
+    flip = vote ^ flip_part[part]
+    if flip.any():
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        bmesh.ops.reverse_faces(bm, faces=[bm.faces[i] for i in np.nonzero(flip)[0]])
+        bm.to_mesh(me)
+        bm.free()
+        if me.has_custom_normals:                      # the source's normals no longer match the flipped faces
+            with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
+                bpy.ops.mesh.customdata_custom_splitnormals_clear()
+        me.shade_smooth()
+        me.set_sharp_from_angle(angle=math.radians(smooth_deg))
+    _, fn2, _ = face_arrays(me)
+    against = np.einsum("ij,ij->i", fn2, src) < 0
+    out = {"vote_flipped_share": round(float(ar[vote].sum()) / total, 4),
+           "part_flipped_share": round(float(ar[flip_part[part]].sum()) / total, 4),
+           "parts_flipped": int(flip_part.sum()),
+           "against_source_share": round(float(ar[against].sum()) / total, 4),
+           "unintended_share": round(float(ar[against & ~flip_part[part]].sum()) / total, 4)}
+    log(f"winding: {out}")
+    return out
 
 
 def select(rule: dict, ctx: dict) -> np.ndarray:
@@ -341,22 +422,12 @@ def main():
     obj = bpy.context.view_layer.objects.active
     obj.name = obj.data.name = J["asset"]
     me = obj.data
-    if J.get("recalc_normals"):
-        # vendor CAD faces some surfaces inward: drawn double-sided they show, but they bake their AO from inside the
-        # machine and come out black (the laser's doors, the EDM's panels). Wound outward, then smooth by angle.
-        if me.has_custom_normals:
-            with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
-                bpy.ops.mesh.customdata_custom_splitnormals_clear()
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.mesh.normals_make_consistent(inside=False)
-        bpy.ops.object.mode_set(mode="OBJECT")
-        me.shade_smooth()
-        me.set_sharp_from_angle(angle=math.radians(mp.get("smooth_deg", 30)))
-        log("normals wound outward and smoothed by angle")
     log(f"joined: {len(me.polygons)} faces ({time.perf_counter() - T0:.0f} s)")
     # parts and the context the rules select from
     part = parts(me)
+    winding = None
+    if J.get("recalc_normals"):
+        winding = wind_outward(obj, part, mp.get("smooth_deg", 30))
     ce, no, ar = face_arrays(me)
     n_parts = int(part.max()) + 1
     plo = np.full((n_parts, 3), np.inf)
@@ -449,7 +520,7 @@ def main():
     stats = {"asset": J["asset"], "triangles": len(me.loop_triangles), "vertices": len(me.vertices),
              "area_m2": round(float(ar.sum()), 4), "uv1_utilisation": round(util, 4), "uv1_margin_px": margin_px,
              "bbox_m": [co.min(0).round(4).tolist(), co.max(0).round(4).tolist()], "links": links, "cads": cads,
-             "parts": n_parts, "materials": by_mat, "unmapped": unmapped, "rules": rule_hits,
+             "parts": n_parts, "materials": by_mat, "unmapped": unmapped, "rules": rule_hits, "winding": winding,
              "seconds": round(time.perf_counter() - T0, 1)}
     Path(J["stats"]).write_text(json.dumps(stats, indent=1))
     if "parts_json" in J:                                  # every part's box, for writing rules

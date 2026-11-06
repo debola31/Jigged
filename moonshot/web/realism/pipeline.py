@@ -260,6 +260,18 @@ def ao_health(asset: str, st: dict) -> dict:
     return {"ok": bool(ok), "uv1_utilisation": util, "covered_share": round(share, 4), "covered_mean": round(mean, 4)}
 
 
+WINDING_UNINTENDED = 0.03   # area left opposite the source's own normals, other than whole parts turned on purpose
+
+
+def winding_ok(w: dict | None) -> bool:
+    """prepare.py's winding (wind_outward): batch A measured normals_make_consistent turning 22-65% of unwelded CAD
+    inward; this fails any build whose faces end up against the source's normals beyond the parts turned over on the
+    rays' evidence. Those can be large and right: the laser's and the EDM's sheet-metal panels face into the machine
+    in the CAD itself (50% and 58% of their area), which is why they baked black; a closed solid can't be turned,
+    its back rays always hit its own inside."""
+    return w is None or w["unintended_share"] <= WINDING_UNINTENDED
+
+
 def check(asset: str) -> dict:
     """The asset against its budgets: the validator's verdict, size, triangles, its frame against the record's."""
     rec, mp = asset_record(asset), mapping(asset)
@@ -289,6 +301,7 @@ def check(asset: str) -> dict:
         "frame": all(abs(d) <= tol for k in frame for d in frame[k]),
         "mapped": not set(st["unmapped"]) - set(mp.get("fallback_ok", [])),
         "ao": health["ok"],
+        "winding": winding_ok(st.get("winding")),
     }
     allowance = {k: mp[k] for k in ("download_bytes", "download_why", "triangles", "triangles_why") if k in mp}
     return {"asset": asset, "class": cls, "status": "ok" if all(checks.values()) else "failed: " + ", ".join(
@@ -297,7 +310,7 @@ def check(asset: str) -> dict:
         "ao": ao, "tiles": pk["tiles"], "materials": pk["materials"], "frame_delta_mm": frame,
         "validator": {**{k: va[k] for k in ("errors", "warnings", "infos", "hints")},
                       "not_benign": [f"{m['code']} {m.get('pointer', '')}" for m in bad][:20]},
-        "unmapped": st["unmapped"], "ao_health": health, "allowance": allowance,
+        "unmapped": st["unmapped"], "ao_health": health, "allowance": allowance, "winding": st.get("winding"),
         "budget": c}
 
 

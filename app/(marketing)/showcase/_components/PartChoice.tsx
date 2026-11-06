@@ -19,8 +19,8 @@ import { shortName } from './glyphs';
 import PilotRequest from './PilotRequest';
 import { finishedStill, type LivePart } from './showcaseData';
 
-/** Where a part was picked from: the intro's carousel, the shop's card before any part, the Change part menu, or the closing card's. */
-export type PickSource = 'intro' | 'prompt' | 'menu' | 'finished';
+/** Where a part was picked from: the intro's carousel, the Change part menu, or the closing card's. */
+export type PickSource = 'intro' | 'menu' | 'finished';
 
 const MENU_BG = 'rgba(17, 20, 57, 0.98)';
 

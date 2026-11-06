@@ -22,6 +22,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HourglassEmptyOutlinedIcon from '@mui/icons-material/HourglassEmptyOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
@@ -241,9 +242,11 @@ export function StepPicker({ part }: { part: LivePart }) {
 
 // --- what you'll need ---------------------------------------------------------------------------
 
+/** The part's plan at a glance: start it, the stations in order, and what to gather under Details. */
 export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
   const openItem = useShowcase((s) => s.openItem);
   const look = useShowcase((s) => s.look);
+  const [details, setDetails] = useState(false);
   const gather = gatherList(part, cat, (id) => cat.shop.surfaces[id] ?? id);
   // The stations in the order the steps reach them.
   const stations = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()].map((where) => ({
@@ -257,6 +260,9 @@ export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
       <Box sx={{ mt: 1.5 }}>
         <PartFacts part={part} />
       </Box>
+      <Button variant="contained" size="large" fullWidth startIcon={<PlayArrowIcon />} onClick={() => openStepTracked(part, 0)} sx={{ mt: 2.5 }}>
+        Start with step 1
+      </Button>
       <Section title="Stations, in order">
         <List dense disablePadding>
           {stations.map((st) => (
@@ -274,14 +280,13 @@ export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
           ))}
         </List>
       </Section>
-      {gather.map((g) => (
-        <Section key={g.place} title={g.place}>
-          <Uses cat={cat} uses={g.uses} />
-        </Section>
-      ))}
-      <Button variant="contained" size="large" fullWidth onClick={() => openStepTracked(part, 0)} sx={{ mt: 3 }}>
-        Start with step 1
-      </Button>
+      <Details open={details} onToggle={() => setDetails((d) => !d)}>
+        {gather.map((g) => (
+          <Section key={g.place} title={g.place}>
+            <Uses cat={cat} uses={g.uses} />
+          </Section>
+        ))}
+      </Details>
     </>
   );
 }

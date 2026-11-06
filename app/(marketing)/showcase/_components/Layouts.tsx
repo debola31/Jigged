@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 import dynamic from 'next/dynamic';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
@@ -13,6 +13,7 @@ import ListSubheader from '@mui/material/ListSubheader';
 import Popover from '@mui/material/Popover';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import CheckIcon from '@mui/icons-material/Check';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -26,7 +27,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import { CATEGORY_LABELS, matches, type Catalog } from './catalog';
 import { CARD_BG, DoneContent, ItemContent, NeedContent, openStepTracked, StepContent, StepPicker, SUBHEADER_BG } from './content';
 import Generating from './Generating';
-import { CategoryIcon, PartFacts, shortName } from './glyphs';
+import { CategoryIcon } from './glyphs';
 import { PartMenu, type PickSource } from './PartChoice';
 import type { LivePart } from './showcaseData';
 import { useShowcase } from './store';
@@ -125,30 +126,24 @@ function Sheet({ cat, part, parts, onPick, onGenerated }: ShopProps) {
   const phase = useShowcase((s) => s.phase);
   const sheet = useShowcase((s) => s.sheet);
   const step = useShowcase((s) => s.step);
-  if (phase === 'pick') return <PickPrompt parts={parts} onPick={onPick} />;
+  if (phase === 'pick') return <PickPrompt />;
   if (phase === 'generating') return <Generating part={part} cat={cat} onDone={onGenerated} />;
   if (sheet === 'done') return <DoneContent part={part} parts={parts} onPick={onPick} />;
   return sheet === 'step' && step !== null ? <StepContent cat={cat} part={part} index={step} /> : <NeedContent cat={cat} part={part} />;
 }
 
-/** Before a part is picked: the same choice as the intro's, for a visitor who scrolled straight here. */
-function PickPrompt({ parts, onPick }: { parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
+/** Up to the parts: the carousel is the one place a part is picked. */
+const toTheParts = () => document.getElementById('showcase-parts')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+/** Before a part is picked: a visitor who scrolled straight here is pointed up to the parts. */
+function PickPrompt() {
   return (
     <Box>
       <Typography component="h2" sx={{ fontWeight: 600, fontSize: '1.3rem' }}>
         Pick a part to see it made
       </Typography>
-      {parts.map((p) => (
-        <Box key={p.id} sx={{ mt: 2, p: 2, borderRadius: 1.5, border: '1px solid rgba(255, 255, 255, 0.12)' }}>
-          <Typography sx={{ fontWeight: 600, mb: 0.75 }}>{shortName(p)}</Typography>
-          <PartFacts part={p} />
-          <Button variant="contained" onClick={() => onPick(p.id, 'prompt')} sx={{ mt: 1.5 }}>
-            Make this part
-          </Button>
-        </Box>
-      ))}
-      <Button size="small" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} sx={{ mt: 2 }}>
-        Or send us your own part
+      <Button variant="contained" startIcon={<ArrowUpwardIcon />} onClick={toTheParts} sx={{ mt: 2 }}>
+        Choose a part
       </Button>
     </Box>
   );
@@ -223,6 +218,9 @@ function ShopButtons({ cat, part, onSnapBack, onWholeShop }: { cat: Catalog; par
           Put the cards back
         </Button>
       )}
+      <Button size="small" variant="contained" color="inherit" startIcon={<ArrowUpwardIcon />} onClick={toTheParts} sx={{ bgcolor: CARD_BG, color: 'common.white', '&:hover': { bgcolor: SUBHEADER_BG } }}>
+        Back to the parts
+      </Button>
       <FindThings cat={cat} />
       <Button
         size="small"
@@ -252,11 +250,82 @@ function WalkStatus() {
   );
 }
 
+function subscribeNothing() {
+  return () => {};
+}
+
+/** How this computer zooms the shop: a Mac's trackpad pinches, or ⌘ with the wheel; anything else, Ctrl. */
+function useZoomKeys(): string {
+  const mac = useSyncExternalStore(subscribeNothing, () => /Mac|iPhone|iPad/.test(navigator.userAgent), () => false);
+  return mac ? 'Pinch or ⌘ + scroll' : 'Ctrl + scroll';
+}
+
 function Hint({ cat }: { cat: Catalog }) {
+  const zoomKeys = useZoomKeys();
   return (
     <Typography sx={{ ...floatSx, right: 16, bottom: 16, px: 1.25, py: 0.5, fontSize: '0.8rem', color: 'text.secondary', boxShadow: 'none' }}>
       {cat.shop.name}
-      {cat.shop.fictional && ', a fictional shop'} · drag to turn · right-drag to move · scroll to zoom
+      {cat.shop.fictional && ', a fictional shop'} · drag to turn · right-drag to move · {zoomKeys.toLowerCase()} to zoom
+    </Typography>
+  );
+}
+
+/**
+ * The page scrolls over the shop, as it does everywhere else, so a visitor can always get back up
+ * to the parts: the camera zooms only with Ctrl or ⌘ held, or a trackpad's pinch (which the browser
+ * reports as Ctrl). A plain scroll says how to zoom, briefly.
+ */
+function useScrollPastTheShop(shop: React.RefObject<HTMLElement | null>): boolean {
+  const [hint, setHint] = useState(false);
+  useEffect(() => {
+    const el = shop.current;
+    if (!el) return;
+    let timer = 0;
+    const onWheel = (e: WheelEvent) => {
+      // The zoom passed on below, on its way to the camera.
+      if (!e.isTrusted) return;
+      // Kept from the camera, which would zoom on it and stop the page scrolling.
+      e.stopPropagation();
+      if (e.ctrlKey || e.metaKey) {
+        // Not the browser's own zoom: the camera's, toward the cursor, as a plain scroll gives it.
+        e.preventDefault();
+        e.target?.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            deltaZ: e.deltaZ,
+            deltaMode: e.deltaMode,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            screenX: e.screenX,
+            screenY: e.screenY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return;
+      }
+      setHint(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setHint(false), 1500);
+    };
+    el.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel, { capture: true });
+      window.clearTimeout(timer);
+    };
+  }, [shop]);
+  return hint;
+}
+
+function ZoomHint({ shown }: { shown: boolean }) {
+  const zoomKeys = useZoomKeys();
+  return (
+    <Typography
+      aria-hidden
+      sx={{ ...floatSx, left: '50%', bottom: 64, transform: 'translateX(-50%)', px: 2, py: 1, fontWeight: 600, pointerEvents: 'none', opacity: shown ? 1 : 0, transition: 'opacity 0.25s' }}
+    >
+      {zoomKeys} to zoom the shop
     </Typography>
   );
 }
@@ -278,6 +347,8 @@ export default function ShopLayout(props: ShopProps) {
   const overview = useShowcase((s) => s.overview);
   const body = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLElement>(null);
+  const view = useRef<HTMLDivElement>(null);
+  const zoomHint = useScrollPastTheShop(view);
   const [cardWidth, setCardWidth] = useState(0);
   const step = useShowcase((s) => s.step);
   // Folded at a step of a part, so opening another step, finishing, or another part unfolds it: a
@@ -310,7 +381,7 @@ export default function ShopLayout(props: ShopProps) {
   return (
     <Box sx={{ position: 'relative', height: '100%' }}>
       {/* Its own stacking context, so the labels over the shop (z-index 0-20) stay under the cards. */}
-      <Box role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+      <Box ref={view} role="img" aria-label={`A 3D view of ${cat.shop.name}`} sx={{ position: 'absolute', inset: 0, zIndex: 0 }}>
         <ShopCanvas cat={cat} part={part} left={cardWidth ? cardWidth + 16 : 0} right={item ? ITEM_CARD + 16 : 0} />
       </Box>
       <ShopButtons
@@ -411,6 +482,7 @@ export default function ShopLayout(props: ShopProps) {
           </Box>
         </Box>
       )}
+      <ZoomHint shown={zoomHint} />
       <Hint cat={cat} />
     </Box>
   );

@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -74,7 +75,26 @@ function OwnPart() {
   );
 }
 
-/** A row that scrolls sideways a slide at a time, with arrows while there is more to see. */
+// The space at either end of the carousel, as the page's gutter.
+const GUTTER = { xs: 2, md: 4 };
+
+const arrowSx = {
+  position: 'absolute',
+  top: '35%',
+  zIndex: 1,
+  transform: 'translateY(-50%)',
+  bgcolor: 'rgba(17, 20, 57, 0.9)',
+  border: '1px solid rgba(255, 255, 255, 0.2)',
+  boxShadow: '0 6px 20px rgba(0, 0, 0, 0.35)',
+  '&:hover': { bgcolor: 'rgba(17, 20, 57, 1)' },
+  // Nothing more that way: gone, but still in place for the keyboard's focus.
+  '&.Mui-disabled': { opacity: 0 },
+} as const;
+
+/**
+ * A row across the whole width of the page that scrolls sideways a slide at a time. The slides sit
+ * in the middle while they all fit; once they don't, arrows over its ends show there is more.
+ */
 function Carousel({ label, children }: { label: string; children: ReactNode }) {
   const track = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
@@ -86,52 +106,72 @@ function Carousel({ label, children }: { label: string; children: ReactNode }) {
     const el = track.current;
     if (!el) return;
     measure();
+    // The track, and each slide as it lays out: either can change how much there is to scroll.
     const seen = new ResizeObserver(measure);
-    seen.observe(el);
+    for (const box of [el, ...el.children]) seen.observe(box);
     return () => seen.disconnect();
   }, [measure]);
   const go = (dir: 1 | -1) => track.current?.scrollBy({ left: dir * track.current.clientWidth * 0.8, behavior: 'smooth' });
+  // Padding takes the theme's spacing from a number; scroll padding and offsets take it only as a length.
+  const theme = useTheme();
+  const gutter = { xs: theme.spacing(GUTTER.xs), md: theme.spacing(GUTTER.md) };
   return (
     <Box component="section" aria-label={label}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <Typography component="h2" sx={{ ...eyebrowSx, color: EYEBROW_COLOR, flex: 1 }}>
-          {label}
-        </Typography>
-        <IconButton aria-label="Previous parts" disabled={edges.start} onClick={() => go(-1)}>
+      <Typography component="h2" sx={{ ...eyebrowSx, display: 'block', color: EYEBROW_COLOR, textAlign: 'center', mb: 2.5 }}>
+        {label}
+      </Typography>
+      <Box sx={{ position: 'relative' }}>
+        <IconButton aria-label="Previous parts" disabled={edges.start} onClick={() => go(-1)} sx={{ ...arrowSx, left: gutter }}>
           <ChevronLeftIcon />
         </IconButton>
-        <IconButton aria-label="More parts" disabled={edges.end} onClick={() => go(1)}>
+        <IconButton aria-label="More parts" disabled={edges.end} onClick={() => go(1)} sx={{ ...arrowSx, right: gutter }}>
           <ChevronRightIcon />
         </IconButton>
-      </Box>
-      <Box
-        ref={track}
-        onScroll={measure}
-        sx={{ display: 'flex', gap: 2, overflowX: 'auto', scrollSnapType: 'x mandatory', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' }, pt: 0.5, pb: 1 }}
-      >
-        {children}
+        <Box
+          ref={track}
+          onScroll={measure}
+          sx={{
+            display: 'flex',
+            gap: 2,
+            overflowX: 'auto',
+            scrollSnapType: 'x mandatory',
+            scrollPaddingInline: gutter,
+            scrollbarWidth: 'none',
+            '&::-webkit-scrollbar': { display: 'none' },
+            px: GUTTER,
+            pt: 0.5,
+            pb: 1,
+            // In the middle while they fit; from the start once they don't.
+            '& > :first-of-type': { ml: 'auto' },
+            '& > :last-of-type': { mr: 'auto' },
+          }}
+        >
+          {children}
+        </Box>
       </Box>
     </Box>
   );
 }
 
-/** The research in a few lines, then the parts to pick from in a carousel: ours, then the visitor's own. */
+/** The research in a few lines, in the middle, then the parts to pick from across the page: ours, then the visitor's own. */
 export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id: string, source: PickSource): void }) {
   return (
-    <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 } }}>
-      <Box sx={{ maxWidth: 760 }}>
-        <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
-          Research preview
-        </Typography>
-        <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4vw, 3.2rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
-          Pick a part. Watch every step of making it.
-        </Typography>
-        <Typography sx={{ mt: 2.5, color: 'rgba(255, 255, 255, 0.8)', fontSize: { xs: '1.05rem', md: '1.15rem' }, lineHeight: 1.6 }}>
-          Jigged plans the part for a real shop&apos;s machines, then shows each step being done, at the machine and with the tools it
-          needs. The shop and the hands are simulated.
-        </Typography>
-      </Box>
-      <Box sx={{ mt: { xs: 5, md: 6 } }}>
+    <>
+      <Section grid size="minor" sx={{ pt: { xs: 6, md: 8 }, pb: { xs: 4, md: 5 } }}>
+        <Box sx={{ maxWidth: 760, mx: 'auto', textAlign: 'center' }}>
+          <Typography component="span" sx={{ ...eyebrowSx, color: EYEBROW_COLOR }}>
+            Research preview
+          </Typography>
+          <Typography component="h1" sx={{ mt: 2, fontFamily: DISPLAY_FONT, fontWeight: 600, fontSize: 'clamp(2.1rem, 4vw, 3.2rem)', lineHeight: 1.05, letterSpacing: '-0.03em', textWrap: 'balance' }}>
+            Pick a part. Watch every step of making it.
+          </Typography>
+          <Typography sx={{ mt: 2.5, color: 'rgba(255, 255, 255, 0.8)', fontSize: { xs: '1.05rem', md: '1.15rem' }, lineHeight: 1.6, textWrap: 'balance' }}>
+            Jigged plans the part for a real shop&apos;s machines, then shows each step being done, at the machine and with the tools it
+            needs. The shop and the hands are simulated.
+          </Typography>
+        </Box>
+      </Section>
+      <Box id="showcase-parts" sx={{ pb: { xs: 5, md: 7 } }}>
         <Carousel label="Pick a part">
           {parts.map((p) => (
             <PartSlide key={p.id} part={p} onPick={() => onPick(p.id, 'intro')} />
@@ -139,6 +179,6 @@ export default function Intro({ parts, onPick }: { parts: LivePart[]; onPick(id:
           <OwnPart />
         </Carousel>
       </Box>
-    </Section>
+    </>
   );
 }

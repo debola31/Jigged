@@ -1,7 +1,7 @@
 {
  "asset": "dti",
  "about": "Mitutoyo 513-404-10E lever dial test indicator on a magnetic stand: four links, eleven CAD materials. Black base, clamps and knob; chrome rods; satin-chrome indicator body; a white dial under its crystal, as the 513-404's; the base's label and ground pole pieces.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: corrected to the real product: the dial made white, as a real Mitutoyo 513-404 (the CAD's is yellow)",
  "fallback": "dti_black",
  "cad": {
   "*": {
@@ -72,7 +72,6 @@
    "about": "the 513-404's white dial face under its glossy crystal"
   }
  },
- "corrected": "2026-11-05: the dial made white, as a real Mitutoyo 513-404 (the CAD's is yellow)",
  "unsure": [
   {
    "what": "the bezel keeps the CAD's black",

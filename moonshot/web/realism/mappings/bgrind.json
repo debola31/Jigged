@@ -1,6 +1,6 @@
 {
  "asset": "bgrind",
- "about": "Generic 8 in bench grinder with a belt-sander arm (the CAD's): motor and guards painted grey, the pedestal a darker cast grey; by CAD material and, inside the default one, by part: the belt, the grinding wheel, the eye shield, the tool rest, the feet.",
+ "about": "Generic 8 in bench grinder with a belt-sander arm (the CAD's): motor and guards painted grey, the pedestal a darker cast grey; by CAD material and, inside the default one, by part box: the belt, the grinding wheel, the eye shield, the tool rest.",
  "reviewed": "2026-11-05: draft",
  "fallback": "bgrind_paint",
  "cad": {
@@ -23,51 +23,77 @@
  },
  "rules": [
   {
-   "why": "the sanding belt (part 27: 40 mm wide, around the arm's two wheels)",
-   "parts": [
-    27
-   ],
+   "why": "the sanding belt: the 40 mm-wide loop (about 194 x 40 x 194 mm) around the arm's two wheels",
+   "part_inside": {
+    "lo": [
+     -0.046,
+     -0.192,
+     0.095
+    ],
+    "hi": [
+     0.152,
+     -0.148,
+     0.293
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.15
+   },
    "material": "bgrind_belt"
   },
   {
-   "why": "the arm's drive and idler wheels (parts 41, 89)",
-   "parts": [
-    41,
-    89
-   ],
-   "material": "aluminium_brushed"
-  },
-  {
-   "why": "the grinding wheel (part 71: 150 x 20 mm)",
-   "parts": [
-    71
-   ],
+   "why": "the grinding wheel: the 150 x 20 mm disc inside the +y guard",
+   "part_inside": {
+    "lo": [
+     -0.075,
+     0.137,
+     0.066
+    ],
+    "hi": [
+     0.079,
+     0.1605,
+     0.22
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.14
+   },
    "material": "bgrind_wheel"
   },
   {
-   "why": "the eye shield (part 25): polycarbonate",
-   "parts": [
-    25
-   ],
+   "why": "the eye shield over the wheel: polycarbonate",
+   "part_inside": {
+    "lo": [
+     -0.159,
+     0.088,
+     0.273
+    ],
+    "hi": [
+     -0.03,
+     0.21,
+     0.293
+    ]
+   },
+   "part_size": {
+    "min_max_side": 0.1
+   },
    "material": "glass_polycarbonate"
   },
   {
-   "why": "the tool rest at the wheel (parts 1, 2)",
-   "parts": [
-    1,
-    2
-   ],
+   "why": "the tool rest at the wheel",
+   "part_inside": {
+    "lo": [
+     -0.11,
+     0.106,
+     0.119
+    ],
+    "hi": [
+     -0.071,
+     0.171,
+     0.151
+    ]
+   },
    "material": "cast_iron_raw"
-  },
-  {
-   "why": "the four feet (parts 10, 26, 65, 68)",
-   "parts": [
-    10,
-    26,
-    65,
-    68
-   ],
-   "material": "rubber_black"
   }
  ],
  "materials": {

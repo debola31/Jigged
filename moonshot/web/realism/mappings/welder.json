@@ -17,6 +17,10 @@
   }
  },
  "rules": [],
+ "drop_links": [
+  "69915K53:1"
+ ],
+ "drop_links_why": "McMaster 69915K53, the power cord's strain-relief gland on the back: 8k CAD triangles for a 40 mm black knob, and the simplifier's floor sat 2 % over the cap with it",
  "materials": {
   "welder_case": {
    "family": "paint",

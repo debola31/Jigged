@@ -1,7 +1,7 @@
 {
  "asset": "cal6",
  "about": "Mitutoyo 500-196-30 6 in ABSOLUTE digital caliper, its CAD's materials named mat_0-9: stainless beam and jaws, black slider housing, LCD, buttons, the beam's dark scale strip with its yellow print, the thumb roller.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: corrected to the real product: the beam made satin stainless with black graduations, as a real 500-196-30 (the CAD's black strip with yellow print dropped)",
  "fallback": "cal6_stainless",
  "cad": {
   "*": {
@@ -132,7 +132,6 @@
    "about": "the housing's ABSOLUTE print: light grey on black"
   }
  },
- "corrected": "2026-11-05: the beam made satin stainless with black graduations, as a real 500-196-30 (the CAD's black strip with yellow print dropped)",
  "unsure": [
   {
    "what": "the two buttons keep the CAD's green and yellow",

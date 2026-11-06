@@ -1,7 +1,7 @@
 {
  "asset": "vise6",
  "about": "Kurt HDL6AL two-station 6 in vise: one CAD mesh in 7 solids, no colours, the body welded to its jaws. As Kurt's HDL6 photos show it: the ductile-iron body ground bare all over, Kurt blue only on the recessed band along each side (y +-60.3 mm, where the HDL decal sits); everything above the bed (z 79.4 mm) the machinable aluminium jaws; the screw and pins steel.",
- "reviewed": "2026-11-05: draft",
+ "reviewed": "2026-11-05: corrected to the real product: body ground bare with a blue side band, from a Kurt HDL6 product photo (was Kurt blue all over)",
  "fallback": "cast_iron_ground",
  "cad": {
   "*": {
@@ -113,7 +113,6 @@
    "about": "Kurt's 1.735 in machinable aluminium jaws: milled 6061"
   }
  },
- "corrected": "2026-11-05: body ground bare with a blue side band, from a Kurt HDL6 product photo (was Kurt blue all over)",
  "unsure": [
   {
    "what": "the blue band's exact height: taken as the recessed side face; the photo also shows the HDL CarvLock decal on it, not modelled",

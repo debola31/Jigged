@@ -73,19 +73,34 @@ texel), phones to ASTC; the manifest's GPU bytes assume 1 byte a texel plus mipm
   step videos' HDRI (`machine_shop_02`, intensity 0.6, rotated by π); RoomEnvironment works too, flatter.
 - Checked under **AgX**, which the page is moving to.
 
-## Swap-in
+## Swap-in: level of detail by screen size
 
-1. Load the light models as today. Start the realistic ones only after every light model is in and the page is idle
-   (`requestIdleCallback`), so the first view is exactly as fast as today.
-2. Stream in `load_order` (heroes first, then `near`, then `other`), re-sorted by distance to the current station,
-   two at a time. Pause while the camera is flying; resume when it stops.
-3. Before swapping, `await renderer.compileAsync(full, camera, scene)` so shaders and texture uploads don't hitch
-   the next frame. Then, in one frame, replace the light model under every item of that asset, dispose the light
-   geometry and materials, and redraw the shadow map once (`shadowMap.needsUpdate = true`).
-4. A failed full model keeps its light one: report it once, as model failures are reported today.
-5. **Phones get no realistic models**: light models only, no swap (decided 2026-11-05). The page already tells a
-   phone from a desktop for its controls (touch gets no orbit); the same test gates the stream. A phone on
-   cellular can't spend ~66 MB and a phone GPU ~0.3 GB on what is a few hundred pixels across.
+A realistic model shows only while its item is big enough on screen to matter; everywhere else, the overview
+included, the light model stays. Measured below: the whole-shop view costs about what it does today.
+
+1. **Load** the light models as today. Then, when every light model is in and the page is idle
+   (`requestIdleCallback`), stream the realistic ones in `load_order` (heroes first), two at a time, paused while the
+   camera flies. Before an item may show its realistic model it must be loaded and `await renderer.compileAsync(...)`ed.
+2. **Rule, per item, each frame the camera moves:** `share = r / (max(d, r) * tan(fov / 2))`, where `r` is the
+   radius of the item's bounding sphere (from the record's `bbox`, as picking uses) and `d` the camera's distance to
+   its centre: roughly the fraction of the view's height the item spans.
+   - **Swap forward** to realistic when `share >= 0.20`; **swap back** to light when `share < 0.14`. The gap is
+     the hysteresis, so an item at the edge doesn't flicker as the camera glides.
+   - Items outside the frustum keep their state; they cost nothing drawn.
+   - **Cap:** among the items that qualify, biggest share first, at most **1.5 M realistic triangles** at once
+     (`manifest.assets[a].triangles`); the rest stay light.
+3. **Both stay resident.** Swapping is `visible` on two children of the item's group, so it's instant both ways;
+   with every realistic model loaded the GPU holds about 0.33 GB (textures 0.25 GB, geometry 0.08 GB; light models
+   negligible), inside the 1 GB budget, so nothing is disposed. Only evict (dispose the realistic model, keep the
+   light) if a device reports memory pressure; the rule then reloads it when it next qualifies.
+4. **Shadows:** a swap changes geometry, so redraw the static shadow map once after swaps settle (debounced
+   ~300 ms after the camera stops), never every frame.
+5. **A failed realistic model** keeps its light one: report it once, as model failures are reported today.
+6. **Phones get no realistic models**: light models only, no swap (decided 2026-11-05). The page already tells a
+   phone from a desktop for its controls (touch gets no orbit); the same test gates the stream.
+
+The rule and the views are in `preview/index.html` (`lodUpdate`), measured with
+`python -m moonshot.web.realism.loadcheck --lod`.
 
 ## Picking, highlighting and shadows
 
@@ -95,14 +110,17 @@ texel), phones to ASTC; the manifest's GPU bytes assume 1 byte a texel plus mipm
 - One mesh per material, nothing named per part: highlighting stays the box outline. Keep `raycast = () => {}`.
 - `castShadow` on every mesh except transparent ones (the VF-2's door panes); `receiveShadow` on all.
 
-## Measured (1080p, GTX 1070, three.js r186 in headless Chromium)
+## Measured (1080p, GTX 1070, three.js r186 in headless Chromium, shadows drawn once)
 
-| Whole shop | triangles drawn | draws | frame, shadows drawn once (as the page does) | frame, shadows every frame |
-|---|---|---|---|---|
-| today, all light | 0.99 M | 432 | 6.2 ms | 5.8-7.6 ms |
-| pilot: 4 realistic | 1.50 M | 443 | 8.3 ms | 10.4 ms |
-| 73 realistic (2026-11-05, 20:50) | 2.48 M | 546 | **12.1 ms** | 15.0 ms |
+With 73 realistic models built (2026-11-05, 21:10); frame time with the triangles drawn and the realistic items shown.
 
-About 3.2 ms per million triangles drawn. The projection for all 95 and the download and GPU totals are in
-`<data>/realism/projection.json` (`python -m moonshot.web.realism project`); the page's own room and
-post-processing come on top, so keep shadows static.
+| View (the page's) | all light | all realistic | with the swap rule |
+|---|---|---|---|
+| Whole shop (overview) | 5.4 ms, 0.87 M | 12.6 ms, 2.27 M | **7.3 ms**, 1.15 M, 3 realistic |
+| Milling zone, from the south | 3.5 ms, 0.34 M | 6.8 ms, 0.87 M | **6.3 ms**, 0.77 M, 6 realistic |
+| VF-2 from its operator side | 2.5 ms, 0.07 M | 3.9 ms, 0.36 M | **3.7 ms**, 0.36 M, 3 realistic |
+| Main aisle at eye height | 6.0 ms, 0.94 M | 12.3 ms, 2.42 M | **7.5 ms**, 1.30 M, 7 realistic |
+
+Shadows redrawn every frame add 2-3 ms; the page's room adds about 0.5 ms (the scene agent's measurement). About
+3.2 ms per million triangles drawn. The projection for all 95 and the download and GPU totals are in
+`<data>/realism/projection.json` (`python -m moonshot.web.realism project`).

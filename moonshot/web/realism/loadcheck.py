@@ -98,16 +98,30 @@ def shop_shots(out_dir: Path, extras=(0, 2, 4)) -> list[dict]:
     return run(shots, "shop")
 
 
+def lod_shots(out_dir: Path, views=("overview", "milling", "vf2", "aisle")) -> list[dict]:
+    """The page's views, each light, all-realistic and with the swap rule, shadows drawn once."""
+    shots = [{"query": f"scene=shop&mode={m}&view={v}&shadow=static", "w": 1920, "h": 1080, "bench": 120,
+              "png": str(out_dir / f"lod_{v}_{m}.png"), "mode": m, "view": v, "shadow": "static",
+              "timeout_ms": 600000} for v in views for m in ("light", "full", "lod")]
+    return run(shots, "lod")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("assets", nargs="*")
     ap.add_argument("--shop", action="store_true")
+    ap.add_argument("--lod", action="store_true", help="the page's views, light / realistic / swap rule")
     ap.add_argument("--out", type=Path, default=work_root() / "checks")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     if a.assets:
         for r in asset_shots(a.assets, a.out):
             print(r["query"], r.get("stats"), r.get("errors"))
+    if a.lod:
+        for r in lod_shots(a.out):
+            st = r.get("stats") or {}
+            print(r["view"], r["mode"], st.get("drawn_triangles"), st.get("draw_calls"), st.get("realistic_items"),
+                  r.get("frame_ms"), r.get("errors"))
     if a.shop:
         for r in shop_shots(a.out):
             print(r["query"], r.get("stats"), r.get("frame_ms"), r.get("errors"))

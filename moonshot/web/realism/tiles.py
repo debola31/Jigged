@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from moonshot.config import data_root
-from moonshot.web.realism import matlib
+from moonshot.web.realism import locks, matlib
 from moonshot.web.realism.budgets import gpu_texture_bytes
 from moonshot.web.realism.paths import ktx, tiles_dir, work_root
 
@@ -166,6 +166,12 @@ def encode(png: Path, dst: Path, kind: str) -> None:
 
 
 def build(only: set[str] | None = None) -> dict:
+    """Bake and encode the families (all, or `only`), one worker at a time: tiles.json is read, changed, written."""
+    with locks.tiles("tiles " + ",".join(sorted(only or []))):
+        return _build(only)
+
+
+def _build(only: set[str] | None) -> dict:
     out_dir, png_dir = tiles_dir(), work_root() / "tiles_png"
     out_dir.mkdir(parents=True, exist_ok=True)
     png_dir.mkdir(parents=True, exist_ok=True)

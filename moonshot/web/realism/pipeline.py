@@ -2,7 +2,7 @@
 
     simplify  node    the sources to the class's triangle cap (meshoptimizer, error-bounded); heroes stay whole
     prepare   Blender materials from the mapping, hand fixes, UV0 tiles, UV1 atlas            (CPU)
-    bake      Blender AO into UV1                                                             (GPU; waits on gpu-hold)
+    bake      Blender AO into UV1                                       (GPU: one job at a time across workers, locks.py)
     export    Blender raw GLB, material stubs
     pack      node    library materials, shared tiles by URI, AO as KTX2, one draw per material, meshopt
     validate  node    the Khronos validator; then budgets.py's checks -> <work>/<asset>/report.json
@@ -11,6 +11,7 @@ Timings land in <work>/<asset>/timings.json, so the rollout can be costed per as
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -19,14 +20,13 @@ from pathlib import Path
 
 from moonshot.config import blender, data_root
 from moonshot.web.export import asset_record
-from moonshot.web.realism import budgets, matlib
-from moonshot.web.realism.paths import HERE, gpu_hold, ktx, models_dir, node_dir, tiles_dir, work_dir
+from moonshot.web.realism import budgets, locks, matlib
+from moonshot.web.realism.paths import HERE, ktx, models_dir, node_dir, tiles_dir, work_dir, work_root
 
 MAPPINGS = HERE / "mappings"
 BLENDER_DIR = HERE / "blender"
 PACK_DIR = HERE / "pack"
 SIMPLIFY_ERROR = {"hero": 0.0005, "large": 0.001, "small": 0.002}   # a fraction of the mesh's radius
-GPU_HOLD_POLL_S = 30
 # Validator warnings that are the validator's gap, not the model's: 2.0.0-dev.3.10 predates KHR_texture_basisu, so
 # it rejects image/ktx2 and can't read KTX2 (ktx validate checks those files instead); and a normal map without
 # tangents, which glTF allows and three.js handles (derivative-based tangent space). Any other warning fails.
@@ -76,19 +76,18 @@ def node(asset: str, cmd: str, job: Path) -> None:
     nd.mkdir(parents=True, exist_ok=True)
     src, dst = PACK_DIR / "package.json", nd / "package.json"
     if not dst.exists() or dst.read_bytes() != src.read_bytes() or not (nd / "node_modules").exists():
-        shutil.copyfile(src, dst)
-        subprocess.run([shutil.which("npm"), "install", "--no-audit", "--no-fund"], cwd=nd, check=True)
-    shutil.copyfile(PACK_DIR / "realism.mjs", nd / "realism.mjs")
-    _run([shutil.which("node"), "realism.mjs", cmd, str(job)], work_dir(asset) / f"node_{cmd}.log", cwd=nd)
-
-
-def wait_for_gpu() -> float:
-    """Another session may need the GPU idle (it measures frame times): wait while <web>/gpu-hold exists."""
-    t = time.perf_counter()
-    while gpu_hold().exists():
-        print(f"[gpu] {gpu_hold()} exists: waiting", flush=True)
-        time.sleep(GPU_HOLD_POLL_S)
-    return time.perf_counter() - t
+        with locks.dir_lock(work_root() / "node-lock.d", "npm install"):
+            if not dst.exists() or dst.read_bytes() != src.read_bytes() or not (nd / "node_modules").exists():
+                shutil.copyfile(src, dst)
+                subprocess.run([shutil.which("npm"), "install", "--no-audit", "--no-fund"], cwd=nd, check=True)
+    # each worktree's script by its content, under node/ so its imports resolve to node/node_modules: workers on
+    # different commits never overwrite each other's
+    code = (PACK_DIR / "realism.mjs").read_bytes()
+    run = nd / "runs" / hashlib.sha256(code).hexdigest()[:12]
+    run.mkdir(parents=True, exist_ok=True)
+    if not (run / "realism.mjs").exists():
+        (run / "realism.mjs").write_bytes(code)
+    _run([shutil.which("node"), str(run / "realism.mjs"), cmd, str(job)], work_dir(asset) / f"node_{cmd}.log", cwd=nd)
 
 
 # --- the steps ---------------------------------------------------------------------------------------------------------
@@ -135,8 +134,9 @@ def prepare(asset: str) -> dict:
         s["path"], s["simplified"] = str(dst), simplified.get(dst.name, False)
     means = json.loads((tiles_dir() / "tiles.json").read_text())["src_means"]
     natural = {}
-    for name in matlib.MATERIALS:
-        r = matlib.resolved(name, means)
+    local = mp.get("materials", {})
+    for name in matlib.library(local):
+        r = matlib.resolved(name, means, local)
         fam = matlib.FAMILIES[r["family"]]
         k = matlib.BASE_MEAN if fam["size"] and fam.get("base") else 1.0
         natural[name] = [min(1.0, c * k) for c in r["baseColorFactor"][:3]]
@@ -163,10 +163,15 @@ def bake(asset: str, device: str = "OPTIX", samples: int | None = None) -> dict:
         "report": str(work_dir(asset) / "bake.json"), "res": res, "device": device,
         "samples": samples or (128 if device != "CPU" else 64), "distance_m": round(min(max(0.2 * side, 0.02), 0.6), 3),
         "margin_px": max(4, res // 128)})
-    waited = wait_for_gpu() if device != "CPU" else 0.0
-    t = time.perf_counter()
-    _blender(asset, "bake.py", job, factory=False)
-    _timed(asset, "bake", time.perf_counter() - t, kind="gpu" if device != "CPU" else "cpu", waited_s=round(waited))
+    if device == "CPU":
+        t = time.perf_counter()
+        _blender(asset, "bake.py", job, factory=False)
+        _timed(asset, "bake", time.perf_counter() - t, kind="cpu")
+    else:
+        with locks.gpu(f"bake {asset}") as waited:
+            t = time.perf_counter()
+            _blender(asset, "bake.py", job, factory=False)
+        _timed(asset, "bake", time.perf_counter() - t, kind="gpu", waited_s=round(waited))
     return json.loads((work_dir(asset) / "bake.json").read_text())
 
 
@@ -196,7 +201,7 @@ def pack(asset: str) -> dict:
     job = _write_job(asset, "pack", {
         "raw": str(work_dir(asset) / "raw.glb"), "out": str(models_dir() / f"{asset}.glb"),
         "ao_ktx2": str(ao) if ao else None, "tiles_uri": "../tiles/", "families": tiles["families"],
-        "materials": {n: matlib.resolved(n, tiles["src_means"]) for n in matlib.MATERIALS},
+        "materials": matlib.resolve_all(tiles["src_means"], mapping(asset).get("materials")),
         "report": str(work_dir(asset) / "pack.json")})
     node(asset, "pack", job)
     _timed(asset, "pack", time.perf_counter() - t, kind="cpu")

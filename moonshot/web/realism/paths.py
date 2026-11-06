@@ -6,6 +6,7 @@
     <data>/realism/node/                    pack/'s package.json installed (npm install), its scripts beside it
     <data>/realism/tools/ktx/bin/ktx.exe    KTX-Software 4.4.2 (KTX env var overrides)
     <data>/web/gpu-hold                     while it exists another session needs the GPU idle: GPU jobs wait
+    <data>/web/gpu-lock.d                   held by the one GPU job running (locks.py)
 """
 from __future__ import annotations
 

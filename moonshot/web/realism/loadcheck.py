@@ -10,12 +10,13 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import os
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from moonshot.web.export import OUT as SHOWCASE_JSON
-from moonshot.web.realism import pipeline, review
+from moonshot.web.realism import locks, pipeline, review
 from moonshot.web.realism.paths import HERE, web_root, work_root
 
 PORT = 8790
@@ -43,18 +44,23 @@ def serve() -> ThreadingHTTPServer:
 
 
 def run(shots: list[dict], name: str) -> list[dict]:
+    """The shots in headless Chromium, holding the GPU lock (which also keeps two workers off the one port)."""
     d = work_root() / "checks"
     d.mkdir(parents=True, exist_ok=True)
+    name = f"{name}_{os.getpid()}"
     job = d / f"shots_{name}.json"
     job.write_text(json.dumps({"base": f"http://127.0.0.1:{PORT}", "shots": shots, "report": str(d / f"{name}.json")},
                               indent=1))
-    httpd = serve()
-    try:
-        pipeline.wait_for_gpu()
-        pipeline.node("checks", "shots", job)
-    finally:
-        httpd.shutdown()
-    return json.loads((d / f"{name}.json").read_text())
+    with locks.gpu(f"loadcheck {name}"):
+        httpd = serve()
+        try:
+            pipeline.node("checks", "shots", job)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+    out = json.loads((d / f"{name}.json").read_text())
+    (d / f"{name.rsplit('_', 1)[0]}.json").write_text(json.dumps(out, indent=1))     # the latest, by kind
+    return out
 
 
 def asset_shots(assets: list[str], out_dir: Path, views=("front", "close")) -> list[dict]:

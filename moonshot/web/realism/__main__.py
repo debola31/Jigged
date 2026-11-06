@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from moonshot.web.realism import manifest, pipeline, projection, review, tiles
+from moonshot.web.realism import locks, manifest, pipeline, projection, review, tiles
 from moonshot.web.realism.paths import work_dir
 
 LOOK_VIEWS = ["front", "back", "left", "right", "top", "low"]
@@ -18,8 +18,8 @@ def look(asset: str, modes: list[str], views: list[str], out_dir=None) -> list:
         "extra_views": pipeline.mapping(asset).get("views", {}),
         "names": {"links": json.loads((work_dir(asset) / "prepare.json").read_text())["links"],
                   "cads": json.loads((work_dir(asset) / "prepare.json").read_text())["cads"]}})
-    pipeline.wait_for_gpu()                     # Workbench draws on the GPU
-    pipeline._blender(asset, "look.py", job)
+    with locks.gpu(f"look {asset}"):            # Workbench draws on the GPU
+        pipeline._blender(asset, "look.py", job)
     out = out_dir or d
     return [review.sheet(d, m, views, out / f"{asset}_{m}.png", f"{asset}: {m}") for m in modes]
 

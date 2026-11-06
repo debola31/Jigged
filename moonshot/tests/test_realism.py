@@ -3,20 +3,22 @@ the heroes are the live parts' stations, and the budgets' arithmetic holds; with
 is valid and the shop stays inside its budgets."""
 import json
 import re
+import threading
+import time
 
 import pytest
 
 from moonshot.config import data_root
 from moonshot.web.export import RECORDS, _json, build, shop_assets
 from moonshot.web.media import GLTF_TRANSFORM
-from moonshot.web.realism import budgets, matlib
+from moonshot.web.realism import budgets, locks, matlib
 from moonshot.web.realism.paths import HERE
 from moonshot.web.realism.pipeline import MAPPINGS, mapped_assets
 
 RULE_KEYS = {"why", "material", "links", "cads", "from", "inside", "outside", "normal", "toward", "part_inside",
              "part_size", "parts"}
 MAPPING_KEYS = {"asset", "about", "reviewed", "source", "fallback", "cad", "rules", "ops", "smooth_deg", "triangles",
-                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views"}
+                "atlas", "bbox_tolerance_mm", "bbox_why", "unsure", "fallback_ok", "views", "check_views", "materials"}
 
 
 def test_the_material_library_is_consistent():
@@ -45,7 +47,10 @@ def test_every_mapping_names_real_assets_materials_and_rule_keys():
         assert mp["asset"] == asset and asset in shop_assets(layout)
         assert set(mp) <= MAPPING_KEYS, set(mp) - MAPPING_KEYS
         assert mp["about"].strip() and mp["reviewed"].strip(), asset
-        assert _materials_named(mp) <= set(matlib.MATERIALS), _materials_named(mp) - set(matlib.MATERIALS)
+        local = mp.get("materials", {})
+        assert matlib.check(local, asset) == [], asset
+        known = set(matlib.library(local))
+        assert _materials_named(mp) <= known, _materials_named(mp) - known
         for rule in mp.get("rules", []):
             assert set(rule) <= RULE_KEYS and rule.get("why"), (asset, set(rule) - RULE_KEYS)
         for op in mp.get("ops", []):
@@ -83,6 +88,73 @@ def test_the_node_tools_are_pinned_as_the_spike_found_them_working():
     assert all(re.fullmatch(r"\d+\.\d+\.\d+(-[\w.]+)?", v) for v in pkg["dependencies"].values()), pkg
     assert pkg["dependencies"]["@gltf-transform/core"] == GLTF_TRANSFORM.rsplit("@", 1)[1]
     assert pkg["overrides"]["sharp"] == "0.35.5"
+
+
+@pytest.fixture
+def fast_locks(monkeypatch):
+    monkeypatch.setattr(locks, "POLL_S", 0.02)
+    monkeypatch.setattr(locks, "HOLD_POLL_S", 0.02)
+
+
+def test_a_lock_is_a_directory_with_its_owner_and_goes_when_released(tmp_path, fast_locks):
+    lock = tmp_path / "gpu-lock.d"
+    with locks.dir_lock(lock, "bake vf2"):
+        owner = json.loads((lock / "owner.json").read_text())
+        assert owner["job"] == "bake vf2" and owner["started_epoch"] <= time.time()
+    assert not lock.exists()
+    with pytest.raises(RuntimeError), locks.dir_lock(lock, "bake vf2"):
+        raise RuntimeError("the bake failed")
+    assert not lock.exists(), "a failed job still releases the GPU"
+
+
+def test_only_one_worker_holds_the_lock_at_a_time(tmp_path, fast_locks):
+    """Four workers in their own threads: their jobs never overlap, and every one gets its turn."""
+    lock, inside, spans = tmp_path / "gpu-lock.d", [], []
+
+    def worker(i):
+        with locks.dir_lock(lock, f"job {i}"):
+            inside.append(i)
+            assert len(inside) == 1
+            t = time.perf_counter()
+            time.sleep(0.05)
+            spans.append((t, time.perf_counter()))
+            inside.remove(i)
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    spans.sort()
+    assert len(spans) == 4 and all(a[1] <= b[0] for a, b in zip(spans, spans[1:]))
+
+
+def test_a_stale_lock_is_broken_and_a_fresh_one_waited_for(tmp_path, fast_locks):
+    lock = tmp_path / "gpu-lock.d"
+    lock.mkdir()
+    (lock / "owner.json").write_text(json.dumps({"token": "dead", "started_epoch": time.time() - 2 * locks.STALE_S}))
+    with locks.dir_lock(lock, "after a crash") as waited:
+        assert waited < 1 and json.loads((lock / "owner.json").read_text())["job"] == "after a crash"
+    assert not list(tmp_path.glob("gpu-lock.d.stale-*"))
+    lock.mkdir()
+    (lock / "owner.json").write_text(json.dumps({"token": "alive", "started_epoch": time.time()}))
+    threading.Timer(0.2, lambda: __import__("shutil").rmtree(lock)).start()
+    with locks.dir_lock(lock, "next") as waited:
+        assert waited >= 0.15
+
+
+def test_the_gpu_waits_while_gpu_hold_exists(tmp_path, fast_locks):
+    hold = tmp_path / "gpu-hold"
+    hold.write_text("measuring")
+    threading.Timer(0.2, hold.unlink).start()
+    with locks.dir_lock(tmp_path / "gpu-lock.d", "bake", hold=hold) as waited:
+        assert waited >= 0.15 and not hold.exists()
+
+
+def test_a_lock_taken_over_is_not_removed_by_its_old_holder(tmp_path, fast_locks):
+    lock = tmp_path / "gpu-lock.d"
+    with locks.dir_lock(lock, "slow"):
+        (lock / "owner.json").write_text(json.dumps({"token": "someone else", "started_epoch": time.time()}))
+    assert lock.exists()
 
 
 @pytest.mark.data_root

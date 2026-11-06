@@ -140,26 +140,32 @@ MATERIALS: dict[str, dict] = {
 }
 
 
-def family(name: str) -> dict:
-    return FAMILIES[MATERIALS[name]["family"]]
+def library(local: dict | None = None) -> dict[str, dict]:
+    """The shared materials plus an asset's own (its mapping's `materials`, each named <asset>_...): a colour only
+    one machine wears belongs to its mapping, so parallel workers don't all edit this file."""
+    return {**MATERIALS, **(local or {})}
 
 
-def tile_m(name: str) -> float:
-    m = MATERIALS[name]
+def family(name: str, local: dict | None = None) -> dict:
+    return FAMILIES[library(local)[name]["family"]]
+
+
+def tile_m(name: str, local: dict | None = None) -> float:
+    m = library(local)[name]
     return m.get("tile_m", FAMILIES[m["family"]]["tile_m"])
 
 
-def resolved(name: str, src_means: dict[str, list[float]]) -> dict:
+def resolved(name: str, src_means: dict[str, list[float]], local: dict | None = None) -> dict:
     """A material as glTF needs it: factors against its family's textures. `src_means` is the mean linear colour of
     each source map, which tiles.py measures (a ("src", tint) colour is that mean times the tint)."""
-    m, fam = MATERIALS[name], family(name)
+    m, fam = library(local)[name], family(name, local)
     colour = m["color"]
     if colour[0] == "src":
         colour = [c * t for c, t in zip(src_means[fam["src"]], colour[1])]
     textured = fam["size"] > 0
     base = [min(1.0, c / BASE_MEAN) if textured and fam.get("base") else c for c in colour]
     rough = m["rough"] / fam["rough_mean"] if textured else m["rough"]
-    out = {"name": name, "family": m["family"], "about": m["about"], "tile_m": tile_m(name),
+    out = {"name": name, "family": m["family"], "about": m["about"], "tile_m": tile_m(name, local),
            "baseColorFactor": [round(c, 5) for c in base] + [m.get("alpha", 1.0)],
            "roughnessFactor": round(min(rough, 1.0), 4), "metallicFactor": m.get("metal", 0.0),
            "normalScale": m.get("normal", 1.0), "doubleSided": m.get("double_sided", m.get("alpha", 1.0) < 1.0)}
@@ -169,8 +175,13 @@ def resolved(name: str, src_means: dict[str, list[float]]) -> dict:
     return out
 
 
-def check() -> list[str]:
-    """What's wrong with the library: unknown families or sources, factors a texture can't reach."""
+def resolve_all(src_means: dict[str, list[float]], local: dict | None = None) -> dict[str, dict]:
+    return {n: resolved(n, src_means, local) for n in library(local)}
+
+
+def check(local: dict | None = None, asset: str | None = None) -> list[str]:
+    """What's wrong with the library (and an asset's own materials): unknown families or sources, factors a texture
+    can't reach, an asset's material shadowing a shared one or not named after the asset."""
     errors = []
     for name, f in FAMILIES.items():
         if f.get("src") and f["src"] not in SOURCES:
@@ -179,9 +190,14 @@ def check() -> list[str]:
             for k in ("smudge", "prints"):
                 if k in f.get(layer, {}) and f[layer][k][0] not in SOURCES:
                     errors.append(f"{name}: unknown source {f[layer][k][0]}")
-    for name, m in MATERIALS.items():
-        if m["family"] not in FAMILIES:
-            errors.append(f"{name}: unknown family {m['family']}")
+    for name in local or {}:
+        if name in MATERIALS:
+            errors.append(f"{name}: an asset's material may not shadow the library's")
+        if asset and not name.startswith(f"{asset}_"):
+            errors.append(f"{name}: an asset's material is named <asset>_...")
+    for name, m in library(local).items():
+        if m.get("family") not in FAMILIES:
+            errors.append(f"{name}: unknown family {m.get('family')}")
             continue
         fam = FAMILIES[m["family"]]
         if m["color"][0] == "src" and not fam.get("src"):

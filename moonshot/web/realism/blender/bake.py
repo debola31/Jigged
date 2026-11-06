@@ -5,7 +5,7 @@
 The asset alone plus the floor it stands on (prepare.py's `_ao_ground`, an occluder never exported): AO per asset,
 not shop-wide lightmaps, so a model doesn't need re-baking whenever the layout moves (spike REPORT.md). The page
 adds one realtime key light; three.js applies the aoMap to indirect light only. Writes an 8-bit linear PNG and
-<work>/bake.json (seconds, device). GPU jobs wait on <data>/web/gpu-hold before they start (pipeline.py).
+<work>/bake.json (seconds, device). pipeline.py runs it holding the PC's GPU lock (locks.py).
 """
 from __future__ import annotations
 

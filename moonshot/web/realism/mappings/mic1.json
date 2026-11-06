@@ -1,0 +1,108 @@
+{
+ "asset": "mic1",
+ "about": "Mitutoyo 103-177 0-1 in outside micrometer with ratchet stop, modelled from scratch lying on its side opened to 0.500 in, as the placeholder: the C frame in green hammertone enamel (raised rim round a recessed web, the cast hub round the sleeve, the black oval nameplate 'Mitutoyo 0-1\" .001\"'), carbide-faced anvil and spindle, the lock lever's boss, screw and tab, the satin sleeve with its datum line, .025 in ticks and numbered tenths, the thimble's 25 divisions reading zero on the datum, its diamond-knurled grip and the straight-knurled ratchet. Engravings are coplanar decals 0.05 mm proud.",
+ "reviewed": "2026-11-05: draft; checked against a dealer's product photograph and the placeholder's layout",
+ "source": {
+  "path": "realism/sources/mic1/mic1.glb"
+ },
+ "double_sided": false,
+ "fallback": "mic1_satin_chrome",
+ "cad": {
+  "*": {
+   "hammertone": "mic1_hammertone",
+   "plate_black": "mic1_plate_black",
+   "print_white": "mic1_print",
+   "satin_chrome": "mic1_satin_chrome",
+   "engraving": "mic1_engraving",
+   "spindle": "steel_bright",
+   "carbide": "mic1_carbide"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "mic1_hammertone": {
+   "family": "paint_cast",
+   "color": [
+    0.028,
+    0.13,
+    0.105
+   ],
+   "rough": 0.42,
+   "normal": 1.1,
+   "tile_m": 0.12,
+   "about": "Mitutoyo's green hammertone baked enamel (the cast family's pits read as the hammered texture)"
+  },
+  "mic1_plate_black": {
+   "family": "paint",
+   "color": [
+    0.008,
+    0.008,
+    0.009
+   ],
+   "rough": 0.55,
+   "tile_m": 0.2,
+   "about": "the black oval nameplate: satin, so it stays black at a glance"
+  },
+  "mic1_print": {
+   "family": "flat",
+   "color": [
+    0.78,
+    0.78,
+    0.78
+   ],
+   "rough": 0.6,
+   "about": "the nameplate's white legend"
+  },
+  "mic1_satin_chrome": {
+   "family": "ground",
+   "color": [
+    0.6,
+    0.61,
+    0.63
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "satin chrome: sleeve, thimble, ratchet, lock lever"
+  },
+  "mic1_engraving": {
+   "family": "flat",
+   "color": [
+    0.012,
+    0.012,
+    0.012
+   ],
+   "rough": 0.7,
+   "about": "the engraved, black-filled graduations and figures"
+  },
+  "mic1_carbide": {
+   "family": "ground",
+   "color": [
+    0.42,
+    0.43,
+    0.45
+   ],
+   "rough": 0.18,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.3,
+   "about": "the lapped carbide measuring faces"
+  }
+ },
+ "unsure": [
+  {
+   "what": "frame proportions: the placeholder's frame (48 mm long, the sleeve's root at x -16) is kept, so the sleeve shows more bare length before zero than Mitutoyo's"
+  },
+  {
+   "what": "engravings and the nameplate's legend are decals 0.05 mm proud of their surfaces: crisp up close, but they may shimmer from far off"
+  }
+ ],
+ "check_views": {
+  "sleeve": {
+   "eye": "0.03,0.07,0.09",
+   "target": "0.0,0.009,-0.015"
+  }
+ }
+}

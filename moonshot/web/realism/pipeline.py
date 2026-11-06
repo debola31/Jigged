@@ -101,6 +101,11 @@ def node(asset: str, cmd: str, job: Path) -> None:
 def sources(asset: str, mp: dict, rec: dict) -> list[dict]:
     lib = data_root() / "library" / rec["category"] / asset
     s = mp.get("source", {})
+    if "path" in s:
+        # A model made for the web where the library has only a placeholder. It lives outside the
+        # library (under the data root), which the step videos render from and must not change; it
+        # is exported in the library's own frame, so the record's bbox still places it.
+        return [{"path": str(data_root() / s["path"]), "link": None, "undo_y_up": False}]
     if "links" in s:
         return [{"path": str(lib / "links" / f"{ln}.glb"), "link": ln, "undo_y_up": True,
                  "translate_mm": s.get("translate_mm", [0, 0, 0]), "move_mm": s.get("move_mm", {}).get(ln)}

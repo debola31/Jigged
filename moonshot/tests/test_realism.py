@@ -196,3 +196,13 @@ def test_every_built_model_is_valid_and_the_shop_stays_in_budget():
     t = m["totals"]
     assert t["download_bytes"] <= budgets.SHOP["download_bytes"]
     assert t["gpu_texture_bytes"] + t["gpu_geometry_bytes"] <= budgets.SHOP["gpu_bytes"]
+
+
+def test_a_web_made_model_is_read_from_outside_the_library():
+    # A placeholder's web model never replaces the library's file, which the step videos render from.
+    from moonshot.web.realism.pipeline import sources
+    rec = {"category": "machines", "file": "fadal.glb"}
+    made = sources("fadal", {"source": {"path": "realism/sources/fadal/fadal.glb"}}, rec)
+    assert made == [{"path": str(data_root() / "realism/sources/fadal/fadal.glb"), "link": None, "undo_y_up": False}]
+    assert "library" not in made[0]["path"]
+    assert sources("fadal", {}, rec)[0]["path"] == str(data_root() / "library" / "machines" / "fadal" / "fadal.glb")

@@ -1,0 +1,45 @@
+{
+ "asset": "wrench",
+ "about": "The setup wrenches on their black rubber bench mat, modelled from scratch where the placeholder lays each: a 3/4 in combination wrench (polished chrome, 12-point box end, open end at 15 deg, 251 mm, the size stamped), a 5/16 in L hex key in black oxide swept round its bend, the Kurt vise handle (hex socket boss, bright bar, ringed black grip) laid straight as the placeholder lays it, and a T-handle lathe chuck key with a 3/8 in square drive.",
+ "reviewed": "2026-11-05: draft; layout checked against the placeholder piece by piece",
+ "source": {
+  "path": "realism/sources/wrench/wrench.glb"
+ },
+ "double_sided": false,
+ "fallback": "steel_black_oxide",
+ "cad": {
+  "*": {
+   "rubber_mat": "rubber_black",
+   "chrome": "chrome",
+   "black_oxide": "steel_black_oxide",
+   "handle_steel": "steel_bright",
+   "grip_black": "plastic_black",
+   "stamp": "wrench_stamp"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "wrench_stamp": {
+   "family": "ground",
+   "color": [
+    0.32,
+    0.325,
+    0.335
+   ],
+   "rough": 0.45,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.8,
+   "about": "the stamped size and alloy marks: duller than the polished chrome round them"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the Kurt handle is a crank (a grip at right angles to its arm, as on the shop's vise model); laid flat in the placeholder's footprint its grip would stand off the mat or cross the hex key, so it is a straight bar with the grip on its end, as the placeholder has it"
+  },
+  {
+   "what": "the stamped marks are decals 0.04 mm proud"
+  }
+ ]
+}

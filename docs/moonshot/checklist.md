@@ -372,6 +372,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - A plate's clamp nuts are run down and snugged with a 3/4 in wrench, in strokes (a fingertip spin turned a nut
     only 10-30 deg a stroke); a ratcheting combination wrench if the box-end's 70 deg strokes can't reach the far
     nuts (the arm runs straight or hits the near clamp);
+    each end's clamps from their own stance, one take per end (the body doesn't walk), each end's own hand on
+    its nuts; and each nut's stroke count learned from a first physics run, the stroke it seats on, then run
+    again stopping there, as the operator's feel (your decision, Nov 6): the planned strokes run 7-13 deg each
+    off, and past snug the soft thread slips rather than stalls;
     the seat, shift and unload takes land when they pass, caption and a still until then.
   - G1's vise loads: bounded retries on ll-1007223 op10 only; the others and the lift-outs show caption and a still
     for Nov 6, resuming after the timing fix (what's left are checks one frame decides, which flip with each run).

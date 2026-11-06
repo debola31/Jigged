@@ -1253,7 +1253,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/op10-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-z",
@@ -1271,7 +1271,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -1718,7 +1718,7 @@
       "type": "video",
       "path": "video/ll-1005337/op10-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tools",
@@ -1922,7 +1922,7 @@
       "type": "video",
       "path": "video/ll-1005337/op20-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-xy",
@@ -1940,7 +1940,7 @@
       "type": "video",
       "path": "video/ll-1005337/op20-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-z",
@@ -2589,7 +2589,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op30-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-z",
@@ -2827,7 +2827,7 @@
       "type": "video",
       "path": "video/ct-slbeam/op40-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-z",
@@ -3533,7 +3533,7 @@
       "type": "video",
       "path": "video/ll-1007223/op20-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-z",
@@ -3753,7 +3753,7 @@
       "type": "video",
       "path": "video/ll-1007223/op30-check.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-xy",
@@ -3771,7 +3771,7 @@
       "type": "video",
       "path": "video/ll-1007223/op30-xy.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-z",
@@ -3789,7 +3789,7 @@
       "type": "video",
       "path": "video/ll-1007223/op30-z.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-tools",

@@ -1,0 +1,91 @@
+{
+ "asset": "compar",
+ "about": "Starrett HB350 14 in bench optical comparator, self-made in Blender (sources/compar/build_compar.py) from dealer and auction photos (bidspotter, Surplus Record, AllSurplus listings found by image search) and the record's specs: the dark cast base on its feet with the X and Y handwheels and STARRETT lettering, the cross-slide and the 15.3 x 5 in stage with its T-slots and a part on it, the red housing with its deep hood round the 14 in screen (black bezel, graduated protractor ring, crosshair, chart clamps, rotation knob), the black panel below with the projection lens, switches and HB350 plate, the black profile illuminator at the left, and the red digital readout on its arm at the right (lit LED axes, keypad). Where the placeholder (planner.placeholders.comparator_14in) has its boxes.",
+ "reviewed": "2026-11-06: modelled against listing photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/compar/compar.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "compar_red",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "chrome": "chrome",
+   "compar_dark": "compar_dark",
+   "compar_led": "compar_led",
+   "compar_red": "compar_red",
+   "compar_white": "compar_white",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "plastic_green": "plastic_green",
+   "rubber_black": "rubber_black",
+   "steel_ground": "steel_ground",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "compar_red": {
+   "family": "paint",
+   "color": [
+    0.36,
+    0.03,
+    0.026
+   ],
+   "rough": 0.4,
+   "about": "Starrett red: the comparator's housing, hood and readout"
+  },
+  "compar_dark": {
+   "family": "paint_cast",
+   "color": [
+    0.035,
+    0.037,
+    0.04
+   ],
+   "rough": 0.5,
+   "about": "the dark grey cast base, cross-slide and stage body"
+  },
+  "compar_white": {
+   "family": "flat",
+   "color": [
+    0.7,
+    0.7,
+    0.68
+   ],
+   "rough": 0.5,
+   "about": "lettering, the protractor's graduations, the crosshair, keys"
+  },
+  "compar_led": {
+   "family": "flat",
+   "color": [
+    0.3,
+    0.01,
+    0.01
+   ],
+   "rough": 0.3,
+   "emissive": [
+    [
+     0.6,
+     0.03,
+     0.02
+    ],
+    1.0
+   ],
+   "about": "the readout's red LED digits, lit"
+  }
+ },
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate",
+ "sources_used": [
+  "the record (14 in screen, 10x lens, 15.3 x 5 in stage, 8 x 4 in travel) and its placeholder's boxes",
+  "photos of the Starrett (Sigma) HB350 at dealers and auctions (bidspotter 'Starrett Sigma HB350', Surplus Record, AllSurplus) found by image search"
+ ],
+ "unsure": [
+  {
+   "what": "the readout stands in front of the housing's right side, where the placeholder's box is; on most HB350s it is on an arm beside the hood"
+  },
+  {
+   "what": "the screen is dark (unlit); a working comparator shows a lit green-white disc"
+  }
+ ]
+}

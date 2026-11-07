@@ -1,0 +1,36 @@
+{
+ "asset": "wire",
+ "about": "0.010 in hard-brass EDM wire on a P5 spool (placeholder): black moulded spool flanges, the brass wire wound between them.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/wire_*.png); page check checks/wire_*_before_after.png",
+ "fallback": "plastic_black",
+ "materials": {
+  "wire_wire": {
+   "family": "flat",
+   "color": [
+    0.76,
+    0.56,
+    0.25
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.06,
+   "normal": 0.35,
+   "about": "hard-brass EDM wire, wound: drawn brass, an even satin sheen (a tile reads as blotches or crosswise streaks on the winding)"
+  }
+ },
+ "cad": {
+  "flange_bottom": {
+   "mat_0": "plastic_black"
+  },
+  "wire": {
+   "mat_1": "wire_wire"
+  }
+ },
+ "rules": [],
+ "unsure": [
+  {
+   "what": "the spool's black: as the placeholder draws it; P5 spools also come in grey or blue",
+   "picture": "checks/wire_front_before_after.png"
+  }
+ ]
+}

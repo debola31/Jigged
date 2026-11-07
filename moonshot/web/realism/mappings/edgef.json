@@ -1,0 +1,32 @@
+{
+ "asset": "edgef",
+ "about": "Mechanical edge finder (GrabCAD, 0.500 shank, 0.200 tip), tip down: body, tip and centre-point are hardened steel, ground bright (the CAD paints the tip black; a Starrett 827A class finder is bright all over). The spring inside the body is dropped.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/edgef_*.png); page check checks/edgef_*_before_after.png",
+ "fallback": "edgef_tool_steel",
+ "materials": {
+  "edgef_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "hardened tool steel, ground bright"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "edgef_tool_steel",
+   "mat_1": "edgef_tool_steel"
+  }
+ },
+ "rules": [],
+ "drop_links": [
+  "NAUO4"
+ ],
+ "drop_links_why": "NAUO4 is the extension spring inside the body: never seen, and 10,607 of the 12,090 triangles; its thousands of UV islands collapsed the AO pack to 0.000 and the finder baked black"
+}

@@ -1,0 +1,118 @@
+{
+ "asset": "cal24",
+ "about": "Mitutoyo 500-506-10, the 0-24 in / 0-600 mm ABSOLUTE Digimatic caliper, modelled from scratch lying face up and closed in the placeholder's frame (its generator's numbers from Mitutoyo's datasheet: L 780, D 90, A 38, beam 25 x 6.5 mm): the satin stainless beam engraved in millimetres along its upper edge (every 10 mm numbered) and tenths of an inch along its lower edge (every inch numbered), the outside jaws' measuring faces and the inside jaws' knife edges, the slider with its dark display unit (LCD reading 0.0000 in; Mitutoyo, ABSOLUTE and DIGIMATIC legends; ORIGIN, ZERO/ABS and in/mm keys; the SPC port's cover) and the knurled lock screw; no thumb roller.",
+ "reviewed": "2026-11-05: draft; jaws, beam and slider match the placeholder's vertices to 0.3 mm",
+ "source": {
+  "path": "realism/sources/cal24/cal24.glb"
+ },
+ "double_sided": false,
+ "fallback": "cal24_stainless",
+ "cad": {
+  "*": {
+   "stainless": "cal24_stainless",
+   "lapped": "steel_bright",
+   "display": "plastic_black",
+   "lcd": "cal24_lcd",
+   "digits": "cal24_ink",
+   "print_white": "cal24_print_white",
+   "print_red": "cal24_print_red",
+   "keys": "cal24_keys",
+   "engraving": "cal24_engraving",
+   "knurl": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "cal24_stainless": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.63,
+    0.64
+   ],
+   "rough": 0.27,
+   "metal": 1.0,
+   "tile_m": 0.15,
+   "normal": 0.4,
+   "about": "Mitutoyo's satin-finished hardened stainless: beam, jaws, slider"
+  },
+  "cal24_lcd": {
+   "family": "glass",
+   "color": [
+    0.2,
+    0.22,
+    0.185
+   ],
+   "rough": 0.1,
+   "about": "the LCD under its window: grey-green, glossy"
+  },
+  "cal24_ink": {
+   "family": "flat",
+   "color": [
+    0.01,
+    0.01,
+    0.01
+   ],
+   "rough": 0.5,
+   "about": "the LCD's segments"
+  },
+  "cal24_print_white": {
+   "family": "flat",
+   "color": [
+    0.75,
+    0.75,
+    0.75
+   ],
+   "rough": 0.6,
+   "about": "the display's white legends"
+  },
+  "cal24_print_red": {
+   "family": "flat",
+   "color": [
+    0.62,
+    0.035,
+    0.025
+   ],
+   "rough": 0.6,
+   "about": "ABSOLUTE, in Mitutoyo's red"
+  },
+  "cal24_keys": {
+   "family": "plastic",
+   "color": [
+    0.16,
+    0.16,
+    0.17
+   ],
+   "rough": 0.5,
+   "about": "the display's grey keys"
+  },
+  "cal24_engraving": {
+   "family": "flat",
+   "color": [
+    0.045,
+    0.045,
+    0.047
+   ],
+   "rough": 0.55,
+   "about": "the beam's black-filled engraving, a touch lighter than black so it greys out cleanly from afar"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the beam's engravings (1 mm and 0.1 in pitch) are decals 0.05 mm proud: at a few metres the 1 mm lines are about a pixel apart and may moire"
+  },
+  {
+   "what": "the display unit's colours and legend layout follow Mitutoyo's ABSOLUTE calipers in general; this model's own photograph wasn't checked"
+  }
+ ],
+ "check_views": {
+  "slider": {
+   "eye": "-0.17,0.15,0.2",
+   "target": "-0.27,0.01,-0.01"
+  },
+  "scale": {
+   "eye": "0.02,0.09,0.1",
+   "target": "-0.06,0.006,-0.025"
+  }
+ }
+}

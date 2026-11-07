@@ -50,8 +50,9 @@
 /api/evals          # measurement harnesses; run by hand, never imported by a route.
 
 # NOT ignored, deliberately:
-#   scripts/  — package.json's postinstall runs scripts/copy-scanner-wasm.mjs, which
-#               copies the zxing WASM into public/ and throws if it fails.
+#   scripts/  — package.json's postinstall runs scripts/copy-scanner-wasm.mjs and
+#               scripts/copy-basis-transcoder.mjs, which copy the zxing WASM and three's
+#               KTX2 transcoder into public/ and throw if they fail.
 #   public/   — app/(marketing)/privacy/page.tsx reads public/legal/privacy.html at
 #               build time, and Hero.tsx serves /wireframe-scene.mp4 + /screenshots.
 

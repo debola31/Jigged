@@ -11,6 +11,7 @@ serve it (plan §1: "videos and published models in Supabase Storage, never the 
     python -m moonshot.web.media stage             # stage every live step's final or still that exists; lists the missing
     python -m moonshot.web.media serve [--draft takes/setup-take/draft.mp4]
     SUPABASE_SECRET_KEY=... python -m moonshot.web.media upload --url https://<ref>.supabase.co --part nist-ftc-10 op10-face op10-seat ...
+    SUPABASE_SECRET_KEY=... python -m moonshot.web.media upload --url https://<ref>.supabase.co --realism
 
 `serve` is for development only: it serves the folder on http://localhost:8787 with CORS, so `pnpm dev` can run with
 NEXT_PUBLIC_SHOWCASE_MEDIA_URL=http://localhost:8787. With --draft, a step video not staged yet is answered with that
@@ -20,7 +21,9 @@ draft, so the player can be built before the finals exist; drafts are never stag
 (supabase/migrations/*_showcase_storage_bucket.sql): anyone can then fetch it. Steps are named one by one, with their
 part (every part has an op10-load), because a person's step is published only once the user has reviewed its draft;
 nothing is published for being staged. It takes the project's URL explicitly and the secret key only from the
-environment, so it can't publish to a project by accident through .env.local.
+environment, so it can't publish to a project by accident through .env.local. With --realism it publishes the
+realistic shop models (moonshot/web/realism): the tiles the manifest names, every model it lists, then the manifest
+last, so the page never fetches a manifest that points at something not there yet.
 """
 from __future__ import annotations
 
@@ -51,7 +54,8 @@ BUDGET_DEFAULT = 1_500
 SIMPLIFY_ERROR = 0.02                      # a fraction of the mesh's extent; invisible at shop scale
 PORT = 8787
 BUCKET = "showcase"
-CONTENT_TYPES = {".glb": "model/gltf-binary", ".mp4": "video/mp4", ".webp": "image/webp"}
+CONTENT_TYPES = {".glb": "model/gltf-binary", ".mp4": "video/mp4", ".webp": "image/webp", ".ktx2": "image/ktx2",
+                 ".json": "application/json"}
 STILL_QUALITY = 85                         # WebP: a 1080p still in a few hundred kB, for phones on cellular
 TUS_CHUNK = 6 * 1024 * 1024                # Supabase's resumable uploads take exactly 6 MB a chunk (but the last)
 RETRY_S = (3, 5, 10, 20)                   # the waits between resumes, as Supabase's tus-js-client example has
@@ -177,7 +181,21 @@ def put(url: str, key: str, path: str, data: bytes, content_type: str) -> None:
             offset = int(_tus(at, "HEAD", key)["Upload-Offset"])
 
 
-def upload(url: str, part: str | None, step_ids: list[str], models: bool) -> None:
+def realism_paths() -> list[str]:
+    """What --realism publishes, in order: the tiles models-full/manifest.json names and tiles.json, each model it
+    lists, the manifest last. Refused if a listed model failed its checks or a file is missing."""
+    manifest = _json(web_root() / "models-full" / "manifest.json")
+    failed = [a for a, m in manifest["assets"].items() if m["validation"]["status"] != "ok"]
+    if failed:
+        raise SystemExit(f"not publishing: {', '.join(failed)} failed validation (models-full/manifest.json)")
+    paths = [f"tiles/{f}" for f in manifest["tiles"]["files"]] + ["tiles/tiles.json"] +         [m["full"] for m in manifest["assets"].values()] + ["models-full/manifest.json"]
+    missing = [p for p in paths if not (web_root() / p).exists()]
+    if missing:
+        raise SystemExit(f"not publishing: {', '.join(missing)} missing from {web_root()}")
+    return paths
+
+
+def upload(url: str, part: str | None, step_ids: list[str], models: bool, realism: bool = False) -> None:
     key = os.environ["SUPABASE_SECRET_KEY"]
     live = live_steps()
     unknown = [i for i in step_ids if (part, i) not in live]
@@ -188,7 +206,8 @@ def upload(url: str, part: str | None, step_ids: list[str], models: bool) -> Non
     if missing:
         raise SystemExit(f"nothing to publish yet for {', '.join(missing)}: no final in takes/")
     media = [p for s in steps for p in media_paths(take_media(part, s))]
-    paths = media + ([f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))] if models else [])
+    paths = (media + ([f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))] if models else [])
+             + (realism_paths() if realism else []))
     total = 0
     for path in paths:
         p = web_root() / path
@@ -233,6 +252,8 @@ def main() -> None:
     ap.add_argument("--part", help="upload: the part the steps are of (nist-ftc-10 ...)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--models", action="store_true", help="upload: the shop's models too")
+    ap.add_argument("--realism", action="store_true",
+                    help="upload: the realistic models, their tiles and models-full/manifest.json")
     ap.add_argument("--draft", type=Path, help="serve: a video for every step not staged yet (relative to the data root)")
     ap.add_argument("--url", help="upload: the Supabase project, https://<ref>.supabase.co")
     a = ap.parse_args()
@@ -241,9 +262,9 @@ def main() -> None:
     elif a.command == "stage":
         stage()
     elif a.command == "upload":
-        if not a.url or not (a.steps or a.models) or (a.steps and not a.part):
-            ap.error("upload needs --url, and --part with the steps to publish (or --models)")
-        upload(a.url, a.part, a.steps, a.models)
+        if not a.url or not (a.steps or a.models or a.realism) or (a.steps and not a.part):
+            ap.error("upload needs --url, and --part with the steps to publish (or --models, --realism)")
+        upload(a.url, a.part, a.steps, a.models, a.realism)
     else:
         serve(data_root() / a.draft if a.draft else None)
 

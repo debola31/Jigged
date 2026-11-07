@@ -1,0 +1,29 @@
+{
+ "asset": "drill-5-32",
+ "about": "Chicago-Latrobe 550ASP 5/32 in cobalt jobber (generator model, one solid): the record says straw finish, all over.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/drill-5-32_*.png); page check checks/drill-5-32_*_before_after.png",
+ "fallback": "drill-5-32_straw",
+ "materials": {
+  "drill-5-32_straw": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.5,
+    0.3
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "straw (light oxide) finish on cobalt HSS: pale bronze-gold"
+  }
+ },
+ "cad": {
+  "*": {
+   "DefaultMaterial": "drill-5-32_straw",
+   "none": "drill-5-32_straw"
+  }
+ },
+ "rules": [],
+ "double_sided": false
+}

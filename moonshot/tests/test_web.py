@@ -1,6 +1,8 @@
 """The showcase page's data (moonshot/web): the committed file is what the plans and records give today."""
 import json
 
+import pytest
+
 from moonshot.web.export import OUT, PUBLISHED, build, media_paths, shop_assets, shop_items, _json, RECORDS
 
 
@@ -73,3 +75,42 @@ def test_what_a_step_uses_is_a_placed_item_or_only_a_name():
     saw = parts["ct-slbeam"]
     assert [saw[i]["uses"] for i in ("saw-load", "saw-cut", "saw-unload")] == [[], [], []]
     assert saw["saw-cut"]["where"]["item"] != saw["op10-face"]["where"]["item"]
+
+
+def _realism_root(tmp_path, monkeypatch, status="ok"):
+    """A data root holding two realistic models, their tiles and manifest, as moonshot/web/realism writes them."""
+    monkeypatch.setenv("MOONSHOT_DATA", str(tmp_path))
+    web = tmp_path / "web"
+    (web / "models-full").mkdir(parents=True)
+    (web / "tiles").mkdir()
+    manifest = {"tiles": {"base": "tiles/", "files": ["paint_mr.ktx2", "paint_nrm.ktx2"]},
+                "assets": {a: {"full": f"models-full/{a}.glb", "validation": {"status": status}} for a in ("vf2", "d688")}}
+    (web / "models-full" / "manifest.json").write_text(json.dumps(manifest))
+    for p in ["tiles/paint_mr.ktx2", "tiles/paint_nrm.ktx2", "tiles/tiles.json", "models-full/vf2.glb",
+              "models-full/d688.glb"]:
+        (web / p).write_bytes(b"x")
+    return web
+
+
+def test_the_realistic_models_publish_tiles_first_and_their_manifest_last(tmp_path, monkeypatch):
+    """The page reads the manifest to find the models and the models to find the tiles: published in that order's
+    reverse, it never meets a path that isn't there yet. Each goes with the type the browser needs to read it."""
+    from moonshot.web.media import CONTENT_TYPES, realism_paths
+    _realism_root(tmp_path, monkeypatch)
+    paths = realism_paths()
+    assert paths == ["tiles/paint_mr.ktx2", "tiles/paint_nrm.ktx2", "tiles/tiles.json", "models-full/vf2.glb",
+                     "models-full/d688.glb", "models-full/manifest.json"]
+    types = {p: CONTENT_TYPES["." + p.rsplit(".", 1)[1]] for p in paths}
+    assert types["tiles/paint_mr.ktx2"] == "image/ktx2" and types["models-full/vf2.glb"] == "model/gltf-binary"
+    assert types["models-full/manifest.json"] == types["tiles/tiles.json"] == "application/json"
+
+
+def test_a_failed_or_missing_realistic_model_is_not_published(tmp_path, monkeypatch):
+    from moonshot.web.media import realism_paths
+    web = _realism_root(tmp_path, monkeypatch, status="failed: download")
+    with pytest.raises(SystemExit, match="failed validation"):
+        realism_paths()
+    web = _realism_root(tmp_path / "again", monkeypatch)
+    (web / "tiles" / "paint_nrm.ktx2").unlink()
+    with pytest.raises(SystemExit, match="paint_nrm.ktx2 missing"):
+        realism_paths()

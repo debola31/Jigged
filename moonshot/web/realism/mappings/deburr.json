@@ -1,0 +1,81 @@
+{
+ "asset": "deburr",
+ "about": "The hand-deburring kit on a black rubber bench mat, modelled from scratch where the placeholder lays each piece: a swivel-blade deburring tool (blue moulded handle with grip flutes, chrome nose, a 3.2 mm hooked HSS blade: Noga NG-1 / E100 style), a 10 in flat second-cut file (1 in x 1/4 in, tapering over its last third, its upcut teeth real ridges on the face, steel ferrule, pear-shaped wooden handle) and a maroon nonwoven pad (Scotch-Brite 7447 class) with soft, compressed edges.",
+ "reviewed": "2026-11-05: draft; layout, sizes and colours checked against the placeholder piece by piece",
+ "source": {
+  "path": "realism/sources/deburr/deburr.glb"
+ },
+ "double_sided": false,
+ "fallback": "rubber_black",
+ "cad": {
+  "*": {
+   "rubber_mat": "rubber_black",
+   "pad": "deburr_pad_maroon",
+   "file_steel": "deburr_file_steel",
+   "wood": "deburr_wood",
+   "ferrule": "steel_bright",
+   "handle_blue": "deburr_handle_blue",
+   "chrome": "chrome",
+   "hss": "steel_ground"
+  }
+ },
+ "rules": [],
+ "atlas": 1024,
+ "materials": {
+  "deburr_pad_maroon": {
+   "family": "rubber",
+   "color": [
+    0.2,
+    0.016,
+    0.024
+   ],
+   "rough": 0.95,
+   "tile_m": 0.12,
+   "normal": 1.4,
+   "about": "maroon nonwoven abrasive (Scotch-Brite 7447 class): fibrous, matte"
+  },
+  "deburr_file_steel": {
+   "family": "ground",
+   "color": [
+    0.2,
+    0.205,
+    0.215
+   ],
+   "rough": 0.48,
+   "metal": 1.0,
+   "tile_m": 0.15,
+   "normal": 0.8,
+   "about": "hardened file steel: dark grey, matte from the cut teeth"
+  },
+  "deburr_wood": {
+   "family": "plastic",
+   "color": [
+    0.2,
+    0.07,
+    0.022
+   ],
+   "rough": 0.38,
+   "tile_m": 0.2,
+   "normal": 0.5,
+   "about": "a lacquered hardwood file handle (no wood family: plastic's mottle under a brown lacquer)"
+  },
+  "deburr_handle_blue": {
+   "family": "plastic",
+   "color": [
+    0.012,
+    0.075,
+    0.33
+   ],
+   "rough": 0.42,
+   "about": "the deburring tool's blue moulded handle"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the file handle's wood is the plastic family in brown (the shared tiles have no wood grain)"
+  },
+  {
+   "what": "the mat is 10 mm thick, as the placeholder: thicker than a typical bench mat"
+  }
+ ]
+}

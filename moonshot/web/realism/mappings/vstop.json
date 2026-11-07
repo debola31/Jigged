@@ -1,0 +1,58 @@
+{
+ "asset": "vstop",
+ "about": "Articulating swing-arm vise stop (GrabCAD, a body and two M10 cap screws; the modeller's default colours): the arm, hinge blocks and clamp hub black-oxide steel, as a Kurt-style workstop is; the stop rod and hinge pins ground bright; the cap screws black oxide.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/vstop_*.png); page check checks/vstop_*_before_after.png",
+ "fallback": "steel_black_oxide",
+ "materials": {
+  "vstop_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "hardened tool steel, ground bright"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "steel_black_oxide",
+   "mat_1": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the 159 mm stop rod along y: hardened, ground",
+   "links": [
+    "NAUO1"
+   ],
+   "part_size": {
+    "min_max_side": 0.15,
+    "max_mid_side": 0.012
+   },
+   "material": "vstop_tool_steel"
+  },
+  {
+   "why": "the two hinge pins across x (40 x 18 x 18 mm): ground",
+   "links": [
+    "NAUO1"
+   ],
+   "part_size": {
+    "min_max_side": 0.039,
+    "max_max_side": 0.041,
+    "max_mid_side": 0.019
+   },
+   "material": "vstop_tool_steel"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "black-oxide steel arm assumed (the GrabCAD model has default colours); many workstops are black-anodised aluminium, which reads the same",
+   "picture": "checks/vstop_front_before_after.png"
+  }
+ ]
+}

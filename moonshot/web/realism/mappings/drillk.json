@@ -1,0 +1,35 @@
+{
+ "asset": "drillk",
+ "about": "K cobalt jobber: the #7 McMaster STEP resized. The record and shop.json say cobalt and no coating, so the usual cobalt jobber's straw finish, not the #7's TiN.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/drillk_*.png); page check checks/drillk_*_before_after.png",
+ "fallback": "drillk_straw",
+ "materials": {
+  "drillk_straw": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.5,
+    0.3
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "straw (light oxide) finish on cobalt HSS: pale bronze-gold"
+  }
+ },
+ "cad": {
+  "*": {
+   "none": "drillk_straw"
+  }
+ },
+ "rules": [],
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): one solid twist drill: welded, its UV1 atlas packs at 0.30 rather than 0.07",
+ "unsure": [
+  {
+   "what": "straw (oxide) finish: the record says cobalt, uncoated; its STEP is the TiN #7's resized",
+   "picture": "checks/drillk_front_before_after.png"
+  }
+ ]
+}

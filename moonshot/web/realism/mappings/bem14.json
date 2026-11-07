@@ -1,0 +1,29 @@
+{
+ "asset": "bem14",
+ "about": "1/4 in 2-flute ball end mill, solid carbide (generator model, one solid, no colours): all of it ground carbide, dark grey.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/bem14_*.png); page check checks/bem14_*_before_after.png",
+ "fallback": "bem14_carbide",
+ "materials": {
+  "bem14_carbide": {
+   "family": "ground",
+   "color": [
+    0.36,
+    0.365,
+    0.375
+   ],
+   "rough": 0.32,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.4,
+   "about": "solid carbide, ground: dark grey, a duller sheen than steel"
+  }
+ },
+ "cad": {
+  "*": {
+   "DefaultMaterial": "bem14_carbide",
+   "none": "bem14_carbide"
+  }
+ },
+ "rules": [],
+ "double_sided": false
+}

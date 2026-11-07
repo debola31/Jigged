@@ -1,9 +1,9 @@
 'use client';
 
 import { Bounds, Environment, Lightformer, OrbitControls, useGLTF } from '@react-three/drei';
-import { Canvas } from '@react-three/fiber';
-import { Component, Suspense, useEffect, useMemo, type ReactNode } from 'react';
-import { Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import { Canvas, useThree } from '@react-three/fiber';
+import { Component, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AgXToneMapping, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // A cut's mesh carries no normals. Facets of one curved face meet at a few degrees and are
@@ -37,6 +37,42 @@ function Model({ url, part, onLoad }: { url: string; part: boolean; onLoad(): vo
   );
 }
 
+/**
+ * A thing's realistic model (moonshot/web/realism/SPEC.md), loaded for this canvas's renderer and
+ * its shaders compiled before it shows. It has the light model's frame, so it fits as that would.
+ */
+function Full({ url, onLoad, onError }: { url: string; onLoad(): void; onError(error: unknown): void }) {
+  const { gl, camera, scene, invalidate } = useThree();
+  const [model, setModel] = useState<Object3D | null>(null);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { realisticLoader } = await import('./realisticLoader');
+        const loaded = await realisticLoader(gl).load(url);
+        await gl.compileAsync(loaded, camera, scene);
+        if (live) setModel(loaded);
+      } catch (error) {
+        if (live) onError(error);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [url, gl, camera, scene, onError]);
+  useEffect(() => {
+    if (!model) return;
+    invalidate();
+    onLoad();
+  }, [model, invalidate, onLoad]);
+  if (!model) return null;
+  return (
+    <Bounds fit clip observe margin={1.2}>
+      <primitive object={model} />
+    </Bounds>
+  );
+}
+
 class Catch extends Component<{ children: ReactNode; onError(error: unknown): void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -53,12 +89,41 @@ class Catch extends Component<{ children: ReactNode; onError(error: unknown): vo
 /**
  * One model on its own, for a mouse to turn: a thing from the shop at its full size, or the part
  * as a cut leaves it (`part`), framed from where the step's still is taken and turn-only, so the
- * wheel still scrolls the panel.
+ * wheel still scrolls the panel. A thing with a realistic model (`full`) shows that one, and its
+ * light model (`url`) only if the realistic one fails, reported by `onFullError`.
  */
-export default function ModelView({ url, part = false, onLoad, onError }: { url: string; part?: boolean; onLoad(): void; onError(error: unknown): void }) {
+export default function ModelView({
+  url,
+  full,
+  part = false,
+  onLoad,
+  onError,
+  onFullError,
+}: {
+  url: string;
+  full?: string | null;
+  part?: boolean;
+  onLoad(): void;
+  onError(error: unknown): void;
+  onFullError?(error: unknown): void;
+}) {
+  const [fullFailed, setFullFailed] = useState(false);
+  const onFull = useCallback(
+    (error: unknown) => {
+      setFullFailed(true);
+      onFullError?.(error);
+    },
+    [onFullError],
+  );
   const at = FROM.clone().multiplyScalar(part ? 400 : 4);
   return (
-    <Canvas frameloop="demand" dpr={[1, 2]} camera={{ fov: 30, position: at.toArray(), near: 0.001, far: 10_000 }}>
+    <Canvas
+      frameloop="demand"
+      dpr={[1, 2]}
+      // A thing as the shop draws it (ShopCanvas), so its white paint keeps its shading; the part as it always has.
+      gl={part ? undefined : { toneMapping: AgXToneMapping }}
+      camera={{ fov: 30, position: at.toArray(), near: 0.001, far: 10_000 }}
+    >
       <color attach="background" args={['#1d2127']} />
       <hemisphereLight args={['#ffffff', '#40444c', 0.7]} />
       <directionalLight position={[3, 5, 4]} intensity={1.4} />
@@ -68,7 +133,7 @@ export default function ModelView({ url, part = false, onLoad, onError }: { url:
       </Environment>
       <Catch onError={onError}>
         <Suspense fallback={null}>
-          <Model url={url} part={part} onLoad={onLoad} />
+          {full && !fullFailed ? <Full url={full} onLoad={onLoad} onError={onFull} /> : <Model url={url} part={part} onLoad={onLoad} />}
         </Suspense>
       </Catch>
       <OrbitControls makeDefault enableDamping enableZoom={!part} enablePan={false} />

@@ -1,0 +1,126 @@
+{
+ "asset": "gblock",
+ "about": "Generic 81-piece gauge-block set in its wooden case, lid up, and a pin-gauge rack: case, blocks and rack by link; the pins (the blocks' link's 50.8 mm parts) and the case's lining by rule.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "gblock_wood",
+ "cad": {
+  "case": {
+   "mat_0": "gblock_wood"
+  },
+  "gauge_blocks": {
+   "mat_1": "gblock_lapped"
+  },
+  "pin_rack": {
+   "mat_2": "plastic_black"
+  }
+ },
+ "rules": [
+  {
+   "why": "the plug pins: the blocks' link's tall parts (50.8 mm)",
+   "links": [
+    "gauge_blocks"
+   ],
+   "part_size": {
+    "min_max_side": 0.045
+   },
+   "material": "steel_ground"
+  },
+  {
+   "why": "the tray the blocks sit in: the case's up-facing faces at the blocks' feet (z 50.8 mm), lined",
+   "links": [
+    "case"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.9
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.045
+    ],
+    "hi": [
+     1,
+     1,
+     0.056
+    ]
+   },
+   "material": "gblock_lining"
+  },
+  {
+   "why": "the lid's inner face, lined the same",
+   "links": [
+    "case"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.9
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.06
+    ],
+    "hi": [
+     1,
+     1,
+     1
+    ]
+   },
+   "material": "gblock_lining"
+  }
+ ],
+ "materials": {
+  "gblock_wood": {
+   "family": "paint",
+   "color": [
+    0.2,
+    0.085,
+    0.035
+   ],
+   "rough": 0.38,
+   "normal": 0.5,
+   "about": "the case: varnished hardwood, mahogany brown"
+  },
+  "gblock_lapped": {
+   "family": "ground",
+   "color": [
+    0.66,
+    0.67,
+    0.68
+   ],
+   "rough": 0.07,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.1,
+   "about": "lapped gauge blocks: near-mirror steel"
+  },
+  "gblock_lining": {
+   "family": "rubber",
+   "color": [
+    0.014,
+    0.018,
+    0.035
+   ],
+   "rough": 0.95,
+   "tile_m": 0.2,
+   "about": "the case's fitted lining: dark blue-black flock"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the lining: the CAD's case is one wooden solid; a dark flock lining on the tray and lid assumed, as most sets have",
+   "picture": "checks/gblock_front_before_after.png"
+  }
+ ]
+}

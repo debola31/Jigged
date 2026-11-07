@@ -1,0 +1,34 @@
+{
+ "asset": "drill-11",
+ "about": "YG-1 DPP447110 Dream Drill, flat-bottom, solid carbide, 11 mm with a 12 mm shank. Dream Drills ship PVD-coated all over (YG-1's Y-coating, a dark TiAlN type), so flutes and shank are one dark coat.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "drill-11_tialn",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "drill-11_tialn",
+   "none": "drill-11_tialn"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "drill-11_tialn": {
+   "family": "ground",
+   "color": [
+    0.09,
+    0.075,
+    0.105
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.3,
+   "about": "TiAlN-type PVD coat over carbide: violet-black anthracite"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the coat: the record says solid carbide and no more; a dark TiAlN-type coat assumed (YG-1's usual). If it is uncoated, map it to a carbide grey.",
+   "picture": "checks/drill-11_close_before_after.png"
+  }
+ ]
+}

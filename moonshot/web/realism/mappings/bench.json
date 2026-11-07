@@ -1,0 +1,145 @@
+{
+ "asset": "bench",
+ "about": "The benches station: a 72 x 30 in, 1.75 in maple butcher-block workbench on a 2 in square-tube frame (levelling feet, angle rails, a notched lower shelf), a six-drawer modular cabinet (Lista-style full-width aluminium handles with label cards) standing on the shelf under its left end, and a 30 x 18 in two-tray steel utility cart on 3 in swivel casters with a push handle. Self-made in Blender (sources/bench/build_bench.py), every part where the library placeholder (planner.placeholders.workbench_set) has its box, in the step videos' colours (look.py: cart_red, frame_black). Props: two hopper bins on the shelf, a tool box, a tray of finished parts, a deburring tool and a file on the cart; nothing on the bench top, which the steps use.",
+ "reviewed": "2026-11-05: modelled; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/bench/bench.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "bench_frame",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "bench_bin_blue": "bench_bin_blue",
+   "bench_cab_blue": "bench_cab_blue",
+   "bench_cart_red": "bench_cart_red",
+   "bench_frame": "bench_frame",
+   "bench_label": "bench_label",
+   "bench_maple_a": "bench_maple_a",
+   "bench_maple_b": "bench_maple_b",
+   "bench_maple_c": "bench_maple_c",
+   "bench_shelf_grey": "bench_shelf_grey",
+   "chrome": "chrome",
+   "plastic_black": "plastic_black",
+   "rubber_black": "rubber_black",
+   "steel_black_oxide": "steel_black_oxide",
+   "steel_bright": "steel_bright",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "bench_maple_a": {
+   "family": "paint",
+   "color": [
+    0.33,
+    0.17,
+    0.062
+   ],
+   "rough": 0.54,
+   "tile_m": 0.7,
+   "about": "oiled maple butcher block: a mid strip"
+  },
+  "bench_maple_b": {
+   "family": "paint",
+   "color": [
+    0.4,
+    0.215,
+    0.085
+   ],
+   "rough": 0.52,
+   "tile_m": 0.7,
+   "about": "oiled maple butcher block: a pale strip"
+  },
+  "bench_maple_c": {
+   "family": "paint",
+   "color": [
+    0.255,
+    0.125,
+    0.045
+   ],
+   "rough": 0.57,
+   "tile_m": 0.7,
+   "about": "oiled maple butcher block: a darker strip"
+  },
+  "bench_frame": {
+   "family": "paint",
+   "color": [
+    0.028,
+    0.029,
+    0.032
+   ],
+   "rough": 0.45,
+   "about": "the bench frame's and the cart posts' black powder-coated steel tube"
+  },
+  "bench_shelf_grey": {
+   "family": "paint",
+   "color": [
+    0.4,
+    0.42,
+    0.45
+   ],
+   "rough": 0.45,
+   "about": "the bench's lower shelf: light grey powder-coated sheet"
+  },
+  "bench_cab_blue": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.082,
+    0.24
+   ],
+   "rough": 0.4,
+   "about": "the modular drawer cabinet: blue powder coat"
+  },
+  "bench_cart_red": {
+   "family": "paint",
+   "color": [
+    0.17,
+    0.015,
+    0.011
+   ],
+   "rough": 0.4,
+   "about": "the utility cart's red powder-coated shelves"
+  },
+  "bench_label": {
+   "family": "paint",
+   "color": [
+    0.62,
+    0.62,
+    0.58
+   ],
+   "rough": 0.55,
+   "about": "the drawers' label cards"
+  },
+  "bench_bin_blue": {
+   "family": "plastic",
+   "color": [
+    0.018,
+    0.075,
+    0.27
+   ],
+   "rough": 0.45,
+   "about": "hopper-front stacking bins and the deburring tool's handle: blue polypropylene"
+  }
+ },
+ "sources_used": [
+  "Global Industrial / Zoro listings, 72 x 30 in maple butcher-block workbenches: 1.75 in square-edge top, 34 in high, 2 in square or 1-5/8 in round legs, lower shelf, levelling feet",
+  "Zoro / Global Industrial steel utility carts, 30 x 18 in, two lipped trays (1.5 in lips), 3-5 in casters",
+  "Lista / Vidmar modular drawer cabinets (full-width extruded aluminium drawer pulls with label slots); Akro-Mils 30240 hopper bins (14.75 x 8.25 x 7 in)",
+  "the library record and placeholder (bench.glb) for every part's position"
+ ],
+ "unsure": [
+  {
+   "what": "the frame colour: kept near-black to match the step videos (look.py frame_black); most catalogue benches are grey or blue"
+  },
+  {
+   "what": "the cabinet's six drawer heights are a typical mix, scaled to the placeholder's box"
+  }
+ ],
+ "atlas": 2048,
+ "atlas_why": "2048 rather than the hero class's 4096: at 16k triangles of mostly flat sheet and wood the AO is ~3 mm a texel either way visually the same, and it saves 1.3 MB of download and 17 MB of GPU memory",
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
+}

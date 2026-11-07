@@ -1,0 +1,75 @@
+{
+ "asset": "belt",
+ "about": "Kalamazoo 2FSM 2 x 48 in belt sander, a generic box model (1340 triangles, 9 solids): base plate, column, table and post, motor, two wheels and the platen, the belt. By link and by part, from the parts sheet.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "belt_paint_grey",
+ "cad": {
+  "base": {
+   "mat_0": "belt_paint_grey"
+  },
+  "contact_wheel": {
+   "mat_1": "aluminium_brushed"
+  },
+  "belt": {
+   "mat_2": "belt_abrasive"
+  },
+  "motor": {
+   "mat_3": "belt_paint_motor"
+  }
+ },
+ "rules": [
+  {
+   "why": "the platen behind the belt (part 6, in the wheels' link): bare steel",
+   "parts": [
+    6
+   ],
+   "material": "steel_machined"
+  },
+  {
+   "why": "the tilting work table (part 7): machined cast iron",
+   "parts": [
+    7
+   ],
+   "material": "cast_iron_raw"
+  }
+ ],
+ "materials": {
+  "belt_paint_grey": {
+   "family": "paint",
+   "color": [
+    0.15,
+    0.16,
+    0.17
+   ],
+   "rough": 0.42,
+   "about": "the sander's machine-grey enamel: base plate, column, table post"
+  },
+  "belt_paint_motor": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.07,
+    0.04
+   ],
+   "rough": 0.4,
+   "about": "the motor's dark green enamel (the CAD's green)"
+  },
+  "belt_abrasive": {
+   "family": "rubber",
+   "color": [
+    0.075,
+    0.048,
+    0.032
+   ],
+   "rough": 0.95,
+   "tile_m": 0.1,
+   "about": "a 2 x 48 in aluminium-oxide belt: matte brown-black grit"
+  }
+ },
+ "unsure": [
+  {
+   "what": "colours: the record is generic and the CAD's colours are placeholders; machine grey with a green motor kept from the CAD's split, Kalamazoo's own paint unconfirmed",
+   "picture": "checks/belt_front_before_after.png"
+  }
+ ]
+}

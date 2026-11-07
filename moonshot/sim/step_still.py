@@ -5,12 +5,13 @@ part (moonshot/orchestrate/pipeline.py --local-still). The record is takes/<part
 naming the frame and the camera; the picture takes/<part>-<step id>/still.png, where the web looks for a step's still,
 as for the cutting steps'.
 
-- clean, load, seat, check: the VF-2 with its doors open, the operator in the doorway as the setup's Start finds him
-  (the first fraction of a second of its door-close take's plan), and the setup's table as the step starts
+- clean, load, seat, check, unload: the VF-2 with its doors open, the operator in the doorway as the setup's Start
+  finds him (the first fraction of a second of its door-close take's plan), and the setup's table as the step starts
   (moonshot/sim/setup_scene.py): the clean, the vise open, the parallels in their rack (or the stop on the table) and
   the part waiting on the table as it enters the setup; the load, the parallels (or the stop) set on the vise; the
-  seat, the part set down on them, the jaw still open; the check, the part clamped.
-- unload: the doors shut and the part clamped as the setup's last cycle leaves it, as its door-open take starts.
+  seat, the part set down on them, the jaw still open; the check, the part clamped; the unload, the part clamped as
+  the setup's last cycle leaves it, as its blow-off finds it once the doors are open (drawn shut, the doors' panels
+  hid the vise: the doors' CAD has no glass).
 - inspect: the part on the inspection bench's mat, every instrument at its rest (the part's deburr take's record, its
   first frames), in its finish where an outside finish comes before the inspection: that finish's take's stock (black
   oxide, zinc), in the part's STEP frame as the bench's part is.
@@ -45,17 +46,17 @@ def folder(part: str, step_id: str) -> Path:
 
 
 def _vise(part: str, step: dict) -> Path:
-    from moonshot.sim.door_cycle import DoorClose, DoorOpen
+    from moonshot.sim.door_cycle import DoorClose
     setup, kind = step["setup"], step["id"].split("-", 1)[1]
     stock, vise = STATE[kind]
-    base = TAKES / f"{part}-{setup}-{'door-open' if kind == 'unload' else 'door-close'}"
+    base = TAKES / f"{part}-{setup}-door-close"
     out = folder(part, step["id"])
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     shutil.copy(base / "reference.npz", out / "reference.npz")
     tk = json.loads((base / "take.json").read_text(encoding="utf-8")) | scene_spec(part, setup, stock, vise)
     (out / "take.json").write_text(json.dumps(tk, indent=1), encoding="utf-8")
-    r = (DoorOpen if kind == "unload" else DoorClose)(out)
+    r = DoorClose(out)
     r.run(seconds=SETTLE_S, log=None)
     r.export()
     rec = np.load(out / "take.npz")

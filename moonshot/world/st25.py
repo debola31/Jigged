@@ -709,6 +709,14 @@ class Control:
             off = self.tool_offset.setdefault(self.station, {"x": None, "z": None})
             off["x"] = float(self.machine_mm()[0])
             self._await_dia = True
+        elif k in ("enter", "f1") and self.page == "work" and self.typed and not self._await_dia:
+            # a value keyed on the work offset page: ENTER adds it to G54 Z, F1 replaces it (the offset pages' keys)
+            try:
+                v = float(self.typed)
+                self.work["G54"]["z"] = v if k == "f1" else self.work["G54"]["z"] + v
+            except ValueError:
+                self.events.append(f"input_alarm {self.typed}")
+            self.typed = ""
         elif k == "enter":
             if self._await_dia and self.typed:
                 try:

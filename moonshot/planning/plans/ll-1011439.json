@@ -50,9 +50,6 @@
   {"what": "The spot, drill, tap and grooving speeds and feeds", "why": "The AMPCO 18 data sheet gives turning and milling only"},
   {"what": "Flood coolant", "why": "Aluminium bronze is cut wet in the shop's practice; no source given"}
  ],
- "missing_records": [
-  {"id": "bot-er32", "what": "BOT turret ID-station holder with an ER32 collet chuck (and a tapping collet), for the spot drill, the 3.3 mm drill and the tap on the spindle's centre", "why": "The shop's ER32 holders are CAT40, for the mills"},
-  {"id": "collet-5c-0625", "what": "5/8 in 5C round collet", "why": "The c5 record is the Royal collet chuck and its collets in general; no record names the 5/8 in collet"}
- ],
+ "missing_records": [],
  "open": []
 }

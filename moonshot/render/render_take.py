@@ -78,7 +78,13 @@ def import_glb(path: Path, parent, local: Matrix, body: str, kind: str) -> list:
         if o.type == "MESH":
             tag(o, body, kind)
             look.dress(path.stem, o)                    # a placeholder prop's missing detail (render only)
-            if not o.data.materials:                    # unpainted CAD: bare steel, not Cycles' white
+            finish = look.link_finish(path)             # a station link drawn in its part's finish, in place of
+            if finish is not None:                      # the default material its export gave it
+                o.data.materials.clear()
+                o.data.materials.append(finish)
+                for s in o.material_slots:              # and any slot the importer linked to the object
+                    s.material = finish
+            elif not o.data.materials:                  # unpainted CAD: bare steel, not Cycles' white
                 o.data.materials.append(look.bare_steel())
             for m in o.data.materials:                  # a CAD export's mat_N is the VF-2's only on the VF-2
                 if m and m.name.startswith("mat_") and not vf2:

@@ -1,0 +1,51 @@
+{
+ "schema": "jigged.card/1",
+ "id": "st25-tool-setter",
+ "name": "Touch off a turret tool on the ST-25's tool presetter: the arm down by M104, the tool jogged to the stylus, -X and then Z held until the probe beeps; and set the work's Z on the part's face",
+ "assets": ["st25"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "the pendant: keys, the jog handle, a held axis key until the probe beeps, Feed Hold",
+   "grasps": {"keys": "fingertip_press", "jog_handle": "precision_disk", "feed_hold": "fingertip_press"},
+   "contacts": [{"digit": "index", "on": "keys"}, {"digit": "thumb", "on": "jog_handle"}, {"digit": "index", "on": "jog_handle"},
+                {"digit": "middle", "on": "jog_handle"}]
+  },
+  "steadying": {
+   "side": "L", "role": "presses Cycle Start; for the work's Z, slides a strip of paper between the tool and the part's face",
+   "grasps": {"cycle_start": "fingertip_press", "paper": "palmar_pinch"},
+   "contacts": [{"digit": "index", "on": "cycle_start"}, {"digit": "thumb", "on": "paper"}, {"digit": "index", "on": "paper"}]
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "Door shut. MDI, M104, Cycle Start: the presetter's arm swings out in front of the chuck [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 3, "ends_on": "the arm out, its stylus in the tools' plane", "source": 0},
+  {"phase": "operate", "what": "Key the tool's station and offset (T0101) and TURRET FWD [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 3, "ends_on": "the tool at the spindle's station", "source": 0},
+  {"phase": "operate", "what": "HANDLE JOG at .1 then .01: bring the tool's tip over the stylus's centre in Z and about 1 mm above it in X [proposed: force_n, duration_s]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "duration_s": [8, 20], "ends_on": "the tip about 1 mm above the stylus", "source": 0},
+  {"phase": "operate", "what": "Select .001 and hold the -X key: the axis feeds at 1 in/min until the probe beeps and stops it, and the tool's X offset is written [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": [2, 4], "ends_on": "the beep; the X offset in the offset page", "source": 0},
+  {"phase": "operate", "what": "+X away, jog round to the stylus's side, below its top, then hold the Z key toward it until the beep: the Z offset is written [proposed: force_n, duration_s]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "duration_s": [10, 20], "ends_on": "the beep; the Z offset in the offset page", "source": 0},
+  {"phase": "operate", "what": "Jog clear and repeat from the turret call for each new tool; drills' X is the spindle's centre, F2 in handle jog; then M105 and Cycle Start to stow the arm [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 3, "ends_on": "the arm stowed by the chuck", "source": 0},
+  {"phase": "operate", "what": "For the work's Z: OFFSET until the work offset page shows, cursor to G54 Z; with a tool whose offset is set, jog its tip to the part's face [proposed: force_n, duration_s]",
+   "action": "turn", "on": "jog_handle", "force_n": 1, "duration_s": [8, 20], "ends_on": "the tip a little off the face", "source": 0},
+  {"phase": "check", "what": "The steadying hand slides a strip of paper between the tip and the face while the working hand jogs Z in at .001, a click at a time [proposed: force_n, duration_s]",
+   "action": "feel", "on": "paper", "force_n": 0.5, "duration_s": [6, 15], "ends_on": "the paper drags but still moves", "source": 0},
+  {"phase": "operate", "what": "Z FACE MEASURE: the face's Z, less the tool's Z offset, goes into G54 Z; the paper drawn out [proposed: force_n, duration_s]",
+   "action": "press", "on": "keys", "force_n": 3, "duration_s": 1, "ends_on": "G54 Z set on the face", "source": 2}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Haas Factory Outlet (Productivity Inc.), 'Haas NGC Lathe Operator with VPS' manual, rev. 8/2022: Probe Presetter Touch-Off Method; Manual Probe Touch-Off Method using Work Offset; Automatic Tool Setting Probe Calibration",
+   "url": "https://www.productivity.com/wp-content/uploads/2022/08/Haas-NGC-Lathe-Operator-with-VPS-8-2022.pdf",
+   "gives": "swing the probe down with M104 in MDI (M105 retracts); bring the tool close to the probe's centre, switch the handle to .001 and press -X until a beep: movement stops and the X value is entered for the tool; +X to reverse; Z found the same way; drills' X by F2 in handle jog; once the tools are set on the probe only the work's Z changes for a new part: touch a tool on the face with paper and press Z FACE MEASURE on the work offset page"},
+  {"kind": "maker", "ref": "Haas Automation, 2023 Lathe Operator's Manual: 3.5 Run/Setup Mode Restrictions, 4.5 the increment keys, 8.6 Set a Work Offset",
+   "url": "https://www.haascnc.com/content/dam/haascnc/en/service/manual/operator/english_lathe_interactive_manual_print_version_2023.pdf",
+   "gives": "with the door open the probe arm can't extend or retract; a held axis key jogs at the increment key's bottom number (.001/1: 1 in/min); jog X and Z until the tool just touches the part's face and press Z FACE MEASURE with the work offset's Z highlighted"},
+  {"kind": "maker", "ref": "Haas Factory Outlet (Morris Trident TMT), Haas Lathe Set-up course: Tool Presetter, Work Offsets",
+   "url": "https://www.haascnc.com/content/dam/haascnc/hfo-microsite/hfo-morris-trident/Morris_Trident_TMT-Haas-Lathe-Set-up.pdf",
+   "gives": "the probe arm is stored by the chuck and extends out in front of it; once a tool touches the stylus its positions are stored in the tool offset page; after the tools are probed, the work's Z is found by touching one tool off manually at the part's Z zero and pressing Z FACE MEASURE"}
+ ],
+ "notes": "For the plans' 'touch each one off' after a tool is bolted into the turret, and their Z on the part's end (ll-1011439's op10-z: the VCGT turning tool on the bar's end). This is the manual probe method of the HFO's NGC manual, which the station's control runs (moonshot/world/st25.py Control._record_touch); VPS's automatic tool-setting cycle (the HFO set-up course's) isn't modelled. The presetter is Haas's option, fitted in the station because Haas's STEP has it, for the user's decision. The paper's thickness isn't corrected for, as the HFO manual doesn't. Proposed, with reasons (phase numbers count from 1): which hand does what, as the VF-2's cards (the working hand on the pendant, the steadying hand on Cycle Start and the paper); 3 N on the keys and 1 N on the handle, the station's affordance forces; every duration, since no source gives one: #1 and #2 3 s of keys and the arm's or turret's own motion, #3 and #7 8-20 s of jogging, #4 2-4 s (1 mm at 1 in/min takes 2.4 s), #5 10-20 s, #6 3 s, #8 6-15 s, #9 1 s; the 0.5 N of the paper's feel, as on the VF-2's card."
+}

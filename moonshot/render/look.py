@@ -262,6 +262,48 @@ def bare_steel() -> bpy.types.Material:
     return mat
 
 
+# The ST-25's links (moonshot/library/stations/extract.py) come out of Haas's STEP unpainted: each drawn in what that
+# part of the machine is, by its link (the GLB's path under library/machines/st25/links/): the door and the castings
+# dark grey, as Haas's CAD colours them (the asset's st25.glb: its door and front casting cover), the enclosure light
+# grey [proposed: the CAD's colour there is its default], the way covers stainless, the chucks and the turret ground
+# steel.
+ST25_FINISH = {"base": "st25_enclosure", "pendant": "st25_pendant", "door": "st25_door",
+               "zslide": "st25_casting", "xslide": "st25_casting", "turret": "st25_turret",
+               "zcover_left": "st25_waycover", "zcover_right": "st25_waycover", "spindle": "st25_nose",
+               "drawtube": "st25_nose", "probe_arm": "st25_probe", "br10/body": "st25_chuck",
+               "br10/jaw_0": "st25_softjaw", "br10/jaw_1": "st25_softjaw", "br10/jaw_2": "st25_softjaw",
+               "c5/body": "st25_chuck", "c5/collet": "st25_chuck"}
+
+
+def link_finish(path: Path):
+    """The material an unpainted station link is drawn in, or None: the ST-25's by its link (ST25_FINISH)."""
+    p = path.as_posix()
+    if "machines/st25/links/" not in p:
+        return None
+    role = ST25_FINISH.get(p.split("machines/st25/links/", 1)[1].removesuffix(".glb"))
+    if role is None:
+        return None
+    mat = bpy.data.materials.get(role)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(role)
+    if role == "st25_enclosure":
+        paint(mat, (0.58, 0.59, 0.6), 0.5, wear=0.12)              # light grey sheet, satin, worn at the edges
+    elif role in ("st25_door", "st25_casting"):
+        paint(mat, (0.05, 0.052, 0.056), 0.45, coat=0.2, wear=0.1)  # the dark grey door and castings
+    elif role == "st25_pendant":
+        paint(mat, (0.07, 0.072, 0.078), 0.4, coat=0.2)
+    elif role == "st25_waycover":
+        metal(mat, (0.7, 0.71, 0.73), 0.25, aniso=0.2)               # stainless way covers
+    elif role in ("st25_turret", "st25_nose", "st25_chuck"):
+        metal(mat, (0.6, 0.61, 0.63), 0.24, aniso=0.3)               # ground steel
+    elif role == "st25_softjaw":
+        metal(mat, (0.66, 0.67, 0.68), 0.3, spread=0.08)             # machined soft steel
+    elif role == "st25_probe":
+        paint(mat, (0.06, 0.06, 0.065), 0.4, coat=0.2)
+    return mat
+
+
 def geom(rgba) -> bpy.types.Material:
     """A collider drawn as itself: painted in its MuJoCo colour."""
     name = "geom_" + "_".join(f"{c:.2f}" for c in rgba[:3])

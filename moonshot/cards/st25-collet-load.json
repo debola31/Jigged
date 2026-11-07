@@ -1,0 +1,53 @@
+{
+ "schema": "jigged.card/1",
+ "id": "st25-collet-load",
+ "name": "Load a bar into the ST-25's 5C collet chuck so far out of its nose, set the stick-out with a steel rule, close the collet with the foot pedal; and take the bar's end out",
+ "assets": ["st25", "c5"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "slides the bar into the open collet and holds it at its stick-out until the collet closes; draws the bar's end out after",
+   "grasps": {"bar": "small_diameter", "bar_end": "tip_pinch"},
+   "contacts": [{"digit": "thumb", "on": "bar"}, {"digit": "index", "on": "bar"}, {"digit": "middle", "on": "bar"}]
+  },
+  "steadying": {
+   "side": "L", "role": "holds a 6 in steel rule against the collet's nose beside the bar to read the stick-out",
+   "grasps": {"scale": "palmar_pinch"},
+   "contacts": [{"digit": "thumb", "on": "scale"}, {"digit": "index", "on": "scale"}]
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "Door open, spindle stopped: the foot on the pedal opens the collet if it's closed, the drawtube pushing it out [proposed: duration_s]",
+   "action": "press", "on": "pedal", "duration_s": 0.5, "ends_on": "the collet open, its bore 0.4 mm over the bar", "source": 1},
+  {"phase": "reach", "what": "The working hand to the bar where it waits", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "grasp", "what": "Round the bar near its back end, fingers and thumb, its axis turned onto the spindle's [proposed: force_n, duration_s]",
+   "action": "lift", "on": "bar", "force_n": 3, "duration_s": 0.5, "ends_on": "the bar in the hand"},
+  {"phase": "transport", "what": "Carry it through the door's opening and line it up with the collet's bore, 10 mm out [proposed: duration_s]",
+   "action": "slide", "on": "bar", "duration_s": [1.5, 2.5], "ends_on": "the bar's end at the collet's mouth, on its axis"},
+  {"phase": "operate", "what": "Slide it into the collet, the hand moving forward along it, until about the plan's stick-out shows [proposed: force_n, travel_mm, duration_s]",
+   "action": "push", "on": "bar_end", "force_n": 3, "travel_mm": 56, "duration_s": [1.0, 1.5], "ends_on": "the bar about 20 mm out", "source": 2},
+  {"phase": "check", "what": "The steadying hand stands the rule's end on the collet's nose beside the bar; the working hand slides the bar in or out to the mark [proposed: force_n, duration_s, the 0.5 mm]",
+   "action": "read", "on": "scale", "force_n": 1, "duration_s": [2, 4], "ends_on": "the bar's end at 20 mm, within half a millimetre"},
+  {"phase": "operate", "what": "Holding the bar there, the foot presses the pedal: the drawtube draws the collet in and it closes on the bar [proposed: duration_s]",
+   "action": "press", "on": "pedal", "duration_s": 0.5, "ends_on": "the collet gripping the bar at the job's pressure", "source": 1},
+  {"phase": "release", "what": "Both hands let go and draw back out of the opening, the rule with them [proposed: duration_s]", "duration_s": 0.8},
+  {"phase": "reach", "what": "To unload the bar's end after a part-off, door open, spindle stopped: the working hand to the bar's end standing out of the nose", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "grasp", "what": "Pinch the bar's end; the foot presses the pedal and the collet opens [proposed: duration_s]", "action": "press", "on": "pedal", "duration_s": 0.5, "ends_on": "the bar loose", "source": 1},
+  {"phase": "transport", "what": "Draw the bar straight out of the collet and out of the door's opening [proposed: duration_s]",
+   "action": "slide", "on": "bar", "duration_s": [1.5, 2.5], "ends_on": "the bar's end clear of the machine"}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Haas Automation, 2023 Lathe Operator's Manual: 3.2 chuck safety (unsupported bar stock not to extend past the drawtube), 3.5 Run/Setup Mode Restrictions",
+   "url": "https://www.haascnc.com/content/dam/haascnc/en/service/manual/operator/english_lathe_interactive_manual_print_version_2023.pdf",
+   "gives": "chuck clamp and unclamp allowed with the door open; part loading: open the door, do the task, close the door"},
+  {"kind": "maker", "ref": "Royal Products, 42057 Low-Profile Pullback CNC Collet Chuck (royalproducts.com) and its instructions R220001 rev D",
+   "url": "https://royalproducts.com/product/42057/",
+   "gives": "a pullback collet chuck: the collet drawn into the chuck by the lathe's drawtube to close, pushed out to open; the collet threaded onto the drawtube adapter and keyed at installation; max drawbar 4,490 lbf; a warning not to actuate the collet without a workpiece"},
+  {"kind": "maker", "ref": "Haas Factory Outlet (Morris Trident TMT), Haas Lathe Set-up course: work holding",
+   "url": "https://www.haascnc.com/content/dam/haascnc/hfo-microsite/hfo-morris-trident/Morris_Trident_TMT-Haas-Lathe-Set-up.pdf",
+   "gives": "the hydraulic workholding worked by the foot pedal or M-codes, its pressure set for the operation"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as no lathe-loading footage was tracked",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+ ],
+ "notes": "For ll-1011439's 3 in length of 5/8 in AMPCO 18 bar in the 5/8 in 5C collet in the Royal chuck, 20 mm out (moonshot/planning/plans/ll-1011439.json); its unload after the part-off picks the pin out of the chip trough first (another card's), then takes the bar's end out as here. The collet is closed by the drawtube, as Royal makes the 42057, worked by the foot pedal like the 3-jaw: there is no chuck key (Royal's collet wrench is for threading a collet onto the adapter at installation, not for each part). The foot on the pedal is an input to the control: the body model has no legs (station gap; Control.press_pedal), for the user's decision. Proposed, with reasons (phase numbers count from 1): which hand does what: the working hand the bar, the steadying hand the rule, as two things must be held at once; the bar's grasp near its back end so the hand stays clear of the collet's face; #1, #7 and #10 the pedal's 0.5 s (the collet's 0.2 mm takes under 0.1 s at 5 kN); #3 3 N and 0.5 s for a 0.12 kg bar; #4 and #11 1.5-2.5 s through the opening; #5 3 N and 56 mm in 1.0-1.5 s, a light slide; #6 2-4 s and the 0.5 mm, setting a stick-out by a rule, since the plan's 20 mm has 1.7 mm of clearance to the collet's nose behind the grooving tool; #8 0.8 s."
+}

@@ -1,0 +1,86 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "collet-5c-0625",
+  "name": "5C round collet, 5/8 in",
+  "category": "workholding",
+  "make": "Hardinge",
+  "model": "5C round collet 5/8 in (10010019 series)",
+  "description": "5/8 in round 5C collet for the Royal 42057 collet chuck on the ST-25: drawn in by the drawtube, its 10 deg head closes it on the bar.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Size",
+      "value": 0.625,
+      "unit": "in"
+    },
+    {
+      "name": "Back bearing diameter",
+      "value": 1.25,
+      "unit": "in"
+    },
+    {
+      "name": "Overall length",
+      "value": 3.281,
+      "unit": "in"
+    },
+    {
+      "name": "Thread",
+      "value": "1.238 x 20 RH"
+    },
+    {
+      "name": "Head diameter",
+      "value": 1.468,
+      "unit": "in"
+    },
+    {
+      "name": "Head angle",
+      "value": 10,
+      "unit": "deg",
+      "note": "a side: 0.003 in of draw a 0.001 in of diameter"
+    },
+    {
+      "name": "Chucking range",
+      "value": "+0.001 / -0.003",
+      "unit": "in"
+    },
+    {
+      "name": "Mass",
+      "value": 354.8,
+      "unit": "g",
+      "note": "volume x steel's density"
+    }
+  ],
+  "source_urls": [
+    "https://forkardthardinge.com/wp-content/uploads/2348J_SpindleTooling.pdf",
+    "https://shop.hardinge.com/All-Products/Workholding/Collets/Lathe-Collets/5C-Round-Collet/p/10010017030000"
+  ],
+  "source_files": [
+    "collet-5c-0625.step",
+    "docs/2348J_SpindleTooling.pdf"
+  ],
+  "license": "self-made from Hardinge's published dimensions (moonshot.library.lathe_tooling); not the maker's CAD",
+  "notes": "Hardinge's catalog gives the back bearing, the overall length, the thread, the head's diameter and its 10 deg angle (its FAQ's 1:3) and the good chucking range. Proposed (no drawing to hand): the head's 2 mm land before its taper, the thread's 12 mm length, three 1.5 mm slots 55 mm long, the bore relieved 1.6 mm a side behind its 25 mm grip, a 0.5 mm chamfer at its mouth; no keyway or internal stop thread. Its asset lies along +X, centred, on z = 0; the ST-25's link is library/machines/st25/links/c5/collet.glb.",
+  "file": "collet-5c-0625.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 4370,
+  "bbox": {
+    "min": [
+      -41.67,
+      -18.66,
+      -0.02
+    ],
+    "max": [
+      41.68,
+      18.66,
+      37.29
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/collet-5c-0625.step",
+    "placeholder": "lathe_tooling.collet_5c",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

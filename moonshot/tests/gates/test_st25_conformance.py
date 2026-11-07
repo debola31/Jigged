@@ -484,6 +484,30 @@ def test_z_face_measure_and_x_diameter_measure_record_the_tools_offsets(st25):
     assert ctl.machine_mm()[0] == pytest.approx(2 * -100.0, abs=1e-6)          # X in diameters
 
 
+def test_on_the_work_offset_page_z_face_measure_sets_g54_z_and_a_keyed_value_shifts_it(st25):
+    """Haas's Set a Work Offset (manual 8.6): with the work offset's Z highlighted, Z FACE MEASURE puts the face the
+    tool touches into G54 Z, its Z offset taken off; then a value keyed and ENTER adds to it, as the offset pages
+    take a value (F1 replaces it): the facing allowance taken off the zero."""
+    m, d = st25
+    ctl = Control(m, d)
+    close_door(ctl)
+    ctl.tool_offset[ctl.station] = {"x": -150.0, "z": -400.0}
+    d.qpos[ctl.q["z"]] = -0.3
+    mujoco.mj_forward(m, d)
+    ctl.press("offset")
+    ctl.press("offset")                                              # the tool offsets, then the work offsets
+    ctl.press("z_face_measure")
+    face = ctl.machine_mm()[1] + 400.0
+    assert ctl.work["G54"]["z"] == pytest.approx(face, abs=1e-6)
+    ctl.type_keys("-0.3")
+    ctl.press("enter")
+    assert ctl.work["G54"]["z"] == pytest.approx(face - 0.3, abs=1e-6)
+    ctl.type_keys("12.5")
+    ctl.press("f1")
+    assert ctl.work["G54"]["z"] == pytest.approx(12.5, abs=1e-6)
+    assert ctl.tool_offset[ctl.station] == {"x": -150.0, "z": -400.0}, "the tool's offsets untouched"
+
+
 # --- what the station leaves out ----------------------------------------------------------------------------------
 
 def test_the_tailstock_is_an_option_the_station_declares_absent(st25):

@@ -207,9 +207,14 @@ def spans(part: str, step: dict) -> list[Span]:
         return [(f"{part}-{sid}", None, None)]              # the cycle's own simulation, one per operation
     if step.get("machine") == "bandsaw":                    # per part's bar: its load (the slide to the stop, then
         # the vise's handwheel, at the saw's other end: moonshot/motion/bandsaw.py) and its unload (the cut piece slid
-        # clear, then lifted out, planned from where the slide left it)
-        return {"load": [(vise, None, None), (f"{vise}-clamp", None, None)], "start": [("saw-start", None, None)],
-                "unload": [(f"{vise}-slide", None, None), (f"lift-out-{vise}", None, None)]}[kind]
+        # clear, then lifted out, planned from where the slide left it). A round bar has its own start (the shared
+        # one has G1's flat bar in the vise), named saw-start-<part>, as <part>-saw-start is the start step's own
+        # video folder; and its cut piece, a disc, is lifted out where it lies
+        round_bar = "bar_dia_mm" in load_plan(part)["stock"]
+        return {"load": [(vise, None, None), (f"{vise}-clamp", None, None)],
+                "start": [(f"saw-start-{part}" if round_bar else "saw-start", None, None)],
+                "unload": ([] if round_bar else [(f"{vise}-slide", None, None)]) + [(f"lift-out-{vise}", None, None)],
+                }[kind]
     own = [(f"{part}-{sid}", None, None)]                   # a take of this step alone
     setting = [(f"{part}/{sid}", None, None)]               # the setting session's takes, per setup, in takes/<part>/
     if not setup:

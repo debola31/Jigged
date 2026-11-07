@@ -15,7 +15,7 @@
    ]},
   {"id": "op10", "title": "Op 10: first spigot and the outside", "machine": "st25", "face_out": "-Y",
    "workholding": {"chuck": "chuck3", "holds": "the blank", "jaws": "soft jaws bored Ø63.5, 8 mm deep, to a step", "stick_out_mm": 17.4,
-                   "note": "In the Kitagawa's soft jaws, bored to the bar's Ø63.5 and 8 mm deep to a step the blank's end seats on: 17.4 mm out, the first spigot's 3.2 and the flange's 9.0 with 0.5 to face and 4.7 of clearance to the jaws. Boring the soft jaws isn't a step, as G1's soft jaws (ll-1007223 Op 20). The jaws hold the end Op 20 cuts away"},
+                   "note": "In the Kitagawa's soft jaws, bored to the bar's Ø63.5 and 8 mm deep to a step the blank's end seats on (model Y 16.9 to 24.9, the blank from -0.5 before its facing): 17.4 mm out from the jaws' front, the first spigot's 3.2 and the flange's 9.0 with 0.5 to face and 4.7 of clearance to the jaws. Boring the soft jaws isn't a step, as G1's soft jaws (ll-1007223 Op 20). The jaws hold the end Op 20 cuts away"},
    "wcs": {"code": "G54", "z": "the blank's end, less 0.5 mm for the facing", "by": "the CCGT roughing tool touched on the blank's end"},
    "operations": [
     {"id": "rough", "kind": "turn", "tool": "turn-ccgt",
@@ -30,8 +30,8 @@
                 "source": "300 m/min as rough's. [proposed: 0.08 mm/rev, a fifth of the 0.4 nose's radius, for the g6's finish; 0.25 mm deep]. The R0.4 roots are the DCGT's own 0.4 mm nose"}}
    ]},
   {"id": "op20", "title": "Op 20: second spigot", "machine": "st25", "face_out": "+Y",
-   "workholding": {"chuck": "chuck3", "holds": "the part", "jaws": "the same soft jaws", "stick_out_mm": 21.7,
-                   "note": "Flipped into the same soft jaws: the flange's finished Ø63.0 in their Ø63.5 bore, which they close 0.25 mm further on, its faced side against their step, so they grip 8 mm of its 9 and leave its outer chamfer clear. Gripped so, it runs true within the general 0.2 mm (ISO 2768-K); no runout is toleranced between the spigots [proposed]"},
+   "workholding": {"chuck": "chuck3", "holds": "the part", "jaws": "the same soft jaws", "stick_out_mm": 13.7,
+                   "note": "Flipped into the same soft jaws: the flange's finished Ø63.0 in their Ø63.5 bore, which they close 0.25 mm further on, its faced side against their step, so they grip 8 mm of its 9 (model Y 3.2 to 11.2) and leave its outer chamfer clear. 13.7 mm out from the jaws' front, measured as Op 10's: the 24.9 mm part Op 10 left, its end at Y 24.9, less the jaws' front at Y 11.2 (21.7 measured from their step at Y 3.2). Gripped so, it runs true within the general 0.2 mm (ISO 2768-K); no runout is toleranced between the spigots [proposed]"},
    "wcs": {"code": "G54", "z": "the finished end, 12.2 mm out from the jaws' step", "by": "the CCGT roughing tool touched on the jaws' step face before loading, and moved out by the part's 12.2 mm"},
    "operations": [
     {"id": "rough", "kind": "turn", "tool": "turn-ccgt",
@@ -69,8 +69,6 @@
   {"what": "Op 30 on 1.25 in parallels in the plain jaws, the single hole along the jaws", "why": "A round part has no flat to clock it; the drawing doesn't place the pattern against anything but the axis"}
  ],
  "missing_records": [
-  {"id": "turn-ccgt", "what": "OD roughing tool: an ISO CCGT 09T308 insert (80 deg rhombus, 7 deg clearance, 9.7 mm edge, 3.97 mm thick, 0.8 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 CCGT 09 T3 08-AL H10; in a 95 deg SCLCR holder with a 1 in square shank for the ST-25's BOT OD stations (ISO SCLCR 2525M09 is its 25 mm twin)", "why": "The shop has no lathe tools (its only one is the boring bar, TPMT-221)"},
-  {"id": "turn-dcgt", "what": "OD finishing tool: an ISO DCGT 11T304 insert (55 deg rhombus, 7 deg clearance, 11.6 mm edge, 3.97 mm thick, 0.4 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 DCGT 11 T3 04-AL H10; in a 93 deg SDJCR holder with a 1 in square shank (ISO SDJCR 2525M11 is its 25 mm twin)", "why": "Its 0.4 mm nose cuts the two R0.4 roots, which need a nose of 0.4 or less; no record"}
  ],
  "open": []
 }

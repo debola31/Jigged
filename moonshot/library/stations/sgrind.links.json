@@ -334,7 +334,7 @@
    -330.0,
    940.0
   ],
-  "triangles": 432
+  "triangles": 560
  },
  "wheel_dwheel-1a1r": {
   "min_mm": [
@@ -348,5 +348,57 @@
    1426.2
   ],
   "triangles": 2304
+ },
+ "coolant_nozzle_gwheel": {
+  "min_mm": [
+   20.9,
+   -67.5,
+   1229.4
+  ],
+  "max_mm": [
+   115.0,
+   -15.2,
+   1335.0
+  ],
+  "triangles": 844
+ },
+ "coolant_nozzle_dwheel-1a1r": {
+  "min_mm": [
+   20.9,
+   -67.5,
+   1280.4
+  ],
+  "max_mm": [
+   115.0,
+   -15.2,
+   1335.0
+  ],
+  "triangles": 844
+ },
+ "coolant_stream_gwheel": {
+  "min_mm": [
+   -1.7,
+   -22.0,
+   1220.7
+  ],
+  "max_mm": [
+   26.7,
+   2.0,
+   1237.3
+  ],
+  "triangles": 96
+ },
+ "coolant_stream_dwheel-1a1r": {
+  "min_mm": [
+   -1.7,
+   -22.0,
+   1271.5
+  ],
+  "max_mm": [
+   26.7,
+   2.0,
+   1288.3
+  ],
+  "triangles": 96
  }
 }

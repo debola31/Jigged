@@ -380,8 +380,9 @@ class Micrometer:
     collar_mm: float = 3.0
     sleeve_thimble_mm: float = 47.0
     ratchet_mm: float = 17.0
-    frame_w_mm: float = 12.0      # [proposed] the frame's width round its C
+    frame_w_mm: float = 12.0      # the bow: the frame's depth below the throat, round its C
     frame_t_mm: float = 8.0       # [proposed] its thickness
+    frame_rgb: tuple[int, int, int] = (150, 152, 158)
     boss_mm: float = 8.0          # [proposed] the anvil's boss and the barrel above the axis
     sleeve_dia_mm: float = 14.0   # [proposed]
     thimble_mm: float = 22.0      # [proposed] the thimble's length, of the 47
@@ -401,7 +402,8 @@ class BenchStone:
 
 GAUGES = [PlugGauge("thread-m4", 4.0, 0.7, 10.3, 7.1, 2 * INCH, 0.375 * INCH)]
 CALIPERS = [Caliper("cal24", 780.0, 25.0, 90.0, 38.0, 35.9)]
-MICROMETERS = [Micrometer("mic2", 1.0 * INCH, 1.5 * INCH, 30.3 + 1.0 * INCH, 2.5, 10.0, 38.0, 6.35, 18.0)]
+MICROMETERS = [Micrometer("mic2", 1.0 * INCH, 1.5 * INCH, 30.3 + 1.0 * INCH, 2.5, 10.0, 38.0, 6.35, 18.0,
+                          frame_w_mm=24.0, frame_rgb=(73, 94, 97))]   # the bow and colour off Mitutoyo's photo
 STONES = [BenchStone("bstone", 6 * INCH, 2 * INCH, 1 * INCH)]
 
 GAUGE_SOURCES = {
@@ -432,12 +434,16 @@ GAUGE_SOURCES = {
                 "6.35 mm spindle, an 18 mm thimble, the head 14.5 + 3 + 47 + 17 mm from the barrel's face, 215 g. "
                 "Its L reads 30.3 mm, the 0-1 in 103-177's figure, which leaves no room for a 1-2 in reading; the "
                 "metric 25-50 mm twin (103-138, the same b, c and 215 g) has 55.3 = 30.3 + 25, so L is taken as "
-                "30.3 + 25.4 = 55.7 mm. The frame 12 mm wide and 8 mm thick, without its lightening holes or the "
-                "spindle lock, the sleeve 14 mm across, 22 mm of the 47 the thimble and the ratchet 10 mm across "
-                "[proposed]. Shown opened to 1.5 in, lying on its side as mic1. Mitutoyo's pages link no CAD; its "
-                "CAD needs an account",
+                "30.3 + 25.4 = 55.7 mm. The drawing gives no depth for the bow below the throat, so it is measured "
+                "off Mitutoyo's own 103-178 photo on the same page (103-178_z, a straight side view), scaled by the "
+                "38 mm throat: 126 px under a 199.5 px throat, 24.0 mm (by the spindle's 6.35 mm instead, 23.5); "
+                "the frame's green-grey (73, 94, 97) is that photo's too. The frame 8 mm thick, without its "
+                "lightening holes, name plate or spindle lock, the sleeve 14 mm across, 22 mm of the 47 the "
+                "thimble and the ratchet 10 mm across [proposed]. Shown opened to 1.5 in, lying on its side as "
+                "mic1. Mitutoyo's pages link no CAD; its CAD needs an account",
         "urls": ["https://shop.mitutoyo.eu/web/mitutoyo/en/all/$catalogue/mitutoyoData/PR/103-178/datasheet.xhtml",
-                 "https://shop.mitutoyo.eu/web/mitutoyo/en/all/$catalogue/mitutoyoData/PR/103-138/datasheet.xhtml"],
+                 "https://shop.mitutoyo.eu/web/mitutoyo/en/all/$catalogue/mitutoyoData/PR/103-138/datasheet.xhtml",
+                 "https://shop.mitutoyo.eu/media/mitutoyoData/IM/bigweb/103-178_z_jpg.webp"],
         "specs": [{"name": "Range", "value": [1, 2], "unit": "in"},
                   {"name": "Graduation", "value": 0.001, "unit": "in"},
                   {"name": "Accuracy", "value": 0.0001, "unit": "in", "note": "plus or minus (MPE E)"},
@@ -553,7 +559,7 @@ def micrometer(m: Micrometer) -> list[tuple[str, cq.Workplane, list[int]]]:
     frame = (u_shape(-a - b, barrel + m.barrel_mm, m.throat_mm + m.frame_w_mm, m.boss_mm)
              .cut(u_shape(-a, barrel, m.throat_mm, m.boss_mm + 1)))
     parts = [
-        ("frame", frame, [150, 152, 158, 255]),
+        ("frame", frame, [*m.frame_rgb, 255]),
         ("anvil", along(-a, 0.0, m.spindle_dia_mm), [214, 214, 220, 255]),
         ("spindle", along(m.reading_mm, barrel, m.spindle_dia_mm), [214, 214, 220, 255]),
         ("collar", along(barrel + m.barrel_mm, head, m.sleeve_dia_mm + 1.0), [196, 198, 204, 255]),

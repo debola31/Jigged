@@ -89,6 +89,12 @@ ENVELOPE_MM |= {("ll-1007224", "op30"): ((-31.5, 31.5), (3.2, 15.4), (-31.5, 31.
 # coming through (21.0), the parallels' outer faces 0.1 mm inside the jaws' at the flange's 31.5 (the user's decision,
 # 2026-11-06: the one by the fixed jaw is slid down its face into place)
 PARALLELS_OFF_MM = {("ll-1007224", "op30"): 28.3}
+# parallels beside the jaws: the vise opens whole crank turns wider until the room beside parallel b, between its near
+# face and the open moving jaw, is the reference's, which the thumb that pinches b there was proven in: 23.25 mm
+# (OPENING_MARGIN + NEAR_TO_B - half a parallel; nist-ftc-10's and ll-1007223's stand exactly so). ll-1007224 Op 30's
+# b, 0.1 mm inside the flange's edge, had 13.9 mm and the thumb's 18.5 mm pad would have gone into the jaw: two more
+# turns give it 26.6 (the user's decision, 2026-11-06). Whole turns leave the knob where it stood, as the stops' rule
+B_ROOM_MM = OPENING_MARGIN + NEAR_TO_B - PARALLEL_T / 2
 # a plate on the table: the spoilboard is 3/4 in MDF, centred on the table (its top collider's box, world mm at loading)
 SPOILBOARD_MM = 0.75 * INCH
 SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05, on the table itself
@@ -246,6 +252,9 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     if not w["parallels_in"]:                    # against a stop: room for the hand that sets it (STOP_JAW_CLEAR_MM)
         clear = opening - width / 2 - STOP_MM[1] / 2
         opening += math.ceil(max(0.0, STOP_JAW_CLEAR_MM - clear) / VISE["lead"]) * VISE["lead"]
+    elif paras:                                  # parallels beside the jaws: room for the thumb that sets b (B_ROOM_MM)
+        room = paras["para_b"] - PARALLEL_T / 2 - (fy - opening)
+        opening += math.ceil(max(0.0, B_ROOM_MM - room - 1e-6) / VISE["lead"]) * VISE["lead"]
     return Load(size_mm=(along, width, up), parallel_h=w["parallels_in"] * INCH, parallels_y=paras,
                 opening0=opening, density=density(plan))
 

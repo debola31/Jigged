@@ -233,6 +233,25 @@ def test_nist_ftc_10s_vise_opens_as_it_did(setup):
     assert vise_load(load_plan("nist-ftc-10"), setup).opening0 == pytest.approx(NIST_OPENING[setup], abs=1e-9)
 
 
+# each other parallel setup's opening as its takes were made, which the room beside parallel b leaves as it was
+OPENED = {("ll-1007223", "op10"): 70.95, ("ll-1007223", "op20"): 70.95, ("ct-slbeam", "op10"): 60.96,
+          ("ct-slbeam", "op40"): 59.69}
+
+
+@pytest.mark.parametrize("part, setup", sorted(OPENED))
+def test_a_parallel_setups_vise_opens_as_it_did(part, setup):
+    assert vise_load(load_plan(part), setup).opening0 == pytest.approx(OPENED[(part, setup)], abs=1e-9)
+
+
+def test_ll_1007224s_vise_opens_two_more_turns_so_the_thumb_that_sets_b_has_the_references_room():
+    """Its b stands 0.1 mm inside the flange's edge: at width and margin (76.8 mm) the room beside it was 13.9 mm."""
+    from moonshot.motion.loads import B_ROOM_MM
+    load = vise_load(load_plan("ll-1007224"), "op30")
+    assert load.opening0 == pytest.approx(63.0 + 13.8 + 2 * VISE["lead"])
+    room = load.parallels_y["para_b"] - PARALLEL_T / 2 - (VISE["fixed_face_y"] - load.opening0)
+    assert B_ROOM_MM == pytest.approx(23.25) and B_ROOM_MM <= room < B_ROOM_MM + VISE["lead"]
+
+
 @pytest.mark.parametrize("part, setup, before", [("ll-1007223", "op30", 88.8), ("ct-slbeam", "op20", 68.1),
                                                  ("ct-slbeam", "op30", 68.1)])
 def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_setters_hand_has_room(part, setup,

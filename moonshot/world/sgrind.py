@@ -405,6 +405,24 @@ class Control:
         self.apply()
         mujoco.mj_step(self.model, self.data)
 
+    def set_axes(self, table_mm: float | None = None, saddle_mm: float | None = None,
+                 head_mm: float | None = None) -> None:
+        """Put the table, the saddle or the wheelhead where given (each slide's mm from joint zero) with its handwheel
+        turned to match through its ratio, so their equality holds: a slide set alone is snapped back to its
+        handwheel by the stiff equality, which throws what is on the chuck."""
+        m, d, J = self.model, self.data, self.J
+        per_rad = {"table": J["table_handwheel"]["travel_mm_per_turn"] / (2 * math.pi),
+                   "saddle": J["cross_handwheel"]["lead_mm"] / (2 * math.pi),
+                   "wheelhead": -J["downfeed_handwheel"]["lead_mm"] / (2 * math.pi)}
+        wheel = {"table": "table_handwheel", "saddle": "cross_handwheel", "wheelhead": "downfeed_handwheel"}
+        for slide, mm in (("table", table_mm), ("saddle", saddle_mm), ("wheelhead", head_mm)):
+            if mm is None:
+                continue
+            d.qpos[self.q[slide]] = mm * M
+            d.qpos[self.q[wheel[slide]]] = mm / per_rad[slide]
+            d.qvel[self.v[slide]] = d.qvel[self.v[wheel[slide]]] = 0.0
+        mujoco.mj_forward(m, d)
+
     # --- readings ---------------------------------------------------------------------------------------------------
     def spindle_rpm(self) -> float:
         return float(self.data.qvel[self.v["spindle"]] * 60 / (2 * math.pi))

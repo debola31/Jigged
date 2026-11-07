@@ -384,13 +384,13 @@ def run_step(lathe: Lathe, s: dict, op: dict, stock: T.Profile, log=print) -> T.
     keyframes = sorted(states)
     look = lathe.material
     for kf in keyframes:
-        write_glb(T.to_brep(states[kf], lathe.axis), out / "stock" / f"{kf}.glb", look)
+        write_glb(T.to_brep(states[kf], lathe.axis), out / "stock" / f"{kf}.glb", look, round_part=True)
     meshes = {"blank": {"dir": "stock", "frames": keyframes}}
     if cut_through:                                      # the bar left in the jaws once the part is off it
         (out / "bar").mkdir()
         remnant = stock.copy()
         remnant.r_out[end.solid()] = remnant.r_in[end.solid()]
-        write_glb(T.to_brep(remnant, lathe.axis), out / "bar" / "0.glb", look)
+        write_glb(T.to_brep(remnant, lathe.axis), out / "bar" / "0.glb", look, round_part=True)
         meshes["bar"] = {"dir": "bar", "frames": [0]}
     shape = T.to_brep(end, lathe.axis)
     shape.exportBrep(str(out / "stock-end.brep"))

@@ -48,7 +48,7 @@ WHEEL_CENTRE_Z = 1350.0
 # .035 x 1-1/4 in 1A1R resin diamond wheel (ct-tpg322's plan, missing_records)
 WHEELS = {"dwheel-1a1r": (6.0 * INCH, 0.035 * INCH)}
 KEEPER_MM = (6.0 * INCH, 0.5 * INCH, 0.125 * INCH)        # a 1/8 x 1/2 in parallel laid flat (para: 6 in long)
-CLEAR_MM = 3.0                                             # the wheel lifted this far off the part for the still
+CLEAR_MM = 50.0                                            # the wheel lifted this far off the part for the still
 EYE = np.array([0.0, -900.0, 1650.0])                      # the operator at the handwheels
 # what the plans leave to the programmer, by part: the insert's IC, its top and its groove's floor (the STEP's)
 PARTS = {"ct-tpg322": {"ic_mm": 0.375 * INCH, "top_z": 3.175, "floor_z": 2.972, "look": "carbide"}}
@@ -86,14 +86,14 @@ def run_step(plan: dict, step: dict, op: dict, k_edge: int, stock, log=print):
     (out / "stock").mkdir()
     ps = edge_passes(op, cfg["top_z"])
     v0 = stock.Volume()
-    write_glb(stock, out / "stock" / "0.glb", cfg["look"])
+    write_glb(stock, out / "stock" / "0.glb", cfg["look"], round_part=True)
     start, levels = stock, sorted({p.bottom_z for p in ps}, reverse=True)
     for k, z in enumerate(levels, start=1):                  # each down-feed: both cross positions to its depth
         s = start
         for p in (q for q in ps if q.bottom_z == z and not q.spark_out):
             s = G.cut(s, G.pass_solid(e, p.n0, w, z, stroke, dia / 2, cfg["top_z"]))
         stock = s
-        write_glb(stock, out / "stock" / f"{k}.glb", cfg["look"])
+        write_glb(stock, out / "stock" / f"{k}.glb", cfg["look"], round_part=True)
     stock.exportBrep(str(out / "stock-end.brep"))
     (out / "grind.json").write_text(json.dumps({
         "schema": "jigged.grind-passes/1", "part": part, "step": step["id"], "operation": op["id"],
@@ -130,14 +130,15 @@ def still_record(plan: dict, step: dict, op: dict, k_edge: int, stock) -> None:
     r_ic = cfg["ic_mm"] / 2
     origin = np.array([0.0, CHUCK_BACK_Y - KEEPER_MM[1] + dy - r_ic, CHUCK_FACE_Z])
     L, Wk, Hk = KEEPER_MM
-    keepers = ""
-    for j, e in enumerate(G.insert_edges(cfg["ic_mm"])):
-        c = (r_ic + Wk / 2) * e.out
-        yaw = math.atan2(e.along[1], e.along[0])
-        q = _quat(np.array([[math.cos(yaw), -math.sin(yaw), 0], [math.sin(yaw), math.cos(yaw), 0], [0, 0, 1]]))
-        keepers += (f'      <geom name="keeper_{j}" type="box" size="{L / 2 * M:.5f} {Wk / 2 * M:.5f} {Hk / 2 * M:.5f}" '
-                    f'pos="{c[0] * M:.5f} {c[1] * M:.5f} {Hk / 2 * M:.5f}" quat="{" ".join(f"{v:.6f}" for v in q)}" '
-                    f'contype="0" conaffinity="0" rgba="0.62 0.63 0.65 1"/>\n')
+    bars = []
+    for e in G.insert_edges(cfg["ic_mm"]):
+        # laid as a pinwheel: each from its edge's start corner on past its end corner, where its end lies clear of
+        # the next keeper's (which starts at that corner), so no two cross; drawn as a mesh in steel's look
+        corners = [e.start, e.start + e.along * L, e.start + e.along * L + e.out * Wk, e.start + e.out * Wk]
+        face = cq.Face.makeFromWires(cq.Wire.makePolygon([cq.Vector(p[0], p[1], 0.0) for p in corners], close=True))
+        bars.append(cq.Solid.extrudeLinear(face, cq.Vector(0, 0, Hk)))
+    (out / "keepers").mkdir()
+    write_glb(cq.Compound.makeCompound(bars), out / "keepers" / "0.glb", "steel")
     qi = " ".join(f"{v:.7f}" for v in _quat(R))
     xml = f"""<mujoco model="grind">
   <worldbody>
@@ -149,7 +150,8 @@ def still_record(plan: dict, step: dict, op: dict, k_edge: int, stock) -> None:
       <geom type="box" size="0.001 0.001 0.001" contype="0" conaffinity="0" rgba="0.5 0.5 0.5 1"/>
     </body>
     <body name="keepers" pos="{origin[0] * M:.5f} {origin[1] * M:.5f} {origin[2] * M:.5f}" quat="{qi}">
-{keepers}    </body>
+      <geom type="box" size="0.001 0.001 0.001" contype="0" conaffinity="0" rgba="0.4 0.4 0.42 1"/>
+    </body>
   </worldbody>
 </mujoco>
 """
@@ -160,15 +162,16 @@ def still_record(plan: dict, step: dict, op: dict, k_edge: int, stock) -> None:
     rec = Recorder(m, set(), arms=())
     for _ in range(2):
         rec.frame(d, {}, EYE, centre, [0, 0, 1])
-    write_glb(stock, out / "stock" / "0.glb", cfg["look"])
+    write_glb(stock, out / "stock" / "0.glb", cfg["look"], round_part=True)
     link = lambda k, off: {"path": f"{LINKS}/{k}.glb", "in_body": [*off, 1, 0, 0, 0], "link": k}   # noqa: E731
     wheel = f"wheel_{op['tool']}"
     glbs = {"sgrind": [link(k, [0, 0, 0]) for k in STATIC] + [link(k, [0, round(dy, 3), 0]) for k in SADDLE]
             + [link(k, [0, 0, round(dz, 3)]) for k in HEAD + [wheel]]}
-    rec.write(out, FPS, 0.0, {}, "sgrind", glbs, meshes={"blank": {"dir": "stock", "frames": [0]}})
+    rec.write(out, FPS, 0.0, {}, "sgrind", glbs, meshes={"blank": {"dir": "stock", "frames": [0]},
+                                                         "keepers": {"dir": "keepers", "frames": [0]}})
     (out / "still.json").write_text(json.dumps({
         "look_off_mm": (R @ np.array([0.0, 0.0, cfg["top_z"] / 2])).round(2).tolist(),
-        "from_mm": (np.array([0.3, -0.75, 0.6]) / np.linalg.norm([0.3, -0.75, 0.6]) * 75.0).round(1).tolist(),
+        "from_mm": (np.array([0.1, -0.35, 0.93]) / np.linalg.norm([0.1, -0.35, 0.93]) * 34.0).round(1).tolist(),
         "region": groove.get("along_edge_mm"),
         "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's origin "
                  "plus look_off_mm (world axes: the insert's centre), from from_mm off that: in front of the chuck, "
@@ -178,6 +181,11 @@ def still_record(plan: dict, step: dict, op: dict, k_edge: int, stock) -> None:
 def main(argv: list[str]) -> int:
     plan = load_plan(argv[0])
     cfg = PARTS[plan["part"]]
+    if "--stills" in argv:                          # only the stills' records, from each step's stock-end.brep
+        for k, (step, s, op) in enumerate(ground_steps(plan)):
+            end = data_root() / "takes" / f"{plan['part']}-{step['id']}" / "stock-end.brep"
+            still_record(plan, step, op, k, cq.Shape.importBrep(str(end)))
+        return 0
     part = cq.importers.importStep(str(data_root() / "parts" / plan["part"] / "part.step")).val()
     stock = G.blank(part, cfg["top_z"], cfg["floor_z"])
     for k, (step, s, op) in enumerate(ground_steps(plan)):

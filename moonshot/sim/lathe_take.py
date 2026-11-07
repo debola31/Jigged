@@ -8,12 +8,15 @@ still.json (the still's camera).
     python -m moonshot.sim.lathe_take ll-1011439                    # every lathe cycle step, in order
     python -m moonshot.sim.lathe_take ll-1011439 --from op10-od      # from a step, on the stock the one before left
 
-The machine is drawn from the ST-25's asset (library/machines/st25/st25.glb, one static model) until its station's
-model lands: the stock on the spindle's axis in front of the jaws, the tools as stand-ins of their edges.
+The machine is drawn from its station's links (library/machines/st25/links/) at joint zero until its station's model
+lands: the setup's chuck on the spindle (the 5C collet chuck, or the Kitagawa BR10 with its jaws slid out to the
+stock), the stock on the spindle's axis out of it, each tool its catalogue model, moving along the program's path;
+each program ends sending the turret home, so the still sees the part alone.
 
 Declared shortcuts: time-lapse, as the VF-2's (the program at its programmed feeds, sampled evenly over a few
 seconds, the stock taking each pass's cut at the first frame after it); the spindle's turning isn't drawn (the stock is
-round); the turret's index between tools is 2 s.
+round); the turret and its slides stand at home while the tool moves (the links are drawn at joint zero); the
+turret's index between tools is 2 s.
 """
 from __future__ import annotations
 

@@ -213,7 +213,9 @@ PLACED = {("nist-ftc-10", "op10"): {"para_a": -249.8, "para_b": -302.35},
           ("ll-1007223", "op20"): {"para_a": -249.8, "para_b": -276.95},
           ("ll-1007223", "op30"): {},
           ("ct-slbeam", "op10"): {"para_a": -249.8, "para_b": -257.9},
-          ("ct-slbeam", "op40"): {"para_a": -249.8, "para_b": -257.9}}
+          ("ct-slbeam", "op40"): {"para_a": -249.8, "para_b": -257.9},
+          # either side of its hanging spigot (the user's decision, 2026-11-06)
+          ("ll-1007224", "op30"): {"para_a": -232.45, "para_b": -292.15}}
 
 
 @pytest.mark.parametrize("part, setup", sorted(PLACED))
@@ -243,3 +245,31 @@ def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_s
     clear = lambda o: o - load.size_mm[1] / 2 - STOP_MM[1] / 2                    # noqa: E731
     assert clear(before) < STOP_JAW_CLEAR_MM <= clear(load.opening0)
 
+
+
+# ll-1007224 (G2): the spacer, Ø63.0 flange y 3.2..12.2 between Ø31.5 spigots, y 0..3.2 and 12.2..15.4 (the axis the
+# model's Y); its five Ø6.6 holes on a 25 mm radius, at most 17.68 + 3.3 off its middle across the jaws
+SPACER = ((-31.5, 31.5), (0.0, 15.4), (-31.5, 31.5))
+
+
+def test_the_spacer_comes_off_the_saw_and_into_the_lathe_as_its_blank():
+    plan = load_plan("ll-1007224")
+    for setup in ("saw", "op10"):
+        env = envelope(plan, setup)
+        assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
+        assert contains(env, SPACER), f"{setup}: the blank doesn't hold the part"
+    assert envelope(plan, "op10")[1, 0] == pytest.approx(-0.5), "Op 10 faces 0.5 mm off the blank's end"
+
+
+def test_the_spacer_lies_on_its_flange_its_first_spigot_hanging_between_the_parallels_clear_of_them():
+    plan = load_plan("ll-1007224")
+    p, load = part_pose(plan, "op30"), vise_load(plan, "op30")
+    world = lambda q: p["origin_mm"] + p["R"] @ np.asarray(q, float)          # noqa: E731
+    top = VISE["seat_z"] + load.parallel_h
+    assert world([0, 3.2, 0])[2] == pytest.approx(top), "the flange on the parallels"
+    assert world([0, 0, 0])[2] == pytest.approx(top - 3.2), "the first spigot below their tops"
+    axis = world([0, 0, 0])[1]
+    for y in load.parallels_y.values():
+        inner, outer = abs(y - axis) - PARALLEL_T / 2, abs(y - axis) + PARALLEL_T / 2
+        assert inner > 17.68 + 3.3 > 15.75, "a parallel under the spigot or a hole"
+        assert outer < 31.5, "a parallel past the flange, in the jaw"

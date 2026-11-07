@@ -34,7 +34,7 @@ import re
 import numpy as np
 
 from moonshot.world import vf2
-from moonshot.world.vise import REFERENCE, STOP_MM, TABLE_Z, VISE, Load
+from moonshot.world.vise import PARALLEL_T, REFERENCE, STOP_MM, TABLE_Z, VISE, Load
 
 AXIS = {"X": 0, "Y": 1, "Z": 2}
 INCH = 25.4
@@ -68,6 +68,9 @@ ENVELOPE_MM |= {("nist-ftc-10", s): ((-79.0, 79.0), (0.0, 31.0), (-37.5, 37.5)) 
 STOCK_MM = {"ll-1007223": ((-4.075, 53.075), (-2.225, 42.225), (-41.275, 41.275)),
             "ct-slbeam": ((-3.175, 79.375), (0.0, 38.1), (-3.175, 53.975)),
             "ll-1005337": ((-403.2, 3.2), (-30.2, 630.2), (-20.0, -0.95))}
+# ll-1007224 (G2), the spacer: its blank sawn 1 in long off 2-1/2 in 6061 bar (Ø63.5 x 25.4), the axis the model's Y,
+# its end 0.5 mm past the first spigot's (y 0), which Op 10 faces off, its far end, gripped in the soft jaws, at 24.9
+STOCK_MM["ll-1007224"] = ((-31.75, 31.75), (-0.5, 24.9), (-31.75, 31.75))
 # ll-1007223: Op 10 faces the top to 40 and profiles the flange's edges and both ends to 49 x 75 down to 1 mm above
 # the jaws (y 17.475), leaving the skirt below them the stock's own size, which Op 20 holds above its soft jaws; Op 30
 # holds the finished part
@@ -77,6 +80,15 @@ ENVELOPE_MM |= {("ll-1007223", "op20"): ((-4.075, 53.075), (-2.225, 40.0), (-41.
 ENVELOPE_MM |= {("ct-slbeam", "op20"): ((-3.175, 79.375), (0.0, 38.1), (0.0, 53.975)),
                 ("ct-slbeam", "op30"): ((-3.175, 76.2), (0.0, 38.1), (0.0, 53.975)),
                 ("ct-slbeam", "op40"): ((0.0, 76.2), (0.0, 38.1), (0.0, 53.975))}
+# ll-1007224 (G2), turned on the ST-25, lies flat in the vise for Op 30 on its flange, its first spigot (y 0..3.2)
+# hanging between the parallels: its box is what stands on them, the Ø63 flange and the second spigot (y 3.2..15.4),
+# so it sits on the parallels as a box does and the model (origin_mm) hangs the first spigot below their tops
+ENVELOPE_MM |= {("ll-1007224", "op30"): ((-31.5, 31.5), (3.2, 15.4), (-31.5, 31.5))}
+# a part with something hanging between its parallels has them set either side of it, their inner faces this far off
+# its middle across the jaws: ll-1007224 Op 30's plan, 28.3 mm, clear of the first spigot (15.75) and of the holes
+# coming through (21.0), the parallels' outer faces 0.1 mm inside the jaws' at the flange's 31.5 (the user's decision,
+# 2026-11-06: the one by the fixed jaw is slid down its face into place)
+PARALLELS_OFF_MM = {("ll-1007224", "op30"): 28.3}
 # a plate on the table: the spoilboard is 3/4 in MDF, centred on the table (its top collider's box, world mm at loading)
 SPOILBOARD_MM = 0.75 * INCH
 SPOILBOARD_TOP_Z = TABLE_Z + SPOILBOARD_MM                  # 872.05, on the table itself
@@ -227,6 +239,9 @@ def vise_load(plan: dict, setup_id: str) -> Load:
     fy = VISE["fixed_face_y"]
     to_a = min(FIXED_TO_A, width - NEAR_TO_B - MIN_PITCH)
     paras = {"para_a": fy - to_a, "para_b": fy - width + NEAR_TO_B} if w["parallels_in"] else {}
+    if (plan.get("part"), setup_id) in PARALLELS_OFF_MM:            # either side of what hangs between them
+        off, mid = PARALLELS_OFF_MM[(plan["part"], setup_id)] + PARALLEL_T / 2, fy - width / 2
+        paras = {"para_a": mid + off, "para_b": mid - off}
     opening = width + (min(TALL_MARGIN_MAX, max(OPENING_MARGIN, TALL_MARGIN * up)) if up > width else OPENING_MARGIN)
     if not w["parallels_in"]:                    # against a stop: room for the hand that sets it (STOP_JAW_CLEAR_MM)
         clear = opening - width / 2 - STOP_MM[1] / 2

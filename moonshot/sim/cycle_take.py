@@ -412,14 +412,33 @@ def saw_cut_take(plan: dict, step: dict, log=print) -> Path:
 
 
 def cycle_steps(plan: dict) -> list[tuple[dict, dict]]:
-    """The mill's cycle steps, in order (the saw's cut and an outside vendor's finish are cycle steps too, but not the
-    mill's)."""
+    """The mill's cycle steps, in order (the saw's cut, the lathe's and an outside vendor's finish are cycle steps too,
+    but not the mill's)."""
+    from moonshot.planning.steps import GRINDERS, LATHES
     setups = {s["id"]: s for s in plan["setups"]}
     out = []
     for s in expand(plan):
-        if s["kind"] == "cycle" and "workholding" in setups.get(s.get("setup"), {}):
+        held = setups.get(s.get("setup"), {})
+        if s["kind"] == "cycle" and "workholding" in held and held.get("machine") not in LATHES | GRINDERS:
             setup = setups[s["setup"]]
             out.append((setup, next(o for o in setup["operations"] if o["id"] == s["operation"])))
+    return out
+
+
+def before_mill(plan: dict) -> Path | None:
+    """The stock the lathe hands the mill (stock-end.brep of the last lathe cycle before the mill's first setup), or
+    None for a part that starts on the mill."""
+    from moonshot.planning.steps import LATHES
+    setups = {s["id"]: s for s in plan["setups"]}
+    first = next((s for s, _ in cycle_steps(plan)), None)
+    out = None
+    for s in expand(plan):
+        held = setups.get(s.get("setup"), {})
+        if first is not None and s.get("setup") == first["id"]:
+            break
+        if s["kind"] == "cycle" and held.get("machine") in LATHES:
+            end = data_root() / "takes" / f"{plan['part']}-{s['id']}" / "stock-end.brep"
+            out = end if end.exists() else out
     return out
 
 
@@ -441,6 +460,8 @@ def main(argv: list[str]) -> int:
     ids = [f"{s['id']}-{o['id']}" for s, o in steps]
     i0 = ids.index(start) if start else 0
     stock = planner.stock0()
+    if turned := before_mill(plan):                         # the lathe's part, as its last cycle left it
+        stock = cq.Shape.importBrep(str(turned))
     if i0:
         prev = next(p for p in reversed(ids[:i0])
                     if (data_root() / "takes" / f"{plan['part']}-{p}" / "stock-end.brep").exists())

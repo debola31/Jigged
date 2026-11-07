@@ -127,11 +127,13 @@ def _soft_jaw(k: int, w: dict, bore_mm: float | None, depth_mm: float) -> str:
         return _obox(f"st25_jaw_{k}_{name}", c, [(x1 - x0) / 2, half_w, (z1 - z0) / 2], R,
                      extra=GRIP)
 
+    # a site on the jaw's gripping face at its front edge, where a hand sees and reaches the jaw
+    face = lambda r: _site(f"st25_jaw_{k}_face", AXIS + radial(JAW_ANGLES[k]) * r + [front - 1.0, 0, 0])  # noqa: E731
     if bore_mm is None:
-        return blk("block", back, front, r_in, r_out)
+        return blk("block", back, front, r_in, r_out) + face(r_in)
     r0 = bore_mm / 2 + 2.2                  # the bore, cut at mid-stroke (2.2 mm in), its face at joint zero
     step = front - depth_mm
-    out = blk("behind", back, step, r_in, r_out) + blk("outer", step, front, r0 + 4.0, r_out)
+    out = blk("behind", back, step, r_in, r_out) + blk("outer", step, front, r0 + 4.0, r_out) + face(r0)
     for j, phi in enumerate((-26.0, -13.0, 0.0, 13.0, 26.0)):
         Rf = R @ _rx(phi)
         c = AXIS + Rf @ np.array([0.0, 0.0, r0 + 2.0]) + np.array([(step + front) / 2, 0, 0])

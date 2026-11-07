@@ -417,8 +417,10 @@ def run_slide(replan=False, seconds=None) -> dict:
 
 def run_unload(replan=False, seconds=None) -> dict:
     """Planned from where the slide left the piece: planned from where it was meant to, the hand closed 5-9 mm off
-    it, the slide having carried it 10-15% short, and sank 10-16 mm into it."""
-    return run_piece("unload", "slide", {"pinch": ("piece",)}, ("piece",), replan, seconds)
+    it, the slide having carried it 10-15% short, and sank 10-16 mm into it. A round bar's disc, with no slide, from
+    where the cut left it."""
+    return run_piece("unload", "cut" if SC.STOCK["round"] else "slide", {"pinch": ("piece",)}, ("piece",), replan,
+                     seconds)
 
 
 def still(take: str, frame: int | None = None, out: Path | None = None, view_from=(-0.55, -0.55, 0.75)) -> Path:
@@ -471,7 +473,8 @@ def main(argv: list[str]) -> int:
         from moonshot.sim.bench import recamera
         recamera(plan.OUT["unload"], plan.OUT["slide"])
         return 0
-    order = [k for k in RUNS if k != "start" or not (plan.OUT["start"] / "state.json").exists()]
+    order = [k for k in RUNS if (k != "start" or not (plan.OUT["start"] / "state.json").exists())
+             and not (k == "slide" and SC.STOCK["round"])]
     for k in (order if which == "all" else [which]):
         print(k, json.dumps(RUNS[k](replan=replan, seconds=seconds), indent=1), flush=True)
     return 0

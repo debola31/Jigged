@@ -37,7 +37,7 @@ FLOOR = '    <geom name="floor" type="plane" size="4 4 0.1" contype="1" conaffin
 STOCK_BODIES = ("bar", "piece", "rest")
 
 # --- the bar (mm) ---------------------------------------------------------------------------------------------------
-STOCK = {"w": 25.4, "h": 25.4, "density": 7850.0, "friction": 0.2, "blank_mm": 82.55, "part": None,
+STOCK = {"w": 25.4, "h": 25.4, "round": False, "density": 7850.0, "friction": 0.2, "blank_mm": 82.55, "part": None,
          "material": "4140 alloy steel, 1 in square bar",
          # steel on the oiled bed, about 0.2 (the card's own figure for sliding a bar); stiff, as the saw's joints are
          # (bandsaw.SAW_DEFAULT), so a bar held to the work stop sits at its face, not a millimetre into it
@@ -77,13 +77,18 @@ def site_mm(name: str) -> np.ndarray:
 
 
 def use_stock(part: str, st: dict) -> None:
-    """Set the cell for a part's bar, from its plan's stock (moonshot/motion/bandsaw.py use_part reads it): the bar
-    lying flat, its wider side down, the blank's length, and its density from the plan's material (G1's bars are
-    4140: steel, near three times aluminium's weight)."""
-    w, h = max(st["bar_mm"]), min(st["bar_mm"])
-    length = next(x for x in st["size_mm"] if all(abs(x - b) > 0.01 for b in st["bar_mm"]))
-    STOCK.update(w=w, h=h, blank_mm=float(length), part=part, material=f"{st['material']}, {st['bar']}",
-                 density=density_of(st["material"]))
+    """Set the cell for a part's bar, from its plan's stock (moonshot/motion/bandsaw.py use_part reads it): a flat
+    bar lying flat, its wider side down, or a round bar (bar_dia_mm: w and h its diameter, its bounds); the blank's
+    length, and its density from the plan's material (G1's bars are 4140: steel, near three times aluminium's
+    weight)."""
+    if "bar_dia_mm" in st:
+        w = h = float(st["bar_dia_mm"])
+        length = next(x for x in st["size_mm"] if abs(x - w) > 0.01)
+    else:
+        w, h = max(st["bar_mm"]), min(st["bar_mm"])
+        length = next(x for x in st["size_mm"] if all(abs(x - b) > 0.01 for b in st["bar_mm"]))
+    STOCK.update(w=w, h=h, round="bar_dia_mm" in st, blank_mm=float(length), part=part,
+                 material=f"{st['material']}, {st['bar']}", density=density_of(st["material"]))
 
 
 DENSITY = {"steel": 7850.0, "aluminium": 2700.0}   # kg/m^3
@@ -142,7 +147,8 @@ def bar_x() -> tuple[float, float]:
 
 
 def stock_kg(length_mm: float) -> float:
-    return STOCK["w"] * STOCK["h"] * length_mm * 1e-9 * STOCK["density"]
+    section = math.pi * STOCK["w"] ** 2 / 4 if STOCK["round"] else STOCK["w"] * STOCK["h"]
+    return section * length_mm * 1e-9 * STOCK["density"]
 
 
 def bench_top_mm() -> float:
@@ -202,9 +208,14 @@ def stock_body(name: str, place: Place, centre, R=None, length: float | None = N
     with its axes, its length along its y."""
     half = np.array([STOCK["w"], length, STOCK["h"]]) / 2
     q = _quat(place.R @ (np.eye(3) if R is None else np.asarray(R, float)))
+    if STOCK["round"]:      # a round bar: a cylinder along the body's y
+        geom = (f'<geom name="{name}" class="stock" type="cylinder" size="{_f(half[[0, 1]])}" zaxis="0 1 0" '
+                f'density="{STOCK["density"]}"/>')
+    else:
+        geom = f'<geom name="{name}" class="stock" type="box" size="{_f(half)}" density="{STOCK["density"]}"/>'
     return (f'    <body name="{name}" pos="{_f(place.world(centre))}" quat="{_f(q, 1)}">\n'
             f'      <freejoint name="{name}"/>\n'
-            f'      <geom name="{name}" class="stock" type="box" size="{_f(half)}" density="{STOCK["density"]}"/>\n'
+            f'      {geom}\n'
             f'    </body>\n')
 
 

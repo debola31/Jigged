@@ -79,11 +79,15 @@ OUT: dict = {"start": TAKES / "saw-start"}       # the part's takes by use_part 
 
 
 def use_part(part: str) -> None:
-    """Plan for a part's bar: its plan's stock (saw_cell.use_stock) and its takes' folders."""
+    """Plan for a part's bar: its plan's stock (saw_cell.use_stock) and its takes' folders. G1's flat bars share the
+    controls' take (saw-start, planned with the first part's bar in the vise); a round bar, which would show another
+    bar in its vise there, has its own (<part>-saw-start). A round bar's cut piece, a disc, is lifted out where the cut
+    leaves it, with no slide first (DiscLiftPlan)."""
     from moonshot.planning.validate import load_plan
     SC.use_stock(part, load_plan(part)["stock"])
     OUT.update(load=TAKES / f"{part}-saw", clamp=TAKES / f"{part}-saw-clamp", cut=TAKES / f"{part}-saw-cut",
-               slide=TAKES / f"{part}-saw-slide", unload=TAKES / f"lift-out-{part}-saw")
+               slide=TAKES / f"{part}-saw-slide", unload=TAKES / f"lift-out-{part}-saw",
+               start=TAKES / (f"{part}-saw-start" if SC.STOCK["round"] else "saw-start"))
 
 RAISED_DEG = 10.0           # the head lowered this far from its top stop: the blade 177 mm over the bar, not the card's
                             # 25 mm, so that its idler guard is clear of the head of someone bent over the handwheel (at
@@ -98,7 +102,7 @@ CUT_FEED_MM_S = 1.5         # the feed valve opened to this (proposed): the blad
 SLIDE_S = 3.0               # the bar's slide, 45 mm: the card's 4.5 s, from Dake's footage, was for 50 mm of a lighter
                             # bar, and pushing 4140 that long held the arm past people's sustained effort (0.42 of a
                             # muscle's maximum for 5.4 s, against 0.30 held 5 s or more)
-PUSH_TOUCH_LEAD_S = {"ct-slbeam": 0.085, "ll-1007223": 0.15}   # how long before the wrist stops the thumb meets the
+PUSH_TOUCH_LEAD_S = {"ct-slbeam": 0.085, "ll-1007223": 0.15, "ll-1007224": 0.12}   # how long before the wrist stops the thumb meets the
                             # bar's end, as each bar's grip has it (measured on their takes: its tip is further ahead of
                             # the fingers on the 1-3/4 in bar than on the 1-1/2)
 PUSH_WIDEST_S = 0.075       # the hand widest this long before the first touch: 74-76% of the reach (at 0.225 s before the
@@ -988,6 +992,49 @@ class UnloadPlan(SawPlan):
         self.down = {"t": t_down, "at_mm": down.tolist()}
 
 
+class DiscLiftPlan(UnloadPlan):
+    """A round bar's cut piece, a disc on its rim, lifted out where the cut left it: pinched across its rim at its
+    middle's height, the thumb on its near side, the index on its far side in front of the blade, where the fixed
+    jaw's front plate has ended (the disc lies against it 5.8 mm of its 25.4), so with no slide first; lifted straight
+    up out of the bow's window and set down on the saw's bed in front of the vise, standing on its rim. A thumb and an
+    index, not the card's four fingers: between the plate's end and the blade there is room for one finger, and the
+    disc is 0.22 kg."""
+
+    def __init__(self, state: dict, out=None, verbose=True):
+        super().__init__(state, out, verbose)
+        self.camera_from = None             # no slide before it: the cut, the machine's own, has no camera
+
+    def grip_specs(self) -> dict:
+        S = lambda *a: list(a) + [0.0, 0.0]               # noqa: E731  (trunk 3, arm 7, girdle 2)
+        c, R = self.piece0
+        r = SC.STOCK["w"] / 2
+        nx = self.place.vec(R @ [1.0, 0.0, 0.0])
+        near, far = self.place.world(c - R @ [r, 0, 0]), self.place.world(c + R @ [r, 0, 0])
+        plate_end = BS.record()["colliders"]["fixed_jaw_front"]["box_max_mm"][1]
+        # the index between the plate's end and the blade's kerf, clear of each by 3 mm
+        lo, hi = plate_end + 3.0 - c[1], -SC.KERF_MM / 2 - 3.0 - c[1]
+        rim = lambda p, n, y0, y1: G.plane_target(p, n, 2.0, bands(p, y=(y0, y1), z=(-6.0, 6.0)))  # noqa: E731
+        q0 = self.hand.neutral()
+        q0.update(index_mcp_flex=40.0, index_pip=45.0, index_dip=20.0)
+        for nm in ("middle", "ring", "little"):                  # curled out of the way
+            q0[f"{nm}_mcp_flex"], q0[f"{nm}_pip"], q0[f"{nm}_dip"] = 70.0, 85.0, 40.0
+        q0.update(thumb_cmc_abd=45.0, thumb_cmc_flex=25.0, thumb_mcp_flex=10.0, thumb_ip=10.0)
+        return {"pinch": dict(of="piece", obj=self.place.world(c), q0=q0, iters=1000, colliders=self.colliders(c),
+                              load=round(SC.stock_kg(self.length), 3),
+                              targets={"thumb": rim(near, -nx, -6.0, 6.0), "index": rim(far, nx, lo, hi)},
+                              starts=[S(f, 0, 0, pl, 40, rr, 60, pp, 0, 0) for f in (20, 35) for pl in (50, 75)
+                                      for rr in (-20,) for pp in (60, 85)])}
+
+    def set_down_at(self):
+        """On the saw's bed in front of the vise, drawn straight back toward the person, standing on its rim as it
+        lay (centre mm, world), as a flat bar's piece (UnloadPlan.set_down_at)."""
+        c, _ = self.piece0
+        bed = BS.record()["colliders"]["bed_front"]
+        x = max(c[0], bed["box_min_mm"][0] + SC.STOCK["w"] / 2 + SET_DOWN_EDGE_MM + 4.0)
+        y = bed["box_min_mm"][1] + self.length / 2 + SET_DOWN_EDGE_MM
+        return self.place.world([x, y, SC.bed_z() + SC.STOCK["h"] / 2 + 0.3])
+
+
 def state_of(take: str) -> dict:
     return json.loads((OUT[take] / "state.json").read_text(encoding="utf-8"))
 
@@ -1003,6 +1050,8 @@ def build(take: str, solve=True, verbose=True):
         plan = StartPlan(state_of("clamp"), verbose=verbose)
     elif take == "slide":
         plan = SlidePlan(state_of("cut"), verbose=verbose)
+    elif SC.STOCK["round"]:
+        plan = DiscLiftPlan(state_of("cut"), verbose=verbose)
     else:
         plan = UnloadPlan(state_of("slide"), verbose=verbose)
     plan.compose()

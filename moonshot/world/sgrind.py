@@ -27,8 +27,9 @@ presses the part into the face, and MuJoCo's contact friction on that harder pre
 welds it. The lever's own magnet holds it at either
 end of its half turn, a torque the control sets on the lever's detent actuator.
 
-`Control` is the grinder's switchgear (SB1029's): ON runs the wheel unless OFF is in; OFF stops it and stays in until
-twisted out. It owns `data.xfrc_applied` for the chuck and every body it holds: push them through `qfrc_applied`.
+`Control` is the grinder's switchgear (SB1029's): ON runs the wheel unless OFF is in or the wheel isn't rated for its
+speed; OFF stops it and stays in until twisted out; the coolant switch runs the pump. It owns `data.xfrc_applied` for
+the chuck and every body it holds: push them through `qfrc_applied`.
 """
 from __future__ import annotations
 
@@ -258,8 +259,15 @@ class Control:
         self.face = m.geom("sg_chuck_face").id
         self.chuck = m.body("sg_chuck").id
         self._meshes: dict[int, tuple] = {}
+        radius_mm = m.geom("sg_wheel").size[0] * 1000                       # the wheel the model mounts, by its size
+        self.wheel_id = next(w for w, s in r["wheels"].items() if abs(s["dia_mm"] / 2 - radius_mm) < 0.01)
         for body, material in dict(self.held).items():
             self.hold(body, material)
+
+    def wheel_may_run(self) -> bool:
+        """SB1029 safety rule 2: the wheel's rating, confirmed, at least the spindle's speed."""
+        w = record()["wheels"][self.wheel_id]
+        return bool(w["rating_confirmed"]) and w["rated_rpm"] >= self.omega * 60 / (2 * math.pi)
 
     # --- the chuck -------------------------------------------------------------------------------------------------
     def hold(self, body: str, material: str) -> None:
@@ -357,6 +365,8 @@ class Control:
         if button == "start":
             if self.stop_in or self.state != "idle":
                 self.events.append("start_refused")
+            elif not self.wheel_may_run():
+                self.events.append("start_refused_wheel_rating")
             else:
                 self.state = "running"
                 self.events.append("start")

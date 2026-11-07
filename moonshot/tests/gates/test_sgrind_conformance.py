@@ -120,8 +120,8 @@ def switch_on(m, d, ctl):
 
 # --- the table, the saddle and the wheelhead ---------------------------------------------------------------------
 
-def test_the_chuck_is_10_by_24_in_and_the_wheel_10_by_1_in(grinder):
-    m, _ = grinder
+def test_the_chuck_is_10_by_24_in_and_the_wheel_10_by_1_in():
+    m, _ = build(wheel="gwheel")                                              # the wheel the STEP draws
     face = m.geom("sg_chuck_face")
     assert 2000 * face.size[0] == pytest.approx(24 * IN, abs=0.5)
     assert 2000 * face.size[1] == pytest.approx(10 * IN, abs=0.5)
@@ -229,20 +229,25 @@ def test_the_head_brings_each_wheel_down_to_the_chuck_and_the_10_in_wheel_rises_
 
 # --- the wheel, its guard and its controls ------------------------------------------------------------------------
 
-def test_the_wheel_runs_at_its_speed_only_after_on_and_inside_its_rating(grinder):
-    m, d = grinder
+@pytest.mark.parametrize("wheel", ["gwheel", "dwheel-1a1r"])
+def test_the_wheel_runs_at_its_speed_only_after_on_and_only_if_rated_for_it(wheel):
+    """SB1029 safety rule 2: the wheel's rating at least the grinder's speed. A wheel whose rating isn't confirmed
+    (gwheel's 3,800 rpm is a 7 in wheel's figure) isn't started at all."""
+    m, d = build(wheel=wheel)
     ctl = Control(m, d)
-    S = record()["spindle"]
-    rpm = S["rpm"]
-    for w, spec in record()["wheels"].items():                               # SB1029 safety rule 2: each wheel is
-        assert spec["rated_rpm"] >= rpm, w                                    # rated for the grinder's speed
+    rpm, spec = record()["spindle"]["rpm"], record()["wheels"][wheel]
     ctl.press("start")
     settle(ctl, 5000)
-    assert ctl.state == "running" and ctl.spindle_rpm() == pytest.approx(rpm, rel=0.02)
-    assert ctl.spindle_rpm() <= rpm * 1.02
+    if spec["rating_confirmed"] and spec["rated_rpm"] >= rpm:
+        assert ctl.state == "running" and ctl.spindle_rpm() == pytest.approx(rpm, rel=0.02)
+        assert ctl.spindle_rpm() <= rpm * 1.02
+    else:
+        assert ctl.state == "idle" and "start_refused_wheel_rating" in ctl.events
+        assert abs(ctl.spindle_rpm()) < 1.0
+    assert record()["wheels"][record()["spindle"]["mounted"]]["rating_confirmed"]   # the mounted wheel may run
 
 
-@pytest.mark.parametrize("wheel", ["gwheel", "dwheel-1a1r"])
+@pytest.mark.parametrize("wheel", ["dwheel-1a1r"])
 def test_off_stays_in_until_twisted_and_the_wheel_coasts_to_a_stop(wheel):
     m, d = build(wheel=wheel)
     ctl = Control(m, d)
@@ -268,14 +273,13 @@ def test_off_stays_in_until_twisted_and_the_wheel_coasts_to_a_stop(wheel):
 def test_the_guard_exposes_at_most_150_deg_of_the_wheel_starting_at_most_15_deg_above_horizontal(grinder):
     m, d = grinder
     centre = d.site("sg_wheel_centre").xpos.copy()
-    radius = m.geom("sg_wheel").size[0]
     head, spindle = m.body("sg_wheelhead").id, m.body("sg_spindle").id
     gid = np.zeros(1, np.int32)
     open_deg = []
     for a in np.arange(0.0, 360.0, 0.5):                                       # a ray in the wheel's plane, from 0 = right
         v = np.array([math.cos(math.radians(a)), 0.0, math.sin(math.radians(a))])
         dist = mujoco.mj_ray(m, d, centre, v, None, 1, spindle, gid)
-        covered = dist >= 0 and m.geom_bodyid[gid[0]] == head and dist < radius + 0.08
+        covered = dist >= 0 and m.geom_bodyid[gid[0]] == head and dist < 0.3     # the guard, for any wheel
         if not covered:
             open_deg.append(a)
     exposure = len(open_deg) * 0.5

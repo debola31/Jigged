@@ -276,12 +276,12 @@
  "spindle": {
   "rpm": 3450,
   "source": "proposed",
-  "reason": "SB1029's and Clausing's spindles run 3450 rpm (a two-pole motor at 60 Hz), as the ct-tpg322 plan takes it: inside the shop's 10 in wheel's rated 3800 rpm (gwheel's record) and the diamond wheel's 6048, and the 6 in diamond wheel then runs 5,420 sfpm",
+  "reason": "SB1029's and Clausing's spindles run 3450 rpm (a two-pole motor at 60 Hz), as the ct-tpg322 plan takes it: inside the diamond wheel's 6048, and the 6 in diamond wheel then runs 5,420 sfpm",
   "motor_hp": 2,
   "motor_source": "proposed",
   "motor_reason": "Between SB1029's 1.5 hp (6 x 18) and Clausing's 3 hp (10 x 20): 4.13 N m at 3450 rpm",
-  "mounted": "gwheel",
-  "mounted_reason": "The shop's wheel at the grinder (shop.json grinding-wheel-1), the one the STEP draws; a plan mounts another by its id"
+  "mounted": "dwheel-1a1r",
+  "mounted_reason": "The diamond wheel (shop.json diamond-wheel-1), the one G2's ct-tpg322 grinds with; the 10 in wheel the STEP draws (gwheel) mounts by its id but isn't started (wheels.gwheel)"
  },
  "guard": {
   "exposure_max_deg": 150,
@@ -860,7 +860,8 @@
   "interlocks": [
    "ON runs the wheel only with the OFF button reset (popped out)",
    "pressing OFF stops the wheel's motor and stays in until twisted",
-   "the wheel isn't braked: it coasts to a stop"
+   "the wheel isn't braked: it coasts to a stop",
+   "ON doesn't start the spindle on a wheel whose rating isn't confirmed or is under the spindle's speed (SB1029 safety rule 2)"
   ],
   "logic_source": "spec",
   "logic_reason": "SB1029 Test Run, steps 6-9: OFF is pushed in and twisted clockwise to pop out and reset; with it not reset, ON must not start the machine. Controls: the power light shows the motor running. The chuck is a permanent magnet switched by its lever, with no interlock"
@@ -929,7 +930,9 @@
    "rated_rpm": 3800,
    "glb": "wheel_gwheel",
    "source": "cad",
-   "reason": "The STEP's wheel (solid 6: 254 mm across, 25.4 wide, a 75 mm bore), its outer flange (8) and blotters (5, 7), as the shop's gwheel (10 x 1 x 3 in, rated 3800 rpm); at a vitrified wheel's 2.2 g/cm3 2.58 kg and 0.0226 kg m2, the steel flange 0.34 kg"
+   "reason": "The STEP's wheel (solid 6: 254 mm across, 25.4 wide, a 75 mm bore), its outer flange (8) and blotters (5, 7), as the shop's gwheel (10 x 1 x 3 in, rated 3800 rpm); at a vitrified wheel's 2.2 g/cm3 2.58 kg and 0.0226 kg m2, the steel flange 0.34 kg",
+   "rating_confirmed": false,
+   "rating_reason": "Not confirmed: gwheel's record gives 3,800 rpm as a 'typical rating', a 7 in wheel's figure; a standard vitrified 10 in wheel is rated 6,500 sfpm, about 2,480 rpm, under the spindle's 3450. So the control won't start the spindle on it until a datasheet gives its rating (the plans agent's check, 2026-11-06)"
   },
   "dwheel-1a1r": {
    "dia_mm": 152.4,
@@ -952,7 +955,9 @@
    "source": "spec",
    "reason": "Butler Bros' 6 x 0.035 x 1-1/4 in 1A1R resin diamond wheel, 120 grit, 1/4 in of diamond on its rim, 6,048 rpm max; its mid-plane where the 10 in wheel's is [proposed]",
    "hub_source": "proposed",
-   "hub_reason": "On its own hub between two steel flanges 4 in across and 1/4 in thick, the STEP's flange size, as a thin wheel is clamped: the steel core 0.12 kg, the flanges 0.73"
+   "hub_reason": "On its own hub between two steel flanges 4 in across and 1/4 in thick, the STEP's flange size, as a thin wheel is clamped: the steel core 0.12 kg, the flanges 0.73",
+   "rating_confirmed": true,
+   "rating_reason": "Butler Bros' listing: 6,048 rpm max"
   }
  }
 }

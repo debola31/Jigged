@@ -24,7 +24,7 @@ from moonshot.motion import plate_clamps as PC
 from moonshot.motion import plates
 from moonshot.sim.door_cycle import NEVER_HELD
 from moonshot.sim.record import glbs_in_bodies
-from moonshot.sim.runner import TakeRunner
+from moonshot.sim.runner import ARM, TakeRunner
 from moonshot.sim.set_parallels import FirmGrip
 from moonshot.world import cell, vf2
 from moonshot.world import spoilboard as SB
@@ -59,6 +59,12 @@ class PlateClamps(FirmGrip, TakeRunner):
             | ({"wrench_R": "wrench", "wrench_L": "wrench"} if self.wrench else {}) | self.more_encloses()
         self.welded = set(self.encloses)
         super().__init__(folder)
+        # the eye steers through the shoulder, elbow and wrist, as the vise take's (moonshot/sim/vise_take.py): the
+        # girdle's slides (sc_*) took most of a correction down and sat on their stops, and ll-1005337's left hand
+        # stood 3 mm over its strap's place as the eye asked 26 mm lower, the strap dropped and turned as it landed
+        m = self.model
+        self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{n}").id] for n in ARM if not n.startswith("sc_")])
+                         for s in self.arm_dofs}
         self.firm_setup()
         # each carry (the wrench may be carried more than once: picked up, laid down, picked up again)
         self.carries = [e for e in self.tk["events"] if e["kind"] == "carry" and e["obj"] != "blank"]

@@ -205,6 +205,9 @@ DENSITY = {
     "304": (8000.0, "AISI 304 stainless 8.00 g/cm^3: MatWeb, AISI Type 304 Stainless Steel (ASM Handbook vol. 1 values)"),
     "acetal": (1410.0, "acetal 1.41 g/cm^3 (copolymer; Delrin homopolymer 1.42): MatWeb, Overview of materials for Acetal"),
     "delrin": (1410.0, "Delrin acetal 1.41-1.42 g/cm^3: DuPont Delrin 150 product information; as acetal above"),
+    "ampco": (7450.0, "AMPCO 18 aluminium bronze 0.269 lb/in^3 (7.45 g/cm^3): Ampco Metal, Technical Data Sheet AMPCO 18"),
+    "carbide": (14950.0, "C2 (K20) tungsten carbide, 6% cobalt, 14.95 g/cm^3: Kugel Pompel data sheet, tungsten carbide "
+                         "with cobalt binder TC K20 (5-7% Co); Carbide Processors' 6% Co grade, 14.95 g/cc"),
 }
 
 

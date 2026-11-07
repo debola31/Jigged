@@ -5761,10 +5761,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-tpg322/op10-edge1.mp4"
+      "type": "still",
+      "still": "still/ct-tpg322/op10-edge1.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-edge2",
@@ -5786,10 +5786,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-tpg322/op10-edge2.mp4"
+      "type": "still",
+      "still": "still/ct-tpg322/op10-edge2.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-edge3",
@@ -5811,10 +5811,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-tpg322/op10-edge3.mp4"
+      "type": "still",
+      "still": "still/ct-tpg322/op10-edge3.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",

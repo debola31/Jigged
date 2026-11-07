@@ -52,7 +52,8 @@ AS_PUBLISHED = {"nist-ftc-10"}
 # fraction of its diameter (held to 0.005-0.15 mm per tooth) and a drill's feed per rev as one; a reamer or tap runs at
 # half speed, a reamer at twice a drill's feed. Machinery's Handbook ranges, the lower half (a conservative shop)
 MATERIALS = {"stainless": (12.0, 60.0, 0.006, 0.012), "steel": (20.0, 90.0, 0.008, 0.015),
-             "acetal": (90.0, 240.0, 0.015, 0.02), "aluminium": (90.0, 300.0, 0.012, 0.02)}
+             "acetal": (90.0, 240.0, 0.015, 0.02), "aluminium": (90.0, 300.0, 0.012, 0.02),
+             "bronze": (25.0, 150.0, 0.008, 0.012)}          # AMPCO 18, aluminium bronze (HB 170): as steel's
 # overall lengths (mm) for the records that don't carry one yet: the standard length for the kind (jobber drills ASME
 # B94.11M / DIN 338, taps DIN 371, a 1/8 in shank miniature end mill's 1-1/2 in) [proposed, until the records do]
 OAL_MM = {"drill-5-32": 63.5, "drill-6p5": 101.0, "drill-11": 102.0, "tap-m4": 63.0, "em132": 38.1}
@@ -161,6 +162,10 @@ def _thread(value: str) -> tuple[float, float]:
 def material_of(plan: dict) -> str:
     """The plan's stock as one of MATERIALS' classes."""
     m = plan["stock"]["material"].lower()
+    if "bronze" in m or "ampco" in m:                  # before aluminium: AMPCO 18 is "aluminum bronze"
+        return "bronze"
+    if "carbide" in m:
+        return "carbide"
     return ("stainless" if "stainless" in m else "acetal" if "delrin" in m or "acetal" in m
             else "steel" if "4140" in m or "steel" in m else "aluminium")
 

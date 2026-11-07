@@ -12,6 +12,11 @@ world frame puts the floor at z = 0, the blade's cutting plane at y = 0 and the 
 (x, -z - 395, y + 406.8) mm. Its links.json also carries each link's CAD volume, centre of mass and inertia at
 1 g/cm3, for the record to price at a density.
 
+The surface grinder's STEP (GrabCAD, a 10 x 24 manual grinder with no maker) is one flat compound of 55 solids, split
+the same way. Its world frame puts the floor at z = 0, the table's middle at x = 0, the wheel's mid-plane at y = 0
+and the operator at -Y: world = (x, 88.7 - z, y) mm. It has no control box, so one is made here (control_box_mesh):
+the buttons South Bend's SB1029 manual names, on a box beside the base's right side (sgrind.json's controls link).
+
 The inspection bench's height gauge and surface plate are one placeholder STEP (the hgauge asset), split so the plate
 stays on the bench while the gauge moves. Each is in its own frame rather than a world frame: the plate's with its
 underside centred at the origin, the gauge's the same frame lowered by the plate's 76.2 mm, so the gauge's underside
@@ -36,10 +41,12 @@ from moonshot.config import data_root
 STATIONS = Path(__file__).resolve().parent
 SOURCES = {"vf2": "machines/vf2/VF-2_STEP__1_2023.step",
            "bandsaw": "machines/bandsaw/8962N13_Horizontal Band Saw for Metal.STEP",
-           "inspection_bench": "inspection/hgauge/hgauge.step"}
+           "inspection_bench": "inspection/hgauge/hgauge.step",
+           "sgrind": "machines/sgrind/Surface Grinder Machine.STEP"}
 Y_UP = np.array([[1.0, 0, 0], [0, 0, -1.0], [0, 1.0, 0]])
 TO_WORLD = {"vf2": (Y_UP, np.array([0.0, 352.0, 505.0])),          # STEP (x, y, z) -> (x, 352 - z, y + 505) mm
             "bandsaw": (Y_UP, np.array([0.0, -395.0, 406.8])),     # STEP (x, y, z) -> (x, -z - 395, y + 406.8) mm
+            "sgrind": (Y_UP, np.array([0.0, 88.7, 0.0])),          # STEP (x, y, z) -> (x, 88.7 - z, y) mm
             "inspection_bench": (np.eye(3), np.zeros(3))}             # already Z up, the plate's underside centred
 LINK_ORIGIN_MM = {"inspection_bench": {"height_gauge": [0.0, 0.0, 76.2]}}   # where a link's own frame sits
 LINKS = {   # STEP component -> link
@@ -59,7 +66,142 @@ SOLID_LINKS = {   # link -> solid indices, for STEPs that are one flat compound;
                 # the bow and all it carries: guide arms, wheels, motor, gearbox. 218 and 219, brackets by the
                 # hinge, stay on the base: carried down with the head they would cut 50 mm into the bed
                 "head": [i for i in [*range(138, 225), 257, 260] if i not in (157, 181, 192, 218, 219)]},
+    # the base is the pedestal (54) and the column (42). The table carries the chuck (47 its body, 21 its top plate,
+    # 9-20 and 22-33 the 24 strips set in it), its end splash guards (0, 1) and the two table stops (51, 52); the
+    # saddle the centre stop (48-50) the table stops meet; the wheelhead the guard and its front plate (3, 4); the
+    # spindle the wheel (6), its flanges (2, 8) and blotters (5, 7). 43 is the down-feed handwheel's shaft, 44 its
+    # graduated dial
+    "sgrind": {"saddle": [34, 48, 49, 50], "table": [41, 0, 1, 51, 52],
+               "chuck": [47, 21, *range(9, 21), *range(22, 34)],
+               "chuck_lever": [53], "wheelhead": [3, 4], "spindle": [2], "wheel_gwheel": [5, 6, 7, 8],
+               "table_handwheel": [35, 36, 37], "cross_handwheel": [38, 39, 40],
+               "downfeed_handwheel": [43, 45, 46], "downfeed_dial": [44]},
 }
+
+
+def control_box_mesh(station: str):
+    """The grinder's control box, which its STEP lacks (world frame, metres): a steel box on a bracket off the base's
+    right side, its face toward the operator, with SB1029's ON button (green, flush), OFF button (red mushroom, push
+    to stop, twist to reset) and power light. Placed where it is reachable from the front right and clears the
+    saddle (x <= 385 mm) and the table (z >= 919 mm) through their travel; its numbers are sgrind.json's."""
+    import trimesh
+
+    def box(lo, hi):
+        lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+        return trimesh.creation.box(extents=(hi - lo) * 0.001,
+                                    transform=trimesh.transformations.translation_matrix((lo + hi) / 2 * 0.001))
+    r = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))
+    c = r["colliders"]["controls_box"]
+    # the box, and its bracket: a plate bolted to the base's right side (x 280) just in front of nothing, under the
+    # saddle (whose bottom is at z 750 at its front lip, 801 behind it), out and forward to a riser under the box
+    parts = [box(c["box_min_mm"], c["box_max_mm"]),
+             box([280.0, -350.0, 728.0], [440.0, -330.0, 745.0]),
+             box([420.0, -440.0, 728.0], [440.0, -330.0, 745.0]),
+             box([420.0, -440.0, 745.0], [440.0, -420.0, 780.0])]
+    for name, radius, depth in (("start", 0.011, 0.004), ("stop", 0.02, 0.022), ("power_light", 0.008, 0.006),
+                                ("coolant_switch", 0.005, 0.010)):
+        at = np.array(r["affordances"][name]["at_mm"]) * 0.001
+        cyl = trimesh.creation.cylinder(radius=radius, height=depth)
+        cyl.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))   # its axis along y
+        cyl.apply_translation(at + np.array([0.0, depth / 2, 0.0]))                          # standing out of the face
+        parts.append(cyl)
+    return trimesh.util.concatenate(parts)
+
+
+def wheel_mesh(station: str, wheel_id: str, on_spindle: bool = True):
+    """A wheel the grinder mounts that its STEP doesn't draw, from sgrind.json's wheels: its disc (the diamond rim
+    and the core, one thickness, a 1A1R) between its two flanges. On the spindle (the world frame, metres), or, for
+    its own asset, lying on z = 0 with its axis +Z (the library's convention), in millimetres."""
+    import trimesh
+    r = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))
+    w, at = r["wheels"][wheel_id], np.array(r["joints"]["spindle"]["at_mm"], float)
+    bore = w["bore_mm"] / 2
+    fl, f0, f1 = w["flange_mm"]
+    y0, y1 = w["y_mm"]
+    rings = [(w["dia_mm"] / 2, y0, y1), (fl / 2, f0, f1), (fl / 2, -f1, -f0)]     # the disc, the front and back flange
+    parts = []
+    for radius, a, b in rings:
+        ring = trimesh.creation.annulus(r_min=bore, r_max=radius, height=b - a, sections=96)
+        ring.apply_translation([0.0, 0.0, (a + b) / 2])
+        parts.append(ring)
+    mesh = trimesh.util.concatenate(parts)                       # its axis along z, its mid-plane at z = 0 (mm)
+    if on_spindle:
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))   # z -> y
+        mesh.apply_translation([at[0], 0.0, at[2]])
+        mesh.apply_scale(0.001)
+    else:
+        mesh.apply_translation([0.0, 0.0, -mesh.bounds[0][2]])
+    return mesh
+
+
+def _tube(a, b, radius_mm: float):
+    """A round tube from a to b (mm), in metres."""
+    import trimesh
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    t = trimesh.creation.cylinder(radius=radius_mm, height=float(np.linalg.norm(b - a)), sections=24)
+    t.apply_transform(trimesh.geometry.align_vectors([0.0, 0.0, 1.0], (b - a) / np.linalg.norm(b - a)))
+    t.apply_translation((a + b) / 2)
+    t.apply_scale(0.001)
+    return t
+
+
+def coolant_nozzle_mesh(station: str, wheel_id: str):
+    """SB1029's coolant nozzle, which the STEP lacks (world frame, metres): a segmented hose along sgrind.json's coolant
+    path for the wheel mounted, with a ball joint at each bend and a mount plate on the guard's front."""
+    import trimesh
+    c = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))["coolant"]
+    path, radius = c["nozzle_mm"][wheel_id], c["radius_mm"]
+    parts = [_tube(a, b, radius) for a, b in zip(path[:-1], path[1:])]
+    for p in path[:-1]:
+        ball = trimesh.creation.icosphere(subdivisions=2, radius=radius * 1.25 * 0.001)
+        ball.apply_translation(np.asarray(p, float) * 0.001)
+        parts.append(ball)
+    m0 = np.asarray(path[0], float)
+    plate = trimesh.creation.box(extents=[0.03, 0.008, 0.03])
+    plate.apply_translation((m0 + [0.0, 8.7, 0.0]) * 0.001)      # flat on the guard's front plate (y -51.3)
+    parts.append(plate)
+    return trimesh.util.concatenate(parts)
+
+
+def coolant_stream_mesh(station: str, wheel_id: str):
+    """The coolant's flow from the nozzle's tip to the wheel's lowest point (world frame, metres): drawn, not
+    simulated."""
+    r = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))
+    tip = np.asarray(r["coolant"]["nozzle_mm"][wheel_id][-1], float)
+    at, w = r["joints"]["spindle"]["at_mm"], r["wheels"][wheel_id]
+    bottom = np.array([at[0], 0.0, at[2] - w["dia_mm"] / 2])
+    return _tube(tip, bottom, 2.5)
+
+
+GENERATED = {"sgrind": {"controls": control_box_mesh,               # links with no solid in the STEP, made here
+                        "wheel_dwheel-1a1r": lambda s: wheel_mesh(s, "dwheel-1a1r"),
+                        **{f"coolant_nozzle_{w}": (lambda s, w=w: coolant_nozzle_mesh(s, w))
+                           for w in ("gwheel", "dwheel-1a1r")},
+                        **{f"coolant_stream_{w}": (lambda s, w=w: coolant_stream_mesh(s, w))
+                           for w in ("gwheel", "dwheel-1a1r")}}}
+WHEEL_ASSETS = {"sgrind": ("dwheel-1a1r",)}    # wheels made here that are also assets of their own (consumables)
+KEEPER_MM = (38.1, 12.7, 3.175)                 # the grinding keeper (records workholding/keeper): its length proposed
+
+
+def keeper_mesh():
+    """A grinding keeper, a ground bar lying on z = 0, its length along X (the library's convention), in mm."""
+    import trimesh
+    box = trimesh.creation.box(extents=KEEPER_MM)
+    box.apply_translation([0.0, 0.0, KEEPER_MM[2] / 2])
+    return box
+
+
+def write_wheel_assets(station: str) -> None:
+    """Each made wheel's own asset GLB, <data root>/library/consumables/<id>/<id>.glb, from the same dimensions, and
+    the keepers its chuck blocks parts in with, <data root>/library/workholding/keeper/keeper.glb."""
+    for wheel_id in WHEEL_ASSETS.get(station, ()):
+        out = data_root() / "library" / "consumables" / wheel_id
+        out.mkdir(parents=True, exist_ok=True)
+        wheel_mesh(station, wheel_id, on_spindle=False).export(out / f"{wheel_id}.glb")
+    if station == "sgrind":
+        out = data_root() / "library" / "workholding" / "keeper"
+        out.mkdir(parents=True, exist_ok=True)
+        keeper_mesh().export(out / "keeper.glb")
 
 
 def read_components(step: Path):
@@ -168,6 +310,8 @@ def extract(station: str) -> dict:
             mesh = to_world_mesh(shape, station, link)
             if mesh is not None:
                 meshes.setdefault(link, []).append(mesh)
+    for link, make in GENERATED.get(station, {}).items():
+        meshes[link] = [make(station)]
     import trimesh
     manifest = {}
     # sub-links (doors, spindle) are cut out of their parents' meshes by being exported separately; their parent
@@ -180,9 +324,10 @@ def extract(station: str) -> dict:
         lo, hi = mesh.bounds * 1000
         manifest[link] = {"min_mm": [round(v, 1) for v in lo], "max_mm": [round(v, 1) for v in hi],
                           "triangles": int(len(mesh.faces))}
-        if station in SOLID_LINKS:
+        if station in SOLID_LINKS and link in shapes:
             manifest[link] |= mass_properties(shapes[link], station)
     (STATIONS / f"{station}.links.json").write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
+    write_wheel_assets(station)
     return manifest
 
 

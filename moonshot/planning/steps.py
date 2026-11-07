@@ -51,12 +51,13 @@ CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool
 PRESET = {"vf3", "hurco"}
 LATHES = {"st25"}                     # turning centres: the stock in a chuck or collet, its tools bolted in a turret
 GRINDERS = {"sgrind"}                 # manual surface grinders: the part on the magnetic chuck, the wheel cranked
-# a lathe's chuck or collet: its name, what's wiped, how it closes, how it opens. The ST-25's Kitagawa closes on its
-# hydraulics by the foot pedal; the Royal 5C collet chuck is tightened by hand with its key
+# a lathe's chuck or collet: its name, what's wiped, how it closes, how it opens. Both close on the ST-25's drawtube,
+# worked by the foot pedal: the Kitagawa on its hydraulics, the Royal 5C collet chuck drawn back by it (Royal's R220001
+# manual; it has no key)
 CHUCKS = {"chuck3": ("the 3-jaw chuck", "its jaws", "Close the jaws with the foot pedal.",
                      "open the jaws with the foot pedal"),
-          "c5": ("the 5C collet chuck", "its collet", "Tighten the collet with the chuck key.",
-                 "loosen the collet with the key")}
+          "c5": ("the 5C collet chuck", "its collet", "Close the collet with the foot pedal.",
+                 "open the collet with the foot pedal")}
 
 
 def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", **extra) -> dict:
@@ -134,6 +135,10 @@ def grinder(s: dict, faces: dict) -> list[dict]:
     and the keepers off."""
     w, p, m = s["workholding"], s["id"], s["machine"]
     f = {"setup": s["title"], "keepers": w["keepers_are"], "on": w["on"], "up": faces[s["face_up"]]}
+    off = "Switch the magnet off, lift the part out and take {keepers} off."
+    if s.get("coolant"):                        # switched on before the first operation's passes (takes.py GRIND_FIRST)
+        off = "Switch the coolant off and run the table clear, then switch the magnet off, lift the part out and " \
+              "take {keepers} off."
     return [
         step(f"{p}-clean", "Clean the chuck", "Wipe {on} and {keepers} clean.", f, setup=p, machine=m),
         step(f"{p}-load", "Block the part in", "Set the part on {on}, {up}, and set {keepers} tight round it.", f,
@@ -144,8 +149,7 @@ def grinder(s: dict, faces: dict) -> list[dict]:
              "Touch the wheel down on the top and zero the down-feed, then set the wheel's edge {land} inside the "
              "cutting edge.", f | {"land": s["datum"]["land"]}, setup=p, machine=m),
         *cycles(s),
-        step(f"{p}-unload", "Take the part out",
-             "Switch the magnet off, lift the part out and take {keepers} off.", f, setup=p, machine=m),
+        step(f"{p}-unload", "Take the part out", off, f, setup=p, machine=m),
     ]
 
 

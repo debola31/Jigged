@@ -1,0 +1,17 @@
+{
+ "part": "ct-tpg322",
+ "about": "What O2 (plan §2) holds ct-tpg322's finished stock to: every face of the STEP within physics.stock_deviation_mm, no face exempt and no band, but the zones below (read by moonshot/tests/gates/test_turned_ground_stock.py). Protected (plan §6, rule 1): an exemption added here is a decision, made visibly.",
+ "exempt": [],
+ "band_mm": 0.0,
+ "held": "Every face of the STEP: the ground top and bottom (thickness .125 ±.001), the chipbreaker's land, groove walls and floor along each edge (drawing note 1, ground on the surface grinder), and the periphery (the 11 deg flanks and the 1/32 nose radii), which the blank must come with if no step grinds it.",
+ "zones": [
+  {"what": "chipbreaker nose", "vertex_mm": [4.7625, 8.2489], "edges": [[-14.2875, -8.2489], [0.0, -16.4978]],
+   "along_mm": 2.9, "types": ["PLANE", "CYLINDER"], "z_min_mm": 2.97,
+   "why": "The user's decision (2026-11-06): the chipbreaker is ground by straight passes of the diamond slotting wheel along each edge (the shop's surface-grinder routing, plan ct-tpg322), which can't follow the groove round the nose, so the top within 2.9 mm of each sharp vertex along its edge is exempt as what a straight wheel leaves: each edge's groove floor is held over the 10.7 of its 16.5 mm (2.9 to 13.6 mm) the wheel reaches. The top only: the land, the groove's floor, walls and corners, and the plateau (z 2.972 and up), never the flanks, the nose radii or the bottom."},
+  {"what": "chipbreaker nose", "vertex_mm": [-9.525, 0.0], "edges": [[14.2875, 8.2489], [14.2875, -8.2489]],
+   "along_mm": 2.9, "types": ["PLANE", "CYLINDER"], "z_min_mm": 2.97, "why": "As above: the nose at -X."},
+  {"what": "chipbreaker nose", "vertex_mm": [4.7625, -8.2489], "edges": [[0.0, 16.4978], [-14.2875, 8.2489]],
+   "along_mm": 2.9, "types": ["PLANE", "CYLINDER"], "z_min_mm": 2.97, "why": "As above: the nose at -Y."}
+ ],
+ "zones_why": "A zone exempts the samples on the top within along_mm of a sharp vertex, measured along the vertex's nearer edge (moonshot/tests/gates/test_turned_ground_stock.py in_zones), not whole faces: the groove's floor and walls along the middle of each edge stay held."
+}

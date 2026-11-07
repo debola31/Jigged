@@ -213,7 +213,9 @@ PLACED = {("nist-ftc-10", "op10"): {"para_a": -249.8, "para_b": -302.35},
           ("ll-1007223", "op20"): {"para_a": -249.8, "para_b": -276.95},
           ("ll-1007223", "op30"): {},
           ("ct-slbeam", "op10"): {"para_a": -249.8, "para_b": -257.9},
-          ("ct-slbeam", "op40"): {"para_a": -249.8, "para_b": -257.9}}
+          ("ct-slbeam", "op40"): {"para_a": -249.8, "para_b": -257.9},
+          # either side of its hanging spigot (the user's decision, 2026-11-06)
+          ("ll-1007224", "op30"): {"para_a": -232.45, "para_b": -292.15}}
 
 
 @pytest.mark.parametrize("part, setup", sorted(PLACED))
@@ -231,6 +233,25 @@ def test_nist_ftc_10s_vise_opens_as_it_did(setup):
     assert vise_load(load_plan("nist-ftc-10"), setup).opening0 == pytest.approx(NIST_OPENING[setup], abs=1e-9)
 
 
+# each other parallel setup's opening as its takes were made, which the room beside parallel b leaves as it was
+OPENED = {("ll-1007223", "op10"): 70.95, ("ll-1007223", "op20"): 70.95, ("ct-slbeam", "op10"): 60.96,
+          ("ct-slbeam", "op40"): 59.69}
+
+
+@pytest.mark.parametrize("part, setup", sorted(OPENED))
+def test_a_parallel_setups_vise_opens_as_it_did(part, setup):
+    assert vise_load(load_plan(part), setup).opening0 == pytest.approx(OPENED[(part, setup)], abs=1e-9)
+
+
+def test_ll_1007224s_vise_opens_two_more_turns_so_the_thumb_that_sets_b_has_the_references_room():
+    """Its b stands 0.1 mm inside the flange's edge: at width and margin (76.8 mm) the room beside it was 13.9 mm."""
+    from moonshot.motion.loads import B_ROOM_MM
+    load = vise_load(load_plan("ll-1007224"), "op30")
+    assert load.opening0 == pytest.approx(63.0 + 13.8 + 2 * VISE["lead"])
+    room = load.parallels_y["para_b"] - PARALLEL_T / 2 - (VISE["fixed_face_y"] - load.opening0)
+    assert B_ROOM_MM == pytest.approx(23.25) and B_ROOM_MM <= room < B_ROOM_MM + VISE["lead"]
+
+
 @pytest.mark.parametrize("part, setup, before", [("ll-1007223", "op30", 88.8), ("ct-slbeam", "op20", 68.1),
                                                  ("ct-slbeam", "op30", 68.1)])
 def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_setters_hand_has_room(part, setup,
@@ -243,3 +264,31 @@ def test_a_vise_holding_a_part_against_a_stop_opens_whole_turns_until_the_stop_s
     clear = lambda o: o - load.size_mm[1] / 2 - STOP_MM[1] / 2                    # noqa: E731
     assert clear(before) < STOP_JAW_CLEAR_MM <= clear(load.opening0)
 
+
+
+# ll-1007224 (G2): the spacer, Ø63.0 flange y 3.2..12.2 between Ø31.5 spigots, y 0..3.2 and 12.2..15.4 (the axis the
+# model's Y); its five Ø6.6 holes on a 25 mm radius, at most 17.68 + 3.3 off its middle across the jaws
+SPACER = ((-31.5, 31.5), (0.0, 15.4), (-31.5, 31.5))
+
+
+def test_the_spacer_comes_off_the_saw_and_into_the_lathe_as_its_blank():
+    plan = load_plan("ll-1007224")
+    for setup in ("saw", "op10"):
+        env = envelope(plan, setup)
+        assert sorted(env[:, 1] - env[:, 0]) == pytest.approx(sorted(plan["stock"]["size_mm"])), setup
+        assert contains(env, SPACER), f"{setup}: the blank doesn't hold the part"
+    assert envelope(plan, "op10")[1, 0] == pytest.approx(-0.5), "Op 10 faces 0.5 mm off the blank's end"
+
+
+def test_the_spacer_lies_on_its_flange_its_first_spigot_hanging_between_the_parallels_clear_of_them():
+    plan = load_plan("ll-1007224")
+    p, load = part_pose(plan, "op30"), vise_load(plan, "op30")
+    world = lambda q: p["origin_mm"] + p["R"] @ np.asarray(q, float)          # noqa: E731
+    top = VISE["seat_z"] + load.parallel_h
+    assert world([0, 3.2, 0])[2] == pytest.approx(top), "the flange on the parallels"
+    assert world([0, 0, 0])[2] == pytest.approx(top - 3.2), "the first spigot below their tops"
+    axis = world([0, 0, 0])[1]
+    for y in load.parallels_y.values():
+        inner, outer = abs(y - axis) - PARALLEL_T / 2, abs(y - axis) + PARALLEL_T / 2
+        assert inner > 17.68 + 3.3 > 15.75, "a parallel under the spigot or a hole"
+        assert outer < 31.5, "a parallel past the flange, in the jaw"

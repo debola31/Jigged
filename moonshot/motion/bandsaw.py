@@ -102,7 +102,7 @@ CUT_FEED_MM_S = 1.5         # the feed valve opened to this (proposed): the blad
 SLIDE_S = 3.0               # the bar's slide, 45 mm: the card's 4.5 s, from Dake's footage, was for 50 mm of a lighter
                             # bar, and pushing 4140 that long held the arm past people's sustained effort (0.42 of a
                             # muscle's maximum for 5.4 s, against 0.30 held 5 s or more)
-PUSH_TOUCH_LEAD_S = {"ct-slbeam": 0.085, "ll-1007223": 0.15, "ll-1007224": 0.12}   # how long before the wrist stops the thumb meets the
+PUSH_TOUCH_LEAD_S = {"ct-slbeam": 0.085, "ll-1007223": 0.15, "ll-1007224": 0.01}   # how long before the wrist stops the thumb meets the
                             # bar's end, as each bar's grip has it (measured on their takes: its tip is further ahead of
                             # the fingers on the 1-3/4 in bar than on the 1-1/2)
 PUSH_WIDEST_S = 0.075       # the hand widest this long before the first touch: 74-76% of the reach (at 0.225 s before the
@@ -340,7 +340,7 @@ class LoadPlan(SawPlan):
 
     def __init__(self, out=None, verbose=True):
         super().__init__(out or OUT["load"], None, verbose)
-        self.bar0 = SC.bar_at(-SC.OUT_MM)
+        self.bar0 = SC.bar_at(-SC.out_mm())
         self.paths["bar"] = [(0.0, self.place.R, self.place.world(self.bar0))]
         self.solve_grips(self.grip_specs(), {"bar": (self.place.world(self.bar0), self.place.R)})
 

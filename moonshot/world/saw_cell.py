@@ -50,6 +50,10 @@ OUT_MM = 40.0               # before the take the bar is pushed through from the
                             # stretch at the end of it was less likely than theirs): left
                             # where the last cut left it, at the kerf, its corner caught on that plate's end, whose face
                             # is the back plate's
+SHORT_START_MM = 2.0        # a blank too short for OUT_MM (G2's 1 in) has its bar left this far past the fixed jaw's front
+                            # plate's end (as OUT_MM leaves G1's), its push the few mm to the stop: left OUT_MM past the
+                            # blade, its end lay in the block; left 15 mm short of the stop, its end met the plate's end
+                            # as it slid, the round bar turned 0.7 deg into the jaw, and stuck 5.3 mm short
 STOP_BLOCK = {"depth": 25.0, "height": 30.0, "rgba": (0.55, 0.45, 0.2, 1.0)}   # the stop block clamped on the bed
 SEAT_GAP_MM = 0.05          # the bar lies this far off the fixed jaw's face, not touching it before anything does
 
@@ -208,9 +212,10 @@ def stock_body(name: str, place: Place, centre, R=None, length: float | None = N
     with its axes, its length along its y."""
     half = np.array([STOCK["w"], length, STOCK["h"]]) / 2
     q = _quat(place.R @ (np.eye(3) if R is None else np.asarray(R, float)))
-    if STOCK["round"]:      # a round bar: a cylinder along the body's y
+    if STOCK["round"]:      # a round bar: a cylinder along the body's y, with its rolling resistance on the bed (the
+        # class's 0.1 mm, condim 6): without it, nothing held it from rolling between the jaws and it rocked 0.9 mm
         geom = (f'<geom name="{name}" class="stock" type="cylinder" size="{_f(half[[0, 1]])}" zaxis="0 1 0" '
-                f'density="{STOCK["density"]}"/>')
+                f'condim="6" density="{STOCK["density"]}"/>')
     else:
         geom = f'<geom name="{name}" class="stock" type="box" size="{_f(half)}" density="{STOCK["density"]}"/>'
     return (f'    <body name="{name}" pos="{_f(place.world(centre))}" quat="{_f(q, 1)}">\n'
@@ -225,9 +230,18 @@ def bar_at(end_y: float) -> np.ndarray:
     return np.array([(x0 + x1) / 2, end_y + bar_mm() / 2, bed_z() + STOCK["h"] / 2])
 
 
+def out_mm() -> float:
+    """How far past the blade the bar's end is before the load take: OUT_MM, or for a blank whose stop is nearer than
+    that, SHORT_START_MM past the fixed jaw's front plate's end."""
+    plate_end = -BS.record()["colliders"]["fixed_jaw_front"]["box_max_mm"][1]
+    out = OUT_MM if -stop_face_y() > OUT_MM + 20.0 else plate_end + SHORT_START_MM
+    assert out < -stop_face_y() - 2.0, f"no push to the stop from {out} mm past the blade"
+    return out
+
+
 def bar_body(place: Place, centre=None, R=None) -> str:
-    """The whole bar: where it lies before the take (pushed through OUT_MM past the blade) or at centre, R."""
-    return stock_body("bar", place, bar_at(-OUT_MM) if centre is None else centre, R, bar_mm())
+    """The whole bar: where it lies before the take (pushed through out_mm() past the blade) or at centre, R."""
+    return stock_body("bar", place, bar_at(-out_mm()) if centre is None else centre, R, bar_mm())
 
 
 def cut_bodies(place: Place, bar_centre, bar_R) -> str:

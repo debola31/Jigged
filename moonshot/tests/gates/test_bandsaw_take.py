@@ -139,7 +139,8 @@ def test_every_take_record_is_complete(takes):
 
 def test_the_bar_is_slid_to_the_stop(takes):
     t = takes["load"]
-    assert bar_end_y(t, 0) > SC.stop_face_y() + 40.0                   # it started well short of the stop
+    # it started short of the stop, where the take finds it (40 mm and more for G1's blanks; a 1 in blank's, its few mm)
+    assert bar_end_y(t, 0) - SC.stop_face_y() >= min(40.0, -SC.stop_face_y() - SC.out_mm()) - 0.5
     assert abs(bar_end_y(t) - SC.stop_face_y()) <= shop_tolerance_mm()
     c0, _ = pose(t, "bar", 0)
     c1, _ = pose(t, "bar", -1)

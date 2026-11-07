@@ -48,12 +48,15 @@ SNUG_MARGIN = 1.25                       # tightening, strokes enough to run a n
                                          # turned it 7-13 deg a stroke short of their plan or past it (by where the
                                          # flats set the box end down, and the arm at its reach), and the nut stood
                                          # 1 mm off its strap, or seated early and slipped its thread
-LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 1.2, 1.0, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
-                                                         # hand took it, past people's 265), over to a nut, held over
-                                                         # it while the eye lines the box end up on it (in 0.5, come
-                                                         # from the far nut turning up to 15 deg onto the near one's
-                                                         # flats, it still swung 9-14 mm about it, and came down 2.9
-                                                         # mm off it, on the hex's top), down onto it
+LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 2.0, 1.0, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
+                                                         # hand took it, past people's 265), over to a nut (in 1.2 s,
+                                                         # the 380 mm from the plate to a far nut, the body swayed
+                                                         # the box end 4-9 mm about the nut at 1 Hz for the whole hold
+                                                         # over it), held over it while the eye lines the box end up
+                                                         # on it (in 0.5, come from the far nut turning up to 15 deg
+                                                         # onto the near one's flats, it still swung 9-14 mm about it),
+                                                         # down onto it: each came down 2.2-2.9 mm off its nut, on the
+                                                         # hex's top past its chamfer's lead
 SWING_S, BACK_S, UP_S = 0.7, 0.35, 0.3   # a stroke swung, and back, the ratchet freewheeling; up off the nut after
                                          # (swung in 0.5 s, on a far nut at the arm's reach the hand ran 8-13 deg past
                                          # each stroke, the nut seated early and the strokes after slipped its thread)

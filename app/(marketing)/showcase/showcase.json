@@ -1733,10 +1733,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/nist-ftc-09/op10-seat.mp4"
+      "type": "still",
+      "still": "still/nist-ftc-09/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -2229,10 +2229,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/nist-ftc-09/op10-unload.mp4"
+      "type": "still",
+      "still": "still/nist-ftc-09/op10-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",
@@ -2350,10 +2350,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/op10-load.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/op10-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -2375,10 +2375,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/op10-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -2404,10 +2404,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/op10-check.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/op10-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",
@@ -2716,10 +2716,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/op20-shift.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/op20-shift.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-check",
@@ -2861,10 +2861,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/op20-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/op20-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",

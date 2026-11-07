@@ -4,6 +4,7 @@ check passed. Runs on the hub; the jobs show on the dashboard like any other.
     python -m moonshot.orchestrate.pipeline <take> [--part nist-ftc-10 --setup op10] [--lift-out] [--no-render]
     python -m moonshot.orchestrate.pipeline <take> --render-only [--final] [--trainual]
     python -m moonshot.orchestrate.pipeline <take> --local [--final] [--data <dir>] [--look <dir>]
+    python -m moonshot.orchestrate.pipeline <part>-<step id>-still --local-still     # a caption-and-still step's picture
     python -m moonshot.orchestrate.pipeline <part> --assemble [--final]
     python -m moonshot.orchestrate.pipeline <take> --still [--worker hub-gtx1070]
 
@@ -82,6 +83,8 @@ def main(argv: list[str]) -> int:
     opt = lambda flag: argv[argv.index(flag) + 1] if flag in argv else None   # noqa: E731
     if "--render-only" in argv:
         return render(take, final="--final" in argv, trainual="--trainual" in argv)
+    if "--local-still" in argv:
+        return local_still(take, data=opt("--data"), look=opt("--look"))
     if "--local" in argv:
         return local(take, final="--final" in argv, data=opt("--data"), look=opt("--look"))
     if "--still" in argv:
@@ -213,6 +216,46 @@ def local(take: str, final: bool, data: str | None = None, look: str | None = No
     print(f"[pipeline] {take}: {n} frames at {quality['res']} on this machine: bake {t1 - t0:.0f} s, render "
           f"{t2 - t1:.0f} s ({(t2 - t1) / n:.1f} s a frame), encode {time.time() - t2:.0f} s -> {folder / name}.mp4",
           flush=True)
+    return 0
+
+
+def local_still(take: str, data: str | None = None, look: str | None = None) -> int:
+    """A caption-and-still step's picture on this machine (moonshot/sim/step_still.py): its record's first or last
+    frame from the camera its still.json names, at final quality and nothing blurred, written as
+    takes/<part>-<step id>/still.png (the record's folder is takes/<part>-<step id>-still)."""
+    import numpy as np
+
+    from moonshot.config import blender
+    from moonshot.render.pack import take_pack, unpack
+    repo = Path(__file__).resolve().parents[2]
+    folder = data_root() / "takes" / take
+    s = json.loads((folder / "still.json").read_text(encoding="utf-8"))
+    out = data_root() / "takes" / take.removesuffix("-still") / "still.png"
+    work = data_root() / "render-local" / take
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
+    pack = unpack(take_pack(folder, work / "take.tar", data=Path(data) if data else None), work / "take")
+    look = Path(look) if look else data_root() / "cc0"
+    for cmd, log_name in (([sys.executable, "-m", "moonshot.render.bake", pack, "--out", work / "bake"], "bake.log"),):
+        with open(work / log_name, "w") as log:
+            if subprocess.run([str(c) for c in cmd], cwd=repo, stdout=log, stderr=subprocess.STDOUT).returncode:
+                print(f"[pipeline] {take}: the bake failed: {(work / log_name).read_text(errors='replace')[-1500:]}")
+                return 1
+    n = int(np.load(work / "bake" / "bake.npz")["n"])
+    k = 0 if s["at"] == "first" else n - 1
+    device = "METAL" if sys.platform == "darwin" else "CUDA"
+    cmd = [blender(), "-b", "--factory-startup", "--python", repo / "moonshot" / "render" / "render_take.py", "--",
+           "--take", pack, "--bake", work / "bake", "--data", pack / "data", "--look", look, "--out", work / "frames",
+           "--frames", f"{k}:{k + 1}", "--res", FINAL["res"], "--samples", FINAL["samples"], "--device", device,
+           "--eye", ",".join(str(v) for v in s["eye_mm"]), "--look-at", ",".join(str(v) for v in s["look_mm"])]
+    with open(work / "render.log", "w") as log:
+        if subprocess.run([str(c) for c in cmd], cwd=repo, stdout=log, stderr=subprocess.STDOUT).returncode:
+            print(f"[pipeline] {take}: the render failed: {(work / 'render.log').read_text(errors='replace')[-1500:]}")
+            return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(work / "frames" / f"{k:05d}.png", out)
+    shutil.rmtree(work / "frames", ignore_errors=True)
+    print(f"[pipeline] {take}: still -> {out}", flush=True)
     return 0
 
 

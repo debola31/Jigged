@@ -284,8 +284,26 @@ def test_the_guard_exposes_at_most_150_deg_of_the_wheel_starting_at_most_15_deg_
     assert highest <= 15.0
 
 
-def test_coolant_is_not_fitted():
-    assert record()["coolant"]["fitted"] is False
+@pytest.mark.parametrize("wheel", ["gwheel", "dwheel-1a1r"])
+def test_the_coolant_switch_runs_the_coolant_at_a_nozzle_aimed_where_the_wheel_enters_the_cut(wheel):
+    """SB1029's optional coolant, fitted (your decision, 2026-11-06): the flow is drawn, not simulated, so what is
+    held here is the switch and where the nozzle points."""
+    m, d = build(wheel=wheel)
+    ctl = Control(m, d)
+    assert record()["coolant"]["fitted"] is True
+    ctl.turn_coolant(True)
+    assert ctl.coolant_on and "coolant_on" in ctl.events
+    ctl.turn_coolant(False)
+    assert not ctl.coolant_on
+    g = m.geom("sg_coolant_nozzle")
+    centre, axis = d.geom_xpos[g.id], d.geom_xmat[g.id].reshape(3, 3)[:, 2]
+    tip = centre + axis * g.size[1] if axis[2] < 0 else centre - axis * g.size[1]
+    aim = -axis if axis[2] > 0 else axis                                       # down, toward the work
+    bottom = d.site("sg_wheel_bottom_head").xpos
+    off = (bottom - tip) - aim * ((bottom - tip) @ aim)
+    assert np.linalg.norm(off) * 1000 < 3.0                                     # aimed at the wheel's lowest point
+    assert (tip[2] - bottom[2]) * 1000 >= 5.0                                   # clear of the work under the wheel
+    assert tip[0] > bottom[0]                                                   # the side the wheel's bottom comes from
 
 
 # --- the magnetic chuck ---------------------------------------------------------------------------------------------
@@ -437,5 +455,6 @@ def test_controls_are_sites(grinder):
     for s in ("sg_start", "sg_stop", "sg_power_light", "sg_chuck_lever", "sg_table_handwheel_knob",
               "sg_table_handwheel_rim", "sg_cross_handwheel_knob", "sg_cross_handwheel_rim",
               "sg_downfeed_handwheel_knob", "sg_downfeed_handwheel_rim", "sg_downfeed_dial", "sg_chuck_centre",
+              "sg_coolant_switch",
               "sg_wheel_bottom_head"):
         assert m.site(s).id >= 0

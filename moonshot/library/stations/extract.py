@@ -98,7 +98,8 @@ def control_box_mesh(station: str):
              box([280.0, -350.0, 728.0], [440.0, -330.0, 745.0]),
              box([420.0, -440.0, 728.0], [440.0, -330.0, 745.0]),
              box([420.0, -440.0, 745.0], [440.0, -420.0, 780.0])]
-    for name, radius, depth in (("start", 0.011, 0.004), ("stop", 0.02, 0.022), ("power_light", 0.008, 0.006)):
+    for name, radius, depth in (("start", 0.011, 0.004), ("stop", 0.02, 0.022), ("power_light", 0.008, 0.006),
+                                ("coolant_switch", 0.005, 0.010)):
         at = np.array(r["affordances"][name]["at_mm"]) * 0.001
         cyl = trimesh.creation.cylinder(radius=radius, height=depth)
         cyl.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))   # its axis along y
@@ -133,8 +134,51 @@ def wheel_mesh(station: str, wheel_id: str, on_spindle: bool = True):
     return mesh
 
 
+def _tube(a, b, radius_mm: float):
+    """A round tube from a to b (mm), in metres."""
+    import trimesh
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    t = trimesh.creation.cylinder(radius=radius_mm, height=float(np.linalg.norm(b - a)), sections=24)
+    t.apply_transform(trimesh.geometry.align_vectors([0.0, 0.0, 1.0], (b - a) / np.linalg.norm(b - a)))
+    t.apply_translation((a + b) / 2)
+    t.apply_scale(0.001)
+    return t
+
+
+def coolant_nozzle_mesh(station: str, wheel_id: str):
+    """SB1029's coolant nozzle, which the STEP lacks (world frame, metres): a segmented hose along sgrind.json's coolant
+    path for the wheel mounted, with a ball joint at each bend and a mount plate on the guard's front."""
+    import trimesh
+    c = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))["coolant"]
+    path, radius = c["nozzle_mm"][wheel_id], c["radius_mm"]
+    parts = [_tube(a, b, radius) for a, b in zip(path[:-1], path[1:])]
+    for p in path[:-1]:
+        ball = trimesh.creation.icosphere(subdivisions=2, radius=radius * 1.25 * 0.001)
+        ball.apply_translation(np.asarray(p, float) * 0.001)
+        parts.append(ball)
+    m0 = np.asarray(path[0], float)
+    plate = trimesh.creation.box(extents=[0.03, 0.008, 0.03])
+    plate.apply_translation((m0 + [0.0, 8.7, 0.0]) * 0.001)      # flat on the guard's front plate (y -51.3)
+    parts.append(plate)
+    return trimesh.util.concatenate(parts)
+
+
+def coolant_stream_mesh(station: str, wheel_id: str):
+    """The coolant's flow from the nozzle's tip to the wheel's lowest point (world frame, metres): drawn, not
+    simulated."""
+    r = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))
+    tip = np.asarray(r["coolant"]["nozzle_mm"][wheel_id][-1], float)
+    at, w = r["joints"]["spindle"]["at_mm"], r["wheels"][wheel_id]
+    bottom = np.array([at[0], 0.0, at[2] - w["dia_mm"] / 2])
+    return _tube(tip, bottom, 2.5)
+
+
 GENERATED = {"sgrind": {"controls": control_box_mesh,               # links with no solid in the STEP, made here
-                        "wheel_dwheel-1a1r": lambda s: wheel_mesh(s, "dwheel-1a1r")}}
+                        "wheel_dwheel-1a1r": lambda s: wheel_mesh(s, "dwheel-1a1r"),
+                        **{f"coolant_nozzle_{w}": (lambda s, w=w: coolant_nozzle_mesh(s, w))
+                           for w in ("gwheel", "dwheel-1a1r")},
+                        **{f"coolant_stream_{w}": (lambda s, w=w: coolant_stream_mesh(s, w))
+                           for w in ("gwheel", "dwheel-1a1r")}}}
 WHEEL_ASSETS = {"sgrind": ("dwheel-1a1r",)}    # wheels made here that are also assets of their own (consumables)
 
 

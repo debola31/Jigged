@@ -20,8 +20,7 @@
   "The STEP draws the chuck's top with 24 strips 1/4 in wide at 3/4 in pitch; its hold is Suburban's fine-pole chuck's (1/8 in poles), as the chuck a 1/8 in insert needs. The strips are drawn as they are",
   "The STEP has no spindle motor: its mass (about 30 kg for 2 hp) isn't added to the wheelhead. It changes only the down-feed handwheel's effort, by 0.6 N at the rim",
   "A permanent chuck's residual magnetism in the part after it is switched off is not modelled",
-  "No coolant: the STEP has no coolant system, and SB1029's coolant pump is an option (its control panel's coolant switch is for the optional system)",
-  "The STEP has no control box: the one here (the controls link, a box on a bracket off the base's right side) is made in extract.py with SB1029's ON and OFF buttons and power light",
+  "The STEP has no control box and no coolant: the box here (the controls link, on a bracket off the base's right side) is made in extract.py with SB1029's ON and OFF buttons, power light and coolant switch, and the coolant's nozzle on the guard (coolant)",
   "A part resting on a held part (on a parallel, say) isn't pulled through it: the flux a steel parallel carries up into what stands on it is not modelled"
  ],
  "links": {
@@ -837,11 +836,21 @@
    ],
    "grip": "tip_pinch",
    "turn": true
+  },
+  "coolant_switch": {
+   "link": "controls",
+   "at_mm": [
+    435.0,
+    -490.0,
+    880.0
+   ],
+   "grip": "lateral",
+   "turn": true
   }
  },
  "affordances_source": {
   "source": "proposed",
-  "reason": "The control box and its buttons aren't in the STEP (see gaps): SB1029's ON button (green, flush) above its OFF button (red, a mushroom pushed in to stop and twisted to reset), with its power light above both. The handwheels' knobs and rims and the lever's ball are the STEP's; which grips work them is the cards'"
+  "reason": "The control box and its buttons aren't in the STEP (see gaps): SB1029's ON button (green, flush) above its OFF button (red, a mushroom pushed in to stop and twisted to reset), with its power light above both, and the optional coolant's switch beside ON. The handwheels' knobs and rims and the lever's ball are the STEP's; which grips work them is the cards'"
  },
  "logic": {
   "states": [
@@ -857,9 +866,49 @@
   "logic_reason": "SB1029 Test Run, steps 6-9: OFF is pushed in and twisted clockwise to pop out and reset; with it not reset, ON must not start the machine. Controls: the power light shows the motor running. The chuck is a permanent magnet switched by its lever, with no interlock"
  },
  "coolant": {
-  "fitted": false,
-  "source": "cad",
-  "reason": "The STEP has no coolant tank, pump or nozzle; on SB1029 coolant is an option"
+  "fitted": true,
+  "source": "spec",
+  "reason": "SB1029's optional coolant system (Figure 1, 'Coolant Switch for Optional Coolant System'; Controls, J, the coolant pump switch), fitted by your decision (2026-11-06): its switch on the control box, its nozzle on the guard; the STEP draws neither, so both are made (extract.py), and its tank and pump, under the machine, aren't drawn. The flow is drawn, not simulated: fluids are rendering only, as light and heat are",
+  "switch_reason": "A toggle beside ON, as SB1029's panel has it; the pump runs while it is on, whether the wheel runs or not (proposed)",
+  "nozzle_mm": {
+   "gwheel": [
+    [
+     100.0,
+     -60.0,
+     1320.0
+    ],
+    [
+     65.0,
+     -52.0,
+     1254.2
+    ],
+    [
+     25.0,
+     -20.0,
+     1235.0
+    ]
+   ],
+   "dwheel-1a1r": [
+    [
+     100.0,
+     -60.0,
+     1320.0
+    ],
+    [
+     65.0,
+     -52.0,
+     1305.52
+    ],
+    [
+     25.0,
+     -20.0,
+     1286.0
+    ]
+   ]
+  },
+  "radius_mm": 6.0,
+  "nozzle_source": "proposed",
+  "nozzle_reason": "A segmented hose from the guard's front plate (y -51.3, solid 4) down to the grinding point, set for the wheel mounted: its tip 25 mm to the right of the wheel's lowest point, the side the wheel's bottom comes from (it turns clockwise as the operator sees it), 20 mm in front of the wheel's plane and 12 mm above its bottom, aimed at it, so the flow meets the wheel where it enters the cut, and the tip stays clear of the work under it"
  },
  "wheels": {
   "gwheel": {

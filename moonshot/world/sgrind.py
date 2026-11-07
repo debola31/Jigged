@@ -142,11 +142,15 @@ def _joint(link: str) -> str:
 
 def wheel_colliders_and_sites(wheel_id: str | None = None) -> tuple[dict, dict]:
     """The mounted wheel's colliders (its disc, and its flange in front of it) and its lowest point's sites."""
-    w, at = wheel(wheel_id), record()["joints"]["spindle"]["at_mm"]
+    r = record()
+    w, at = wheel(wheel_id), r["joints"]["spindle"]["at_mm"]
     r_mm = w["dia_mm"] / 2
     fl, f0, f1 = w["flange_mm"]
     cols = {"wheel": {"link": "spindle", "cylinder_y_mm": w["y_mm"], "at_mm": at, "radius_mm": r_mm},
             "flange": {"link": "spindle", "cylinder_y_mm": [f0, f1], "at_mm": at, "radius_mm": fl / 2}}
+    if r["coolant"]["fitted"]:                   # the nozzle's last run to its tip, set for the wheel
+        path = r["coolant"]["nozzle_mm"][wheel_id or r["spindle"]["mounted"]]
+        cols["coolant_nozzle"] = {"link": "wheelhead", "capsule_mm": path[-2:], "radius_mm": r["coolant"]["radius_mm"]}
     bottom = [at[0], 0.0, at[2] - r_mm]
     sites = {"wheel_bottom": {"link": "spindle", "at_mm": bottom},          # on its rim's circle, so still the lowest
              "wheel_bottom_head": {"link": "wheelhead", "at_mm": bottom}}   # carried by the head: doesn't turn
@@ -239,6 +243,7 @@ class Control:
     held: dict[str, str] = field(default_factory=dict)
     state: str = "idle"
     stop_in: bool = False
+    coolant_on: bool = False
     events: list[str] = field(default_factory=list)
     wrench: dict[str, np.ndarray] = field(default_factory=dict)
 
@@ -366,6 +371,15 @@ class Control:
         self.stop_in = False
         self.events.append("stop_reset")
 
+    def turn_coolant(self, on: bool) -> None:
+        """SB1029's coolant switch: the pump runs while it is on. The flow is drawn by the render, not simulated."""
+        if not record()["coolant"]["fitted"]:
+            self.events.append("coolant_not_fitted")
+            return
+        if on != self.coolant_on:
+            self.coolant_on = on
+            self.events.append("coolant_on" if on else "coolant_off")
+
     def apply(self) -> None:
         """The spindle's drive, the lever's detent and the chuck's pull. For a scene that steps the simulation itself
         (a take): call this before each mj_step."""
@@ -402,9 +416,25 @@ class Control:
                      / (2 * math.pi))
 
 
-def render_links(wheel_id: str | None = None) -> dict[str, tuple[str, str]]:
-    """Each link's GLB (moonshot/library/stations/extract.py) and the body that carries it, with the mounted wheel's
-    drawn on the spindle."""
-    out = {k: (f"sg_{k}", f"library/machines/sgrind/links/{k}.glb") for k in record()["links"]}
-    out["wheel"] = ("sg_spindle", f"library/machines/sgrind/links/{wheel(wheel_id)['glb']}.glb")
+LINK_DIR = "library/machines/sgrind/links"
+
+
+def render_links(wheel_id: str | None = None, coolant_flowing: bool = False) -> dict[str, tuple[str, str]]:
+    """Each link's GLB (moonshot/library/stations/extract.py) and the body that carries it: the mounted wheel's drawn
+    on the spindle, its coolant nozzle on the wheelhead, and, for a take where the coolant runs throughout, its flow
+    (coolant_stream_glb, for a take that switches it, to draw as a mesh that changes by frame)."""
+    r = record()
+    w = wheel_id or r["spindle"]["mounted"]
+    out = {k: (f"sg_{k}", f"{LINK_DIR}/{k}.glb") for k in r["links"]}
+    out["wheel"] = ("sg_spindle", f"{LINK_DIR}/{wheel(w)['glb']}.glb")
+    if r["coolant"]["fitted"]:
+        out["coolant_nozzle"] = ("sg_wheelhead", f"{LINK_DIR}/coolant_nozzle_{w}.glb")
+        if coolant_flowing:
+            out["coolant_stream"] = ("sg_wheelhead", coolant_stream_glb(w))
     return out
+
+
+def coolant_stream_glb(wheel_id: str | None = None) -> str:
+    """The coolant's flow from the nozzle's tip to the wheel's grinding point, for the mounted wheel: drawn, not
+    simulated."""
+    return f"{LINK_DIR}/coolant_stream_{wheel_id or record()['spindle']['mounted']}.glb"

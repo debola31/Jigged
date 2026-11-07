@@ -115,11 +115,23 @@ def holder_body(name: str, tool_id: str, at_mm, quat=(1.0, 0.0, 0.0, 0.0), free:
             f'{holder_geoms(name, tool_id, collide=free)}</body>\n')
 
 
+# the library's tool GLBs (the CAT40 holder, every cutter) are stored Y up, glTF's way, their axis along raw +y: turned
+# +90 deg about x they stand along the holder body's z, its colliders' axis (as bench_cell.ASSET and wrench.Y_UP_IN_BODY
+# turn theirs). Placed unturned, every take drew the holder and its tool lying on their side (found 2026-11-06)
+Y_UP = [0.7071068, 0.7071068, 0.0, 0.0]
+
+
+def glb_entry(path: str, z_mm: float) -> dict:
+    """A tool GLB in a holder body, its nose (the holder's) or tip (a cutter's) z_mm along the body's axis: a library
+    GLB turned up from Y (Y_UP); a take's own stand-in cutter (moonshot/sim/cycle_take.py write_cutter_glb), built
+    along z, as it is."""
+    turn = Y_UP if path.startswith("library/") else [1.0, 0.0, 0.0, 0.0]
+    return {"path": path, "in_body": [0, 0, round(z_mm, 3), *turn]}
+
+
 def render_glbs(tool_id: str) -> list[dict]:
     """A holder body's GLBs: the CAT40 holder from its nose, the tool from its tip (as the cycle takes draw them)."""
-    t = cutter(tool_id)
-    return [{"path": HOLDER_GLB, "in_body": [0, 0, -round(GAUGE_MM, 3), 1, 0, 0, 0]},
-            {"path": f"library/tooling/{tool_id}/{tool_id}.glb", "in_body": [0, 0, -round(t["length"], 3), 1, 0, 0, 0]}]
+    return [glb_entry(HOLDER_GLB, -GAUGE_MM), glb_entry(f"library/tooling/{tool_id}/{tool_id}.glb", -cutter(tool_id)["length"])]
 
 
 # --- the tool stand ------------------------------------------------------------------------------------------------

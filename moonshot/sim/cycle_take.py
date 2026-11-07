@@ -31,6 +31,7 @@ from moonshot.planning.validate import load_plan
 from moonshot.sim import cam
 from moonshot.sim.record import Recorder, glbs_in_bodies
 from moonshot.world import cell, vf2
+from moonshot.world import tooling as TL
 from moonshot.world import vise as V
 
 M = 0.001
@@ -318,8 +319,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
         if not (data_root() / model).exists():                  # its 3D model isn't built yet: its record's shape
             model = f"takes/{out.name}/cutter_{t.id}.glb"
             write_cutter_glb(t, data_root() / model)
-        glbs[f"tool_{t.id}"] = [{"path": HOLDER_GLB, "in_body": [0, 0, -round(cam.GAUGE_MM, 3), 1, 0, 0, 0]},
-                                {"path": model, "in_body": [0, 0, -round(t.length, 3), 1, 0, 0, 0]}]
+        glbs[f"tool_{t.id}"] = [TL.glb_entry(HOLDER_GLB, -cam.GAUGE_MM), TL.glb_entry(model, -t.length)]
     rec.write(out, FPS, 0.0, {}, "vf2", glbs, meshes=meshes)
     if part not in cam.AS_PUBLISHED:                            # the still's camera, framed on the stock
         sb = c.frame.to_world(stock).BoundingBox()

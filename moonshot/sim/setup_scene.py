@@ -11,6 +11,10 @@ takes keep the reference load (moonshot/world/vise.py REFERENCE).
   (moonshot/world/parallel_rack.py) or the stop free on the table where it waits (vise.STOP_HOME), and the part
   waiting on the table right of the vise (Load.stage), as setting them finds it (moonshot/sim/set_parallels.py,
   set_stop.py).
+- A vise setup, set (its load's start, for its still: moonshot/sim/step_still.py): as open, but the parallels on the
+  seat, or the stop on the floor, where they were set; or placed (its seat's start): the part set down on them too,
+  where it is clamped, the jaw still open. Each held where it stands by the vise scene's keepers, as the load take
+  finds them.
 - A plate setup: the plate on its spoilboard under its clamps (moonshot/motion/plates.py; nist-ftc-09's on its
   riser), held to the table by the declared `clamped` weld, as the setting session holds it.
 
@@ -63,6 +67,11 @@ class Table:
     def open(self) -> bool:
         return self.vise == "open"
 
+    @property
+    def jaw_open(self) -> bool:
+        """Is the jaw open at the load's opening (the clean, the load's and the seat's start)?"""
+        return self.vise in ("open", "set", "placed")
+
     def parallels(self) -> dict[str, np.ndarray]:
         """Each parallel's base centre: on the vise's seat, or standing in its slot in the rack when the vise is open."""
         return RACK.slots(self.load) if self.open else self.load.parallels()
@@ -83,9 +92,9 @@ class Table:
             return xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
                                f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.002 1" '
                                'solimp="0.99 0.999 0.001"/>\n', 1)
-        at = self.load.stage if self.open else self.centre
+        at = self.load.stage if self.vise in ("open", "set") else self.centre
         xml = cell.with_body(body_xml, at, self.parallels(), hand_body, self.load, stop_mm=self.stop())
-        return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1) if self.open else xml
+        return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1) if self.jaw_open else xml
 
     def start(self, m: mujoco.MjModel, d: mujoco.MjData) -> None:
         """Before the take: the jaw closed on the part and locked, or locked open at the load's opening with the
@@ -104,6 +113,11 @@ class Table:
                 d.eq_active[m.equality("keep_stop").id] = 0
                 a = m.jnt_qposadr[m.joint("stop").id]
                 d.qpos[a + 3:a + 7] = [np.cos(RACK.YAW / 2), 0.0, 0.0, np.sin(RACK.YAW / 2)]
+            mujoco.mj_forward(m, d)
+            return
+        if self.jaw_open:                                # set or placed: locked open, the keepers holding what is set
+            m.eq_data[lock, 0] = d.qpos[m.jnt_qposadr[m.joint("crank").id]]
+            d.eq_active[lock] = 1
             mujoco.mj_forward(m, d)
             return
         jaw = (self.load.opening0 - self.load.size[1] - JAW_GAP_MM) * 0.001

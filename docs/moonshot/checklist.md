@@ -417,6 +417,9 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   than Nov 8-9 if it can be): the three plans (ct-tpg322, ll-1011439, ll-1007224), the Haas ST-25 lathe and the
   surface grinder as stations, and turning and surface grinding in the cut simulation, each gate first. G1's steps
   shown as caption and a still get their still rendered from the setup's scene (your decision, Nov 6).
+  Your G2 decisions, Nov 6: ct-tpg322 is blocked in on the surface grinder's magnetic chuck with ground steel
+  keepers (C2 carbide holds at about 5% of steel); its chipbreaker is ground by hand at the handwheels, the
+  shop's routing kept and the three nose regions exempted in the stock compare, as what a straight wheel leaves.
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web
 - [ ] Nov 11: G5; all 20 parts on the web

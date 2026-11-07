@@ -494,6 +494,130 @@
    },
    "from": "em12's grip (the 11 mm drill's 12 mm shank is about the 1/2 in end mill's size: the default's sinks the skin 4.05 mm into it), its middle, ring and little fingers searched to sweep less of the drill's longer shank as the hand opens off it: with the hand still, 4.9 mm into it at most, from em12's 5.5 (skin {'flange': 0.0, 'body': 1.98, 'tool': 0.0} mm into the holder, closed); and eased 8 mm down before it opens, so its little finger opens under the drill's tip, not across its shank (eased 1.5 mm, 4.4-4.6 mm of skin in the tool for a frame)",
    "ease_mm": 8.0
+  },
+  "dovetail-20": {
+   "q": {
+    "cmc2_flex": 0.0321447129568982,
+    "index_mcp_abd": -4.8824918314182195,
+    "index_mcp_flex": 44.13803755976339,
+    "index_pip": 45.43103263345404,
+    "index_dip": 19.408307068644433,
+    "cmc3_flex": 2.5993225362251433,
+    "middle_mcp_abd": -0.155264197496287,
+    "middle_mcp_flex": 0.272074623897371,
+    "middle_pip": 73.20153397929032,
+    "middle_dip": 51.58942308929349,
+    "cmc4_flex": 4.269375912348849,
+    "ring_mcp_abd": 4.574223130696601,
+    "ring_mcp_flex": 17.460697569228238,
+    "ring_pip": 15.151659118873827,
+    "ring_dip": 14.836344821500784,
+    "cmc5_flex": 5.288437939417831,
+    "little_mcp_abd": -10.195079057480532,
+    "little_mcp_flex": 21.612188041057372,
+    "little_pip": 10.720742526691579,
+    "little_dip": 7.076144004955459,
+    "thumb_cmc_abd": 31.97870017740464,
+    "thumb_cmc_flex": 14.867243430911905,
+    "thumb_cmc_roll": 10.522293565577396,
+    "thumb_mcp_abd": -2.7266000785159266,
+    "thumb_mcp_flex": 16.807842563848723,
+    "thumb_ip": -14.14544553187266
+   },
+   "H": [
+    [
+     0.27561043612450586,
+     0.14127291470984968,
+     0.9508316628450293
+    ],
+    [
+     0.961117356149185,
+     -0.05809163476304424,
+     -0.2699607187710047
+    ],
+    [
+     0.01709722808118565,
+     0.9882648053735096,
+     -0.15179051107364816
+    ]
+   ],
+   "W_rel": [
+    37.147489414764095,
+    -110.13193157451195,
+    -57.93189418977502
+   ],
+   "loss": 28.54,
+   "terms": {
+    "pad_index": 4.11,
+    "pad_thumb": 12.47,
+    "penetration": 8.44,
+    "prior": 1.67,
+    "coupling": 1.84
+   },
+   "from": "facem's grip, kept 5 mm off a cutter wider than the holder's body: the 20 deg dovetail cutter's 30 mm head, which its holder's tool solid carries its whole length, nearly as wide as the 31.75 mm body (the default grip sinks the skin 12.6 mm into it, em12's 5.2, facem's 0: skin {'flange': 0.89, 'body': 1.36, 'tool': 0.0} mm into the holder)",
+   "wide_grip": true
+  },
+  "ream-8": {
+   "q": {
+    "cmc2_flex": 0.0321447129568982,
+    "index_mcp_abd": -4.8824918314182195,
+    "index_mcp_flex": 44.13803755976339,
+    "index_pip": 45.43103263345404,
+    "index_dip": 19.408307068644433,
+    "cmc3_flex": 2.5993225362251433,
+    "middle_mcp_abd": -0.155264197496287,
+    "middle_mcp_flex": 0.272074623897371,
+    "middle_pip": 73.20153397929032,
+    "middle_dip": 51.58942308929349,
+    "cmc4_flex": 4.269375912348849,
+    "ring_mcp_abd": 4.574223130696601,
+    "ring_mcp_flex": 17.460697569228238,
+    "ring_pip": 15.151659118873827,
+    "ring_dip": 14.836344821500784,
+    "cmc5_flex": 5.288437939417831,
+    "little_mcp_abd": -10.195079057480532,
+    "little_mcp_flex": 21.612188041057372,
+    "little_pip": 10.720742526691579,
+    "little_dip": 7.076144004955459,
+    "thumb_cmc_abd": 31.97870017740464,
+    "thumb_cmc_flex": 14.867243430911905,
+    "thumb_cmc_roll": 10.522293565577396,
+    "thumb_mcp_abd": -2.7266000785159266,
+    "thumb_mcp_flex": 16.807842563848723,
+    "thumb_ip": -14.14544553187266
+   },
+   "H": [
+    [
+     0.27561043612450586,
+     0.14127291470984968,
+     0.9508316628450293
+    ],
+    [
+     0.961117356149185,
+     -0.05809163476304424,
+     -0.2699607187710047
+    ],
+    [
+     0.01709722808118565,
+     0.9882648053735096,
+     -0.15179051107364816
+    ]
+   ],
+   "W_rel": [
+    37.147489414764095,
+    -110.13193157451195,
+    -57.93189418977502
+   ],
+   "loss": 28.54,
+   "terms": {
+    "pad_index": 4.11,
+    "pad_thumb": 12.47,
+    "penetration": 8.44,
+    "prior": 1.67,
+    "coupling": 1.84
+   },
+   "from": "facem's grip, its fingers kept 5 mm off a cutter wider than the holder's body, so far off the 8 mm reamer's 4 mm shank, 122 mm out of the holder (skin {'flange': 0.89, 'body': 1.36, 'tool': -6.61} mm into the holder, closed, and the tool never touched as it opens): the default's lower fingers sank 3.7 mm into the shank as it was carried, and drill-11's, which wraps it, crossed it as the hand opened off it",
+   "wide_grip": true
   }
  }
 }

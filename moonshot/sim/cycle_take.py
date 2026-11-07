@@ -31,6 +31,7 @@ from moonshot.planning.validate import load_plan
 from moonshot.sim import cam
 from moonshot.sim.record import Recorder, glbs_in_bodies
 from moonshot.world import cell, vf2
+from moonshot.world import tooling as TL
 from moonshot.world import vise as V
 
 M = 0.001
@@ -171,15 +172,24 @@ LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
          "bar": ("steel_bar_cold_finished", [0.06, 0.062, 0.068, 1.0], 0.0, 0.55),  # the sawn blank: bar stock's dark
                                                      # grey (drawn dull: metallic, it mirrors the bright shop, white)
          "black oxide": ("black_oxide", [0.018, 0.018, 0.02, 1.0], 0.5, 0.5),      # dark grey-black, satin
-         "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22)}      # bright bluish silver
+         "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22),     # bright bluish silver
+         "bronze": ("aluminium_bronze", [0.77, 0.58, 0.33, 1.0], 1.0, 0.3),        # AMPCO 18 turned: golden
+         "carbide": ("carbide_ground", [0.36, 0.37, 0.39, 1.0], 0.75, 0.38)}       # ground tungsten carbide, grey
 
 
-def write_glb(shape, path: Path, look: str = "aluminium") -> None:
+ROUND_MESH_MM, ROUND_MESH_RAD = 0.01, 0.1     # a round part's mesh: 10 µm off its surface, absolute (tessellate's
+                                              # 0.05 is relative: about 30 flats round a Ø63)
+
+
+def write_glb(shape, path: Path, look: str = "aluminium", round_part: bool = False) -> None:
     """A stock shape as a GLB in its own frame, mm (the take record's meshes), in milled 6061 as vise.render_meshes
-    draws the blank, or as LOOKS has the part's material."""
+    draws the blank, or as LOOKS has the part's material. A round part (turned, or a bar's slug) meshed finer."""
     import trimesh
     from trimesh.visual.material import PBRMaterial
     name, colour, metal, rough = LOOKS[look]
+    if round_part:                             # tessellate() keeps a finer mesh it finds
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        BRepMesh_IncrementalMesh(shape.wrapped, ROUND_MESH_MM, False, ROUND_MESH_RAD, True)
     v, f = shape.tessellate(0.05, 0.3)
     mesh = trimesh.Trimesh(np.array([p.toTuple() for p in v]), np.array(f), process=False)
     mesh.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
@@ -218,6 +228,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
             f"(a plan gap)")
         return None
     tools = [p.tool for p in c.passes]
+    turned = before_mill(plan) is not None                     # a round part off the lathe: its GLBs meshed finer
     out = data_root() / "takes" / f"{part}-{c.step}"
     if out.exists():
         shutil.rmtree(out)
@@ -292,7 +303,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     stock.exportBrep(str(out / "stock-end.brep"))
     keyframes = sorted(states)
     for k in keyframes:
-        write_glb(states[k], out / "stock" / f"{k}.glb", planner.material)
+        write_glb(states[k], out / "stock" / f"{k}.glb", planner.material, round_part=turned)
 
     glbs = glbs_in_bodies(m, "vf2", vf2.render_links())
     if plate:                                                   # the spoilboard is drawn from its geom
@@ -308,8 +319,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
         if not (data_root() / model).exists():                  # its 3D model isn't built yet: its record's shape
             model = f"takes/{out.name}/cutter_{t.id}.glb"
             write_cutter_glb(t, data_root() / model)
-        glbs[f"tool_{t.id}"] = [{"path": HOLDER_GLB, "in_body": [0, 0, -round(cam.GAUGE_MM, 3), 1, 0, 0, 0]},
-                                {"path": model, "in_body": [0, 0, -round(t.length, 3), 1, 0, 0, 0]}]
+        glbs[f"tool_{t.id}"] = [TL.glb_entry(HOLDER_GLB, -cam.GAUGE_MM), TL.glb_entry(model, -t.length)]
     rec.write(out, FPS, 0.0, {}, "vf2", glbs, meshes=meshes)
     if part not in cam.AS_PUBLISHED:                            # the still's camera, framed on the stock
         sb = c.frame.to_world(stock).BoundingBox()
@@ -356,15 +366,17 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
     return out
 
 
-def on_shelf(plan: dict, stock, out: Path, look: str) -> None:
+def on_shelf(plan: dict, stock, out: Path, look: str, R: np.ndarray | None = None, round_part: bool = False) -> None:
     """A take of a part on its own (a cycle step with no simulation): the stock, in look (LOOKS), on a dark shelf,
-    set down as the mill held it in its flattest setup, the still's camera close on it: take.npz, scene.json,
-    stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
+    set down as the mill held it in its flattest setup (or turned by R), the still's camera close on it: take.npz,
+    scene.json, stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
     (out / "stock").mkdir(parents=True, exist_ok=True)
     finish = look
-    # set down on the shelf as the mill held it in its flattest setup (the last of those as flat)
-    poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
-    R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
+    if R is not None:
+        R_last = np.asarray(R, float)
+    else:                     # set down on the shelf as the mill held it in its flattest setup (the last as flat)
+        poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
+        R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
     sb = cam.Frame(R_last, np.zeros(3)).to_world(stock).BoundingBox()
     origin = np.array([-(sb.xmin + sb.xmax) / 2, -(sb.ymin + sb.ymax) / 2, SHELF_Z - sb.zmin])
     f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
@@ -386,7 +398,7 @@ def on_shelf(plan: dict, stock, out: Path, look: str) -> None:
     rec = Recorder(m, set(), arms=())
     for _ in range(2):
         rec.frame(d, {}, look + np.array(STILL_FROM_MM), look, [0, 0, 1])
-    write_glb(stock, out / "stock" / "0.glb", finish)
+    write_glb(stock, out / "stock" / "0.glb", finish, round_part=round_part)
     rec.write(out, FPS, 0.0, {}, "outside", {}, meshes={"blank": {"dir": "stock", "frames": [0]}})
     size = max(sb.xlen, sb.ylen, sb.zlen)                   # close on the part: it fills the view as nist-ftc-10's
     (out / "still.json").write_text(json.dumps({            # blank does in the vise
@@ -404,22 +416,49 @@ def saw_cut_take(plan: dict, step: dict, log=print) -> Path:
     where the saw's session keeps its cut's."""
     from moonshot.motion.loads import envelope
     env = envelope(plan, next(x for x in plan["setups"] if "workholding" in x)["id"])
-    stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
     out = data_root() / "takes" / f"{plan['part']}-{step['id']}"
-    on_shelf(plan, stock, out, "bar")
+    if "bar_dia_mm" in plan["stock"]:            # a round bar's slug (a lathe part's), lying on its end, its axis up
+        k = "XYZ".index(plan["stock"].get("axis", "Y"))
+        d = np.eye(3)[k]
+        base = cq.Vector(*(env.mean(1) * (1 - d) + env[k, 0] * d))
+        stock = cq.Solid.makeCylinder(plan["stock"]["bar_dia_mm"] / 2, env[k, 1] - env[k, 0], base, cq.Vector(*d))
+        up = np.roll(np.eye(3), -k, axis=0)          # the bar's axis to world z
+        on_shelf(plan, stock, out, "bar", R=np.stack([up[1], up[2], up[0]]), round_part=True)
+    else:
+        stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
+        on_shelf(plan, stock, out, "bar")
     log(f"[cycle] {step['id']}: the sawn blank, {' x '.join(f'{v:.2f}' for v in env[:, 1] - env[:, 0])} mm")
     return out
 
 
 def cycle_steps(plan: dict) -> list[tuple[dict, dict]]:
-    """The mill's cycle steps, in order (the saw's cut and an outside vendor's finish are cycle steps too, but not the
-    mill's)."""
+    """The mill's cycle steps, in order (the saw's cut, the lathe's and an outside vendor's finish are cycle steps too,
+    but not the mill's)."""
+    from moonshot.planning.steps import GRINDERS, LATHES
     setups = {s["id"]: s for s in plan["setups"]}
     out = []
     for s in expand(plan):
-        if s["kind"] == "cycle" and "workholding" in setups.get(s.get("setup"), {}):
+        held = setups.get(s.get("setup"), {})
+        if s["kind"] == "cycle" and "workholding" in held and held.get("machine") not in LATHES | GRINDERS:
             setup = setups[s["setup"]]
             out.append((setup, next(o for o in setup["operations"] if o["id"] == s["operation"])))
+    return out
+
+
+def before_mill(plan: dict) -> Path | None:
+    """The stock the lathe hands the mill (stock-end.brep of the last lathe cycle before the mill's first setup), or
+    None for a part that starts on the mill."""
+    from moonshot.planning.steps import LATHES
+    setups = {s["id"]: s for s in plan["setups"]}
+    first = next((s for s, _ in cycle_steps(plan)), None)
+    out = None
+    for s in expand(plan):
+        held = setups.get(s.get("setup"), {})
+        if first is not None and s.get("setup") == first["id"]:
+            break
+        if s["kind"] == "cycle" and held.get("machine") in LATHES:
+            end = data_root() / "takes" / f"{plan['part']}-{s['id']}" / "stock-end.brep"
+            out = end if end.exists() else out
     return out
 
 
@@ -441,6 +480,8 @@ def main(argv: list[str]) -> int:
     ids = [f"{s['id']}-{o['id']}" for s, o in steps]
     i0 = ids.index(start) if start else 0
     stock = planner.stock0()
+    if turned := before_mill(plan):                         # the lathe's part, as its last cycle left it
+        stock = cq.Shape.importBrep(str(turned))
     if i0:
         prev = next(p for p in reversed(ids[:i0])
                     if (data_root() / "takes" / f"{plan['part']}-{p}" / "stock-end.brep").exists())

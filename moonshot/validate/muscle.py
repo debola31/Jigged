@@ -155,8 +155,12 @@ class MyoArm:
         mujoco.mju_sparse2dense(self.R, d.actuator_moment, d.moment_rownnz, d.moment_rowadr, d.moment_colind)
         A = (self.C.T @ self.R.T) * gain                          # activation -> our joints' torque
         y = self.C.T @ (need - given)
-        sol = lsq_linear(np.vstack([TORQUE_WEIGHT * A, np.eye(m.nu)]),
-                         np.concatenate([TORQUE_WEIGHT * y, np.zeros(m.nu)]), bounds=(0.0, ACT_MAX), method="bvls")
+        lhs, rhs = np.vstack([TORQUE_WEIGHT * A, np.eye(m.nu)]), np.concatenate([TORQUE_WEIGHT * y, np.zeros(m.nu)])
+        sol = lsq_linear(lhs, rhs, bounds=(0.0, ACT_MAX), method="bvls")
+        if not np.isfinite(sol.x).all():
+            # BVLS can step to nan on finite inputs (ct-slbeam-saw-clamp, frame 291 of 434: its neighbours 0.68 and
+            # 0.67); the trust-region method solves the same problem (there 0.676, 0.0015 N m short)
+            sol = lsq_linear(lhs, rhs, bounds=(0.0, ACT_MAX), method="trf")
         return sol.x, float(np.linalg.norm(A @ sol.x - y))
 
 

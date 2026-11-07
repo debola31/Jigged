@@ -1,4 +1,5 @@
-"""The setting steps' takes, Find X and Y and Set Z, in every setup of G1's parts, meet their outcomes on the full body
+"""The setting steps' takes, Find X and Y and Set Z, in every VF-2 setup of G1's parts and of G2's ll-1007224 (its Op 30:
+X and Y by a boss cycle round its top spigot, Z off its flange's top face), meet their outcomes on the full body
 at the VF-2's pendant: the work offset the machine ends with puts the spindle on the datum the take planned, the jog
 handle turns only while a hand turns it, every key the plan presses registers on the machine and no other does, and
 every per-frame check passes (docs/moonshot/physics.md). Physics tier: farm and hub only (`pytest moonshot -m farm`),
@@ -7,8 +8,9 @@ on the takes the runners write to the data root (takes/<part>/<step id>/).
 So does Check it's square, where a setup stands the part on the vise floor (nist-ftc-10's op50, ct-slbeam's op20 and
 op30): a test indicator in the spindle, its ball pressed against the part's side, swept up it by jogging Z with the
 handle; the needle stays put. So does Check it's straight, where a plate lies on the spoilboard (nist-ftc-09's op10,
-ll-1005337's op10 and op20): the ball against its long edge, swept along it by jogging X. ll-1007223's op30 checks a
-face that stands level, by a sweep across it: not this one.
+ll-1005337's op10): the ball against its long edge, swept along it by jogging X; and ll-1007223's op30, the ball down
+on the stem's side, which faces up at the floor of the T's notch, swept across it by jogging Y. A setup's "cuts"
+(boxes, world mm at frame 0) are taken out of the part's box, as the probe's sensing takes them (sim/pendant.py).
 
 What each take carries besides its record (take.npz, scene.json):
     take.json     "sets": {axis: {"method": "edge_finder" | "probe" | "touch_off", "datum_mm": [x, y, z], "wcs"}}, the
@@ -41,14 +43,16 @@ from moonshot.planning.validate import PLANS, load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
-PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
-STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
+PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam",      # G1
+         "ll-1007224")                                                               # G2's part drilled on the VF-2
+# the VF-2's steps: a lathe's Set Z is a touch-off at the ST-25, not at this pendant
+STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p)) if s.get("machine") == "vf2"]
 # ll-1005337's Op 20 checks the plate slid straight by probing its second dowel hole into G55 (the user's decision,
 # 2026-11-05: its finished near edge stands past the Y travel's front): a work offset, held to the probe's bar
 PROBED_CHECKS = ["ll-1005337/op20-check"]
 SETTING = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Find X and Y", "Set Z")] + PROBED_CHECKS
 CHECKS = [f"{p}/{s['id']}" for p, s in STEPS if s["title"] in ("Check it's square", "Check it's straight")
-          and f"{p}/{s['id']}" not in ["ll-1007223/op30-check", *PROBED_CHECKS]]
+          and f"{p}/{s['id']}" not in PROBED_CHECKS]
 TOLERANCE = {"edge_finder": "setting.edge_finder_mm", "probe": "setting.probe_mm", "touch_off": "setting.touch_off_mm"}
 DETENT_DEG = 3.6
 
@@ -155,16 +159,21 @@ def test_the_needle_stays_put_through_a_sweep_along_the_side(square):
     t = 2 * np.cross(v, down)
     ball = d["pos"][:, tool] + down + w * t + np.cross(v, t)            # rotated by the tool's quaternion
     p = ball - (np.array(s["centre_mm"], float) + d["pos"][:, blank] - d["pos"][0, blank])   # the part moves with the table
-    out = np.abs(p) - np.array(s["half_mm"], float)
-    gap = np.linalg.norm(np.maximum(out, 0), axis=1) + np.minimum(out.max(axis=1), 0)
+
+    def box_gap(v, half):                                               # signed distance from a box's surface
+        out = np.abs(v) - np.asarray(half, float)
+        return np.linalg.norm(np.maximum(out, 0), axis=1) + np.minimum(out.max(axis=1), 0)
+    gap = box_gap(p, s["half_mm"])
+    for c in s.get("cuts", []):                                         # the part's box less its cuts
+        gap = np.maximum(gap, -box_gap(p - (np.array(c["centre_mm"], float) - s["centre_mm"]), c["half_mm"]))
     needle = r - gap                                                    # mm the side pushes the ball in
     on = np.flatnonzero(needle > 0)
     assert on.size, "the indicator never touches the part"
     assert np.all(np.diff(on) == 1), f"the ball leaves the side mid-sweep, at frame {on[np.argmax(np.diff(on) > 1)]}"
-    # the sweep: the ball's way over the side, along whichever of its directions it went farthest (up a square check's
-    # side by Z, along a straight check's edge by X)
+    # the sweep: the ball's way over the side, along whichever direction it went farthest (up a square check's side by
+    # Z, along a straight check's edge by X, across the stem's side by Y)
     q = p[on]
-    a = max((i for i in range(3) if i != np.argmax(out[on].mean(axis=0))), key=lambda i: abs(q[-1, i] - q[0, i]))
+    a = int(np.argmax(np.abs(q[-1] - q[0])))
     lo, hi = sorted((q[0, a], q[-1, a]))
     assert hi - lo >= threshold("setting.sweep_mm").value, f"swept {hi - lo:.1f} mm along the side"
     sweep = (q[:, a] > lo + 0.5) & (q[:, a] < hi - 0.5)                  # not the ball's way in or out

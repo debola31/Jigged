@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -114,11 +115,23 @@ def holder_body(name: str, tool_id: str, at_mm, quat=(1.0, 0.0, 0.0, 0.0), free:
             f'{holder_geoms(name, tool_id, collide=free)}</body>\n')
 
 
+# the library's tool GLBs (the CAT40 holder, every cutter) are stored Y up, glTF's way, their axis along raw +y: turned
+# +90 deg about x they stand along the holder body's z, its colliders' axis (as bench_cell.ASSET and wrench.Y_UP_IN_BODY
+# turn theirs). Placed unturned, every take drew the holder and its tool lying on their side (found 2026-11-06)
+Y_UP = [0.7071068, 0.7071068, 0.0, 0.0]
+
+
+def glb_entry(path: str, z_mm: float) -> dict:
+    """A tool GLB in a holder body, its nose (the holder's) or tip (a cutter's) z_mm along the body's axis: a library
+    GLB turned up from Y (Y_UP); a take's own stand-in cutter (moonshot/sim/cycle_take.py write_cutter_glb), built
+    along z, as it is."""
+    turn = Y_UP if path.startswith("library/") else [1.0, 0.0, 0.0, 0.0]
+    return {"path": path, "in_body": [0, 0, round(z_mm, 3), *turn]}
+
+
 def render_glbs(tool_id: str) -> list[dict]:
     """A holder body's GLBs: the CAT40 holder from its nose, the tool from its tip (as the cycle takes draw them)."""
-    t = cutter(tool_id)
-    return [{"path": HOLDER_GLB, "in_body": [0, 0, -round(GAUGE_MM, 3), 1, 0, 0, 0]},
-            {"path": f"library/tooling/{tool_id}/{tool_id}.glb", "in_body": [0, 0, -round(t["length"], 3), 1, 0, 0, 0]}]
+    return [glb_entry(HOLDER_GLB, -GAUGE_MM), glb_entry(f"library/tooling/{tool_id}/{tool_id}.glb", -cutter(tool_id)["length"])]
 
 
 # --- the tool stand ------------------------------------------------------------------------------------------------
@@ -132,45 +145,157 @@ STAND = {"first_mm": (-190.0, -430.0, 1023.0),      # the first fork's holder ax
          "plate_y": 60.0, "table_z": 853.0}
 
 
-def stand_axis(k: int) -> np.ndarray:
+@dataclass(frozen=True)
+class Layout:
+    """Where a stand stands and how its forks are set out: fork 0's holder axis at its tines' top (world mm), the forks
+    along +X at STAND's pitch, `per_row` to a row (0: all in one row), the front row's first; the back row's forks
+    `back_mm` (y, z) behind the front row's, and up or down from them; the stand's feet on `foot_z`. The vise setups'
+    stand is ONE_ROW."""
+    first_mm: tuple[float, float, float] = STAND["first_mm"]
+    per_row: int = 0
+    back_mm: tuple[float, float] = (0.0, 0.0)
+    foot_z: float = STAND["table_z"]
+    bracket: bool = False                               # standing on the bracket at the table's front (BRACKET)
+
+    def row_col(self, k: int) -> tuple[int, int]:
+        return (0, k) if not self.per_row else divmod(k, self.per_row)
+
+    def axis(self, k: int) -> np.ndarray:
+        row, col = self.row_col(k)
+        return (np.asarray(self.first_mm, float) + col * np.asarray(STAND["pitch_mm"], float)
+                + row * np.array([0.0, *self.back_mm]))
+
+    def to_json(self) -> dict:
+        return {"first_mm": list(self.first_mm), "per_row": self.per_row, "back_mm": list(self.back_mm),
+                "foot_z": self.foot_z, "bracket": self.bracket}
+
+    @classmethod
+    def from_json(cls, d: dict | None) -> "Layout":
+        return ONE_ROW if not d else cls(tuple(d["first_mm"]), int(d["per_row"]), tuple(d["back_mm"]),
+                                         float(d["foot_z"]), bool(d.get("bracket", False)))
+
+
+ONE_ROW = Layout()
+
+# A plate setup's tools (nist-ftc-09, ll-1005337) can't wait on the table: the spoilboard covers all of it, and the
+# plate and its clamps most of it. They wait on a two-row stand on this bracket in front of the table instead (the
+# user's decision, 2026-11-05), inside the doorway, clear of the plate, the spoilboard and the clamps (ll-1005337's
+# plate overhangs the table's front to y -541.4; the back row's plate stands 2.6 mm in front of it).
+BRACKET = {
+    "what": "A plain steel bracket bolted to the VF-2 table's front edge: a 10 mm plate against the table's front face "
+            "and a 10 mm shelf on it, level with the table's top, reaching out toward the operator, on which the "
+            "two-row tool stand stands as it stands on the table for a vise setup [proposed]",
+    "front_y": -690.0,      # the front row's holder axes (world y), its flanges 33 mm behind the doors' panels' line
+    "row_mm": 78.0,         # the back row this far behind, its plate, the stand's one, 2.6 mm in front of
+                            # ll-1005337's plate: 53 behind, the open fingers of a hand reaching round a front holder
+                            # met the taper of the back holder behind it and pushed the hand 27 mm off its grip
+    "right_x": -46.0,       # each row's rightmost fork, where the vise setups' third fork is
+    "front_rise_mm": 120.0, # the front row stands this much higher than the back, on arms reaching back over it to the
+                            # stand's plate behind the back row: a back holder slides out under the emptied front forks
+                            # (its knob, lifted, 5 mm under their back stops), and the hand that takes it reaches in
+                            # under them. The other way up, the back row raised over the front, the hand reaching for a
+                            # back holder caught on the emptied front forks and closed 44 mm low and 37 mm back on it,
+                            # and every front holder had to go up over the back row's knobs
+    "drop_mm": 120.0,       # the shelf this far under the table's top, the back row as far under the vise setups'
+                            # stand's height and the front row (front_rise_mm over it) at that height: the back row at
+                            # that height and the front raised 135 over it, the hand closed on a front holder pressing
+                            # 7.8 mm into its body, its weight taken 100 ms after it touched it (people's 139-321);
+                            # dropped 60, its fingers swept the spot drill's cutter on the way in for 61 frames, 80 for 2
+    "face_y": -524.0,       # the table's front face (vf2.json table_top), which the bracket is bolted to
+    "t": 10.0, "margin_x": 60.0, "face_h": 40.0,
+}
+
+
+def bracket_layout(tool_ids: list[str]) -> Layout:
+    """The two-row stand on the bracket for a plate setup's tools, in the order they go in: the first half (rounded up)
+    in the front row, emptied first, the rest in the back row, each row ending at BRACKET right_x; the back row
+    drop_mm under the vise setups' stand's height, the front row front_rise_mm over the back."""
+    per_row = (len(tool_ids) + 1) // 2
+    rise, drop = BRACKET["front_rise_mm"], BRACKET["drop_mm"]
+    first = (BRACKET["right_x"] - (per_row - 1) * STAND["pitch_mm"][0], BRACKET["front_y"],
+             STAND["first_mm"][2] - drop + rise)
+    return Layout(first, per_row, (BRACKET["row_mm"], -rise), STAND["table_z"] - drop, bracket=True)
+
+
+def bracket_geoms(layout: Layout, n: int) -> str:
+    """The bracket's geoms, in the stand's frame (its fork 0's axis at its tines' top): the shelf under every row's
+    foot, from the table's front face out past the front row's foot, and the plate bolted against the table's front
+    face from the table's top down to under the shelf."""
+    o = stand_axis(0, layout)
+    xs = [stand_axis(k, layout)[0] for k in range(n)]
+    x0, x1 = min(xs) - 40.0 - BRACKET["margin_x"], max(xs) + 40.0 + BRACKET["margin_x"]
+    y0, y1 = min(p["y"] for p in stand_plates(layout, n)) - 52.0, BRACKET["face_y"]      # from the foot's front edge
+    t, z = BRACKET["t"], layout.foot_z
+    z0, z1 = min(z - 2 * t, STAND["table_z"] - BRACKET["face_h"]), STAND["table_z"]
+    shelf = [(x0 + x1) / 2, (y0 + y1) / 2, z - t / 2]
+    face = [(x0 + x1) / 2, y1 - t / 2, (z0 + z1) / 2]
+    return (f'<geom name="bracket_shelf" class="steel" type="box" size="{_f([(x1 - x0) / 2, (y1 - y0) / 2, t / 2])}" '
+            f'pos="{_f(np.array(shelf) - o)}" rgba="0.45 0.46 0.48 1"/>'
+            f'<geom name="bracket_face" class="steel" type="box" size="{_f([(x1 - x0) / 2, t / 2, (z1 - z0) / 2])}" '
+            f'pos="{_f(np.array(face) - o)}" rgba="0.45 0.46 0.48 1"/>')
+
+
+def stand_axis(k: int, layout: Layout = ONE_ROW) -> np.ndarray:
     """Fork k's holder axis at the height of its tines' top (world mm)."""
-    return np.asarray(STAND["first_mm"], float) + k * np.asarray(STAND["pitch_mm"], float)
+    return layout.axis(k)
 
 
-def on_stand(k: int) -> np.ndarray:
+def on_stand(k: int, layout: Layout = ONE_ROW) -> np.ndarray:
     """Where a holder in fork k has its gauge line: its upper flange disc's underside on the tines."""
-    return stand_axis(k) + [0.0, 0.0, -GROOVE[2]]
+    return stand_axis(k, layout) + [0.0, 0.0, -GROOVE[2]]
 
 
-def stand_xml(n: int, waiting: dict[int, str]) -> str:
+def stand_plates(layout: Layout, n: int) -> list[dict]:
+    """The stand's back plates (world mm): each row's own, plate_y behind its axes and 12 mm over its tines (the vise
+    setups'); on a plate's bracket one for both rows, plate_y behind the back row's axes and 12 mm over the higher
+    row's tines, every fork's arm reaching back to it. Each: "tag" (its geoms' name suffix), "forks", "x" (its first
+    and last fork's axis), "y" (its front face), "top"."""
+    rows = sorted({layout.row_col(k)[0] for k in range(n)})
+    groups = [list(range(n))] if layout.bracket else [[k for k in range(n) if layout.row_col(k)[0] == r] for r in rows]
+    out = []
+    for i, ks in enumerate(groups):
+        axes = np.array([stand_axis(k, layout) for k in ks])
+        out.append({"tag": "" if i == 0 else f"_{i}", "forks": ks, "x": (float(axes[:, 0].min()), float(axes[:, 0].max())),
+                    "y": float(axes[:, 1].max()) + STAND["plate_y"], "top": float(axes[:, 2].max()) + 12.0})
+    return out
+
+
+def stand_xml(n: int, waiting: dict[int, str], layout: Layout = ONE_ROW) -> str:
     """The stand with n forks (a static body, steel): each two tines in a holder's V-groove and a back stop, opening
-    toward -Y, on a back plate standing on the table; holders in forks `waiting` ({fork: tool}) are on it, fixed, as
-    nothing in the take moves them. The hand that wraps a holder's back passes under the back stop and in front of
-    the plate."""
+    toward -Y, on an arm back to a plate standing on the table (stand_plates); holders in forks `waiting` ({fork:
+    tool}) are on it, fixed, as nothing in the take moves them. The hand that wraps a holder's back passes under the
+    back stop and in front of the plate."""
     c = STAND
     x0 = GROOVE[0] + c["clear"] + c["tine_w"] / 2
+    o = stand_axis(0, layout)
+    plates = stand_plates(layout, n)
     geoms = []
     for k in range(n):
-        a = stand_axis(k) - stand_axis(0)
+        a = stand_axis(k, layout) - o
         zc = a[2] - c["tine_t"] / 2
         yc = a[1] + (c["tine_back"] - c["tine_front"]) / 2
         hl = (c["tine_back"] + c["tine_front"]) / 2
+        py = next(p["y"] for p in plates if k in p["forks"]) - o[1] - a[1]       # its plate's face, from its axis
         for s in (-1, 1):
             geoms.append(f'<geom name="stand_tine_{k}{"lr"[s > 0]}" class="steel" type="box" '
                          f'size="{_f([c["tine_w"] / 2, hl, c["tine_t"] / 2])}" pos="{_f([a[0] + s * x0, yc, zc])}"/>')
         geoms.append(f'<geom name="stand_back_{k}" class="steel" type="box" size="{_f([x0 + c["tine_w"] / 2, 3, 8])}" '
                      f'pos="{_f([a[0], a[1] + c["tine_back"] + 3, zc + 4])}"/>')
-        geoms.append(f'<geom name="stand_arm_{k}" class="steel" type="box" size="{_f([6, (c["plate_y"] - c["tine_back"]) / 2, 8])}" '
-                     f'pos="{_f([a[0], a[1] + (c["plate_y"] + c["tine_back"]) / 2, zc + 4])}"/>')
-    span = stand_axis(n - 1) - stand_axis(0)
-    h = stand_axis(0)[2] + 12 - c["table_z"]
-    plate = (f'<geom name="stand_plate" class="steel" type="box" size="{_f([span[0] / 2 + 40, 4, h / 2])}" '
-             f'pos="{_f([span[0] / 2, c["plate_y"] + 4, 12 - h / 2])}"/>'
-             f'<geom name="stand_foot" class="steel" type="box" size="{_f([span[0] / 2 + 40, 30, 5])}" '
-             f'pos="{_f([span[0] / 2, c["plate_y"] - 22, 5 + c["table_z"] - stand_axis(0)[2]])}"/>')
-    held = "".join(f'<body name="stand_holder_{k}" pos="{_f(on_stand(k) - stand_axis(0))}">'
+        geoms.append(f'<geom name="stand_arm_{k}" class="steel" type="box" size="{_f([6, (py - c["tine_back"]) / 2, 8])}" '
+                     f'pos="{_f([a[0], a[1] + (py + c["tine_back"]) / 2, zc + 4])}"/>')
+    plate = ""
+    for p in plates:
+        (x_a, x_b), y, top = p["x"], p["y"] - o[1], p["top"] - o[2]
+        h = top - (layout.foot_z - o[2])
+        plate += (f'<geom name="stand_plate{p["tag"]}" class="steel" type="box" size="{_f([(x_b - x_a) / 2 + 40, 4, h / 2])}" '
+                  f'pos="{_f([(x_a + x_b) / 2 - o[0], y + 4, top - h / 2])}"/>'
+                  f'<geom name="stand_foot{p["tag"]}" class="steel" type="box" size="{_f([(x_b - x_a) / 2 + 40, 30, 5])}" '
+                  f'pos="{_f([(x_a + x_b) / 2 - o[0], y - 22, 5 + layout.foot_z - o[2]])}"/>')
+    held = "".join(f'<body name="stand_holder_{k}" pos="{_f(on_stand(k, layout) - o)}">'
                    f'{holder_geoms(f"stand_holder_{k}", t, collide=True)}</body>' for k, t in waiting.items())
-    return f'    <body name="tool_stand" pos="{_f(stand_axis(0))}">{"".join(geoms)}{plate}{held}</body>\n'
+    if layout.bracket:
+        plate += bracket_geoms(layout, n)
+    return f'    <body name="tool_stand" pos="{_f(o)}">{"".join(geoms)}{plate}{held}</body>\n'
 
 
 # --- the carousel --------------------------------------------------------------------------------------------------

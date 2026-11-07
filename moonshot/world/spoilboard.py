@@ -73,6 +73,14 @@ NOSE_IN_MM = 12.0                                        # the nose's reach onto
 SIDE_IN_MM = 24.0                                        # ... and its tip at least this far in from a long edge: at
                                                          # 18 a swung nose's back corner stood 1.5 mm off the sheet
 PARK_NUT_GAP_MM = 6.0                                    # a parked clamp's nut run up this far over its clamped place
+NUT_FRICTION_NM = 0.05       # [proposed] a loose flange nut's drag on its stud, its threads' running torque: at 0.008
+                             # (set for a fingertip's spin, since dropped) the ratchet's drag swung back with the
+                             # handle turned the nut back 16 deg a stroke
+NUT_FRICTION = 0.6           # [proposed] dry steel's: the flange on the strap, and a fingertip on the flange (as
+                             # "steel", 0.25, the fingertip slid round the rim, turning it 10-30 deg a stroke)
+NUT_ARMATURE = 5e-5          # [proposed] the nut's turn's added inertia (kg m^2), for the thread's stability: a 3/4 in
+                             # flange nut's own is ~3e-6; at 5e-4 it weighed like 2.7 kg at its rim, and a fingertip's
+                             # stroke turned it 2-20 deg and the stroke back turned it back
 STEEL_KG_M3 = 7850.0
 PLATE_RGBA = {8000.0: "0.72 0.72 0.74 1", 1410.0: "0.06 0.06 0.07 1"}    # stainless sheet; black Delrin
 
@@ -293,24 +301,34 @@ def _nut_geoms(name: str, ind: str) -> str:
     kg_flange = STEEL_KG_M3 * math.pi * FLANGE_R ** 2 * FLANGE_T * 1e-9
     side = NUT_AF / math.sqrt(3)
     kg_hex = STEEL_KG_M3 * 1.5 * side * NUT_AF * NUT_HEX_H * 1e-9
+    fr = f'friction="{NUT_FRICTION} 0.004 0.0001"'
     out = (f'{ind}<geom name="{name}_flange" class="steel" type="cylinder" size="{_f([FLANGE_R, FLANGE_T / 2])}" '
-           f'pos="0 0 {FLANGE_T / 2 * M:.5f}" mass="{kg_flange:.5f}" rgba="0.3 0.3 0.32 1"/>\n')
+           f'pos="0 0 {FLANGE_T / 2 * M:.5f}" mass="{kg_flange:.5f}" {fr} rgba="0.3 0.3 0.32 1"/>\n')
     for j in range(3):
+        # the hex's flats are the wrench's, steel on steel: at the flange's dry 0.6 a box end set down a little off them
+        # stuck on its chamfer instead of sliding down onto them (the wrench does it all, no fingertip spins the nut)
         out += (f'{ind}<geom name="{name}_hex_{j}" class="steel" type="box" size="{_f([side / 2, NUT_AF / 2, NUT_HEX_H / 2])}" '
                 f'pos="0 0 {(FLANGE_T + NUT_HEX_H / 2) * M:.5f}" quat="{_quat_z(j * math.pi / 3)}" '
                 f'mass="{kg_hex / 3:.5f}" rgba="0.3 0.3 0.32 1"/>\n')
     return out
 
 
-def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple[str, ...] = (),
-           nuts: tuple[str, ...] | None = None) -> str:
+def state_of(state: str | dict[str, str], clamp: Clamp) -> str:
+    """A clamp's pose in a scene: one state for every clamp, or each its own by name (a take that sets one end's
+    clamps, the other end's already down or still parked)."""
+    return state if isinstance(state, str) else state[clamp.name]
+
+
+def bolted(plate: Plate, clamps: list[Clamp], state: str | dict[str, str] = "clamped", free: tuple[str, ...] = (),
+           nuts: tuple[str, ...] | None = None, nut_up: dict[str, float] | None = None) -> str:
     """What is bolted to the table (bodies fixed in the table body, whose frame is the world's at the loading position;
     each its own body, with no GLB, so the take record draws it from its geoms): the spoilboard with each clamp's T-nut,
     stud and heel block (body `spoilboard`), each clamp not in `free` in its pose, and each clamp's nut where the pose
     has it: on its thread (a body on a slide and a hinge along the stud, its frame at the flange's underside) if its
     clamp is in `nuts` (by default the free clamps), fixed otherwise. The spoilboard's top is the plate's underside
     (its clamps' board when the plate isn't on it), on its riser if that is above the table's own (riser_mm)."""
-    board = plate.bottom if plate is not None else (clamps[0].board_z if clamps else TOP_Z)
+    board = clamps[0].board_z if clamps else (plate.bottom if plate is not None else TOP_Z)   # the clamps' board:
+                                                                     # a plate in the hands isn't on it yet
     rise = riser_mm(board)
     c = np.r_[TABLE_MID, board - SPOILBOARD_MM[2] / 2]
     out = (f'        <body name="spoilboard">\n'
@@ -339,8 +357,8 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
     for k in clamps:
         s = np.asarray(k.stud, float)
         z1 = k.stud_z()[1]
-        at, R = k.pose(state)
-        nz = k.nut_z(state)
+        at, R = k.pose(state_of(state, k))
+        nz = k.nut_z(state_of(state, k)) if k.name not in (nut_up or {}) else k.nut_z("clamped") + nut_up[k.name]
         if k.name not in free:
             out += (f'        <body name="{k.name}" pos="{_f(at)}" quat="{_quat(R)}">\n'
                     + _strap_geoms(k.name, ind="          ") + '        </body>\n')
@@ -350,7 +368,7 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
                     f'range="{-(nz - k.nut_z()) * M - 0.004:.5f} {(z1 - nz - NUT_HEX_H - FLANGE_T) * M:.5f}" '
                     f'damping="2"/>\n'
                     f'          <joint name="{k.name}_nut_turn" type="hinge" axis="0 0 1" limited="false" '
-                    f'damping="0.002" frictionloss="0.02" armature="0.0005"/>\n'
+                    f'damping="0.002" frictionloss="{NUT_FRICTION_NM}" armature="{NUT_ARMATURE}"/>\n'
                     + _nut_geoms(f"{k.name}_nut", "          ") + '        </body>\n')
         else:
             out += (f'        <body name="{k.name}_nut" pos="{_f(np.r_[s, nz])}">\n'
@@ -358,7 +376,8 @@ def bolted(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tupl
     return out
 
 
-def loose(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple[str, ...] = ()) -> str:
+def loose(plate: Plate, clamps: list[Clamp], state: str | dict[str, str] = "clamped",
+          free: tuple[str, ...] = ()) -> str:
     """The free bodies: the plate (`blank`) on the spoilboard, if it is there, and each clamp in `free`, in its pose."""
     out = "" if plate is None else (
         f'    <body name="blank" pos="{_f(plate.centre)}">\n      <freejoint name="blank"/>\n'
@@ -367,7 +386,7 @@ def loose(plate: Plate, clamps: list[Clamp], state: str = "clamped", free: tuple
         f'rgba="{PLATE_RGBA.get(plate.density, "0.6 0.6 0.62 1")}"/>\n    </body>\n')
     for k in clamps:
         if k.name in free:
-            at, R = k.pose(state)
+            at, R = k.pose(state_of(state, k))
             out += (f'    <body name="{k.name}" pos="{_f(at)}" quat="{_quat(R)}">\n'
                     f'      <freejoint name="{k.name}"/>\n' + _strap_geoms(k.name) + '    </body>\n')
     return out
@@ -388,15 +407,17 @@ def excludes(clamps: list[Clamp], free: tuple[str, ...] = ()) -> str:
     return "".join(f'    <exclude body1="spoilboard" body2="{c.name}_nut"/>\n' for c in clamps if c.name in free)
 
 
-def with_body(body_xml: str, plate: Plate | None, clamps: list[Clamp], state: str = "clamped",
-              free: tuple[str, ...] = (), nuts: tuple[str, ...] | None = None) -> str:
+def with_body(body_xml: str, plate: Plate | None, clamps: list[Clamp], state: str | dict[str, str] = "clamped",
+              free: tuple[str, ...] = (), nuts: tuple[str, ...] | None = None,
+              nut_up: dict[str, float] | None = None) -> str:
     """The body model's MJCF with the VF-2 cell set up for the plate: the machine carrying the spoilboard and the
     clamps, the floor, the plate (None: the table bare), the free clamps and the nuts on their threads, and the
     machine's actuators after the body's. The vise isn't on the table. state: the clamps' pose (`clamped` or
-    `parked`); free: the clamps a take moves; nuts: the clamps whose nuts turn on their threads (default: free's)."""
+    `parked`, or each its own: state_of); free: the clamps a take moves; nuts: the clamps whose nuts turn on their
+    threads (default: free's)."""
     from moonshot.world.cell import LOAD_X_MM
     nuts = free if nuts is None else nuts
-    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free, nuts))
+    machine, acts = vf2.worldbody(bolted(plate, clamps, state, free, nuts, nut_up))
     machine = f'    <body name="vf2" pos="{-LOAD_X_MM * vf2.M:.4f} 0 0">\n{machine}    </body>\n'
     head, _, tail = body_xml.rpartition("\n  </default>")
     xml = head + "\n" + V.STEEL_DEFAULT + "\n  </default>" + tail

@@ -14,7 +14,8 @@ moonshot/tests/gates/test_bandsaw_take.py.
 - While the hand turns the handwheel it pushes the knob round with the card's force, fed forward through the arm
   as a press is (`hand_forces`).
 
-    python -m moonshot.sim.bandsaw <part> load|clamp|start|cut|unload|all [--replan]   # -> <data root>/takes/<take>
+    python -m moonshot.sim.bandsaw <part> load|clamp|start|cut|slide|unload|all [--replan]   # -> <data root>/takes/<take>
+    python -m moonshot.sim.bandsaw <part> recamera      # the lift-out's camera continuing the slide's, its physics kept
 """
 from __future__ import annotations
 
@@ -105,11 +106,19 @@ class SawRun(BenchRun):
 
     def anchor_weld(self, e: dict, eq: int, tt: float) -> None:
         """BenchRun's, but a knob that spins in the fist is held on its own axis: at the pinch, off the axis, the hold
-        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob."""
+        swung 20 mm round it as the wheel made its half turn and dragged the fingers 17 mm into the knob. And a piece
+        slid by the fingers on its top is held at its middle, so that the push neither turns nor tips it: at the pinch,
+        the thumb's tip off the piece drew it round as it slid, and at its top's middle the push tipped it 2.5 deg;
+        either way it wedged between the stop block and the rest."""
         super().anchor_weld(e, eq, tt)
+        m, d = self.model, self.data
+        if e["obj"] == "piece" and e.get("grip") == "top":
+            hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("piece").id
+            m.eq_data[eq, 0:3] = 0.0                                              # its middle
+            m.eq_data[eq, 3:6] = d.xmat[hb].reshape(3, 3).T @ (d.xpos[ob] - d.xpos[hb])
+            return
         if e["obj"] != "saw_handwheel":
             return
-        m, d = self.model, self.data
         hb, ob = m.body(f"{e.get('side', 'R')}_hand").id, m.body("saw_handwheel").id
         j, kg = m.joint("saw_handwheel").id, m.geom("saw_handwheel_knob").id
         axis, centre = d.xaxis[j], d.geom_xpos[kg]
@@ -211,9 +220,12 @@ class SawRun(BenchRun):
             if e["t0"] <= tt < e["t1"]:
                 ease = min(1.0, (tt - e["t0"]) / 0.25, (e["t1"] - tt) / 0.25)
                 hand = m.body(f"{e['side']}_hand").id
-                # where the fingers hold it, between the thumb's, index's and middle's tips (the carry weld's anchor):
-                # pushed at the wrist against a bar held at the fingertips, the hand pivoted on them
-                at = np.mean([d.geom_xpos[m.geom(f"{e['side']}_g_dis{i}").id] for i in (1, 2, 3)], axis=0)
+                # where the fingers hold it, between the thumb's, index's and middle's tips (the carry weld's anchor),
+                # or the drag's own fingers: pushed at the wrist against a bar held at the fingertips, the hand pivoted
+                # on them; and pushed between the thumb, off the piece, and the pads on its top, the hand turned 1.5
+                # deg and tipped 5 as it slid it, and the piece wedged
+                at = np.mean([d.geom_xpos[m.geom(f"{e['side']}_g_dis{i}").id] for i in e.get("fingers", (1, 2, 3))],
+                             axis=0)
                 jacp = np.zeros((3, m.nv))
                 mujoco.mj_jac(m, d, jacp, None, at, hand)
                 tau += jacp[:, self.act_dof].T @ (np.asarray(e["direction"], float) * e["force"] * ease)
@@ -385,29 +397,41 @@ def cut(seconds: float | None = None) -> dict:
     return report
 
 
-def run_unload(replan=False, seconds=None) -> dict:
-    out = plan.OUT["unload"]
-    state = plan.state_of("cut")
+def run_piece(take: str, after: str, grips: dict, lifted: tuple, replan=False, seconds=None) -> dict:
+    """A take of the person's with the cut piece (the slide, the lift-out), from the state the take before left."""
+    out = plan.OUT[take]
+    state = plan.state_of(after)
     if replan or not (out / "reference.npz").exists():
-        plan.build("unload")
+        plan.build(take)
     st = state["stock"]
     loose = "".join(SC.stock_body(b, SC.FRONT, st[b]["centre"], st[b]["R"], st[b]["length"]) for b in ("piece", "rest"))
-    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects={"top": ("piece",), "pinch": ("piece",)},
-               lifted=("piece",))
+    r = SawRun(out, SC.FRONT, loose, state, carried=("piece",), grip_objects=grips, lifted=lifted)
     r.go(seconds)
     p = SC.saw_state(r.model, r.data, r.ctl, r.place)["stock"]
     return r.finish({"piece_end": p["piece"], "rest_end": p["rest"]})
 
 
+def run_slide(replan=False, seconds=None) -> dict:
+    return run_piece("slide", "cut", {"top": ("piece",)}, (), replan, seconds)
+
+
+def run_unload(replan=False, seconds=None) -> dict:
+    """Planned from where the slide left the piece: planned from where it was meant to, the hand closed 5-9 mm off
+    it, the slide having carried it 10-15% short, and sank 10-16 mm into it. A round bar's disc, with no slide, from
+    where the cut left it."""
+    return run_piece("unload", "cut" if SC.STOCK["round"] else "slide", {"pinch": ("piece",)}, ("piece",), replan,
+                     seconds)
+
+
 def still(take: str, frame: int | None = None, out: Path | None = None, view_from=(-0.55, -0.55, 0.75)) -> Path:
     """A picture of the physics run at a frame (the middle by default), as MuJoCo draws it: its colliders, the body's
-    capsules, the saw and the stock (the bow's boxes see-through), at the right hand from view_from (m, world). For
+    capsules, the saw and the stock (the head's boxes see-through), at the right hand from view_from (m, world). For
     review; the take's render is Blender's (moonshot/render/)."""
     folder = plan.OUT[take]
     xml = (folder / "physics.xml").read_text(encoding="utf-8")
     xml = xml.replace("<worldbody>", '<visual><global offwidth="1280" offheight="720"/></visual>\n  <worldbody>', 1)
     m = mujoco.MjModel.from_xml_string(xml)
-    for g in range(m.ngeom):            # the bow's coarse boxes, which span its window, drawn see-through
+    for g in range(m.ngeom):            # the head's and the guards' coarse boxes drawn see-through
         if m.body(m.geom_bodyid[g]).name in ("saw_head", "saw_cover_idler", "saw_cover_drive"):
             m.geom_rgba[g, 3] = 0.1
         elif m.body(m.geom_bodyid[g]).name in SC.STOCK_BODIES:
@@ -436,7 +460,7 @@ def still(take: str, frame: int | None = None, out: Path | None = None, view_fro
 
 
 RUNS = {"load": run_load, "clamp": run_clamp, "start": run_start,
-        "cut": lambda replan=False, seconds=None: cut(seconds), "unload": run_unload}
+        "cut": lambda replan=False, seconds=None: cut(seconds), "slide": run_slide, "unload": run_unload}
 
 
 def main(argv: list[str]) -> int:
@@ -445,7 +469,12 @@ def main(argv: list[str]) -> int:
     which = argv[1] if len(argv) > 1 else "all"
     replan = "--replan" in argv
     seconds = float(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
-    order = [k for k in RUNS if k != "start" or not (plan.OUT["start"] / "state.json").exists()]
+    if which == "recamera":                 # the lift-out's camera re-exported continuing the slide's (sim/bench.py)
+        from moonshot.sim.bench import recamera
+        recamera(plan.OUT["unload"], plan.OUT["slide"])
+        return 0
+    order = [k for k in RUNS if (k != "start" or not (plan.OUT["start"] / "state.json").exists())
+             and not (k == "slide" and SC.STOCK["round"])]
     for k in (order if which == "all" else [which]):
         print(k, json.dumps(RUNS[k](replan=replan, seconds=seconds), indent=1), flush=True)
     return 0

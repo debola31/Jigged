@@ -51,6 +51,16 @@ class TouchOnsets:
         return out
 
 
+def hull_planes(model: mujoco.MjModel, g: int) -> dict:
+    """A mesh collider's convex hull (MuJoCo collides a mesh by its hull) as its face planes in the geom's frame,
+    [nx, ny, nz, offset mm] with n.p + offset <= 0 inside, and the radius that bounds it (mm)."""
+    from scipy.spatial import ConvexHull
+    mid = model.geom_dataid[g]
+    V = model.mesh_vert[model.mesh_vertadr[mid]:model.mesh_vertadr[mid] + model.mesh_vertnum[mid]] * 1000
+    eq = np.unique(np.round(ConvexHull(V).equations, 6), axis=0)
+    return {"planes": eq.round(5).tolist(), "radius": round(float(np.linalg.norm(V, axis=1).max()), 3)}
+
+
 def glbs_in_bodies(model: mujoco.MjModel, root: str, links: dict[str, tuple[str, str]]) -> dict[str, list[dict]]:
     """Each body's GLBs, for meshes authored in `root`'s frame at joint zero (a station's links): links maps a link
     to (its body, its GLB's path under the data root)."""
@@ -126,6 +136,9 @@ class Recorder:
                       "quat": [round(float(v), 6) for v in m.geom_quat[g]],
                       "rgba": [round(float(v), 3) for v in m.geom_rgba[g]]}
                      for g in range(m.ngeom) if m.geom_bodyid[g] == b]
+            for gd, g in zip(geoms, [g for g in range(m.ngeom) if m.geom_bodyid[g] == b]):
+                if gd["type"] == "mesh":                   # a convex mesh collider: its hull's face planes, for the skin
+                    gd |= hull_planes(m, g)                # check's distance (moonshot/validate/skin.py)
             entry = {"role": "body" if name in self.person else "object", "geoms": geoms}
             if name in glbs:
                 entry["glbs"] = glbs[name]

@@ -52,6 +52,8 @@ L_SIGHT_EASE_S = 0.3        # the left hand's sight correction, its press over, 
 FAST_MM_S = 250.0           # while the plan moves the right hand faster than this, sight doesn't correct it: it acts
                             # in a movement's slow end (corrected through the fast reach to the holder, the eye wound
                             # up 22 mm of lag and threw the hand 30 mm past its grip as the reach slowed)
+REGRIP_KEEP_DEG = 6.0       # a hand settling onto its grip off a plate's bracket (`regrip`) comes to within this of it:
+                            # as far off as the front row's hands closed, whose inserts sit as people's do
 CARRY_SOLREF_S = 0.004      # the carry weld's time constant, holding the holder stiffly in the hand ...
 CARRY_SOLIMP = (0.9, 0.95)  # ... and its impedance
 PRELOAD_SOLREF_S = 0.3      # before the hand takes the holder's weight, soft, and giving: at the carry's impedance the
@@ -114,6 +116,7 @@ class ToolLoadRun(PendantRunner):
         self._pivot_R = np.eye(3)
         self._hold, self._hold_q = None, None
         self._stiff = False
+        self._regrip = None
         self._apart_on = False
 
     # --- the scene --------------------------------------------------------------------------------------------------
@@ -122,13 +125,14 @@ class ToolLoadRun(PendantRunner):
         ld = self.tk["load"]
         n = len(self.tk["step"]["facts"]["tool_ids"])
         stand = {int(k): t for k, t in ld["stand"].items()}
+        layout = TL.Layout.from_json(ld.get("stand_layout"))     # a plate's on the bracket; else the vise setups'
         add = ""
         if ld["kind"] in ("seat", "pick"):          # on the stand
-            add += TL.holder_body("holder", ld["tool"], TL.on_stand(ld["fork"]))
+            add += TL.holder_body("holder", ld["tool"], TL.on_stand(ld["fork"], layout))
             stand.pop(ld["fork"])
         elif ld["kind"] == "insert":               # in the hand from the start, where the pick left it held
             add += TL.holder_body("holder", ld["tool"], np.array(ld["path"][0][1:], float))
-        add += TL.stand_xml(n, stand)
+        add += TL.stand_xml(n, stand, layout)
         add += TL.carousel_xml({int(p): t for p, t in ld["pockets"].items() if t != "probe"}, int(ld["current"]))
         xml = xml.replace("<worldbody>\n", "<worldbody>\n" + add, 1)
         if ld["kind"] in CARRIED:                  # the carry's grip assist, switched by before_step
@@ -143,8 +147,9 @@ class ToolLoadRun(PendantRunner):
 
     def glbs(self) -> dict[str, list[dict]]:
         out = super().glbs()
-        for body, drawn in V.render_glbs().items():
-            out.setdefault(body, []).extend(drawn)
+        if "plate" not in self.tk["setup"]:        # the vise (a plate's spoilboard and clamps are drawn from their geoms)
+            for body, drawn in V.render_glbs().items():
+                out.setdefault(body, []).extend(drawn)
         ld = self.tk["load"]
         if ld["kind"] in CARRIED + ("atc",):
             out["holder"] = TL.render_glbs(ld["tool"])
@@ -157,6 +162,8 @@ class ToolLoadRun(PendantRunner):
         return out
 
     def meshes(self, folder: Path) -> dict[str, dict]:
+        if "plate" in self.tk["setup"]:            # the plate, the spoilboard and the clamps: drawn from their geoms
+            return {}
         return V.render_meshes(Load.from_json(self.tk["setup"]["load"]), folder)
 
     def start(self) -> None:
@@ -351,6 +358,31 @@ class ToolLoadRun(PendantRunner):
         mujoco.mju_mat2Quat(qr, np.ascontiguousarray(rel).reshape(-1))
         m.eq_data[self.weld, 6:10] = qr
 
+    def regrip(self, t: float, window) -> None:
+        """Over the carry's `regrip` window (a pick off a plate's bracket, as the holder goes up clear of it), carry_holder
+        moved from where the hand closed on the holder toward the planned grip (the hand's place and turn on it), to
+        within REGRIP_KEEP_DEG of it, so the hand settles onto its grip as people do once what they hold is free: the
+        hand that reached low under the front row's arms closed on a back-row holder 13-20 deg off it, and kept that to
+        the doorway, where the insert, the holder upright under the spindle, put the arm in a posture people's sit
+        further from. Not wholly onto it: there the run's fingers, curled past the grip's, sank 4 mm into the body."""
+        m = self.model
+        if self._regrip is None:                 # where the weld had the hand when the window opened: its turn in the
+            q0 = m.eq_data[self.weld, 6:10].copy()   # holder's frame, and its body's origin there (the weld's point is
+            R0 = np.zeros(9)                         # the holder's own origin, anchor_weld([0, 0, 0]))
+            mujoco.mju_quat2Mat(R0, q0)
+            R0 = R0.reshape(3, 3)
+            off = np.degrees(np.linalg.norm(Rotation.from_matrix(R0.T @ self.grip_in_holder).as_rotvec()))
+            self._regrip = (R0, -R0 @ m.eq_data[self.weld, 0:3], max(0.0, 1.0 - REGRIP_KEEP_DEG / max(off, 1e-9)))
+        R0, W0, part = self._regrip
+        s = part * min_jerk((t - window[0]) / max(window[1] - window[0], 1e-9))
+        rel = R0 @ Rotation.from_rotvec(s * Rotation.from_matrix(R0.T @ self.grip_in_holder).as_rotvec()).as_matrix()
+        W = W0 + s * (self.grip_W_m - W0)
+        m.eq_data[self.weld, 0:3] = rel.T @ (-W)
+        m.eq_data[self.weld, 3:6] = 0.0
+        qr = np.zeros(4)
+        mujoco.mju_mat2Quat(qr, np.ascontiguousarray(rel).reshape(-1))
+        m.eq_data[self.weld, 6:10] = qr
+
     def carry_weld(self, t: float) -> None:
         """carry_holder on from just after the fingers close to when the drawbar has the holder, holding the holder
         where it then sits in the hand (no jump: welded to where the plan had the hand, a hand that closed off it
@@ -389,6 +421,9 @@ class ToolLoadRun(PendantRunner):
             # front, dragged through it as the hand came away
             self.anchor_weld([0.0, 0.0, 0.0], turn_to_grip=True)
             self._stiff = True
+        rg = self.carry.get("regrip") if self.carry else None
+        if want and rg and self._stiff and not self._pivoting and t >= rg[0]:
+            self.regrip(t, rg)
         f = float(np.clip((t - lo[0]) / max(lo[1] - lo[0], 1e-9), 0.0, 1.0)) if self._stiff else 0.0
         m.eq_solref[self.weld, 0] = PRELOAD_SOLREF_S * (CARRY_SOLREF_S / PRELOAD_SOLREF_S) ** f
         m.eq_solimp[self.weld, 0:2] = np.add(PRELOAD_SOLIMP, f * np.subtract(CARRY_SOLIMP, PRELOAD_SOLIMP))

@@ -42,13 +42,19 @@ def _sdf(p, g):
         return np.linalg.norm(p, axis=1) - s[0]
     if t == "plane":
         return p[:, 2]
+    if t == "mesh" and "planes" in g:
+        # a convex mesh, by its hull's face planes (moonshot/sim/record.py hull_planes): inside it, where the skin's
+        # depth is measured, the deepest plane's distance is the exact distance to its surface
+        P = np.asarray(g["planes"], float)
+        return (p @ P[:, :3].T + P[:, 3]).max(axis=1)
     raise ValueError(f"the skin check has no distance for a {t} collider ({g['name']})")
 
 
 def _radius(g) -> float:
     s = np.asarray(g["size"], float)
     return {"box": float(np.linalg.norm(s[:3])), "cylinder": float(np.hypot(s[0], s[1])),
-            "capsule": float(s[0] + s[1]), "sphere": float(s[0])}.get(g["type"], np.inf)
+            "capsule": float(s[0] + s[1]), "sphere": float(s[0]),
+            "mesh": float(g.get("radius", np.inf))}.get(g["type"], np.inf)
 
 
 def _near(W, c, Rg, g) -> bool:

@@ -64,6 +64,34 @@ def test_a_part_sawn_first_numbers_only_its_vf2_tools():
     assert num == {"facem": 1, "spot": 2, "drill": 3, "tap": 4, "em12": 5, "drillk": 6, "em38": 7, "chamf": 8}
 
 
+PLATE_TOOLS = [(p, s) for p, s in EVERY_TOOLS if "clamps" in s["facts"]]
+
+
+@pytest.mark.parametrize("part,step", PLATE_TOOLS, ids=lambda x: x if isinstance(x, str) else x["id"])
+def test_a_plates_tools_wait_on_the_bracket_in_front_of_the_table(part, step):
+    """The spoilboard covers the table, so a plate's tools wait on two rows on the bracket in front of it: every holder
+    in the doorway, in front of the table, the spoilboard and the plate (and so its clamps), the stand's plate too;
+    the front row raised so a back holder, lifted off and slid out, passes under the emptied front forks; each holder
+    picked standing back from the bracket, then inserted from the doorway."""
+    from moonshot.motion import plates
+    from moonshot.planning.takes import forks, stand
+    from moonshot.world import spoilboard as SB
+    layout = stand(step)
+    assert layout.bracket and layout.per_row
+    plate = plates.plate(part, step["setup"])
+    front_of = min(plate.centre[1] - plate.size[1] / 2, SB.TABLE_MID[1] - SB.SPOILBOARD_MM[1] / 2,
+                   T.REC["colliders"]["table_top"]["box_min_mm"][1])
+    for k in forks(step):
+        a = TL.stand_axis(k, layout)
+        assert -981.0 < a[0] < 194.0, k                       # inside the open doors (vf2.json door colliders)
+        assert a[1] + TL.STAND["plate_y"] + 8.0 < front_of, k  # the row's plate, behind its holders
+        assert split(k, layout)
+    at = forks(step)
+    knob = TL.on_stand(layout.per_row, layout)[2] + T.LIFT_MM + TL.KNOB_HEAD[1] + TL.KNOB_HEAD[0]
+    assert knob < TL.stand_axis(0, layout)[2] - TL.STAND["tine_t"] - 10.0  # a back holder slid out under the front forks
+    assert T.stance(at[0], layout, "pick")[1] < T.DOOR_LUMBAR[1] - 150.0        # standing back from the bracket
+
+
 def _control():
     m = mujoco.MjModel.from_xml_string(vf2.standalone_xml())
     d = mujoco.MjData(m)

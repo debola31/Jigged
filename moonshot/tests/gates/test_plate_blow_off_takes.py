@@ -1,5 +1,6 @@
 """Blow the chips off a plate's table with the air gun, on the full body: each plate setup's "Clean the table" (the
-spoilboard bare, its clamps parked) and ll-1005337 op10's unload, whose plate stays clamped for op20. The right hand
+spoilboard bare, its clamps parked) and each one's unload, the plate still clamped (ll-1005337 op10's stays clamped
+for op20; the others' clamps are then loosened and the plate lifted off, lift-off-plate). The right hand
 takes the gun from its holster, blows along the middle of the table with the trigger held, and puts it back.
 
 In the physics run the gun leaves the holster only in the hand and is never dropped (it moves with the hand, within
@@ -14,7 +15,8 @@ from moonshot.contracts.take_record import check
 from moonshot.contracts.thresholds import threshold
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKES = ["nist-ftc-09-op10-clean-blow-off", "ll-1005337-op10-clean-blow-off", "ll-1005337-op10-unload-blow-off"]
+TAKES = ["nist-ftc-09-op10-clean-blow-off", "ll-1005337-op10-clean-blow-off", "ll-1005337-op10-unload-blow-off",
+         "nist-ftc-09-op10-unload-blow-off", "ll-1005337-op20-unload-blow-off"]
 
 
 @pytest.fixture(scope="module", params=TAKES)

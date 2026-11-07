@@ -56,6 +56,9 @@ LEVER_DROP_MM = 2.5         # a straight check's indicator lever angles down thi
                             # down beside the ball, into the plate where the Y travel kept it near (ll-1005337)
 LEVER_OUT_MM = 0.5          # and the lever runs along the edge this far out from it, clear of the plate
 DOWEL_R_MM = 4.0            # ll-1005337's reamed 8.000 mm dowel holes
+LEVEL_SWEEP_MM = 220 * 0.01 * vf2.INCH     # a level check's sweep across a face facing up: 220 clicks at .01, 55.88 mm
+LEVEL_OUT_MM = 5.0          # its lever runs along the sweep this far, and angles down this far to its ball, so its
+LEVEL_DROP_MM = 5.0         # stem stays in the notch the face is the floor of, clear of the jaws at either end
 BELOW_TOP_MM = 3.0          # how far below the top the tip runs along a face
 SCREEN = np.array([915.0, -986.3, 1650.0]) + [-381.0, 0, 0]
 JAW_TOP_MM = 970.3
@@ -203,11 +206,15 @@ class Probing:
         hand over Feed Hold, and wait it out."""
         k = self.k
         k.look(k.t, SCREEN)
-        k.keys(["edit", "down", "down", "enter", "down", "enter"] + ["right"] * {"surface": 1, "bore": 2}[template]
-               + ["enter"])
+        k.keys(["edit", "down", "down", "enter", "down", "enter"]
+               + ["right"] * {"surface": 1, "bore": 2, "boss": 3}[template] + ["enter"])
         if wcs != "G54":
             k.keys(["down"])
             k.type(wcs[1:])
+            k.keys(["enter"])
+        for v in ([values["dia_mm"], values["depth_mm"]] if template == "boss" else []):    # its diameter, Z depth
+            k.keys(["down"])
+            k.type(f"{v:.3f}".rstrip("0").rstrip("."))
             k.keys(["enter"])
         k.keys(["f4"])
         self.page = "vps"
@@ -254,6 +261,13 @@ class Probing:
             self.shift(a, datum["xy".index(a)] - centre["xy".index(a)])
         self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
 
+    def boss(self, centre: np.ndarray, z: float, dia: float) -> None:
+        """A boss cycle round a vertical boss (dia mm across), its touches with the ball at z: the ball over the boss's
+        centre, STANDOFF_MM above its top, and the cycle's Z depth from there down to z. Its centre is the zero."""
+        self.to([centre[0], centre[1], self.top + STANDOFF_MM], fine=True)
+        self.cycle("boss", 18.0, dia_mm=dia, depth_mm=round(float(self.ball()[2] - z), 3))
+        self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
+
     def plan(self, axes: str, wcs: str = "G54") -> dict:
         k, f = self.k, self.f
         k.look(0.0, key_at("handle_jog"))
@@ -264,6 +278,10 @@ class Probing:
             if "bore" in f:
                 self.bore(np.array(f["bore"]["centre_mm"]), f["bore"]["z_mm"], np.array(f["datum_mm"]),
                           "".join(a for a in "xy" if a not in f), wcs)
+            if "boss" in f:
+                b = f["boss"]
+                assert np.allclose(b["centre_mm"], f["datum_mm"][:2]), "a boss's centre is the zero: no shift is keyed"
+                self.boss(np.array(b["centre_mm"]), b["z_mm"], 2 * b["r_mm"])
             for a in ("x", "y"):
                 if a in f:
                     s = f[a]
@@ -324,6 +342,58 @@ class SquareCheck:
         k.wait(1.0)
         self.jog("x", side * 2 * INC["inc_0.1"], "inc_0.1")
         self.jog("z", -k.axis_mm[2], "inc_0.1")
+        k.rest_hand()
+        k.wait(0.5)
+        return {}
+
+
+class LevelCheck:
+    """Check it's square across a face that faces up (ll-1007223 Op 30: the stem's side, the floor of the T's notch,
+    the part on its flange's edge between the jaws): the test indicator down into the notch onto the face, in at .001
+    to the preload, swept along Y between the jaws at .01, a look at the needle, then up off it and home.
+
+    Its lever runs LEVEL_OUT_MM along the sweep and angles LEVEL_DROP_MM down to its ball, so its stem stands in the
+    open notch over the face; a level stylus 35 mm long reached into the flange, the stop or a jaw, whichever way it
+    pointed. The sweep is centred between the jaws, the stem and the ball the same distance off each."""
+
+    def __init__(self, take: PendantTake, part: dict, face: np.ndarray):
+        self.k, self.c, self.h = take, np.array(part["centre_mm"]), np.array(part["half_mm"])
+        self.face = np.asarray(face, float)                     # a point of the face (world mm, frame 0), its z the face's
+        r = INDICATOR["tip_r"]
+        self.tool = INDICATOR | {"offset_mm": [0.0, LEVEL_OUT_MM], "lever_drop_mm": LEVEL_DROP_MM}
+        self.ball0 = SPINDLE + [*self.tool["offset_mm"], -INDICATOR["length_mm"] + r]
+        # the span from the stem's far side (LEVEL_OUT_MM + shank_r behind the ball) to the ball's lead, centred on the part
+        back, lead = LEVEL_OUT_MM + INDICATOR["shank_r"], r
+        self.y0 = self.c[1] - (LEVEL_SWEEP_MM + back + lead) / 2 + back
+
+    def ball(self) -> np.ndarray:
+        return self.ball0 + self.k.axis_mm
+
+    def jog(self, axis: str, mm: float, inc: str, deg_s: float = STROKE_DEG_S) -> None:
+        k = self.k
+        k.keys(([] if k.jog_axis == axis else [f"+{axis}"]) + ([] if math.isclose(k.inc_mm, INC[inc]) else [inc]))
+        k.look(k.t, self.ball())
+        k.turn(clicks(mm, inc), deg_s)
+
+    def plan(self) -> dict:
+        k, r = self.k, INDICATOR["tip_r"]
+        gap = lambda: self.ball()[2] - r - self.face[2]            # noqa: E731  the ball over the face
+        k.look(0.0, key_at("handle_jog"))
+        k.wait(0.5)
+        k.keys(["handle_jog", "inc_0.1"])
+        k.inc_mm = INC["inc_0.1"]
+        approach(self, "x", self.face[0])
+        approach(self, "y", self.y0)
+        approach(self, "z", self.face[2] + r + STANDOFF_MM)
+        self.jog("z", -max(0.0, gap() - CLOSE_MM), "inc_0.01")
+        self.jog("z", -(gap() + PRELOAD_MM), "inc_0.001", 150.0)
+        self.jog("y", LEVEL_SWEEP_MM, "inc_0.01", 200.0)
+        k.look(k.t, self.ball())
+        k.wait(1.0)
+        self.jog("z", 2 * INC["inc_0.1"], "inc_0.1")
+        for inc in ("inc_0.1", "inc_0.01"):                        # home: whole clicks at each, the rest at .001,
+            self.jog("z", math.trunc(-k.axis_mm[2] / INC[inc]) * INC[inc], inc)     # which the preload's clicks need
+        self.jog("z", -k.axis_mm[2], "inc_0.001", 150.0)
         k.rest_hand()
         k.wait(0.5)
         return {}
@@ -472,10 +542,27 @@ PROBES |= {
     ("ll-1005337", "op20"): {"bore": (-40.5, 579.5, -8.95), "datum": (-40.5, 579.5, -0.95),
                              "check": {"bore": (-20.5, 20.5, -8.95), "wcs": "G55"}},
 }
+# ll-1007224 Op 30 (G2), turned, lying on its flange (moonshot/motion/loads.py ENVELOPE_MM): X and Y by a boss cycle
+# round the Ø31.5 top spigot (model y 12.2..15.4, the axis y), the ball 1.6 mm above the flange, where the spigot is
+# straight between its R0.4 root and 0.5 chamfer (0.4..2.7); Z off the flange's top, halfway out between the spigot
+# and its edge, on the side the holes' pattern leaves bare (model -z). The cuts take the box down to the flange round
+# the spigot: a box's sides, tangent to the spigot where the cycle touches it on X and Y through its centre. They run
+# up well past the ball's reach: the probe senses the box less a cut as max(box, -cut), exact only inside the cut, so
+# a ball coming down outside it read the box's top (the spigot's height) 3.2 mm above the flange
+_SPIGOT_R, _AIR = 15.75, ((12.2, 60.0),)
+PROBES |= {
+    ("ll-1007224", "op30"): {"boss": ((0.0, 13.8, 0.0), _SPIGOT_R), "z": (0.0, 12.2, -23.5),
+                             "cuts": [((-32.0, -_SPIGOT_R), *_AIR, (-32.0, 32.0)), ((_SPIGOT_R, 32.0), *_AIR, (-32.0, 32.0)),
+                                      ((-_SPIGOT_R, _SPIGOT_R), *_AIR, (-32.0, -_SPIGOT_R)),
+                                      ((-_SPIGOT_R, _SPIGOT_R), *_AIR, (_SPIGOT_R, 32.0))],
+                             "datum": (0.0, 12.2, 0.0)},
+}
 # the fixed jaw's -x end, and its face 17 mm past the end of a part up to 83 mm long: 5 and 3 mm below its top
 FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
                          [-1.0, 0.0, 0.0]),
              "jaw_face": ([vise.VISE["x"] - 58.7, vise.VISE["fixed_face_y"], JAW_TOP_MM - 3.0], [0.0, -1.0, 0.0])}
+# the square checks across a face that faces up (LevelCheck): ll-1007223 Op 30's stem's side, PROBES's z touch
+LEVEL = {("ll-1007223", "op30")}
 # the square checks that sweep the part's right side, a stop against its left: from 15 mm above the vise's floor
 SQUARE = {("ct-slbeam", "op20"), ("ct-slbeam", "op30")}
 
@@ -526,6 +613,10 @@ def g1_features(plan: dict, setup_id: str, check: bool = False) -> dict:
     if "bore" in spec:
         b, top = world(spec["bore"]), c[2] + h[2]
         out["bore"] = {"centre_mm": b[:2].tolist(), "z_mm": float(b[2]), "r_mm": DOWEL_R_MM, "top_z_mm": float(top)}
+    if "boss" in spec:
+        point, r = spec["boss"]
+        b = world(point)
+        out["boss"] = {"centre_mm": b[:2].tolist(), "z_mm": float(b[2]), "r_mm": r}
     return out
 
 
@@ -557,6 +648,12 @@ def build(part: str, step_id: str, solve: bool = True, verbose: bool = True) -> 
         sq = StraightCheck(take, p)
         sets = sq.plan()
         tool = sq.tool
+    elif step["title"] == "Check it's square" and (part, setup) in LEVEL:
+        f = probe_features(plan, setup)
+        lv = LevelCheck(take, p, [*f["z"]["at_xy"], f["z"]["z_mm"]])
+        sets = lv.plan()
+        tool = lv.tool
+        extra = {"cuts": f["cuts"]}
     elif step["title"] == "Check it's square":
         sq = SquareCheck(take, p, **square_sweep(plan, setup, p))
         sets = sq.plan()

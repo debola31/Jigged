@@ -1,0 +1,7 @@
+{
+ "part": "ll-1011439",
+ "about": "What O2 (plan §2) holds ll-1011439's finished stock to: every face of the STEP within physics.stock_deviation_mm, nothing exempt and no band (read by moonshot/tests/gates/test_turned_ground_stock.py). Nothing is masked unless the user decides (2026-11-06). Protected (plan §6, rule 1): an exemption added here is a decision, made visibly.",
+ "exempt": [],
+ "band_mm": 0.0,
+ "held": "Every face of the STEP: each turned face (the Ø8 g6 pilot and its R0.2 relief, the shoulder, the Ø12.42, the R7 crown, the 15 deg lead, the R1 and the part-off face), the chamfers, and the M4 tap drill's hole and its point (the STEP models the thread at its Ø3.3 minor diameter)."
+}

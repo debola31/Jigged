@@ -41,7 +41,7 @@
     },
     "hand_tools": {
       "type": "array",
-      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["wrench_set", "deburring_kit"] } } }
+      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["wrench_set", "ratcheting_wrench", "deburring_kit", "bench_stone"] } } }
     },
     "support": {
       "type": "array",
@@ -299,7 +299,8 @@
             "live_center",
             "magnetic_chuck",
             "spin_indexer",
-            "edm_fixture"
+            "edm_fixture",
+            "keeper_set"
           ]
         },
         "name": { "type": "string", "minLength": 1 },
@@ -353,11 +354,11 @@
           "then": { "required": ["taper", "tool_number", "stylus_ball_diameter"] }
         },
         {
-          "if": { "properties": { "kind": { "enum": ["block_123", "angle_plate", "sine_plate", "soft_jaws"] } } },
+          "if": { "properties": { "kind": { "enum": ["block_123", "angle_plate", "sine_plate", "soft_jaws", "keeper_set"] } } },
           "then": { "required": ["size"] }
         },
         {
-          "if": { "properties": { "kind": { "const": "block_123" } } },
+          "if": { "properties": { "kind": { "enum": ["block_123", "keeper_set"] } } },
           "then": { "required": ["quantity"] }
         },
         {

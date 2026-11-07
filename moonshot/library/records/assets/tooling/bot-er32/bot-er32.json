@@ -1,0 +1,62 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "bot-er32",
+  "name": "BOT20 ID holder with an ER32 collet chuck",
+  "category": "tooling",
+  "make": "Haas Tooling",
+  "model": "BOT20 1-1/2 in Ø ID static turning holder (04-0757) with a 1-1/2 in straight-shank ER32 collet chuck",
+  "description": "An ID station holder bolted round the ST-25's BOT turret, its 1-1/2 in bore on the station's centreline, holding an ER32 collet chuck for the spot drill, the drills and the taps on the spindle's centre.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Turret",
+      "value": "BOT20 (ST-20, ST-25, ST-30...)"
+    },
+    {
+      "name": "Bore",
+      "value": 1.5,
+      "unit": "in"
+    },
+    {
+      "name": "Collet",
+      "value": "ER32"
+    },
+    {
+      "name": "Nut diameter",
+      "value": 50.0,
+      "unit": "mm"
+    }
+  ],
+  "source_urls": [
+    "https://www.haastooling.com/c/bot20-toolholding",
+    "https://www.haascnc.com/content/dam/haascnc/hfo-microsite/hfo-morris-trident/Morris_Trident_TMT-Haas-Lathe-Set-up.pdf"
+  ],
+  "source_files": [
+    "bot-er32.step"
+  ],
+  "license": "self-made from the makers' published sizes (moonshot.library.lathe_tooling); not the makers' CAD",
+  "notes": "Haas Tooling lists the BOT20 1-1/2 in ID holder (04-0757) for the ST-25 and says BOT turrets take bolt-on holders round their perimeter; the HFO's set-up course has ID holders bolted to the turret's outside to put the tools on centreline, holding them in a bore with lathe collets. Its seat and bore from the ST-25's turret (moonshot/library/stations/st25.json: the flat 229.5 mm from the turret's centre, the ID axis 278.0, the turret 109 mm thick). Proposed (no drawing to hand): the block 88.5 mm radially (from the flat to 40 mm past the axis), 100 mm wide, from the turret's back face to 25 mm proud of its front; the ER32 chuck's 95 mm of shank in the bore, a 42 mm body 40 mm long and a 50 mm nut 22.5 mm long. In a turret station's frame: x out along the station from the ID axis, z toward the chuck, the turret's front face at z = 0; mount it on the station's site (st25_station_k).",
+  "file": "bot-er32.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 3172,
+  "bbox": {
+    "min": [
+      -48.5,
+      -50.0,
+      -109.0
+    ],
+    "max": [
+      40.0,
+      50.0,
+      25.0
+    ]
+  },
+  "attach_points": [],
+  "build": {
+    "from": "source/bot-er32.step",
+    "placeholder": "lathe_tooling.bot_er32",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

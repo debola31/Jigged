@@ -63,7 +63,7 @@ function PartSlide({ part, onPick }: { part: LivePart; onPick(): void }) {
   );
 }
 
-/** The visitor's own part, first: the site's gradient call to action, shut ("Coming soon") until uploads open. */
+/** The visitor's own part, first: the site's gradient call to action, opening the interest form (PartChoice.tsx). */
 function OwnPart() {
   const [open, setOpen] = useState(false);
   return (
@@ -76,7 +76,7 @@ function OwnPart() {
       {UPLOADS_OPEN ? (
         <>
           <Button variant="contained" onClick={() => setOpen(true)} sx={gradientButtonSx}>
-            Send a part
+            Upload a part
           </Button>
           <PilotDialog open={open} onClose={() => setOpen(false)} />
         </>

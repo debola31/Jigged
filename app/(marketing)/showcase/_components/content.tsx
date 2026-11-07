@@ -454,7 +454,7 @@ export function DoneContent({ part, parts, onPick }: { part: LivePart; parts: Li
         <PartFacts part={part} />
       </Box>
       <Button variant="contained" size="large" fullWidth startIcon={<UploadFileOutlinedIcon />} disabled={!UPLOADS_OPEN} onClick={() => setPilot(true)} sx={{ mt: 3 }}>
-        {UPLOADS_OPEN ? 'Send us your own part' : 'Upload your own part: coming soon'}
+        {UPLOADS_OPEN ? 'Try it with your own part' : 'Upload your own part: coming soon'}
       </Button>
       <PartMenu
         parts={parts}

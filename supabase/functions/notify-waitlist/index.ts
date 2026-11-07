@@ -41,11 +41,56 @@ async function sendEmail(
   }
 }
 
-function buildWelcomeEmailHtml(name: string | null, companyName: string | null): string {
-  const greeting = name ? `Hi ${name},` : 'Hi there,';
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * What the visitor is told, by where they signed up. The showcase's "your own part" form
+ * (app/(marketing)/showcase/_components/InterestForm.tsx) records a feature request or a pilot
+ * commitment, not a shop being set up, so its sign-ups get a confirmation of what they asked for.
+ */
+interface Confirmation {
+  subject: string;
+  title: string;
+  /** The sentence after the greeting, with `{shop}` where the business name goes. */
+  body: string;
+  /** How the team's email names it. */
+  kind: string;
+}
+
+const CONFIRMATIONS: Record<string, Confirmation> = {
+  showcase_pilot: {
+    subject: "You're in the Jigged pilot",
+    title: "You're in the pilot",
+    body: "Thanks for joining the Jigged pilot for {shop}. We'll be in touch to set up a walkthrough of your part with your machines and tools.",
+    kind: 'pilot',
+  },
+  showcase_feature_request: {
+    subject: "We've got your request — Jigged",
+    title: "We've got your request",
+    body: "Thanks for asking to make walkthroughs of your own parts for {shop}. We'll let you know as soon as you can.",
+    kind: 'feature request',
+  },
+};
+
+const DEFAULT_CONFIRMATION: Confirmation = {
+  subject: 'We got your request — welcome to Jigged',
+  title: 'Welcome to Jigged',
+  body: "Thanks for signing up for {shop}. We're setting up your shop now — you'll get a personal login shortly.",
+  kind: 'signup',
+};
+
+function confirmationFor(source: string | null): Confirmation {
+  return (source && CONFIRMATIONS[source]) || DEFAULT_CONFIRMATION;
+}
+
+function buildWelcomeEmailHtml(name: string | null, companyName: string | null, c: Confirmation): string {
+  const greeting = name ? `Hi ${escapeHtml(name)},` : 'Hi there,';
   const shopText = companyName
-    ? `<strong style="color:#ffffff;">${companyName}</strong>`
+    ? `<strong style="color:#ffffff;">${escapeHtml(companyName)}</strong>`
     : 'your shop';
+  const body = escapeHtml(c.body).replace('{shop}', shopText).replace(/ — /g, ' &mdash; ');
 
   return `<!DOCTYPE html>
 <html>
@@ -72,11 +117,11 @@ function buildWelcomeEmailHtml(name: string | null, companyName: string | null):
           </svg>
         </td></tr>
         <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
-          Welcome to Jigged
+          ${escapeHtml(c.title)}
         </td></tr>
         <tr><td align="center" style="color:#B0B3B8; font-size:14px; line-height:1.5; padding-bottom:24px;">
           ${greeting}<br><br>
-          Thanks for signing up for ${shopText}. We're setting up your shop now &mdash; you'll get a personal login shortly.
+          ${body}
         </td></tr>
         <tr><td align="center" style="color:#B0B3B8; font-size:13px; padding-top:8px;">
           &mdash; Debola from Jigged
@@ -106,6 +151,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const { email, name, company_name, shop_size, source, created_at } = payload.record;
+    const confirmation = confirmationFor(source);
 
     // Send both emails in parallel
     const results = await Promise.allSettled([
@@ -113,7 +159,7 @@ Deno.serve(async (req: Request) => {
       sendEmail(apiKey, {
         from: 'Jigged <noreply@jigged.app>',
         to: 'debola@jigged.app',
-        subject: `New signup: ${company_name || 'Unknown'}`,
+        subject: `New ${confirmation.kind}: ${company_name || 'Unknown'}`,
         text: [
           'New waitlist request:',
           '',
@@ -130,12 +176,12 @@ Deno.serve(async (req: Request) => {
       sendEmail(apiKey, {
         from: 'Debola from Jigged <noreply@jigged.app>',
         to: email,
-        subject: 'We got your request — welcome to Jigged',
-        html: buildWelcomeEmailHtml(name, company_name),
+        subject: confirmation.subject,
+        html: buildWelcomeEmailHtml(name, company_name, confirmation),
         text: [
           `Hi ${name || 'there'},`,
           '',
-          `Thanks for signing up for ${company_name || 'your shop'}. We're setting up your shop now — you'll get a personal login shortly.`,
+          confirmation.body.replace('{shop}', company_name || 'your shop'),
           '',
           '— Debola from Jigged',
         ].join('\n'),

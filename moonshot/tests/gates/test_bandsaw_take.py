@@ -1,7 +1,7 @@
 """Cutting bar stock to length on the band saw (the bandsaw-cut-to-length card), for each part sawn from bar (G1's flat
 bars, G2's round), as the person's takes at the saw and the machine's cut between them (plan §5.4): the bar slid
 along the bed to the stop (<part>-saw), clamped by the handwheel (<part>-saw-clamp), the saw started and its feed
-opened (saw-start, the same for every flat bar; a round bar's own, <part>-saw-start), cut by the machine with no one
+opened (saw-start, the same for every flat bar; a round bar's own, saw-start-<part>), cut by the machine with no one
 at it (<part>-saw-cut), a flat bar's cut piece slid clear of the fixed jaw and the stop block (<part>-saw-slide), and
 taken off from where that, or for a round bar's disc the cut, left it (lift-out-<part>-saw). Physics tier, on the takes the runner writes to the data root (moonshot/sim/bandsaw.py).
 Protected (plan §6, rule 1).
@@ -44,7 +44,7 @@ def folders(part: str) -> dict[str, Path]:
     t = data_root() / "takes"
     round_bar = "bar_dia_mm" in load_plan(part)["stock"]
     out = {"load": t / f"{part}-saw", "clamp": t / f"{part}-saw-clamp",
-           "start": t / (f"{part}-saw-start" if round_bar else "saw-start"), "cut": t / f"{part}-saw-cut",
+           "start": t / (f"saw-start-{part}" if round_bar else "saw-start"), "cut": t / f"{part}-saw-cut",
            "slide": t / f"{part}-saw-slide", "unload": t / f"lift-out-{part}-saw"}
     if round_bar:
         del out["slide"]

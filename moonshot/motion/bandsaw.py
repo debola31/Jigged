@@ -81,13 +81,13 @@ OUT: dict = {"start": TAKES / "saw-start"}       # the part's takes by use_part 
 def use_part(part: str) -> None:
     """Plan for a part's bar: its plan's stock (saw_cell.use_stock) and its takes' folders. G1's flat bars share the
     controls' take (saw-start, planned with the first part's bar in the vise); a round bar, which would show another
-    bar in its vise there, has its own (<part>-saw-start). A round bar's cut piece, a disc, is lifted out where the cut
+    bar in its vise there, has its own (saw-start-<part>: <part>-saw-start is its step's video folder). A round bar's cut piece, a disc, is lifted out where the cut
     leaves it, with no slide first (DiscLiftPlan)."""
     from moonshot.planning.validate import load_plan
     SC.use_stock(part, load_plan(part)["stock"])
     OUT.update(load=TAKES / f"{part}-saw", clamp=TAKES / f"{part}-saw-clamp", cut=TAKES / f"{part}-saw-cut",
                slide=TAKES / f"{part}-saw-slide", unload=TAKES / f"lift-out-{part}-saw",
-               start=TAKES / (f"{part}-saw-start" if SC.STOCK["round"] else "saw-start"))
+               start=TAKES / (f"saw-start-{part}" if SC.STOCK["round"] else "saw-start"))
 
 RAISED_DEG = 10.0           # the head lowered this far from its top stop: the blade 177 mm over the bar, not the card's
                             # 25 mm, so that its idler guard is clear of the head of someone bent over the handwheel (at
@@ -272,16 +272,21 @@ class SawPlan(BenchPlan):
         return th
 
     def reach(self, side, grip, t0, ready, approach, opened, lead=0.12, reach_s=0.5, pre=0.25, rise_s=RISE_S,
-              still_s=STILL_S, rise_via=(), rest_open=0.15):
+              still_s=STILL_S, rise_via=(), rest_open=0.15, keep=()):
         """BenchPlan's reach to grasp: up from the thigh to ready, still, then onto the grip from approach, the hand
         widest `lead` before it comes to rest open round the grip, then closing on it. Here the rise and the pause
         are the take's (the physics arm trails a fast rise by 50-75 mm, and coming down behind its plan beside the
         saw's fixed jaw, its fingers struck the jaw's plate), and the hand pre-shapes as people's does through a
         movement: opened `pre` of the way by the middle of the rise, easing as it stops over the grip. Opened from the
         thigh straight through, it was widest at the end of the rise, unlike the card's footage, whose hand is widest
-        half way through each movement. Returns when the grip has closed."""
+        half way through each movement. keep: fingers held curled as the grip has them through the reach, out of the
+        way. Returns when the grip has closed."""
         from moonshot.motion.bench import CLOSE_S
         g = self.grips[grip]
+
+        def open_like(hand, q, amount, _open=open_like):     # noqa: N807  (the module's, with the kept fingers as q has them)
+            out = _open(hand, q, amount)
+            return out | {n: q[n] for n in q if any(n.startswith(f"{f}_") for f in keep)}
         t_ready = t0 + rise_s
         t_go = t_ready + still_s
         tc = t_go + reach_s

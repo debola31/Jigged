@@ -413,7 +413,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's four inspect steps (all but nist-ftc-10's) stay caption and still.
   - The setting takes render on the M4 as well as the M1 (the M1 alone needed about 47 h), only the video going to
     the hub.
-- [ ] Nov 7: G2 (3 parts) on the web. Started 17:30 on Nov 6, in parallel with G1's last takes (your decision, sooner
+- Dropped (your decision, late Nov 6: five parts at most on the page, G1's five). ~~Nov 7: G2 (3 parts) on the web~~. Started 17:30 on Nov 6, in parallel with G1's last takes (your decision, sooner
   than Nov 8-9 if it can be): the three plans (ct-tpg322, ll-1011439, ll-1007224), the Haas ST-25 lathe and the
   surface grinder as stations, and turning and surface grinding in the cut simulation, each gate first. G1's steps
   shown as caption and a still get their still rendered from the setup's scene (your decision, Nov 6).
@@ -454,9 +454,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     stored Y-up and were placed without the turn the bench's and the wrench's get). Fixed, and the 127 published
     tool-load takes re-render on the M1 and the hub's GPU, nist-ftc-10 first, each step's video replaced as its
     corrected one lands; the M4 stays on G2. The machining stills that show a tool are rendered again.
-- [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
-- [ ] Nov 10: G4 (5 parts) on the web
-- [ ] Nov 11: G5; all 20 parts on the web
+  Later on Nov 6 the hub's GPU proved slow (11 s a frame), so the re-renders also take the bottom of the M4's queue
+  (your decision), everything above them going first.
+- Your decision, late Nov 6: **five parts at most on the page: G1's five** (nist-ftc-10, ct-slbeam, ll-1007223,
+  ll-1005337, nist-ftc-09). G2 comes off the page and its work stops; G3 to G5 are dropped. G1's remaining steps are
+  finished as takes where a take passes and as a caption and still otherwise, with no more open-ended tuning. The
+  tool-load re-renders carry on for all five.
+- ~~Nov 9: G3 (5 parts) on the web; all 36 stations conformant~~ (dropped, your decision, Nov 6)
+- ~~Nov 10: G4 (5 parts) on the web~~ (dropped)
+- ~~Nov 11: G5; all 20 parts on the web~~ (dropped)
 - [ ] Nov 13: sharing and final fixes done
 
 ## 7. Cloud reserve (only if the forecast slips past Nov 11)

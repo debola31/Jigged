@@ -189,7 +189,7 @@ export function StepList({ part, onPick, dense = true }: { part: LivePart; onPic
                   <KindIcon kind={s.kind} sx={{ fontSize: 18 }} />
                 </ListItemIcon>
                 <ListItemText primary={`${i + 1}. ${s.title}`} />
-                {!ready(s) && <HourglassEmptyOutlinedIcon aria-label={s.media.type === 'cut' ? 'Picture coming' : 'Video coming'} sx={{ fontSize: 16, color: 'text.secondary', ml: 1 }} />}
+                {!ready(s) && <HourglassEmptyOutlinedIcon aria-label={s.media.type === 'video' ? 'Video coming' : 'Picture coming'} sx={{ fontSize: 16, color: 'text.secondary', ml: 1 }} />}
               </ListItemButton>
             ),
           )}
@@ -296,7 +296,7 @@ export function NeedContent({ cat, part }: { cat: Catalog; part: LivePart }) {
 /**
  * A step: its setup's colour and its kind's icon, its title, then its video (or the part after a
  * machine cycle) as large as the card. What it says, where and with what are under Details: the shop
- * already marks the station and the tools.
+ * already marks the station and the tools. A step shown as a still has what it says under the still.
  */
 export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart; index: number }) {
   const step = part.steps[index];
@@ -307,7 +307,9 @@ export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart
   const [modelShown, setModelShown] = useState<string | null>(null);
   const reported = useRef(new Set<string>());
   const finePointer = useFinePointer();
-  const what = step.media.type === 'cut' ? 'picture' : 'video';
+  const what = step.media.type === 'video' ? 'video' : 'picture';
+  // A step shown as a still has its caption under the picture, not under Details: the two are the step.
+  const captioned = ready(step) && step.media.type === 'still';
   const report = (error: unknown) => {
     // Published media that won't load is a fault; unpublished media never gets here.
     if (reported.current.has(step.id)) return;
@@ -356,6 +358,18 @@ export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart
               </Typography>
             )}
           </>
+        ) : step.media.type === 'still' ? (
+          <Box
+            component="img"
+            key={step.id}
+            src={mediaUrl(step.media.still)}
+            alt={`This step as it starts: ${step.title}`}
+            onError={() => {
+              setFailed(step.id);
+              report(new Error('still failed to load'));
+            }}
+            sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          />
         ) : (
           <Box
             component="video"
@@ -380,12 +394,19 @@ export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart
           </Typography>
         )}
       </Box>
+      {captioned && (
+        <Typography aria-live="polite" sx={{ mt: 1.5, fontSize: '1.05rem', lineHeight: 1.55 }}>
+          {step.caption}
+        </Typography>
+      )}
       <Details open={details} onToggle={() => setDetails((d) => !d)}>
         {/* Side by side once the card is wide enough. */}
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', columnGap: 3, alignItems: 'start' }}>
-          <Box sx={{ mt: 1.5 }} aria-live="polite">
-            <Typography sx={{ fontSize: '1.05rem', lineHeight: 1.55 }}>{step.caption}</Typography>
-          </Box>
+          {!captioned && (
+            <Box sx={{ mt: 1.5 }} aria-live="polite">
+              <Typography sx={{ fontSize: '1.05rem', lineHeight: 1.55 }}>{step.caption}</Typography>
+            </Box>
+          )}
           <Box>
             <Section title="Where">
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

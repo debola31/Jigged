@@ -22,12 +22,20 @@ The part is drawn as the cutting simulation (moonshot/sim/cycle_take.py) has it:
 setup's first cycle's stock at its first frame; leaving it ("out"), its last cycle's last stock. Each GLB is in the
 part's model frame (its STEP's); the cycle's blank stands at part_pose's origin turned R, so moved into this take's
 blank, the box part_pose centres (it carries no turn), a model point p is at R (p - envelope's middle). Its physics
-is that box, as every vise take's. A setup none of whose cycles has run yet draws the box (vise.render_meshes). A plate
-is drawn from its geoms, as the plates' own takes draw it.
+is that box, as every vise take's. A setup none of whose cycles has run yet draws the finished part if it has one, else
+the box (vise.render_meshes). A plate is drawn from its geoms, as the plates' own takes draw it.
+
+The part's mesh is written into the take's folder when its run is exported, so the render draws the stock as it was
+then. When a setup's stock comes later (ll-1007224 op30's, drawn finished until the cutting simulation hands it the
+part as op20 leaves it), its takes are drawn again from it without running them again: the physics is the box's.
+
+    python -m moonshot.sim.setup_scene ll-1007224-op30-door-close ...     # each take's part drawn from its stock now
 """
 from __future__ import annotations
 
+import json
 import re
+import sys
 from pathlib import Path
 
 import mujoco
@@ -150,15 +158,20 @@ class Table:
 
     def meshes(self, folder: Path) -> dict[str, dict]:
         """The parallels (and stop) as boxes at the load's size, and the part as its stock (stock_glb), each written
-        into the take's folder; a plate, nothing (drawn from its geoms)."""
+        into the take's folder; a plate, nothing (drawn from its geoms). A setup none of whose cycles has run yet draws
+        the finished part (parts/<part>/finished.glb, the STEP in metres: moonshot/library/bench_links.py), its holes
+        and all, if the part has one; else the box."""
         if self.is_plate:
             return {}
         out = V.render_meshes(self.load, folder)
-        src = self.stock_glb()
+        src, scale = self.stock_glb(), 1.0
         if src is None:
-            return out
+            src, scale = data_root() / "parts" / self.part / "finished.glb", 1000.0
+            if not src.exists():
+                return out
         import trimesh
         mesh = trimesh.load(src, force="mesh")
+        mesh.apply_scale(scale)
         R, mid = np.asarray(self.pose["R"], float), np.asarray(self.pose["envelope_mm"], float).mean(1)
         T = np.eye(4)
         T[:3, :3], T[:3, 3] = R, -R @ mid
@@ -166,3 +179,17 @@ class Table:
         (Path(folder) / "blank").mkdir(parents=True, exist_ok=True)
         mesh.export(Path(folder) / "blank" / "0.glb")
         return out
+
+
+def redraw(folder: Path) -> Path | None:
+    """A per-setup take's part drawn again from the stock as it is now (Table.meshes), its record and physics as
+    they were; returns the stock GLB it is drawn from (None: the finished part or the box)."""
+    tk = json.loads((Path(folder) / "take.json").read_text(encoding="utf-8"))
+    table = Table(tk)
+    table.meshes(Path(folder))
+    return table.stock_glb()
+
+
+if __name__ == "__main__":
+    for name in sys.argv[1:]:
+        print(name, "drawn from", redraw(data_root() / "takes" / name) or "the finished part", flush=True)

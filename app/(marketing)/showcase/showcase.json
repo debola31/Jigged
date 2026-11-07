@@ -1880,7 +1880,7 @@
       "type": "video",
       "path": "video/nist-ftc-09/op10-tools.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-start",
@@ -2270,10 +2270,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/nist-ftc-09/inspect.mp4"
+      "type": "still",
+      "still": "still/nist-ftc-09/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -2902,10 +2902,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/inspect.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -3057,10 +3057,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-clean.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-clean.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -3086,10 +3086,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -3115,10 +3115,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -3144,10 +3144,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-check.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",
@@ -3285,10 +3285,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-clean",
@@ -3343,10 +3343,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-seat",
@@ -3372,10 +3372,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-check",
@@ -3521,10 +3521,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clean",
@@ -3579,10 +3579,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-seat",
@@ -3608,10 +3608,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-check",
@@ -3868,10 +3868,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-clean",
@@ -3897,10 +3897,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-clean.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-clean.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-load",
@@ -3926,10 +3926,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-seat",
@@ -3955,10 +3955,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-check",
@@ -3984,10 +3984,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-check.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-xy",
@@ -4267,10 +4267,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",
@@ -4345,10 +4345,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/inspect.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -4524,10 +4524,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -4553,10 +4553,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -4582,10 +4582,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-check.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",
@@ -4843,10 +4843,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-clean",
@@ -4901,10 +4901,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-seat",
@@ -4930,10 +4930,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-check",
@@ -4959,10 +4959,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-check.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-xy",
@@ -5182,10 +5182,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clean",
@@ -5240,10 +5240,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-seat",
@@ -5269,10 +5269,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-check",
@@ -5533,10 +5533,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",
@@ -5611,10 +5611,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/inspect.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -5644,7 +5644,7 @@
     {
      "id": "op10-clean",
      "title": "Clean the chuck",
-     "caption": "Wipe the magnetic chuck and the three 1/8 in parallels clean.",
+     "caption": "Wipe the magnetic chuck and the three grinding keepers clean.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5656,12 +5656,8 @@
      },
      "uses": [
       {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
-      {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5673,7 +5669,7 @@
     {
      "id": "op10-load",
      "title": "Block the part in",
-     "caption": "Set the part on the magnetic chuck, top up, and set the three 1/8 in parallels tight round it.",
+     "caption": "Set the part on the magnetic chuck, top up, and set the three grinding keepers tight round it.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5685,12 +5681,8 @@
      },
      "uses": [
       {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
-      {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5702,7 +5694,7 @@
     {
      "id": "op10-seat",
      "title": "Switch the magnet on",
-     "caption": "Switch the magnet on, holding the three 1/8 in parallels against the part.",
+     "caption": "Switch the magnet on, holding the three grinding keepers against the part.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5714,12 +5706,8 @@
      },
      "uses": [
       {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
-      {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5743,7 +5731,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5755,7 +5744,7 @@
     {
      "id": "op10-edge1",
      "title": "Grind the first edge's chipbreaker",
-     "caption": "Grind the first edge's chipbreaker: .055 wide and .008 deep, .010 in from the edge, in two cross positions .020 in apart, the table rocked about 3 mm along the edge's middle, with the diamond wheel.",
+     "caption": "Grind the first edge's chipbreaker: the coolant switched on, then .055 wide and .008 deep, .010 in from the edge, in two cross positions .020 in apart, each pass the table rocked about 3 mm along the edge's middle from the front and the wheel fed down .0005 in from the column's right side, with the diamond wheel.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5767,7 +5756,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5779,7 +5769,7 @@
     {
      "id": "op10-edge2",
      "title": "Grind the second edge's chipbreaker",
-     "caption": "Grind the second edge's chipbreaker: the magnet off, the insert turned 120 deg between its keepers and the magnet on again, then ground as the first, with the diamond wheel.",
+     "caption": "Grind the second edge's chipbreaker: the coolant off and the table run clear, the magnet off, the insert turned 120 deg between its keepers, the magnet and the coolant on again, then ground as the first, with the diamond wheel.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5791,7 +5781,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5815,7 +5806,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5827,7 +5819,7 @@
     {
      "id": "op10-unload",
      "title": "Take the part out",
-     "caption": "Switch the magnet off, lift the part out and take the three 1/8 in parallels off.",
+     "caption": "Switch the coolant off and run the table clear, then switch the magnet off, lift the part out and take the three grinding keepers off.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5940,7 +5932,7 @@
     {
      "id": "op10-seat",
      "title": "Clamp it",
-     "caption": "Tighten the collet with the chuck key.",
+     "caption": "Close the collet with the foot pedal.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -6168,7 +6160,7 @@
     {
      "id": "op10-unload",
      "title": "Open the door and pick the part out",
-     "caption": "Open the door, blow the chips off, pick the part out of the chip tray, then loosen the collet with the key and take out the bar's end.",
+     "caption": "Open the door, blow the chips off, pick the part out of the chip tray, then open the collet with the foot pedal and take out the bar's end.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -9043,6 +9035,22 @@
     "facts": []
    },
    {
+    "item": "bench-stone-1",
+    "asset": "bstone",
+    "x": 25770.8,
+    "y": 6092.6,
+    "z": 863.6,
+    "rot": 180,
+    "name": "6 x 2 x 1\" India bench stone, coarse and fine",
+    "category": "hand_tools",
+    "kind": "bench_stone",
+    "zone": "benches",
+    "on": "bench-lathe",
+    "make": "Norton",
+    "model": "IB6 (61463685560)",
+    "facts": []
+   },
+   {
     "item": "bench-grinder-1",
     "asset": "bgrind",
     "x": 45540.4,
@@ -9292,6 +9300,60 @@
      [
       "Capacity pole pitch",
       "0.25"
+     ]
+    ]
+   },
+   {
+    "item": "keepers-1",
+    "asset": "keeper",
+    "x": 30300,
+    "y": 12000,
+    "z": 850,
+    "rot": 0,
+    "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+    "category": "workholding",
+    "kind": "keeper_set",
+    "zone": "grinding",
+    "on": "cart-grind",
+    "facts": [
+     [
+      "Quantity",
+      "3"
+     ],
+     [
+      "Size",
+      "1.5, 0.5, 0.125"
+     ]
+    ]
+   },
+   {
+    "item": "diamond-wheel-1",
+    "asset": "dwheel-1a1r",
+    "x": 30250,
+    "y": 12350,
+    "z": 850,
+    "rot": 0,
+    "name": "6 x 0.035 x 1-1/4\" 1A1R resin diamond wheel, 120 grit, on its own hub",
+    "category": "consumables",
+    "kind": "grinding_wheel",
+    "zone": "grinding",
+    "on": "cart-grind",
+    "facts": [
+     [
+      "Specs diameter",
+      "6.0"
+     ],
+     [
+      "Specs width",
+      "0.035"
+     ],
+     [
+      "Specs bore",
+      "1.25"
+     ],
+     [
+      "Specs abrasive",
+      "ASD120-R100B99-1/4 resin diamond"
      ]
     ]
    },
@@ -11002,6 +11064,39 @@
     ]
    },
    {
+    "item": "micrometer-2-1",
+    "asset": "mic2",
+    "x": 46220,
+    "y": 11949.5,
+    "z": 860,
+    "rot": 0,
+    "name": "1-2\" outside micrometer",
+    "category": "inspection",
+    "kind": "micrometer",
+    "zone": "inspection",
+    "on": "insp-table",
+    "make": "Mitutoyo",
+    "model": "103-178",
+    "facts": [
+     [
+      "Range min",
+      "1.0"
+     ],
+     [
+      "Range max",
+      "2.0"
+     ],
+     [
+      "Resolution",
+      "0.001"
+     ],
+     [
+      "Accuracy",
+      "0.0001"
+     ]
+    ]
+   },
+   {
     "item": "comparator-1",
     "asset": "compar",
     "x": 48850.2,
@@ -11546,6 +11641,54 @@
      {
       "name": "Filler",
       "value": "silver braze alloy with flux (typical)"
+     }
+    ]
+   },
+   "bstone": {
+    "name": "Bench stone, India, 6 x 2 x 1 in",
+    "model": "models/bstone.glb",
+    "bbox": {
+     "min": [
+      -76.2,
+      -25.4,
+      -0.0
+     ],
+     "max": [
+      76.2,
+      25.4,
+      25.4
+     ]
+    },
+    "description": "6 x 2 x 1 in India combination oil stone, coarse and fine, fine face up: for stoning a burr or a part-off pip flat.",
+    "key_specs": [
+     {
+      "name": "Length",
+      "value": 6,
+      "unit": "in"
+     },
+     {
+      "name": "Width",
+      "value": 2,
+      "unit": "in"
+     },
+     {
+      "name": "Thickness",
+      "value": 1,
+      "unit": "in"
+     },
+     {
+      "name": "Abrasive",
+      "value": "India (aluminium oxide), an oil stone"
+     },
+     {
+      "name": "Grit",
+      "value": "coarse and fine, one each face; 320 grit (Norton)"
+     },
+     {
+      "name": "Mass",
+      "value": 540,
+      "unit": "g",
+      "note": "volume x 2.75 g/cc [proposed]"
      }
     ]
    },
@@ -12801,6 +12944,58 @@
      }
     ]
    },
+   "dwheel-1a1r": {
+    "name": "Diamond wheel, 1A1R, 6 x 0.035 x 1-1/4 in, 120 grit, on its own hub",
+    "model": "models/dwheel-1a1r.glb",
+    "bbox": {
+     "min": [
+      -76.2,
+      -76.2,
+      0.0
+     ],
+     "max": [
+      76.2,
+      76.2,
+      13.58
+     ]
+    },
+    "description": "Thin straight resin-bond diamond wheel for slotting carbide on the surface grinder, kept mounted between its own flanges on its own hub, as a carbide shop keeps its diamond wheel; grinds ct-tpg322's chipbreaker.",
+    "key_specs": [
+     {
+      "name": "Size",
+      "value": "6 x 0.035 x 1-1/4 in (152.4 x 0.889 x 31.75 mm)"
+     },
+     {
+      "name": "Type",
+      "value": "1A1R: straight, rim and core one thickness"
+     },
+     {
+      "name": "Abrasive",
+      "value": "synthetic diamond, 120 grit, concentration 100, resin bond (ASD120-R100B99-1/4)"
+     },
+     {
+      "name": "Diamond depth",
+      "value": 0.25,
+      "unit": "in"
+     },
+     {
+      "name": "Max speed",
+      "value": 6048,
+      "unit": "rpm"
+     },
+     {
+      "name": "Flanges",
+      "value": "two, 4 in across, 1/4 in thick",
+      "note": "proposed: the grinder STEP's flange size"
+     },
+     {
+      "name": "Mass",
+      "value": 0.85,
+      "unit": "kg",
+      "note": "the steel core 0.12 kg and the flanges 0.73 kg"
+     }
+    ]
+   },
    "edgef": {
     "name": "Edge finder",
     "model": "models/edgef.glb",
@@ -13485,6 +13680,50 @@
      }
     ]
    },
+   "keeper": {
+    "name": "Grinding keeper, 1/8 x 1/2 x 1-1/2 in",
+    "model": "models/keeper.glb",
+    "bbox": {
+     "min": [
+      -19.05,
+      -6.35,
+      0.0
+     ],
+     "max": [
+      19.05,
+      6.35,
+      3.175
+     ]
+    },
+    "description": "A short ground steel strip laid flat on the surface grinder's magnetic chuck, set tight against a part too weakly magnetic or too small for the chuck to hold alone: the magnet holds the keeper, and the keepers trap the part. Three in a pinwheel block in ct-tpg322's carbide insert.",
+    "key_specs": [
+     {
+      "name": "Size",
+      "value": "1/8 x 1/2 x 1-1/2 in (3.175 x 12.7 x 38.1 mm)"
+     },
+     {
+      "name": "Stock",
+      "value": "1/8 x 1/2 x 18 in precision ground flat stock, AISI O-1, oil hardening"
+     },
+     {
+      "name": "Length",
+      "value": 1.5,
+      "unit": "in",
+      "note": "proposed: cut from the 18 in bar so a pinwheel of three round a 3/8 in IC triangle reaches 23 mm behind it and 35 in front, inside the chuck and clear of the spindle's housing with the 6 in wheel at the work"
+     },
+     {
+      "name": "Hold on the grinder's chuck",
+      "value": 100,
+      "unit": "N",
+      "note": "its 1/2 x 1-1/2 in face at the chuck's rated 20.7 N/cm2 (moonshot/library/stations/sgrind.json chuck)"
+     },
+     {
+      "name": "Mass",
+      "value": 0.012,
+      "unit": "kg"
+     }
+    ]
+   },
    "kmill": {
     "name": "Bridgeport-type turret knee mill",
     "model": "models/kmill.glb",
@@ -13759,6 +13998,79 @@
      {
       "name": "Measuring faces",
       "value": "Carbide tipped, with ratchet stop"
+     }
+    ]
+   },
+   "mic2": {
+    "name": "Outside micrometer, 1-2 in",
+    "model": "models/mic2.glb",
+    "bbox": {
+     "min": [
+      -79.96,
+      -29.5,
+      -0.0
+     ],
+     "max": [
+      79.95,
+      29.5,
+      18.0
+     ]
+    },
+    "description": "1-2 in outside micrometer with ratchet stop, for checking diameters and thicknesses to 0.0001 in.",
+    "key_specs": [
+     {
+      "name": "Range",
+      "value": [
+       1,
+       2
+      ],
+      "unit": "in"
+     },
+     {
+      "name": "Graduation",
+      "value": 0.001,
+      "unit": "in"
+     },
+     {
+      "name": "Accuracy",
+      "value": 0.0001,
+      "unit": "in",
+      "note": "plus or minus (MPE E)"
+     },
+     {
+      "name": "Spindle diameter",
+      "value": 6.35,
+      "unit": "mm",
+      "note": "d"
+     },
+     {
+      "name": "Throat depth",
+      "value": 38,
+      "unit": "mm",
+      "note": "c"
+     },
+     {
+      "name": "Thimble diameter",
+      "value": 18,
+      "unit": "mm"
+     },
+     {
+      "name": "Measuring force",
+      "value": [
+       5,
+       10
+      ],
+      "unit": "N"
+     },
+     {
+      "name": "Measuring faces",
+      "value": "carbide-tipped, micro-lapped, with ratchet stop"
+     },
+     {
+      "name": "Mass",
+      "value": 215,
+      "unit": "g",
+      "note": "Mitutoyo's datasheet"
      }
     ]
    },

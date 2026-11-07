@@ -420,6 +420,18 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   Your G2 decisions, Nov 6: ct-tpg322 is blocked in on the surface grinder's magnetic chuck with ground steel
   keepers (C2 carbide holds at about 5% of steel); its chipbreaker is ground by hand at the handwheels, the
   shop's routing kept and the three nose regions exempted in the stock compare, as what a straight wheel leaves.
+  Later on Nov 6:
+  - The edge grind keeps the grinder's CAD: the down-feed handwheel is 1.4 m up on the column's right side, out of
+    reach of the table handwheel, so each pass is a front take (rocking the table) then a right-side take (the
+    down-feed), joined by declared cuts, the video showing one or two cycles.
+  - The grinder gets SB1029's optional flood coolant (a switch on the control box, a nozzle on the guard), the flow
+    drawn but not simulated.
+  - The grinder's table rack, cross screw and down-feed screw are declared as exact ratios, and the magnetic chuck's
+    pull as a physical force on the chuck and on each part it holds.
+  - ll-1007224 op30's parallels sit 28.3 mm off the part's centre (the plan's), so the five holes come out between
+    them; the one about 1.6 mm from the fixed jaw is slid down the jaw face into place, a take.
+  - ll-1011439's deburr is a take: a bench stone joins the inspection bench, and the deburr gate's minimum stroke
+    is shortened for small parts (the pin's longest edge is 39 mm round).
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web
 - [ ] Nov 11: G5; all 20 parts on the web

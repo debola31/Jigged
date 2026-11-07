@@ -711,6 +711,15 @@
       "asset": "blk123"
     },
     {
+      "id": "keepers-1",
+      "kind": "keeper_set",
+      "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+      "asset": "keeper",
+      "location": "grinder-1",
+      "quantity": 3,
+      "size": [1.5, 0.5, 0.125]
+    },
+    {
       "id": "clamp-kit-1",
       "kind": "clamp_kit",
       "name": "McMaster 8957A43 step-clamp and T-slot kit, 5/8\" slots",
@@ -1266,6 +1275,17 @@
       "range": {"min": 0.0, "max": 24.0},
       "resolution": 0.0005,
       "accuracy": 0.002
+    },
+    {
+      "id": "micrometer-2-1",
+      "kind": "micrometer",
+      "name": "1-2\" outside micrometer",
+      "make": "Mitutoyo",
+      "model": "103-178",
+      "asset": "mic2",
+      "range": {"min": 1.0, "max": 2.0},
+      "resolution": 0.001,
+      "accuracy": 0.0001
     }
   ],
   "consumables": [
@@ -1276,6 +1296,14 @@
       "asset": "gwheel",
       "location": "grinder-1",
       "specs": {"diameter": 10.0, "width": 1.0, "bore": 3.0, "abrasive": "A46-H vitrified"}
+    },
+    {
+      "id": "diamond-wheel-1",
+      "kind": "grinding_wheel",
+      "name": "6 x 0.035 x 1-1/4\" 1A1R resin diamond wheel, 120 grit, on its own hub",
+      "asset": "dwheel-1a1r",
+      "location": "grinder-1",
+      "specs": {"diameter": 6.0, "width": 0.035, "bore": 1.25, "abrasive": "ASD120-R100B99-1/4 resin diamond"}
     },
     {
       "id": "dresser-1",
@@ -1296,7 +1324,8 @@
   "hand_tools": [
     {"id": "wrenches-1", "kind": "wrench_set", "name": "Wrenches, hex keys, vise handle and chuck key", "asset": "wrench"},
     {"id": "ratchet-wrench-1", "kind": "ratcheting_wrench", "name": "3/4 in ratcheting combination wrench", "asset": "ratchet-wrench"},
-    {"id": "deburr-1", "kind": "deburring_kit", "name": "Deburring tools, files and abrasive pads", "asset": "deburr"}
+    {"id": "deburr-1", "kind": "deburring_kit", "name": "Deburring tools, files and abrasive pads", "asset": "deburr"},
+    {"id": "bench-stone-1", "kind": "bench_stone", "name": "6 x 2 x 1\" India bench stone, coarse and fine", "make": "Norton", "model": "IB6 (61463685560)", "asset": "bstone"}
   ],
   "support": [
     {

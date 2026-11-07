@@ -32,6 +32,7 @@ DOOR = ' conaffinity="2"'
 INCH = 25.4
 POCKETS = 20                      # the umbrella carousel's (vf2.json tool_changer)
 PROBE_FAST_MM_S, PROBE_SLOW_MM_S, PROBE_BACK_MM = 8.0, 0.5, 1.0   # Renishaw's cycles find fast, back off, measure slow [proposed]
+BOSS_CLEAR_MM = 5.0         # a boss cycle comes down this far out from the boss's side, then probes in [proposed]
 
 
 # The spindle's bore and drawbar, in the spindle's frame (mm: its gauge point, +Z up the axis), for a CAT40 holder
@@ -495,8 +496,11 @@ class Control:
     def vps(self, template: str, **v) -> None:
         """A probing cycle output from VPS to MDI, to run on Cycle Start: "surface" (axis, sign: one touch, its offset
         the ball's radius beyond the ball's centre; in Z the probe's length below its gauge line), "bore" (four
-        touches, the centre in X and Y), or "tool_length" (the tool in the spindle down onto the tool setter, whose top
-        is setter_z; gauge_length is the operator's approximate length, to come down to it at rapid). A cycle writes
+        touches, the centre in X and Y), "boss" (four touches from outside a boss the probe starts over: out past its
+        side, dia_mm across, by BOSS_CLEAR_MM, down depth_mm, in to it, then back out and up over it to the far side;
+        Y's pair from over X's centre; the centre in X and Y), or "tool_length" (the tool in the spindle down onto the
+        tool setter, whose top is setter_z; gauge_length is the operator's approximate length, to come down to it at
+        rapid). A cycle writes
         the work offset "wcs" names, G54 unless it names another (G55, to measure without moving the zero)."""
         s, r = self.machine_mm().copy(), v.get("ball_r", 0.0)
         G = self.work.setdefault(v.get("wcs", "G54"), np.zeros(3))
@@ -514,6 +518,20 @@ class Control:
             mid = lambda: np.r_[(self._touches[0][0] + self._touches[1][0]) / 2, s[1], s[2]]     # noqa: E731
             self.cycle = [("probe", ex, 20.0), ("move", s), ("probe", -ex, 20.0), ("move", mid),
                           ("probe", ey, 20.0), ("move", mid), ("probe", -ey, 20.0), ("move", mid)]
+
+            def done(t):
+                G[0], G[1] = (t[0][0] + t[1][0]) / 2, (t[2][1] + t[3][1]) / 2
+        elif template == "boss":
+            ex, ey = np.array([1.0, 0, 0]), np.array([0, 1.0, 0])
+            out, down = v["dia_mm"] / 2 + BOSS_CLEAR_MM, np.array([0, 0, -v["depth_mm"]])
+            mid = lambda: np.r_[(self._touches[0][0] + self._touches[1][0]) / 2, s[1], s[2]]     # noqa: E731
+            self.cycle = []
+            for over, u in ((lambda: s, ex), (lambda: s, -ex), (mid, ey), (mid, -ey)):
+                at = lambda over=over, u=u: over() + u * out             # noqa: E731  out past the side, up high
+                low = lambda at=at: at() + down                          # noqa: E731  and down beside it
+                self.cycle += [("move", at), ("move", low), ("probe", -u, 2 * BOSS_CLEAR_MM), ("move", low),
+                               ("move", at)]
+            self.cycle.append(("move", lambda: np.r_[mid()[0], (self._touches[2][1] + self._touches[3][1]) / 2, s[2]]))
 
             def done(t):
                 G[0], G[1] = (t[0][0] + t[1][0]) / 2, (t[2][1] + t[3][1]) / 2

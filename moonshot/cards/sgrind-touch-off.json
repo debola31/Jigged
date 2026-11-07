@@ -1,0 +1,40 @@
+{
+ "schema": "jigged.card/1",
+ "id": "sgrind-touch-off",
+ "name": "Touch the surface grinder's wheel off on the work: down until it just sparks, the down-feed dial zeroed; and its side off on an edge, by the cross-feed dial",
+ "assets": ["sgrind"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "turns the down-feed handwheel and sets its dial; turns the cross-feed handwheel",
+   "grasps": {"downfeed_handwheel": "tip_pinch", "downfeed_dial": "tip_pinch", "cross_handwheel": "tip_pinch"},
+   "contacts": [{"digit": "thumb", "on": "downfeed_handwheel"}, {"digit": "index", "on": "downfeed_handwheel"},
+                {"digit": "thumb", "on": "downfeed_dial"}, {"digit": "index", "on": "downfeed_dial"},
+                {"digit": "thumb", "on": "cross_handwheel"}, {"digit": "index", "on": "cross_handwheel"}]
+  },
+  "steadying": {
+   "side": "L", "role": "rocks the table by its handwheel to bring the work under the wheel and away again",
+   "grasps": {"table_handwheel": "small_diameter"},
+   "contacts": [{"digit": "palm", "on": "table_handwheel"}]
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "With the wheel running and the coolant off, the table traversed and the saddle fed to bring the work just beside the wheel, the head lowered fast by the down-feed handwheel to a few millimetres above the work [proposed: force_n, duration_s, the gap]",
+   "action": "turn", "on": "downfeed_handwheel", "force_n": 8, "duration_s": [5, 15], "ends_on": "the wheel's bottom about 1 mm above the work, by eye", "source": 0},
+  {"phase": "operate", "what": "Then a graduation (0.0002 in) at a time, the table rocked a little under the wheel between each, until a first spark [proposed: force_n, duration_s]",
+   "action": "turn", "on": "downfeed_handwheel", "force_n": 4, "duration_s": [10, 30], "ends_on": "a single spark, or a faint scratch on the work", "source": 1},
+  {"phase": "operate", "what": "Hold the handwheel and turn the dial alone to its zero: that is the work's top [proposed: force_n, duration_s]",
+   "action": "turn", "on": "downfeed_dial", "force_n": 2, "duration_s": 1.5, "ends_on": "the dial at zero, the handwheel unmoved", "source": 1},
+  {"phase": "operate", "what": "For a slot set from an edge: raise the wheel clear, bring its side to the edge with the cross-feed until it just sparks on the edge, note the cross dial, raise clear again, and feed across by the dial to where the slot begins [proposed: force_n, duration_s]",
+   "action": "turn", "on": "cross_handwheel", "force_n": 3, "duration_s": [10, 25], "ends_on": "the cross dial at the slot's offset from the edge", "source": 2}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "South Bend Lathe Co., Model SB1029 Owner's Manual (2010): Operation Overview (p. 20, step 5: the wheel lowered to just above the work's top), Using the Surface Grinder (p. 32: the elevation handwheel governs the stock removed; the cross handwheel between passes), Machine Specifications (vertical handwheel 0.0002 in a graduation, 0.05 in a turn; cross 0.001 in, 0.2 in)",
+   "url": "https://archive.org/download/manualsonline-id-7918a92e-d1b2-4fbe-bb4c-6217a681a58e/7918a92e-d1b2-4fbe-bb4c-6217a681a58e.pdf",
+   "gives": "the wheel down to just above the work; the handwheels' graduations"},
+  {"kind": "practice", "ref": "The station's down-feed and its friction-held dial (moonshot/library/stations/sgrind.json joints.downfeed_handwheel, downfeed_dial; its gate test_sgrind_conformance.py), and the ct-tpg322 plan's datum (the wheel touched down on the insert's top and the dial zeroed)",
+   "gives": "a graduation at a time to the touch; the dial turned alone to zero without moving the wheel"},
+  {"kind": "practice", "ref": "The ct-tpg322 plan's cross datum: the wheel's outer side set .010 in inside the cutting edge with the cross-feed, by the dial from the wheel's side touched on the edge (moonshot/planning/plans/ct-tpg322.json setups op10 datum.cross)",
+   "gives": "the side touch-off on an edge and the offset by the cross dial"}
+ ],
+ "notes": "On this grinder the down-feed handwheel is on the column's right side, 1.4 m up, and the table and cross handwheels are at the front: a hand on the down-feed can't reach the table's, so a touch-off made from the down-feed's side brings the work under the wheel first and lowers onto it there, and the plan's hand grind splits each pass into a front take and a right-side take (your decision, 2026-11-06). The steadying hand's rocking applies where both are in reach. A spark is the touch: the dial's zero is the part's top within a graduation. No footage of a touch-off is measured yet. Proposed, with reasons (phase numbers count from 1): #1 8 N at the knob (the station's down-feed takes about 1 N m) and 5-15 s, the gap of about 1 mm by eye; #2 4 N and 10-30 s, a graduation at a time over the last 1 mm being up to 200 of them, most taken a few at a time until close; #3 2 N on the dial (its friction 0.4 N m at 100 mm) and 1.5 s; #4 3 N on the cross knob and 10-25 s for the side touch and the offset."
+}

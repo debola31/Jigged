@@ -6,7 +6,7 @@ layout.json and shop.json. moonshot/ never reaches a Vercel build, so the data i
 Videos, stills and models aren't in it: it names their paths in Supabase Storage (`media.py`), and marks a step
 `published` only once its media is in published.json, which the upload writes; the page shows the others as coming.
 Only people's work is rendered as video: a machine cycle is shown by the part after the cut, as one still and, on a
-desktop, as its 3D model.
+desktop, as its 3D model. A person's step published as a still and no video is shown as that still and its caption.
 
     python -m moonshot.web.export          # rewrites the file; the gate test_web_steps.py checks it
 """
@@ -164,7 +164,8 @@ def uses(step: dict, setups: dict, shop_json: dict, layout: dict) -> list[dict]:
         return []
     w = setup["workholding"]
     if "chuck" in w:                            # a lathe's chuck or collet; a grinder's magnetic chuck and keepers
-        return [u for k in ("chuck", "keepers") if k in w for u in thing(by_asset.get(w[k]))]
+        return [u for k in ("chuck", "keepers") if k in w and w[k] != setup["machine"]   # its own chuck: the station
+                for u in thing(by_asset.get(w[k]))]
     if "vise" in w:
         held = thing(by_asset.get(w["vise"])) + thing(by_kind.get("parallel_set" if w["parallels_in"] else "vise_stop"))
         return held + (thing(by_kind.get("test_indicator")) if what == "check" and not w["parallels_in"] else [])
@@ -184,16 +185,23 @@ def where_zone(zone_id: str, layout: dict) -> dict:
     return {"name": z["name"], "x": (x0 + x1) / 2, "y": (y0 + y1) / 2}
 
 
-def step_media(part: str, step: dict) -> dict:
+def step_media(part: str, step: dict, published: set[str] | frozenset[str] = frozenset()) -> dict:
     """What the page shows for a step: people's work as a video, a machine cycle as the part after it (a still,
-    and the model a desktop can turn)."""
+    and the model a desktop can turn). A person's step whose still is published and its video isn't is shown as
+    that still with its caption (the user's decision, 2026-11-06: G1's deferred loads and lift-outs, its inspects
+    and ct-slbeam's cleans); once its video is published, the video."""
     if step["kind"] == "cycle":
         return {"type": "cut", "still": f"still/{part}/{step['id']}.webp", "model": f"cut/{part}/{step['id']}.glb"}
-    return {"type": "video", "path": f"video/{part}/{step['id']}.mp4"}
+    video, still = f"video/{part}/{step['id']}.mp4", f"still/{part}/{step['id']}.webp"
+    if video not in published and still in published:
+        return {"type": "still", "still": still}
+    return {"type": "video", "path": video}
 
 
 def media_paths(media: dict) -> list[str]:
-    return [media["still"], media["model"]] if media["type"] == "cut" else [media["path"]]
+    if media["type"] == "cut":
+        return [media["still"], media["model"]]
+    return [media["still"]] if media["type"] == "still" else [media["path"]]
 
 
 def live_part(part: str, layout: dict, shop_json: dict) -> dict:
@@ -211,7 +219,7 @@ def live_part(part: str, layout: dict, shop_json: dict) -> dict:
             where = where_machine(setups[s["setup"]]["machine"], layout, shop_json) | {"at": at}
         else:
             where = where_zone(STATION_ZONES[s["station"]], layout)
-        media = step_media(part, s)
+        media = step_media(part, s, published)
         steps.append({"id": s["id"], "title": s["title"], "caption": s["caption"], "kind": s["kind"],
                       "group": s.get("setup", "finish"), "where": where,
                       "uses": uses(s, setups, shop_json, layout), "media": media,

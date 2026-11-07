@@ -1638,6 +1638,18 @@
      },
      "published": true
     }
+   ],
+   "picks": [
+    "op10-load",
+    "op10-seat",
+    "op10-xy",
+    "op10-tools",
+    "op10-start",
+    "op10-pocket",
+    "op20-scallops",
+    "op50-deep",
+    "deburr",
+    "inspect"
    ]
   },
   {
@@ -2275,6 +2287,15 @@
      },
      "published": true
     }
+   ],
+   "picks": [
+    "op10-clean",
+    "op10-load",
+    "op10-start",
+    "op10-slots",
+    "op10-lettering",
+    "op10-outline",
+    "deburr"
    ]
   },
   {
@@ -2907,6 +2928,15 @@
      },
      "published": true
     }
+   ],
+   "picks": [
+    "op10-clean",
+    "op10-start",
+    "op10-recesses",
+    "op10-nests",
+    "op10-undercut",
+    "op20-far_edge",
+    "deburr"
    ]
   },
   {
@@ -4350,6 +4380,18 @@
      },
      "published": true
     }
+   ],
+   "picks": [
+    "saw-load",
+    "saw-cut",
+    "saw-unload",
+    "op10-tools",
+    "op10-start",
+    "op40-notch",
+    "op40-cbores",
+    "deburr",
+    "send-out",
+    "black-oxide"
    ]
   },
   {
@@ -5616,6 +5658,18 @@
      },
      "published": true
     }
+   ],
+   "picks": [
+    "saw-load",
+    "saw-cut",
+    "op10-clean",
+    "op10-start",
+    "op10-outline",
+    "op20-underside",
+    "op30-tap",
+    "deburr",
+    "send-out",
+    "zinc"
    ]
   },
   {

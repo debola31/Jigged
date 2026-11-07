@@ -22,6 +22,22 @@ def test_a_step_is_published_by_its_part_and_id():
         assert all(p.split("/")[1] == part and p.split("/")[2].rsplit(".", 1)[0] == i for p in media_paths(s["media"]))
 
 
+def test_each_live_part_shows_ten_or_fewer_picked_steps_across_its_machines():
+    """The page shows a live part's picks, not all its steps (the user's decision, 2026-11-07): ten or fewer, each a
+    planned and published step, in the plan's order, no two the same, and more than one machine or station among
+    them."""
+    for part in build()["parts"]:
+        if part["status"] != "live":
+            assert "picks" not in part
+            continue
+        steps = {s["id"]: s for s in part["steps"]}
+        picks = part["picks"]
+        assert 1 <= len(picks) <= 10 and len(set(picks)) == len(picks), part["id"]
+        assert all(p in steps and steps[p]["published"] for p in picks), part["id"]
+        assert picks == [s for s in steps if s in picks], part["id"]
+        assert len({steps[p]["where"]["name"] for p in picks}) > 1, part["id"]
+
+
 def test_every_placed_item_has_its_asset_and_model():
     layout = _json(RECORDS / "layout.json")
     shop = build()["shop"]

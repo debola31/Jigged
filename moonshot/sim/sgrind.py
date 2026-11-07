@@ -77,6 +77,14 @@ class GrindRun(SawRun):
                                              "sg_chuck_field")}, "controls": []}
         self.cut = CutFrames()
 
+    def tree(self, obj: str) -> set[int]:
+        """BenchRun's, but a grinder link the hand carries (the chuck's lever, a handwheel) is that link alone: the
+        whole machine is one tree, so the lever carried took for the hand's every contact on the grinder, the keepers
+        on its chuck among them."""
+        if obj.startswith("sg_"):
+            return {self.model.body(obj).id}
+        return super().tree(obj)
+
     def scene(self, loose, carried, skip):
         return GC.with_body(self.body.xml, self.place, loose, self.assets, carried, self.wheel_id)
 
@@ -147,3 +155,31 @@ class GrindRun(SawRun):
         self.export("sgrind", NEVER_HELD, list(self.ctl.held), glbs, report,
                     checks={"machine_axes": self.log["axes"], "driven": DRIVEN} | (station_extra or {}))
         return json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
+
+
+# each take's carried bodies and its grips' objects (BenchRun's carried and grip_objects)
+TAKE_BODIES = {"magnet-on": (("sg_chuck_lever",), {"ball": ("sg_chuck_lever",)})}
+
+
+def run_take(part: str, setup: str, take: str, replan: bool = False, seconds=None) -> dict:
+    """A take's physics, planned first if it hasn't been (moonshot/motion/sgrind.py), from the state its plan started
+    from; writes the take record, checks.json, report.json and state.json into its folder."""
+    from moonshot.motion import sgrind as plan
+    out = plan.take_dir(part, setup, take)
+    if replan or not (out / "reference.npz").exists():
+        plan.build(part, setup, take)
+    state = json.loads((out / "state_in.json").read_text(encoding="utf-8"))
+    place = plan.TAKE_PLANS[take].place
+    asset, loose = plan.loose_of(state, place)
+    carried, grips = TAKE_BODIES[take]
+    r = GrindRun(out, place, loose, asset, state, carried=carried, grip_objects=grips, lifted=())
+    r.go(seconds)
+    m, d = r.model, r.data
+    lever = math.degrees(d.qpos[r.ctl.q["chuck_lever"]])
+    held = {b: (d.xpos[m.body(b).id] * 1000).round(3).tolist() for b in r.ctl.held}
+    return r.finish({"chuck_lever_deg": round(lever, 2), "field": round(r.ctl.field(), 4), "held_mm": held})
+
+
+if __name__ == "__main__":
+    import sys
+    print(json.dumps(run_take(sys.argv[1], sys.argv[2], sys.argv[3], replan="--replan" in sys.argv), indent=1))

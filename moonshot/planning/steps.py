@@ -89,8 +89,10 @@ def saw(plan: dict, s: dict) -> list[dict]:
 
 
 def turret(s: dict, f: dict, loaded: dict[str, set[str]]) -> list[dict]:
-    """A lathe setup's tools the turret doesn't hold yet, bolted into its stations and each touched off for its
-    offsets (no step when every one is in from an earlier setup)."""
+    """A lathe setup's tools the turret doesn't hold yet, bolted into its stations, then each touched off for its
+    offsets on the lathe's tool presetter (no step when every one is in from an earlier setup, its offsets set then).
+    The ST-25's offsets are set on Haas's tool presetter arm: lowered by M104, each tool jogged in until it beeps, the
+    door shut, as the arm is refused with it open (the user's decision, 2026-11-06)."""
     p, m = s["id"], s["machine"]
     have = loaded.setdefault(m, set())
     new = list(dict.fromkeys(op["tool"] for op in s["operations"] if op["tool"] not in have))
@@ -98,7 +100,8 @@ def turret(s: dict, f: dict, loaded: dict[str, set[str]]) -> list[dict]:
     if not new:
         return []
     tf = f | {"tools": ", ".join(TOOL_NAMES.get(t, t) for t in new), "tool_ids": new, "changer": CHANGERS[m]}
-    return [step(f"{p}-tools", "Set up the turret", "Bolt {tools} into {changer} and touch each one off.", tf,
+    return [step(f"{p}-tools", "Set up the turret",
+                 "Bolt {tools} into {changer}, then shut the door and touch each one off on the tool presetter.", tf,
                  setup=p, machine=m)]
 
 

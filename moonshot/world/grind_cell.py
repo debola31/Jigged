@@ -43,7 +43,9 @@ CHUCK = Place()                     # the same turn, the body at the front right
 RIGHT = Place(yaw_deg=-90.0)        # turned so the station's -X, toward the column from its right side, is the way the
                                     # body faces
 FRONT_LUMBAR = np.array([-220.0, -1180.0, 955.0])   # the table handwheel's knob (y -853 to -905) 275-330 mm ahead
-CHUCK_LUMBAR = np.array([520.0, -650.0, 955.0])     # the control box's face 170 mm ahead, the lever's ball 400 mm
+CHUCK_LUMBAR = np.array([650.0, -650.0, 955.0])     # right of the saddle's arm (x 350; at 520 the left hip stood on
+                                                    # its edge the take through) and of the control box (at 600 the
+                                                    # hanging left hand brushed it); the lever's ball 400 mm ahead
 RIGHT_LUMBAR = np.array([850.0, 260.0, 955.0])      # the down-feed knob 360-420 mm ahead, 100 mm to the right
 
 PART = {"density": 14900.0, "friction": 0.2, "material": "carbide",          # C2 (WC, 6% Co): 14.9 g/cm3

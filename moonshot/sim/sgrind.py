@@ -23,6 +23,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from moonshot.config import data_root
 from moonshot.sim.bandsaw import BUTTON_MM, TURN_N_MAX, TURN_N_PER_RAD, SawRun
 from moonshot.sim.bench import BenchRun
 from moonshot.sim.record import glbs_in_bodies
@@ -76,6 +77,14 @@ class GrindRun(SawRun):
         self.log = {"axes": {k: [] for k in ("sg_table_mm", "sg_saddle_mm", "sg_wheelhead_mm", "sg_spindle_rpm",
                                              "sg_chuck_field")}, "controls": []}
         self.cut = CutFrames()
+
+    def tree(self, obj: str) -> set[int]:
+        """BenchRun's, but a grinder link the hand carries (the chuck's lever, a handwheel) is that link alone: the
+        whole machine is one tree, so the lever carried took for the hand's every contact on the grinder, the keepers
+        on its chuck among them."""
+        if obj.startswith("sg_"):
+            return {self.model.body(obj).id}
+        return super().tree(obj)
 
     def scene(self, loose, carried, skip):
         return GC.with_body(self.body.xml, self.place, loose, self.assets, carried, self.wheel_id)
@@ -145,5 +154,63 @@ class GrindRun(SawRun):
         coolant = state["control"]["coolant_on"]
         glbs = glbs_in_bodies(m, "sgrind", GC.render_links(self.ctl.wheel_id, coolant_flowing=coolant))
         self.export("sgrind", NEVER_HELD, list(self.ctl.held), glbs, report,
-                    checks={"machine_axes": self.log["axes"], "driven": DRIVEN} | (station_extra or {}))
+                    # what is on the chuck rides the table: a push on the lever or a handwheel moves the table (its
+                    # rack isn't self-locking), and its parts with it, which is no motion of theirs
+                    checks={"machine_axes": self.log["axes"], "driven": DRIVEN,
+                            "rides_on": {b: "sg_chuck" for b in self.ctl.held}} | (station_extra or {}))
         return json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
+
+
+# each take's carried bodies and its grips' objects (BenchRun's carried and grip_objects), by the take's name or, for an
+# edge's pass takes, its suffix
+TAKE_BODIES = {"magnet-on": (("sg_chuck_lever",), {"ball": ("sg_chuck_lever",)}),
+               "-rock": (("sg_table_handwheel",), {"knob": ("sg_table_handwheel",)}),
+               "-feed": (("sg_downfeed_handwheel",), {"knob": ("sg_downfeed_handwheel",)})}
+
+
+def bodies_of(take: str):
+    return TAKE_BODIES.get(take) or next(v for k, v in TAKE_BODIES.items() if k.startswith("-") and take.endswith(k))
+
+
+def draw_stock(folder: Path, part: str, take: str, k: int) -> None:
+    """A pass take's insert drawn as the cut simulation left it at its k-th down-feed (takes/<part>-op10-edge<n>/
+    stock/<k>.glb, mm in the insert's frame, Z up): copied into the take's own stock/ and named in its scene as the
+    part's mesh at every frame (the take record's changing body)."""
+    import shutil
+    src = data_root() / "takes" / f"{part}-op10-edge{take[4]}" / "stock" / f"{k}.glb"
+    (folder / "stock").mkdir(exist_ok=True)
+    shutil.copyfile(src, folder / "stock" / f"{k}.glb")
+    scene = json.loads((folder / "scene.json").read_text(encoding="utf-8"))
+    n = len(np.load(folder / "take.npz")["t"])
+    scene["bodies"][f"{GC.PREFIX}part"]["meshes"] = {"dir": "stock", "frames": [k] * n}
+    (folder / "scene.json").write_text(json.dumps(scene, indent=1), encoding="utf-8")
+
+
+def run_take(part: str, setup: str, take: str, replan: bool = False, seconds=None) -> dict:
+    """A take's physics, planned first if it hasn't been (moonshot/motion/sgrind.py), from the state its plan started
+    from; writes the take record, checks.json, report.json and state.json into its folder."""
+    from moonshot.motion import sgrind as plan
+    out = plan.take_dir(part, setup, take)
+    if replan or not (out / "reference.npz").exists():
+        plan.build(part, setup, take)
+    state = json.loads((out / "state_in.json").read_text(encoding="utf-8"))
+    place = plan.TAKE_PLANS[take].place
+    asset, loose = plan.loose_of(state, place)
+    carried, grips = bodies_of(take)
+    r = GrindRun(out, place, loose, asset, state, carried=carried, grip_objects=grips, lifted=())
+    r.go(seconds)
+    m, d = r.model, r.data
+    lever = math.degrees(d.qpos[r.ctl.q["chuck_lever"]])
+    held = {b: (d.xpos[m.body(b).id] * 1000).round(3).tolist() for b in r.ctl.held}
+    q0 = state["q"]
+    moved = {a: round((d.qpos[r.ctl.q[a]] - q0[a]) * 1000, 4) for a in ("table", "saddle", "wheelhead")}
+    report = r.finish({"chuck_lever_deg": round(lever, 2), "field": round(r.ctl.field(), 4), "held_mm": held,
+                       "axes_moved_mm": moved, "downfeed_graduations": round(r.ctl.downfeed_graduations(), 2)})
+    if "pass" in state:
+        draw_stock(out, part, take, int(state["pass"]))
+    return report
+
+
+if __name__ == "__main__":
+    import sys
+    print(json.dumps(run_take(sys.argv[1], sys.argv[2], sys.argv[3], replan="--replan" in sys.argv), indent=1))

@@ -253,6 +253,40 @@ def cotton(mat, rgb=(0.03, 0.05, 0.10)):
     return n
 
 
+def look_sgrind(m, name: str) -> None:
+    """The surface grinder's paints, by its link GLBs' material names."""
+    if name == "sgrind_paint":                  # the castings: light grey-blue machine enamel, a little worn
+        paint(m, (0.30, 0.32, 0.37), 0.5, coat=0.2, coat_rough=0.35, wear=0.12, edge_mm=2.0, mottle=0.08)
+    elif name == "sgrind_blue":                 # the wheel's guard and the splash guards
+        paint(m, (0.02, 0.12, 0.38), 0.42, coat=0.5, coat_rough=0.25, wear=0.1, edge_mm=1.5)
+    elif name == "sgrind_red":                  # the table stops and OFF
+        paint(m, (0.42, 0.04, 0.03), 0.45, coat=0.3, edge_mm=1.0)
+    elif name == "sgrind_chuck_body":           # the chuck's black body
+        paint(m, (0.04, 0.04, 0.045), 0.5, wear=0.1, edge_mm=1.5)
+    elif name == "sgrind_brass":                # the chuck's pole separators
+        metal(m, (0.56, 0.42, 0.18), 0.3)
+    elif name == "sgrind_dial":                 # the down-feed's satin aluminium dial
+        metal(m, (0.7, 0.71, 0.73), 0.3, aniso=0.3)
+    elif name == "sgrind_abrasive":             # a white vitrified wheel
+        paint(m, (0.52, 0.52, 0.5), 0.92, mottle=0.2)
+    elif name == "sgrind_diamond":              # a resin diamond wheel's dark rim and core
+        paint(m, (0.05, 0.05, 0.055), 0.7, mottle=0.15)
+    elif name == "sgrind_blotter":              # the paper blotters between wheel and flange
+        paint(m, (0.55, 0.5, 0.42), 0.85)
+    elif name == "sgrind_box":                  # the control box
+        paint(m, (0.22, 0.23, 0.25), 0.5, wear=0.08, edge_mm=1.5)
+    elif name == "sgrind_green":                # ON
+        paint(m, (0.02, 0.25, 0.04), 0.35, coat=0.5, edge_mm=1.0)
+    elif name == "sgrind_lamp":                 # the power light's lens
+        paint(m, (0.7, 0.6, 0.35), 0.25, coat=0.8)
+    elif name == "sgrind_locline":              # the coolant's orange segmented hose
+        paint(m, (0.6, 0.2, 0.02), 0.4, coat=0.4)
+    elif name == "sgrind_coolant":              # a milky water-soluble coolant's stream
+        paint(m, (0.78, 0.8, 0.78), 0.15, coat=0.8, coat_rough=0.05)
+    else:
+        paint(m, (0.3, 0.32, 0.37), 0.5)
+
+
 def bare_steel() -> bpy.types.Material:
     """What a GLB with no materials is drawn in: most of what a shop holds is steel."""
     mat = bpy.data.materials.get("bare_steel")
@@ -363,6 +397,10 @@ def apply_look(cc0: Path) -> None:
             c = b.inputs["Base Color"].default_value if b else (0.5, 0.5, 0.5, 1)
             lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
             paint(m, (0.04, 0.04, 0.045) if lum < 0.15 else (0.5, 0.51, 0.52), 0.5, wear=0.1)
+        elif name.startswith("sgrind_"):
+            # the surface grinder, as its CAD's renders paint it (moonshot/library/stations/extract.py MATERIALS):
+            # satin machine paint, worn at the edges, not the bare steel an unpainted GLB gets
+            look_sgrind(m, name)
         elif name.startswith("kurt_blue"):
             paint(m, (0.02, 0.10, 0.36), 0.42, coat=0.7, coat_rough=0.2)
         elif name.startswith(("ground_steel", "hardened_steel")):

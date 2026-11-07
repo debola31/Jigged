@@ -131,18 +131,19 @@ def control_box_mesh(station: str):
     c = r["colliders"]["controls_box"]
     # the box, and its bracket: a plate bolted to the base's right side (x 280) just in front of nothing, under the
     # saddle (whose bottom is at z 750 at its front lip, 801 behind it), out and forward to a riser under the box
-    parts = [box(c["box_min_mm"], c["box_max_mm"]),
-             box([280.0, -350.0, 728.0], [440.0, -330.0, 745.0]),
-             box([420.0, -440.0, 728.0], [440.0, -330.0, 745.0]),
-             box([420.0, -440.0, 745.0], [440.0, -420.0, 780.0])]
-    for name, radius, depth in (("start", 0.011, 0.004), ("stop", 0.02, 0.022), ("power_light", 0.008, 0.006),
-                                ("coolant_switch", 0.005, 0.010)):
+    parts = [(box(c["box_min_mm"], c["box_max_mm"]), "sgrind_box"),
+             (box([280.0, -350.0, 728.0], [440.0, -330.0, 745.0]), "sgrind_box"),
+             (box([420.0, -440.0, 728.0], [440.0, -330.0, 745.0]), "sgrind_box"),
+             (box([420.0, -440.0, 745.0], [440.0, -420.0, 780.0]), "sgrind_box")]
+    for name, radius, depth, paint in (("start", 0.011, 0.004, "sgrind_green"), ("stop", 0.02, 0.022, "sgrind_red"),
+                                       ("power_light", 0.008, 0.006, "sgrind_lamp"),
+                                       ("coolant_switch", 0.005, 0.010, "grip_black")):
         at = np.array(r["affordances"][name]["at_mm"]) * 0.001
         cyl = trimesh.creation.cylinder(radius=radius, height=depth)
         cyl.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))   # its axis along y
         cyl.apply_translation(at + np.array([0.0, depth / 2, 0.0]))                          # standing out of the face
-        parts.append(cyl)
-    return trimesh.util.concatenate(parts)
+        parts.append((cyl, paint))
+    return parts
 
 
 def wheel_mesh(station: str, wheel_id: str, on_spindle: bool = True):
@@ -157,18 +158,19 @@ def wheel_mesh(station: str, wheel_id: str, on_spindle: bool = True):
     y0, y1 = w["y_mm"]
     rings = [(w["dia_mm"] / 2, y0, y1), (fl / 2, f0, f1), (fl / 2, -f1, -f0)]     # the disc, the front and back flange
     parts = []
-    for radius, a, b in rings:
+    for k, (radius, a, b) in enumerate(rings):
         ring = trimesh.creation.annulus(r_min=bore, r_max=radius, height=b - a, sections=96)
-        ring.apply_translation([0.0, 0.0, (a + b) / 2])
-        parts.append(ring)
-    mesh = trimesh.util.concatenate(parts)                       # its axis along z, its mid-plane at z = 0 (mm)
-    if on_spindle:
-        mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))   # z -> y
-        mesh.apply_translation([at[0], 0.0, at[2]])
-        mesh.apply_scale(0.001)
-    else:
+        ring.apply_translation([0.0, 0.0, (a + b) / 2])           # its axis along z, its mid-plane at z = 0 (mm)
+        parts.append((ring, "sgrind_diamond" if k == 0 else "ground_steel"))
+    if not on_spindle:
+        mesh = trimesh.util.concatenate([m for m, _ in parts])
         mesh.apply_translation([0.0, 0.0, -mesh.bounds[0][2]])
-    return mesh
+        return mesh
+    for m, _ in parts:
+        m.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))      # z -> y
+        m.apply_translation([at[0], 0.0, at[2]])
+        m.apply_scale(0.001)
+    return parts
 
 
 def _tube(a, b, radius_mm: float):
@@ -197,7 +199,7 @@ def coolant_nozzle_mesh(station: str, wheel_id: str):
     plate = trimesh.creation.box(extents=[0.03, 0.008, 0.03])
     plate.apply_translation((m0 + [0.0, 8.7, 0.0]) * 0.001)      # flat on the guard's front plate (y -51.3)
     parts.append(plate)
-    return trimesh.util.concatenate(parts)
+    return [(trimesh.util.concatenate(parts), "sgrind_locline")]
 
 
 def coolant_stream_mesh(station: str, wheel_id: str):
@@ -207,7 +209,7 @@ def coolant_stream_mesh(station: str, wheel_id: str):
     tip = np.asarray(r["coolant"]["nozzle_mm"][wheel_id][-1], float)
     at, w = r["joints"]["spindle"]["at_mm"], r["wheels"][wheel_id]
     bottom = np.array([at[0], 0.0, at[2] - w["dia_mm"] / 2])
-    return _tube(tip, bottom, 2.5)
+    return [(_tube(tip, bottom, 2.5), "sgrind_coolant")]
 
 
 GENERATED = {"sgrind": {"controls": control_box_mesh,               # links with no solid in the STEP, made here
@@ -239,6 +241,42 @@ def write_wheel_assets(station: str) -> None:
         out = data_root() / "library" / "workholding" / "keeper"
         out.mkdir(parents=True, exist_ok=True)
         keeper_mesh().export(out / "keeper.glb")
+
+
+# each link's material, by the name moonshot/render/look.py paints it (the CAD's colours: light grey castings, blue
+# guards, black handwheels; the chuck's face ground steel between brass separators), and the solids that differ from
+# their link's
+MATERIALS = {"sgrind": {
+    "links": {"base": "sgrind_paint", "saddle": "sgrind_paint", "table": "sgrind_paint", "chuck": "sgrind_chuck_body",
+              "chuck_lever": "handle_steel", "wheelhead": "sgrind_blue", "spindle": "ground_steel",
+              "wheel_gwheel": "sgrind_abrasive", "table_handwheel": "grip_black", "cross_handwheel": "grip_black",
+              "downfeed_handwheel": "grip_black", "downfeed_dial": "sgrind_dial"},
+    "solids": {21: "ground_steel", **{i: "sgrind_brass" for i in (*range(9, 21), *range(22, 34))},
+               0: "sgrind_blue", 1: "sgrind_blue", 51: "sgrind_red", 52: "sgrind_red", 48: "grip_black",
+               49: "grip_black", 50: "grip_black", 5: "sgrind_blotter", 7: "sgrind_blotter", 8: "ground_steel"}}}
+BASE_COLOURS = {"sgrind_paint": (0.42, 0.44, 0.5), "sgrind_blue": (0.03, 0.2, 0.55), "sgrind_red": (0.55, 0.08, 0.06),
+                "sgrind_chuck_body": (0.12, 0.12, 0.13), "sgrind_brass": (0.6, 0.46, 0.2), "ground_steel": (0.62, 0.63, 0.65),
+                "handle_steel": (0.7, 0.71, 0.72), "grip_black": (0.02, 0.02, 0.02), "sgrind_dial": (0.75, 0.75, 0.77),
+                "sgrind_abrasive": (0.6, 0.6, 0.57), "sgrind_blotter": (0.75, 0.7, 0.6), "sgrind_diamond": (0.08, 0.08, 0.09),
+                "sgrind_box": (0.3, 0.31, 0.33), "sgrind_green": (0.03, 0.35, 0.06), "sgrind_lamp": (0.85, 0.82, 0.7),
+                "sgrind_locline": (0.75, 0.3, 0.04), "sgrind_coolant": (0.86, 0.88, 0.86)}
+
+
+def painted_glb(parts):
+    """A link's meshes as one GLB, a mesh per material, each material named for the look to paint (its base colour
+    the CAD's, for a viewer that doesn't)."""
+    import trimesh
+    scene = trimesh.Scene()
+    groups: dict[str, list] = {}
+    for mesh, mat in parts:
+        groups.setdefault(mat or "ground_steel", []).append(mesh)
+    for mat, ms in groups.items():
+        m = trimesh.util.concatenate(ms)
+        rgb = BASE_COLOURS.get(mat, (0.62, 0.63, 0.65))
+        m.visual = trimesh.visual.TextureVisuals(material=trimesh.visual.material.PBRMaterial(
+            name=mat, baseColorFactor=[*rgb, 1.0], metallicFactor=0.0, roughnessFactor=0.5))
+        scene.add_geometry(m, geom_name=mat)
+    return scene
 
 
 def read_components(step: Path):
@@ -480,10 +518,12 @@ def extract(station: str) -> dict:
     step = data_root() / "originals" / SOURCES[station]
     meshes: dict[str, list] = {}
     shapes: dict[str, list] = {}
+    solid_of: dict[str, list] = {}
     if station in SOLID_LINKS:
         owner = {i: link for link, ids in SOLID_LINKS[station].items() for i in ids}
         for i, solid in enumerate(read_solids(step)):
             shapes.setdefault(owner.get(i, "base"), []).append(solid)
+            solid_of.setdefault(owner.get(i, "base"), []).append(i)
     elif station == "st25":
         for link, shape in read_paths(step, ST25_PATHS, ST25_EXCLUDE):
             shapes.setdefault(link, []).append(shape)
@@ -492,22 +532,28 @@ def extract(station: str) -> dict:
             link = LINKS[station].get(comp_name) or SUBLINKS.get(station, {}).get(comp_name)
             if link is not None:
                 shapes.setdefault(link, []).append(shape)
+    paints = MATERIALS.get(station)
     for link, parts in shapes.items():
-        for shape in parts:
+        for k, shape in enumerate(parts):
             mesh = to_world_mesh(shape, station, link)
             if mesh is not None:
-                meshes.setdefault(link, []).append(mesh)
+                mat = None if paints is None else paints["solids"].get(solid_of[link][k], paints["links"].get(link))
+                meshes.setdefault(link, []).append((mesh, mat))
     for link, make in GENERATED.get(station, {}).items():
-        meshes[link] = [make(station)]
+        made = make(station)
+        meshes[link] = made if isinstance(made, list) else [(made, None)]
     import trimesh
     manifest = {}
     # sub-links (doors, spindle) are cut out of their parents' meshes by being exported separately; their parent
     # component also contains them, so parents are rebuilt without their sub-links' geometry where they overlap
     for link, parts in meshes.items():
-        mesh = trimesh.util.concatenate(parts)
+        mesh = trimesh.util.concatenate([p for p, _ in parts])
         if link in ("head",) and "spindle" in meshes:
             pass                                           # the spindle stays drawn in the head; it only turns
-        mesh.export(out_dir / f"{link}.glb")
+        if any(mat for _, mat in parts):                   # painted by name: the render's look paints each
+            painted_glb(parts).export(out_dir / f"{link}.glb")
+        else:
+            mesh.export(out_dir / f"{link}.glb")
         lo, hi = mesh.bounds * 1000
         manifest[link] = {"min_mm": [round(v, 1) for v in lo], "max_mm": [round(v, 1) for v in hi],
                           "triangles": int(len(mesh.faces))}

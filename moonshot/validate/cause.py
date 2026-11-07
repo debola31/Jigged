@@ -42,8 +42,13 @@ def measure(take: Path) -> dict:
         rec = np.load(take / "take.npz")
         at = objects.positions(take) | {o: objects.riding(take, o, on) for o, on in ck.get("rides_on", {}).items()}
         driven = set(ck.get("driven", ()))
+        touching = objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"]))
+        # a body a declared mechanism pushes that frame (checks.json applied_forces, which shortcuts_declared holds to
+        # the declared list): the grinder's chuck pulling what it holds moves it a hair as it seats
+        pushed = ck.get("applied_forces", [[]] * len(touching))
+        touching = [sorted(set(t) | set(f)) for t, f in zip(touching, pushed)]
         return {"fps": float(rec["fps"]), "finite": _finite(rec, len(rec["t"])), "opening_mm": [0.0] * len(rec["t"]),
-                "touching": objects.touched(take, ck["touching"], objects.carried(ck["active_constraints"])),
+                "touching": touching,
                 "bodies_mm": {k: v.tolist() for k, v in at.items()} | {"hand": rec["R_W"].tolist(),
                                                                        "hand_L": rec["L_W"].tolist()},
                 "loose": [o for o in at if o not in driven]}

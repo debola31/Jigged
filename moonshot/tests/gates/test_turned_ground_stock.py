@@ -19,8 +19,9 @@ The faces held: every face of the STEP, but where the user decides. Each part's 
 blank comes with (as supplied, not cut here) is held too: the blank the plan names must already have it. The one
 decision so far (2026-11-06): ct-tpg322's chipbreaker is ground on the surface grinder by straight passes of the wheel
 along each edge, which can't follow the groove round the noses, so the three nose regions are exempt as what a
-straight wheel leaves, and each edge's groove is held over the 10.7 of its 16.5 mm (the IC's triangle) the wheel
-reaches. A fixture's zones say so: each a nose's sharp vertex (the triangle's, plan view), the two edges from it, and
+straight wheel leaves, and each edge's groove is held over 10.3 of its 16.5 mm (the IC's triangle), 3.1 to 13.4 mm
+along it, the plan's region (3.1, not 2.9: the groove's inner corners, past both straight slots, read 0.127 out to 3.0).
+A fixture's zones say so, and hold the plan's region: each a nose's sharp vertex (the triangle's, plan view), the two edges from it, and
 along_mm; a point is in it if it lies within along_mm of the vertex along its nearer edge, on a face of the zone's
 types, at or above z_min_mm (the top: the land, the groove and the plateau, never the flanks or the bottom).
 
@@ -147,11 +148,16 @@ def test_each_part_s_fixture_exempts_only_what_the_user_decided():
         fx = fixture(part)
         assert fx["part"] == part and fx["exempt"] == [] and fx["band_mm"] == 0.0 and not fx.get("regions"), part
         assert not fx.get("zones") or part == "ct-tpg322", part
+    from moonshot.planning.validate import load_plan
     zones = fixture("ct-tpg322")["zones"]
     side = 2 * np.sqrt(3) * 0.375 / 2 * 25.4                               # the IC's triangle: 16.497 mm
+    regions = {tuple(o["region"]["along_edge_mm"]) for s in load_plan("ct-tpg322")["setups"]
+               for o in s["operations"] if "region" in o}
+    assert len(regions) == 1, "the plan's edges hold their grooves over different spans"
+    (lo, hi), = regions                                                   # where the plan holds each edge's groove
     assert len(zones) == 3 and {z["what"] for z in zones} == {"chipbreaker nose"}
     for z in zones:
-        assert z["along_mm"] == pytest.approx((side - 10.7) / 2, abs=0.01)       # 10.7 of each edge held
+        assert z["along_mm"] == pytest.approx(lo, abs=0.01) == pytest.approx(side - hi, abs=0.01)  # the plan's
         assert np.linalg.norm(z["vertex_mm"]) == pytest.approx(side / np.sqrt(3), abs=0.01)   # a sharp vertex
         assert z["types"] == ["PLANE", "CYLINDER"] and z["z_min_mm"] == pytest.approx(2.97)  # the top only
         for e in z["edges"]:                                              # each along an edge to another vertex
@@ -180,7 +186,8 @@ def test_ct_tpg322_zones_take_only_its_top_round_each_nose():
     assert 0.02 < z.mean() < 0.25
     assert (pts[z, 2] >= 2.97).all()
     near = np.min([np.linalg.norm(pts[z, :2] - np.asarray(q["vertex_mm"]), axis=1) for q in zones], axis=0)
-    assert near.max() < 2.9 + 2.0                                     # along an edge, and its groove's 1.65 in
+    reach = max(q["along_mm"] for q in zones)
+    assert near.max() < reach + 2.0                                   # along an edge, and its groove's 1.65 in
     mids = [(np.asarray(a["vertex_mm"]) + np.asarray(b["vertex_mm"])) / 2 for a, b in
             zip(zones, zones[1:] + zones[:1])]
     for m in mids:                                                    # each edge's middle is held

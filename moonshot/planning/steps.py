@@ -3,13 +3,17 @@
 Deterministic: every mill setup expands to the shop's setup pattern for how the part is held (in the vise on
 parallels, standing on the vise floor against a stop, or a plate clamped to the table, which the next setup may
 slide along it to reach what the machine's travel didn't), a band saw setup to the
-saw's, each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
+saw's, a lathe setup to the lathe's (the stock in its chuck or collet, the turret's tools, Z on the part's end), a
+surface grinder setup to the grinder's (the part blocked in by keepers on the magnetic chuck, the magnet on, the
+wheel touched off), each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
 from its `facts`, so it can't name a tool, size or setting the plan doesn't contain (plan §2, O8; checked by
 `caption_names_only_facts`).
 
-A `cycle` step is machine-only: the mill's or the saw's own cut, or an outside vendor's process (a finishing step
-with `machine_only`). Only people's work is rendered (your decision, 2026-11-03); a cycle step is shown on the web
-as its caption and a still, or in three.js. It keeps its place in the sequence.
+A `cycle` step is machine-only: the mill's, the lathe's or the saw's own cut, or an outside vendor's process (a
+finishing step with `machine_only`). Only people's work is rendered (your decision, 2026-11-03); a cycle step is shown
+on the web as its caption and a still, or in three.js. It keeps its place in the sequence. An operation done by hand
+on a manual machine ("by": "hand": the surface grinder's table and feeds are cranked by the operator) is people's
+work, a step of its own like a cycle's.
 
     python -m moonshot.planning.steps nist-ftc-10          # prints the steps as a numbered list
 """
@@ -34,11 +38,24 @@ TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em3
               "drill-3p3": "the 3.3 mm drill", "drill-6p5": "the 6.5 mm drill", "drill-11": "the 11 mm drill",
               "tap-m4": "the M4 tap", "ream-8": "the 8 mm reamer", "dovetail-20": "the 20 deg dovetail cutter",
               "drill-5-32": "the 5/32 in drill", "ream-1-4": "the 1/4 in reamer", "em18": "the 1/8 in end mill",
-              "em132": "the 1/32 in end mill"}
+              "em132": "the 1/32 in end mill",
+              # G2's: the ST-25's turret tools and the surface grinder's wheel, none with a record yet (each plan's
+              # missing_records)
+              "turn-ccgt": "the CCGT roughing tool", "turn-dcgt": "the DCGT finishing tool",
+              "turn-vcgt": "the VCGT turning tool", "groove-3": "the 3 mm grooving tool",
+              "tap-m4-bot": "the M4 bottoming tap", "dwheel-1a1r": "the diamond wheel"}
 # Where each mill's tools go. The VF-2 measures its own on its tool setter; the shop's other mills have none
 # (shop.json puts the only tool setter and probe on the VF-2), so their tools are measured on the presetter first.
-CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool changer"}
+CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool changer", "st25": "the turret"}
 PRESET = {"vf3", "hurco"}
+LATHES = {"st25"}                     # turning centres: the stock in a chuck or collet, its tools bolted in a turret
+GRINDERS = {"sgrind"}                 # manual surface grinders: the part on the magnetic chuck, the wheel cranked
+# a lathe's chuck or collet: its name, what's wiped, how it closes, how it opens. The ST-25's Kitagawa closes on its
+# hydraulics by the foot pedal; the Royal 5C collet chuck is tightened by hand with its key
+CHUCKS = {"chuck3": ("the 3-jaw chuck", "its jaws", "Close the jaws with the foot pedal.",
+                     "open the jaws with the foot pedal"),
+          "c5": ("the 5C collet chuck", "its collet", "Tighten the collet with the chuck key.",
+                 "loosen the collet with the key")}
 
 
 def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", **extra) -> dict:
@@ -46,9 +63,11 @@ def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", *
 
 
 def cycles(s: dict) -> list[dict]:
+    """Each operation's step: the machine's cycle, or the operator's own work on a manual machine ("by": "hand")."""
     return [step(f"{s['id']}-{op['id']}", op["what"].split(":")[0], "{what}, with {tool}.",
                  {"what": op["what"], "tool": TOOL_NAMES.get(op["tool"], op["tool"])},
-                 kind="cycle", setup=s["id"], operation=op["id"], machine=s["machine"]) for op in s["operations"]]
+                 kind="human" if op.get("by") == "hand" else "cycle", setup=s["id"], operation=op["id"],
+                 machine=s["machine"]) for op in s["operations"]]
 
 
 def saw(plan: dict, s: dict) -> list[dict]:
@@ -64,6 +83,68 @@ def saw(plan: dict, s: dict) -> list[dict]:
         *cycles(s),
         step(f"{p}-unload", "Lift the blank off",
              "Lift the {length} blank off the bed, clear of the blade, and set it on the bench.", f, setup=p, machine=m),
+    ]
+
+
+def turret(s: dict, f: dict, loaded: dict[str, set[str]]) -> list[dict]:
+    """A lathe setup's tools the turret doesn't hold yet, bolted into its stations and each touched off for its
+    offsets (no step when every one is in from an earlier setup)."""
+    p, m = s["id"], s["machine"]
+    have = loaded.setdefault(m, set())
+    new = list(dict.fromkeys(op["tool"] for op in s["operations"] if op["tool"] not in have))
+    have |= set(new)
+    if not new:
+        return []
+    tf = f | {"tools": ", ".join(TOOL_NAMES.get(t, t) for t in new), "tool_ids": new, "changer": CHANGERS[m]}
+    return [step(f"{p}-tools", "Set up the turret", "Bolt {tools} into {changer} and touch each one off.", tf,
+                 setup=p, machine=m)]
+
+
+def lathe(s: dict, faces_out: dict, loaded: dict[str, set[str]]) -> list[dict]:
+    """A lathe setup: the stock into the chuck or collet and closed on it, the turret's new tools, Z on the part's
+    end (a lathe's X is the spindle's centre, so only Z is set), the cycle, and the part out: from the chuck, or after
+    a part-off, out of the chip tray, the bar's end then taken out of the collet."""
+    w, p, m = s["workholding"], s["id"], s["machine"]
+    chuck, wiped, close, opens = CHUCKS[w["chuck"]]
+    f = {"setup": s["title"], "chuck": chuck, "holds": w["holds"], "out": faces_out[s["face_out"]]}
+    parted = any(op["kind"] == "part_off" for op in s["operations"])
+    return [
+        step(f"{p}-clean", "Clean the chuck", "Blow the chips out of {chuck} and wipe " + wiped + ".", f,
+             setup=p, machine=m),
+        step(f"{p}-load", f"Load {w['holds']}", "Set {holds} in {chuck}, {out}.", f, setup=p, machine=m),
+        step(f"{p}-seat", "Clamp it", close, f, setup=p, machine=m),
+        *turret(s, f, loaded),
+        step(f"{p}-z", "Set Z", "Set {wcs} Z at {z}.", f | {"wcs": s["wcs"]["code"], "z": s["wcs"]["z"]},
+             setup=p, machine=m),
+        step(f"{p}-start", "Close the door and start the cycle",
+             "Close the door, check the program is {setup}, and press Cycle Start.", f, setup=p, machine=m),
+        *cycles(s),
+        step(f"{p}-unload", "Open the door and pick the part out" if parted else "Blow off the chips and unload",
+             "Open the door, blow the chips off, pick the part out of the chip tray, then " + opens +
+             " and take out the bar's end." if parted else
+             "Open the door, blow the chips off, " + opens + " and lift the part out.", f, setup=p, machine=m),
+    ]
+
+
+def grinder(s: dict, faces: dict) -> list[dict]:
+    """A manual surface grinder setup: the part blocked in on the magnetic chuck by ground steel keepers set tight
+    round it (a part the magnet holds too weakly, as carbide), the magnet switched on, the wheel touched down on its
+    top and set across from its edge by hand (a manual grinder has no work offsets), each operation, then the part
+    and the keepers off."""
+    w, p, m = s["workholding"], s["id"], s["machine"]
+    f = {"setup": s["title"], "keepers": w["keepers_are"], "on": w["on"], "up": faces[s["face_up"]]}
+    return [
+        step(f"{p}-clean", "Clean the chuck", "Wipe {on} and {keepers} clean.", f, setup=p, machine=m),
+        step(f"{p}-load", "Block the part in", "Set the part on {on}, {up}, and set {keepers} tight round it.", f,
+             setup=p, machine=m),
+        step(f"{p}-seat", "Switch the magnet on", "Switch the magnet on, holding {keepers} against the part.", f,
+             setup=p, machine=m),
+        step(f"{p}-touch", "Touch off",
+             "Touch the wheel down on the top and zero the down-feed, then set the wheel's edge {land} inside the "
+             "cutting edge.", f | {"land": s["datum"]["land"]}, setup=p, machine=m),
+        *cycles(s),
+        step(f"{p}-unload", "Take the part out",
+             "Switch the magnet off, lift the part out and take {keepers} off.", f, setup=p, machine=m),
     ]
 
 
@@ -114,6 +195,12 @@ def expand(plan: dict) -> list[dict]:
         stays = "shift" in nxt.get("workholding", {})      # the next setup slides this plate rather than reloading it
         if m == "bandsaw":
             out += saw(plan, s)
+            continue
+        if m in LATHES:
+            out += lathe(s, plan.get("faces_out", {}), loaded)
+            continue
+        if m in GRINDERS:
+            out += grinder(s, faces)
             continue
         out += held(s, faces)
         f = out[-1]["facts"]

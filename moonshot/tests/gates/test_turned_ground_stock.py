@@ -9,8 +9,9 @@ Both shapes are meshed first to MESH_MM of their surfaces, absolute: the shared 
 size (its tessellate() is relative) up to 0.3 rad, which on a turned face is chord sag of 0.044 mm on the Ø31.5 spigots
 and up to 0.35 on the Ø63, as much as the limit itself; it keeps a finer mesh it finds.
 
-What the cycles hand this gate, as the VF-2's do: takes/<part>-<step id>/stock-end.brep for each cycle step that cuts,
-the stock after it in the part's model frame (mm); the last one is the finished stock. A turned part's stock is
+What the cutting steps hand this gate, as the VF-2's cycles do: takes/<part>-<step id>/stock-end.brep for each step
+on a machine's operation that cuts (a machine's cycle, or a person's at a manual machine's handwheels: ct-tpg322's
+edges, ground by hand), the stock after it in the part's model frame (mm); the last one is the finished stock. A turned part's stock is
 revolved about the spindle's axis, which is the STEP's own; a part-off hands on the part, not the bar left in the chuck.
 
 The faces held: every face of the STEP, but where the user decides. Each part's fixture (tests/fixtures/stock/
@@ -33,7 +34,7 @@ import numpy as np
 import pytest
 
 from moonshot.contracts.thresholds import threshold
-from moonshot.tests.gates.test_cycle_stock import Mesh, deviation, finished_stock, fixture, load_part, report
+from moonshot.tests.gates.test_cycle_stock import Mesh, deviation, fixture, load_part, report
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 
@@ -94,6 +95,21 @@ def measure(part: str, stock) -> dict:
     fx = fixture(part)
     p, s = fine(load_part(part)), fine(stock)
     return deviation_in_zones(p, s, fx) if fx.get("zones") else deviation(p, s, fx)
+
+
+def finished_stock(part: str):
+    """The stock the part's last cutting step leaves: of every step on a machine's operation, a machine's cycle or a
+    person's at a manual machine's handwheels (ct-tpg322's hand-ground edges), the last with a stock-end.brep."""
+    import cadquery as cq
+    from moonshot.config import data_root
+    from moonshot.planning.steps import expand
+    from moonshot.planning.validate import load_plan
+    ends = [data_root() / "takes" / f"{part}-{s['id']}" / "stock-end.brep" for s in expand(load_plan(part))
+            if s.get("operation")]
+    ends = [p for p in ends if p.exists()]
+    if not ends:
+        pytest.skip(f"no cutting step has run on {part}")
+    return cq.Shape.importBrep(str(ends[-1]))
 
 
 def _plan_or_skip(part: str) -> None:

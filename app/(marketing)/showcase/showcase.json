@@ -5644,7 +5644,7 @@
     {
      "id": "op10-clean",
      "title": "Clean the chuck",
-     "caption": "Wipe the magnetic chuck and the three 1/8 in parallels clean.",
+     "caption": "Wipe the magnetic chuck and the three grinding keepers clean.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5656,8 +5656,8 @@
      },
      "uses": [
       {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5669,7 +5669,7 @@
     {
      "id": "op10-load",
      "title": "Block the part in",
-     "caption": "Set the part on the magnetic chuck, top up, and set the three 1/8 in parallels tight round it.",
+     "caption": "Set the part on the magnetic chuck, top up, and set the three grinding keepers tight round it.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5681,8 +5681,8 @@
      },
      "uses": [
       {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5694,7 +5694,7 @@
     {
      "id": "op10-seat",
      "title": "Switch the magnet on",
-     "caption": "Switch the magnet on, holding the three 1/8 in parallels against the part.",
+     "caption": "Switch the magnet on, holding the three grinding keepers against the part.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5706,8 +5706,8 @@
      },
      "uses": [
       {
-       "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
-       "item": "parallels-1"
+       "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+       "item": "keepers-1"
       }
      ],
      "media": {
@@ -5731,7 +5731,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5755,7 +5756,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5779,7 +5781,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5803,7 +5806,8 @@
      },
      "uses": [
       {
-       "name": "diamond wheel"
+       "name": "diamond wheel",
+       "item": "diamond-wheel-1"
       }
      ],
      "media": {
@@ -5815,7 +5819,7 @@
     {
      "id": "op10-unload",
      "title": "Take the part out",
-     "caption": "Switch the coolant off and run the table clear, then switch the magnet off, lift the part out and take the three 1/8 in parallels off.",
+     "caption": "Switch the coolant off and run the table clear, then switch the magnet off, lift the part out and take the three grinding keepers off.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -9296,6 +9300,60 @@
      [
       "Capacity pole pitch",
       "0.25"
+     ]
+    ]
+   },
+   {
+    "item": "keepers-1",
+    "asset": "keeper",
+    "x": 30300,
+    "y": 12000,
+    "z": 850,
+    "rot": 0,
+    "name": "Grinding keepers, 1/8 x 1/2 x 1-1/2 in, cut from precision ground O-1 flat stock",
+    "category": "workholding",
+    "kind": "keeper_set",
+    "zone": "grinding",
+    "on": "cart-grind",
+    "facts": [
+     [
+      "Quantity",
+      "3"
+     ],
+     [
+      "Size",
+      "1.5, 0.5, 0.125"
+     ]
+    ]
+   },
+   {
+    "item": "diamond-wheel-1",
+    "asset": "dwheel-1a1r",
+    "x": 30250,
+    "y": 12350,
+    "z": 850,
+    "rot": 0,
+    "name": "6 x 0.035 x 1-1/4\" 1A1R resin diamond wheel, 120 grit, on its own hub",
+    "category": "consumables",
+    "kind": "grinding_wheel",
+    "zone": "grinding",
+    "on": "cart-grind",
+    "facts": [
+     [
+      "Specs diameter",
+      "6.0"
+     ],
+     [
+      "Specs width",
+      "0.035"
+     ],
+     [
+      "Specs bore",
+      "1.25"
+     ],
+     [
+      "Specs abrasive",
+      "ASD120-R100B99-1/4 resin diamond"
      ]
     ]
    },
@@ -12886,6 +12944,58 @@
      }
     ]
    },
+   "dwheel-1a1r": {
+    "name": "Diamond wheel, 1A1R, 6 x 0.035 x 1-1/4 in, 120 grit, on its own hub",
+    "model": "models/dwheel-1a1r.glb",
+    "bbox": {
+     "min": [
+      -76.2,
+      -76.2,
+      0.0
+     ],
+     "max": [
+      76.2,
+      76.2,
+      13.58
+     ]
+    },
+    "description": "Thin straight resin-bond diamond wheel for slotting carbide on the surface grinder, kept mounted between its own flanges on its own hub, as a carbide shop keeps its diamond wheel; grinds ct-tpg322's chipbreaker.",
+    "key_specs": [
+     {
+      "name": "Size",
+      "value": "6 x 0.035 x 1-1/4 in (152.4 x 0.889 x 31.75 mm)"
+     },
+     {
+      "name": "Type",
+      "value": "1A1R: straight, rim and core one thickness"
+     },
+     {
+      "name": "Abrasive",
+      "value": "synthetic diamond, 120 grit, concentration 100, resin bond (ASD120-R100B99-1/4)"
+     },
+     {
+      "name": "Diamond depth",
+      "value": 0.25,
+      "unit": "in"
+     },
+     {
+      "name": "Max speed",
+      "value": 6048,
+      "unit": "rpm"
+     },
+     {
+      "name": "Flanges",
+      "value": "two, 4 in across, 1/4 in thick",
+      "note": "proposed: the grinder STEP's flange size"
+     },
+     {
+      "name": "Mass",
+      "value": 0.85,
+      "unit": "kg",
+      "note": "the steel core 0.12 kg and the flanges 0.73 kg"
+     }
+    ]
+   },
    "edgef": {
     "name": "Edge finder",
     "model": "models/edgef.glb",
@@ -13567,6 +13677,50 @@
      {
       "name": "Tool changer",
       "value": "16-pocket side mount"
+     }
+    ]
+   },
+   "keeper": {
+    "name": "Grinding keeper, 1/8 x 1/2 x 1-1/2 in",
+    "model": "models/keeper.glb",
+    "bbox": {
+     "min": [
+      -19.05,
+      -6.35,
+      0.0
+     ],
+     "max": [
+      19.05,
+      6.35,
+      3.175
+     ]
+    },
+    "description": "A short ground steel strip laid flat on the surface grinder's magnetic chuck, set tight against a part too weakly magnetic or too small for the chuck to hold alone: the magnet holds the keeper, and the keepers trap the part. Three in a pinwheel block in ct-tpg322's carbide insert.",
+    "key_specs": [
+     {
+      "name": "Size",
+      "value": "1/8 x 1/2 x 1-1/2 in (3.175 x 12.7 x 38.1 mm)"
+     },
+     {
+      "name": "Stock",
+      "value": "1/8 x 1/2 x 18 in precision ground flat stock, AISI O-1, oil hardening"
+     },
+     {
+      "name": "Length",
+      "value": 1.5,
+      "unit": "in",
+      "note": "proposed: cut from the 18 in bar so a pinwheel of three round a 3/8 in IC triangle reaches 23 mm behind it and 35 in front, inside the chuck and clear of the spindle's housing with the 6 in wheel at the work"
+     },
+     {
+      "name": "Hold on the grinder's chuck",
+      "value": 100,
+      "unit": "N",
+      "note": "its 1/2 x 1-1/2 in face at the chuck's rated 20.7 N/cm2 (moonshot/library/stations/sgrind.json chuck)"
+     },
+     {
+      "name": "Mass",
+      "value": 0.012,
+      "unit": "kg"
      }
     ]
    },

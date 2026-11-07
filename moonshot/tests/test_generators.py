@@ -6,8 +6,8 @@ import math
 import cadquery as cq
 import pytest
 
-from moonshot.library.generators import (CALIPERS, DENSITY_G_CC, GAUGES, SOURCED, SOURCES, TOOLS, build, caliper,
-                                         plug_gauge, record)
+from moonshot.library.generators import (CALIPERS, DENSITY_G_CC, GAUGES, MICROMETERS, SOURCED, SOURCES, STONES,
+                                         TOOLS, bench_stone, build, caliper, micrometer, plug_gauge, record)
 
 
 @pytest.mark.parametrize("tool", [t for t in TOOLS + SOURCED if t.envelope_mm <= 3.5], ids=lambda t: t.id)
@@ -24,7 +24,8 @@ def test_a_generated_tool_has_its_size_and_a_plausible_mass(tool):
 
 def test_every_generated_tool_is_in_the_catalogue():
     from moonshot.planning.validate import catalogue
-    assert {t.id for t in TOOLS + SOURCED} | {g.id for g in GAUGES + CALIPERS} <= catalogue()
+    assert ({t.id for t in TOOLS + SOURCED} | {g.id for g in GAUGES + CALIPERS + MICROMETERS + STONES}
+            <= catalogue())
 
 
 def test_every_sourced_tool_says_where_its_dimensions_came_from():
@@ -75,3 +76,22 @@ def test_the_plug_gauge_is_its_members_and_handle_end_to_end():
     bb = _box(plug_gauge(g))
     assert bb.xlen == pytest.approx(g.go_mm + g.handle_mm + g.nogo_mm, abs=0.05)
     assert bb.zlen == pytest.approx(g.handle_dia_mm, abs=0.05) and bb.zmin == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_micrometer_reads_its_opening_and_reaches_its_range():
+    """Shown at its reading: the anvil's face to the spindle's is the reading, the spindle's travel out of the barrel
+    reaches the range's start, and the frame's throat is the datasheet's c below the axis."""
+    m = MICROMETERS[0]
+    parts = {n: s.val().BoundingBox() for n, s, _ in micrometer(m)}
+    assert parts["spindle"].xmin - parts["anvil"].xmax == pytest.approx(m.reading_mm, abs=0.01)
+    assert parts["spindle"].xmax - parts["anvil"].xmax >= m.min_mm
+    axis_y = (parts["anvil"].ymin + parts["anvil"].ymax) / 2
+    assert axis_y - parts["frame"].ymin == pytest.approx(m.throat_mm + m.frame_w_mm, abs=0.01)
+    assert _box(micrometer(m)).zmin == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_bench_stone_is_its_size_lying_flat():
+    s = STONES[0]
+    bb = _box(bench_stone(s))
+    assert (bb.xlen, bb.ylen, bb.zlen) == pytest.approx((s.length_mm, s.width_mm, s.thickness_mm), abs=0.01)
+    assert bb.zmin == pytest.approx(0.0, abs=0.01)

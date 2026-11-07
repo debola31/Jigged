@@ -11,6 +11,10 @@ takes keep the reference load (moonshot/world/vise.py REFERENCE).
   (moonshot/world/parallel_rack.py) or the stop free on the table where it waits (vise.STOP_HOME), and the part
   waiting on the table right of the vise (Load.stage), as setting them finds it (moonshot/sim/set_parallels.py,
   set_stop.py).
+- A vise setup, set (its load's start, for its still: moonshot/sim/step_still.py): as open, but the parallels on the
+  seat, or the stop on the floor, where they were set; or placed (its seat's start): the part set down on them too,
+  where it is clamped, the jaw still open. Each held where it stands by the vise scene's keepers, as the load take
+  finds them.
 - A plate setup: the plate on its spoilboard under its clamps (moonshot/motion/plates.py; nist-ftc-09's on its
   riser), held to the table by the declared `clamped` weld, as the setting session holds it.
 
@@ -18,12 +22,20 @@ The part is drawn as the cutting simulation (moonshot/sim/cycle_take.py) has it:
 setup's first cycle's stock at its first frame; leaving it ("out"), its last cycle's last stock. Each GLB is in the
 part's model frame (its STEP's); the cycle's blank stands at part_pose's origin turned R, so moved into this take's
 blank, the box part_pose centres (it carries no turn), a model point p is at R (p - envelope's middle). Its physics
-is that box, as every vise take's. A setup none of whose cycles has run yet draws the box (vise.render_meshes). A plate
-is drawn from its geoms, as the plates' own takes draw it.
+is that box, as every vise take's. A setup none of whose cycles has run yet draws the finished part if it has one, else
+the box (vise.render_meshes). A plate is drawn from its geoms, as the plates' own takes draw it.
+
+The part's mesh is written into the take's folder when its run is exported, so the render draws the stock as it was
+then. When a setup's stock comes later (ll-1007224 op30's, drawn finished until the cutting simulation hands it the
+part as op20 leaves it), its takes are drawn again from it without running them again: the physics is the box's.
+
+    python -m moonshot.sim.setup_scene ll-1007224-op30-door-close ...     # each take's part drawn from its stock now
 """
 from __future__ import annotations
 
+import json
 import re
+import sys
 from pathlib import Path
 
 import mujoco
@@ -63,6 +75,11 @@ class Table:
     def open(self) -> bool:
         return self.vise == "open"
 
+    @property
+    def jaw_open(self) -> bool:
+        """Is the jaw open at the load's opening (the clean, the load's and the seat's start)?"""
+        return self.vise in ("open", "set", "placed")
+
     def parallels(self) -> dict[str, np.ndarray]:
         """Each parallel's base centre: on the vise's seat, or standing in its slot in the rack when the vise is open."""
         return RACK.slots(self.load) if self.open else self.load.parallels()
@@ -83,9 +100,9 @@ class Table:
             return xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
                                f'anchor="{c}" relpose="0 0 0 1 0 0 0" solref="0.002 1" '
                                'solimp="0.99 0.999 0.001"/>\n', 1)
-        at = self.load.stage if self.open else self.centre
+        at = self.load.stage if self.vise in ("open", "set") else self.centre
         xml = cell.with_body(body_xml, at, self.parallels(), hand_body, self.load, stop_mm=self.stop())
-        return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1) if self.open else xml
+        return xml.replace("<worldbody>\n", "<worldbody>\n" + RACK.xml(), 1) if self.jaw_open else xml
 
     def start(self, m: mujoco.MjModel, d: mujoco.MjData) -> None:
         """Before the take: the jaw closed on the part and locked, or locked open at the load's opening with the
@@ -104,6 +121,11 @@ class Table:
                 d.eq_active[m.equality("keep_stop").id] = 0
                 a = m.jnt_qposadr[m.joint("stop").id]
                 d.qpos[a + 3:a + 7] = [np.cos(RACK.YAW / 2), 0.0, 0.0, np.sin(RACK.YAW / 2)]
+            mujoco.mj_forward(m, d)
+            return
+        if self.jaw_open:                                # set or placed: locked open, the keepers holding what is set
+            m.eq_data[lock, 0] = d.qpos[m.jnt_qposadr[m.joint("crank").id]]
+            d.eq_active[lock] = 1
             mujoco.mj_forward(m, d)
             return
         jaw = (self.load.opening0 - self.load.size[1] - JAW_GAP_MM) * 0.001
@@ -136,15 +158,20 @@ class Table:
 
     def meshes(self, folder: Path) -> dict[str, dict]:
         """The parallels (and stop) as boxes at the load's size, and the part as its stock (stock_glb), each written
-        into the take's folder; a plate, nothing (drawn from its geoms)."""
+        into the take's folder; a plate, nothing (drawn from its geoms). A setup none of whose cycles has run yet draws
+        the finished part (parts/<part>/finished.glb, the STEP in metres: moonshot/library/bench_links.py), its holes
+        and all, if the part has one; else the box."""
         if self.is_plate:
             return {}
         out = V.render_meshes(self.load, folder)
-        src = self.stock_glb()
+        src, scale = self.stock_glb(), 1.0
         if src is None:
-            return out
+            src, scale = data_root() / "parts" / self.part / "finished.glb", 1000.0
+            if not src.exists():
+                return out
         import trimesh
         mesh = trimesh.load(src, force="mesh")
+        mesh.apply_scale(scale)
         R, mid = np.asarray(self.pose["R"], float), np.asarray(self.pose["envelope_mm"], float).mean(1)
         T = np.eye(4)
         T[:3, :3], T[:3, 3] = R, -R @ mid
@@ -152,3 +179,17 @@ class Table:
         (Path(folder) / "blank").mkdir(parents=True, exist_ok=True)
         mesh.export(Path(folder) / "blank" / "0.glb")
         return out
+
+
+def redraw(folder: Path) -> Path | None:
+    """A per-setup take's part drawn again from the stock as it is now (Table.meshes), its record and physics as
+    they were; returns the stock GLB it is drawn from (None: the finished part or the box)."""
+    tk = json.loads((Path(folder) / "take.json").read_text(encoding="utf-8"))
+    table = Table(tk)
+    table.meshes(Path(folder))
+    return table.stock_glb()
+
+
+if __name__ == "__main__":
+    for name in sys.argv[1:]:
+        print(name, "drawn from", redraw(data_root() / "takes" / name) or "the finished part", flush=True)

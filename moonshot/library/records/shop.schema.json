@@ -41,7 +41,7 @@
     },
     "hand_tools": {
       "type": "array",
-      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["wrench_set", "ratcheting_wrench", "deburring_kit"] } } }
+      "items": { "$ref": "#/$defs/item", "properties": { "kind": { "enum": ["wrench_set", "ratcheting_wrench", "deburring_kit", "bench_stone"] } } }
     },
     "support": {
       "type": "array",

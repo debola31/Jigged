@@ -16,7 +16,12 @@ as for the cutting steps'.
   first frames), in its finish where an outside finish comes before the inspection: that finish's take's stock (black
   oxide, zinc), in the part's STEP frame as the bench's part is.
 
+A clean whose set-parallels is itself caption and still (ll-1007224 op30's: its parallel a stands 0.1 mm from the fixed
+jaw, where no grip the hand can take slides it down the face; the user's decision, 2026-11-06) is drawn with the vise
+as the step leaves it, the parallels set and the part still waiting on the table (--vise set).
+
     python -m moonshot.sim.step_still ct-slbeam op10-load op10-seat inspect     # writes each step's record
+    python -m moonshot.sim.step_still ll-1007224 op30-clean --vise set          # the vise as the step leaves it
 """
 from __future__ import annotations
 
@@ -45,10 +50,12 @@ def folder(part: str, step_id: str) -> Path:
     return TAKES / f"{part}-{step_id}-still"
 
 
-def _vise(part: str, step: dict) -> Path:
+def _vise(part: str, step: dict, vise: str | None = None) -> Path:
+    """vise: the vise's state (setup_scene.py) in place of the one the step starts in (STATE)."""
     from moonshot.sim.door_cycle import DoorClose
     setup, kind = step["setup"], step["id"].split("-", 1)[1]
-    stock, vise = STATE[kind]
+    stock, starts = STATE[kind]
+    vise = vise or starts
     base = TAKES / f"{part}-{setup}-door-close"
     out = folder(part, step["id"])
     shutil.rmtree(out, ignore_errors=True)
@@ -112,17 +119,22 @@ def _camera(out: Path, at: str, eye, look) -> None:
         encoding="utf-8")
 
 
-def build(part: str, step_id: str) -> Path:
+def build(part: str, step_id: str, vise: str | None = None) -> Path:
     step = next(s for s in expand(load_plan(part)) if s["id"] == step_id)
     if step_id == "inspect" or step.get("station") == "inspection":
         return _inspect(part, step)
-    return _vise(part, step)
+    return _vise(part, step, vise)
 
 
 def main(argv: list[str]) -> int:
+    vise = None
+    if "--vise" in argv:
+        i = argv.index("--vise")
+        vise = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     part = argv[0]
     for sid in argv[1:]:
-        out = build(part, sid)
+        out = build(part, sid, vise)
         print(f"{part} {sid}: {out}", flush=True)
     return 0
 

@@ -230,6 +230,15 @@ def test_the_piece_comes_free_and_is_set_down_away_from_the_blade(takes):
     assert np.linalg.norm(r - r[0], axis=1).max() <= STILL_MM          # the rest stays clamped
 
 
+def test_the_lift_out_continues_the_slides_camera(takes):
+    """The step plays the slide and the lift-out as one, split at a cut on the same camera: the lift-out's camera
+    starts on the slide's last pose (moonshot/tests/gates/test_camera_continuity.py checks the join)."""
+    assert takes["unload"]["plan"].get("continues") == takes["folders"]["slide"].name
+    a, b = takes["slide"]["npz"], takes["unload"]["npz"]
+    for k in ("eye", "look"):
+        assert np.linalg.norm(b[k][0] - a[k][-1]) <= 0.5, k
+
+
 def test_the_hand_never_touches_the_blade(takes):
     for k in PERSON:
         assert "saw_blade" in takes[k]["checks"]["never_held"]

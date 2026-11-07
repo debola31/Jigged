@@ -876,6 +876,8 @@ class UnloadPlan(SawPlan):
 
     def __init__(self, state: dict, out=None, verbose=True):
         super().__init__(out or OUT["unload"], state, verbose)
+        # the slide's continuation on the same camera, the step playing the two as one (continue_camera)
+        self.camera_from = OUT["slide"]
         s, r = state["stock"]["piece"], state["stock"]["rest"]
         self.piece0 = (np.array(s["centre"], float), np.array(s["R"], float))
         self.rest0 = (np.array(r["centre"], float), np.array(r["R"], float), r["length"])

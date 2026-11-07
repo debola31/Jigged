@@ -10,6 +10,11 @@ are the same for every bar (`saw-start`). Only nist-ftc-10, published so, plays 
 start and unload: every other part's setup has its own run of them, its part or plate in the scene
 (`<part>-<setup>-door-close`, ...: per_setup).
 
+A take split from the one before it at a cut on the same camera (the saw's lift-out from its slide) continues that
+take's camera: it starts on its last pose and eases into its own (moonshot/motion/bench.py continue_camera;
+BenchPlan.camera_from, take.json "continues"), so the step's join shows no jump; a deliberate cut, from one place to
+another (the saw's load to its handwheel), doesn't (moonshot/tests/gates/test_camera_continuity.py).
+
 A machine-only (cycle) step is no take of people's work: the web shows it as its caption and a still, or in
 three.js, from the cycle's own simulation in takes/<part>-<step id>.
 

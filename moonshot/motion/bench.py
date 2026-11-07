@@ -103,6 +103,32 @@ class Steady:
     away: tuple = field(default=(0.0, -25.0, 110.0), repr=False)
 
 
+CAMERA_EASE_S = 1.0         # a take that continues another on the same camera eases from its last pose over this long
+
+
+def continue_camera(eye, look, up, prev, fps: float = FPS, ease_s: float = CAMERA_EASE_S):
+    """A take's head camera (eye, look, up: per frame) starting exactly at prev, the (eye, look, up) another take ended
+    on, then easing into its own over ease_s: two takes that one step plays as one, split at a cut on the same camera
+    (moonshot/planning/takes.py), join with no jump. Started from its own pose, the saw's lift-out jumped from its
+    slide's, the camera tilting toward the floor in one frame, nothing in the scene moving."""
+    eye, look, up = (np.array(a, float) for a in (eye, look, up))
+    e0, l0, u0 = (np.asarray(a, float) for a in prev)
+    for k in range(len(eye)):
+        w = min_jerk(min(1.0, k / fps / ease_s))
+        if w >= 1.0:
+            break
+        eye[k], look[k] = e0 + (eye[k] - e0) * w, l0 + (look[k] - l0) * w
+        u = u0 + (up[k] - u0) * w
+        up[k] = u / np.linalg.norm(u)
+    return eye, look, up
+
+
+def last_camera(folder: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The camera pose a take's record ends on (its take.npz: what is rendered)."""
+    d = np.load(Path(folder) / "take.npz")
+    return d["eye"][-1], d["look"][-1], d["up"][-1]
+
+
 def box(c, h):
     return lambda p, c=np.asarray(c, float), h=np.asarray(h, float): G.sdf_box(p, c, np.eye(3), h)
 
@@ -161,6 +187,8 @@ class BenchPlan:
     solver_w: dict = {}             # its own weights over the body solver's (BodySolver.W), as a step take's SOLVER_W
     bench_part = BC.NIST_FTC_10     # the finished part on the mat
     steady_on = Steady()            # where the left hand holds it down
+    camera_from: Path | None = None  # the take this one continues on the same camera across a cut, or None
+                                     # (continue_camera; take.json "continues")
 
     def __init__(self, out: Path, verbose: bool = True):
         torch.set_num_threads(8)
@@ -528,6 +556,9 @@ class BenchPlan:
             out[f"obj_{name}_R"] = np.stack([R for R, _ in poses])
         self.theta12 = self.theta[:, :12]
         eyes, looks, ups = head_camera(self, self.theta12, self.dp, lumbar=self.lumbar)
+        if self.camera_from is not None:
+            eyes, looks, ups = continue_camera(eyes, looks, ups, last_camera(self.camera_from))
+            extra = extra | {"continues": Path(self.camera_from).name}
         out |= {"eye": eyes, "look": looks, "up": ups}
         np.savez(self.out / "reference.npz", **out)
         jsonable = lambda v: v.tolist() if isinstance(v, np.ndarray) else v        # noqa: E731

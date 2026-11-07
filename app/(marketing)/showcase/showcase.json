@@ -6054,7 +6054,7 @@
       "still": "still/ll-1011439/op10-turn.webp",
       "model": "cut/ll-1011439/op10-turn.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-spot",
@@ -6080,7 +6080,7 @@
       "still": "still/ll-1011439/op10-spot.webp",
       "model": "cut/ll-1011439/op10-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-drill",
@@ -6105,7 +6105,7 @@
       "still": "still/ll-1011439/op10-drill.webp",
       "model": "cut/ll-1011439/op10-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-tap",
@@ -6130,7 +6130,7 @@
       "still": "still/ll-1011439/op10-tap.webp",
       "model": "cut/ll-1011439/op10-tap.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-part_off",
@@ -6155,7 +6155,7 @@
       "still": "still/ll-1011439/op10-part_off.webp",
       "model": "cut/ll-1011439/op10-part_off.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -6317,7 +6317,7 @@
       "still": "still/ll-1007224/saw-cut.webp",
       "model": "cut/ll-1007224/saw-cut.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "saw-unload",
@@ -6504,7 +6504,7 @@
       "still": "still/ll-1007224/op10-rough.webp",
       "model": "cut/ll-1007224/op10-rough.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-finish",
@@ -6529,7 +6529,7 @@
       "still": "still/ll-1007224/op10-finish.webp",
       "model": "cut/ll-1007224/op10-finish.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-unload",
@@ -6689,7 +6689,7 @@
       "still": "still/ll-1007224/op20-rough.webp",
       "model": "cut/ll-1007224/op20-rough.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-finish",
@@ -6714,7 +6714,7 @@
       "still": "still/ll-1007224/op20-finish.webp",
       "model": "cut/ll-1007224/op20-finish.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-unload",
@@ -6949,7 +6949,7 @@
       "type": "video",
       "path": "video/ll-1007224/op30-start.mp4"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-spot",
@@ -6975,7 +6975,7 @@
       "still": "still/ll-1007224/op30-spot.webp",
       "model": "cut/ll-1007224/op30-spot.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-drill",
@@ -7001,7 +7001,7 @@
       "still": "still/ll-1007224/op30-drill.webp",
       "model": "cut/ll-1007224/op30-drill.glb"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-unload",

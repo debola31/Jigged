@@ -546,8 +546,10 @@ PROBES |= {
 # round the Ø31.5 top spigot (model y 12.2..15.4, the axis y), the ball 1.6 mm above the flange, where the spigot is
 # straight between its R0.4 root and 0.5 chamfer (0.4..2.7); Z off the flange's top, halfway out between the spigot
 # and its edge, on the side the holes' pattern leaves bare (model -z). The cuts take the box down to the flange round
-# the spigot: a box's sides, tangent to the spigot where the cycle touches it on X and Y through its centre
-_SPIGOT_R, _AIR = 15.75, ((12.2, 16.0),)
+# the spigot: a box's sides, tangent to the spigot where the cycle touches it on X and Y through its centre. They run
+# up well past the ball's reach: the probe senses the box less a cut as max(box, -cut), exact only inside the cut, so
+# a ball coming down outside it read the box's top (the spigot's height) 3.2 mm above the flange
+_SPIGOT_R, _AIR = 15.75, ((12.2, 60.0),)
 PROBES |= {
     ("ll-1007224", "op30"): {"boss": ((0.0, 13.8, 0.0), _SPIGOT_R), "z": (0.0, 12.2, -23.5),
                              "cuts": [((-32.0, -_SPIGOT_R), *_AIR, (-32.0, 32.0)), ((_SPIGOT_R, 32.0), *_AIR, (-32.0, 32.0)),

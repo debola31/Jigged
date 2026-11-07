@@ -1,0 +1,77 @@
+{
+ "schema": "jigged.plan/1",
+ "part": "ll-1007224",
+ "about": "Process plan for the L&L spacer (Abstandhalter, 1007224) in 6061-T6: a blank sawn from round bar on the band saw, turned on the shop's Haas ST-25 in two setups, one per spigot, in its Kitagawa 3-jaw chuck's soft jaws, its five bolt holes drilled on the VF-2 in the Kurt D688, then the bench and inspection. Its real routing isn't known; the part record's machines_likely is saw, lathe, VMC, inspection. Written by Claude from the drawing (314-092-59935-10) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: Y is the axis. The first spigot, Ø31.500 g6, runs from Y=0 (its end) to Y=3.2, the flange, Ø63.0, from 3.2 to 12.2, the second spigot from 12.2 to 15.4; each spigot has a 0.5 x 45 deg chamfer on its end and an R0.4 at its root, the flange a 0.5 x 45 deg chamfer on each outside edge. The five Ø6.6 holes go through the flange on a 25 mm radius: four at 45 deg (X and Z ±17.68) and one at Z=+25. Op 10 holds the blank by its far end, which Op 20 faces and turns away, so the jaws' marks go with it; Op 20 holds the part by the flange Op 10 finished.",
+ "stock": {"material": "6061-T6 aluminium", "material_note": "As the drawing",
+           "bar": "2-1/2 in 6061-T6 round bar", "bar_dia_mm": 63.5, "length": "1 in",
+           "size_mm": [63.5, 25.4, 63.5], "axis": "Y", "size_in": "2.5 dia x 1",
+           "from": "sawn from the bar on the band saw [proposed: 2-1/2 in bar, 0.25 mm a side over the Ø63.0, which is ±0.3 (ISO 2768-m); 1 in long: 17.4 mm out of the jaws for the first spigot and the flange, 8 mm in them]"},
+ "faces": {"+Y": "lying flat"},
+ "faces_out": {"-Y": "an end 17.4 mm out, the other against the jaws' step", "+Y": "flipped, the finished flange in the jaws against their step"},
+ "setups": [
+  {"id": "saw", "title": "Saw: cut the blank", "machine": "bandsaw",
+   "operations": [
+    {"id": "cut", "kind": "saw", "tool": "bandsaw", "what": "Cut the 1 in blank from the bar"}
+   ]},
+  {"id": "op10", "title": "Op 10: first spigot and the outside", "machine": "st25", "face_out": "-Y",
+   "workholding": {"chuck": "chuck3", "holds": "the blank", "jaws": "soft jaws bored Ø63.5, 8 mm deep, to a step", "stick_out_mm": 17.4,
+                   "note": "In the Kitagawa's soft jaws, bored to the bar's Ø63.5 and 8 mm deep to a step the blank's end seats on: 17.4 mm out, the first spigot's 3.2 and the flange's 9.0 with 0.5 to face and 4.7 of clearance to the jaws. Boring the soft jaws isn't a step, as G1's soft jaws (ll-1007223 Op 20). The jaws hold the end Op 20 cuts away"},
+   "wcs": {"code": "G54", "z": "the blank's end, less 0.5 mm for the facing", "by": "the CCGT roughing tool touched on the blank's end"},
+   "operations": [
+    {"id": "rough", "kind": "turn", "tool": "turn-ccgt",
+     "what": "Face the end and rough the first spigot, the flange's face and the outside to 2 mm past the flange, leaving 0.25 mm",
+     "speeds": {"vc_m_min": 300, "rpm_max": 3400, "feed_mm_rev": 0.25, "doc_mm": 2.0, "constant_surface_speed": true, "coolant": "flood",
+                "source": "300 m/min, the shop's rule for carbide in aluminium (moonshot/sim/cam.py MATERIALS: Machinery's Handbook, the lower half); 1,500 rpm at the bar's Ø63.5. [proposed: 0.25 mm/rev and 2 mm deep, the middle of a polished CCGT 09T308's roughing range in aluminium]"}},
+    {"id": "finish", "kind": "turn", "tool": "turn-dcgt",
+     "what": "Finish the first spigot to Ø31.500 g6 (-0.009/-0.025) with its 0.5 x 45° chamfer and R0.4 root, the flange's face, and the Ø63.0 with its 0.5 x 45° chamfer",
+     "features": [{"type": "plane", "normal": "-Y", "at_mm": 0.0}, {"type": "hole", "dia_mm": 31.5, "axis": "Y", "count": 1},
+                  {"type": "plane", "normal": "-Y", "at_mm": 3.2}, {"type": "hole", "dia_mm": 63.0, "axis": "Y", "count": 1}],
+     "speeds": {"vc_m_min": 300, "rpm_max": 3400, "feed_mm_rev": 0.08, "doc_mm": 0.25, "constant_surface_speed": true, "coolant": "flood",
+                "source": "300 m/min as rough's. [proposed: 0.08 mm/rev, a fifth of the 0.4 nose's radius, for the g6's finish; 0.25 mm deep]. The R0.4 roots are the DCGT's own 0.4 mm nose"}}
+   ]},
+  {"id": "op20", "title": "Op 20: second spigot", "machine": "st25", "face_out": "+Y",
+   "workholding": {"chuck": "chuck3", "holds": "the part", "jaws": "the same soft jaws", "stick_out_mm": 21.7,
+                   "note": "Flipped into the same soft jaws: the flange's finished Ø63.0 in their Ø63.5 bore, which they close 0.25 mm further on, its faced side against their step, so they grip 8 mm of its 9 and leave its outer chamfer clear. Gripped so, it runs true within the general 0.2 mm (ISO 2768-K); no runout is toleranced between the spigots [proposed]"},
+   "wcs": {"code": "G54", "z": "the finished end, 12.2 mm out from the jaws' step", "by": "the CCGT roughing tool touched on the jaws' step face before loading, and moved out by the part's 12.2 mm"},
+   "operations": [
+    {"id": "rough", "kind": "turn", "tool": "turn-ccgt",
+     "what": "Face to the 15.4 mm length and rough the second spigot and the flange's other face, leaving 0.25 mm",
+     "speeds": {"vc_m_min": 300, "rpm_max": 3400, "feed_mm_rev": 0.25, "doc_mm": 2.0, "constant_surface_speed": true, "coolant": "flood",
+                "source": "As Op 10's rough. The end comes down 9.5 mm, faced in 2 mm passes"}},
+    {"id": "finish", "kind": "turn", "tool": "turn-dcgt",
+     "what": "Finish the second spigot to Ø31.500 g6 (-0.009/-0.025) with its 0.5 x 45° chamfer and R0.4 root, the flange's other face to the 9.00 thickness, and the outside's second 0.5 x 45° chamfer",
+     "features": [{"type": "plane", "normal": "+Y", "at_mm": 15.4}, {"type": "hole", "dia_mm": 31.5, "axis": "Y", "count": 1},
+                  {"type": "plane", "normal": "+Y", "at_mm": 12.2}],
+     "speeds": {"vc_m_min": 300, "rpm_max": 3400, "feed_mm_rev": 0.08, "doc_mm": 0.25, "constant_surface_speed": true, "coolant": "flood",
+                "source": "As Op 10's finish"}}
+   ]},
+  {"id": "op30", "title": "Op 30: bolt holes", "machine": "vf2", "face_up": "+Y",
+   "workholding": {"vise": "d688", "parallels_in": 1.25, "jaw_on": "X faces",
+                   "note": "Lying flat on 1.25 in parallels under the flange, the first spigot hanging between them; the plain jaws grip the flange's 8 mm outside, whose band stands 32-40 mm above the vise floor, under the jaws' 44 mm top. The holes, at most 21 mm off the centre across the jaws, come out between the parallels, which stand 28.3 mm off it. A round part has nothing to clock it by, so the pattern's single hole is put along the jaws, +Y in the vise [proposed]"},
+   "wcs": {"code": "G54", "x": "the centre of the top spigot (probe)", "y": "the centre of the top spigot (probe)", "z": "the flange's top face (probe)", "by": "probe in X and Y, a boss cycle round the Ø31.5 spigot, and Z; tool setter for the tools' lengths"},
+   "operations": [
+    {"id": "spot", "kind": "spot", "tool": "spot", "what": "Spot the five holes",
+     "speeds": {"rpm": 2260.0, "feed_mm_min": 574.04, "source": "moonshot/sim/cam.py tool(): the plan's material rule, as G1's"}},
+    {"id": "drill", "kind": "drill", "tool": "drill-6p5", "what": "Drill 5X Ø6.6 through the flange", "note": "6.5 mm is inside Ø6.6's ±0.2, and nearer its middle than the H drill (6.76 mm)",
+     "features": [{"type": "hole", "dia_mm": 6.6, "axis": "Y", "count": 5}],
+     "speeds": {"rpm": 4410.0, "feed_mm_min": 573.3, "source": "moonshot/sim/cam.py tool(): the plan's material rule, as G1's"}}
+   ]}
+ ],
+ "finish": [
+  {"id": "deburr", "station": "bench", "what": "Deburr every edge, breaking each sharp corner 0.2 x 45° (note 1) with a hooked blade drawn along it, the five holes' edges on both faces too"},
+  {"id": "inspect", "station": "inspection", "title": "Check the spigots, the flange and the holes", "what": "Check both Ø31.500 g6 spigots with the 1-2 in micrometer, the Ø63.0, the 9.00 flange, the 15.4 length and the holes' 25.00 and 17.68 positions with the calipers, and the five Ø6.6 holes with gauge pins",
+   "tools": ["mic2", "cal6", "gblock"]}
+ ],
+ "proposed": [
+  {"what": "2-1/2 in 6061-T6 bar, sawn 1 in long", "why": "The Ø63.0 is ±0.3 (ISO 2768-m), so 0.25 mm a side cleans it up; 1 in gives Op 10 17.4 mm out of the jaws and 8 mm in them"},
+  {"what": "Both lathe setups in one set of the Kitagawa's soft jaws, bored to Ø63.5", "why": "Op 10 grips the bar's Ø63.5 where Op 20 cuts it away; Op 20 grips the finished Ø63.0 in the same bore, closed 0.25 mm further, inside the drawing's general runout. Boring them isn't a step, as G1's soft jaws"},
+  {"what": "The turning feeds and depths", "why": "The surface speed is the shop's rule for carbide in aluminium; no source gives the CCGT's and DCGT's feeds for this part"},
+  {"what": "Op 30 on 1.25 in parallels in the plain jaws, the single hole along the jaws", "why": "A round part has no flat to clock it; the drawing doesn't place the pattern against anything but the axis"}
+ ],
+ "missing_records": [
+  {"id": "turn-ccgt", "what": "OD roughing tool: an ISO CCGT 09T308 insert (80 deg rhombus, 7 deg clearance, 9.7 mm edge, 3.97 mm thick, 0.8 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 CCGT 09 T3 08-AL H10; in a 95 deg SCLCR holder with a 1 in square shank for the ST-25's BOT OD stations (ISO SCLCR 2525M09 is its 25 mm twin)", "why": "The shop has no lathe tools (its only one is the boring bar, TPMT-221)"},
+  {"id": "turn-dcgt", "what": "OD finishing tool: an ISO DCGT 11T304 insert (55 deg rhombus, 7 deg clearance, 11.6 mm edge, 3.97 mm thick, 0.4 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 DCGT 11 T3 04-AL H10; in a 93 deg SDJCR holder with a 1 in square shank (ISO SDJCR 2525M11 is its 25 mm twin)", "why": "Its 0.4 mm nose cuts the two R0.4 roots, which need a nose of 0.4 or less; no record"},
+  {"id": "mic2", "what": "1-2 in outside micrometer, .0001 in, e.g. Mitutoyo 103-178", "why": "The g6 spigots' 0.016 mm band needs a micrometer, and the shop's (mic1) reads 0-1 in, short of 31.5 mm"}
+ ],
+ "open": []
+}

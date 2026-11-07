@@ -5957,7 +5957,7 @@
     {
      "id": "op10-tools",
      "title": "Set up the turret",
-     "caption": "Bolt the VCGT turning tool, the 1/2 in spot drill, the 3.3 mm 118 deg drill, the M4 bottoming tap, the 3 mm grooving tool into the turret and touch each one off.",
+     "caption": "Bolt the VCGT turning tool, the 1/2 in spot drill, the 3.3 mm 118 deg drill, the M4 bottoming tap, the 3 mm grooving tool into the turret, then shut the door and touch each one off on the tool presetter.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -6417,7 +6417,7 @@
     {
      "id": "op10-tools",
      "title": "Set up the turret",
-     "caption": "Bolt the CCGT roughing tool, the DCGT finishing tool into the turret and touch each one off.",
+     "caption": "Bolt the CCGT roughing tool, the DCGT finishing tool into the turret, then shut the door and touch each one off on the tool presetter.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -6629,7 +6629,7 @@
     {
      "id": "op20-z",
      "title": "Set Z",
-     "caption": "Set G54 Z at the finished end, 12.2 mm out from the jaws' step.",
+     "caption": "Set G54 Z at the finished end, 9.5 mm in from the part's end.",
      "kind": "human",
      "group": "op20",
      "where": {

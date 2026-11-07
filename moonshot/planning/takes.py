@@ -187,7 +187,8 @@ def grind_takes(part: str, step: dict) -> list[str]:
 
 def lathe_tool_takes(step: dict) -> list[str]:
     """A lathe's Set up the turret step's takes, by their folders under the step's own: one per new tool, bolted into
-    its turret station and touched off for its offsets, in the order the plan first uses them."""
+    its turret station and touched off for its offsets on the tool presetter (steps.py turret: the door shut, M104,
+    jogged in to the beep), in the order the plan first uses them."""
     return [f"{k:02d}-mount-{t}" for k, t in enumerate(step["facts"]["tool_ids"], 1)]
 
 

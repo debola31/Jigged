@@ -173,15 +173,22 @@ LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
          "black oxide": ("black_oxide", [0.018, 0.018, 0.02, 1.0], 0.5, 0.5),      # dark grey-black, satin
          "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22),     # bright bluish silver
          "bronze": ("aluminium_bronze", [0.77, 0.58, 0.33, 1.0], 1.0, 0.3),        # AMPCO 18 turned: golden
-         "carbide": ("carbide_ground", [0.46, 0.47, 0.49, 1.0], 1.0, 0.28)}        # ground tungsten carbide, grey
+         "carbide": ("carbide_ground", [0.36, 0.37, 0.39, 1.0], 0.75, 0.38)}       # ground tungsten carbide, grey
 
 
-def write_glb(shape, path: Path, look: str = "aluminium") -> None:
+ROUND_MESH_MM, ROUND_MESH_RAD = 0.01, 0.1     # a round part's mesh: 10 µm off its surface, absolute (tessellate's
+                                              # 0.05 is relative: about 30 flats round a Ø63)
+
+
+def write_glb(shape, path: Path, look: str = "aluminium", round_part: bool = False) -> None:
     """A stock shape as a GLB in its own frame, mm (the take record's meshes), in milled 6061 as vise.render_meshes
-    draws the blank, or as LOOKS has the part's material."""
+    draws the blank, or as LOOKS has the part's material. A round part (turned, or a bar's slug) meshed finer."""
     import trimesh
     from trimesh.visual.material import PBRMaterial
     name, colour, metal, rough = LOOKS[look]
+    if round_part:                             # tessellate() keeps a finer mesh it finds
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        BRepMesh_IncrementalMesh(shape.wrapped, ROUND_MESH_MM, False, ROUND_MESH_RAD, True)
     v, f = shape.tessellate(0.05, 0.3)
     mesh = trimesh.Trimesh(np.array([p.toTuple() for p in v]), np.array(f), process=False)
     mesh.visual = trimesh.visual.TextureVisuals(material=PBRMaterial(
@@ -220,6 +227,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
             f"(a plan gap)")
         return None
     tools = [p.tool for p in c.passes]
+    turned = before_mill(plan) is not None                     # a round part off the lathe: its GLBs meshed finer
     out = data_root() / "takes" / f"{part}-{c.step}"
     if out.exists():
         shutil.rmtree(out)
@@ -294,7 +302,7 @@ def run_step(plan: dict, planner: cam.Planner, setup: dict, op: dict, stock, log
     stock.exportBrep(str(out / "stock-end.brep"))
     keyframes = sorted(states)
     for k in keyframes:
-        write_glb(states[k], out / "stock" / f"{k}.glb", planner.material)
+        write_glb(states[k], out / "stock" / f"{k}.glb", planner.material, round_part=turned)
 
     glbs = glbs_in_bodies(m, "vf2", vf2.render_links())
     if plate:                                                   # the spoilboard is drawn from its geom
@@ -358,7 +366,7 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
     return out
 
 
-def on_shelf(plan: dict, stock, out: Path, look: str, R: np.ndarray | None = None) -> None:
+def on_shelf(plan: dict, stock, out: Path, look: str, R: np.ndarray | None = None, round_part: bool = False) -> None:
     """A take of a part on its own (a cycle step with no simulation): the stock, in look (LOOKS), on a dark shelf,
     set down as the mill held it in its flattest setup (or turned by R), the still's camera close on it: take.npz,
     scene.json, stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
@@ -390,7 +398,7 @@ def on_shelf(plan: dict, stock, out: Path, look: str, R: np.ndarray | None = Non
     rec = Recorder(m, set(), arms=())
     for _ in range(2):
         rec.frame(d, {}, look + np.array(STILL_FROM_MM), look, [0, 0, 1])
-    write_glb(stock, out / "stock" / "0.glb", finish)
+    write_glb(stock, out / "stock" / "0.glb", finish, round_part=round_part)
     rec.write(out, FPS, 0.0, {}, "outside", {}, meshes={"blank": {"dir": "stock", "frames": [0]}})
     size = max(sb.xlen, sb.ylen, sb.zlen)                   # close on the part: it fills the view as nist-ftc-10's
     (out / "still.json").write_text(json.dumps({            # blank does in the vise
@@ -415,7 +423,7 @@ def saw_cut_take(plan: dict, step: dict, log=print) -> Path:
         base = cq.Vector(*(env.mean(1) * (1 - d) + env[k, 0] * d))
         stock = cq.Solid.makeCylinder(plan["stock"]["bar_dia_mm"] / 2, env[k, 1] - env[k, 0], base, cq.Vector(*d))
         up = np.roll(np.eye(3), -k, axis=0)          # the bar's axis to world z
-        on_shelf(plan, stock, out, "bar", R=np.stack([up[1], up[2], up[0]]))
+        on_shelf(plan, stock, out, "bar", R=np.stack([up[1], up[2], up[0]]), round_part=True)
     else:
         stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
         on_shelf(plan, stock, out, "bar")

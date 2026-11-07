@@ -2270,10 +2270,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/nist-ftc-09/inspect.mp4"
+      "type": "still",
+      "still": "still/nist-ftc-09/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -2902,10 +2902,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1005337/inspect.mp4"
+      "type": "still",
+      "still": "still/ll-1005337/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -3057,10 +3057,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-clean.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-clean.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-load",
@@ -3086,10 +3086,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -3115,10 +3115,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -3144,10 +3144,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-check.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",
@@ -3285,10 +3285,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op10-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op10-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-clean",
@@ -3343,10 +3343,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-seat",
@@ -3372,10 +3372,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-check",
@@ -3521,10 +3521,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op20-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op20-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clean",
@@ -3579,10 +3579,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-seat",
@@ -3608,10 +3608,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-check",
@@ -3868,10 +3868,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op30-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op30-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-clean",
@@ -3897,10 +3897,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-clean.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-clean.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-load",
@@ -3926,10 +3926,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-load.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-seat",
@@ -3955,10 +3955,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-seat.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-check",
@@ -3984,10 +3984,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-check.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op40-xy",
@@ -4267,10 +4267,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/op40-unload.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/op40-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",
@@ -4345,10 +4345,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ct-slbeam/inspect.mp4"
+      "type": "still",
+      "still": "still/ct-slbeam/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },
@@ -4524,10 +4524,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-seat",
@@ -4553,10 +4553,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-check",
@@ -4582,10 +4582,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-check.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op10-xy",
@@ -4843,10 +4843,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op10-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op10-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-clean",
@@ -4901,10 +4901,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-seat",
@@ -4930,10 +4930,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-check",
@@ -4959,10 +4959,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-check.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-check.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op20-xy",
@@ -5182,10 +5182,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op20-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op20-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-clean",
@@ -5240,10 +5240,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-load.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-load.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-seat",
@@ -5269,10 +5269,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-seat.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-seat.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-check",
@@ -5533,10 +5533,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/op30-unload.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/op30-unload.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "deburr",
@@ -5611,10 +5611,10 @@
      },
      "uses": [],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007223/inspect.mp4"
+      "type": "still",
+      "still": "still/ll-1007223/inspect.webp"
      },
-     "published": false
+     "published": true
     }
    ]
   },

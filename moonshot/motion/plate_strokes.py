@@ -26,6 +26,7 @@ from moonshot.motion import plates
 
 TAKES = data_root() / "takes"
 SEATED_MM = 0.02             # a nut tightened is snug on its strap with its flange this close to the strap's top
+TAKEN_FRAC = 0.25            # a nut its strokes ran less than this share of its run, the box end never took
 
 
 def learn(folder: Path, keep: set[str] = frozenset()) -> dict:
@@ -64,9 +65,14 @@ def learn(folder: Path, keep: set[str] = frozenset()) -> dict:
                 turn = done + abs(e["rad"]) * frac
                 break
             done += abs(e["rad"])
-        if turn is None:                          # never got there: the strokes' turn scaled to the run it made, no more
-            made = abs(zz[int(round(mine[-1]["t1"] * fps))] - zz[int(round(mine[0]["t0"] * fps))])   # than half again
-            turn = done * min(run / max(made, 1e-3), 1.5)          # (a nut the box end never took barely moved)
+        if turn is None:
+            made = abs(zz[int(round(mine[-1]["t1"] * fps))] - zz[int(round(mine[0]["t0"] * fps))])
+            # the box end never took it: nothing to learn, its strokes as planned (scaled half again, as a nut that
+            # ran short, ll-1005337's far left nut was planned 2103 deg, 1000 past snug)
+            if made < run * TAKEN_FRAC:
+                out.setdefault(d, {})[c.name] = round(math.degrees(done), 2)
+                continue
+            turn = done * min(run / made, 1.5)    # never got there: the strokes' turn scaled to the run it made
         if d == "tighten":
             turn += PW.SNUG                       # the snug past it
         out.setdefault(d, {})[c.name] = round(math.degrees(turn), 2)

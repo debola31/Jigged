@@ -40,7 +40,8 @@ STEEL = ' class="st25"'
 STIFF = ' solreflimit="0.002 1" solimplimit="0.999 0.9999 0.0001"'
 # a chuck's gripping faces: metal on metal, as stiff as the 1 ms step allows (as the vise's jaws, moonshot/world/vise.py)
 GRIP = ' priority="1" friction="0.5 0.004 0.0001" solref="0.002 1" solimp="0.95 0.99 0.0005"'
-GRIP_COLLET = ' priority="1" friction="0.4 0.004 0.0001" solref="0.002 1" solimp="0.95 0.99 0.0005"'
+# the collet's faces: drawn not as themselves but by its GLB on the spindle (links/c5/collet.glb), so unseen
+GRIP_COLLET = ' priority="1" friction="0.4 0.004 0.0001" solref="0.002 1" solimp="0.99 0.999 0.0002" rgba="0.6 0.6 0.62 0"'
 
 
 def record() -> dict:
@@ -374,7 +375,7 @@ def _pedal(p: dict) -> str:
     rest = math.radians(p["rest_deg"])
     pad_c = np.array([0.0, p["pad_len_mm"] / 2 * math.cos(rest), p["pad_len_mm"] / 2 * math.sin(rest) + 5.0])
     pref = p["preload_nm"] / p["stiffness_nm_rad"]
-    return f"""    {_box("st25_pedal_housing", p["housing_min_mm"], np.array(p["housing_max_mm"]) - [0, 0, 10.0])}
+    return f"""    <body name="st25_pedal_base">{_box("st25_pedal_housing", p["housing_min_mm"], np.array(p["housing_max_mm"]) - [0, 0, 10.0])}</body>
     <body name="st25_pedal" pos="{_f(h)}">
       <joint name="st25_pedal" type="hinge" axis="{_f(p['axis'], 1)}" range="{-math.radians(p['travel_deg']):.5f} 0" stiffness="{p['stiffness_nm_rad']}" springref="{pref:.5f}" damping="0.2"/>
       <geom name="st25_pedal_pad"{STEEL} type="box" size="{p['pad_width_mm'] / 2 * M:.5f} {p['pad_len_mm'] / 2 * M:.5f} 0.005" pos="{_f(pad_c)}" quat="{_quat(_rx(p['rest_deg']))}" mass="{p['kg']}" friction="0.8 0.004 0.0001"/>
@@ -439,7 +440,8 @@ def standalone_xml(workholding: str = "br10", bore_mm: float | None = None, dept
 # move against it on their own joints (the spindle's nose through the headstock wall, the door on its track, the jog
 # handle in its bezel, the pedal in its housing, the arm on its hub) are kept from it here
 EXCLUDE = "".join(f'    <exclude body1="st25" body2="st25_{b}"/>\n'
-                  for b in ("spindle", "door", "zslide", "probe_arm", "jog_handle", "pedal"))
+                  for b in ("spindle", "door", "zslide", "probe_arm", "jog_handle", "pedal")) + \
+    '    <exclude body1="st25_pedal_base" body2="st25_pedal"/>\n'
 
 
 def render_links(workholding: str = "br10") -> dict[str, tuple[str, str]]:
@@ -448,6 +450,8 @@ def render_links(workholding: str = "br10") -> dict[str, tuple[str, str]]:
     body = {"base": "st25", "pendant": "st25", "zcover_left": "st25", "zcover_right": "st25", "door": "st25_door",
             "zslide": "st25_zslide", "xslide": "st25_xslide", "turret": "st25_turret", "spindle": "st25_spindle",
             "drawtube": "st25_drawtube", "probe_arm": "st25_probe_arm", f"{workholding}/body": "st25_spindle"}
+    if workholding == "c5":
+        body["c5/collet"] = "st25_spindle"          # its fingers close 0.24 mm at most: drawn still, with the chuck
     if workholding == "br10":
         body |= {f"br10/jaw_{k}": f"st25_jaw_{k}" for k in range(3)}
     return {k: (b, f"library/machines/st25/links/{k}.glb") for k, b in body.items()}

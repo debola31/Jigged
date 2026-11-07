@@ -445,6 +445,15 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     as their reflected inertia, the hidden drawtube shown following them by an exact ratio, declared.
   - The ST-25's tools are touched off on Haas's tool presetter (M104, each jogged in to the beep); the work's Z on
     the bar's end with Z FACE MEASURE. The tailstock, an option neither part needs, is left out.
+  - The ST-25's door latch is declared: the interlock holds the shut door while the spindle turns or a program runs
+    (Haas's manual, 3.5).
+  - ll-1007224 op30's parallels are shown as a caption and a still, as ct-slbeam's are: one stands 0.1 mm from the
+    fixed jaw, and neither an end pinch (the arm can't turn the hand far enough from the stance) nor a press
+    against the jaw (the fingertips come over the jaw's top) passes.
+  - Every published "Load the tools" video drew the CAT40 holder and its cutter on their side (the tool models are
+    stored Y-up and were placed without the turn the bench's and the wrench's get). Fixed, and the 127 published
+    tool-load takes re-render on the M1 and the hub's GPU, nist-ftc-10 first, each step's video replaced as its
+    corrected one lands; the M4 stays on G2. The machining stills that show a tool are rendered again.
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web
 - [ ] Nov 11: G5; all 20 parts on the web

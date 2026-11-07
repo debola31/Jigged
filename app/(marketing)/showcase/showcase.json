@@ -6760,10 +6760,10 @@
       }
      ],
      "media": {
-      "type": "video",
-      "path": "video/ll-1007224/op30-clean.mp4"
+      "type": "still",
+      "still": "still/ll-1007224/op30-clean.webp"
      },
-     "published": false
+     "published": true
     },
     {
      "id": "op30-load",

@@ -92,6 +92,11 @@ SOURCED = [
     # sized to the part it cuts, not a catalogue entry: ll-1005337's undercut end-notch walls (SOURCES says how)
     Tool("dovetail-20", "dovetail", "20 deg dovetail cutter", 30.0, 20.0, 70.0, "HSS", 6, helix_deg=0.0,
          flank_deg=20.0, shank_mm=0.75 * INCH, neck=((20.0, 12.0), (25.0, 12.0), (28.0, 0.75 * INCH))),
+    # G2's (ll-1011439's plan): the STEP's 118 deg hole bottom, and a bottoming tap for its 8.0 of full thread
+    Tool("drill-3p3-118", "drill", "3.3 mm HSS jobber drill, 118 deg", 3.3, 36, 65, "HSS", 2, point_deg=118.0),
+    Tool("tap-m4-bot", "tap", "M4x0.7 spiral-flute bottoming tap", 4.0, 13, 63, "HSS", 3, helix_deg=40.0,
+         thread="M4x0.7", shank_mm=4.5, neck=((13.0, 3.2), (19.0, 3.2), (20.0, 4.5)), pitch_mm=0.7, thread_mm=13.0,
+         chamfer_mm=1.75, square_mm=(3.4, 6.0)),
 ]
 
 # Where each sourced tool's dimensions came from, for its record: `dims` goes into its notes, `urls` and `files`
@@ -137,6 +142,20 @@ SOURCES = {
               "urls": ["https://www.harveytool.com/products/tool-details-72031",
                        "https://harveyperformance.widen.net/content/tery12h1wd/original/Harvey_72031.dxf"],
               "files": ["Harvey_72031.dxf (Harvey Tool's profile drawing)"]},
+    "drill-3p3-118": {
+        "dims": "DIN 338 type N for 3.3 mm (the standard's table): 65 mm overall, 36 mm of flute, a 118 deg point and a "
+                "standard (type N) helix, drawn at 30 deg [proposed]. DIN 338 is a dimension standard: any maker's "
+                "3.3 mm type N jobber has these",
+        "urls": [], "license": "self-made parametric generator (moonshot.library.generators, family drill), from DIN "
+                               "338's dimensions; no maker's tool"},
+    "tap-m4-bot": {
+        "dims": "DIN 371 for M4 (the standard's table): 63 mm overall, a 4.5 mm reinforced shank with a 3.4 mm square "
+                "6 mm long, 13 mm of thread; a form C bottoming chamfer of 2-3 threads (1.75 mm, ISO 8830), 3 "
+                "spiral flutes at 40 deg; the neck 3.2 mm across from the thread's end to 19 mm and the step up to "
+                "the shank at 20 [proposed]. DIN 371 is a dimension standard: any maker's M4 HSS-E spiral-flute "
+                "bottoming tap has these",
+        "urls": [], "license": "self-made parametric generator (moonshot.library.generators, family tap), from DIN "
+                               "371's dimensions; no maker's tool"},
     "dovetail-20": {
         "dims": "the wall it cuts, not a catalogue's 10 or 20 deg naming. The angle as read from ll-1005337's STEP "
                 "(part.step, 2026-11-05): each end notch's undercut wall is a plane whose normal is (0, -/+0.9397, "
@@ -760,12 +779,175 @@ def write_inspection(item: PlugGauge | Caliper | Micrometer | BenchStone) -> Pat
     return out
 
 
+# --- lathe tools: an insert in its holder ------------------------------------------------------------------------
+# A lathe tool lies in its own frame as the cut simulation reads it (moonshot/sim/turn.py): +X along the spindle away
+# from the chuck (the lathe's Z), +Z out along the shank toward the turret (the lathe's X), the rake face at Y = 0
+# facing +Y; the insert's nose centre (a turning insert) or the blade's bottom centre (a grooving insert) at the
+# origin. Its record carries the edge the simulation cuts with: a turning insert's nose radius, insert angle, lead
+# angle and cutting edge length; a grooving insert's width and corner radius.
+
+@dataclass(frozen=True)
+class LatheTool:
+    id: str
+    family: str                  # turning | grooving
+    name: str
+    make: str
+    model: str
+    description: str
+    insert: str
+    nose_mm: float               # a turning insert's nose radius; a grooving insert's corner radius
+    shank_mm: float              # the holder's square shank
+    holder_mm: float             # its length
+    insert_deg: float = 0.0      # turning: the insert's point angle
+    lead_deg: float = 0.0        # turning: the holder's lead (approach) angle
+    edge_mm: float = 0.0         # turning: the insert's cutting edge length
+    thick_mm: float = 0.0        # turning: the insert's thickness
+    width_mm: float = 0.0        # grooving: the insert's width
+    depth_mm: float = 0.0        # grooving: how deep the blade reaches
+    material: str = "carbide"
+
+
+LATHE_TOOLS = [
+    LatheTool("turn-vcgt", "turning", "VCGT turning tool, 93 deg", "Sandvik Coromant",
+              "VCGT 11 03 02-AL H10 in SVJCR (1 in shank)",
+              "OD turning tool: a VCGT 110302 insert (35 deg rhombus, 7 deg clearance, 0.2 mm nose, uncoated H10 for "
+              "non-ferrous) in a 93 deg SVJCR holder with a 1 in square shank, for the ST-25's BOT OD stations.",
+              "VCGT 110302 (inch VCGT 2.5(1.5)0.5), uncoated H10 carbide", 0.2, INCH, 150.0, insert_deg=35.0,
+              lead_deg=93.0, edge_mm=11.07, thick_mm=3.18),
+    LatheTool("turn-ccgt", "turning", "CCGT roughing tool, 95 deg", "Sandvik Coromant",
+              "CCGT 09 T3 08-AL H10 in SCLCR (1 in shank)",
+              "OD roughing tool: a CCGT 09T308 insert (80 deg rhombus, 7 deg clearance, 0.8 mm nose, uncoated H10 for "
+              "non-ferrous) in a 95 deg SCLCR holder with a 1 in square shank, for the ST-25's BOT OD stations.",
+              "CCGT 09T308 (inch CCGT 32.52), uncoated H10 carbide", 0.8, INCH, 150.0, insert_deg=80.0,
+              lead_deg=95.0, edge_mm=9.67, thick_mm=3.97),
+    LatheTool("turn-dcgt", "turning", "DCGT finishing tool, 93 deg", "Sandvik Coromant",
+              "DCGT 11 T3 04-AL H10 in SDJCR (1 in shank)",
+              "OD finishing tool: a DCGT 11T304 insert (55 deg rhombus, 7 deg clearance, 0.4 mm nose, uncoated H10 for "
+              "non-ferrous) in a 93 deg SDJCR holder with a 1 in square shank, for the ST-25's BOT OD stations.",
+              "DCGT 11T304 (inch DCGT 32.51), uncoated H10 carbide", 0.4, INCH, 150.0, insert_deg=55.0,
+              lead_deg=93.0, edge_mm=11.6, thick_mm=3.97),
+    LatheTool("groove-3", "grooving", "3 mm grooving and parting tool", "Sandvik Coromant",
+              "N123G2-0300-0002-TF H13A in RF123G (1 in shank)",
+              "Groove-and-turn and parting tool: a 3.00 mm CoroCut 1-2 insert with 0.2 mm corners, uncoated H13A, in a "
+              "CoroCut 1-2 holder (RF123G type, seat G) with a 1 in square shank, cutting 12 mm deep.",
+              "N123G2-0300-0002-TF H13A, 3.00 mm wide, 0.2 mm corners", 0.2, INCH, 150.0, width_mm=3.0,
+              depth_mm=12.0),
+]
+LATHE_SOURCES = {
+    "turn-ccgt": {"dims": "ISO 1832 for a CCGT 09T308: an 80 deg rhombus, 9.525 mm inscribed circle, 9.67 mm edge, "
+                          "3.97 mm thick, 0.8 mm nose; ISO 5608's SCLCR: 95 deg lead, 1 in shank, 150 mm long (the 25 mm "
+                          "SCLCR 2525M09's). The holder's head drawn as a block [proposed]. Sandvik's CAD needs a "
+                          "login (its download centre)",
+                  "urls": ["https://www.sandvik.coromant.com/en-us/product-details?c=CCGT%2009%20T3%2008-AL%20%20%20%20H10"]},
+    "turn-dcgt": {"dims": "ISO 1832 for a DCGT 11T304: a 55 deg rhombus, 9.525 mm inscribed circle, 11.6 mm edge, "
+                          "3.97 mm thick, 0.4 mm nose; ISO 5608's SDJCR: 93 deg lead, 1 in shank, 150 mm long (the 25 mm "
+                          "SDJCR 2525M11's). The holder's head drawn as a block [proposed]. Sandvik's CAD needs a "
+                          "login (its download centre)",
+                  "urls": ["https://www.sandvik.coromant.com/en-us/product-details?c=DCGT%2011%20T3%2004-AL%20%20%20%20H10"]},
+    "turn-vcgt": {"dims": "ISO 1832 for a VCGT 110302: a 35 deg rhombus, 6.35 mm inscribed circle, 11.07 mm edge, "
+                          "3.18 mm thick, 0.2 mm nose; ISO 5608's SVJCR: 93 deg lead, 1 in shank, 150 mm long (the 25 mm "
+                          "SVJCR 2525M11's). The holder's head drawn as a block [proposed]. Sandvik's CAD needs a "
+                          "login (its download centre)",
+                  "urls": ["https://www.sandvik.coromant.com/en-us/product-details?c=VCGT%2011%2003%2002-AL%20%20%20%20H10"]},
+    "groove-3": {"dims": "Sandvik's CoroCut 1-2 table for N123G2-0300-0002-TF: 3.00 mm wide, 0.2 mm corner radii; a "
+                         "1 in RF123G holder 150 mm long with a blade reaching 12 mm [proposed], the 5/8 in bar's 7.9 "
+                         "radius and more. The blade and head drawn as blocks [proposed]. Sandvik's CAD needs a login",
+                 "urls": ["https://www.sandvik.coromant.com/en-us/product-details?c=N123G2-0300-0002-TF%20%20%20H13A"]},
+}
+CARBIDE = [120, 122, 128, 255]
+HOLDER = [40, 42, 46, 255]
+
+
+def _prism(pts_xz: list, y0: float, y1: float):
+    """A polygon in the XZ plane, extruded along Y from y0 to y1."""
+    w = cq.Wire.makePolygon([cq.Vector(x, y0, z) for x, z in pts_xz], close=True)
+    return cq.Solid.extrudeLinear(cq.Face.makeFromWires(w), cq.Vector(0, y1 - y0, 0))
+
+
+def lathe_edge(t: LatheTool) -> list:
+    """The insert's outline in XZ about its reference point (moonshot/sim/turn.py's: turning_edge, blade_edge)."""
+    from moonshot.library.lathe_edges import blade, turning   # the one definition both use
+    if t.family == "turning":
+        return turning(t.nose_mm, t.lead_deg, t.insert_deg, t.edge_mm)
+    return blade(t.width_mm, t.nose_mm, t.depth_mm)
+
+
+def lathe_parts(t: LatheTool) -> list:
+    """(name, shape, rgba): the insert, and the holder's head and shank, in the tool's frame (mm)."""
+    import numpy as np
+    edge = np.array(lathe_edge(t))
+    s = t.shank_mm
+    if t.family == "turning":
+        n = edge[1:-1]                                   # the nose arc; the rhombus's other three corners from it
+        a, b = np.array(edge[0]), np.array(edge[-1])
+        tip = (n[0] + n[-1]) / 2
+        far = a + (b - tip)
+        insert = _prism([tuple(p) for p in [a] + list(n) + [b, far]], -t.thick_mm, 0.0)
+        x0 = float(edge[:, 0].min()) - 1.0
+        head = cq.Solid.makeBox(s, s - t.thick_mm, 28.0, cq.Vector(x0, -s, 4.0))
+        shank = cq.Solid.makeBox(s, s, t.holder_mm - 32.0, cq.Vector(x0, -s, 32.0))
+    else:
+        h = t.width_mm / 2
+        insert = _prism([tuple(p) for p in edge if p[1] <= 5.0] + [(h, 5.0), (-h, 5.0)], -12.0, 0.0)
+        blade = cq.Solid.makeBox(t.width_mm - 0.4, 25.0, t.depth_mm + 20.0, cq.Vector(-h + 0.2, -25.0, 5.0))
+        shank = cq.Solid.makeBox(s, s, t.holder_mm - t.depth_mm - 25.0, cq.Vector(-h + 0.2, -s, t.depth_mm + 25.0))
+        head = blade
+    return [("insert", cq.Workplane("XY").add(insert), CARBIDE), ("head", cq.Workplane("XY").add(head), HOLDER),
+            ("shank", cq.Workplane("XY").add(shank), HOLDER)]
+
+
+def lathe_record(t: LatheTool, parts: list, triangles: int) -> dict:
+    mm = lambda v: round(float(v), 4)                   # noqa: E731
+    specs = [{"name": "Insert", "value": t.insert}, {"name": "Shank", "value": mm(t.shank_mm), "unit": "mm",
+                                                     "note": "square"},
+             {"name": "Overall length", "value": mm(t.holder_mm), "unit": "mm"}, {"name": "Material",
+                                                                                   "value": f"{t.material} insert"}]
+    if t.family == "turning":
+        specs += [{"name": "Nose radius", "value": mm(t.nose_mm), "unit": "mm"},
+                  {"name": "Insert angle", "value": t.insert_deg, "unit": "deg"},
+                  {"name": "Lead angle", "value": t.lead_deg, "unit": "deg", "note": "the holder's approach to the feed"},
+                  {"name": "Cutting edge length", "value": mm(t.edge_mm), "unit": "mm"},
+                  {"name": "Insert thickness", "value": mm(t.thick_mm), "unit": "mm"},
+                  {"name": "Hand", "value": "R"}]
+    else:
+        specs += [{"name": "Width", "value": mm(t.width_mm), "unit": "mm"},
+                  {"name": "Corner radius", "value": mm(t.nose_mm), "unit": "mm"},
+                  {"name": "Max cutting depth", "value": mm(t.depth_mm), "unit": "mm"}]
+    shape = cq.Workplane("XY").add(cq.Compound.makeCompound([p.val() for _, p, _ in parts]))
+    src = LATHE_SOURCES[t.id]
+    return {"schema": "setupguide.asset/0.1", "id": t.id, "name": t.name, "category": "tooling", "make": t.make,
+            "model": t.model, "description": t.description, "generic": True, "key_specs": specs,
+            "source_urls": src["urls"], "source_files": [f"{t.id}.step"],
+            "license": f"self-made parametric generator (moonshot.library.generators, family {t.family}), from "
+                       f"{t.make}'s published dimensions and ISO's; not the maker's CAD",
+            "notes": f"{MARK.strip()} (family {t.family}) from {src['dims']}. Frame: +X along the spindle away from "
+                     "the chuck, +Z out along the shank, the rake face at Y = 0; the insert's nose centre (turning) or "
+                     "the blade's bottom centre (grooving) at the origin.",
+            "file": f"{t.id}.glb", "units": "mm", "up": "+Z", "bbox": _bbox(shape), "attach_points": [],
+            "build": {"from": f"source/{t.id}.step", "placeholder": f"generators.{t.family}", "up": "+Z",
+                      "max_triangles": MAX_TRIANGLES},
+            "triangles": triangles}
+
+
+def write_lathe(t: LatheTool) -> Path:
+    parts = lathe_parts(t)
+    src, lib = _dirs("tooling", t.id)
+    cq.exporters.export(cq.Workplane("XY").add(cq.Compound.makeCompound([p.val() for _, p, _ in parts])),
+                        str(src / f"{t.id}.step"))
+    triangles = write_parts_glb(parts, lib / f"{t.id}.glb", tolerance_mm=0.01, max_triangles=MAX_TRIANGLES)
+    out = _record_path("tooling", t.id)
+    _save(out, lathe_record(t, parts, triangles))
+    return out
+
+
 def main(ids: list[str]) -> None:
     every = ({t.id: t for t in TOOLS + SOURCED} | {g.id: g for g in GAUGES + CALIPERS + MICROMETERS + STONES}
-             | {w.id: w for w in RATCHET_WRENCHES})
+             | {w.id: w for w in RATCHET_WRENCHES} | {t.id: t for t in LATHE_TOOLS})
     for i in ids or list(every):
         item = every[i]
-        if isinstance(item, Tool):
+        if isinstance(item, LatheTool):
+            print("wrote", write_lathe(item))
+        elif isinstance(item, Tool):
             print("wrote", write(item))
         elif isinstance(item, RatchetWrench):
             print("wrote", write_hand_tool(item))

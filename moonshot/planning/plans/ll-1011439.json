@@ -9,7 +9,7 @@
  "setups": [
   {"id": "op10", "title": "Op 10: the whole pin", "machine": "st25", "face_out": "-Y",
    "workholding": {"chuck": "c5", "holds": "the bar", "collet_in": 0.625, "stick_out_mm": 20.0,
-                   "note": "In a 5/8 in 5C collet in the Royal collet chuck, 20 mm out: the pin's 15.0, 0.3 to face, the grooving tool's 3 mm and 1.7 mm of clearance to the collet's nose; the rest of the 3 in bar, 56 mm, in the collet. Tightened with the chuck's key"},
+                   "note": "In a 5/8 in 5C collet in the Royal collet chuck, 20 mm out: the pin's 15.0, 0.3 to face, the grooving tool's 3 mm and 1.7 mm of clearance to the collet's nose; the rest of the 3 in bar, 56 mm, in the collet. The collet chuck has no key: the ST-25's drawtube closes it, worked by the foot pedal as the 3-jaw is (Royal's R220001 manual, the lathe agent's finding, 2026-11-06)"},
    "wcs": {"code": "G54", "z": "the bar's end, less 0.3 mm for the facing", "by": "the VCGT turning tool touched on the bar's end"},
    "operations": [
     {"id": "turn", "kind": "turn", "tool": "turn-vcgt",

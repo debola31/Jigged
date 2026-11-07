@@ -1,0 +1,241 @@
+{
+ "asset": "vf2",
+ "about": "Haas VF-2, ported from the realism spike's mapping.py (worked out from per-link area, bbox and facing stats, reviewed in its Cycles renders). Doors shut, as the light model has them, so the swap doesn't visibly open the machine; their panes are fitted.",
+ "reviewed": "2026-11-05: spike mapping re-checked on the materials sheet; doors shut and side panels white (coordinator)",
+ "source": {
+  "links": [
+   "base",
+   "saddle",
+   "table",
+   "head",
+   "enclosure",
+   "side_doors",
+   "door_left",
+   "door_right",
+   "conveyor",
+   "pendant",
+   "exhaust",
+   "pads",
+   "carousel",
+   "coolant"
+  ],
+  "why_no_spindle": "the head link already holds the spindle's faces (identical counts): both z-fight"
+ },
+ "fallback": "paint_haas_dark",
+ "cad": {
+  "table": {
+   "mat_10": "cast_iron_ground",
+   "mat_2": "cast_iron_raw",
+   "mat_6": "cast_iron_raw",
+   "mat_1": "steel_brushed",
+   "mat_4": "steel_ground",
+   "mat_18": "cast_iron_raw"
+  },
+  "saddle": {
+   "mat_6": "cast_iron_painted",
+   "mat_4": "steel_ground",
+   "mat_1": "steel_ground"
+  },
+  "base": {
+   "mat_0": "cast_iron_painted",
+   "mat_4": "steel_ground",
+   "mat_1": "cast_iron_raw",
+   "mat_2": "cast_iron_painted",
+   "mat_3": "steel_ground",
+   "mat_5": "paint_label_yellow",
+   "mat_10": "steel_ground"
+  },
+  "head": {
+   "mat_6": "paint_haas_dark",
+   "mat_9": "paint_haas_dark",
+   "mat_13": "steel_ground",
+   "mat_4": "paint_haas_red",
+   "mat_7": "steel_brushed",
+   "mat_8": "aluminium_brushed",
+   "mat_10": "paint_haas_dark",
+   "mat_14": "steel_ground",
+   "mat_15": "steel_ground",
+   "mat_16": "steel_ground",
+   "mat_17": "steel_ground",
+   "mat_32": "steel_ground",
+   "mat_5": "steel_ground",
+   "mat_1": "steel_ground",
+   "mat_11": "steel_ground",
+   "mat_12": "steel_ground",
+   "mat_26": "plastic_black"
+  },
+  "enclosure": {
+   "mat_10": "paint_haas_white",
+   "mat_6": "paint_haas_dark",
+   "mat_2": "paint_haas_white",
+   "mat_18": "paint_haas_white",
+   "mat_7": "paint_haas_white",
+   "mat_1": "paint_haas_dark",
+   "mat_4": "paint_haas_red",
+   "mat_23": "steel_brushed",
+   "mat_5": "paint_label_yellow",
+   "mat_19": "plastic_black_gloss",
+   "mat_26": "paint_haas_dark",
+   "mat_20": "rubber_black"
+  },
+  "side_doors": {
+   "mat_21": "paint_haas_white",
+   "mat_1": "paint_haas_dark",
+   "mat_14": "steel_brushed",
+   "mat_10": "paint_haas_white"
+  },
+  "door_left": {
+   "mat_6": "paint_haas_white",
+   "mat_22": "steel_brushed",
+   "mat_2": "steel_brushed"
+  },
+  "door_right": {
+   "mat_6": "paint_haas_white",
+   "mat_22": "steel_brushed",
+   "mat_2": "steel_brushed"
+  },
+  "pendant": {
+   "mat_18": "paint_haas_white",
+   "mat_2": "paint_haas_dark",
+   "mat_23": "plastic_black",
+   "mat_10": "paint_haas_white",
+   "mat_24": "plastic_green",
+   "mat_4": "paint_haas_red"
+  },
+  "conveyor": {
+   "mat_23": "steel_brushed",
+   "mat_10": "paint_haas_white"
+  },
+  "carousel": {
+   "mat_10": "paint_haas_white",
+   "mat_3": "plastic_black",
+   "mat_0": "cast_iron_painted",
+   "mat_2": "steel_brushed",
+   "mat_19": "rubber_black",
+   "mat_6": "paint_haas_dark",
+   "mat_1": "steel_ground",
+   "mat_27": "plastic_black",
+   "mat_28": "steel_ground"
+  },
+  "exhaust": {
+   "mat_25": "paint_haas_white",
+   "mat_18": "paint_haas_white",
+   "mat_26": "paint_haas_dark",
+   "mat_10": "paint_haas_white",
+   "mat_27": "plastic_black"
+  },
+  "coolant": {
+   "mat_2": "plastic_black",
+   "mat_10": "aluminium_brushed",
+   "mat_26": "plastic_black",
+   "mat_6": "paint_haas_dark",
+   "mat_3": "steel_brushed",
+   "mat_1": "steel_brushed",
+   "mat_13": "paint_haas_red",
+   "mat_5": "paint_label_yellow"
+  },
+  "pads": {
+   "mat_9": "cast_iron_raw",
+   "mat_1": "steel_ground"
+  }
+ },
+ "ops": [
+  {
+   "op": "pane",
+   "links": [
+    "door_left",
+    "door_right"
+   ],
+   "material": "glass_polycarbonate",
+   "why": "the CAD's doors have window openings and no glass: a pane fitted by ray casting, 0.504 x 0.808 m"
+  }
+ ],
+ "rules": [
+  {
+   "why": "enclosure faces inside the work zone, facing into it: the coolant-washed inside",
+   "links": [
+    "enclosure"
+   ],
+   "from": [
+    "paint_haas_white",
+    "paint_haas_dark",
+    "paint_haas_red"
+   ],
+   "inside": {
+    "lo": [
+     -1.17,
+     -0.87,
+     0.62
+    ],
+    "hi": [
+     1.17,
+     1.14,
+     1.96
+    ]
+   },
+   "toward": {
+    "point": [
+     0.0,
+     0.05,
+     1.25
+    ],
+    "min": 0.2
+   },
+   "material": "paint_haas_interior"
+  },
+  {
+   "why": "the pendant's front-facing mat_18 faces are its controls, not its white housing",
+   "links": [
+    "pendant"
+   ],
+   "cads": [
+    "mat_18"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.7
+   },
+   "material": "plastic_black"
+  },
+  {
+   "why": "... and above z 1.5 m its screen",
+   "links": [
+    "pendant"
+   ],
+   "cads": [
+    "mat_18"
+   ],
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.7
+   },
+   "inside": {
+    "lo": [
+     -9,
+     -9,
+     1.5
+    ],
+    "hi": [
+     9,
+     9,
+     9
+    ]
+   },
+   "material": "plastic_black_gloss"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "side_doors mat_21: the CAD colours it glass-teal (0.35, 1.0, 0.72) and the light model shows teal panels standing above the roof at the back corners; the spike (and the step videos' look.py) paint it Haas white. Kept white; if those are side windows, map it to glass_polycarbonate. Decided 2026-11-05: white, as in the videos.",
+   "picture": "checks/vf2_close_before_after.png"
+  }
+ ]
+}

@@ -1,0 +1,88 @@
+{
+ "asset": "blk123",
+ "about": "McMaster 8630A74 1-2-3 blocks, a composed pair (one solid each, no colours): hardened steel, every outer face surface ground bright; the 23 holes' walls drilled and tapped, a duller turned grey.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/blk123_*.png); page check checks/blk123_*_before_after.png",
+ "fallback": "steel_machined",
+ "materials": {
+  "blk123_tool_steel": {
+   "family": "ground",
+   "color": [
+    0.64,
+    0.65,
+    0.665
+   ],
+   "rough": 0.2,
+   "metal": 1.0,
+   "tile_m": 0.08,
+   "normal": 0.5,
+   "about": "hardened 1-2-3 block faces, surface ground"
+  }
+ },
+ "cad": {
+  "*": {
+   "mat_0": "steel_machined"
+  }
+ },
+ "rules": [
+  {
+   "why": "block at +y: its outer faces (centres within 0.3 mm of its box), ground",
+   "part_inside": {
+    "lo": [
+     -0.04,
+     0.012,
+     -0.001
+    ],
+    "hi": [
+     0.04,
+     0.04,
+     0.052
+    ]
+   },
+   "outside": {
+    "lo": [
+     -0.0378,
+     0.013,
+     0.0003
+    ],
+    "hi": [
+     0.0378,
+     0.0378,
+     0.0505
+    ]
+   },
+   "material": "blk123_tool_steel"
+  },
+  {
+   "why": "block at -y: its outer faces, ground",
+   "part_inside": {
+    "lo": [
+     -0.04,
+     -0.04,
+     -0.001
+    ],
+    "hi": [
+     0.04,
+     -0.012,
+     0.052
+    ]
+   },
+   "outside": {
+    "lo": [
+     -0.0378,
+     -0.0378,
+     0.0003
+    ],
+    "hi": [
+     0.0378,
+     -0.013,
+     0.0505
+    ]
+   },
+   "material": "blk123_tool_steel"
+  }
+ ],
+ "atlas": 512,
+ "double_sided": false,
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): two solid blocks: with seams kept the holes' split normals stall it at 21k"
+}

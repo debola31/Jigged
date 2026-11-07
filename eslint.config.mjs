@@ -27,6 +27,11 @@ const eslintConfig = defineConfig([
     // (prefer-const on single-letter minifier names) that make `pnpm lint`
     // unusable for anyone who has run the local stack. Gitignored; absent in CI.
     "supabase/.temp/**",
+    // Copied from node_modules on install by scripts/copy-scanner-wasm.mjs and
+    // scripts/copy-basis-transcoder.mjs: the barcode scanner's wasm and three's
+    // KTX2 (Basis) transcoder, whose minified JS uses require() and lands errors.
+    // Vendor output, not our source; gitignored, but present in CI after install.
+    "public/wasm/**",
   ]),
   {
     // ESLint 9 flat config: rules from a plugin need the plugin registered

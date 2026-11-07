@@ -1,0 +1,128 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "ratchet-wrench",
+  "name": "3/4 in ratcheting combination wrench",
+  "category": "hand_tools",
+  "make": "GEARWRENCH",
+  "model": "9532N 3/4 in 72-tooth 12-point reversible ratcheting combination wrench",
+  "description": "Ratcheting box end and open end, 3/4 in, for running the step clamps' flange nuts down and snugging them without lifting the wrench off between strokes.",
+  "generic": true,
+  "key_specs": [
+    {
+      "name": "Size",
+      "value": "3/4 in"
+    },
+    {
+      "name": "Overall length",
+      "value": 9.594,
+      "unit": "in",
+      "note": "9532N listings; the non-reversible 9024's is 9.764 in"
+    },
+    {
+      "name": "Box end width",
+      "value": 1.339,
+      "unit": "in"
+    },
+    {
+      "name": "Box end thickness",
+      "value": 0.441,
+      "unit": "in"
+    },
+    {
+      "name": "Open end width",
+      "value": 1.626,
+      "unit": "in"
+    },
+    {
+      "name": "Open end thickness",
+      "value": 0.374,
+      "unit": "in"
+    },
+    {
+      "name": "Ratchet teeth",
+      "value": 72,
+      "unit": "teeth"
+    },
+    {
+      "name": "Swing arc",
+      "value": 5,
+      "unit": "deg"
+    },
+    {
+      "name": "Box end",
+      "value": "12-point, 0 deg offset"
+    },
+    {
+      "name": "Reversible",
+      "value": "yes: a lever on the head sets which way the ratchet drives"
+    },
+    {
+      "name": "Weight",
+      "value": 0.47,
+      "unit": "lb",
+      "note": "the 9024's catalogue weight"
+    }
+  ],
+  "source_urls": [
+    "https://www.gearwrench.com/all-tools/wrenches/ratcheting/9024-34-72-tooth-12-point-ratcheting-combination-wrench",
+    "https://www.rsl.ca/Product/gearwrench-3-4-72-tooth-12-point-reversible-ratcheting-combination-wrench-9532n-axt",
+    "https://mytools.co.nz/products/gearwrench-wrench-combination-ratcheting-reversible-sae-3-4"
+  ],
+  "source_files": [
+    "ratchet-wrench.step"
+  ],
+  "license": "self-made (moonshot/world/wrench.py) from the maker's published dimensions",
+  "notes": "GENERIC, the user's decision of 2026-11-05: it replaces the shop's plain 3/4 in combination wrench (wrenches-1, the wrench set) for the plate takes' clamp nuts. The box end's width and thickness, the open end's, the 72 teeth, the 5 deg swing arc and the 0.47 lb are GEARWRENCH's own page for the 9024 (the same head as the reversible 9532N); the 9532N's 9.594 in overall length and its reversing are its dealers' listings (no maker's page for it could be fetched). [proposed]: the handle's 17 mm width and 7 mm thickness, the ratchet ring's 26 mm outside, its 0.45 mm play a flat on the nut and its underside's 1.5 mm 45 deg chamfer. HOW THE RATCHET IS MODELLED (moonshot/world/wrench.py, moonshot/sim/plate_clamps.py pawl): the ring is a body in the head on a hinge about the box end's axis (the joint in the head, `<name>_ratchet`), its inside the six flats it drives the nut by (the real 12 points fit the hex every 30 deg; the flats, every 60); the pawl is that hinge's limit, which the physics run sets each step while the box end works a nut, on the side the reversing lever drives, at where the ring last stood that way, and leaves free the other way, so the ring turns the nut one way and freewheels the other; it catches wherever it stops (the 72 teeth's 5 deg not modelled); off a nut the ring is held where it stands. Freewheeling, the ring drags in the head at 0.004 N m [proposed], under a loose nut's own drag on its stud, so swinging the handle back leaves the nut. No constraint or applied force: the hinge and its limit are the wrench's own structure. Its open end is in its model but not among its physics solids (it does no work here).",
+  "file": "ratchet-wrench.glb",
+  "units": "mm",
+  "up": "+Z",
+  "attach_points": [
+    {
+      "name": "wrench_grip",
+      "t": [
+        135.0,
+        0.0,
+        5.6
+      ],
+      "q": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "name": "box_end",
+      "t": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "q": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "build": {
+    "from": "source/ratchet-wrench.step",
+    "placeholder": "generators.ratchet_wrench",
+    "up": "+Z",
+    "max_triangles": 50000
+  },
+  "triangles": 3692,
+  "bbox": {
+    "min": [
+      -17.01,
+      -20.66,
+      -0.0
+    ],
+    "max": [
+      226.17,
+      20.66,
+      11.2
+    ]
+  }
+}

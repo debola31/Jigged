@@ -1,0 +1,41 @@
+{
+ "asset": "gwheel",
+ "about": "10 x 1 x 3 in vitrified white aluminium-oxide surface-grinding wheel (placeholder disc): the abrasive matte, grainy off-white; the paper blotter on each face red, as the placeholder draws it.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/gwheel_*.png); page check checks/gwheel_*_before_after.png",
+ "fallback": "gwheel_abrasive",
+ "materials": {
+  "gwheel_abrasive": {
+   "family": "rubber",
+   "color": [
+    0.7,
+    0.7,
+    0.665
+   ],
+   "rough": 0.92,
+   "metal": 0.0,
+   "tile_m": 0.12,
+   "normal": 1.0,
+   "about": "vitrified white aluminium-oxide abrasive: matte, grainy, off-white"
+  },
+  "gwheel_blotter": {
+   "family": "flat",
+   "color": [
+    0.42,
+    0.03,
+    0.035
+   ],
+   "rough": 0.85,
+   "metal": 0.0,
+   "about": "a grinding wheel's paper blotter label, red"
+  }
+ },
+ "cad": {
+  "wheel": {
+   "mat_0": "gwheel_abrasive"
+  },
+  "blotter": {
+   "mat_1": "gwheel_blotter"
+  }
+ },
+ "rules": []
+}

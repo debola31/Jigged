@@ -1,0 +1,28 @@
+{
+ "asset": "dovetail-20",
+ "about": "Generic 30 mm, 20 deg-per-side dovetail cutter, HSS, bright ground all over.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "dovetail-20_hss",
+ "cad": {
+  "*": {
+   "DefaultMaterial": "dovetail-20_hss",
+   "none": "dovetail-20_hss"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "dovetail-20_hss": {
+   "family": "ground",
+   "color": [
+    0.62,
+    0.625,
+    0.64
+   ],
+   "rough": 0.22,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "bright ground HSS"
+  }
+ }
+}

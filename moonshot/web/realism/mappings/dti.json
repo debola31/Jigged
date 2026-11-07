@@ -1,0 +1,86 @@
+{
+ "asset": "dti",
+ "about": "Mitutoyo 513-404-10E lever dial test indicator on a magnetic stand: four links, eleven CAD materials. Black base, clamps and knob; chrome rods; satin-chrome indicator body; a white dial under its crystal, as the 513-404's; the base's label and ground pole pieces.",
+ "reviewed": "2026-11-05: corrected to the real product: the dial made white, as a real Mitutoyo 513-404 (the CAD's is yellow)",
+ "fallback": "dti_black",
+ "cad": {
+  "*": {
+   "mat_0": "dti_black",
+   "mat_1": "dti_label_white",
+   "mat_2": "dti_label_white",
+   "mat_3": "dti_label_blue",
+   "mat_4": "steel_ground",
+   "mat_6": "chrome",
+   "mat_7": "dti_black",
+   "mat_8": "steel_bright",
+   "mat_9": "dti_print",
+   "mat_10": "dti_dial",
+   "mat_12": "steel_machined"
+  }
+ },
+ "rules": [],
+ "triangles": 15000,
+ "triangles_why": "the stand's knurled clamp knobs, the indicator's knurled bezel and the rods' knurls hold the seams-kept simplifier at 14.8k even at its 1.6 % bound; positions-only (11.1k) would risk the thin pointer, stylus and label, and no link is hidden enough to drop (4 links, all visible)",
+ "atlas": 512,
+ "download_bytes": 560000,
+ "download_why": "the 15k-triangle allowance's geometry is ~0.46 MB on its own; with the AO already down to 512 (1.1 mm a texel on a 230 mm stand) the model lands just over 0.5 MB",
+ "materials": {
+  "dti_black": {
+   "family": "paint",
+   "color": [
+    0.022,
+    0.022,
+    0.024
+   ],
+   "rough": 0.45,
+   "normal": 0.6,
+   "about": "black enamel: the magnetic base, the clamps, the switch knob, the dial's bezel"
+  },
+  "dti_label_white": {
+   "family": "flat",
+   "color": [
+    0.72,
+    0.72,
+    0.7
+   ],
+   "rough": 0.4,
+   "about": "the base's label: white"
+  },
+  "dti_label_blue": {
+   "family": "flat",
+   "color": [
+    0.0,
+    0.11,
+    0.48
+   ],
+   "rough": 0.4,
+   "about": "the label's blue band"
+  },
+  "dti_print": {
+   "family": "flat",
+   "color": [
+    0.02,
+    0.02,
+    0.02
+   ],
+   "rough": 0.4,
+   "about": "the dial's figures and pointer"
+  },
+  "dti_dial": {
+   "family": "glass",
+   "color": [
+    0.8,
+    0.8,
+    0.78
+   ],
+   "rough": 0.06,
+   "about": "the 513-404's white dial face under its glossy crystal"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the bezel keeps the CAD's black",
+   "picture": "checks/dti_close_before_after.png"
+  }
+ ]
+}

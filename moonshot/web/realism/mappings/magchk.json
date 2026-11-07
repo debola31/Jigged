@@ -1,0 +1,62 @@
+{
+ "asset": "magchk",
+ "about": "Suburban MCB-618-FP 6 x 18 in fine-pole permanent magnetic chuck (placeholder): a ground steel housing, its top ground across steel poles and brass separators; the switch boss black oxide, the on/off lever black.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/magchk_*.png); page check checks/magchk_*_before_after.png",
+ "fallback": "steel_machined",
+ "materials": {
+  "magchk_brass": {
+   "family": "ground",
+   "color": [
+    0.76,
+    0.56,
+    0.25
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.06,
+   "normal": 0.35,
+   "about": "brass, ground or drawn: warm yellow metal"
+  }
+ },
+ "cad": {
+  "body": {
+   "mat_0": "steel_machined"
+  },
+  "poles": {
+   "mat_1": "steel_ground"
+  },
+  "brass_separators": {
+   "mat_2": "magchk_brass"
+  },
+  "handle_boss": {
+   "mat_3": "steel_black_oxide"
+  }
+ },
+ "rules": [
+  {
+   "why": "the on/off lever standing up from the boss: a black grip",
+   "links": [
+    "handle_boss"
+   ],
+   "part_inside": {
+    "lo": [
+     0.2,
+     -0.02,
+     0.03
+    ],
+    "hi": [
+     0.25,
+     0.02,
+     0.12
+    ]
+   },
+   "material": "plastic_black"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the housing bare ground steel; some permanent chucks have a painted housing",
+   "picture": "checks/magchk_front_before_after.png"
+  }
+ ]
+}

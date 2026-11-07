@@ -1,0 +1,77 @@
+{
+ "asset": "mazak",
+ "about": "Mazak QT-Primos 100, self-made in Blender (sources/mazak/build_mazak.py) from Mazak's product photos and the record's specs, replacing the GrabCAD layout model (the library keeps it for the step videos; this one is in its frame): the black base with the lubrication tank behind its window, a pressure gauge, the coolant tank's louvred front panel and handles; the white upper body with the orange-red 'Mazak' logotype; the black sliding door with its round-cornered window, 'QT-PRIMOS 100' lettering and orange grip strip; the tall black MAZATROL panel at the right front with its orange edge, screen, keys and e-stop; a signal tower on the roof. Inside, through the window: the headstock and 6 in chuck holding a bar, the 12-station turret with tools, the chip slope. Behind: the hydraulic unit.",
+ "reviewed": "2026-11-05: modelled against Mazak's product photos; look sheets and three.js before/after checked",
+ "source": {
+  "path": "realism/sources/mazak/mazak.glb",
+  "made": "self-made in Blender from public dimensions and photos; build script and .blend beside it"
+ },
+ "fallback": "mazak_white",
+ "smooth_deg": 35,
+ "cad": {
+  "*": {
+   "aluminium_brushed": "aluminium_brushed",
+   "cast_iron_painted": "cast_iron_painted",
+   "chrome": "chrome",
+   "glass_polycarbonate": "glass_polycarbonate",
+   "mazak_black": "mazak_black",
+   "mazak_orange": "mazak_orange",
+   "mazak_white": "mazak_white",
+   "paint_label_yellow": "paint_label_yellow",
+   "plastic_black": "plastic_black",
+   "plastic_black_gloss": "plastic_black_gloss",
+   "plastic_green": "plastic_green",
+   "steel_brushed": "steel_brushed",
+   "steel_ground": "steel_ground",
+   "steel_machined": "steel_machined"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "mazak_white": {
+   "family": "paint",
+   "color": [
+    0.62,
+    0.63,
+    0.625
+   ],
+   "rough": 0.36,
+   "about": "Mazak's white upper body, its covers and lettering"
+  },
+  "mazak_black": {
+   "family": "paint",
+   "color": [
+    0.02,
+    0.021,
+    0.023
+   ],
+   "rough": 0.42,
+   "about": "Mazak's black base, sliding door and MAZATROL panel"
+  },
+  "mazak_orange": {
+   "family": "paint",
+   "color": [
+    0.8,
+    0.1,
+    0.012
+   ],
+   "rough": 0.34,
+   "about": "Mazak orange-red: the logotype, the door's grip strip, the panel's edge, keys, the e-stop, the tower's red"
+  }
+ },
+ "sources_used": [
+  "the record (17.5 in swing, 7.1 in max machining diameter, 7.9 in machining length, 6 in chuck, 5,000 rpm) and its library model's box (1555.6 x 1312.2 x 1700 mm)",
+  "Mazak's QT-PRIMOS product page photos (mazak.com) and dealer photos (Tramar, Equipt): black base, white body, orange accents, the MAZATROL SmoothG panel at the right",
+  "no CAD downloaded: the GrabCAD model already in the library was only read for its frame"
+ ],
+ "unsure": [
+  {
+   "what": "the photos show the 150SG; the 100's body is the same family, scaled to the record's box"
+  },
+  {
+   "what": "another worker drafted a mapping for mazak from the GrabCAD model (in the merged shared fixes); this self-made one replaces it"
+  }
+ ],
+ "double_sided": false,
+ "double_sided_why": "self-made closed solids, normals checked outward when built (jig.orient), hidden faces culled: single-sided saves fill rate"
+}

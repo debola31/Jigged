@@ -398,6 +398,8 @@ export default function ShopLayout(props: ShopProps) {
             left: 16,
             // Folded, just its header, on one line.
             width: watching ? STEP_CARD : collapsed ? 'max-content' : { md: 380, xl: 420 },
+            // A phone that opened the shop anyway (ShowcaseApp's notice): the card fits its screen.
+            maxWidth: 'calc(100% - 32px)',
             '& button': { whiteSpace: 'nowrap' },
             maxHeight: 'calc(100% - 32px)',
             // Not before a part is picked; kept mounted, so its width is measured from the start.
@@ -407,7 +409,18 @@ export default function ShopLayout(props: ShopProps) {
           }}
         >
           {phase === 'plan' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1.5, borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                // On a phone its buttons take two rows rather than run into each other.
+                flexWrap: { xs: 'wrap', md: 'nowrap' },
+                gap: 1,
+                p: 1.5,
+                borderBottom: collapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+                flexShrink: 0,
+              }}
+            >
               <StepPicker part={part} />
               {sheet === 'step' && (
                 <Button size="small" onClick={showNeed}>
@@ -451,7 +464,7 @@ export default function ShopLayout(props: ShopProps) {
           <Box
             component="aside"
             aria-label="The thing"
-            sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column' }}
+            sx={{ ...floatSx, top: 64, right: 16, width: ITEM_CARD, maxWidth: 'calc(100% - 32px)', maxHeight: 'calc(100% - 128px)', display: 'flex', flexDirection: 'column' }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1, pl: 1.5, pr: 1, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
               <CategoryIcon category={thing?.category} sx={{ fontSize: 20, color: 'secondary.main' }} />

@@ -1,0 +1,76 @@
+{
+ "asset": "welder",
+ "about": "PrimeWeld TIG225X AC/DC TIG welder (McMaster-sourced bumpers, handle, fan guards): nine CAD materials. Dark charcoal powder-coat case, black plastic corner bumpers, handle and knobs with red caps, brass Dinse and gas fittings, chrome fan guards.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "welder_case",
+ "cad": {
+  "*": {
+   "mat_5": "welder_case",
+   "mat_0": "plastic_black",
+   "mat_8": "welder_red",
+   "mat_2": "chrome",
+   "mat_3": "rubber_black",
+   "mat_4": "welder_brass",
+   "mat_6": "welder_label",
+   "mat_7": "welder_blue",
+   "mat_1": "steel_machined"
+  }
+ },
+ "rules": [],
+ "atlas": 512,
+ "materials": {
+  "welder_case": {
+   "family": "paint",
+   "color": [
+    0.03,
+    0.031,
+    0.034
+   ],
+   "rough": 0.45,
+   "about": "the case: dark charcoal powder coat (the CAD's)"
+  },
+  "welder_red": {
+   "family": "plastic",
+   "color": [
+    0.36,
+    0.02,
+    0.018
+   ],
+   "rough": 0.4,
+   "about": "the knobs' red caps"
+  },
+  "welder_brass": {
+   "family": "ground",
+   "color": [
+    0.72,
+    0.5,
+    0.18
+   ],
+   "rough": 0.3,
+   "metal": 1.0,
+   "tile_m": 0.05,
+   "normal": 0.4,
+   "about": "brass Dinse sockets and gas fittings"
+  },
+  "welder_label": {
+   "family": "flat",
+   "color": [
+    0.6,
+    0.6,
+    0.58
+   ],
+   "rough": 0.45,
+   "about": "light labels and switch marks"
+  },
+  "welder_blue": {
+   "family": "flat",
+   "color": [
+    0.02,
+    0.1,
+    0.55
+   ],
+   "rough": 0.4,
+   "about": "a small blue mark (the CAD's)"
+  }
+ }
+}

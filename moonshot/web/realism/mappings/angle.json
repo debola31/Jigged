@@ -1,0 +1,211 @@
+{
+ "asset": "angle",
+ "about": "McMaster 2353A67 webbed cast-iron angle plate, 4-1/2 x 6 x 5 in, 4 slots: one CAD solid, no colours. Its six working faces ground; the slots milled, not ground; the web between the legs painted, as cast.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "cast_iron_ground",
+ "cad": {
+  "*": {
+   "none": "cast_iron_ground"
+  }
+ },
+ "rules": [
+  {
+   "why": "the slots' walls and ends (x 32.5-50 mm either side), milled",
+   "inside": {
+    "lo": [
+     -0.051,
+     -1,
+     -1
+    ],
+    "hi": [
+     -0.0319,
+     1,
+     1
+    ]
+   },
+   "material": "cast_iron_raw"
+  },
+  {
+   "why": "... the other pair",
+   "inside": {
+    "lo": [
+     0.0319,
+     -1,
+     -1
+    ],
+    "hi": [
+     0.051,
+     1,
+     1
+    ]
+   },
+   "material": "cast_iron_raw"
+  },
+  {
+   "why": "the base leg's top (z 17.5 mm) is ground through the slot band",
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.017
+    ],
+    "hi": [
+     1,
+     1,
+     0.018
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "... the upright's top edge (z 127 mm)",
+   "normal": {
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     0.1265
+    ],
+    "hi": [
+     1,
+     1,
+     0.1275
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "... and the base's underside",
+   "normal": {
+    "dir": [
+     0,
+     0,
+     -1
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -1,
+     -0.001
+    ],
+    "hi": [
+     1,
+     1,
+     0.001
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the upright leg's back face (y 57.1 mm), ground through the slot band",
+   "normal": {
+    "dir": [
+     0,
+     1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     0.0565,
+     -1
+    ],
+    "hi": [
+     1,
+     0.058,
+     1
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the upright leg's working face (y 39.7 mm) and the base's front edge (y -57.1 mm)",
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     0.039,
+     -1
+    ],
+    "hi": [
+     1,
+     0.0405,
+     1
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "...",
+   "normal": {
+    "dir": [
+     0,
+     -1,
+     0
+    ],
+    "min": 0.98
+   },
+   "inside": {
+    "lo": [
+     -1,
+     -0.058,
+     -1
+    ],
+    "hi": [
+     1,
+     -0.0565,
+     1
+    ]
+   },
+   "material": "cast_iron_ground"
+  },
+  {
+   "why": "the web: between the legs, |x| < 7.5 mm, painted over the casting",
+   "inside": {
+    "lo": [
+     -0.0075,
+     -0.0412,
+     0.0176
+    ],
+    "hi": [
+     0.0075,
+     0.0396,
+     0.1265
+    ]
+   },
+   "material": "cast_iron_painted"
+  }
+ ],
+ "unsure": [
+  {
+   "what": "the web painted dark grey (cast_iron_painted): McMaster's listing doesn't say; many webbed plates leave it bare cast iron",
+   "picture": "checks/angle_front_before_after.png"
+  }
+ ]
+}

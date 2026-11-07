@@ -1,0 +1,29 @@
+{
+ "asset": "drill",
+ "about": "McMaster 27995A617 #7 cobalt jobber, TiN-coated (the record): one solid, no colours, so all of it TiN gold.",
+ "reviewed": "2026-11-05: natural, materials and parts sheets (look/drill_*.png); page check checks/drill_*_before_after.png",
+ "fallback": "drill_tin",
+ "materials": {
+  "drill_tin": {
+   "family": "ground",
+   "color": [
+    0.72,
+    0.49,
+    0.12
+   ],
+   "rough": 0.28,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.35,
+   "about": "TiN coating over ground HSS: gold"
+  }
+ },
+ "cad": {
+  "*": {
+   "none": "drill_tin"
+  }
+ },
+ "rules": [],
+ "simplify_positions_only": true,
+ "simplify_why": "positions only (opt-in, solid parts): one solid twist drill: welded, its UV1 atlas packs at 0.37 rather than 0.08"
+}

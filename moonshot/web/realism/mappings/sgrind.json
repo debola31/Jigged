@@ -1,0 +1,83 @@
+{
+ "asset": "sgrind",
+ "about": "10 x 24 manual surface grinder (GrabCAD, 'E.G.S.'): the CAD's blue-grey body toned to a grey enamel, its blue guards kept, the table ground steel, handwheels black, the wheel abrasive.",
+ "reviewed": "2026-11-05: natural sheet (look/<asset>_natural.png) against the CAD's colours; metal parts by CAD colour, face count and extent",
+ "fallback": "paint_mid_grey",
+ "cad": {
+  "*": {
+   "mat_0": "sgrind_body",
+   "mat_1": "sgrind_cad_1",
+   "mat_2": "steel_ground",
+   "mat_3": "sgrind_wheel",
+   "mat_4": "paint_light_grey",
+   "mat_5": "paint_black",
+   "mat_6": "paint_dark_grey",
+   "mat_7": "paint_mid_grey",
+   "mat_8": "paint_mid_grey",
+   "mat_9": "paint_dark_grey",
+   "mat_10": "glass_clear",
+   "mat_11": "sgrind_cad_11",
+   "mat_12": "sgrind_cad_12"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "sgrind_cad_1": {
+   "family": "paint",
+   "color": [
+    0.0,
+    0.241,
+    0.6
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_1 colour [0, 0.4, 1], toned to an enamel"
+  },
+  "sgrind_cad_11": {
+   "family": "paint",
+   "color": [
+    0.6,
+    0.186,
+    0.18
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_11 colour [1, 0.31, 0.3], toned to an enamel"
+  },
+  "sgrind_cad_12": {
+   "family": "paint",
+   "color": [
+    0.04,
+    0.18,
+    0.48
+   ],
+   "rough": 0.38,
+   "about": "the CAD's mat_12 colour [0.05, 0.21, 0.56], toned to an enamel"
+  },
+  "sgrind_body": {
+   "family": "paint_cast",
+   "color": [
+    0.21,
+    0.23,
+    0.27
+   ],
+   "rough": 0.42,
+   "normal": 0.5,
+   "about": "surface-grinder blue-grey enamel"
+  },
+  "sgrind_wheel": {
+   "family": "paint_cast",
+   "color": [
+    0.42,
+    0.42,
+    0.4
+   ],
+   "rough": 0.6,
+   "about": "a vitrified grinding wheel: matte, grainy"
+  }
+ },
+ "unsure": [
+  {
+   "what": "mat_2 (light grey, 146 faces) taken for the table and magnetic chuck",
+   "picture": "checks/sgrind_front_before_after.png"
+  }
+ ]
+}

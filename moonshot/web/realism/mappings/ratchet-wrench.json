@@ -1,0 +1,13 @@
+{
+ "asset": "ratchet-wrench",
+ "about": "3/4 in ratcheting combination wrench (GEARWRENCH 9024 class), self-made from the maker's dimensions (moonshot/world/wrench.py): full-polish chrome, as such wrenches are.",
+ "reviewed": "2026-11-06: natural sheet (look/<asset>_natural.png)",
+ "fallback": "chrome",
+ "cad": {
+  "*": {
+   "none": "chrome",
+   "DefaultMaterial": "chrome"
+  }
+ },
+ "rules": []
+}

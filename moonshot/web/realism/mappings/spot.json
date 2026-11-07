@@ -1,0 +1,28 @@
+{
+ "asset": "spot",
+ "about": "Ultra Tool 2911A639 (McMaster): 1/2 in 90 deg spotting drill, solid carbide, TiN-coated all over: gold.",
+ "reviewed": "2026-11-05: draft",
+ "fallback": "spot_tin",
+ "cad": {
+  "*": {
+   "none": "spot_tin",
+   "DefaultMaterial": "spot_tin"
+  }
+ },
+ "rules": [],
+ "materials": {
+  "spot_tin": {
+   "family": "ground",
+   "color": [
+    0.72,
+    0.48,
+    0.14
+   ],
+   "rough": 0.24,
+   "metal": 1.0,
+   "tile_m": 0.04,
+   "normal": 0.25,
+   "about": "TiN coat: gold"
+  }
+ }
+}

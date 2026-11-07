@@ -96,8 +96,27 @@ const WALL_TILE_MEAN = 0.61;
 const FLOOR_PLAIN = lin(0.242, 0.235, 0.229);
 const LINE_PLAIN = lin(0.6, 0.414, 0.013);
 
-/** For scripts and tests: the room is dressed and the probe drawn. */
-export const roomStatus = { settled: false };
+/**
+ * `models`: the light models are in and have settled. `settled`: the room is dressed and the
+ * probe drawn, too. Read by the realistic models' stream, and by scripts and tests.
+ */
+export const roomStatus = { models: false, settled: false };
+
+let redrawer: (() => void) | null = null;
+let probeTexture: Texture | null = null;
+
+/**
+ * Draws the shop's static shadow map, contact shadows and reflection probe again, once: for when
+ * what shows has changed without a model arriving, as when realistic models swap in.
+ */
+export function redrawRoom() {
+  redrawer?.();
+}
+
+/** The reflection probe's environment, once drawn, for the metals of a model that arrives later. */
+export function roomProbe(): Texture | null {
+  return probeTexture;
+}
 
 // --- geometry -----------------------------------------------------------------------------------
 
@@ -648,7 +667,7 @@ export default function Room({ cat }: { cat: Catalog }) {
     const main = cat.shop.aisles.reduce((a, b) => (b.rect[2] - b.rect[0] > a.rect[2] - a.rect[0] ? b : a)).rect;
     const probeAt = toScene((main[0] + main[2]) / 2, (main[1] + main[3]) / 2, 2500);
     gl.shadowMap.autoUpdate = false;
-    roomStatus.settled = false;
+    roomStatus.models = roomStatus.settled = false;
     const born = performance.now();
     let count = -1;
     let still = 0;
@@ -657,12 +676,27 @@ export default function Room({ cat }: { cat: Catalog }) {
     let alive = true;
     let media: Media | null = null;
     let probe: WebGLRenderTarget | null = null;
+    const drawProbe = () => {
+      probe?.dispose();
+      probe = renderProbe(gl, scene, probeAt, room.cutaway, camera.position);
+      probeTexture = probe.texture;
+      lightMetals(scene, probe.texture);
+    };
+    // What a swap of realistic models asks for once it has settled (Realistic.tsx).
+    const redraw = () => {
+      room.contact.render(gl, scene);
+      gl.shadowMap.needsUpdate = true;
+      if (probe) drawProbe();
+      invalidate();
+    };
+    redrawer = redraw;
     // Twice a second, cheaply: a count of meshes. A new model draws the shadows and the contact
     // shadows again; once the models have settled, the room's media loads and then the probe.
+    // Realistic models arrive hidden and change nothing drawn, so they don't count.
     const id = window.setInterval(() => {
       let n = 0;
       scene.traverse((o) => {
-        if (o instanceof Mesh) n += 1;
+        if (o instanceof Mesh && !o.userData.realistic) n += 1;
       });
       if (n !== count) {
         count = n;
@@ -676,6 +710,7 @@ export default function Room({ cat }: { cat: Catalog }) {
       }
       still += 1;
       const settled = still >= 2 && !useProgress.getState().active;
+      if (settled) roomStatus.models = true;
       if (!started && (settled || performance.now() - born > MEDIA_AFTER_MS)) {
         started = true;
         loadMedia(gl)
@@ -690,9 +725,7 @@ export default function Room({ cat }: { cat: Catalog }) {
       }
       if (settled && media && scene.environment === media.env && probed !== count) {
         probed = count;
-        probe?.dispose();
-        probe = renderProbe(gl, scene, probeAt, room.cutaway, camera.position);
-        lightMetals(scene, probe.texture);
+        drawProbe();
         roomStatus.settled = true;
         invalidate();
       }
@@ -700,6 +733,8 @@ export default function Room({ cat }: { cat: Catalog }) {
     return () => {
       alive = false;
       window.clearInterval(id);
+      if (redrawer === redraw) redrawer = null;
+      probeTexture = null;
       gl.shadowMap.autoUpdate = true;
       probe?.dispose();
       if (media) for (const tex of [...media.floor, ...media.wall, media.line, media.env]) tex.dispose();

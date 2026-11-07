@@ -30,6 +30,7 @@ import { toError } from '@/lib/supabaseErrors';
 import { gatherList, stepsUsing, type Catalog } from './catalog';
 import { CategoryIcon, KindIcon, PartFacts, setupColour, shortName } from './glyphs';
 import { PartMenu, PilotDialog, UPLOADS_OPEN, type PickSource } from './PartChoice';
+import { useRealisticModel } from './realisticManifest';
 import { finishedStill, mediaUrl, ready, type LivePart, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -460,6 +461,9 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
   const [shown, setShown] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const onLoad = useCallback(() => setShown(id), [id]);
+  // Its realistic model where one is published, as the shop shows close up; undefined while asked.
+  const full = useRealisticModel(thing?.asset, finePointer);
+  const onFullError = useCallback((e: unknown) => Sentry.captureException(toError(e, `Showcase: the realistic model of ${id} failed to load in its card`)), [id]);
   if (!thing) return null;
   const asset = cat.shop.assets[thing.asset];
   const surface = thing.on && cat.shop.surfaces[thing.on];
@@ -474,7 +478,16 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
       </Typography>
       {finePointer && (
         <Box sx={{ mt: 1.5, position: 'relative', aspectRatio: '4 / 3', borderRadius: 1.5, overflow: 'hidden', bgcolor: 'common.black' }}>
-          <ModelView key={id} url={mediaUrl(asset.model)} onLoad={onLoad} onError={(e) => Sentry.captureException(toError(e, `Showcase: the model of ${id} failed to load`))} />
+          {full !== undefined && (
+            <ModelView
+              key={id}
+              url={mediaUrl(asset.model)}
+              full={full}
+              onLoad={onLoad}
+              onError={(e) => Sentry.captureException(toError(e, `Showcase: the model of ${id} failed to load`))}
+              onFullError={onFullError}
+            />
+          )}
           <Typography sx={{ position: 'absolute', left: 10, bottom: 8, fontSize: '0.8rem', color: 'text.secondary', pointerEvents: 'none' }}>
             {shown === id ? 'Drag to turn · scroll to zoom' : 'Loading the model…'}
           </Typography>

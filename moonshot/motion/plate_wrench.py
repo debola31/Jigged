@@ -48,9 +48,15 @@ SNUG_MARGIN = 1.25                       # tightening, strokes enough to run a n
                                          # turned it 7-13 deg a stroke short of their plan or past it (by where the
                                          # flats set the box end down, and the arm at its reach), and the nut stood
                                          # 1 mm off its strap, or seated early and slipped its thread
-LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 1.2, 0.5, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
-                                                         # hand took it, past people's 265), over to a nut, held over
-                                                         # it while the eye lines the box end up on it, down onto it
+LIFT_S, MOVE_S, OVER_S, DOWN_S = 0.4, 2.0, 1.0, 0.8     # up off the plate (in 0.5, it came up 267 ms after the
+                                                         # hand took it, past people's 265), over to a nut (in 1.2 s,
+                                                         # the 380 mm from the plate to a far nut, the body swayed
+                                                         # the box end 4-9 mm about the nut at 1 Hz for the whole hold
+                                                         # over it), held over it while the eye lines the box end up
+                                                         # on it (in 0.5, come from the far nut turning up to 15 deg
+                                                         # onto the near one's flats, it still swung 9-14 mm about it),
+                                                         # down onto it: each came down 2.2-2.9 mm off its nut, on the
+                                                         # hex's top past its chamfer's lead
 SWING_S, BACK_S, UP_S = 0.7, 0.35, 0.3   # a stroke swung, and back, the ratchet freewheeling; up off the nut after
                                          # (swung in 0.5 s, on a far nut at the arm's reach the hand ran 8-13 deg past
                                          # each stroke, the nut seated early and the strokes after slipped its thread)
@@ -58,9 +64,13 @@ EFFORT = 0.8                 # the hand's hold on the handle while it strokes, t
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut
 PINCH_W = 4.0                # the planned pinch kept on the handle's arc while the hand strokes (use), against the pose
-REACH_PEAK = {"R": SP.REACH_PEAK, "L": 0.85}  # where in its reach for the handle each hand opens widest (people's
-                                               # 71-77%, person.peak_aperture_reach_frac): the left's from where it
-                                               # hung, at the right's 0.76, measured widest at 70%, at 0.8 at 70.5
+LIFT_DELAY_S = {"R": 0.14, "L": 0.18}   # the wrench starts up this long after each hand's carry starts (people's
+                             # 163-265 ms from the load coming on to its coming off the plate: at the parallels' 0.16 the
+                             # right hand's took 267, at 0.1 and at 0.14 the left's 133)
+REACH_PEAK = {"R": 0.81, "L": 0.85}   # where in its reach for the handle each hand opens widest (people's 71-77%,
+                             # person.peak_aperture_reach_frac): from where it hung, at the parallels' 0.76 the right's
+                             # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5; the right's, its
+                             # grip solved on its near nut, at 0.85 at 84.7 and at 0.78 at 68.5
 PAD_IN_MM = 0.5              # the pinch's pads this far into the handle's edges as it is solved: at 1.0, gripped with
                              # EFFORT through the strokes, the left hand's skin stood 3.4-3.6 mm in it (the limit 3.5)
 
@@ -78,11 +88,13 @@ def grab_at() -> np.ndarray:
 
 def grip_at(plate: SB.Plate, nuts: list[SB.Clamp], side: str, direction: str = "tighten") -> tuple[np.ndarray, float]:
     """Where the wrench stands as a hand's pinch on it is solved (its box end's middle mm, its yaw): on the hand's
-    first nut (by_hand), seated, halfway through a stroke, where the hand works it. Solved where the wrench lies on
-    the plate, the hand took it as a pickup there has it, and turned with it onto a nut: the right forearm pronated
-    10 deg past people's range on the right end's nuts, the left wrist stood out past the stud on the left end's, and
-    the trunk bent 12-15 deg to the side."""
-    c = next(ns[0] for s, ns in by_hand(nuts) if s == side)
+    nut nearest the operator (by_hand's), seated, halfway through a stroke, where the hand works it. Solved where the
+    wrench lies on the plate, the hand took it as a pickup there has it, and turned with it onto a nut: the right
+    forearm pronated 10 deg past people's range on the right end's nuts, the left wrist stood out past the stud on
+    the left end's, and the trunk bent 12-15 deg to the side."""
+    # (on the hand's nut nearest the operator, where the arm is most cramped: solved on the right end's far nut,
+    # on its near nut the planned wrist stood 187 mm right of the shoulder and the arm fell 61 mm short of the handle)
+    c = min(next(ns for s, ns in by_hand(nuts) if s == side), key=lambda k: k.stud[1])
     sweep = STROKE / 2 * (-1 if direction == "tighten" else 1)
     z = c.nut_z("clamped") + (SB.PARK_NUT_GAP_MM / 2 if direction == "tighten" else 0.0)
     yaw = nut_yaw(c, plate, direction, next(ns for s, ns in by_hand(nuts) if s == side)) + sweep
@@ -115,6 +127,13 @@ def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R", nuts: list[SB.Cl
     for c in nuts or ():                                     # the clamps, clamped, under the handle
         at, Rc = c.pose("clamped")
         cols += [obox(at + Rc @ b, Rc, hh) for _, b, hh in SB.strap_boxes()]
+    if nuts:
+        # and the plate as the wrench lies on it, where the hand takes it up: solved on the nut alone, the fingers
+        # reached under the handle's edges, and coming down on it lying there, met the plate before the handle (the
+        # right hand's 4 N two frames before its grasp, its opening cut short, widest at 69% of its reach)
+        p_r, y_r = rest(plate)
+        M = R @ turned(y_r).T
+        cols.append(obox(p + M @ (np.asarray(plate.centre, float) - p_r), M, plate.size / 2))
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     depth = (1.0, 4.0)
     k = PAD_IN_MM
@@ -256,7 +275,7 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     take.effort(side, t_c, 0.0, grip)
     take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S
-    k, swings, work = keys(plate, clamps, t_load + SP.LIFT_DELAY_S, direction, gap_mm, turns)
+    k, swings, work = keys(plate, clamps, t_load + LIFT_DELAY_S[side], direction, gap_mm, turns)
     grab = grab_at()
     take.follow(side, t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
                 lambda tt: PC.key_at(k, tt)[0] @ R0.T)

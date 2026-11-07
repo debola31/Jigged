@@ -41,6 +41,9 @@ LEVEL_S, SLIDE_S, HOLD_S, DOWN_S = 0.5, 1.2, 0.9, 0.8     # unhurried, and a pau
                                                           # held 0.4 s, a far clamp, slid 6.6 mm past its place, was
                                                           # still 5.8 past as it went down, and the eye's pull back
                                                           # landed it 4.4-4.8 mm short (ll-1005337's left take)
+SET_S = 0.3                  # ... and held where it lands a moment before it's let go: let go as it came down, a strap
+                             # still 0.7-2.5 mm over its place dropped onto its pads and turned 0.45-0.5 deg as it
+                             # landed, and its nut's snug turned it 0.4 more (ll-1005337's left take; its limit 1 deg)
 RAISE_PEAK_MM_S = 380.0      # the hand's peak speed on its way to a reach's ready point, under the reach's own
 ARC_UP_MM = 80.0             # ... and how far over the higher of where it starts and the ready point it arcs
 LIFT_DELAY_S = 0.04          # the strap starts up this long after the carry starts: a tipped strap's middle rises slowly
@@ -49,8 +52,11 @@ LIFT_DELAY_S = 0.04          # the strap starts up this long after the carry sta
 REACH_S = {"R": SP.REACH_S, "L": 0.52}   # the reach onto a grip, each hand in its people's time (person.reach_to_grasp
                                          # _right_s 0.32-0.67, _left_s 0.26-0.62): at the right's 0.58 the left hand's
                                          # reaches measured 0.63-0.67 s
-OFF_AT_S = 0.3               # the hand moves up off a strap this long after it is set down, opening as it goes (opened
-                             # in place first, from 0.45 s, the fingers swung into the strap's heel, 4.4-6 mm of skin)
+OFF_AT_S = 0.3               # the hand moves up off a strap this long after it is set down (opened in place first, from
+                             # 0.45 s, the fingers swung into the strap's heel, 4.4-6 mm of skin)
+OPEN_AFTER_S = 0.2           # ... its fingers held in the grip's shape this long as it comes up, clear of the strap's
+                             # top, then opened: opening as it came straight up, the right hand's index swung into the
+                             # heel's end, 4.3 mm of skin
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
 BOARD_CLEAR_MM = 4.0         # ... and off the spoilboard
 
@@ -104,14 +110,16 @@ def grip_spec(take: StepTake, clamp: SB.Clamp, state: str, plate: SB.Plate | Non
     k = PAD_IN_MM
     return dict(obj=grab, side=side_of(clamp), q0=q0, colliders=cols, load=SB.clamp_kg(),
                 targets={"thumb": plane(near, n_near, k, local_bands(top, R, x=(-8, 8), depth=(lo, hi))),
-                         "index": plane(far, -n_near, k, local_bands(top, R, x=(-18, -2), depth=(lo, hi))),
+                         # (the index's band stops 1 mm in from the heel's end: to 18 mm out it reached past it, and
+                         # let go, it swung into the end, 3.6 mm of skin in it)
+                         "index": plane(far, -n_near, k, local_bands(top, R, x=(-13, -2), depth=(lo, hi))),
                          "middle": plane(far, -n_near, k, local_bands(top, R, x=(2, 18), depth=(lo, hi)))},
                 iters=1500, starts=[S(20, 0, r, 50, 50, -15, 65, p, -10, 5) for p in (0, 35, 60) for r in (0, 15)])
 
 
-def on_keys(clamp: SB.Clamp, t0: float) -> list[tuple[float, np.ndarray, np.ndarray]]:
-    """The strap's planned path from parked to clamped from t0: up level and clear of the plate's top and the block,
-    forward along its slot over the plate's end, down. Keys (t, frame, middle mm)."""
+def path(clamp: SB.Clamp, t0: float) -> list[tuple[float, np.ndarray, np.ndarray]]:
+    """The strap's path from parked to clamped from t0: up level and clear of the plate's top and the block, forward
+    along its slot over the plate's end, down. Keys (t, frame, middle mm)."""
     p0, R0 = clamp.pose("parked")
     p1, R1 = clamp.pose_at(SB.PARK_SLIDE_MM, CLEAR_MM)
     p2, _ = clamp.pose_at(0.0, CLEAR_MM)
@@ -122,11 +130,23 @@ def on_keys(clamp: SB.Clamp, t0: float) -> list[tuple[float, np.ndarray, np.ndar
     return [(t0, R0, p0), (t1, R1, p1), (t2, R1, p2), (t3, R1, p2), (t3 + DOWN_S, R1, p3)]
 
 
+def settled(keys):
+    """A strap's keys, held where it lands SET_S before it's let go."""
+    t, R, p = keys[-1]
+    return keys + [(t + SET_S, R, p)]
+
+
+def on_keys(clamp: SB.Clamp, t0: float) -> list[tuple[float, np.ndarray, np.ndarray]]:
+    """The strap's planned path from parked to clamped from t0 (path), held on its place a moment."""
+    return settled(path(clamp, t0))
+
+
 def off_keys(clamp: SB.Clamp, t0: float) -> list[tuple[float, np.ndarray, np.ndarray]]:
-    """The strap's planned path from clamped back to parked from t0: on_keys reversed in time."""
-    keys = on_keys(clamp, 0.0)
+    """The strap's planned path from clamped back to parked from t0: path reversed in time, held where it's parked a
+    moment."""
+    keys = path(clamp, 0.0)
     T = keys[-1][0]
-    return [(t0 + T - t, R, p) for t, R, p in reversed(keys)]
+    return settled([(t0 + T - t, R, p) for t, R, p in reversed(keys)])
 
 
 def key_at(keys, t: float) -> tuple[np.ndarray, np.ndarray]:
@@ -200,10 +220,13 @@ def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tu
     take.effort(s, t_down - 0.1, 0.6, grip)
     take.effort(s, t_down + 0.2, 0.0, None)
     take.fingers(s, t_down + 0.25, g["q"])
-    take.fingers(s, t_down + 0.6, open_like(take.hand, g["q"], 0.4))
+    take.fingers(s, t_off + OPEN_AFTER_S, g["q"])
+    take.fingers(s, t_off + OPEN_AFTER_S + 0.25, open_like(take.hand, g["q"], 0.4))
     R1, p1 = key_at(keys, t_down)
     H1, W1 = take.grip_pose(grip, p1 + R1 @ grab, R1 @ R0.T)
-    off = W1 + np.array([0.0, -30.0, 90.0])
+    # straight up off it: drawn back toward the operator as it rose, the far fingers dragged the strap's heel and
+    # turned it 0.35-0.45 deg on its stud
+    off = W1 + np.array([0.0, 0.0, 90.0])
     take.add(s, t_off, t_off + 0.5, lambda tt, a=t_off, H1=H1, W1=W1, off=off:
              [("pose", H1, W1 + (off - W1) * min_jerk((tt - a) / 0.5), 2.0)])
     take.side[s]["wrist"] = off

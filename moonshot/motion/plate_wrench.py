@@ -67,9 +67,10 @@ PINCH_W = 4.0                # the planned pinch kept on the handle's arc while 
 LIFT_DELAY_S = 0.14          # the wrench starts up this long after the carry starts (people's 163-265 ms from the load
                              # coming on to its coming off the plate: at the parallels' 0.16 the right hand's took 267,
                              # at 0.1 the left's 133)
-REACH_PEAK = 0.85            # where in its reach for the handle a hand opens widest (people's 71-77%,
+REACH_PEAK = {"R": 0.78, "L": 0.85}   # where in its reach for the handle each hand opens widest (people's 71-77%,
                              # person.peak_aperture_reach_frac): from where it hung, at the parallels' 0.76 the right's
-                             # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5
+                             # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5; at 0.85, the
+                             # right's, its grip solved on its near nut, at 84.7
 PAD_IN_MM = 0.5              # the pinch's pads this far into the handle's edges as it is solved: at 1.0, gripped with
                              # EFFORT through the strokes, the left hand's skin stood 3.4-3.6 mm in it (the limit 3.5)
 
@@ -263,7 +264,7 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     # the grip's frame as it was solved (grip_spec: on the hand's first nut, or where the wrench lies)
     R0 = turned(take.__dict__.get("wrench_grip_at", {}).get(grip, rest(plate))[1])
     t_c, _ = PC.reach(take, side, grip, t0, WR.HANDLE_W, obj=p_rest + turned(y_rest) @ grab_at(),
-                      R=turned(y_rest) @ R0.T, peak=REACH_PEAK)
+                      R=turned(y_rest) @ R0.T, peak=REACH_PEAK[side])
     take.effort(side, t_c, 0.0, grip)
     take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S

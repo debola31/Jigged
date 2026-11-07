@@ -52,8 +52,11 @@ LIFT_DELAY_S = 0.04          # the strap starts up this long after the carry sta
 REACH_S = {"R": SP.REACH_S, "L": 0.52}   # the reach onto a grip, each hand in its people's time (person.reach_to_grasp
                                          # _right_s 0.32-0.67, _left_s 0.26-0.62): at the right's 0.58 the left hand's
                                          # reaches measured 0.63-0.67 s
-OFF_AT_S = 0.3               # the hand moves up off a strap this long after it is set down, opening as it goes (opened
-                             # in place first, from 0.45 s, the fingers swung into the strap's heel, 4.4-6 mm of skin)
+OFF_AT_S = 0.3               # the hand moves up off a strap this long after it is set down (opened in place first, from
+                             # 0.45 s, the fingers swung into the strap's heel, 4.4-6 mm of skin)
+OPEN_AFTER_S = 0.2           # ... its fingers held in the grip's shape this long as it comes up, clear of the strap's
+                             # top, then opened: opening as it came straight up, the right hand's index swung into the
+                             # heel's end, 4.3 mm of skin
 NUT_CLEAR_MM = 4.0           # the fingers kept this far off the nut
 BOARD_CLEAR_MM = 4.0         # ... and off the spoilboard
 
@@ -217,7 +220,8 @@ def move(take: StepTake, clamp: SB.Clamp, grip: str, t0: float, keys_from) -> tu
     take.effort(s, t_down - 0.1, 0.6, grip)
     take.effort(s, t_down + 0.2, 0.0, None)
     take.fingers(s, t_down + 0.25, g["q"])
-    take.fingers(s, t_down + 0.6, open_like(take.hand, g["q"], 0.4))
+    take.fingers(s, t_off + OPEN_AFTER_S, g["q"])
+    take.fingers(s, t_off + OPEN_AFTER_S + 0.25, open_like(take.hand, g["q"], 0.4))
     R1, p1 = key_at(keys, t_down)
     H1, W1 = take.grip_pose(grip, p1 + R1 @ grab, R1 @ R0.T)
     # straight up off it: drawn back toward the operator as it rose, the far fingers dragged the strap's heel and

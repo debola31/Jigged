@@ -98,6 +98,10 @@ included, the light model stays. Measured below: the whole-shop view costs about
 5. **A failed realistic model** keeps its light one: report it once, as model failures are reported today.
 6. **Phones get no realistic models**: light models only, no swap (decided 2026-11-05). The page already tells a
    phone from a desktop for its controls (touch gets no orbit); the same test gates the stream.
+7. **A thing's card** (its model to turn, desktop only) shows the realistic model when the manifest lists the asset,
+   loaded when the card opens (from the browser's cache once the stream has it) and compiled before it shows; its
+   light model only if that fails, reported once per card. The card and the stream share one manifest fetch and one
+   KTX2 transcoder (`realisticManifest.ts`, `realisticLoader.ts`).
 
 The rule and the views are in `preview/index.html` (`lodUpdate`), measured with
 `python -m moonshot.web.realism.loadcheck --lod`.

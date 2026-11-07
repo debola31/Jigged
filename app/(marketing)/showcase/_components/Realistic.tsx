@@ -11,6 +11,7 @@ import { useEffect, useMemo } from 'react';
 import { Frustum, MathUtils, Matrix4, Mesh, MeshStandardMaterial, Sphere, Texture, Vector3, type Group, type Object3D, type PerspectiveCamera, type WebGLRenderer } from 'three';
 import { toError } from '@/lib/supabaseErrors';
 import { spotBox, type Catalog } from './catalog';
+import { realisticManifest, type Manifest } from './realisticManifest';
 import { redrawRoom, roomProbe, roomStatus } from './Room';
 import { mediaUrl, type ShopItem } from './showcaseData';
 
@@ -35,10 +36,6 @@ export interface Slot {
   spot: ShopItem;
   outer: Group;
   light: Group;
-}
-
-interface Manifest {
-  assets: Record<string, { full: string; triangles: number; priority: string; load_order: number }>;
 }
 
 interface Item {
@@ -185,23 +182,19 @@ async function stream(cat: Catalog, slots: Map<number, Slot>, swap: Swap, get: (
     await sleep(500);
   }
   await idle();
-  let manifest: Manifest;
+  let manifest: Manifest | null;
   try {
-    const res = await fetch(mediaUrl('models-full/manifest.json'), { signal });
-    // None published yet (Supabase Storage answers a missing object with 400, a plain server 404):
-    // the light models, quietly.
-    if (res.status === 404 || res.status === 400) return;
-    if (!res.ok) throw new Error(`The realistic models' manifest answered ${res.status}`);
-    manifest = await res.json();
+    manifest = await realisticManifest();
   } catch (error) {
     if (!signal.aborted) report(error);
     return;
   }
+  // None published yet: the light models, quietly.
+  if (!manifest || signal.aborted) return;
   const { realisticLoader } = await import('./realisticLoader');
   if (signal.aborted) return;
   const { gl, scene, camera, invalidate } = get();
   const loader = realisticLoader(gl);
-  signal.addEventListener('abort', () => loader.dispose());
 
   const byAsset = new Map<string, Slot[]>();
   for (const slot of slots.values()) {

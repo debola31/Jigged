@@ -139,6 +139,20 @@ def test_the_cell_composes_with_the_body_model():
     assert glbs["wheel"][1].endswith("wheel_dwheel-1a1r.glb") and "coolant_nozzle" in glbs
 
 
+def test_the_grind_is_reported_only_while_the_wheel_is_inside_the_part():
+    m, d, _ = blocked_in()
+    head = m.jnt_qposadr[m.joint("sg_wheelhead").id]
+    a = m.jnt_qposadr[m.joint("chucked_part").id]
+    d.qpos[a:a + 2] = d.site("sg_wheel_bottom_head").xpos[:2]               # the insert's middle under the wheel
+    d.qpos[head] = -0.150
+    mujoco.mj_forward(m, d)
+    assert not GC.grind_cut_active(m, d)                                       # the wheel well above it
+    top = d.xpos[m.body("chucked_part").id][2] + THICK * 0.001
+    d.qpos[head] += top - d.site("sg_wheel_bottom_head").xpos[2] - 0.0002          # 0.2 mm into its top
+    mujoco.mj_forward(m, d)
+    assert GC.grind_cut_active(m, d)
+
+
 def test_the_grinders_state_carries_to_the_next_take():
     m, d, loose = blocked_in()
     ctl = GC.control(m, d, loose)

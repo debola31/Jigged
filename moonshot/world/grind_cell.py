@@ -265,6 +265,27 @@ def set_grinder(model: mujoco.MjModel, data: mujoco.MjData, ctl: SG.Control, sta
     mujoco.mj_forward(m, d)
 
 
+def grind_cut_active(model: mujoco.MjModel, data: mujoco.MjData, part: str = PREFIX + "part") -> bool:
+    """Is the wheel inside the part's uncut shape: its lowest point below the part's top and over its footprint? For
+    the frame's record of the grind's shortcut (the wheel and the part don't collide while it grinds), pending its
+    declaration."""
+    m, d = model, data
+    try:
+        g = m.geom(part).id
+    except KeyError:
+        return False
+    R, p = d.geom_xmat[g].reshape(3, 3), d.geom_xpos[g]
+    if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH:
+        mid = m.geom_dataid[g]
+        V = p + m.mesh_vert[m.mesh_vertadr[mid]:m.mesh_vertadr[mid] + m.mesh_vertnum[mid]] @ R.T
+    else:
+        s = m.geom_size[g]
+        V = p + np.array([[x, y, z] for x in (-s[0], s[0]) for y in (-s[1], s[1]) for z in (-s[2], s[2])]) @ R.T
+    w = d.site("sg_wheel_bottom_head").xpos
+    lo, hi = V.min(axis=0), V.max(axis=0)
+    return bool(w[2] < hi[2] and lo[0] <= w[0] <= hi[0] and lo[1] <= w[1] <= hi[1])
+
+
 def render_links(wheel_id: str | None = None, coolant_flowing: bool = False) -> dict[str, tuple[str, str]]:
     """The grinder's GLBs and the bodies that carry them, for glbs_in_bodies(model, "sgrind", ...)."""
     return SG.render_links(wheel_id, coolant_flowing)

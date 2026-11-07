@@ -87,3 +87,18 @@ def test_a_tool_setter_cycle_writes_the_tools_length(ctl):
     ctl.vps("tool_length", setter_z=setter_mm, gauge_length=125.0)
     _run(ctl, seconds=40.0)
     assert ctl.tool_length[3] == pytest.approx(length, abs=0.01)
+
+
+def test_a_boss_cycle_touches_it_from_outside_and_sets_x_and_y_at_its_centre(ctl):
+    """From over a boss (ll-1007224's Ø31.5 spigot), the probe 1.1 mm off its centre: out past each side, down the depth,
+    in to it, back out and up over it; X's pair, then Y's from over X's centre; each touch found within its travel, and
+    it ends over the centre, as high as it started."""
+    start = ctl.machine_mm().copy()
+    centre, r, depth = start[:2] + [0.9, -0.6], 15.75, 8.0
+    low = lambda: ctl.machine_mm()[2] < start[2] - depth / 2           # noqa: E731  the boss's top, half the depth down
+    ctl.sensor = lambda: low() and np.linalg.norm(ctl.machine_mm()[:2] - centre) - BALL_R <= r
+    ctl.vps("boss", ball_r=BALL_R, dia_mm=2 * r, depth_mm=depth)
+    _run(ctl, seconds=40.0)
+    assert ctl.work["G54"][:2] == pytest.approx(centre, abs=0.01)
+    assert ctl.machine_mm() == pytest.approx([*centre, start[2]], abs=0.01), "back over the centre, as high as it started"
+    assert "probe_missed" not in ctl.events

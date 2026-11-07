@@ -10,7 +10,7 @@ import { catalog, type Catalog } from './catalog';
 import Intro, { PartsRow } from './Intro';
 import ShopLayout from './Layouts';
 import type { PickSource } from './PartChoice';
-import { ready, type LivePart, type Showcase } from './showcaseData';
+import { picked, ready, type LivePart, type Showcase } from './showcaseData';
 import { useShowcase } from './store';
 
 // The marketing header above, which stays put.
@@ -91,7 +91,11 @@ function useAddress(part: LivePart, cat: Catalog, shop: React.RefObject<HTMLElem
  */
 export default function ShowcaseApp({ data }: { data: Showcase }) {
   // A live part shows once some of it is published: until its renders land there is nothing to watch.
-  const parts = useMemo(() => data.parts.filter((p): p is LivePart => p.status === 'live' && p.steps.some(ready)), [data.parts]);
+  // Each part narrowed to its picked steps (showcaseData.ts picked): every planned step stays in the data.
+  const parts = useMemo(
+    () => data.parts.filter((p): p is LivePart => p.status === 'live' && p.steps.some(ready)).map(picked),
+    [data.parts],
+  );
   const [partId, setPartId] = useState(parts[0].id);
   const part = parts.find((p) => p.id === partId) ?? parts[0];
   const cat = useMemo(() => catalog(data.shop), [data.shop]);

@@ -55,6 +55,9 @@ export interface LivePart extends PartBase {
   /** The setups, then finishing; a setup names the machine it's on. */
   groups: { id: string; title: string; where?: string }[];
   steps: Step[];
+  /** The steps the page shows, by id in plan order: ten or fewer, picked to be different and to span the part's
+   *  machines. `steps` keeps every planned step (gate test_web_steps.py); the page narrows to these (`picked`). */
+  picks?: string[];
 }
 
 export interface ComingPart extends PartBase {
@@ -145,6 +148,18 @@ const PREVIEW_UNPUBLISHED = process.env.NEXT_PUBLIC_SHOWCASE_PREVIEW_UNPUBLISHED
 
 export function ready(step: Step): boolean {
   return step.published || PREVIEW_UNPUBLISHED;
+}
+
+/**
+ * The part as the page shows it: only its picked steps, and only the setups (groups) that still have a step. A
+ * part without picks shows every step.
+ */
+export function picked(part: LivePart): LivePart {
+  if (!part.picks?.length) return part;
+  const keep = new Set(part.picks);
+  const steps = part.steps.filter((s) => keep.has(s.id));
+  const groups = part.groups.filter((g) => steps.some((s) => s.group === g.id));
+  return { ...part, steps, groups };
 }
 
 /** The part as its last cut leaves it: the newest published still of a machine cycle. */

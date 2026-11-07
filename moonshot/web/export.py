@@ -31,6 +31,20 @@ PARTS = ["nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223", 
 # The user's decision (2026-11-06): five parts on the page, G1's. G2-G5 are dropped; G2's published media stays in the
 # bucket, unlisted.
 LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223"}
+# The steps each live part shows (the user's picks, 2026-11-07): ten or fewer, each different, spread across the
+# part's machines. Every planned step stays in the page data (gate test_web_steps.py); the page shows these.
+PICKS = {
+    "nist-ftc-10": ["op10-load", "op10-seat", "op10-xy", "op10-tools", "op10-start", "op10-pocket",
+                    "op20-scallops", "op50-deep", "deburr", "inspect"],
+    "ct-slbeam": ["saw-load", "saw-cut", "saw-unload", "op10-tools", "op10-start", "op40-notch", "op40-cbores",
+                  "deburr", "send-out", "black-oxide"],
+    "ll-1007223": ["saw-load", "saw-cut", "op10-clean", "op10-start", "op10-outline", "op20-underside", "op30-tap",
+                   "deburr", "send-out", "zinc"],
+    "nist-ftc-09": ["op10-clean", "op10-load", "op10-start", "op10-slots", "op10-lettering", "op10-outline",
+                    "deburr"],
+    "ll-1005337": ["op10-clean", "op10-start", "op10-recesses", "op10-nests", "op10-undercut", "op20-far_edge",
+                   "deburr"],
+}
 # Where a finishing station's steps happen: its zone in layout.json.
 STATION_ZONES = {"bench": "benches", "inspection": "inspection", "outside": "shipping"}
 # shop.json's lists of things, in the order the page lists them.
@@ -226,9 +240,11 @@ def live_part(part: str, layout: dict, shop_json: dict) -> dict:
                       "uses": uses(s, setups, shop_json, layout), "media": media,
                       "published": all(p in published for p in media_paths(media))})
     stock = plan["stock"]
+    order = [s["id"] for s in steps]
+    picks = sorted(PICKS[part], key=order.index)             # in the plan's order, whatever order they're listed in
     return {"material": stock["material"],
             "stock": {"material": stock["material"], "size": stock["size_in"], "from": stock["from"]},
-            "groups": groups, "steps": steps}
+            "groups": groups, "steps": steps, "picks": picks}
 
 
 def build() -> dict:

@@ -16,22 +16,23 @@ import PrecisionManufacturingOutlinedIcon from '@mui/icons-material/PrecisionMan
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
 import { shortName } from './glyphs';
-import PilotRequest from './PilotRequest';
+import InterestForm from './InterestForm';
 import { finishedStill, type LivePart } from './showcaseData';
 
 /** Where a part was picked from: the intro's carousel, the Change part menu, or the closing card's. */
 export type PickSource = 'intro' | 'menu' | 'finished';
 
 /**
- * Whether visitors can send their own part. Off until the privacy policy covers pilot requests
- * (PR #882's "Before this can merge"): every way to upload shows "Coming soon" and opens nothing.
- * The form, its Route Handlers and the `pilot_requests` table stay as they are for when it's on.
+ * Whether the "your own part" entries open. They open the interest form (InterestForm.tsx): the
+ * visitor picks their part's file, which never leaves their computer, then asks for the feature or
+ * joins the pilot, onto the waitlist. The upload-and-walkthrough form (PilotRequest.tsx, its Route
+ * Handlers and the `pilot_requests` table) stays unused: it needs the privacy policy to cover files.
  */
-export const UPLOADS_OPEN = false;
+export const UPLOADS_OPEN = true;
 
 const MENU_BG = 'rgba(17, 20, 57, 0.98)';
 
-/** The pilot-request form in a dialog: the visitor's own part. */
+/** The visitor's own part, in a dialog: the interest form. */
 export function PilotDialog({ open, onClose }: { open: boolean; onClose(): void }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -39,7 +40,7 @@ export function PilotDialog({ open, onClose }: { open: boolean; onClose(): void 
         <IconButton onClick={onClose} aria-label="Close" sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
           <CloseIcon />
         </IconButton>
-        <PilotRequest />
+        <InterestForm />
       </Box>
     </Dialog>
   );
@@ -121,7 +122,7 @@ export function PartMenu({
             </ListItemIcon>
             <ListItemText
               primary="Your own part"
-              secondary={UPLOADS_OPEN ? 'Send a CAD file or drawing' : 'Coming soon'}
+              secondary={UPLOADS_OPEN ? 'A CAD file or drawing' : 'Coming soon'}
               slotProps={{ primary: { sx: { fontWeight: 600 } } }}
             />
           </ListItemButton>

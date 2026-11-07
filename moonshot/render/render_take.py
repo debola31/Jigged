@@ -28,7 +28,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from moonshot.config import data_root  # noqa: E402
-from moonshot.render import look  # noqa: E402
+from moonshot.render import keypad, look  # noqa: E402
 
 MM = 0.001
 UNDO_Y_UP = Matrix.Rotation(math.radians(-90), 4, "X")
@@ -89,6 +89,8 @@ def import_glb(path: Path, parent, local: Matrix, body: str, kind: str) -> list:
             for m in o.data.materials:                  # a CAD export's mat_N is the VF-2's only on the VF-2
                 if m and m.name.startswith("mat_") and not vf2:
                     m.name = f"{path.stem}_{m.name}"
+    if vf2 and path.stem == "pendant":                  # the CAD's pendant is a bare face: its keys and screen drawn
+        new += keypad.pendant(holder, link, body)       # on it (render only; moonshot/render/keypad.py)
     return [o for o in new if o.type == "MESH"]
 
 

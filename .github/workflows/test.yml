@@ -113,42 +113,6 @@ jobs:
           name: frontend-coverage
           path: coverage/
 
-  moonshot:
-    # The showcase pipeline (docs/moonshot/shop-and-pipeline-plan.md). Its own job so MuJoCo, OpenCASCADE and
-    # MyoSuite stay out of the API job. Only the fast tier runs here; the physics tier runs on the farm.
-    name: Moonshot Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # The bar check diffs against the PR base, which a shallow clone can't resolve.
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: moonshot/requirements.txt
-
-      - name: Install dependencies
-        # torch first from the CPU index: PyPI's Linux wheel pulls ~2 GB of CUDA libraries the tests never use
-        run: |
-          pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
-          pip install -r moonshot/requirements.txt
-
-      - name: Bar check — a PR moves the bar or meets it, never both (plan §6, rule 1)
-        # Empty on a push (no pull_request payload): the check says so and passes. It is a PR-time control.
-        env:
-          MOONSHOT_BASE_REF: ${{ github.event.pull_request.base.sha }}
-        run: python moonshot/tools/bar_check.py
-
-      - name: Layer check — stages import only downward
-        working-directory: ./moonshot
-        run: PYTHONPATH=.. lint-imports
-
-      - name: Fast tier, under 3 minutes (thresholds.toml tests.fast_tier_s)
-        run: timeout 180 pytest moonshot -v
-
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest

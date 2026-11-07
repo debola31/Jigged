@@ -95,7 +95,9 @@ Not needed, so not copied: the raw GRAB, ARCTIC and MANO downloads (they stay on
   check: skin penetration, proved against the reference take's 1,275 frames and two bad takes.
 - [x] A CI job for the fast tier, timed against the 3-minute target (§6): `Moonshot Tests` in
   `.github/workflows/test.yml`, `timeout 180`; green on 2026-11-02 at 11 s. It runs on pull requests and pushes to
-  `main`, so this branch's later commits first run it at merge.
+  `main`, so this branch's later commits first run it at merge. Removed from CI on 2026-11-07 (your decision, with
+  development wound down): the fast tier, the bar check and the layer check still run locally (`pytest moonshot`,
+  `python moonshot/tools/bar_check.py`, `lint-imports` in `moonshot/`).
 
 ## 3b. Body model, usage cards and checks (§3–§5), before any station
 

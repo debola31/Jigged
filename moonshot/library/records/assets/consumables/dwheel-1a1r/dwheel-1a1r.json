@@ -1,0 +1,35 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "dwheel-1a1r",
+  "name": "Diamond wheel, 1A1R, 6 x 0.035 x 1-1/4 in, 120 grit, on its own hub",
+  "category": "consumables",
+  "make": "Generic",
+  "model": "Type 1A1R resin-bond diamond wheel, ASD120-R100B99-1/4",
+  "description": "Thin straight resin-bond diamond wheel for slotting carbide on the surface grinder, kept mounted between its own flanges on its own hub, as a carbide shop keeps its diamond wheel; grinds ct-tpg322's chipbreaker.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Size", "value": "6 x 0.035 x 1-1/4 in (152.4 x 0.889 x 31.75 mm)"},
+    {"name": "Type", "value": "1A1R: straight, rim and core one thickness"},
+    {"name": "Abrasive", "value": "synthetic diamond, 120 grit, concentration 100, resin bond (ASD120-R100B99-1/4)"},
+    {"name": "Diamond depth", "value": 0.25, "unit": "in"},
+    {"name": "Max speed", "value": 6048, "unit": "rpm"},
+    {"name": "Flanges", "value": "two, 4 in across, 1/4 in thick", "note": "proposed: the grinder STEP's flange size"},
+    {"name": "Mass", "value": 0.85, "unit": "kg", "note": "the steel core 0.12 kg and the flanges 0.73 kg"}
+  ],
+  "source_urls": ["https://shop.butlerbros.com/catalogue/product/1042056"],
+  "source_files": ["dwheel-1a1r.glb (made by moonshot/library/stations/extract.py wheel_mesh)"],
+  "license": "self-made from the listing's published dimensions (moonshot/library/stations/extract.py wheel_mesh); not a maker's CAD",
+  "notes": "GENERIC: a plain disc between two flanges needs no download. Its dimensions are Butler Bros' listing of a 6 x 0.035 x 1-1/4 in 1A1R resin diamond wheel, 120 grit (1/4 in diamond depth, 6,048 rpm max); the hub's flanges are proposed. The same numbers mount it on the grinder (moonshot/library/stations/sgrind.json wheels), and extract.py writes both its own GLB and the grinder's link.",
+  "file": "dwheel-1a1r.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 2304,
+  "bbox": {"min": [-76.2, -76.2, 0.0], "max": [76.2, 76.2, 13.58]},
+  "attach_points": [],
+  "build": {
+    "from": "moonshot/library/stations/extract.py",
+    "placeholder": "extract.wheel_mesh",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

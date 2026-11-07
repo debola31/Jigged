@@ -1,0 +1,48 @@
+{
+ "schema": "jigged.card/1",
+ "id": "sgrind-block-in",
+ "name": "Set a small part on the surface grinder's magnetic chuck, blocked in by steel keepers, and switch the chuck on",
+ "assets": ["sgrind", "keeper"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "wipes the chuck, sets the keepers and the part, turns the chuck's lever",
+   "grasps": {"rag": "flat_press", "keeper": "prismatic_2_finger", "part": "tip_pinch", "chuck_lever": "power_sphere"},
+   "contacts": [{"digit": "palm", "on": "rag"}, {"digit": "thumb", "on": "keeper"}, {"digit": "index", "on": "keeper"},
+                {"digit": "thumb", "on": "part"}, {"digit": "index", "on": "part"}, {"digit": "palm", "on": "chuck_lever"}]
+  },
+  "steadying": {
+   "side": "L", "role": "holds each keeper or the part down against the one being set while the working hand pushes it tight",
+   "grasps": {"keeper": "fingertip_press", "part": "fingertip_press"},
+   "contacts": [{"digit": "index", "on": "keeper"}, {"digit": "middle", "on": "part"}]
+  }
+ },
+ "phases": [
+  {"phase": "check", "what": "The chuck off (the lever pointing right), the wheel stopped and raised clear [proposed: duration_s]",
+   "action": "read", "on": "chuck_lever", "duration_s": 1, "ends_on": "off and clear", "source": 0},
+  {"phase": "operate", "what": "Wipe the chuck's face clean where the work will sit, and the part's and the keepers' undersides: a chip under them lifts them off the poles [proposed: force_n, duration_s]",
+   "action": "wipe", "on": "chuck_face", "force_n": 5, "duration_s": [3, 6], "ends_on": "no chips or grit on the face", "source": 0},
+  {"phase": "transport", "what": "Lay the first keeper flat on the chuck, square to the table's travel by eye [proposed: duration_s]",
+   "action": "place", "on": "keeper", "duration_s": 1.5, "ends_on": "the keeper flat, square by eye", "source": 1},
+  {"phase": "transport", "what": "Set the part on the chuck, its face to be ground up, one flank against the first keeper [proposed: duration_s]",
+   "action": "place", "on": "part", "duration_s": 1.5, "ends_on": "the flank touching the keeper", "source": 1},
+  {"phase": "operate", "what": "Each further keeper laid flat against the next flank and slid in until it touches, the steadying hand holding the part down against the keepers already set; keepers placed so none crosses another or runs off the chuck [proposed: force_n, duration_s]",
+   "action": "slide", "on": "keeper", "force_n": 1, "duration_s": [2, 4], "ends_on": "every flank touching a keeper", "source": 1},
+  {"phase": "reach", "what": "The working hand to the chuck's lever", "duration_s": [0.32, 0.67], "source": 3},
+  {"phase": "operate", "what": "Lever half a turn to on, the steadying hand off the work [proposed: duration_s]",
+   "action": "turn", "on": "chuck_lever", "force_n": [25, 30], "duration_s": 0.8, "ends_on": "the lever at its far stop", "source": 2},
+  {"phase": "check", "what": "Try the part and each keeper with a fingertip: the keepers don't move; the part is held, a light nudge only, as a hard sideways knock wedges a clearance-ground insert up over its keepers [proposed: force_n, duration_s]",
+   "action": "push", "on": "part", "force_n": 1, "duration_s": 1.0, "ends_on": "nothing moves", "source": 1}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "South Bend Lathe Co., Model SB1029 Owner's Manual (2010): Magnetic Chuck and Setup for a Typical Grinding Operation (p. 31: both faces ground flat and clean, the chuck off to place the work, then on), Operation Overview (p. 20: the head raised clear, the table wiped)",
+   "url": "https://archive.org/download/manualsonline-id-7918a92e-d1b2-4fbe-bb4c-6217a681a58e/7918a92e-d1b2-4fbe-bb4c-6217a681a58e.pdf",
+   "gives": "clean faces, the chuck off to place the work and on to hold it"},
+  {"kind": "practice", "ref": "The station's magnetic chuck (moonshot/library/stations/sgrind.json chuck; moonshot/world/sgrind.py): carbide holds at about 6% of steel's pull (its cobalt binder), so a carbide part is blocked in by steel keepers the magnet holds (your decision, 2026-11-06); and the grinder cell's tests (moonshot/tests/test_grind_cell.py)",
+   "gives": "why keepers, how tight (0.05 mm off each flank), that they lie in a pinwheel so none crosses another, and that a 1 N nudge leaves the part in its pocket while a sideways knock of about 6.5 N lifts an 11 deg clearance insert out"},
+  {"kind": "maker", "ref": "Tormach PSG 612 Operator's Manual UM10159: Using the Magnetic Chuck (p. 12)",
+   "url": "https://tormach.com/docs/download/assetlink/asset_id/431", "gives": "the chuck switched on by its handle once the work is placed"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed for reach durations",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json", "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+ ],
+ "notes": "For a part too weakly magnetic, or too small, for the chuck to hold alone; a steel part thick enough is set straight on the chuck and phases 3 and 5 drop out. ct-tpg322's keepers are the shop's grinding keepers (keepers-1, record keeper), 1/8 x 1/2 x 1-1/2 in, so three fit round its insert in a pinwheel, 23 mm behind its middle and 35 in front; the shop's 6 in parallels laid that way reach 256 mm across the table, past the 254 mm chuck, and into the spindle housing's path with the 6 in wheel at the work (your decision, 2026-11-06). No footage of a grinder setup is measured yet. Proposed, with reasons (phase numbers count from 1): #1 1 s to check; #2 5 N and 3-6 s for a rag over a small area; #3 and #4 1.5 s each to lay a keeper or the part; #5 1 N, a fingertip's push that closes a 0.05 mm gap without shifting what is set, and 2-4 s a keeper; #7 the lever as the station's; #8 1 N, from the cell's tests, and 1.0 s."
+}

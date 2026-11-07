@@ -91,6 +91,8 @@
     {"item":"grinding-wheel-1","asset":"gwheel","zone":"grinding","x":29642.4,"y":12353,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"dresser-1","asset":"dresser","zone":"grinding","x":29885.6,"y":12429.2,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"mag-chuck-1","asset":"magchk","zone":"grinding","x":29758.6,"y":12109.8,"z":850,"rot":0,"on":"cart-grind"},
+    {"item":"keepers-1","asset":"keeper","zone":"grinding","x":30300,"y":12000,"z":850,"rot":0,"on":"cart-grind"},
+    {"item":"diamond-wheel-1","asset":"dwheel-1a1r","zone":"grinding","x":30250,"y":12350,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"edm-wire-1","asset":"wire","zone":"wire-edm","x":35825.7,"y":12400,"z":850,"rot":0,"on":"cart-edm"},
     {"item":"edm-fixture-1","asset":"edmfix","zone":"wire-edm","x":36098.1,"y":12378.4,"z":850,"rot":0,"on":"cart-edm"},
     {"item":"cat40-em-0500-1","asset":"cat40","zone":"tool-crib","x":38350.5,"y":12448.3,"z":1000,"rot":0,"on":"crib-holders"},

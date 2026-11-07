@@ -1,0 +1,39 @@
+{
+ "schema": "jigged.card/1",
+ "id": "sgrind-hand-grind",
+ "name": "Grind by hand on the surface grinder: rock the table under the wheel, feed down a little each pass, step across, spark out",
+ "assets": ["sgrind"],
+ "hands": {
+  "working": {
+   "side": "L", "role": "rocks the table back and forth by its longitudinal handwheel",
+   "grasps": {"table_handwheel": "small_diameter"},
+   "contacts": [{"digit": "palm", "on": "table_handwheel"}, {"digit": "thumb", "on": "table_handwheel"}]
+  },
+  "steadying": {
+   "side": "R", "role": "feeds down between passes; steps across with the cross-feed",
+   "grasps": {"downfeed_handwheel": "tip_pinch", "cross_handwheel": "tip_pinch"},
+   "contacts": [{"digit": "thumb", "on": "downfeed_handwheel"}, {"digit": "index", "on": "downfeed_handwheel"},
+                {"digit": "thumb", "on": "cross_handwheel"}, {"digit": "index", "on": "cross_handwheel"}]
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "A stroke: the table rocked by its handwheel so the work passes under the wheel and out the far side, and back [proposed: force_n, duration_s]",
+   "action": "turn", "on": "table_handwheel", "force_n": 5, "duration_s": [0.8, 2.0], "ends_on": "the work past the wheel both ways; no more sparks on the return", "source": 0},
+  {"phase": "operate", "what": "At the stroke's end, clear of the work, feed down by the dial: a few graduations a pass, lighter for finishing [proposed: force_n, duration_s]",
+   "action": "turn", "on": "downfeed_handwheel", "force_n": 4, "duration_s": [0.5, 1.5], "ends_on": "the dial at the next pass's depth", "source": 1},
+  {"phase": "operate", "what": "Across a face wider than the wheel: step across with the cross-feed between strokes, overlapping a little, the cross lock eased only to move [proposed: force_n, duration_s]",
+   "action": "turn", "on": "cross_handwheel", "force_n": 3, "duration_s": [0.5, 1.5], "ends_on": "the cross dial at the next step", "source": 0},
+  {"phase": "operate", "what": "At depth, spark out: strokes with no feed until no more sparks come [proposed: duration_s]",
+   "action": "turn", "on": "table_handwheel", "force_n": 5, "duration_s": [2, 6], "ends_on": "no sparks", "source": 0},
+  {"phase": "check", "what": "Wheel raised clear; between passes the work squeegeed or blown off to see it [proposed: duration_s]",
+   "action": "read", "on": "work", "duration_s": [2, 5], "ends_on": "the depth reached across the face", "source": 0}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "South Bend Lathe Co., Model SB1029 Owner's Manual (2010): Using the Surface Grinder and Grinding Tips (p. 32): many light passes, never too much in one; the longitudinal handwheel sweeps the work under the wheel until no further sparks; the cross handwheel only between passes, overlapping slightly; the cross lock tightened during passes; the squeegee between passes",
+   "url": "https://archive.org/download/manualsonline-id-7918a92e-d1b2-4fbe-bb4c-6217a681a58e/7918a92e-d1b2-4fbe-bb4c-6217a681a58e.pdf",
+   "gives": "the pass: sweep until no sparks, then cross between passes; light passes; spark-out"},
+  {"kind": "practice", "ref": "The ct-tpg322 plan's grind (moonshot/planning/plans/ct-tpg322.json op10 edge1-3 speeds): 0.0005 in a pass, 16 passes and two spark-outs at each of two cross positions .020 in apart, the table rocked about 3 mm along the edge's middle",
+   "gives": "the feeds and counts for a chipbreaker slot in carbide with a resin diamond wheel"}
+ ],
+ "notes": "The hands: the table's handwheel is at the front left, the cross-feed's at the front right, and this grinder's down-feed on the column's right side, 1.4 m up: from the front the down-feed is out of reach, so each pass is split into a front take (the strokes) and a right-side take (the down-feed), joined by declared cuts (your decision, 2026-11-06), and the cross step is made from the front between them. The video may show one or two cycles and cut the rest, each cut declared. The grind's removal is the cut simulation's work; the wheel doesn't touch the work in the physics (moonshot/world/grind_cell.py), and the pass's grinding forces aren't simulated (on a 5 g insert at the 1 ms timestep they move it a millimetre a step). No footage is measured yet. Proposed, with reasons (phase numbers count from 1): #1 and #4 5 N at the table handwheel's knob (its rack and the table's ball ways take about 0.5 N m, a few newtons at the knob, more to start and stop the table) and 0.8-2.0 s a stroke of a few mm to a few cm; #2 4 N and 0.5-1.5 s for a few graduations; #3 3 N and 0.5-1.5 s; #4 2-6 s, a few strokes; #5 2-5 s."
+}

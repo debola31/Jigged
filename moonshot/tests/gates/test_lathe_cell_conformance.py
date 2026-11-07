@@ -64,12 +64,16 @@ def test_the_pendants_buttons_are_within_reach_from_the_pendant():
 
 
 def test_stock_clamped_in_the_chuck_turns_with_the_spindle_in_the_cell():
-    """A 2-1/2 in 6061 blank in the BR10's soft jaws bored to it, as ll-1007224's op10 holds it."""
+    """A 2-1/2 in 6061 blank in the BR10's soft jaws bored to it, as ll-1007224's op10 holds it: 8 mm of its 25.4 in
+    the jaws, so its weight is held up (as the hand holds it) until the jaws have closed on it."""
     blank = LC.stock_xml("stock", 63.5, 25.4, LC.in_jaws_mm(63.5, 25.4, 8.0), LC.DENSITY["6061"])
     m, d, ctl = scene(LC.LOAD_PELVIS_MM, loose=blank, bore_mm=63.5)
+    stock = m.body("stock").id
+    d.xfrc_applied[stock, 2] = m.body_subtreemass[stock] * 9.81
     ctl.clamp()
     for _ in range(800):
         ctl.step()
+    d.xfrc_applied[stock, 2] = 0.0
     assert ctl.chuck == "clamped"
     d.qpos[ctl.q["door"]] = 0.0
     ctl.spindle(1000.0)

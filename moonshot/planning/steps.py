@@ -43,7 +43,8 @@ TOOL_NAMES = {"facem": "the 2 in face mill", "em12": "the 1/2 in end mill", "em3
               # missing_records)
               "turn-ccgt": "the CCGT roughing tool", "turn-dcgt": "the DCGT finishing tool",
               "turn-vcgt": "the VCGT turning tool", "groove-3": "the 3 mm grooving tool",
-              "tap-m4-bot": "the M4 bottoming tap", "dwheel-1a1r": "the diamond wheel"}
+              "tap-m4-bot": "the M4 bottoming tap", "drill-3p3-118": "the 3.3 mm 118 deg drill",
+              "dwheel-1a1r": "the diamond wheel"}
 # Where each mill's tools go. The VF-2 measures its own on its tool setter; the shop's other mills have none
 # (shop.json puts the only tool setter and probe on the VF-2), so their tools are measured on the presetter first.
 CHANGERS = {"vf2": "the carousel", "vf3": "the tool changer", "hurco": "the tool changer", "st25": "the turret"}

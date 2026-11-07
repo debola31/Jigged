@@ -237,10 +237,15 @@ def test_the_piece_comes_free_and_is_set_down_away_from_the_blade(takes):
     assert np.linalg.norm(p[0] - s) <= threshold("physics.placement_mm").value   # where the slide left it
     assert p[:, 2].max() - p[0, 2] >= LIFT_MM
     bed = BS.record()["colliders"]["bed_front"]
-    xy = corners_xy(t, "piece")
+    if SC.STOCK["round"]:                                               # a disc, laid flat: its circle's bounds
+        r = SC.STOCK["w"] / 2
+        xy = np.array([p[-1, :2] + [sx * r, sy * r] for sx in (-1, 1) for sy in (-1, 1)])
+        top = SC.bed_z() + length_mm(t, "piece") / 2
+    else:
+        xy, top = corners_xy(t, "piece"), SC.bed_z() + SC.STOCK["h"] / 2
     assert (np.array(bed["box_min_mm"][:2]) <= xy).all() and (xy <= np.array(bed["box_max_mm"][:2])).all(), xy
     assert xy[:, 1].max() <= -AWAY_MM, xy                               # the blade's plane is y = 0
-    assert abs(p[-1, 2] - (SC.bed_z() + SC.STOCK["h"] / 2)) <= threshold("physics.placement_mm").value
+    assert abs(p[-1, 2] - top) <= threshold("physics.placement_mm").value
     fps = float(t["npz"]["fps"])
     still = p[-int(0.3 * fps):]
     assert np.linalg.norm(still - still[-1], axis=1).max() < 0.5        # resting there, let go

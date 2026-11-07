@@ -33,8 +33,8 @@ IN = 25.4
 SFPM = 0.3048 / 60                         # m/s per surface foot per minute
 
 
-def build(loose: str = ""):
-    m = mujoco.MjModel.from_xml_string(standalone_xml(loose))
+def build(loose: str = "", wheel=None):
+    m = mujoco.MjModel.from_xml_string(standalone_xml(loose, wheel))
     d = mujoco.MjData(m)
     mujoco.mj_forward(m, d)
     return m, d
@@ -212,14 +212,19 @@ def test_a_hand_turns_the_dial_alone_to_set_it_without_moving_the_wheel(grinder)
     assert abs(ctl.wheel_above_chuck_mm() - h0) < 0.002                       # nor the wheel
 
 
-def test_the_wheel_comes_down_to_the_chuck_and_rises_10_in_above_it(grinder):
-    m, d = grinder
-    ctl = Control(m, d)
-    lo, hi = m.jnt_range[m.joint("sg_wheelhead").id]
-    put(m, d, "sg_wheelhead", lo)
-    assert ctl.wheel_above_chuck_mm() == pytest.approx(0.0, abs=0.5)
-    put(m, d, "sg_wheelhead", hi)
-    assert ctl.wheel_above_chuck_mm() >= 10 * IN
+def test_the_head_brings_each_wheel_down_to_the_chuck_and_the_10_in_wheel_rises_10_in_above_it():
+    at_bottom = {}
+    for w in record()["wheels"]:
+        m, d = build(wheel=w)
+        ctl = Control(m, d)
+        lo, hi = m.jnt_range[m.joint("sg_wheelhead").id]
+        put(m, d, "sg_wheelhead", lo)
+        at_bottom[w] = ctl.wheel_above_chuck_mm()
+        assert at_bottom[w] <= 0.5                                            # every wheel reaches the chuck
+        if w == "gwheel":
+            put(m, d, "sg_wheelhead", hi)
+            assert ctl.wheel_above_chuck_mm() >= 10 * IN
+    assert min(abs(h) for h in at_bottom.values()) < 0.5                      # the stop is where the smallest meets it
 
 
 # --- the wheel, its guard and its controls ------------------------------------------------------------------------
@@ -229,15 +234,17 @@ def test_the_wheel_runs_at_its_speed_only_after_on_and_inside_its_rating(grinder
     ctl = Control(m, d)
     S = record()["spindle"]
     rpm = S["rpm"]
-    assert math.pi * S["wheel_mm"][0] / 1000 * rpm / 60 <= S["wheel_rated_sfpm"] * SFPM   # SB1029 safety rule 2
+    for w, spec in record()["wheels"].items():                               # SB1029 safety rule 2: each wheel is
+        assert spec["rated_rpm"] >= rpm, w                                    # rated for the grinder's speed
     ctl.press("start")
     settle(ctl, 5000)
     assert ctl.state == "running" and ctl.spindle_rpm() == pytest.approx(rpm, rel=0.02)
     assert ctl.spindle_rpm() <= rpm * 1.02
 
 
-def test_off_stays_in_until_twisted_and_the_wheel_coasts_to_a_stop(grinder):
-    m, d = grinder
+@pytest.mark.parametrize("wheel", ["gwheel", "dwheel-1a1r"])
+def test_off_stays_in_until_twisted_and_the_wheel_coasts_to_a_stop(wheel):
+    m, d = build(wheel=wheel)
     ctl = Control(m, d)
     ctl.press("start")
     settle(ctl, 5000)

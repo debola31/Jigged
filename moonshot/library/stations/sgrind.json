@@ -3,7 +3,7 @@
  "id": "sgrind",
  "shop_id": "grinder-1",
  "name": "10 x 24 manual surface grinder",
- "about": "Links from the GrabCAD STEP (moonshot/library/stations/extract.py; bounds, volumes and inertias in sgrind.links.json), in a world frame with the floor at z = 0, the table's middle at x = 0, the wheel's mid-plane at y = 0 and the operator at -Y. Joint zero is the STEP's pose: the table centred, the wheel 163.1 mm above the chuck, the chuck lever pointing right (off). The STEP has no maker, so its working numbers come from makers' manuals and listings for manual grinders: South Bend's SB1029 6 x 18 manual (hand-feed, the controls and the order of work), Clausing's CSG2A1020 10 x 20 (travel) and Suburban's 10 x 24 fine-pole permanent chuck. Sources: cad is measured on the STEP, naming its solids by their index in the file; spec is a maker's figure for this machine's class, named in each reason; proposed has its reason.",
+ "about": "Links from the GrabCAD STEP (moonshot/library/stations/extract.py; bounds, volumes and inertias in sgrind.links.json), in a world frame with the floor at z = 0, the table's middle at x = 0, the wheel's mid-plane at y = 0 and the operator at -Y. Joint zero is the STEP's pose: the table centred, the 10 in wheel 163.1 mm above the chuck, the chuck lever pointing right (off). The STEP has no maker, so its working numbers come from makers' manuals and listings for manual grinders: South Bend's SB1029 6 x 18 manual (hand-feed, the controls and the order of work), Clausing's CSG2A1020 10 x 20 (travel) and Suburban's 10 x 24 fine-pole permanent chuck. Sources: cad is measured on the STEP, naming its solids by their index in the file; spec is a maker's figure for this machine's class, named in each reason; proposed has its reason.",
  "sources": {
   "sb1029": "South Bend Lathe Co., Model SB1029 6 x 18 Surface Grinder Owner's Manual (2010), https://archive.org/download/manualsonline-id-7918a92e-d1b2-4fbe-bb4c-6217a681a58e/7918a92e-d1b2-4fbe-bb4c-6217a681a58e.pdf: Machine Specifications (p. 4-5), Additional Surface Grinder Safety (p. 8), Test Run (p. 19), Operation Overview and Controls (p. 20-21), Wheel Dressing (p. 28), Magnetic Chuck, Setup and Using the Surface Grinder (p. 31-32)",
   "clausing": "Clausing Industrial, CSG2A1020 Manual Precision Surface Grinder, 10 x 20 in, https://clausing-industrial.com/product/csg2a1020/",
@@ -11,7 +11,8 @@
   "mcmaster_chucks": "McMaster-Carr, magnetic workholding chucks: permanent-magnet chucks hold up to 30 psi, rare-earth 115 psi; fine pole spacing for parts smaller or thinner than 1/4 in, https://www.mcmaster.com/products/magnetic-workholding-chucks",
   "sharp": "Sharp SG-618 6 x 18 manual surface grinder, dealer listing of the maker's specification: longitudinal hand feed 2.7 in per turn, https://blumberg.machinehub.com/listing/new-6-x-18-sharp-sg-618-manual-surface-grinder-3/",
   "osha": "OSHA 29 CFR 1910.215(b)(4): on surface grinders the guard's exposure angle may not exceed 150 deg, beginning not more than 15 deg above the horizontal plane of the spindle, https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.215",
-  "tormach": "Tormach PSG 612 Operator's Manual UM10159, https://tormach.com/docs/download/assetlink/asset_id/431: Using the Magnetic Chuck (a wrench on its front face turned to on or off, p. 12), Dressing a Wheel (the dresser on the chuck, p. 16)"
+  "tormach": "Tormach PSG 612 Operator's Manual UM10159, https://tormach.com/docs/download/assetlink/asset_id/431: Using the Magnetic Chuck (a wrench on its front face turned to on or off, p. 12), Dressing a Wheel (the dresser on the chuck, p. 16)",
+  "butler_1a1r": "Butler Bros, 6 x 0.035 x 1-1/4 in diamond wheel, resin bond, type 1A1R, 120 grit (ASD120-R100B99-1/4: 1/4 in diamond depth, 6,048 rpm max), https://shop.butlerbros.com/catalogue/product/1042056"
  },
  "gaps": [
   "Cross travel is what the STEP's column allows: 140 mm toward it before the table's back edge reaches the column's face (150 mm), 75 mm toward the operator. The wheel then reaches the chuck's back 202 mm of its 254 mm width, not all of it as on a real 10 x 24 grinder (Clausing's 10 x 20 crosses 11.81 in). A part set within that reach grinds as on the real machine",
@@ -20,141 +21,889 @@
   "The STEP has no spindle motor: its mass (about 30 kg for 2 hp) isn't added to the wheelhead. It changes only the down-feed handwheel's effort, by 0.6 N at the rim",
   "A permanent chuck's residual magnetism in the part after it is switched off is not modelled",
   "No coolant: the STEP has no coolant system, and SB1029's coolant pump is an option (its control panel's coolant switch is for the optional system)",
-  "The STEP has no control box: the one here (the controls link, a box on a bracket off the base's right side) is made in extract.py with SB1029's ON and OFF buttons and power light"
+  "The STEP has no control box: the one here (the controls link, a box on a bracket off the base's right side) is made in extract.py with SB1029's ON and OFF buttons and power light",
+  "A part resting on a held part (on a parallel, say) isn't pulled through it: the flux a steel parallel carries up into what stands on it is not modelled"
  ],
  "links": {
-  "base": {"parent": null}, "saddle": {"parent": "base"}, "table": {"parent": "saddle"}, "chuck": {"parent": "table"},
-  "chuck_lever": {"parent": "chuck"}, "table_handwheel": {"parent": "saddle"}, "cross_handwheel": {"parent": "saddle"},
-  "wheelhead": {"parent": "base"}, "spindle": {"parent": "wheelhead"},
-  "downfeed_handwheel": {"parent": "base"}, "downfeed_dial": {"parent": "downfeed_handwheel"}, "controls": {"parent": "base"}
+  "base": {
+   "parent": null
+  },
+  "saddle": {
+   "parent": "base"
+  },
+  "table": {
+   "parent": "saddle"
+  },
+  "chuck": {
+   "parent": "table"
+  },
+  "chuck_lever": {
+   "parent": "chuck"
+  },
+  "table_handwheel": {
+   "parent": "saddle"
+  },
+  "cross_handwheel": {
+   "parent": "saddle"
+  },
+  "wheelhead": {
+   "parent": "base"
+  },
+  "spindle": {
+   "parent": "wheelhead"
+  },
+  "downfeed_handwheel": {
+   "parent": "base"
+  },
+  "downfeed_dial": {
+   "parent": "downfeed_handwheel"
+  },
+  "controls": {
+   "parent": "base"
+  }
  },
- "density_g_cm3": {"saddle": 3.6, "table": 3.6, "chuck": 6.52, "chuck_lever": 7.85, "wheelhead": 7.2,
-                   "table_handwheel": 7.2, "cross_handwheel": 7.2, "downfeed_handwheel": 7.2, "downfeed_dial": 2.7},
- "density_source": {"source": "proposed", "reason": "The saddle's and the table's solids are filled where their castings are ribbed: cast iron's 7.2 halved, about the share of a ribbed casting that is iron (the table 118 kg, the saddle 268 kg). The chuck weighs Suburban's figure: the MCB-824-FP's 126 lb scaled to 10 in wide, 71.4 kg over the STEP's 10,946 cm3. The guard is a 10 mm shell, cast iron at full density; the handwheels cast iron; the lever steel; the dial aluminium"},
- "spindle_mass": {"kg": 9.53, "axial_inertia_kg_m2": 0.035, "source": "proposed",
-                  "reason": "The 10 x 1 x 1-1/4 in wheel (solid 6, 1,175 cm3) at a vitrified wheel's 2.2 g/cm3, 2.58 kg and 0.0211 kg m2 about its axis; the spindle nose (solid 2) and outer flange (8) steel, 6.93 kg and 0.0089 kg m2; and 0.005 kg m2 for the motor's rotor, which the STEP doesn't draw"},
+ "density_g_cm3": {
+  "saddle": 3.6,
+  "table": 3.6,
+  "chuck": 6.52,
+  "chuck_lever": 7.85,
+  "wheelhead": 7.2,
+  "table_handwheel": 7.2,
+  "cross_handwheel": 7.2,
+  "downfeed_handwheel": 7.2,
+  "downfeed_dial": 2.7
+ },
+ "density_source": {
+  "source": "proposed",
+  "reason": "The saddle's and the table's solids are filled where their castings are ribbed: cast iron's 7.2 halved, about the share of a ribbed casting that is iron (the table 118 kg, the saddle 268 kg). The chuck weighs Suburban's figure: the MCB-824-FP's 126 lb scaled to 10 in wide, 71.4 kg over the STEP's 10,946 cm3. The guard is a 10 mm shell, cast iron at full density; the handwheels cast iron; the lever steel; the dial aluminium"
+ },
+ "spindle_mass": {
+  "kg": 6.59,
+  "axial_inertia_kg_m2": 0.0135,
+  "source": "proposed",
+  "reason": "The spindle nose (solid 2, 839 cm3) in steel, 6.59 kg and 0.0085 kg m2 about its axis, and 0.005 kg m2 for the motor's rotor, which the STEP doesn't draw; the wheel mounted on it adds its own (wheels)"
+ },
  "joints": {
-  "table": {"link": "table", "type": "slide", "axis": [1, 0, 0], "range_mm": [-360.8, 360.8], "friction_n": 20,
-            "source": "spec", "reason": "Clausing's CSG2A1020 traverses its table 24.41 in by hand, 4.41 in more than its 20 in chuck; the same 4.41 in beyond this 24 in chuck is 28.41 in (721.6 mm), centred on the STEP's pose. At both ends the whole chuck is past the wheel and nothing meets the column or the down-feed handwheel",
-            "friction_source": "proposed", "friction_reason": "SB1029's table rides ball-bearing slideways: about 0.01 of the table and chuck's 190 kg weight, 19 N"},
-  "table_handwheel": {"link": "table_handwheel", "type": "hinge", "at_mm": [-287.5, -780.0, 825.0], "axis": [0, 1, 0],
-                      "travel_mm_per_turn": 68.58, "friction_n_m": 0.3, "rim_radius_mm": 127.0,
-                      "source": "cad", "reason": "The larger front handwheel (solids 35-37, 254 mm across), its spinner (36) 117 mm off its axis; positive is clockwise as the operator sees it and drives the table right through its rack, as SB1029's longitudinal handwheel moves the table left and right",
-                      "travel_source": "spec", "travel_reason": "Sharp's SG-618 manual grinder: 2.7 in of table per turn of its longitudinal handwheel. Not self-locking: a push on the table turns the handwheel",
-                      "friction_source": "proposed", "friction_reason": "The pinion's bearings and the rack's mesh: a hand turns it with a few newtons at the rim"},
-  "saddle": {"link": "saddle", "type": "slide", "axis": [0, 1, 0], "range_mm": [-75.0, 140.0], "friction_n": 290,
-             "source": "cad", "reason": "Toward the column (+Y) until the table's back edge (y 88.7, solid 41) is 10 mm from the column's face (y 238.7, solid 42); toward the operator 75 mm, past the 61.4 mm that brings the wheel's back face over the chuck's back edge (see gaps)",
-             "friction_source": "proposed", "friction_reason": "Oiled cast-iron ways under the saddle, table, chuck and handwheels, 470 kg at about 0.063"},
-  "cross_handwheel": {"link": "cross_handwheel", "type": "hinge", "at_mm": [105.0, -690.0, 850.5], "axis": [0, 1, 0],
-                      "lead_mm": 5.08, "graduations": 200, "friction_n_m": 0.8, "rim_radius_mm": 100.0,
-                      "source": "cad", "reason": "The smaller front handwheel (solids 38-40, 200 mm across), its spinner (40) 90.5 mm off its axis; positive is clockwise as the operator sees it, which runs a right-hand screw and the saddle toward the column",
-                      "lead_source": "spec", "lead_reason": "SB1029 and Clausing CSG2A1020: cross feed 0.2 in per turn of the handwheel, 0.001 in per graduation (200 a turn)",
-                      "friction_source": "proposed", "friction_reason": "The screw's thread and the saddle's ways (0.24 N m of it): 8 N at the rim; self-locking, a 200 N push on the table can't back-drive it (0.16 N m)"},
-  "wheelhead": {"link": "wheelhead", "type": "slide", "axis": [0, 0, 1], "range_mm": [-163.1, 95.0], "friction_n": 40,
-                "source": "cad", "reason": "Down until the new wheel's bottom (z 1222.9, solid 6) is at the chuck's face (z 1059.9, solid 21), where the wheel would grind the chuck true; up until the guard's top (z 1500, solid 3) is 5 mm under the column's top (z 1600, solid 42). Wheel to chuck up to 258.1 mm (10.2 in)",
-                "friction_source": "proposed", "friction_reason": "The head's gibbed ways"},
-  "downfeed_handwheel": {"link": "downfeed_handwheel", "type": "hinge", "at_mm": [362.0, 358.7, 1400.0], "axis": [-1, 0, 0],
-                         "lead_mm": 1.27, "graduations": 250, "friction_n_m": 1.0, "rim_radius_mm": 100.0,
-                         "source": "cad", "reason": "The handwheel on the column's right side (solids 43, 45, 46, 200 mm across), its spinner (46) 92.5 mm off its axis; positive is clockwise as the operator at the machine's right sees it, and lowers the wheel",
-                         "lead_source": "spec", "lead_reason": "SB1029: vertical handwheel 0.05 in per turn, 0.0002 in per graduation (250 a turn)",
-                         "friction_source": "proposed", "friction_reason": "Self-locking: the head's 30 kg back-drives its screw with only 0.06 N m, so friction holds it; a hand turns it with 10 N at the rim"},
-  "downfeed_dial": {"link": "downfeed_dial", "type": "hinge", "at_mm": [362.0, 358.7, 1400.0], "axis": [-1, 0, 0],
-                    "friction_n_m": 0.4,
-                    "source": "cad", "reason": "The graduated dial behind the handwheel (solid 44); it turns with the handwheel on its friction, and a hand holding it while the handwheel turns, or turning it alone, sets it to zero",
-                    "friction_source": "proposed", "friction_reason": "A friction-held dial collar: the handwheel carries it (it has 0.001 kg m2 to drag), a fingertip slips it"},
-  "spindle": {"link": "spindle", "type": "hinge", "at_mm": [0.0, 0.0, 1350.0], "axis": [0, 1, 0], "friction_n_m": 0.15,
-              "source": "cad", "reason": "The wheel's axis (solids 2, 6, 8), front to back; positive is clockwise as the operator sees it, so the wheel's bottom runs left and throws its sparks left, where SB1029's chip port is (its Figure 1)",
-              "friction_source": "proposed", "friction_reason": "Bearings and windage: the wheel coasts from 1750 rpm to a stop in about 40 s with no brake, as SB1029 asks the operator to let it come to a complete stop"},
-  "chuck_lever": {"link": "chuck_lever", "type": "hinge", "at_mm": [267.0, -222.0, 1010.0], "axis": [0, -1, 0],
-                  "range_deg": [0, 180], "friction_n_m": 1.0, "detent_n_m": 8.0,
-                  "source": "cad", "reason": "The lever on the chuck's front (solid 53): its hub at x 267, its ball 317 mm out; it turns in the front plane, positive lifting the ball, from pointing right (the STEP's pose, off) over the top to pointing left (on)",
-                  "range_source": "proposed", "range_reason": "A permanent chuck's handle turns half a turn between off and on (Tormach's chuck: turned to on or off); which end is on isn't in the STEP",
-                  "detent_source": "proposed", "detent_reason": "The magnet's pull holds the lever at either end: a torque of 8 N m sin(2 x angle) back toward the nearer end, 25 N at the ball at its worst, with 1 N m of friction"}
+  "table": {
+   "link": "table",
+   "type": "slide",
+   "axis": [
+    1,
+    0,
+    0
+   ],
+   "range_mm": [
+    -360.8,
+    360.8
+   ],
+   "friction_n": 20,
+   "source": "spec",
+   "reason": "Clausing's CSG2A1020 traverses its table 24.41 in by hand, 4.41 in more than its 20 in chuck; the same 4.41 in beyond this 24 in chuck is 28.41 in (721.6 mm), centred on the STEP's pose. At both ends the whole chuck is past the wheel and nothing meets the column or the down-feed handwheel",
+   "friction_source": "proposed",
+   "friction_reason": "SB1029's table rides ball-bearing slideways: about 0.01 of the table and chuck's 190 kg weight, 19 N"
+  },
+  "table_handwheel": {
+   "link": "table_handwheel",
+   "type": "hinge",
+   "at_mm": [
+    -287.5,
+    -780.0,
+    825.0
+   ],
+   "axis": [
+    0,
+    1,
+    0
+   ],
+   "travel_mm_per_turn": 68.58,
+   "friction_n_m": 0.3,
+   "rim_radius_mm": 127.0,
+   "source": "cad",
+   "reason": "The larger front handwheel (solids 35-37, 254 mm across), its spinner (36) 117 mm off its axis; positive is clockwise as the operator sees it and drives the table right through its rack, as SB1029's longitudinal handwheel moves the table left and right",
+   "travel_source": "spec",
+   "travel_reason": "Sharp's SG-618 manual grinder: 2.7 in of table per turn of its longitudinal handwheel. Not self-locking: a push on the table turns the handwheel",
+   "friction_source": "proposed",
+   "friction_reason": "The pinion's bearings and the rack's mesh: a hand turns it with a few newtons at the rim"
+  },
+  "saddle": {
+   "link": "saddle",
+   "type": "slide",
+   "axis": [
+    0,
+    1,
+    0
+   ],
+   "range_mm": [
+    -75.0,
+    140.0
+   ],
+   "friction_n": 290,
+   "source": "cad",
+   "reason": "Toward the column (+Y) until the table's back edge (y 88.7, solid 41) is 10 mm from the column's face (y 238.7, solid 42); toward the operator 75 mm, past the 61.4 mm that brings the wheel's back face over the chuck's back edge (see gaps)",
+   "friction_source": "proposed",
+   "friction_reason": "Oiled cast-iron ways under the saddle, table, chuck and handwheels, 470 kg at about 0.063"
+  },
+  "cross_handwheel": {
+   "link": "cross_handwheel",
+   "type": "hinge",
+   "at_mm": [
+    105.0,
+    -690.0,
+    850.5
+   ],
+   "axis": [
+    0,
+    1,
+    0
+   ],
+   "lead_mm": 5.08,
+   "graduations": 200,
+   "friction_n_m": 0.8,
+   "rim_radius_mm": 100.0,
+   "source": "cad",
+   "reason": "The smaller front handwheel (solids 38-40, 200 mm across), its spinner (40) 90.5 mm off its axis; positive is clockwise as the operator sees it, which runs a right-hand screw and the saddle toward the column",
+   "lead_source": "spec",
+   "lead_reason": "SB1029 and Clausing CSG2A1020: cross feed 0.2 in per turn of the handwheel, 0.001 in per graduation (200 a turn)",
+   "friction_source": "proposed",
+   "friction_reason": "The screw's thread and the saddle's ways (0.24 N m of it): 8 N at the rim; self-locking, a 200 N push on the table can't back-drive it (0.16 N m)"
+  },
+  "wheelhead": {
+   "link": "wheelhead",
+   "type": "slide",
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "range_mm": [
+    -213.9,
+    95.0
+   ],
+   "friction_n": 40,
+   "source": "cad",
+   "reason": "Down until the smallest wheel it mounts, the 6 in diamond wheel, has its bottom (z 1273.8 at joint zero) at the chuck's face (z 1059.9, solid 21); the 10 in wheel meets the face 50.8 mm higher, where the operator stops it. Up until the guard's top (z 1500, solid 3) is 5 mm under the column's top (z 1600, solid 42): the 10 in wheel up to 258.1 mm (10.2 in) over the chuck. Lowered for the 6 in wheel, the spindle's housing behind the wheel (from y 38.7, its underside 99 mm under the spindle's axis, solid 3) comes down past the chuck's face: it clears the chuck only while the chuck's back edge is ahead of it (saddle at -10 mm or less), so the work stands within 38 mm of that edge",
+   "friction_source": "proposed",
+   "friction_reason": "The head's gibbed ways"
+  },
+  "downfeed_handwheel": {
+   "link": "downfeed_handwheel",
+   "type": "hinge",
+   "at_mm": [
+    362.0,
+    358.7,
+    1400.0
+   ],
+   "axis": [
+    -1,
+    0,
+    0
+   ],
+   "lead_mm": 1.27,
+   "graduations": 250,
+   "friction_n_m": 1.0,
+   "rim_radius_mm": 100.0,
+   "source": "cad",
+   "reason": "The handwheel on the column's right side (solids 43, 45, 46, 200 mm across), its spinner (46) 92.5 mm off its axis; positive is clockwise as the operator at the machine's right sees it, and lowers the wheel",
+   "lead_source": "spec",
+   "lead_reason": "SB1029: vertical handwheel 0.05 in per turn, 0.0002 in per graduation (250 a turn)",
+   "friction_source": "proposed",
+   "friction_reason": "Self-locking: the head's 30 kg back-drives its screw with only 0.06 N m, so friction holds it; a hand turns it with 10 N at the rim"
+  },
+  "downfeed_dial": {
+   "link": "downfeed_dial",
+   "type": "hinge",
+   "at_mm": [
+    362.0,
+    358.7,
+    1400.0
+   ],
+   "axis": [
+    -1,
+    0,
+    0
+   ],
+   "friction_n_m": 0.4,
+   "source": "cad",
+   "reason": "The graduated dial behind the handwheel (solid 44); it turns with the handwheel on its friction, and a hand holding it while the handwheel turns, or turning it alone, sets it to zero",
+   "friction_source": "proposed",
+   "friction_reason": "A friction-held dial collar: the handwheel carries it (it has 0.001 kg m2 to drag), a fingertip slips it"
+  },
+  "spindle": {
+   "link": "spindle",
+   "type": "hinge",
+   "at_mm": [
+    0.0,
+    0.0,
+    1350.0
+   ],
+   "axis": [
+    0,
+    1,
+    0
+   ],
+   "friction_n_m": 0.25,
+   "source": "cad",
+   "reason": "The wheel's axis (solids 2, 6, 8), front to back; positive is clockwise as the operator sees it, so the wheel's bottom runs left and throws its sparks left, where SB1029's chip port is (its Figure 1)",
+   "friction_source": "proposed",
+   "friction_reason": "Bearings and windage: the wheel coasts from 3450 rpm to a stop with no brake in about 50 s (the 10 in wheel) or 22 s (the 6 in diamond wheel), as SB1029 asks the operator to let it come to a complete stop"
+  },
+  "chuck_lever": {
+   "link": "chuck_lever",
+   "type": "hinge",
+   "at_mm": [
+    267.0,
+    -222.0,
+    1010.0
+   ],
+   "axis": [
+    0,
+    -1,
+    0
+   ],
+   "range_deg": [
+    0,
+    180
+   ],
+   "friction_n_m": 1.0,
+   "detent_n_m": 8.0,
+   "source": "cad",
+   "reason": "The lever on the chuck's front (solid 53): its hub at x 267, its ball 317 mm out; it turns in the front plane, positive lifting the ball, from pointing right (the STEP's pose, off) over the top to pointing left (on)",
+   "range_source": "proposed",
+   "range_reason": "A permanent chuck's handle turns half a turn between off and on (Tormach's chuck: turned to on or off); which end is on isn't in the STEP",
+   "detent_source": "proposed",
+   "detent_reason": "The magnet's pull holds the lever at either end: a torque of 8 N m sin(2 x angle) back toward the nearer end, 25 N at the ball at its worst, with 1 N m of friction"
+  }
  },
  "spindle": {
-  "rpm": 1750, "source": "proposed", "reason": "A 10 in wheel at the 3450 rpm of SB1029's and Clausing's 7-8 in wheels would run 9030 sfpm, past the 6500 sfpm a vitrified surface wheel is rated for; 1750 rpm (a four-pole motor at 60 Hz) runs it at 4580 sfpm, inside a resin diamond wheel's range on carbide too",
-  "motor_hp": 2, "motor_source": "proposed", "motor_reason": "Between SB1029's 1.5 hp (6 x 18) and Clausing's 3 hp (10 x 20): 8.1 N m at 1750 rpm",
-  "wheel_mm": [254.0, 25.4, 31.75], "wheel_source": "cad", "wheel_reason": "Solid 6: 254 mm across, 25.4 mm wide; its bore is SB1029's and Clausing's 1-1/4 in",
-  "wheel_rated_sfpm": 6500, "rated_source": "proposed", "rated_reason": "A vitrified surface wheel's usual maximum, marked on the wheel; SB1029 safety rule 2: the wheel's rating must be at least the grinder's speed"
+  "rpm": 3450,
+  "source": "proposed",
+  "reason": "SB1029's and Clausing's spindles run 3450 rpm (a two-pole motor at 60 Hz), as the ct-tpg322 plan takes it: inside the shop's 10 in wheel's rated 3800 rpm (gwheel's record) and the diamond wheel's 6048, and the 6 in diamond wheel then runs 5,420 sfpm",
+  "motor_hp": 2,
+  "motor_source": "proposed",
+  "motor_reason": "Between SB1029's 1.5 hp (6 x 18) and Clausing's 3 hp (10 x 20): 4.13 N m at 3450 rpm",
+  "mounted": "gwheel",
+  "mounted_reason": "The shop's wheel at the grinder (shop.json grinding-wheel-1), the one the STEP draws; a plan mounts another by its id"
  },
- "guard": {"exposure_max_deg": 150, "exposure_starts_max_deg_above_horizontal": 15, "source": "spec",
-           "reason": "OSHA 1910.215(b)(4); the STEP's guard (solids 3, 4) is open below z 1310 between its sides at x +-145 mm: 149.2 deg of the wheel, seen from its axis, starting 15.4 deg below the spindle's horizontal plane"},
+ "guard": {
+  "exposure_max_deg": 150,
+  "exposure_starts_max_deg_above_horizontal": 15,
+  "source": "spec",
+  "reason": "OSHA 1910.215(b)(4); the STEP's guard (solids 3, 4) is open below z 1310 between its sides at x +-145 mm: 149.2 deg of the wheel, seen from its axis, starting 15.4 deg below the spindle's horizontal plane; the same for any wheel it holds, its sides being what bounds the opening"
+ },
  "chuck": {
-  "face_mm": [609.6, 254.0], "face_z_mm": 1059.9, "centre_mm": [0.0, -78.3],
-  "source": "cad", "reason": "The chuck's top plate (solid 21), 24 x 10 in; Suburban's MCB-1024-FP, 24-1/2 x 10 x 2-5/8 in, is the chuck it stands for (the STEP's is 2.75 in high)",
-  "face_friction": 0.2, "friction_source": "proposed", "friction_reason": "Ground steel on the chuck's ground face, clean and dry: about 0.2",
-  "rated_n_cm2": 20.7, "rated_source": "spec", "rated_reason": "McMaster: permanent-magnet chucks hold up to 30 psi (20.7 N/cm2) of a part's face, on thick steel ground flat",
-  "pole_mm": 3.175, "pole_source": "spec", "pole_reason": "Suburban's fine pole: 1/8 in poles with 1/8 in separators",
-  "full_hold_thickness_mm": 3.175, "thickness_source": "proposed", "thickness_reason": "The flux from one pole to the next runs through the part: thinner than a pole's width it saturates, and the hold falls in proportion to its thickness",
-  "gap_mm": 0.3, "gap_source": "proposed", "gap_reason": "The hold falls with the gap g under the part as 1 / (1 + g / 0.3 mm)^2: a 0.1 mm chip or burr costs about 44% of it, which is why SB1029 has both faces ground and cleaned",
-  "reach_mm": 3.0, "reach_reason": "Beyond 3 mm the pull is under 1% of its seated value, and it is left out",
-  "working_tesla": 0.721, "working_reason": "The flux density that pulls 20.7 N/cm2, B = sqrt(2 mu0 p): below the saturation of steel, so every steel holds alike",
+  "face_mm": [
+   609.6,
+   254.0
+  ],
+  "face_z_mm": 1059.9,
+  "centre_mm": [
+   0.0,
+   -78.3
+  ],
+  "source": "cad",
+  "reason": "The chuck's top plate (solid 21), 24 x 10 in; Suburban's MCB-1024-FP, 24-1/2 x 10 x 2-5/8 in, is the chuck it stands for (the STEP's is 2.75 in high)",
+  "face_friction": 0.2,
+  "friction_source": "proposed",
+  "friction_reason": "Ground steel on the chuck's ground face, clean and dry: about 0.2",
+  "rated_n_cm2": 20.7,
+  "rated_source": "spec",
+  "rated_reason": "McMaster: permanent-magnet chucks hold up to 30 psi (20.7 N/cm2) of a part's face, on thick steel ground flat",
+  "pole_mm": 3.175,
+  "pole_source": "spec",
+  "pole_reason": "Suburban's fine pole: 1/8 in poles with 1/8 in separators",
+  "full_hold_thickness_mm": 3.175,
+  "thickness_source": "proposed",
+  "thickness_reason": "The flux from one pole to the next runs through the part: thinner than a pole's width it saturates, and the hold falls in proportion to its thickness",
+  "gap_mm": 0.3,
+  "gap_source": "proposed",
+  "gap_reason": "The hold falls with the gap g under the part as 1 / (1 + g / 0.3 mm)^2: a 0.1 mm chip or burr costs about 44% of it, which is why SB1029 has both faces ground and cleaned",
+  "reach_mm": 3.0,
+  "reach_reason": "Beyond 3 mm the pull is under 1% of its seated value, and it is left out",
+  "working_tesla": 0.721,
+  "working_reason": "The flux density that pulls 20.7 N/cm2, B = sqrt(2 mu0 p): below the saturation of steel, so every steel holds alike",
   "materials": {
-   "steel": 1.0, "cast_iron": 1.0, "stainless_400": 1.0, "carbide": 0.064,
-   "stainless_300": 0.0, "aluminium": 0.0, "brass": 0.0, "bronze": 0.0, "plastic": 0.0
+   "steel": 1.0,
+   "cast_iron": 1.0,
+   "stainless_400": 1.0,
+   "carbide": 0.064,
+   "stainless_300": 0.0,
+   "aluminium": 0.0,
+   "brass": 0.0,
+   "bronze": 0.0,
+   "plastic": 0.0
   },
-  "materials_source": "proposed", "materials_reason": "The hold scales with (B / 0.721 T)^2, B the most the part's material can carry: iron and steels, ferritic stainless and cast iron saturate at 1.2-2.15 T, past the chuck's flux, so 1. Carbide's only magnetic phase is its cobalt binder: C2 grade's 6% cobalt by weight is 10.1% by volume (WC 15.63, Co 8.9 g/cm3), 0.183 T of cobalt's 1.81 T, so (0.183 / 0.721)^2 = 0.064. Austenitic stainless, aluminium, brass, bronze and plastics aren't magnetic",
+  "materials_source": "proposed",
+  "materials_reason": "The hold scales with (B / 0.721 T)^2, B the most the part's material can carry: iron and steels, ferritic stainless and cast iron saturate at 1.2-2.15 T, past the chuck's flux, so 1. Carbide's only magnetic phase is its cobalt binder: C2 grade's 6% cobalt by weight is 10.1% by volume (WC 15.63, Co 8.9 g/cm3), 0.183 T of cobalt's 1.81 T, so (0.183 / 0.721)^2 = 0.064. Austenitic stainless, aluminium, brass, bronze and plastics aren't magnetic",
   "field_reason": "The lever's angle a sets the field as (1 - cos a) / 2: none pointing right, all pointing left (proposed)"
  },
  "colliders": {
-  "base": {"link": "base", "box_min_mm": [-280.0, -356.3, 0.0], "box_max_mm": [280.0, 238.7, 800.0], "reason": "The pedestal (solid 54) above its 50 mm foot; its lower front, 95 mm further out below z 640, is left out"},
-  "column": {"link": "base", "box_min_mm": [-250.0, 238.7, 0.0], "box_max_mm": [250.0, 538.7, 1600.0], "reason": "The column (solid 42)"},
-  "saddle_top": {"link": "saddle", "box_min_mm": [-525.0, -245.3, 857.0], "box_max_mm": [525.0, 438.7, 919.0], "reason": "The saddle's top under the table (solid 34)"},
-  "saddle_arm": {"link": "saddle", "box_min_mm": [-350.0, -701.3, 750.0], "box_max_mm": [350.0, -245.3, 900.0], "reason": "The saddle's front arm carrying the handwheels (solid 34)"},
-  "table": {"link": "table", "box_min_mm": [-850.0, -245.3, 919.0], "box_max_mm": [850.0, 88.7, 990.0], "reason": "The table (solid 41)"},
-  "guard_left": {"link": "table", "box_min_mm": [-735.0, -245.3, 990.0], "box_max_mm": [-665.0, 88.7, 1370.0], "reason": "The left splash guard (solid 0)"},
-  "guard_right": {"link": "table", "box_min_mm": [665.0, -245.3, 990.0], "box_max_mm": [735.0, 88.7, 1180.0], "reason": "The right splash guard (solid 1)"},
-  "chuck_body": {"link": "chuck", "box_min_mm": [-325.0, -215.3, 990.0], "box_max_mm": [325.0, 48.7, 1029.8], "reason": "The chuck's body (solid 47)"},
-  "chuck_face": {"link": "chuck", "box_min_mm": [-304.8, -205.3, 1029.8], "box_max_mm": [304.8, 48.7, 1059.9], "reason": "The chuck's top plate and its poles (solids 21, 9-33): the magnet's face"},
-  "chuck_lever_rod": {"link": "chuck_lever", "capsule_mm": [[277.0, -255.3, 1010.0], [565.0, -255.3, 1010.0]], "radius_mm": 9.3, "reason": "The lever's rod (solid 53), 18.5 mm across"},
-  "chuck_lever_ball": {"link": "chuck_lever", "sphere_mm": [584.0, -255.3, 1009.8], "radius_mm": 20.0, "reason": "The lever's ball (solid 53)"},
-  "chuck_lever_hub": {"link": "chuck_lever", "capsule_mm": [[267.0, -215.3, 1010.0], [267.0, -250.0, 1010.0]], "radius_mm": 10.0, "reason": "The lever's hub and its bend toward the operator (solid 53)"},
-  "wheel": {"link": "spindle", "cylinder_y_mm": [-12.7, 12.7], "at_mm": [0.0, 0.0, 1350.0], "radius_mm": 127.0, "reason": "The wheel (solid 6)"},
-  "flange": {"link": "spindle", "cylinder_y_mm": [-25.7, -12.7], "at_mm": [0.0, 0.0, 1350.0], "radius_mm": 50.8, "reason": "The outer flange (solid 8)"},
-  "guard_top": {"link": "wheelhead", "box_min_mm": [-155.0, -41.3, 1490.0], "box_max_mm": [155.0, 38.7, 1500.0], "reason": "The guard's top (solid 3)"},
-  "guard_side_left": {"link": "wheelhead", "box_min_mm": [-155.0, -41.3, 1310.0], "box_max_mm": [-145.0, 38.7, 1490.0], "reason": "The guard's left side (solid 3), open below z 1310"},
-  "guard_side_right": {"link": "wheelhead", "box_min_mm": [145.0, -41.3, 1310.0], "box_max_mm": [155.0, 38.7, 1490.0], "reason": "The guard's right side (solid 3)"},
-  "guard_front": {"link": "wheelhead", "box_min_mm": [-155.0, -51.3, 1310.0], "box_max_mm": [155.0, -41.3, 1500.0], "reason": "The guard's front plate (solid 4)"},
-  "housing": {"link": "wheelhead", "box_min_mm": [-100.0, 38.7, 1251.0], "box_max_mm": [100.0, 238.7, 1449.0], "reason": "The spindle's housing behind the guard, tapering back to the column's slide (solid 3), boxed by its bounds"},
-  "table_handwheel": {"link": "table_handwheel", "cylinder_y_mm": [-801.3, -758.3], "at_mm": [-287.5, 0.0, 825.0], "radius_mm": 127.0, "reason": "The longitudinal handwheel's rim, spokes and hub (solid 37), as a disc"},
-  "table_handwheel_knob": {"link": "table_handwheel", "cylinder_y_mm": [-905.3, -801.3], "at_mm": [-287.5, 0.0, 942.0], "radius_mm": 12.5, "reason": "Its spinner knob (solid 36)"},
-  "cross_handwheel": {"link": "cross_handwheel", "cylinder_y_mm": [-706.3, -671.3], "at_mm": [105.0, 0.0, 850.5], "radius_mm": 100.0, "reason": "The cross-feed handwheel (solid 39), as a disc"},
-  "cross_handwheel_knob": {"link": "cross_handwheel", "cylinder_y_mm": [-818.3, -706.3], "at_mm": [105.0, 0.0, 941.0], "radius_mm": 12.5, "reason": "Its spinner knob (solid 40)"},
-  "downfeed_handwheel": {"link": "downfeed_handwheel", "cylinder_x_mm": [347.0, 378.0], "at_mm": [0.0, 358.7, 1400.0], "radius_mm": 100.0, "reason": "The down-feed handwheel (solid 45), as a disc"},
-  "downfeed_handwheel_knob": {"link": "downfeed_handwheel", "cylinder_x_mm": [378.0, 490.0], "at_mm": [0.0, 358.7, 1492.5], "radius_mm": 12.5, "reason": "Its spinner knob (solid 46)"},
-  "downfeed_dial": {"link": "downfeed_dial", "cylinder_x_mm": [332.0, 347.0], "at_mm": [0.0, 358.7, 1400.0], "radius_mm": 100.0, "reason": "The graduated dial (solid 44)"},
-  "controls_box": {"link": "controls", "box_min_mm": [360.0, -480.0, 780.0], "box_max_mm": [450.0, -420.0, 940.0], "reason": "The control box (made, see gaps): its face toward the operator 75 mm in front of the base, outside the saddle's arm (x 350) and under the table (z 919) through all their travel"}
+  "base": {
+   "link": "base",
+   "box_min_mm": [
+    -280.0,
+    -356.3,
+    0.0
+   ],
+   "box_max_mm": [
+    280.0,
+    238.7,
+    800.0
+   ],
+   "reason": "The pedestal (solid 54) above its 50 mm foot; its lower front, 95 mm further out below z 640, is left out"
+  },
+  "column": {
+   "link": "base",
+   "box_min_mm": [
+    -250.0,
+    238.7,
+    0.0
+   ],
+   "box_max_mm": [
+    250.0,
+    538.7,
+    1600.0
+   ],
+   "reason": "The column (solid 42)"
+  },
+  "saddle_top": {
+   "link": "saddle",
+   "box_min_mm": [
+    -525.0,
+    -245.3,
+    857.0
+   ],
+   "box_max_mm": [
+    525.0,
+    438.7,
+    919.0
+   ],
+   "reason": "The saddle's top under the table (solid 34)"
+  },
+  "saddle_arm": {
+   "link": "saddle",
+   "box_min_mm": [
+    -350.0,
+    -701.3,
+    750.0
+   ],
+   "box_max_mm": [
+    350.0,
+    -245.3,
+    900.0
+   ],
+   "reason": "The saddle's front arm carrying the handwheels (solid 34)"
+  },
+  "table": {
+   "link": "table",
+   "box_min_mm": [
+    -850.0,
+    -245.3,
+    919.0
+   ],
+   "box_max_mm": [
+    850.0,
+    88.7,
+    990.0
+   ],
+   "reason": "The table (solid 41)"
+  },
+  "guard_left": {
+   "link": "table",
+   "box_min_mm": [
+    -735.0,
+    -245.3,
+    990.0
+   ],
+   "box_max_mm": [
+    -665.0,
+    88.7,
+    1370.0
+   ],
+   "reason": "The left splash guard (solid 0)"
+  },
+  "guard_right": {
+   "link": "table",
+   "box_min_mm": [
+    665.0,
+    -245.3,
+    990.0
+   ],
+   "box_max_mm": [
+    735.0,
+    88.7,
+    1180.0
+   ],
+   "reason": "The right splash guard (solid 1)"
+  },
+  "chuck_body": {
+   "link": "chuck",
+   "box_min_mm": [
+    -325.0,
+    -215.3,
+    990.0
+   ],
+   "box_max_mm": [
+    325.0,
+    48.7,
+    1029.8
+   ],
+   "reason": "The chuck's body (solid 47)"
+  },
+  "chuck_face": {
+   "link": "chuck",
+   "box_min_mm": [
+    -304.8,
+    -205.3,
+    1029.8
+   ],
+   "box_max_mm": [
+    304.8,
+    48.7,
+    1059.9
+   ],
+   "reason": "The chuck's top plate and its poles (solids 21, 9-33): the magnet's face"
+  },
+  "chuck_lever_rod": {
+   "link": "chuck_lever",
+   "capsule_mm": [
+    [
+     277.0,
+     -255.3,
+     1010.0
+    ],
+    [
+     565.0,
+     -255.3,
+     1010.0
+    ]
+   ],
+   "radius_mm": 9.3,
+   "reason": "The lever's rod (solid 53), 18.5 mm across"
+  },
+  "chuck_lever_ball": {
+   "link": "chuck_lever",
+   "sphere_mm": [
+    584.0,
+    -255.3,
+    1009.8
+   ],
+   "radius_mm": 20.0,
+   "reason": "The lever's ball (solid 53)"
+  },
+  "chuck_lever_hub": {
+   "link": "chuck_lever",
+   "capsule_mm": [
+    [
+     267.0,
+     -215.3,
+     1010.0
+    ],
+    [
+     267.0,
+     -250.0,
+     1010.0
+    ]
+   ],
+   "radius_mm": 10.0,
+   "reason": "The lever's hub and its bend toward the operator (solid 53)"
+  },
+  "guard_top": {
+   "link": "wheelhead",
+   "box_min_mm": [
+    -155.0,
+    -41.3,
+    1490.0
+   ],
+   "box_max_mm": [
+    155.0,
+    38.7,
+    1500.0
+   ],
+   "reason": "The guard's top (solid 3)"
+  },
+  "guard_side_left": {
+   "link": "wheelhead",
+   "box_min_mm": [
+    -155.0,
+    -41.3,
+    1310.0
+   ],
+   "box_max_mm": [
+    -145.0,
+    38.7,
+    1490.0
+   ],
+   "reason": "The guard's left side (solid 3), open below z 1310"
+  },
+  "guard_side_right": {
+   "link": "wheelhead",
+   "box_min_mm": [
+    145.0,
+    -41.3,
+    1310.0
+   ],
+   "box_max_mm": [
+    155.0,
+    38.7,
+    1490.0
+   ],
+   "reason": "The guard's right side (solid 3)"
+  },
+  "guard_front": {
+   "link": "wheelhead",
+   "box_min_mm": [
+    -155.0,
+    -51.3,
+    1310.0
+   ],
+   "box_max_mm": [
+    155.0,
+    -41.3,
+    1500.0
+   ],
+   "reason": "The guard's front plate (solid 4)"
+  },
+  "housing": {
+   "link": "wheelhead",
+   "box_min_mm": [
+    -100.0,
+    38.7,
+    1251.0
+   ],
+   "box_max_mm": [
+    100.0,
+    238.7,
+    1449.0
+   ],
+   "reason": "The spindle's housing behind the guard, tapering back to the column's slide (solid 3), boxed by its bounds"
+  },
+  "table_handwheel": {
+   "link": "table_handwheel",
+   "cylinder_y_mm": [
+    -801.3,
+    -758.3
+   ],
+   "at_mm": [
+    -287.5,
+    0.0,
+    825.0
+   ],
+   "radius_mm": 127.0,
+   "reason": "The longitudinal handwheel's rim, spokes and hub (solid 37), as a disc"
+  },
+  "table_handwheel_knob": {
+   "link": "table_handwheel",
+   "cylinder_y_mm": [
+    -905.3,
+    -801.3
+   ],
+   "at_mm": [
+    -287.5,
+    0.0,
+    942.0
+   ],
+   "radius_mm": 12.5,
+   "reason": "Its spinner knob (solid 36)"
+  },
+  "cross_handwheel": {
+   "link": "cross_handwheel",
+   "cylinder_y_mm": [
+    -706.3,
+    -671.3
+   ],
+   "at_mm": [
+    105.0,
+    0.0,
+    850.5
+   ],
+   "radius_mm": 100.0,
+   "reason": "The cross-feed handwheel (solid 39), as a disc"
+  },
+  "cross_handwheel_knob": {
+   "link": "cross_handwheel",
+   "cylinder_y_mm": [
+    -818.3,
+    -706.3
+   ],
+   "at_mm": [
+    105.0,
+    0.0,
+    941.0
+   ],
+   "radius_mm": 12.5,
+   "reason": "Its spinner knob (solid 40)"
+  },
+  "downfeed_handwheel": {
+   "link": "downfeed_handwheel",
+   "cylinder_x_mm": [
+    347.0,
+    378.0
+   ],
+   "at_mm": [
+    0.0,
+    358.7,
+    1400.0
+   ],
+   "radius_mm": 100.0,
+   "reason": "The down-feed handwheel (solid 45), as a disc"
+  },
+  "downfeed_handwheel_knob": {
+   "link": "downfeed_handwheel",
+   "cylinder_x_mm": [
+    378.0,
+    490.0
+   ],
+   "at_mm": [
+    0.0,
+    358.7,
+    1492.5
+   ],
+   "radius_mm": 12.5,
+   "reason": "Its spinner knob (solid 46)"
+  },
+  "downfeed_dial": {
+   "link": "downfeed_dial",
+   "cylinder_x_mm": [
+    332.0,
+    347.0
+   ],
+   "at_mm": [
+    0.0,
+    358.7,
+    1400.0
+   ],
+   "radius_mm": 100.0,
+   "reason": "The graduated dial (solid 44)"
+  },
+  "controls_box": {
+   "link": "controls",
+   "box_min_mm": [
+    360.0,
+    -480.0,
+    780.0
+   ],
+   "box_max_mm": [
+    450.0,
+    -420.0,
+    940.0
+   ],
+   "reason": "The control box (made, see gaps): its face toward the operator 75 mm in front of the base, outside the saddle's arm (x 350) and under the table (z 919) through all their travel"
+  }
  },
  "sites": {
-  "chuck_centre": {"link": "chuck", "at_mm": [0.0, -78.3, 1059.9], "reason": "The middle of the chuck's face (solid 21)"},
-  "chuck_front_left": {"link": "chuck", "at_mm": [-304.8, -205.3, 1059.9], "reason": "The face's front left corner"},
-  "chuck_back_right": {"link": "chuck", "at_mm": [304.8, 48.7, 1059.9], "reason": "The face's back right corner"},
-  "wheel_bottom": {"link": "spindle", "at_mm": [0.0, 0.0, 1223.0], "reason": "The wheel's lowest point at joint zero (solid 6); it stays the lowest as the wheel turns, being on its rim's circle"},
-  "wheel_centre": {"link": "wheelhead", "at_mm": [0.0, 0.0, 1350.0], "reason": "The spindle's axis at the wheel's mid-plane, on the wheelhead so it doesn't turn"},
-  "wheel_bottom_head": {"link": "wheelhead", "at_mm": [0.0, 0.0, 1223.0], "reason": "The wheel's lowest point, carried by the wheelhead so it doesn't turn with the wheel"}
+  "chuck_centre": {
+   "link": "chuck",
+   "at_mm": [
+    0.0,
+    -78.3,
+    1059.9
+   ],
+   "reason": "The middle of the chuck's face (solid 21)"
+  },
+  "chuck_front_left": {
+   "link": "chuck",
+   "at_mm": [
+    -304.8,
+    -205.3,
+    1059.9
+   ],
+   "reason": "The face's front left corner"
+  },
+  "chuck_back_right": {
+   "link": "chuck",
+   "at_mm": [
+    304.8,
+    48.7,
+    1059.9
+   ],
+   "reason": "The face's back right corner"
+  },
+  "wheel_centre": {
+   "link": "wheelhead",
+   "at_mm": [
+    0.0,
+    0.0,
+    1350.0
+   ],
+   "reason": "The spindle's axis at the wheel's mid-plane, on the wheelhead so it doesn't turn; the wheel's lowest point (sg_wheel_bottom_head) is made from the mounted wheel"
+  }
  },
  "affordances": {
-  "start": {"link": "controls", "at_mm": [405.0, -484.0, 880.0], "grip": "fingertip_press", "force_n": 5},
-  "stop": {"link": "controls", "at_mm": [405.0, -502.0, 820.0], "grip": "flat_press", "force_n": 10},
-  "power_light": {"link": "controls", "at_mm": [405.0, -486.0, 915.0], "grip": "none"},
-  "chuck_lever": {"link": "chuck_lever", "at_mm": [584.0, -255.3, 1009.8], "grip": "power", "turn": true},
-  "table_handwheel_knob": {"link": "table_handwheel", "at_mm": [-287.5, -853.3, 942.0], "grip": "power", "turn": true},
-  "table_handwheel_rim": {"link": "table_handwheel", "at_mm": [-287.5, -779.8, 952.0], "grip": "medium_wrap", "turn": true},
-  "cross_handwheel_knob": {"link": "cross_handwheel", "at_mm": [105.0, -762.3, 941.0], "grip": "tip_pinch", "turn": true},
-  "cross_handwheel_rim": {"link": "cross_handwheel", "at_mm": [105.0, -688.8, 950.5], "grip": "tip_pinch", "turn": true},
-  "downfeed_handwheel_knob": {"link": "downfeed_handwheel", "at_mm": [434.0, 358.7, 1492.5], "grip": "tip_pinch", "turn": true},
-  "downfeed_handwheel_rim": {"link": "downfeed_handwheel", "at_mm": [362.5, 358.7, 1500.0], "grip": "tip_pinch", "turn": true},
-  "downfeed_dial": {"link": "downfeed_dial", "at_mm": [339.5, 358.7, 1500.0], "grip": "tip_pinch", "turn": true}
+  "start": {
+   "link": "controls",
+   "at_mm": [
+    405.0,
+    -484.0,
+    880.0
+   ],
+   "grip": "fingertip_press",
+   "force_n": 5
+  },
+  "stop": {
+   "link": "controls",
+   "at_mm": [
+    405.0,
+    -502.0,
+    820.0
+   ],
+   "grip": "flat_press",
+   "force_n": 10
+  },
+  "power_light": {
+   "link": "controls",
+   "at_mm": [
+    405.0,
+    -486.0,
+    915.0
+   ],
+   "grip": "none"
+  },
+  "chuck_lever": {
+   "link": "chuck_lever",
+   "at_mm": [
+    584.0,
+    -255.3,
+    1009.8
+   ],
+   "grip": "power",
+   "turn": true
+  },
+  "table_handwheel_knob": {
+   "link": "table_handwheel",
+   "at_mm": [
+    -287.5,
+    -853.3,
+    942.0
+   ],
+   "grip": "power",
+   "turn": true
+  },
+  "table_handwheel_rim": {
+   "link": "table_handwheel",
+   "at_mm": [
+    -287.5,
+    -779.8,
+    952.0
+   ],
+   "grip": "medium_wrap",
+   "turn": true
+  },
+  "cross_handwheel_knob": {
+   "link": "cross_handwheel",
+   "at_mm": [
+    105.0,
+    -762.3,
+    941.0
+   ],
+   "grip": "tip_pinch",
+   "turn": true
+  },
+  "cross_handwheel_rim": {
+   "link": "cross_handwheel",
+   "at_mm": [
+    105.0,
+    -688.8,
+    950.5
+   ],
+   "grip": "tip_pinch",
+   "turn": true
+  },
+  "downfeed_handwheel_knob": {
+   "link": "downfeed_handwheel",
+   "at_mm": [
+    434.0,
+    358.7,
+    1492.5
+   ],
+   "grip": "tip_pinch",
+   "turn": true
+  },
+  "downfeed_handwheel_rim": {
+   "link": "downfeed_handwheel",
+   "at_mm": [
+    362.5,
+    358.7,
+    1500.0
+   ],
+   "grip": "tip_pinch",
+   "turn": true
+  },
+  "downfeed_dial": {
+   "link": "downfeed_dial",
+   "at_mm": [
+    339.5,
+    358.7,
+    1500.0
+   ],
+   "grip": "tip_pinch",
+   "turn": true
+  }
  },
- "affordances_source": {"source": "proposed", "reason": "The control box and its buttons aren't in the STEP (see gaps): SB1029's ON button (green, flush) above its OFF button (red, a mushroom pushed in to stop and twisted to reset), with its power light above both. The handwheels' knobs and rims and the lever's ball are the STEP's; which grips work them is the cards'"},
+ "affordances_source": {
+  "source": "proposed",
+  "reason": "The control box and its buttons aren't in the STEP (see gaps): SB1029's ON button (green, flush) above its OFF button (red, a mushroom pushed in to stop and twisted to reset), with its power light above both. The handwheels' knobs and rims and the lever's ball are the STEP's; which grips work them is the cards'"
+ },
  "logic": {
-  "states": ["idle", "running"],
+  "states": [
+   "idle",
+   "running"
+  ],
   "interlocks": [
    "ON runs the wheel only with the OFF button reset (popped out)",
    "pressing OFF stops the wheel's motor and stays in until twisted",
    "the wheel isn't braked: it coasts to a stop"
   ],
-  "logic_source": "spec", "logic_reason": "SB1029 Test Run, steps 6-9: OFF is pushed in and twisted clockwise to pop out and reset; with it not reset, ON must not start the machine. Controls: the power light shows the motor running. The chuck is a permanent magnet switched by its lever, with no interlock"
+  "logic_source": "spec",
+  "logic_reason": "SB1029 Test Run, steps 6-9: OFF is pushed in and twisted clockwise to pop out and reset; with it not reset, ON must not start the machine. Controls: the power light shows the motor running. The chuck is a permanent magnet switched by its lever, with no interlock"
  },
- "coolant": {"fitted": false, "source": "cad", "reason": "The STEP has no coolant tank, pump or nozzle; on SB1029 coolant is an option"}
+ "coolant": {
+  "fitted": false,
+  "source": "cad",
+  "reason": "The STEP has no coolant tank, pump or nozzle; on SB1029 coolant is an option"
+ },
+ "wheels": {
+  "gwheel": {
+   "dia_mm": 254.0,
+   "width_mm": 25.4,
+   "bore_mm": 76.2,
+   "y_mm": [
+    -12.7,
+    12.7
+   ],
+   "flange_mm": [
+    101.6,
+    -25.7,
+    -12.7
+   ],
+   "kg": 2.92,
+   "axial_inertia_kg_m2": 0.0233,
+   "rated_rpm": 3800,
+   "glb": "wheel_gwheel",
+   "source": "cad",
+   "reason": "The STEP's wheel (solid 6: 254 mm across, 25.4 wide, a 75 mm bore), its outer flange (8) and blotters (5, 7), as the shop's gwheel (10 x 1 x 3 in, rated 3800 rpm); at a vitrified wheel's 2.2 g/cm3 2.58 kg and 0.0226 kg m2, the steel flange 0.34 kg"
+  },
+  "dwheel-1a1r": {
+   "dia_mm": 152.4,
+   "width_mm": 0.889,
+   "bore_mm": 31.75,
+   "rim_depth_mm": 6.35,
+   "y_mm": [
+    -0.4445,
+    0.4445
+   ],
+   "flange_mm": [
+    101.6,
+    -6.79,
+    -0.4445
+   ],
+   "kg": 0.85,
+   "axial_inertia_kg_m2": 0.0014,
+   "rated_rpm": 6048,
+   "glb": "wheel_dwheel-1a1r",
+   "source": "spec",
+   "reason": "Butler Bros' 6 x 0.035 x 1-1/4 in 1A1R resin diamond wheel, 120 grit, 1/4 in of diamond on its rim, 6,048 rpm max; its mid-plane where the 10 in wheel's is [proposed]",
+   "hub_source": "proposed",
+   "hub_reason": "On its own hub between two steel flanges 4 in across and 1/4 in thick, the STEP's flange size, as a thin wheel is clamped: the steel core 0.12 kg, the flanges 0.73"
+  }
+ }
 }

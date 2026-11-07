@@ -73,7 +73,7 @@ SOLID_LINKS = {   # link -> solid indices, for STEPs that are one flat compound;
     # graduated dial
     "sgrind": {"saddle": [34, 48, 49, 50], "table": [41, 0, 1, 51, 52],
                "chuck": [47, 21, *range(9, 21), *range(22, 34)],
-               "chuck_lever": [53], "wheelhead": [3, 4], "spindle": [2, 5, 6, 7, 8],
+               "chuck_lever": [53], "wheelhead": [3, 4], "spindle": [2], "wheel_gwheel": [5, 6, 7, 8],
                "table_handwheel": [35, 36, 37], "cross_handwheel": [38, 39, 40],
                "downfeed_handwheel": [43, 45, 46], "downfeed_dial": [44]},
 }
@@ -107,7 +107,43 @@ def control_box_mesh(station: str):
     return trimesh.util.concatenate(parts)
 
 
-GENERATED = {"sgrind": {"controls": control_box_mesh}}      # links with no solid in the STEP, made here
+def wheel_mesh(station: str, wheel_id: str, on_spindle: bool = True):
+    """A wheel the grinder mounts that its STEP doesn't draw, from sgrind.json's wheels: its disc (the diamond rim
+    and the core, one thickness, a 1A1R) between its two flanges. On the spindle (the world frame, metres), or, for
+    its own asset, lying on z = 0 with its axis +Z (the library's convention), in millimetres."""
+    import trimesh
+    r = json.loads((STATIONS / f"{station}.json").read_text(encoding="utf-8"))
+    w, at = r["wheels"][wheel_id], np.array(r["joints"]["spindle"]["at_mm"], float)
+    bore = w["bore_mm"] / 2
+    fl, f0, f1 = w["flange_mm"]
+    y0, y1 = w["y_mm"]
+    rings = [(w["dia_mm"] / 2, y0, y1), (fl / 2, f0, f1), (fl / 2, -f1, -f0)]     # the disc, the front and back flange
+    parts = []
+    for radius, a, b in rings:
+        ring = trimesh.creation.annulus(r_min=bore, r_max=radius, height=b - a, sections=96)
+        ring.apply_translation([0.0, 0.0, (a + b) / 2])
+        parts.append(ring)
+    mesh = trimesh.util.concatenate(parts)                       # its axis along z, its mid-plane at z = 0 (mm)
+    if on_spindle:
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))   # z -> y
+        mesh.apply_translation([at[0], 0.0, at[2]])
+        mesh.apply_scale(0.001)
+    else:
+        mesh.apply_translation([0.0, 0.0, -mesh.bounds[0][2]])
+    return mesh
+
+
+GENERATED = {"sgrind": {"controls": control_box_mesh,               # links with no solid in the STEP, made here
+                        "wheel_dwheel-1a1r": lambda s: wheel_mesh(s, "dwheel-1a1r")}}
+WHEEL_ASSETS = {"sgrind": ("dwheel-1a1r",)}    # wheels made here that are also assets of their own (consumables)
+
+
+def write_wheel_assets(station: str) -> None:
+    """Each made wheel's own asset GLB, <data root>/library/consumables/<id>/<id>.glb, from the same dimensions."""
+    for wheel_id in WHEEL_ASSETS.get(station, ()):
+        out = data_root() / "library" / "consumables" / wheel_id
+        out.mkdir(parents=True, exist_ok=True)
+        wheel_mesh(station, wheel_id, on_spindle=False).export(out / f"{wheel_id}.glb")
 
 
 def read_components(step: Path):
@@ -233,6 +269,7 @@ def extract(station: str) -> dict:
         if station in SOLID_LINKS and link in shapes:
             manifest[link] |= mass_properties(shapes[link], station)
     (STATIONS / f"{station}.links.json").write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
+    write_wheel_assets(station)
     return manifest
 
 

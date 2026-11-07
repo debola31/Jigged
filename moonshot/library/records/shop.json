@@ -1278,6 +1278,14 @@
       "specs": {"diameter": 10.0, "width": 1.0, "bore": 3.0, "abrasive": "A46-H vitrified"}
     },
     {
+      "id": "diamond-wheel-1",
+      "kind": "grinding_wheel",
+      "name": "6 x 0.035 x 1-1/4\" 1A1R resin diamond wheel, 120 grit, on its own hub",
+      "asset": "dwheel-1a1r",
+      "location": "grinder-1",
+      "specs": {"diameter": 6.0, "width": 0.035, "bore": 1.25, "abrasive": "ASD120-R100B99-1/4 resin diamond"}
+    },
+    {
       "id": "dresser-1",
       "kind": "wheel_dresser",
       "name": "Diamond wheel dresser and dressing stick",

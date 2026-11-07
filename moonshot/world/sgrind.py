@@ -85,13 +85,19 @@ def mass_properties(link: str) -> tuple[float, np.ndarray, list[float]]:
     return L["volume_cm3"] * rho / 1000, np.array(L["com_mm"]) * M, [v * rho for v in L["inertia_kg_m2_at_1g_cm3"]]
 
 
-def _inertial(link: str, origin: np.ndarray) -> str:
-    if link == "spindle":
-        s = record()["spindle_mass"]
+def wheel(wheel_id: str | None = None) -> dict:
+    """A wheel the spindle mounts (record "wheels"), the mounted one if none is named."""
+    r = record()
+    return r["wheels"][wheel_id or r["spindle"]["mounted"]]
+
+
+def _inertial(link: str, origin: np.ndarray, wheel_id: str | None = None) -> str:
+    if link == "spindle":                        # the nose and the motor's rotor, with the wheel it mounts
+        s, w = record()["spindle_mass"], wheel(wheel_id)
         com = np.array(links()["spindle"]["com_mm"]) - origin
-        side = s["axial_inertia_kg_m2"] * 0.6
-        return (f'<inertial pos="{_xyz(com)}" mass="{s["kg"]}" '
-                f'diaginertia="{side:.6f} {s["axial_inertia_kg_m2"]:.6f} {side:.6f}"/>')
+        kg, axial = s["kg"] + w["kg"], s["axial_inertia_kg_m2"] + w["axial_inertia_kg_m2"]
+        side = axial * 0.6
+        return f'<inertial pos="{_xyz(com)}" mass="{kg:.4f}" diaginertia="{side:.6f} {axial:.6f} {side:.6f}"/>'
     kg, com, inertia = mass_properties(link)
     return (f'<inertial pos="{_xyz(com - origin * M, 1)}" mass="{kg:.4f}" '
             f'fullinertia="{" ".join(f"{v:.6f}" for v in inertia)}"/>')
@@ -134,18 +140,33 @@ def _joint(link: str) -> str:
             f'frictionloss="{j["friction_n_m"]}"/>')
 
 
-def worldbody() -> tuple[str, str, str]:
-    """(worldbody XML, actuator XML, equality XML)."""
+def wheel_colliders_and_sites(wheel_id: str | None = None) -> tuple[dict, dict]:
+    """The mounted wheel's colliders (its disc, and its flange in front of it) and its lowest point's sites."""
+    w, at = wheel(wheel_id), record()["joints"]["spindle"]["at_mm"]
+    r_mm = w["dia_mm"] / 2
+    fl, f0, f1 = w["flange_mm"]
+    cols = {"wheel": {"link": "spindle", "cylinder_y_mm": w["y_mm"], "at_mm": at, "radius_mm": r_mm},
+            "flange": {"link": "spindle", "cylinder_y_mm": [f0, f1], "at_mm": at, "radius_mm": fl / 2}}
+    bottom = [at[0], 0.0, at[2] - r_mm]
+    sites = {"wheel_bottom": {"link": "spindle", "at_mm": bottom},          # on its rim's circle, so still the lowest
+             "wheel_bottom_head": {"link": "wheelhead", "at_mm": bottom}}   # carried by the head: doesn't turn
+    return cols, sites
+
+
+def worldbody(wheel_id: str | None = None) -> tuple[str, str, str]:
+    """(worldbody XML, actuator XML, equality XML), the spindle mounting wheel_id (the record's mounted wheel if
+    None)."""
     r = record()
     C, J, S = r["chuck"], r["joints"], r["spindle"]
     o = origins()
     inner = {link: "" for link in r["links"]}
-    for name, c in r["colliders"].items():
+    wheel_cols, wheel_sites = wheel_colliders_and_sites(wheel_id)
+    for name, c in {**r["colliders"], **wheel_cols}.items():
         g = _geom(f"sg_{name}", c, o[c["link"]])
         if name == "chuck_face":                 # the magnet's face: ground steel
             g += f' friction="{C["face_friction"]} 0.004 0.0001"'
         inner[c["link"]] += f"      {g}/>\n"
-    for name, s in {**r["sites"], **r["affordances"]}.items():
+    for name, s in {**r["sites"], **wheel_sites, **r["affordances"]}.items():
         inner[s["link"]] += (f'      <site name="sg_{name}" pos="{_xyz(np.array(s["at_mm"], float) - o[s["link"]])}" '
                              f'size="0.006"/>\n')
     children: dict[str, list[str]] = {}
@@ -160,7 +181,7 @@ def worldbody() -> tuple[str, str, str]:
         if jx:
             out += f"{pad}  {jx}\n"
         if link not in ("base", "controls"):
-            out += f"{pad}  {_inertial(link, o[link])}\n"
+            out += f"{pad}  {_inertial(link, o[link], wheel_id)}\n"
         out += inner[link]
         for child in children.get(link, []):
             out += body(child, o[link], depth + 1)
@@ -187,10 +208,10 @@ def worldbody() -> tuple[str, str, str]:
     return xml, acts, eq
 
 
-def standalone_xml(loose: str = "") -> str:
+def standalone_xml(loose: str = "", wheel_id: str | None = None) -> str:
     """The station alone, with any loose bodies (parts on its chuck), for its conformance tests: on the body model's
     solver settings (moonshot/body/skeleton.py), as the takes run it."""
-    body, acts, eq = worldbody()
+    body, acts, eq = worldbody(wheel_id)
     return f"""<mujoco model="sgrind">
   <compiler angle="radian" autolimits="true"/>
   <option timestep="0.001" integrator="implicitfast" solver="Newton" cone="elliptic" impratio="10" tolerance="1e-10"
@@ -381,6 +402,9 @@ class Control:
                      / (2 * math.pi))
 
 
-def render_links() -> dict[str, tuple[str, str]]:
-    """Each link's GLB (moonshot/library/stations/extract.py) and the body that carries it."""
-    return {k: (f"sg_{k}", f"library/machines/sgrind/links/{k}.glb") for k in record()["links"]}
+def render_links(wheel_id: str | None = None) -> dict[str, tuple[str, str]]:
+    """Each link's GLB (moonshot/library/stations/extract.py) and the body that carries it, with the mounted wheel's
+    drawn on the spindle."""
+    out = {k: (f"sg_{k}", f"library/machines/sgrind/links/{k}.glb") for k in record()["links"]}
+    out["wheel"] = ("sg_spindle", f"library/machines/sgrind/links/{wheel(wheel_id)['glb']}.glb")
+    return out

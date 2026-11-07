@@ -69,8 +69,6 @@
   {"what": "Op 30 on 1.25 in parallels in the plain jaws, the single hole along the jaws", "why": "A round part has no flat to clock it; the drawing doesn't place the pattern against anything but the axis"}
  ],
  "missing_records": [
-  {"id": "turn-ccgt", "what": "OD roughing tool: an ISO CCGT 09T308 insert (80 deg rhombus, 7 deg clearance, 9.7 mm edge, 3.97 mm thick, 0.8 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 CCGT 09 T3 08-AL H10; in a 95 deg SCLCR holder with a 1 in square shank for the ST-25's BOT OD stations (ISO SCLCR 2525M09 is its 25 mm twin)", "why": "The shop has no lathe tools (its only one is the boring bar, TPMT-221)"},
-  {"id": "turn-dcgt", "what": "OD finishing tool: an ISO DCGT 11T304 insert (55 deg rhombus, 7 deg clearance, 11.6 mm edge, 3.97 mm thick, 0.4 mm nose), polished for aluminium, uncoated K10, e.g. Sandvik CoroTurn 107 DCGT 11 T3 04-AL H10; in a 93 deg SDJCR holder with a 1 in square shank (ISO SDJCR 2525M11 is its 25 mm twin)", "why": "Its 0.4 mm nose cuts the two R0.4 roots, which need a nose of 0.4 or less; no record"}
  ],
  "open": []
 }

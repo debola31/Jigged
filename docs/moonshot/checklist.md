@@ -331,7 +331,7 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   assembled at 06:20 on Nov 5.
 - [ ] **Nov 5: `nist-ftc-10` on the web; sharing starts.** On the web: all 61 steps published by 06:40 on Nov 5,
   each a 720p final. Sharing is yours.
-- [ ] Nov 6: G1 (5 parts) on the web. Started 22:30 on Nov 4 alongside nist-ftc-10's last renders (your decision),
+- [x] Nov 6: G1 (5 parts) on the web. Done 23:50 on Nov 6: every step of the five on the page (nist-ftc-10 61, ct-slbeam 55, ll-1007223 48, nist-ftc-09 23, ll-1005337 24), a step without a passing take as a caption and still; the tool-loading videos, which drew the tools on their side, are being replaced by corrected renders. Started 22:30 on Nov 4 alongside nist-ftc-10's last renders (your decision),
   in parallel: the four parts' cutting simulations and stills, the 11 pending tools' models (downloaded where no
   login is needed, generated otherwise: your decision), the two plate parts' table-clamp takes, the two bar parts'
   vise loads and lift-outs, their band saw takes (the saw's card changes approved as proposed: your decision),

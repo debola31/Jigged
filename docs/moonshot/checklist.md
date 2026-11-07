@@ -432,6 +432,19 @@ For each track, I write its data formats, checks and bad takes **before** its ag
     them; the one about 1.6 mm from the fixed jaw is slid down the jaw face into place, a take.
   - ll-1011439's deburr is a take: a bench stone joins the inspection bench, and the deburr gate's minimum stroke
     is shortened for small parts (the pin's longest edge is 39 mm round).
+  - ct-tpg322's exempt noses reach 3.1 mm along each edge (from 2.9): the groove's three inner corners, which
+    neither slot's wheel reaches, read 0.127 mm past 2.9 and 0.090 past 3.1. Each edge is held over 10.3 of its
+    16.5 mm. Its keepers are three 1-1/2 in pieces of 1/8 x 1/2 in ground flat stock in a pinwheel (the shop's
+    6 in parallels span more than the chuck and meet the spindle housing), within your ground steel keepers.
+  - The grind's cut is declared (`grind_cut`): while the wheel's rim is inside the insert's uncut shape (a rock
+    take, the touch-off's spark), the wheel and the insert don't collide, the insert is drawn each frame from the
+    cut simulation's shape, and no grinding force is applied (on the 4.9 g insert it would move it a millimetre a
+    step), each such frame reported.
+  - The ST-25's foot pedal is a declared input to its control, timed by the plan (the body has no legs); the
+    pedal's spring and switch, the chuck and the grip are simulated. Its drawtube's mass is carried by the jaws
+    as their reflected inertia, the hidden drawtube shown following them by an exact ratio, declared.
+  - The ST-25's tools are touched off on Haas's tool presetter (M104, each jogged in to the beep); the work's Z on
+    the bar's end with Z FACE MEASURE. The tailstock, an option neither part needs, is left out.
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web
 - [ ] Nov 11: G5; all 20 parts on the web

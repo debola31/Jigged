@@ -127,9 +127,11 @@ def lathe_fits(setup: dict, stock: dict) -> list[str]:
 
 
 def grinder_fits(setup: dict, stock: dict) -> list[str]:
-    """A surface grinder setup: the stock's footprint on its magnetic chuck."""
+    """A surface grinder setup: the stock's footprint on its magnetic chuck, the grinder's own (its record's "Chuck
+    size", when the chuck is the machine) or a chuck of its own record ("Size")."""
     sid, chuck = setup["id"], setup["workholding"]["chuck"]
-    size = sorted((_inches(v) for v in _spec(chuck, "Size")["value"].removesuffix(" in").split(" x ")), reverse=True)
+    spec = _spec(chuck, "Chuck size" if chuck == setup["machine"] else "Size")["value"]
+    size = sorted((_inches(v) for v in spec.split(" in")[0].split(" x ")), reverse=True)
     footprint = sorted(stock["size_mm"], reverse=True)[:2]
     if footprint[0] > size[0] or footprint[1] > size[1]:
         return [f"{sid}: the stock's {footprint} mm footprint is bigger than the {chuck} chuck's "

@@ -164,7 +164,8 @@ def uses(step: dict, setups: dict, shop_json: dict, layout: dict) -> list[dict]:
         return []
     w = setup["workholding"]
     if "chuck" in w:                            # a lathe's chuck or collet; a grinder's magnetic chuck and keepers
-        return [u for k in ("chuck", "keepers") if k in w for u in thing(by_asset.get(w[k]))]
+        return [u for k in ("chuck", "keepers") if k in w and w[k] != setup["machine"]   # its own chuck: the station
+                for u in thing(by_asset.get(w[k]))]
     if "vise" in w:
         held = thing(by_asset.get(w["vise"])) + thing(by_kind.get("parallel_set" if w["parallels_in"] else "vise_stop"))
         return held + (thing(by_kind.get("test_indicator")) if what == "check" and not w["parallels_in"] else [])

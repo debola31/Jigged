@@ -5656,10 +5656,6 @@
      },
      "uses": [
       {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
-      {
        "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
        "item": "parallels-1"
       }
@@ -5685,10 +5681,6 @@
      },
      "uses": [
       {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
-      {
        "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
        "item": "parallels-1"
       }
@@ -5713,10 +5705,6 @@
       "at": "table"
      },
      "uses": [
-      {
-       "name": "Suburban 6x18 permanent magnetic chuck",
-       "item": "mag-chuck-1"
-      },
       {
        "name": "McMaster parallel set 86425A65, 1/8\" thick x 6\" long",
        "item": "parallels-1"
@@ -5755,7 +5743,7 @@
     {
      "id": "op10-edge1",
      "title": "Grind the first edge's chipbreaker",
-     "caption": "Grind the first edge's chipbreaker: .055 wide and .008 deep, .010 in from the edge, in two cross positions .020 in apart, the table rocked about 3 mm along the edge's middle, with the diamond wheel.",
+     "caption": "Grind the first edge's chipbreaker: the coolant switched on, then .055 wide and .008 deep, .010 in from the edge, in two cross positions .020 in apart, each pass the table rocked about 3 mm along the edge's middle from the front and the wheel fed down .0005 in from the column's right side, with the diamond wheel.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5779,7 +5767,7 @@
     {
      "id": "op10-edge2",
      "title": "Grind the second edge's chipbreaker",
-     "caption": "Grind the second edge's chipbreaker: the magnet off, the insert turned 120 deg between its keepers and the magnet on again, then ground as the first, with the diamond wheel.",
+     "caption": "Grind the second edge's chipbreaker: the coolant off and the table run clear, the magnet off, the insert turned 120 deg between its keepers, the magnet and the coolant on again, then ground as the first, with the diamond wheel.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5827,7 +5815,7 @@
     {
      "id": "op10-unload",
      "title": "Take the part out",
-     "caption": "Switch the magnet off, lift the part out and take the three 1/8 in parallels off.",
+     "caption": "Switch the coolant off and run the table clear, then switch the magnet off, lift the part out and take the three 1/8 in parallels off.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -5940,7 +5928,7 @@
     {
      "id": "op10-seat",
      "title": "Clamp it",
-     "caption": "Tighten the collet with the chuck key.",
+     "caption": "Close the collet with the foot pedal.",
      "kind": "human",
      "group": "op10",
      "where": {
@@ -6168,7 +6156,7 @@
     {
      "id": "op10-unload",
      "title": "Open the door and pick the part out",
-     "caption": "Open the door, blow the chips off, pick the part out of the chip tray, then loosen the collet with the key and take out the bar's end.",
+     "caption": "Open the door, blow the chips off, pick the part out of the chip tray, then open the collet with the foot pedal and take out the bar's end.",
      "kind": "human",
      "group": "op10",
      "where": {

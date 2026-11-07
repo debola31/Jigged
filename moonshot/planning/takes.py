@@ -21,8 +21,9 @@ three.js, from the cycle's own simulation in takes/<part>-<step id>.
 A lathe's or a surface grinder's setup has its own takes, named per setup as the plates' are (LATHE_TAKES,
 GRINDER_TAKES: takes/<part>-<setup>-<take>), its door and Cycle Start the setup's own runs (per_setup), its Z or touch-off
 the setting session's (takes/<part>/<step id>), and a lathe's tools one take per tool bolted into its turret station and
-touched off (lathe_tool_takes). An operation done by hand on the grinder is one take of its own, takes/<part>-<step id>,
-the step's video, as the deburr's is. None of them plays the VF-2 cell's.
+touched off (lathe_tool_takes). An operation done by hand on the grinder is its pass pair, the table rocked from the
+front and the wheel fed down from the column's right side, joined by declared cuts (grind_takes). None of them plays the
+VF-2 cell's.
 
     python -m moonshot.planning.takes nist-ftc-10         # prints each step's takes, and which aren't made yet
 """
@@ -159,11 +160,29 @@ LATHE_PARTED = ("pick-part", "unload-chuck")
 # a surface grinder setup's own takes: the chuck and the keepers wiped, the part set down and the keepers set tight
 # round it, the magnet switched on, and the part and the keepers taken off
 GRINDER_TAKES = {"clean": "wipe-chuck", "load": "block-in", "seat": "magnet-on", "unload": "unload-part"}
+# an operation ground by hand: a pass is two takes, as the operator can't reach both handwheels from one place (the
+# user's decision, 2026-11-06): the table rocked by its handwheel from the front, the cross handwheel set to the pass's
+# position there too, then the wheel fed down by the handwheel 1.4 m up on the column's right side. One pass pair shows
+# the operation's passes, the rest cut, each cut declared. Before the first operation's pair the flood coolant is
+# switched on at the control box; before a later one's, the part is turned in its keepers (the coolant off and the
+# table run clear, the magnet off, the part turned, the magnet and the coolant on again)
+GRIND_PASS = ("rock", "feed")
+GRIND_FIRST, GRIND_NEXT = "coolant-on", "index"
 
 
 def setup_take(part: str, setup: str, take: str) -> str:
     """A lathe's or a grinder's setup's own take's folder: takes/<part>-<setup>-<take>."""
     return f"{part}-{setup}-{take}"
+
+
+def grind_takes(part: str, step: dict) -> list[str]:
+    """An operation ground by hand: its take before its passes (GRIND_FIRST: takes/<part>-<setup>-coolant-on; or
+    GRIND_NEXT: takes/<part>-<setup>-<operation>-index), then its pass pair, takes/<part>-<setup>-<operation>-rock and
+    -feed, in the order they play."""
+    setup, op = step["setup"], step["operation"]
+    ops = [o["id"] for o in next(s for s in load_plan(part)["setups"] if s["id"] == setup)["operations"]]
+    before = setup_take(part, setup, GRIND_FIRST if ops.index(op) == 0 else f"{op}-{GRIND_NEXT}")
+    return [before, *(setup_take(part, setup, f"{op}-{t}") for t in GRIND_PASS)]
 
 
 def lathe_tool_takes(step: dict) -> list[str]:
@@ -210,7 +229,9 @@ def spans(part: str, step: dict) -> list[Span]:
     if step.get("machine") in GRINDERS:                     # the surface grinder: by hand, no door, no cycle
         if kind in GRINDER_TAKES:
             return [own_setup(GRINDER_TAKES[kind])]
-        return setting if kind == "touch" else own        # the touch-off; an operation done by hand, its own take
+        if kind == "touch":
+            return setting                                   # the touch-off: the setting session's take
+        return [(t, None, None) for t in grind_takes(part, step)]    # an operation by hand: its passes' takes
     tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
     if "clamps" in facts:                                 # a plate clamped to the table: its own takes
         plate = lambda take: (plate_take(part, setup, take), None, None)       # noqa: E731

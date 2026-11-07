@@ -105,10 +105,12 @@ def test_the_insert_is_trapped_by_its_keepers_once_the_chuck_is_on():
         assert np.linalg.norm(on_chuck(m, d, f"chucked_keeper_{i}") - k) * 1000 < 0.05
 
 
-def test_a_sideways_knock_wedges_the_insert_up_over_its_keepers():
-    """Its 11 deg clearance turns a keeper's push on its flank 11 deg upward: a sideways push lifts it by about 0.19 of
-    itself, more than the carbide's pull and weight (about 1.2 N) once it passes about 6.5 N. In a pass the wheel's
-    down-force, about twice its sideways force, keeps it seated; a knock without it lifts it out."""
+def test_a_sideways_knock_past_about_6_n_wedges_the_insert_up_over_its_keepers():
+    """Its 11 deg clearance turns a keeper's push on its flank 11 deg upward: a sideways push F lifts it by F tan 11 deg
+    (frictionless; friction only raises it), so it comes off once F tan 11 deg passes the chuck's pull and its weight.
+    Computed from the cell's insert and the chuck's pull on it, not simulated: a knock of that size on a 4.9 g part
+    moves it a millimetre a step at the 1 ms timestep, past what contacts resolve (MuJoCo goes unstable). In a pass the
+    wheel's down-force, about twice its sideways force, keeps it seated."""
     m, d, loose = blocked_in()
     ctl = GC.control(m, d, loose)
     for _ in range(200):
@@ -117,14 +119,15 @@ def test_a_sideways_knock_wedges_the_insert_up_over_its_keepers():
     for k in range(500):
         d.qpos[lever] = math.pi * min(1.0, (k + 1) / 400)
         ctl.step()
+    V = GC.triangle_insert_mm(IC, THICK, NOSE, CLEAR)
+    top, bottom = V[V[:, 2] > THICK / 2], V[V[:, 2] < THICK / 2]
+    inset = top[:, 0].max() - bottom[:, 0].max()                              # the first flank, at +X
+    assert math.degrees(math.atan2(inset, THICK)) == pytest.approx(CLEAR, abs=0.05)
     b = m.body("chucked_part").id
-    z0 = d.xpos[b][2]
-    for _ in range(300):
-        d.qfrc_applied[:] = 0.0
-        mujoco.mj_applyFT(m, d, np.array([10.0, 0.0, 0.0]), np.zeros(3), d.xpos[b] + [0.0, 0.0, THICK * 0.001], b,
-                          d.qfrc_applied)
-        ctl.step()
-    assert (d.xpos[b][2] - z0) * 1000 > 1.0
+    hold = -ctl.wrench["chucked_part"][2] + m.body_mass[b] * 9.81
+    knock = hold / math.tan(math.radians(CLEAR))
+    assert 1.0 < hold < 1.5 and 5.0 < knock < 8.0                             # about 1.2 N held, about 6.4 N to lift
+    assert knock > 1.0 * 5                                                     # five times the cell's fingertip nudge
 
 
 def test_the_cell_composes_with_the_body_model():

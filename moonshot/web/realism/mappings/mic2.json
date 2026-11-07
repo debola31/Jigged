@@ -1,7 +1,7 @@
 {
  "asset": "mic2",
- "about": "Mitutoyo 103-178 1-2 in outside micrometer with ratchet stop, modelled from scratch lying on its side opened to 1.500 in, as the placeholder: the C frame in green hammertone enamel (raised rim round a recessed web, the anvil's head lower than the barrel, a brass plug in its back, the black oval nameplate 'Mitutoyo 1-2\" .001\"'), carbide-tipped anvil and spindle, the barrel a block cast with the frame and the lock on its face (chrome ring, black slotted screw, the tapered lever), the satin sleeve with its datum line, .025 in ticks and numbered tenths, the 47 mm thimble's 25 divisions each numbered and a large 0 reading zero on the datum, its plain band and diamond-knurled grip, and the ratchet's two plain rings and diamond-knurled cap. Engravings and legends are flat decals 0.05 mm proud; the finishes are mic1's.",
- "reviewed": "2026-11-06: draft; checked against Penn Tool's two product photographs of the 103-178 (penntoolco.com/103-178), the record's dimensions (c 38 mm, d 6.35 mm, 18 mm thimble, the head 14.5 + 3 + 47 + 17 mm) and the placeholder's layout (axis, anvil and spindle faces, barrel, ratchet's end); the look sheets (six views and four close-ups) and the page-side renders (loadcheck: front, close, head) reviewed",
+ "about": "Mitutoyo 103-178 1-2 in outside micrometer with ratchet stop, modelled from scratch lying on its side opened to 1.500 in, as the placeholder: the C frame in green-grey hammertone enamel (raised rim round a recessed web, the anvil's head lower than the barrel, a brass plug in its back, the black oval nameplate 'Mitutoyo 1-2\" .001\"'), carbide-tipped anvil and spindle, the barrel a block cast with the frame and the lock on its face (chrome ring, black slotted screw, the tapered lever), the satin sleeve with its datum line, .025 in ticks and numbered tenths, the 47 mm thimble's 25 divisions each numbered and a large 0 reading zero on the datum, its plain band and diamond-knurled grip, and the ratchet's two plain rings and diamond-knurled cap. Engravings and legends are flat decals 0.05 mm proud; the finishes are mic1's.",
+ "reviewed": "2026-11-06: rebuilt to the record's deeper bow (24 mm below the 38 mm throat, 0d7583b1) and its green-grey, both off Mitutoyo's own 103-178 photograph; the nameplate at the photograph's size in the deeper bow. Before: 2026-11-06: draft; checked against Penn Tool's two product photographs of the 103-178 (penntoolco.com/103-178), the record's dimensions (c 38 mm, d 6.35 mm, 18 mm thimble, the head 14.5 + 3 + 47 + 17 mm) and the placeholder's layout (axis, anvil and spindle faces, barrel, ratchet's end); the look sheets (six views and four close-ups) and the page-side renders (loadcheck: front, close, head) reviewed",
  "source": {
   "path": "realism/sources/mic2/mic2.glb"
  },
@@ -26,14 +26,14 @@
   "mic2_hammertone": {
    "family": "paint_cast",
    "color": [
-    0.028,
-    0.13,
-    0.105
+    0.067,
+    0.112,
+    0.12
    ],
    "rough": 0.42,
    "normal": 1.1,
    "tile_m": 0.12,
-   "about": "Mitutoyo's green hammertone baked enamel, as mic1's (the cast family's pits read as the hammered texture)"
+   "about": "Mitutoyo's green-grey hammertone baked enamel, its colour the record's (73, 94, 97), off Mitutoyo's own 103-178 photograph (the cast family's pits read as the hammered texture)"
   },
   "mic2_plate_black": {
    "family": "paint",
@@ -95,31 +95,25 @@
  },
  "unsure": [
   {
-   "what": "the bow is the placeholder's, 12 mm deep below the 38 mm throat; the photographs' is about 25 mm, which would put the model 14 mm below the record's box, so the frame keeps the placeholder's outline and the nameplate is a little smaller (20 x 6.6 mm) than the photographed one"
-  },
-  {
    "what": "the barrel's block (15.6 x 15 mm across, as wide as the sleeve) and the lock's height on it are inferred: the photographs show the frame only from its face"
   },
   {
    "what": "the nameplate's second line reads '1-2\" .001\"' as mic1's does; the photographed Brazilian-made one reads 'MADE IN BRAZIL'"
   },
   {
-   "what": "the frame's colour is mic1's green, so the two read as a pair; the photographs' enamel looks more blue-grey"
-  },
-  {
    "what": "engravings and legends are flat decals 0.05 mm proud of their surfaces: crisp up close, but they may shimmer from far off"
   }
  ],
  "views": {
-  "head": [[0.022, -0.012, 0.072], [0.022, 0.0195, 0.012]],
-  "plate": [[-0.041, -0.045, 0.058], [-0.041, -0.022, 0.012]],
-  "lock": [[-0.012, -0.012, 0.058], [-0.006, 0.0185, 0.016]],
-  "ratchet": [[0.08, -0.03, 0.045], [0.066, 0.0205, 0.009]]
+  "head": [[0.022, -0.006, 0.072], [0.022, 0.0255, 0.012]],
+  "plate": [[-0.041, -0.039, 0.058], [-0.041, -0.016, 0.012]],
+  "lock": [[-0.012, -0.006, 0.058], [-0.006, 0.0245, 0.016]],
+  "ratchet": [[0.08, -0.024, 0.045], [0.066, 0.0265, 0.009]]
  },
  "check_views": {
   "head": {
-   "eye": "0.045,0.075,0.085",
-   "target": "0.02,0.009,-0.02"
+   "eye": "0.045,0.075,0.079",
+   "target": "0.02,0.009,-0.026"
   }
  }
 }

@@ -152,5 +152,5 @@ def test_an_insert_bigger_than_the_grinders_chuck_is_refused():
     plan = copy.deepcopy(load_plan("ct-tpg322"))
     setup, stock = plan["setups"][0], plan["stock"]
     assert fits(setup, stock) == []
-    stock["size_mm"] = [200.0, 500.0, 3.18]                       # the 6 x 18-1/2 in magnetic chuck
+    stock["size_mm"] = [300.0, 700.0, 3.18]                       # the grinder's own 10 x 24 in chuck (254 x 610 mm)
     assert any("chuck" in p for p in fits(setup, stock))

@@ -1266,6 +1266,17 @@
       "range": {"min": 0.0, "max": 24.0},
       "resolution": 0.0005,
       "accuracy": 0.002
+    },
+    {
+      "id": "micrometer-2-1",
+      "kind": "micrometer",
+      "name": "1-2\" outside micrometer",
+      "make": "Mitutoyo",
+      "model": "103-178",
+      "asset": "mic2",
+      "range": {"min": 1.0, "max": 2.0},
+      "resolution": 0.001,
+      "accuracy": 0.0001
     }
   ],
   "consumables": [
@@ -1296,7 +1307,8 @@
   "hand_tools": [
     {"id": "wrenches-1", "kind": "wrench_set", "name": "Wrenches, hex keys, vise handle and chuck key", "asset": "wrench"},
     {"id": "ratchet-wrench-1", "kind": "ratcheting_wrench", "name": "3/4 in ratcheting combination wrench", "asset": "ratchet-wrench"},
-    {"id": "deburr-1", "kind": "deburring_kit", "name": "Deburring tools, files and abrasive pads", "asset": "deburr"}
+    {"id": "deburr-1", "kind": "deburring_kit", "name": "Deburring tools, files and abrasive pads", "asset": "deburr"},
+    {"id": "bench-stone-1", "kind": "bench_stone", "name": "6 x 2 x 1\" India bench stone, coarse and fine", "make": "Norton", "model": "IB6 (61463685560)", "asset": "bstone"}
   ],
   "support": [
     {

@@ -1,0 +1,62 @@
+{
+ "schema": "jigged.plan/1",
+ "part": "ll-1011439",
+ "about": "Process plan for the L&L centering pin (Zentrierstück, 1011439) in AMPCO 18 aluminium bronze, on the shop's Haas ST-25 in its 5C collet chuck, then the bench and inspection. Its real routing isn't known; the print shows a lathe part, and it is turned in one setup from a short length of bar: the pilot's end out, so the pilot, the shoulder, the Ø12.420 and the tapped hole are cut from the front, then the grooving tool profiles the R7 crown, the 15 deg lead and the R1 behind them, the crown's diameter falling toward the chuck, and parts the pin off, its cut face the crown's flat end. Written by Claude from the drawing (314-092-59930-10) and the STEP model; every feature below is checked against the model by moonshot/planning/validate.py. Model frame: Y is the axis (the Y=-3 face is the pilot's end, with the M4 hole; Y=0 the shoulder; Y=12 the crown's flat end), X and Z across it, centred. The drawing's 0.3 x 45 deg on the shoulder's outside edge is 0.25 in the STEP; the plan cuts the drawing's 0.3, within 0.05 mm of the STEP.",
+ "stock": {"material": "AMPCO 18 (aluminium bronze, extruded)", "material_note": "As the drawing",
+           "bar": "5/8 in AMPCO 18 round bar", "size_mm": [15.88, 76.2, 15.88], "axis": "Y", "size_in": "5/8 dia x 3",
+           "from": "a 3 in length of 5/8 in bar, a drop from the rack [proposed: the routing has no saw; 5/8 in leaves 1.7 mm a side over the Ø12.420, where 1/2 in bar's 0.14 mm would be at the mercy of the bar's own tolerance]"},
+ "faces_out": {"-Y": "an end 20 mm out"},
+ "setups": [
+  {"id": "op10", "title": "Op 10: the whole pin", "machine": "st25", "face_out": "-Y",
+   "workholding": {"chuck": "c5", "holds": "the bar", "collet_in": 0.625, "stick_out_mm": 20.0,
+                   "note": "In a 5/8 in 5C collet in the Royal collet chuck, 20 mm out: the pin's 15.0, 0.3 to face, the grooving tool's 3 mm and 1.7 mm of clearance to the collet's nose; the rest of the 3 in bar, 56 mm, in the collet. The collet chuck has no key: the ST-25's drawtube closes it, worked by the foot pedal as the 3-jaw is (Royal's R220001 manual, the lathe agent's finding, 2026-11-06)"},
+   "wcs": {"code": "G54", "z": "the bar's end, less 0.3 mm for the facing", "by": "the VCGT turning tool touched on the bar's end"},
+   "operations": [
+    {"id": "turn", "kind": "turn", "tool": "turn-vcgt",
+     "what": "Face the end and turn the Ø8.000 g6 pilot with its 0.5 x 45° chamfer and R0.2 relief, the shoulder and its 0.3 x 45° chamfer, and the Ø12.420, roughed and finished",
+     "features": [{"type": "plane", "normal": "-Y", "at_mm": -3.0}, {"type": "hole", "dia_mm": 8.0, "axis": "Y", "count": 1},
+                  {"type": "plane", "normal": "-Y", "at_mm": 0.0}, {"type": "hole", "dia_mm": 12.42, "axis": "Y", "count": 1}],
+     "speeds": {"rough": {"vc_m_min": 150, "feed_mm_rev": 0.15, "doc_mm": 1.5}, "finish": {"vc_m_min": 180, "feed_mm_rev": 0.08, "doc_mm": 0.15},
+                "feed_mm_rev": 0.15, "rpm_max": 3400, "constant_surface_speed": true, "coolant": "flood",
+                "source": "AMPCO 18's data sheet (Ampco Metal, TDS AMPCO 18): turning roughing 150-200 m/min, 0.1-0.2 mm/rev, up to 2 mm; finishing 180-250 m/min, 0.05-0.1 mm/rev, 0.1-0.2 mm; K10-K20 carbide. The lower half, as the shop's other rules (moonshot/sim/cam.py MATERIALS). At Ø15.9 150 m/min is 3,010 rpm; at the pilot's Ø8 the ST-25's 3,400 rpm caps it at 85 m/min"}},
+    {"id": "spot", "kind": "spot", "tool": "spot",
+     "what": "Spot the centre for the drill, Ø3.3 at its mouth",
+     "speeds": {"vc_m_min": 60, "rpm_max": 1500, "feed_mm_rev": 0.05,
+                "source": "[proposed: the carbide spot drill at 60 m/min and 0.05 mm/rev, about half the data sheet's carbide milling speed, as it cuts at the centre where the surface speed falls to nothing; the sheet gives no drilling figures]"}},
+    {"id": "drill", "kind": "drill", "tool": "drill-3p3-118",
+     "what": "Drill the Ø3.3 tap drill 10.1 deep, pecking",
+     "note": "A 118 deg point, as the STEP draws the hole's bottom: the shop's 3.3 mm drill (drill-3p3) is a 135 deg split point (the cut-sim agent's call, 2026-11-06)",
+     "features": [{"type": "hole", "dia_mm": 3.3, "axis": "Y", "count": 1}],
+     "speeds": {"vc_m_min": 20, "rpm_max": 1930, "feed_mm_rev": 0.05, "peck_mm": 1.0,
+                "source": "[proposed: the HSS drill at 20 m/min, the lower half of HSS drilling for hard aluminium bronzes (about 190 HB extruded, the data sheet), and 0.05 mm/rev, 1.5% of its diameter, inside the shop's 0.8-3.2% for drills (thresholds.toml machining.drill_feed_per_rev_dia_frac)]"}},
+    {"id": "tap", "kind": "tap", "tool": "tap-m4-bot",
+     "what": "Tap the M4x0.7-6H 8.0 deep, rigid, with the spindle reversing out",
+     "speeds": {"vc_m_min": 5, "rpm_max": 400, "feed_mm_rev": 0.7,
+                "source": "[proposed: 5 m/min, a quarter of the drill's, as the shop runs taps slower (thresholds.toml machining.ream_speed_feed_factor holds them to half or less); its feed is the thread's pitch, 0.7 mm/rev]"}},
+    {"id": "part_off", "kind": "part_off", "tool": "groove-3",
+     "what": "Profile the R7 crown, the 15° lead and the R1 behind the Ø12.420, then part the pin off at its 15.0 length",
+     "features": [{"type": "plane", "normal": "+Y", "at_mm": 12.0}],
+     "speeds": {"vc_m_min": 80, "rpm_max": 3400, "feed_mm_rev": 0.04, "constant_surface_speed": true,
+                "source": "[proposed: about half the data sheet's roughing speed and a fifth of its feed, a grooving tool's usual reduction from turning; the spindle held at the ST-25's 3,400 rpm as the cut nears the centre]"}}
+   ]}
+ ],
+ "finish": [
+  {"id": "deburr", "station": "bench", "what": "Deburr every edge, breaking each sharp corner 0.2 x 45° (note 1) with a hooked blade drawn along it, and stone the part-off's pip off the crown's flat end"},
+  {"id": "inspect", "station": "inspection", "title": "Check the pilot, the thread and the crown", "what": "Check the Ø8.000 g6 pilot and the Ø12.420 with the micrometer, the 15.0 length with the calipers, the M4 thread with a go/no-go gauge, and the R7 crown and 15° lead against the drawing on the comparator",
+   "tools": ["mic1", "cal6", "thread-m4", "compar"]}
+ ],
+ "proposed": [
+  {"what": "One setup from a 3 in length of 5/8 in bar, in a 5/8 in 5C collet", "why": "The real routing isn't known; the routing has no saw. One setup turns everything but the crown's back from the front, and the grooving tool profiles the crown and parts off; two setups would grip the finished Ø12.420 in a collet for the pilot's end, about 9 more steps"},
+  {"what": "The spot, drill, tap and grooving speeds and feeds", "why": "The AMPCO 18 data sheet gives turning and milling only"},
+  {"what": "Flood coolant", "why": "Aluminium bronze is cut wet in the shop's practice; no source given"}
+ ],
+ "missing_records": [
+  {"id": "turn-vcgt", "what": "OD turning tool: an ISO VCGT 110302 insert (35 deg rhombus, 7 deg clearance, 11 mm edge, 3.18 mm thick, 0.2 mm nose; inch VCGT 2.5(1.5)0.5), uncoated K10 for non-ferrous, e.g. Sandvik CoroTurn 107 VCGT 11 03 02-AL H10; in a 93 deg SVJCR holder with a 1 in square shank for the ST-25's BOT OD stations (ISO SVJCR 2525M11 is its 25 mm twin)", "why": "The shop has no lathe tools (its only one is the boring bar, TPMT-221). The 0.2 nose cuts the pilot's R0.2 max relief; the 35 deg point reaches into the shoulder"},
+  {"id": "groove-3", "what": "Grooving and parting tool: a 3.00 mm groove-and-turn insert with 0.2 mm corners, uncoated K grade, e.g. Sandvik CoroCut 1-2 N123G2-0300-0002-TF H13A, in a CoroCut 1-2 holder (RF123G type, seat G) with a 1 in square shank, cutting 8 mm deep or more to part a 5/8 in bar", "why": "Profiles the R7 crown, the 15 deg lead and the R1, whose diameter falls toward the chuck, with its corner (a 55 deg insert can't take the R1 past about 30 deg toward the chuck), and parts off"},
+  {"id": "drill-3p3-118", "what": "3.3 mm HSS jobber drill, 118 deg point, DIN 338 type N: 65 mm overall, 36 mm of flute, the M4 tap drill", "why": "The STEP draws the hole's bottom at 118 deg; the shop's 3.3 mm drill (drill-3p3) is a 135 deg split point"},
+  {"id": "tap-m4-bot", "what": "M4x0.7 6H HSS-E spiral-flute tap with a bottoming (2-3 thread, form C) chamfer, DIN 371 dimensions (63 mm overall, 4.5 mm shank)", "why": "The shop's M4 tap (tap-m4, OSG 1980401) is a plug spiral-point for through holes: its 2.8 mm chamfer would reach the 10.1 drilled depth with only 7.3 mm of full thread, short of the drawing's 8.0"},
+  {"id": "bot-er32", "what": "BOT turret ID-station holder with an ER32 collet chuck (and a tapping collet), for the spot drill, the 3.3 mm drill and the tap on the spindle's centre", "why": "The shop's ER32 holders are CAT40, for the mills"},
+  {"id": "collet-5c-0625", "what": "5/8 in 5C round collet", "why": "The c5 record is the Royal collet chuck and its collets in general; no record names the 5/8 in collet"}
+ ],
+ "open": []
+}

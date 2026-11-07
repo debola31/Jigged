@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from moonshot.planning.steps import TOOL_NAMES, expand
+from moonshot.planning.steps import LATHES, TOOL_NAMES, expand
 from moonshot.planning.validate import load_plan
 
 REPO = Path(__file__).resolve().parents[2]
@@ -28,7 +28,8 @@ PUBLISHED = Path(__file__).resolve().parent / "published.json"
 PARTS = ["nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223", "ct-tpg322", "ll-1011439",
          "ll-1007224", "mcm-8017t3", "nist-ctc-05", "mcm-8492a054", "mcm-91259a544", "ct-8848hn", "nist-ctc-01",
          "ll-1011443", "ll-1011604", "ct-brmb0143", "ct-107w-ngd-3r", "ll-1006941", "ct-10004-bcrm"]
-LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223"}
+LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223",
+        "ct-tpg322", "ll-1011439", "ll-1007224"}
 # Where a finishing station's steps happen: its zone in layout.json.
 STATION_ZONES = {"bench": "benches", "inspection": "inspection", "outside": "shipping"}
 # shop.json's lists of things, in the order the page lists them.
@@ -148,18 +149,23 @@ def uses(step: dict, setups: dict, shop_json: dict, layout: dict) -> list[dict]:
         return [u for k in FINISH_KINDS.get(step["id"], []) for u in thing(by_kind.get(k))]
     setup = setups[step["setup"]]
     what = step["id"].removeprefix(f"{setup['id']}-")
-    if step["kind"] == "cycle":
+    if "operation" in step:                     # a cycle, or an operation done by hand on a manual machine
         op = next(o for o in setup["operations"] if o["id"] == step["operation"])
         # A saw's blade is the saw: the station itself.
         return [] if op["tool"] == setup["machine"] else tool(op["tool"])
     if what == "tools":
         return [u for t in step["facts"]["tool_ids"] for u in tool(t)]
-    if what in STEP_KINDS:
+    if what == "touch":                         # a grinder's wheel, touched down on the part
+        return [u for t in dict.fromkeys(op["tool"] for op in setup["operations"]) for u in tool(t)]
+    if what in STEP_KINDS and setup["machine"] not in LATHES:     # a lathe's Z is touched off with its own tool
         return [u for k in STEP_KINDS[what] for u in thing(by_kind.get(k))]
     # A saw holds the bar in its own vise.
     if what not in ("clean", "load", "seat", "check", "shift") or "workholding" not in setup:
         return []
     w = setup["workholding"]
+    if "chuck" in w:                            # a lathe's chuck or collet; a grinder's magnetic chuck and keepers
+        return [u for k in ("chuck", "keepers") if k in w and w[k] != setup["machine"]   # its own chuck: the station
+                for u in thing(by_asset.get(w[k]))]
     if "vise" in w:
         held = thing(by_asset.get(w["vise"])) + thing(by_kind.get("parallel_set" if w["parallels_in"] else "vise_stop"))
         return held + (thing(by_kind.get("test_indicator")) if what == "check" and not w["parallels_in"] else [])

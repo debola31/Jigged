@@ -18,6 +18,13 @@ another (the saw's load to its handwheel), doesn't (moonshot/tests/gates/test_ca
 A machine-only (cycle) step is no take of people's work: the web shows it as its caption and a still, or in
 three.js, from the cycle's own simulation in takes/<part>-<step id>.
 
+A lathe's or a surface grinder's setup has its own takes, named per setup as the plates' are (LATHE_TAKES,
+GRINDER_TAKES: takes/<part>-<setup>-<take>), its door and Cycle Start the setup's own runs (per_setup), its Z or touch-off
+the setting session's (takes/<part>/<step id>), and a lathe's tools one take per tool bolted into its turret station and
+touched off (lathe_tool_takes). An operation done by hand on the grinder is its pass pair, the table rocked from the
+front and the wheel fed down from the column's right side, joined by declared cuts (grind_takes). None of them plays the
+VF-2 cell's.
+
     python -m moonshot.planning.takes nist-ftc-10         # prints each step's takes, and which aren't made yet
 """
 from __future__ import annotations
@@ -25,7 +32,7 @@ from __future__ import annotations
 import sys
 
 from moonshot.config import data_root
-from moonshot.planning.steps import expand
+from moonshot.planning.steps import GRINDERS, LATHES, expand
 from moonshot.planning.validate import load_plan
 from moonshot.world import tooling as TL
 
@@ -144,6 +151,52 @@ def tool_takes(step: dict) -> list[str]:
     return out
 
 
+# a lathe setup's own takes, by the step that plays each (takes/<part>-<setup>-<take>): the stock set in the chuck or
+# collet, the chuck closed on it; and its unload's after the door and the blow-off, the part lifted out of the opened
+# chuck, or after a part-off, picked out of the chip tray and then the bar's end taken out of the collet
+LATHE_TAKES = {"load": "load-chuck", "seat": "close-chuck"}
+LATHE_UNLOAD = ("unload-chuck",)
+LATHE_PARTED = ("pick-part", "unload-chuck")
+# a surface grinder setup's own takes: the chuck and the keepers wiped, the part set down and the keepers set tight
+# round it, the magnet switched on, and the part and the keepers taken off
+GRINDER_TAKES = {"clean": "wipe-chuck", "load": "block-in", "seat": "magnet-on", "unload": "unload-part"}
+# an operation ground by hand: a pass is two takes, as the operator can't reach both handwheels from one place (the
+# user's decision, 2026-11-06): the table rocked by its handwheel from the front, the cross handwheel set to the pass's
+# position there too, then the wheel fed down by the handwheel 1.4 m up on the column's right side. One pass pair shows
+# the operation's passes, the rest cut, each cut declared. Before the first operation's pair the flood coolant is
+# switched on at the control box; before a later one's, the part is turned in its keepers (the coolant off and the
+# table run clear, the magnet off, the part turned, the magnet and the coolant on again)
+GRIND_PASS = ("rock", "feed")
+GRIND_FIRST, GRIND_NEXT = "coolant-on", "index"
+
+
+def setup_take(part: str, setup: str, take: str) -> str:
+    """A lathe's or a grinder's setup's own take's folder: takes/<part>-<setup>-<take>."""
+    return f"{part}-{setup}-{take}"
+
+
+def grind_takes(part: str, step: dict) -> list[str]:
+    """An operation ground by hand: its take before its passes (GRIND_FIRST: takes/<part>-<setup>-coolant-on; or
+    GRIND_NEXT: takes/<part>-<setup>-<operation>-index), then its pass pair, takes/<part>-<setup>-<operation>-rock and
+    -feed, in the order they play."""
+    setup, op = step["setup"], step["operation"]
+    ops = [o["id"] for o in next(s for s in load_plan(part)["setups"] if s["id"] == setup)["operations"]]
+    before = setup_take(part, setup, GRIND_FIRST if ops.index(op) == 0 else f"{op}-{GRIND_NEXT}")
+    return [before, *(setup_take(part, setup, f"{op}-{t}") for t in GRIND_PASS)]
+
+
+def lathe_tool_takes(step: dict) -> list[str]:
+    """A lathe's Set up the turret step's takes, by their folders under the step's own: one per new tool, bolted into
+    its turret station and touched off for its offsets, in the order the plan first uses them."""
+    return [f"{k:02d}-mount-{t}" for k, t in enumerate(step["facts"]["tool_ids"], 1)]
+
+
+def lathe_parted(part: str, setup: str) -> bool:
+    """Does the lathe setup part its part off the bar (an operation of kind part_off)?"""
+    s = next(x for x in load_plan(part)["setups"] if x["id"] == setup)
+    return any(op["kind"] == "part_off" for op in s["operations"])
+
+
 def spans(part: str, step: dict) -> list[Span]:
     """The takes, in order, that make one step of a part's plan."""
     sid, setup = step["id"], step.get("setup")
@@ -163,8 +216,24 @@ def spans(part: str, step: dict) -> list[Span]:
         return own                                           # finishing: the bench's and inspection's takes
     cell = lambda take: per_setup(part, step, take)          # noqa: E731  the setup's run of a cell take
     start = [cell("door-close"), cell("cycle-start")]
+    own_setup = lambda take: (setup_take(part, setup, take), None, None)       # noqa: E731
+    if step.get("machine") in LATHES:                       # the ST-25: its chuck's own takes and its turret's
+        if kind == "tools":
+            return [(f"{part}/{sid}/{t}", None, None) for t in lathe_tool_takes(step)]
+        if kind == "unload":
+            after = LATHE_PARTED if lathe_parted(part, setup) else LATHE_UNLOAD
+            return [cell("door-open"), cell("unload-blow-off"), *[own_setup(t) for t in after]]
+        if kind in LATHE_TAKES:
+            return [own_setup(LATHE_TAKES[kind])]
+        return {"clean": [cell("clean-blow-off")], "z": setting, "start": start}[kind]
+    if step.get("machine") in GRINDERS:                     # the surface grinder: by hand, no door, no cycle
+        if kind in GRINDER_TAKES:
+            return [own_setup(GRINDER_TAKES[kind])]
+        if kind == "touch":
+            return setting                                   # the touch-off: the setting session's take
+        return [(t, None, None) for t in grind_takes(part, step)]    # an operation by hand: its passes' takes
     tools = [(f"{part}/{sid}/{t}", None, None) for t in tool_takes(step)] if kind == "tools" else []
-    if "clamps" in facts:                                   # a plate clamped to the table: its own takes
+    if "clamps" in facts:                                 # a plate clamped to the table: its own takes
         plate = lambda take: (plate_take(part, setup, take), None, None)       # noqa: E731
         if kind == "seat":
             return [plate(t) for t in seat_takes(part)]
@@ -195,13 +264,16 @@ def played(kind: str) -> list[str]:
     """Every take of a cell take's kind (door-close, cycle-start, door-open, clean-blow-off, unload-blow-off,
     set-parallels, set-stop, loosen) the plans' steps play, in plan order: the shared take nist-ftc-10 plays, and each
     other part's setups' own runs (per_setup). A blow-off's shared take is both step kinds' (`blow-off`). A plate's own
-    takes (plate_take: its blow-offs too) aren't the cell's, and aren't listed."""
+    takes (plate_take: its blow-offs too) aren't the cell's, and aren't listed; nor is another machine's run of a door
+    or a blow-off (the ST-25's), which is its station's, not the VF-2 cell's."""
     from moonshot.planning.validate import PLANS
     shared_name = kind.split("-", 1)[1] if kind.endswith("-blow-off") else kind
     plate_own = (*PLATE_TAKES.values(), *PLATE_UNLOAD, *(f"{PLATE_TAKES['seat']}-{e}" for e in SEAT_ENDS))
     out: list[str] = []
     for f in sorted(PLANS.glob("*.json")):
         for s in expand(load_plan(f.stem)):
+            if s.get("machine", "vf2") != "vf2":
+                continue
             for t, _, _ in spans(f.stem, s):
                 if "clamps" in s.get("facts", {}) and any(t.endswith(f"-{p}") for p in plate_own):
                     continue

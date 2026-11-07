@@ -206,11 +206,15 @@ class Probing:
         hand over Feed Hold, and wait it out."""
         k = self.k
         k.look(k.t, SCREEN)
-        k.keys(["edit", "down", "down", "enter", "down", "enter"] + ["right"] * {"surface": 1, "bore": 2}[template]
-               + ["enter"])
+        k.keys(["edit", "down", "down", "enter", "down", "enter"]
+               + ["right"] * {"surface": 1, "bore": 2, "boss": 3}[template] + ["enter"])
         if wcs != "G54":
             k.keys(["down"])
             k.type(wcs[1:])
+            k.keys(["enter"])
+        for v in ([values["dia_mm"], values["depth_mm"]] if template == "boss" else []):    # its diameter, Z depth
+            k.keys(["down"])
+            k.type(f"{v:.3f}".rstrip("0").rstrip("."))
             k.keys(["enter"])
         k.keys(["f4"])
         self.page = "vps"
@@ -257,6 +261,13 @@ class Probing:
             self.shift(a, datum["xy".index(a)] - centre["xy".index(a)])
         self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
 
+    def boss(self, centre: np.ndarray, z: float, dia: float) -> None:
+        """A boss cycle round a vertical boss (dia mm across), its touches with the ball at z: the ball over the boss's
+        centre, STANDOFF_MM above its top, and the cycle's Z depth from there down to z. Its centre is the zero."""
+        self.to([centre[0], centre[1], self.top + STANDOFF_MM], fine=True)
+        self.cycle("boss", 18.0, dia_mm=dia, depth_mm=round(float(self.ball()[2] - z), 3))
+        self.jog("z", self.top + 15 - self.ball()[2], "inc_0.1")
+
     def plan(self, axes: str, wcs: str = "G54") -> dict:
         k, f = self.k, self.f
         k.look(0.0, key_at("handle_jog"))
@@ -267,6 +278,10 @@ class Probing:
             if "bore" in f:
                 self.bore(np.array(f["bore"]["centre_mm"]), f["bore"]["z_mm"], np.array(f["datum_mm"]),
                           "".join(a for a in "xy" if a not in f), wcs)
+            if "boss" in f:
+                b = f["boss"]
+                assert np.allclose(b["centre_mm"], f["datum_mm"][:2]), "a boss's centre is the zero: no shift is keyed"
+                self.boss(np.array(b["centre_mm"]), b["z_mm"], 2 * b["r_mm"])
             for a in ("x", "y"):
                 if a in f:
                     s = f[a]
@@ -527,6 +542,19 @@ PROBES |= {
     ("ll-1005337", "op20"): {"bore": (-40.5, 579.5, -8.95), "datum": (-40.5, 579.5, -0.95),
                              "check": {"bore": (-20.5, 20.5, -8.95), "wcs": "G55"}},
 }
+# ll-1007224 Op 30 (G2), turned, lying on its flange (moonshot/motion/loads.py ENVELOPE_MM): X and Y by a boss cycle
+# round the Ø31.5 top spigot (model y 12.2..15.4, the axis y), the ball 1.6 mm above the flange, where the spigot is
+# straight between its R0.4 root and 0.5 chamfer (0.4..2.7); Z off the flange's top, halfway out between the spigot
+# and its edge, on the side the holes' pattern leaves bare (model -z). The cuts take the box down to the flange round
+# the spigot: a box's sides, tangent to the spigot where the cycle touches it on X and Y through its centre
+_SPIGOT_R, _AIR = 15.75, ((12.2, 16.0),)
+PROBES |= {
+    ("ll-1007224", "op30"): {"boss": ((0.0, 13.8, 0.0), _SPIGOT_R), "z": (0.0, 12.2, -23.5),
+                             "cuts": [((-32.0, -_SPIGOT_R), *_AIR, (-32.0, 32.0)), ((_SPIGOT_R, 32.0), *_AIR, (-32.0, 32.0)),
+                                      ((-_SPIGOT_R, _SPIGOT_R), *_AIR, (-32.0, -_SPIGOT_R)),
+                                      ((-_SPIGOT_R, _SPIGOT_R), *_AIR, (_SPIGOT_R, 32.0))],
+                             "datum": (0.0, 12.2, 0.0)},
+}
 # the fixed jaw's -x end, and its face 17 mm past the end of a part up to 83 mm long: 5 and 3 mm below its top
 FIXED_JAW = {"jaw_end": ([vise.VISE["x"] - vise.VISE["half_width"], vise.VISE["fixed_face_y"] + 20.0, JAW_TOP_MM - 5.0],
                          [-1.0, 0.0, 0.0]),
@@ -583,6 +611,10 @@ def g1_features(plan: dict, setup_id: str, check: bool = False) -> dict:
     if "bore" in spec:
         b, top = world(spec["bore"]), c[2] + h[2]
         out["bore"] = {"centre_mm": b[:2].tolist(), "z_mm": float(b[2]), "r_mm": DOWEL_R_MM, "top_z_mm": float(top)}
+    if "boss" in spec:
+        point, r = spec["boss"]
+        b = world(point)
+        out["boss"] = {"centre_mm": b[:2].tolist(), "z_mm": float(b[2]), "r_mm": r}
     return out
 
 

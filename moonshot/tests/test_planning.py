@@ -110,13 +110,30 @@ def test_a_caption_inventing_a_number_is_caught():
 
 @pytest.mark.parametrize("part", PARTS)
 def test_steps_have_unique_ids_and_every_operation_has_a_cycle_step(part):
+    """A machine's operation is a cycle step; one done by hand on a manual machine (the surface grinder's) is a step
+    of people's work of its own."""
     plan, steps = load_plan(part), expand(load_plan(part))
     ids = [s["id"] for s in steps]
     assert len(ids) == len(set(ids))
-    ops = {(s["id"], op["id"]) for s in plan["setups"] for op in s["operations"]}
+    ops = {(s["id"], op["id"]) for s in plan["setups"] for op in s["operations"] if op.get("by") != "hand"}
+    by_hand = {(s["id"], op["id"]) for s in plan["setups"] for op in s["operations"] if op.get("by") == "hand"}
     machine_only = [s for s in steps if s["kind"] == "cycle"]
     assert ops == {(s["setup"], s["operation"]) for s in machine_only if "setup" in s}
+    assert by_hand == {(s["setup"], s["operation"]) for s in steps if s["kind"] == "human" and "operation" in s}
     assert all(s["station"] == "outside" for s in machine_only if "setup" not in s)     # a vendor's process
+
+
+@pytest.mark.parametrize("part", PARTS)
+def test_a_vf2_operations_stated_speeds_are_the_cutting_simulations(part):
+    """Where a plan writes a VF-2 operation's speed and feed out, they are the ones the cycle runs (moonshot/sim/cam.py
+    tool(), by the plan's material), so the plan can't say one thing and the cut do another."""
+    from moonshot.sim import cam
+    plan = load_plan(part)
+    for s in plan["setups"]:
+        for op in s["operations"]:
+            if s["machine"] == "vf2" and "speeds" in op:
+                t = cam.tool(op["tool"], cam.material_of(plan))
+                assert (op["speeds"]["rpm"], op["speeds"]["feed_mm_min"]) == pytest.approx((t.rpm, t.feed), rel=1e-3)
 
 
 @pytest.mark.parametrize("part", PARTS)

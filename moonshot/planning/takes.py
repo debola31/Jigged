@@ -156,9 +156,9 @@ def tool_takes(step: dict) -> list[str]:
 LATHE_TAKES = {"load": "load-chuck", "seat": "close-chuck"}
 LATHE_UNLOAD = ("unload-chuck",)
 LATHE_PARTED = ("pick-part", "unload-chuck")
-# a surface grinder setup's own takes: the chuck wiped, the fixture set on it and the magnet on, the part clamped in the
-# fixture, and the part and the fixture taken off
-GRINDER_TAKES = {"clean": "wipe-chuck", "load": "set-fixture", "seat": "clamp-part", "unload": "unload-part"}
+# a surface grinder setup's own takes: the chuck and the keepers wiped, the part set down and the keepers set tight
+# round it, the magnet switched on, and the part and the keepers taken off
+GRINDER_TAKES = {"clean": "wipe-chuck", "load": "block-in", "seat": "magnet-on", "unload": "unload-part"}
 
 
 def setup_take(part: str, setup: str, take: str) -> str:

@@ -4,8 +4,8 @@ Deterministic: every mill setup expands to the shop's setup pattern for how the 
 parallels, standing on the vise floor against a stop, or a plate clamped to the table, which the next setup may
 slide along it to reach what the machine's travel didn't), a band saw setup to the
 saw's, a lathe setup to the lathe's (the stock in its chuck or collet, the turret's tools, Z on the part's end), a
-surface grinder setup to the grinder's (a fixture on the magnetic chuck, the part clamped in it, the wheel touched
-off), each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
+surface grinder setup to the grinder's (the part blocked in by keepers on the magnetic chuck, the magnet on, the
+wheel touched off), each operation becomes a short cycle step, and the finishing work follows. Each step's caption is built only
 from its `facts`, so it can't name a tool, size or setting the plan doesn't contain (plan §2, O8; checked by
 `caption_names_only_facts`).
 
@@ -56,7 +56,6 @@ CHUCKS = {"chuck3": ("the 3-jaw chuck", "its jaws", "Close the jaws with the foo
                      "open the jaws with the foot pedal"),
           "c5": ("the 5C collet chuck", "its collet", "Tighten the collet with the chuck key.",
                  "loosen the collet with the key")}
-FIXTURES = {"insert-fixture": "the insert fixture"}
 
 
 def step(sid: str, title: str, caption: str, facts: dict, kind: str = "human", **extra) -> dict:
@@ -128,25 +127,24 @@ def lathe(s: dict, faces_out: dict, loaded: dict[str, set[str]]) -> list[dict]:
 
 
 def grinder(s: dict, faces: dict) -> list[dict]:
-    """A manual surface grinder setup: the fixture on the magnetic chuck, the part clamped in it, the wheel touched
-    down on its top and set across from its edge by hand (a manual grinder has no work offsets), each operation, then
-    the part and the fixture off."""
+    """A manual surface grinder setup: the part blocked in on the magnetic chuck by ground steel keepers set tight
+    round it (a part the magnet holds too weakly, as carbide), the magnet switched on, the wheel touched down on its
+    top and set across from its edge by hand (a manual grinder has no work offsets), each operation, then the part
+    and the keepers off."""
     w, p, m = s["workholding"], s["id"], s["machine"]
-    f = {"setup": s["title"], "fixture": FIXTURES.get(w["fixture"], w["fixture"]), "on": w["on"],
-         "up": faces[s["face_up"]]}
+    f = {"setup": s["title"], "keepers": w["keepers_are"], "on": w["on"], "up": faces[s["face_up"]]}
     return [
-        step(f"{p}-clean", "Clean the chuck", "Wipe {on} and the base of {fixture} clean.", f, setup=p, machine=m),
-        step(f"{p}-load", "Set the fixture down", "Set {fixture} on {on} and switch the magnet on.", f,
+        step(f"{p}-clean", "Clean the chuck", "Wipe {on} and {keepers} clean.", f, setup=p, machine=m),
+        step(f"{p}-load", "Block the part in", "Set the part on {on}, {up}, and set {keepers} tight round it.", f,
              setup=p, machine=m),
-        step(f"{p}-seat", "Clamp the part", "Seat the part in the pocket of {fixture}, {up}, and tighten its clamp.",
-             f, setup=p, machine=m),
+        step(f"{p}-seat", "Switch the magnet on", "Switch the magnet on, holding {keepers} against the part.", f,
+             setup=p, machine=m),
         step(f"{p}-touch", "Touch off",
              "Touch the wheel down on the top and zero the down-feed, then set the wheel's edge {land} inside the "
              "cutting edge.", f | {"land": s["datum"]["land"]}, setup=p, machine=m),
         *cycles(s),
         step(f"{p}-unload", "Take the part out",
-             "Loosen the clamp and lift the part out, then switch the magnet off and lift {fixture} off.", f,
-             setup=p, machine=m),
+             "Switch the magnet off, lift the part out and take {keepers} off.", f, setup=p, machine=m),
     ]
 
 

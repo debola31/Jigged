@@ -180,10 +180,10 @@ def fits(setup: dict, stock: dict) -> list[str]:
 
 def named_assets(plan: dict) -> set[str]:
     """Every catalogue entry the plan names: its operations' tools, its finishing steps' gauges, and each setup's
-    vise, chuck and fixture."""
+    vise, chuck, fixture and keepers."""
     tools = {op["tool"] for s in plan["setups"] for op in s["operations"]}
     tools |= {t for f in plan.get("finish", []) for t in f.get("tools", [])}
-    tools |= {s["workholding"][k] for s in plan["setups"] for k in ("vise", "chuck", "fixture")
+    tools |= {s["workholding"][k] for s in plan["setups"] for k in ("vise", "chuck", "fixture", "keepers")
               if k in s.get("workholding", {})}
     return tools
 

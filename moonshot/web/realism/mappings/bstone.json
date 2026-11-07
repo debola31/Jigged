@@ -1,0 +1,54 @@
+{
+ "asset": "bstone",
+ "about": "Norton IB6 India combination bench stone, 152.4 x 50.8 x 25.4 mm, modelled from scratch lying flat with its fine face up, as the placeholder: one closed aluminium-oxide block, the fine grit's half an orange tan, the coarse grit's half below it a darker grey-brown, each half the thickness, their bonded joint a slightly ragged line round the sides, every outside edge broken 1 mm (none at the joint); a dry, matte grain from the shared rubber tile, the coarse half's coarser and deeper.",
+ "reviewed": "2026-11-06: draft; checked against Norton's product photograph of the IB6 with its box (hardwareworld.com, item TVE3U2) for the grits' colours and the joint, and the record's dimensions and the placeholder's box; the look sheets and the page-side renders (loadcheck: front, close) reviewed, the rendered sides' colours sampled against the photograph's",
+ "source": {
+  "path": "realism/sources/bstone/bstone.glb"
+ },
+ "double_sided": false,
+ "fallback": "bstone_fine",
+ "cad": {
+  "*": {
+   "fine": "bstone_fine",
+   "coarse": "bstone_coarse"
+  }
+ },
+ "rules": [],
+ "atlas": 512,
+ "materials": {
+  "bstone_fine": {
+   "family": "rubber",
+   "color": [
+    0.43,
+    0.172,
+    0.062
+   ],
+   "rough": 0.86,
+   "metal": 0.0,
+   "tile_m": 0.06,
+   "normal": 0.8,
+   "about": "fine India (aluminium oxide): an orange tan, matte, a fine even grain; saturated past the photograph's so the environment's sheen at a glancing view leaves it orange"
+  },
+  "bstone_coarse": {
+   "family": "rubber",
+   "color": [
+    0.19,
+    0.122,
+    0.078
+   ],
+   "rough": 0.91,
+   "metal": 0.0,
+   "tile_m": 0.1,
+   "normal": 1.4,
+   "about": "coarse India: a darker grey-brown, drier, its grain coarser and deeper"
+  }
+ },
+ "unsure": [
+  {
+   "what": "the coarse half's colour: the record says only that the fine face is the lighter orange; Norton's photograph shows the coarse half a dark grey-brown, which this follows"
+  },
+  {
+   "what": "the grain is the shared rubber tile scaled down (as gwheel's abrasive is), not a photographed stone texture"
+  }
+ ]
+}

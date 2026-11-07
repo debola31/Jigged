@@ -171,7 +171,9 @@ LOOKS = {"aluminium": ("aluminium_6061", [0.8, 0.81, 0.82, 1.0], 1.0, 0.33),
          "bar": ("steel_bar_cold_finished", [0.06, 0.062, 0.068, 1.0], 0.0, 0.55),  # the sawn blank: bar stock's dark
                                                      # grey (drawn dull: metallic, it mirrors the bright shop, white)
          "black oxide": ("black_oxide", [0.018, 0.018, 0.02, 1.0], 0.5, 0.5),      # dark grey-black, satin
-         "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22)}      # bright bluish silver
+         "zinc": ("zinc_trivalent_clear", [0.74, 0.79, 0.88, 1.0], 1.0, 0.22),     # bright bluish silver
+         "bronze": ("aluminium_bronze", [0.77, 0.58, 0.33, 1.0], 1.0, 0.3),        # AMPCO 18 turned: golden
+         "carbide": ("carbide_ground", [0.46, 0.47, 0.49, 1.0], 1.0, 0.28)}        # ground tungsten carbide, grey
 
 
 def write_glb(shape, path: Path, look: str = "aluminium") -> None:

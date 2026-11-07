@@ -127,6 +127,13 @@ def grip_spec(take: StepTake, plate: SB.Plate, side: str = "R", nuts: list[SB.Cl
     for c in nuts or ():                                     # the clamps, clamped, under the handle
         at, Rc = c.pose("clamped")
         cols += [obox(at + Rc @ b, Rc, hh) for _, b, hh in SB.strap_boxes()]
+    if nuts:
+        # and the plate as the wrench lies on it, where the hand takes it up: solved on the nut alone, the fingers
+        # reached under the handle's edges, and coming down on it lying there, met the plate before the handle (the
+        # right hand's 4 N two frames before its grasp, its opening cut short, widest at 69% of its reach)
+        p_r, y_r = rest(plate)
+        M = R @ turned(y_r).T
+        cols.append(obox(p + M @ (np.asarray(plate.centre, float) - p_r), M, plate.size / 2))
     S = lambda *a: list(a) + [0.0, 0.0]                                                         # noqa: E731
     depth = (1.0, 4.0)
     k = PAD_IN_MM

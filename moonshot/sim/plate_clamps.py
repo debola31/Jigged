@@ -33,12 +33,10 @@ from moonshot.world import wrench as WR
 TAKES = data_root() / "takes"
 DOORS = ("door_left", "door_right")
 DOORS_OPEN_MM = 600.0
-WRENCH_PUSH_MM = 2.0         # the eye pushes the wrench's box end down onto a nut by at most this much error
+WRENCH_PUSH_MM = 5.0         # the eye pushes the wrench's box end down onto a nut by at most this much error: at 2, a
+                             # far nut's box end come down 0.75 mm off its middle sat on its chamfers at 1.5 N through
+                             # the dwell, and the first stroke swung it off the nut
 WRENCH_TURN_SCALE = 0.02     # the wrench's weld's turn against its place while the hand strokes it (MuJoCo's torquescale)
-STRAP_TURN_GAIN = 3.0        # a strap's turn off its place, as the eye lines it up on its slot, weighed this many times
-                             # the eye's own (a radian as 100 mm, moonshot/sim/runner.py correction): at its own, a near
-                             # strap's 1.6 deg turn off on its way over the plate's end came out 1.1 deg past it as it
-                             # went down, where its place is 1 deg
 
 
 class PlateClamps(FirmGrip, TakeRunner):
@@ -126,11 +124,14 @@ class PlateClamps(FirmGrip, TakeRunner):
         """While a clamp or the wrench is carried, the eye is on it: its middle and its turn against the plan (its
         keys). The wrench's box end, over a nut and not swinging, is turned onto the nut's flats where they really are;
         and over a nut the eye never pushes it down more than WRENCH_PUSH_MM: come down on the hex's top, it is felt,
-        not seen, and set down harder it was pinned there, off the flats, and slid off onto the clamp. The turn onto the
-        next nut's flats is eased in over the carry to it (to_flats), as a hand lines a wrench up on its way to the nut:
-        turned there only over the nut, up to 30 deg at once, it swung the box end 25-57 mm off the nut. The wrench is
-        turned about its box end: the eye's turn of the hand, which holds it 135 mm along its handle, comes with the
-        hand's move that keeps the box end where it is."""
+        not seen (set down harder while it came down off the flats, as the six-point ring did, it was pinned there and
+        slid off onto the clamp; square on them, its chamfers lead it on). The turn onto the next nut's flats is eased
+        in over the carry to it (to_flats), as a hand lines a wrench up on its way to the nut: turned there only over
+        the nut, up to 30 deg at once, it swung the box end 25-57 mm off the nut. What it holds is turned about its own
+        middle, the wrench about its box end: the eye's turn of the hand, which holds a strap by its heel and the
+        wrench 135 mm along its handle, comes with the hand's move that keeps that middle where it is. Turned about the
+        hand, a strap's turn moved its middle too, and ll-1005337's left straps rocked 8-14 mm either side of their
+        places along their slots as they came over them (weighed 3 times, 18 mm: one slid off the plate)."""
         self._now = t
         m, d = self.model, self.data
         e = self.carrying(side, t)
@@ -144,11 +145,8 @@ class PlateClamps(FirmGrip, TakeRunner):
         b = m.body(held).id
         turn = Rotation.from_matrix(R @ d.xmat[b].reshape(3, 3).T).as_rotvec()
         err = np.r_[p * 0.001 - d.xpos[b], turn]
-        if held == "wrench":
-            hb = m.body(f"{side}_hand").id
-            err[:3] += np.cross(turn, d.xpos[hb] - d.xpos[b])         # the hand's move for a turn about the box end
-        else:
-            err[3:] *= STRAP_TURN_GAIN
+        hb = m.body(f"{side}_hand").id
+        err[:3] += np.cross(turn, d.xpos[hb] - d.xpos[b])     # the hand's move for a turn about the held's middle
         if over:
             err[2] = max(err[2], -WRENCH_PUSH_MM * 0.001)
         return err

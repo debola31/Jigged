@@ -238,16 +238,33 @@ def test_the_three_jaws_move_together_through_the_makers_stroke():
     assert all(abs(q(m, d, f"st25_jaw_{k}")) * 1000 < 0.05 for k in range(3))
 
 
+def turns_with_spindle(ctl, seconds=1.0):
+    """(the spindle's turn, the bar's turn) over `seconds` (rad): a bar held without slipping turns as far."""
+    m, d = ctl.model, ctl.data
+    sp, bar = m.jnt_dofadr[m.joint("st25_spindle").id], m.jnt_dofadr[m.joint("test_bar").id]
+    a_sp = a_bar = 0.0
+    for _ in range(int(round(seconds / m.opt.timestep))):
+        ctl.step()
+        R = d.body("test_bar").xmat.reshape(3, 3)
+        a_sp += d.qvel[sp] * m.opt.timestep
+        a_bar += (R @ d.qvel[bar + 3:bar + 6])[0] * m.opt.timestep
+    return a_sp, a_bar
+
+
 def grip_n(m, d, part="test_bar"):
-    """The sum of the normal forces the chuck's jaws or the collet put on the part (N)."""
+    """The chuck's gripping force on the part (N), as a maker measures it: each jaw's (or collet finger's) push on the
+    part along its own stroke, summed over the jaws. A contact's normal force counts by its component along the
+    jaw's slide, as a bore's arc spreads it over faces that lean from the jaw's line."""
     total, f = 0.0, np.zeros(6)
     pb = m.body(part).id
     for i in range(d.ncon):
         c = d.contact[i]
         b1, b2 = m.geom_bodyid[c.geom1], m.geom_bodyid[c.geom2]
-        if pb in (b1, b2) and m.body(b1 if b2 == pb else b2).name.startswith(("st25_jaw", "st25_collet")):
+        jaw = b1 if b2 == pb else b2
+        if pb in (b1, b2) and m.body(jaw).name.startswith(("st25_jaw", "st25_collet")):
             mujoco.mj_contactForce(m, d, i, f)
-            total += f[0]
+            slide = d.xaxis[m.body_jntadr[jaw]]
+            total += f[0] * abs(float(np.dot(c.frame[:3], slide)))
     return total
 
 
@@ -260,11 +277,10 @@ def test_the_br10_grips_with_its_makers_ratio_and_holds_a_bar_at_speed():
     assert grip_n(m, d) == pytest.approx(10000.0 * BR10["grip_per_pull"], rel=0.05)
     close_door(ctl)
     ctl.spindle(1000.0)
-    run(ctl, 2.0)
-    w_sp = d.qvel[m.jnt_dofadr[m.joint("st25_spindle").id]]
-    w_bar = d.qvel[m.jnt_dofadr[m.joint("test_bar").id] + 3]          # the free bar's spin about world X
-    assert w_sp > 100
-    assert w_bar == pytest.approx(w_sp, rel=0.01)                    # turning with it, not slipping
+    run(ctl, 1.0)
+    a_sp, a_bar = turns_with_spindle(ctl)
+    assert a_sp > 100                                                # 1,000 rpm: 105 rad in the second
+    assert a_bar == pytest.approx(a_sp, rel=0.005)                   # turning with it, not slipping
 
 
 def test_the_chuck_wont_unclamp_while_turning_past_setting_283(st25):
@@ -330,9 +346,10 @@ def test_the_collet_chuck_closes_on_a_bar_with_its_makers_ratio():
     assert grip_n(m, d) == pytest.approx(5000.0 * ROYAL["grip_per_pull"], rel=0.05)
     close_door(ctl)
     ctl.spindle(2000.0)
-    run(ctl, 2.0)
-    w_sp = d.qvel[m.jnt_dofadr[m.joint("st25_spindle").id]]
-    assert d.qvel[m.jnt_dofadr[m.joint("test_bar").id] + 3] == pytest.approx(w_sp, rel=0.01)
+    run(ctl, 1.0)
+    a_sp, a_bar = turns_with_spindle(ctl)
+    assert a_sp > 200
+    assert a_bar == pytest.approx(a_sp, rel=0.005)
 
 
 def test_the_open_collet_clears_its_bar_and_closes_under_its_size():

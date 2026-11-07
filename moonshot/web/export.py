@@ -28,8 +28,9 @@ PUBLISHED = Path(__file__).resolve().parent / "published.json"
 PARTS = ["nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223", "ct-tpg322", "ll-1011439",
          "ll-1007224", "mcm-8017t3", "nist-ctc-05", "mcm-8492a054", "mcm-91259a544", "ct-8848hn", "nist-ctc-01",
          "ll-1011443", "ll-1011604", "ct-brmb0143", "ct-107w-ngd-3r", "ll-1006941", "ct-10004-bcrm"]
-LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223",
-        "ct-tpg322", "ll-1011439", "ll-1007224"}
+# The user's decision (2026-11-06): five parts on the page, G1's. G2-G5 are dropped; G2's published media stays in the
+# bucket, unlisted.
+LIVE = {"nist-ftc-10", "nist-ftc-09", "ll-1005337", "ct-slbeam", "ll-1007223"}
 # Where a finishing station's steps happen: its zone in layout.json.
 STATION_ZONES = {"bench": "benches", "inspection": "inspection", "outside": "shipping"}
 # shop.json's lists of things, in the order the page lists them.

@@ -64,9 +64,9 @@ EFFORT = 0.8                 # the hand's hold on the handle while it strokes, t
 DWELL_S = 0.15               # ... and settled on the flats before it's swung: swung as it came down, a box end not yet
                              # down past its chamfer was tipped off the nut
 PINCH_W = 4.0                # the planned pinch kept on the handle's arc while the hand strokes (use), against the pose
-LIFT_DELAY_S = 0.14          # the wrench starts up this long after the carry starts (people's 163-265 ms from the load
-                             # coming on to its coming off the plate: at the parallels' 0.16 the right hand's took 267,
-                             # at 0.1 the left's 133)
+LIFT_DELAY_S = {"R": 0.14, "L": 0.18}   # the wrench starts up this long after each hand's carry starts (people's
+                             # 163-265 ms from the load coming on to its coming off the plate: at the parallels' 0.16 the
+                             # right hand's took 267, at 0.1 and at 0.14 the left's 133)
 REACH_PEAK = {"R": 0.81, "L": 0.85}   # where in its reach for the handle each hand opens widest (people's 71-77%,
                              # person.peak_aperture_reach_frac): from where it hung, at the parallels' 0.76 the right's
                              # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5; the right's, its
@@ -268,7 +268,7 @@ def use(take: StepTake, plate: SB.Plate, clamps: list[SB.Clamp], t0: float, dire
     take.effort(side, t_c, 0.0, grip)
     take.effort(side, t_c + 0.2, EFFORT, grip)
     t_load = t_c + SP.PRELOAD_S
-    k, swings, work = keys(plate, clamps, t_load + LIFT_DELAY_S, direction, gap_mm, turns)
+    k, swings, work = keys(plate, clamps, t_load + LIFT_DELAY_S[side], direction, gap_mm, turns)
     grab = grab_at()
     take.follow(side, t_c, k[-1][0] + 0.3, grip, lambda tt: (lambda R, p: p + R @ grab)(*PC.key_at(k, tt)),
                 lambda tt: PC.key_at(k, tt)[0] @ R0.T)

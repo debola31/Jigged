@@ -67,10 +67,10 @@ PINCH_W = 4.0                # the planned pinch kept on the handle's arc while 
 LIFT_DELAY_S = 0.14          # the wrench starts up this long after the carry starts (people's 163-265 ms from the load
                              # coming on to its coming off the plate: at the parallels' 0.16 the right hand's took 267,
                              # at 0.1 the left's 133)
-REACH_PEAK = {"R": 0.78, "L": 0.85}   # where in its reach for the handle each hand opens widest (people's 71-77%,
+REACH_PEAK = {"R": 0.81, "L": 0.85}   # where in its reach for the handle each hand opens widest (people's 71-77%,
                              # person.peak_aperture_reach_frac): from where it hung, at the parallels' 0.76 the right's
-                             # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5; at 0.85, the
-                             # right's, its grip solved on its near nut, at 84.7
+                             # measured widest at 68% and the left's at 70%, the left's at 0.8 at 70.5; the right's, its
+                             # grip solved on its near nut, at 0.85 at 84.7 and at 0.78 at 68.5
 PAD_IN_MM = 0.5              # the pinch's pads this far into the handle's edges as it is solved: at 1.0, gripped with
                              # EFFORT through the strokes, the left hand's skin stood 3.4-3.6 mm in it (the limit 3.5)
 

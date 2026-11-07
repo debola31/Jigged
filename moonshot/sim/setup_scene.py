@@ -150,15 +150,20 @@ class Table:
 
     def meshes(self, folder: Path) -> dict[str, dict]:
         """The parallels (and stop) as boxes at the load's size, and the part as its stock (stock_glb), each written
-        into the take's folder; a plate, nothing (drawn from its geoms)."""
+        into the take's folder; a plate, nothing (drawn from its geoms). A setup none of whose cycles has run yet draws
+        the finished part (parts/<part>/finished.glb, the STEP in metres: moonshot/library/bench_links.py), its holes
+        and all, if the part has one; else the box."""
         if self.is_plate:
             return {}
         out = V.render_meshes(self.load, folder)
-        src = self.stock_glb()
+        src, scale = self.stock_glb(), 1.0
         if src is None:
-            return out
+            src, scale = data_root() / "parts" / self.part / "finished.glb", 1000.0
+            if not src.exists():
+                return out
         import trimesh
         mesh = trimesh.load(src, force="mesh")
+        mesh.apply_scale(scale)
         R, mid = np.asarray(self.pose["R"], float), np.asarray(self.pose["envelope_mm"], float).mean(1)
         T = np.eye(4)
         T[:3, :3], T[:3, 3] = R, -R @ mid

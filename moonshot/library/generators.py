@@ -363,8 +363,46 @@ class Caliper:
     slider_t_mm: float = 16.0     # [proposed] its thickness in front of the beam's back
 
 
+@dataclass(frozen=True)
+class Micrometer:
+    """An outside micrometer lying on its side, its C-frame flat: the spindle's axis along +X with the anvil's face at
+    x = 0, the frame's C below the axis toward -Y; letters and the head's lengths as the maker's drawing has them."""
+    id: str
+    min_mm: float                 # the anvil-to-spindle gap at the range's start
+    reading_mm: float             # shown opened to this
+    frame_gap_mm: float           # L: the anvil's base to the barrel's face
+    anvil_mm: float               # a: the anvil out of the frame
+    anvil_side_mm: float          # b: the frame beside the anvil
+    throat_mm: float              # c: the axis to the frame's inside
+    spindle_dia_mm: float         # d
+    thimble_dia_mm: float
+    barrel_mm: float = 14.5       # the head along the axis from the barrel's face, as the drawing: 14.5, 3, 47, 17
+    collar_mm: float = 3.0
+    sleeve_thimble_mm: float = 47.0
+    ratchet_mm: float = 17.0
+    frame_w_mm: float = 12.0      # [proposed] the frame's width round its C
+    frame_t_mm: float = 8.0       # [proposed] its thickness
+    boss_mm: float = 8.0          # [proposed] the anvil's boss and the barrel above the axis
+    sleeve_dia_mm: float = 14.0   # [proposed]
+    thimble_mm: float = 22.0      # [proposed] the thimble's length, of the 47
+    ratchet_dia_mm: float = 10.0  # [proposed]
+
+
+@dataclass(frozen=True)
+class BenchStone:
+    """A combination bench stone lying flat, its fine face up: its length along X, centred, its underside on z = 0;
+    the two grits each half its thickness."""
+    id: str
+    length_mm: float
+    width_mm: float
+    thickness_mm: float
+    chamfer_mm: float = 1.0       # [proposed] the edges' break
+
+
 GAUGES = [PlugGauge("thread-m4", 4.0, 0.7, 10.3, 7.1, 2 * INCH, 0.375 * INCH)]
 CALIPERS = [Caliper("cal24", 780.0, 25.0, 90.0, 38.0, 35.9)]
+MICROMETERS = [Micrometer("mic2", 1.0 * INCH, 1.5 * INCH, 30.3 + 1.0 * INCH, 2.5, 10.0, 38.0, 6.35, 18.0)]
+STONES = [BenchStone("bstone", 6 * INCH, 2 * INCH, 1 * INCH)]
 
 GAUGE_SOURCES = {
     "thread-m4": {
@@ -388,6 +426,48 @@ GAUGE_SOURCES = {
                   {"name": "Inside jaw length", "value": 38, "unit": "mm", "note": "A"},
                   {"name": "Beam height", "value": 25, "unit": "mm", "note": "H"},
                   {"name": "Mass", "value": 1350, "unit": "g", "note": "Mitutoyo's datasheet"}]},
+    "mic2": {
+        "dims": "Mitutoyo's own 103-178 datasheet (shop.mitutoyo.eu) and the 103 series' dimension drawing on it "
+                "(103-927-10_d2): the anvil a 2.5 mm out of the frame, b 10 mm beside it, a c 38 mm throat, the d "
+                "6.35 mm spindle, an 18 mm thimble, the head 14.5 + 3 + 47 + 17 mm from the barrel's face, 215 g. "
+                "Its L reads 30.3 mm, the 0-1 in 103-177's figure, which leaves no room for a 1-2 in reading; the "
+                "metric 25-50 mm twin (103-138, the same b, c and 215 g) has 55.3 = 30.3 + 25, so L is taken as "
+                "30.3 + 25.4 = 55.7 mm. The frame 12 mm wide and 8 mm thick, without its lightening holes or the "
+                "spindle lock, the sleeve 14 mm across, 22 mm of the 47 the thimble and the ratchet 10 mm across "
+                "[proposed]. Shown opened to 1.5 in, lying on its side as mic1. Mitutoyo's pages link no CAD; its "
+                "CAD needs an account",
+        "urls": ["https://shop.mitutoyo.eu/web/mitutoyo/en/all/$catalogue/mitutoyoData/PR/103-178/datasheet.xhtml",
+                 "https://shop.mitutoyo.eu/web/mitutoyo/en/all/$catalogue/mitutoyoData/PR/103-138/datasheet.xhtml"],
+        "specs": [{"name": "Range", "value": [1, 2], "unit": "in"},
+                  {"name": "Graduation", "value": 0.001, "unit": "in"},
+                  {"name": "Accuracy", "value": 0.0001, "unit": "in", "note": "plus or minus (MPE E)"},
+                  {"name": "Spindle diameter", "value": 6.35, "unit": "mm", "note": "d"},
+                  {"name": "Throat depth", "value": 38, "unit": "mm", "note": "c"},
+                  {"name": "Thimble diameter", "value": 18, "unit": "mm"},
+                  {"name": "Measuring force", "value": [5, 10], "unit": "N"},
+                  {"name": "Measuring faces", "value": "carbide-tipped, micro-lapped, with ratchet stop"},
+                  {"name": "Mass", "value": 215, "unit": "g", "note": "Mitutoyo's datasheet"}]},
+    "bstone": {
+        "dims": "Norton's own product pages for 61463685560, the IB6 (nortonabrasives.com, en-us 'Norton AO "
+                "Combination Grit Benchstone' and en-gb 'Combination Bench Stone', read through a search as the site "
+                "answers 403 to anything but a browser): 6 x 2 x 1 in (152.4 x 50.8 x 25.4 mm), India aluminium "
+                "oxide, coarse on one face and fine on the other, 320 grit; the grits each half its thickness, the "
+                "fine face up, the edges broken 1 mm, the fine face a lighter orange than the coarse, and 2.75 g/cc "
+                "for its mass [proposed]. Norton's pages offer no CAD. At the inspection bench, for ll-1011439's "
+                "deburr: lying at (300, -100) mm in the bench's frame (moonshot/library/stations/"
+                "inspection_bench.json), its length along X, right of where the deburr tool lies (moonshot/motion/"
+                "deburr.py TOOL_AT, 190, -230), clear of the roughness tester (to y -163) and the gauge-block case "
+                "(from y 106) [proposed]; the station's rests are its seven instruments, which the bench's gate "
+                "fixes, so it isn't among them",
+        "urls": ["https://www.nortonabrasives.com/en-us/product/norton-ao-combination-grit-benchstone",
+                 "https://www.nortonabrasives.com/en-gb/product/sticks-stones-sharpening-stones-combination-bench-stone",
+                 "https://sourceatlantic.ca/Product/61463685560"],
+        "specs": [{"name": "Length", "value": 6, "unit": "in"},
+                  {"name": "Width", "value": 2, "unit": "in"},
+                  {"name": "Thickness", "value": 1, "unit": "in"},
+                  {"name": "Abrasive", "value": "India (aluminium oxide), an oil stone"},
+                  {"name": "Grit", "value": "coarse and fine, one each face; 320 grit (Norton)"},
+                  {"name": "Mass", "value": 540, "unit": "g", "note": "volume x 2.75 g/cc [proposed]"}]},
 }
 
 
@@ -448,6 +528,53 @@ def caliper(c: Caliper) -> list[tuple[str, cq.Workplane, list[int]]]:
     bb = cq.Compound.makeCompound([s.val() for _, s, _ in parts]).BoundingBox()
     move = (-(bb.xmin + bb.xmax) / 2, -(bb.ymin + bb.ymax) / 2, -bb.zmin)
     return [(n, s.translate(move), col) for n, s, col in parts]
+
+
+def micrometer(m: Micrometer) -> list[tuple[str, cq.Workplane, list[int]]]:
+    """The micrometer's parts at its reading, lying on its side (the thimble on z = 0), centred on its box in X and
+    Y. The C-frame is the U between the anvil's boss and the barrel, its inside c below the axis and its outside the
+    frame's width further; the head turns out of the barrel as the reading opens, thimble and ratchet with it."""
+    t = m.frame_t_mm
+
+    def along(x0: float, x1: float, d: float) -> cq.Workplane:     # a cylinder on the spindle's axis
+        return cq.Workplane("YZ").workplane(offset=x0).circle(d / 2).extrude(x1 - x0)
+
+    def u_shape(x0: float, x1: float, depth: float, top: float) -> cq.Workplane:  # a U, its round bottom `depth` down
+        r, cx = (x1 - x0) / 2, (x0 + x1) / 2
+        rect = cq.Workplane("XY").box(x1 - x0, top + depth - r, t).translate((cx, (top - depth + r) / 2, 0))
+        disc = cq.Workplane("XY").circle(r).extrude(t / 2, both=True).translate((cx, -depth + r, 0))
+        below = cq.Workplane("XY").box(2 * r + 2, r + 1, t + 2).translate((cx, -depth + r - (r + 1) / 2, 0))
+        return rect.union(disc.intersect(below))                     # the disc's lower half only
+
+    a, b, barrel = m.anvil_mm, m.anvil_side_mm, -m.anvil_mm + m.frame_gap_mm     # the barrel's face
+    head = barrel + m.barrel_mm + m.collar_mm                                     # where the sleeve starts
+    shift = m.reading_mm - m.min_mm                                               # the thimble's travel out
+    t0 = head + m.sleeve_thimble_mm - m.thimble_mm + shift                        # the thimble's start
+    frame = (u_shape(-a - b, barrel + m.barrel_mm, m.throat_mm + m.frame_w_mm, m.boss_mm)
+             .cut(u_shape(-a, barrel, m.throat_mm, m.boss_mm + 1)))
+    parts = [
+        ("frame", frame, [150, 152, 158, 255]),
+        ("anvil", along(-a, 0.0, m.spindle_dia_mm), [214, 214, 220, 255]),
+        ("spindle", along(m.reading_mm, barrel, m.spindle_dia_mm), [214, 214, 220, 255]),
+        ("collar", along(barrel + m.barrel_mm, head, m.sleeve_dia_mm + 1.0), [196, 198, 204, 255]),
+        ("sleeve", along(head, t0, m.sleeve_dia_mm), [196, 198, 204, 255]),
+        ("thimble", along(t0, t0 + m.thimble_mm, m.thimble_dia_mm), [196, 198, 204, 255]),
+        ("ratchet", along(t0 + m.thimble_mm, t0 + m.thimble_mm + m.ratchet_mm, m.ratchet_dia_mm),
+         [170, 172, 178, 255]),
+    ]
+    bb = cq.Compound.makeCompound([s.val() for _, s, _ in parts]).BoundingBox()
+    move = (-(bb.xmin + bb.xmax) / 2, -(bb.ymin + bb.ymax) / 2, -bb.zmin)
+    return [(n, s.translate(move), col) for n, s, col in parts]
+
+
+def bench_stone(s: BenchStone) -> list[tuple[str, cq.Workplane, list[int]]]:
+    """The stone's two grits, the block's edges broken before it is split, so only its outside is chamfered."""
+    L, W, T = s.length_mm, s.width_mm, s.thickness_mm
+    block = cq.Workplane("XY").box(L, W, T, centered=(True, True, False)).edges().chamfer(s.chamfer_mm)
+    half = lambda z0: cq.Workplane("XY").box(L + 2, W + 2, T / 2, centered=(True, True, False)).translate(  # noqa: E731
+        (0, 0, z0))
+    return [("coarse", block.intersect(half(0.0)), [150, 82, 44, 255]),
+            ("fine", block.intersect(half(T / 2)), [196, 120, 70, 255])]
 
 
 # --- hand tools ------------------------------------------------------------------------------------------------------
@@ -633,14 +760,19 @@ def _save(path: Path, rec: dict) -> None:
     path.write_text(json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def write_inspection(item: PlugGauge | Caliper) -> Path:
-    family = "plug_gauge" if isinstance(item, PlugGauge) else "caliper"
-    parts = plug_gauge(item) if family == "plug_gauge" else caliper(item)
-    src, lib = _dirs("inspection", item.id)
+def write_inspection(item: PlugGauge | Caliper | Micrometer | BenchStone) -> Path:
+    """A gauge's, caliper's, micrometer's or bench stone's STEP, GLB and record (its category's: a stone is a hand
+    tool)."""
+    family, builder, category = {PlugGauge: ("plug_gauge", plug_gauge, "inspection"),
+                                 Caliper: ("caliper", caliper, "inspection"),
+                                 Micrometer: ("micrometer", micrometer, "inspection"),
+                                 BenchStone: ("bench_stone", bench_stone, "hand_tools")}[type(item)]
+    parts = builder(item)
+    src, lib = _dirs(category, item.id)
     compound = cq.Workplane("XY").add(cq.Compound.makeCompound([s.val() for _, s, _ in parts]))
     cq.exporters.export(compound, str(src / f"{item.id}.step"))
     triangles = write_parts_glb(parts, lib / f"{item.id}.glb", tolerance_mm=0.02, max_triangles=MAX_TRIANGLES)
-    out = _record_path("inspection", item.id)
+    out = _record_path(category, item.id)
     base = json.loads(out.read_text(encoding="utf-8"))
     rec = sourced_record(base, {"bbox": _bbox(compound)}, GAUGE_SOURCES[item.id], family, triangles)
     _save(out, rec)
@@ -809,7 +941,7 @@ def write_lathe(t: LatheTool) -> Path:
 
 
 def main(ids: list[str]) -> None:
-    every = ({t.id: t for t in TOOLS + SOURCED} | {g.id: g for g in GAUGES + CALIPERS}
+    every = ({t.id: t for t in TOOLS + SOURCED} | {g.id: g for g in GAUGES + CALIPERS + MICROMETERS + STONES}
              | {w.id: w for w in RATCHET_WRENCHES} | {t.id: t for t in LATHE_TOOLS})
     for i in ids or list(every):
         item = every[i]

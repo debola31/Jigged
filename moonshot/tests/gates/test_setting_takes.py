@@ -1,4 +1,5 @@
-"""The setting steps' takes, Find X and Y and Set Z, in every setup of G1's parts, meet their outcomes on the full body
+"""The setting steps' takes, Find X and Y and Set Z, in every VF-2 setup of G1's parts and of G2's ll-1007224 (its Op 30:
+X and Y by a boss cycle round its top spigot, Z off its flange's top face), meet their outcomes on the full body
 at the VF-2's pendant: the work offset the machine ends with puts the spindle on the datum the take planned, the jog
 handle turns only while a hand turns it, every key the plan presses registers on the machine and no other does, and
 every per-frame check passes (docs/moonshot/physics.md). Physics tier: farm and hub only (`pytest moonshot -m farm`),
@@ -42,8 +43,10 @@ from moonshot.planning.validate import PLANS, load_plan
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
 TAKES = data_root() / "takes" / "nist-ftc-10"
-PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam")      # G1
-STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p))]
+PARTS = ("nist-ftc-10", "nist-ftc-09", "ll-1005337", "ll-1007223", "ct-slbeam",      # G1
+         "ll-1007224")                                                               # G2's part drilled on the VF-2
+# the VF-2's steps: a lathe's Set Z is a touch-off at the ST-25, not at this pendant
+STEPS = [(p, s) for p in PARTS for s in expand(load_plan(p)) if s.get("machine") == "vf2"]
 # ll-1005337's Op 20 checks the plate slid straight by probing its second dowel hole into G55 (the user's decision,
 # 2026-11-05: its finished near edge stands past the Y travel's front): a work offset, held to the probe's bar
 PROBED_CHECKS = ["ll-1005337/op20-check"]

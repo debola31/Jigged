@@ -104,8 +104,14 @@ def settle(ctl, steps=300):
         ctl.step()
 
 
+def on(d, m, body):
+    """Where a body is on the chuck: its position from the chuck's, which moves with the table."""
+    return d.xpos[m.body(body).id] - d.xpos[m.body("sg_chuck").id]
+
+
 def moved_mm(d, m, body, p0):
-    return float(np.linalg.norm(d.xpos[m.body(body).id] - p0) * 1000)
+    """How far a body has moved on the chuck since it was at p0 (on's)."""
+    return float(np.linalg.norm(on(d, m, body) - p0) * 1000)
 
 
 def switch_on(m, d, ctl):
@@ -146,7 +152,7 @@ def test_the_longitudinal_handwheel_moves_the_table_2_7_in_a_turn_and_a_push_tur
     assert turns > 0.5
     travel = (d.qpos[adr(m, "sg_table")] - x0) * 1000
     assert abs(travel - turns * 2.7 * IN) <= tol and travel > 0               # clockwise: the table goes right
-    settle(ctl, 1000)
+    settle(ctl, 4000)                                                         # on its ball ways it coasts about 2 s
     w1 = d.qpos[adr(m, "sg_table_handwheel")]
     push(m, d, ctl, "sg_table", [-80.0, 0.0, 0.0], 1000)                     # a rack and pinion isn't self-locking
     assert d.qpos[adr(m, "sg_table_handwheel")] < w1 - 0.1
@@ -187,7 +193,7 @@ def test_the_downfeed_handwheel_lowers_the_wheel_0_05_in_a_turn_in_0_0002_in_gra
     drop = h0 - ctl.wheel_above_chuck_mm()
     assert abs(drop - turns * 0.05 * IN) <= tol and drop > 0                  # clockwise: the wheel goes down
     assert ctl.downfeed_graduations() - g0 == pytest.approx(turns * 250, abs=0.5)   # the dial turns with it
-    settle(ctl, 500)
+    settle(ctl, 1500)                                                         # let go, the handwheel coasts 0.7 s
     h1 = ctl.wheel_above_chuck_mm()
     settle(ctl, 3000)                                                         # the screw holds the head's weight
     assert abs(ctl.wheel_above_chuck_mm() - h1) < 0.002
@@ -197,7 +203,7 @@ def test_a_hand_turns_the_dial_alone_to_set_it_without_moving_the_wheel(grinder)
     m, d = grinder
     ctl = Control(m, d)
     turn(m, d, ctl, "sg_downfeed_handwheel", 1.5, 500)
-    settle(ctl, 1000)
+    settle(ctl, 1500)
     h0, w0, g0 = ctl.wheel_above_chuck_mm(), d.qpos[adr(m, "sg_downfeed_handwheel")], ctl.downfeed_graduations()
     turn(m, d, ctl, "sg_downfeed_dial", -0.55, 200)                         # a fingertip turns the dial back
     settle(ctl, 1000)
@@ -328,7 +334,7 @@ def test_on_the_chuck_holds_a_steel_block_against_a_push_and_a_lift_and_off_it_d
     m, d = build(block_xml("block", BLOCK, on_chuck()))
     ctl = Control(m, d, held={"block": "steel"})
     settle(ctl)
-    p0 = d.xpos[m.body("block").id].copy()
+    p0 = on(d, m, "block")
     push(m, d, ctl, "block", [1.25 * mu * kg * 9.81, 0, 0], 500)              # off: it slides at its weight's friction
     assert moved_mm(d, m, "block", p0) > 2.0
 
@@ -337,7 +343,7 @@ def test_on_the_chuck_holds_a_steel_block_against_a_push_and_a_lift_and_off_it_d
     switch_on(m, d, ctl)
     settle(ctl)
     hold = block_hold_n() + kg * 9.81
-    p0 = d.xpos[m.body("block").id].copy()
+    p0 = on(d, m, "block")
     push(m, d, ctl, "block", [0.8 * mu * hold, 0, 0], 1000)                   # on: friction on the pull holds it
     assert moved_mm(d, m, "block", p0) < 0.1
     push(m, d, ctl, "block", [0, 0, 0.8 * hold], 1000)                        # and lifting under the pull doesn't
@@ -352,9 +358,9 @@ def test_a_lift_past_the_pull_takes_the_block_off():
     ctl = Control(m, d, held={"block": "steel"})
     switch_on(m, d, ctl)
     settle(ctl)
-    p0 = d.xpos[m.body("block").id].copy()
+    p0 = on(d, m, "block")
     push(m, d, ctl, "block", [0, 0, 1.25 * (block_hold_n() + kg * 9.81)], 300)
-    assert (d.xpos[m.body("block").id][2] - p0[2]) * 1000 > 5.0
+    assert (on(d, m, "block")[2] - p0[2]) * 1000 > 5.0
 
 
 def test_the_pull_on_the_part_is_the_chucks_pull_reversed():
@@ -384,11 +390,11 @@ def test_a_carbide_insert_gets_carbides_share_and_aluminium_none():
     assert pull == pytest.approx(0.064 * C["rated_n_cm2"] * insert[0] * insert[1] / 100, rel=0.02)
     assert np.abs(ctl.wrench.get("alu", np.zeros(6))).max() == 0.0
     kg = 14900 * np.prod(insert) * 1e-9
-    p0 = d.xpos[m.body("insert").id].copy()
+    p0 = on(d, m, "insert")
     push(m, d, ctl, "insert", [1.25 * mu * (pull + kg * 9.81), 0, 0], 500)   # a light push slides it
     assert moved_mm(d, m, "insert", p0) > 2.0
     kg = 2700 * np.prod(BLOCK) * 1e-9
-    p0 = d.xpos[m.body("alu").id].copy()
+    p0 = on(d, m, "alu")
     push(m, d, ctl, "alu", [1.25 * mu * kg * 9.81, 0, 0], 500)
     assert moved_mm(d, m, "alu", p0) > 2.0
 

@@ -3,7 +3,8 @@ serve it (plan §1: "videos and published models in Supabase Storage, never the 
 
     models/<asset>.glb             light copies of the library's GLBs for the shop view
     video/<part>/<step>.mp4        a person's step: its final render, takes/<part>-<step>/final.mp4
-    still/<part>/<step>.webp       a machine cycle: one still of the part after it, from takes/<part>-<step>/still.png
+    still/<part>/<step>.webp       a machine cycle: one still of the part after it, from takes/<part>-<step>/still.png;
+                                   or a person's step shown as its caption and a still, its take having no final
     cut/<part>/<step>.glb          ... and the part itself, the take's last stock mesh, for a desktop to turn
 
     python -m moonshot.web.media models            # decimate every asset the layout places (gltf-transform, via npx)
@@ -44,7 +45,7 @@ from pathlib import Path
 from PIL import Image
 
 from moonshot.config import data_root
-from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, media_paths, shop_assets
+from moonshot.web.export import PUBLISHED, RECORDS, _json, asset_record, build, media_paths, shop_assets, step_media
 
 GLTF_TRANSFORM = "@gltf-transform/cli@4.5.1"
 # Triangle budgets for the shop view, where a machine is a few hundred pixels across and a tool a few.
@@ -94,10 +95,25 @@ def _stale(src: Path, dst: Path) -> bool:
     return not dst.exists() or dst.stat().st_mtime < src.stat().st_mtime
 
 
-def stage_step(part: str, step: dict) -> bool:
-    """Stage one step's media from its take; False if the take has no final (or still and stock) yet."""
+def take_media(part: str, step: dict) -> dict:
+    """The media a step's take publishes: a machine cycle's still and stock; a person's final as its video or, with
+    none yet, the still its caption is shown with (export.step_media); the video's path while it has neither."""
     take = data_root() / "takes" / f"{part}-{step['id']}"
-    media = step["media"]
+    if step["kind"] != "cycle" and not (take / "final.mp4").exists() and (take / "still.png").exists():
+        return {"type": "still", "still": f"still/{part}/{step['id']}.webp"}
+    return step_media(part, step, {f"video/{part}/{step['id']}.mp4"})
+
+
+def _webp(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if _stale(src, dst):
+        Image.open(src).convert("RGB").save(dst, "WEBP", quality=STILL_QUALITY, method=6)
+
+
+def stage_step(part: str, step: dict) -> bool:
+    """Stage one step's media from its take (take_media); False if the take has no final (or still and stock) yet."""
+    take = data_root() / "takes" / f"{part}-{step['id']}"
+    media = take_media(part, step)
     if media["type"] == "video":
         src, dst = take / "final.mp4", web_root() / media["path"]
         if not src.exists():
@@ -106,13 +122,13 @@ def stage_step(part: str, step: dict) -> bool:
         if _stale(src, dst):
             shutil.copy2(src, dst)
         return True
+    if media["type"] == "still":
+        _webp(take / "still.png", web_root() / media["still"])
+        return True
     still, stock = take / "still.png", sorted((take / "stock").glob("*.glb"), key=lambda p: int(p.stem))
     if not still.exists() or not stock:
         return False
-    dst = web_root() / media["still"]
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if _stale(still, dst):
-        Image.open(still).convert("RGB").save(dst, "WEBP", quality=STILL_QUALITY, method=6)
+    _webp(still, web_root() / media["still"])
     # The stock as the cut leaves it: its last mesh (named by frame), meshopt-compressed but not simplified, so the
     # model shows the cut exactly.
     dst = web_root() / media["model"]
@@ -189,8 +205,9 @@ def upload(url: str, part: str | None, step_ids: list[str], models: bool, realis
     missing = [s["id"] for s in steps if not stage_step(part, s)]
     if missing:
         raise SystemExit(f"nothing to publish yet for {', '.join(missing)}: no final in takes/")
-    media = [p for s in steps for p in media_paths(s["media"])]
-    paths = media + ([f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))] if models else []) +         (realism_paths() if realism else [])
+    media = [p for s in steps for p in media_paths(take_media(part, s))]
+    paths = (media + ([f"models/{a}.glb" for a in shop_assets(_json(RECORDS / "layout.json"))] if models else [])
+             + (realism_paths() if realism else []))
     total = 0
     for path in paths:
         p = web_root() / path

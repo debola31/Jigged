@@ -34,9 +34,10 @@ export interface Step {
   /**
    * What the step is shown with, by path under the media root: a person's step is a video; a
    * machine cycle is the part after the cut, as a still and as the model a desktop can turn (only
-   * people's work is rendered).
+   * people's work is rendered). A person's step published as a still and no video is that still,
+   * with its caption beside it (moonshot/web/export.py step_media).
    */
-  media: { type: 'video'; path: string } | { type: 'cut'; still: string; model: string };
+  media: { type: 'video'; path: string } | { type: 'cut'; still: string; model: string } | { type: 'still'; still: string };
   /** The media is in the bucket (moonshot/web/published.json). Until then the step shows as coming. */
   published: boolean;
 }

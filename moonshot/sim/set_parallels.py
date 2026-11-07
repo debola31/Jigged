@@ -79,6 +79,8 @@ class FirmGrip:
             if not d.eq_active[eq]:
                 self._anchored.discard(eq)
                 continue
+            if self._eq_by.get(eq) is not e:         # held now by another of its grip's events (a wrench taken twice)
+                continue
             c = self.carry_of(e)
             if t >= c["t0"] and eq not in self._anchored:
                 # set again where the block sits in the hand now: the hand drifts a little on the soft weld while the

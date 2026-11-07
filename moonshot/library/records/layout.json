@@ -80,7 +80,9 @@
     {"item":"live-center-1","asset":"livectr","zone":"benches","x":26988.2,"y":5428,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"spin-indexer-1","asset":"spindex","zone":"benches","x":26747.4,"y":5453.2,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"wrenches-1","asset":"wrench","zone":"benches","x":26369.6,"y":5523,"z":863.6,"rot":180,"on":"bench-lathe"},
+    {"item":"ratchet-wrench-1","asset":"ratchet-wrench","zone":"benches","x":26120,"y":5523,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"deburr-1","asset":"deburr","zone":"benches","x":25897.8,"y":5526.2,"z":863.6,"rot":180,"on":"bench-lathe"},
+    {"item":"bench-stone-1","asset":"bstone","zone":"benches","x":25770.8,"y":6092.6,"z":863.6,"rot":180,"on":"bench-lathe"},
     {"item":"bench-grinder-1","asset":"bgrind","zone":"finishing","x":45540.4,"y":7567,"z":863.6,"rot":180,"on":"bench-finishing"},
     {"item":"belt-sander-1","asset":"belt","zone":"finishing","x":45127.5,"y":7510.4,"z":863.6,"rot":180,"on":"bench-finishing"},
     {"item":"etch-1","asset":"etch","zone":"finishing","x":44674.7,"y":7464,"z":863.6,"rot":180,"on":"bench-finishing"},
@@ -89,6 +91,8 @@
     {"item":"grinding-wheel-1","asset":"gwheel","zone":"grinding","x":29642.4,"y":12353,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"dresser-1","asset":"dresser","zone":"grinding","x":29885.6,"y":12429.2,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"mag-chuck-1","asset":"magchk","zone":"grinding","x":29758.6,"y":12109.8,"z":850,"rot":0,"on":"cart-grind"},
+    {"item":"keepers-1","asset":"keeper","zone":"grinding","x":30300,"y":12000,"z":850,"rot":0,"on":"cart-grind"},
+    {"item":"diamond-wheel-1","asset":"dwheel-1a1r","zone":"grinding","x":30250,"y":12350,"z":850,"rot":0,"on":"cart-grind"},
     {"item":"edm-wire-1","asset":"wire","zone":"wire-edm","x":35825.7,"y":12400,"z":850,"rot":0,"on":"cart-edm"},
     {"item":"edm-fixture-1","asset":"edmfix","zone":"wire-edm","x":36098.1,"y":12378.4,"z":850,"rot":0,"on":"cart-edm"},
     {"item":"cat40-em-0500-1","asset":"cat40","zone":"tool-crib","x":38350.5,"y":12448.3,"z":1000,"rot":0,"on":"crib-holders"},
@@ -137,6 +141,7 @@
     {"item":"roughness-1","asset":"rough","zone":"inspection","x":47295.5,"y":12712.7,"z":860,"rot":0,"on":"insp-table"},
     {"item":"thread-gauge-m4-1","asset":"thread-m4","zone":"inspection","x":47469.3,"y":12775.2,"z":860,"rot":0,"on":"insp-table"},
     {"item":"caliper-24-1","asset":"cal24","zone":"inspection","x":45710,"y":11996.5,"z":860,"rot":0,"on":"insp-table"},
+    {"item":"micrometer-2-1","asset":"mic2","zone":"inspection","x":46220,"y":11949.5,"z":860,"rot":0,"on":"insp-table"},
     {"item":"comparator-1","asset":"compar","zone":"inspection","x":48850.2,"y":12362.5,"z":760,"rot":0,"on":"comparator-stand"}
   ]
 }

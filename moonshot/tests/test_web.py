@@ -32,7 +32,8 @@ def test_every_placed_item_has_its_asset_and_model():
 
 def test_each_step_has_its_own_media_and_a_place_in_the_shop():
     """People's work is shown as video and a machine cycle as the part after it, a still and its model; either shows
-    only once the upload has recorded all of it in published.json."""
+    only once the upload has recorded all of it in published.json. A person's step published as a still and no video
+    is shown as that still, and as its video once that is published."""
     items = {i["item"] for i in build()["shop"]["items"]}
     published = set(_json(PUBLISHED)["media"])
     for part in build()["parts"]:
@@ -40,11 +41,13 @@ def test_each_step_has_its_own_media_and_a_place_in_the_shop():
         paths = [p for s in steps for p in media_paths(s["media"])]
         assert len(set(paths)) == len(paths)
         for s in steps:
+            video, still = f"video/{part['id']}/{s['id']}.mp4", f"still/{part['id']}/{s['id']}.webp"
             if s["kind"] == "cycle":
-                assert s["media"] == {"type": "cut", "still": f"still/{part['id']}/{s['id']}.webp",
-                                      "model": f"cut/{part['id']}/{s['id']}.glb"}
+                assert s["media"] == {"type": "cut", "still": still, "model": f"cut/{part['id']}/{s['id']}.glb"}
+            elif still in published and video not in published:
+                assert s["media"] == {"type": "still", "still": still} and s["published"]
             else:
-                assert s["media"] == {"type": "video", "path": f"video/{part['id']}/{s['id']}.mp4"}
+                assert s["media"] == {"type": "video", "path": video}
             assert s["published"] == all(p in published for p in media_paths(s["media"]))
             if "item" in s["where"]:
                 assert s["where"]["item"] in items

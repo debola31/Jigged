@@ -1,0 +1,53 @@
+{
+ "schema": "jigged.card/1",
+ "id": "sgrind-controls",
+ "name": "Work the surface grinder's switches: the chuck's lever, ON standing out of the wheel's path, the coolant, OFF and its reset",
+ "assets": ["sgrind"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "the chuck's lever, ON, OFF and the coolant switch",
+   "grasps": {"chuck_lever": "power_sphere", "start": "fingertip_press", "stop": "flat_press", "coolant_switch": "lateral"},
+   "contacts": [{"digit": "palm", "on": "chuck_lever"}, {"digit": "index", "on": "start"}, {"digit": "palm", "on": "stop"},
+                {"digit": "thumb", "on": "coolant_switch"}, {"digit": "index", "on": "coolant_switch"}]
+  },
+  "steadying": {
+   "side": "L", "role": "rests at the side, clear of the wheel and the table"
+  }
+ },
+ "phases": [
+  {"phase": "check", "what": "Before ON: the wheel looked over for cracks and chips, and clear of the work, the head raised well above it [proposed: duration_s]",
+   "action": "read", "on": "wheel", "duration_s": 2, "ends_on": "the wheel whole and clear of the work", "source": 0},
+  {"phase": "reach", "what": "The working hand to the chuck's lever's ball", "duration_s": [0.32, 0.67], "source": 2},
+  {"phase": "operate", "what": "The work set on the chuck with it off; then the lever turned half a turn over the top to on, a firm push through the magnet's pull at the middle [proposed: duration_s]",
+   "action": "turn", "on": "chuck_lever", "force_n": [25, 30], "duration_s": 0.8, "ends_on": "the lever at its far stop, pointing left", "source": 1},
+  {"phase": "check", "what": "Try the work by hand: it doesn't slide [proposed: force_n, duration_s]",
+   "action": "push", "on": "work", "force_n": 2, "duration_s": 0.5, "ends_on": "nothing moves", "source": 0},
+  {"phase": "reach", "what": "The working hand to the control box; the body stepped to the side of the wheel's path, out of its plane", "duration_s": [0.32, 0.67], "source": 2},
+  {"phase": "operate", "what": "Press ON, standing out of the wheel's path while it comes up to speed [proposed: force_n, duration_s]",
+   "action": "press", "on": "start", "force_n": 5, "duration_s": 0.3, "ends_on": "the wheel at speed, the power light on", "source": 0},
+  {"phase": "check", "what": "Let it run up to speed out of its path: a damaged wheel usually flies apart shortly after start-up [proposed: duration_s]",
+   "action": "read", "on": "wheel", "duration_s": [5, 10], "ends_on": "running smoothly, little or no vibration", "source": 0},
+  {"phase": "operate", "what": "Coolant switch on [proposed: force_n, duration_s]",
+   "action": "turn", "on": "coolant_switch", "force_n": 2, "duration_s": 0.5, "ends_on": "coolant flowing onto the wheel at the work", "source": 0},
+  {"phase": "operate", "what": "Done grinding: coolant off, then OFF pushed in [proposed: force_n, duration_s]",
+   "action": "press", "on": "stop", "force_n": 10, "duration_s": 0.3, "ends_on": "the motor off, the power light out", "source": 0},
+  {"phase": "check", "what": "Let the wheel come to a complete stop before the hands go near the work; it coasts, unbraked [proposed: duration_s]",
+   "action": "read", "on": "wheel", "duration_s": [20, 50], "ends_on": "the wheel stopped", "source": 0},
+  {"phase": "operate", "what": "Lever back half a turn to off before lifting the work [proposed: duration_s]",
+   "action": "turn", "on": "chuck_lever", "force_n": [25, 30], "duration_s": 0.8, "ends_on": "the lever at its stop pointing right", "source": 1},
+  {"phase": "operate", "what": "To start again: twist OFF clockwise until it pops out [proposed: force_n, duration_s]",
+   "action": "turn", "on": "stop", "force_n": 3, "duration_s": 0.6, "ends_on": "OFF popped out: ON works again", "source": 0}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "South Bend Lathe Co., Model SB1029 6 x 18 Surface Grinder Owner's Manual (2010): Additional Surface Grinder Safety (p. 8: wheel rating, hand-wheel contact, ring test, standing out of the wheel's path when turning ON), Test Run (p. 19: OFF pushed in and twisted clockwise to pop out; ON doesn't start with OFF in), Operation Overview (p. 20: examine the wheel, the chuck to hold the work, ON standing to the side, OFF and the wheel to a complete stop, then the work off), Controls (p. 21: power light, ON, OFF, coolant pump switch), Setup for a Typical Grinding Operation (p. 31: the chuck off to place the work, then on)",
+   "url": "https://archive.org/download/manualsonline-id-7918a92e-d1b2-4fbe-bb4c-6217a681a58e/7918a92e-d1b2-4fbe-bb4c-6217a681a58e.pdf",
+   "gives": "the order: wheel checked, work on the chuck with it off, chuck on, ON standing out of the wheel's path, coolant, grind, OFF, the wheel to a complete stop, the chuck off; OFF's push and twist-to-reset"},
+  {"kind": "maker", "ref": "Tormach PSG 612 Operator's Manual UM10159: Using the Magnetic Chuck (p. 12), a wrench in the slot on the chuck's front turned to on or off; and the station record (moonshot/library/stations/sgrind.json joints.chuck_lever)",
+   "url": "https://tormach.com/docs/download/assetlink/asset_id/431",
+   "gives": "a permanent chuck is turned on and off by a handle on its front; the lever's half turn and its detent's 8 N m (25 N at the ball, plus its friction's 3 N) are the station's"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed for reach durations, as no grinder footage is measured yet",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+ ],
+ "notes": "One card for the grinder's switches, in the order a job uses them. The grinder is the 10 x 24 manual grinder (station sgrind), whose STEP has no control box: its ON, OFF and coolant switch are on a box made from SB1029's panel (sgrind.json gaps), and the coolant is SB1029's option, fitted (your decision, 2026-11-06). 'Out of the wheel's path' is out of its plane (it spins about the front-to-back axis, so its path is the plane across the machine at the wheel); the body standing at the front, behind the handwheels, already is. No grinder footage is measured yet: a machinist's surface-grinder video, measured as G1's were, would tighten the lever's and the buttons' timing. Proposed, with reasons (phase numbers count from 1): #1 2 s to look the wheel over; #3 and #11 0.8 s for the lever's half turn, its force the station's; #4 2 N and 0.5 s to try the work; #6 5 N and 0.3 s on ON, the station's affordance force; #7 5-10 s to run up, the station's wheel taking about 3 s to its speed and SB1029 asking only that the operator stand clear while it does; #8 2 N and 0.5 s on the coolant toggle, as the band saw's; #9 10 N on the mushroom; #10 20-50 s, the station's coast-down (the 1A1R about 22 s, the 10 in wheel about 50); #12 3 N and 0.6 s to twist OFF out."
+}

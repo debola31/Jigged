@@ -1,0 +1,54 @@
+{
+ "schema": "jigged.card/1",
+ "id": "st25-chuck-load",
+ "name": "Load a round part into the ST-25's 3-jaw chuck, its end on the soft jaws' step, clamp it with the foot pedal; and take it out",
+ "assets": ["st25", "chuck3"],
+ "hands": {
+  "working": {
+   "side": "R", "role": "carries the part into the open jaws and holds it on their step until they close; lifts it out after",
+   "grasps": {"part": "precision_disk", "part_face": "flat_press"},
+   "contacts": [{"digit": "thumb", "on": "part"}, {"digit": "index", "on": "part"}, {"digit": "middle", "on": "part"},
+                {"digit": "ring", "on": "part"}]
+  },
+  "steadying": {
+   "side": "L", "role": "rests at the side; the foot presses the pedal"
+  }
+ },
+ "phases": [
+  {"phase": "operate", "what": "Door open, spindle stopped: the foot on the pedal opens the jaws if they're closed (each press toggles them) [proposed: duration_s]",
+   "action": "press", "on": "pedal", "duration_s": 0.5, "ends_on": "the jaws open, 2.2 mm clear of a part of their bore's size", "source": 1},
+  {"phase": "reach", "what": "The working hand to the part where it waits, opening round its rim", "duration_s": [0.32, 0.67], "source": 4},
+  {"phase": "grasp", "what": "Fingertips and thumb round the rim, the part's face toward the chuck; take its weight [proposed: force_n, duration_s]",
+   "action": "lift", "on": "part", "force_n": 4, "duration_s": 0.5, "ends_on": "the part off its place"},
+  {"phase": "transport", "what": "Carry it through the door's opening to the chuck, its axis turned onto the spindle's, in front of the jaws [proposed: duration_s]",
+   "action": "slide", "on": "part", "duration_s": [1.5, 2.5], "ends_on": "the part on the spindle's axis, 10 mm in front of the jaws"},
+  {"phase": "operate", "what": "Slide it into the jaws' bore until its end meets their step, then a light push to seat it [proposed: force_n, travel_mm, duration_s]",
+   "action": "push", "on": "part_face", "force_n": 10, "travel_mm": 10, "duration_s": [0.6, 1.0], "ends_on": "the part's end on the step", "source": 2},
+  {"phase": "operate", "what": "Holding it there, the foot presses the pedal: the jaws close on it in about half a second [proposed: duration_s]",
+   "action": "press", "on": "pedal", "duration_s": 0.6, "ends_on": "the jaws gripping it at the job's pressure", "source": 1},
+  {"phase": "release", "what": "Let go and draw the hand back out of the door's opening [proposed: duration_s]", "duration_s": 0.8},
+  {"phase": "check", "what": "Look that it sits square on the step, no gap at its end [proposed: duration_s]", "action": "read", "on": "part", "duration_s": 1.5, "source": 2},
+  {"phase": "reach", "what": "To unload, with the door open and the spindle stopped, the working hand to the part, round its rim", "duration_s": [0.32, 0.67], "source": 4},
+  {"phase": "grasp", "what": "Hold it; the foot presses the pedal and the jaws open [proposed: duration_s]", "action": "press", "on": "pedal", "duration_s": 0.6, "ends_on": "the part loose in the open jaws", "source": 1},
+  {"phase": "transport", "what": "Draw it straight off the step out of the bore, then out of the door's opening to its place [proposed: duration_s]",
+   "action": "slide", "on": "part", "duration_s": [1.5, 2.5], "ends_on": "the part clear of the machine"}
+ ],
+ "sources": [
+  {"kind": "maker", "ref": "Haas Automation, 2023 Lathe Operator's Manual: 1.2 (7. Foot Pedal), 3.2 chuck safety, 3.5 Run/Setup Mode Restrictions",
+   "url": "https://www.haascnc.com/content/dam/haascnc/en/service/manual/operator/english_lathe_interactive_manual_print_version_2023.pdf",
+   "gives": "chuck clamp and unclamp allowed with the door open; hydraulic pressure set to hold the part securely without distortion; jaws not beyond the chuck's diameter; part loading: open the door, do the task, close the door"},
+  {"kind": "maker", "ref": "Haas Automation, Foot Pedal - Troubleshooting Guide - NGC (TG0066), and the M10/M11 and Settings 282-284 pages",
+   "url": "https://www.haascnc.com/service/troubleshooting-and-how-to/troubleshooting/foot-pedal---troubleshooting-guide---ngc.html",
+   "gives": "the foot pedal works the chuck's clamp and unclamp, its input toggling when pressed; M10 clamps, M11 unclamps; OD clamping closes the jaws toward the centre; no unclamp above Setting 283's rpm; no Cycle Start unclamped (284)"},
+  {"kind": "maker", "ref": "Haas Factory Outlet (Morris Trident TMT), Haas Lathe Set-up course: work holding, types of jaws",
+   "url": "https://www.haascnc.com/content/dam/haascnc/hfo-microsite/hfo-morris-trident/Morris_Trident_TMT-Haas-Lathe-Set-up.pdf",
+   "gives": "the hydraulic chuck worked by the foot pedal or M-codes; its pressure set for the operation (roughing up to 300-400 psi, finishing as little as 100 psi); the jaws' limited stroke; soft jaws bored to hold a diameter, for second operations, clamping without marking a turned surface and running concentric"},
+  {"kind": "maker", "ref": "Kitagawa, BR10 specifications (kitagawa.global)",
+   "url": "https://kitagawa.global/en/kitagawa-br10-large-thru-hole-high-accuracy-power-chuck",
+   "gives": "jaw stroke 8.8 mm on the diameter; 123 kN of static grip at 49 kN of draw"},
+  {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed, as no lathe-loading footage was tracked",
+   "file": "moonshot/cards/footage/kurt-vise-setup.timing.json",
+   "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
+ ],
+ "notes": "For ll-1007224's two setups in the Kitagawa's soft jaws, bored Ø63.5 and 8 mm deep to a step (moonshot/planning/plans/ll-1007224.json): op10's 1 in blank and op20's flipped part are loaded and unloaded so. The jaws are bored near mid-stroke, so open they stand 2.2 mm clear of a part of the bore's size all round and close on it 2.2 mm in (moonshot/library/stations/st25.json). With 8 mm of a 25.4 mm blank in the jaws its middle is outside them: unheld it tips out, so the hand holds it on the step until the jaws close (as moonshot/tests/gates/test_lathe_cell_conformance.py does). The foot on the pedal is an input to the control, not a simulated foot: the body model has no legs (station gap; Control.press_pedal), for the user's decision. Proposed, with reasons (phase numbers count from 1): one hand carries and holds the part, as a 0.2 kg disc needs, the other free; the disc's grasp by its rim, its face toward the chuck, so the fingers stay out of the bore; #1, #6 and #10 the pedal's 0.5-0.6 s (the jaws close their 2.2 mm in about 0.4 s at 10 kN of draw, the station's oil damping); #3 4 N and 0.5 s to take a 0.2 kg blank's weight with margin; #4 and #11 1.5-2.5 s through the opening; #5 10 N and 10 mm to seat it, as a light push home; #7 0.8 s; #8 1.5 s. The job's pressure is the plan's: the station's default draw is 10 kN, about 100 psi, a finishing pressure."
+}

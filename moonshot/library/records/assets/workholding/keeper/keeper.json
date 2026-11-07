@@ -1,0 +1,33 @@
+{
+  "schema": "setupguide.asset/0.1",
+  "id": "keeper",
+  "name": "Grinding keeper, 1/8 x 1/2 x 1-1/2 in",
+  "category": "workholding",
+  "make": "Generic",
+  "model": "1/8 x 1/2 in precision ground O-1 flat stock, cut 1-1/2 in long",
+  "description": "A short ground steel strip laid flat on the surface grinder's magnetic chuck, set tight against a part too weakly magnetic or too small for the chuck to hold alone: the magnet holds the keeper, and the keepers trap the part. Three in a pinwheel block in ct-tpg322's carbide insert.",
+  "generic": true,
+  "key_specs": [
+    {"name": "Size", "value": "1/8 x 1/2 x 1-1/2 in (3.175 x 12.7 x 38.1 mm)"},
+    {"name": "Stock", "value": "1/8 x 1/2 x 18 in precision ground flat stock, AISI O-1, oil hardening"},
+    {"name": "Length", "value": 1.5, "unit": "in", "note": "proposed: cut from the 18 in bar so a pinwheel of three round a 3/8 in IC triangle reaches 23 mm behind it and 35 in front, inside the chuck and clear of the spindle's housing with the 6 in wheel at the work"},
+    {"name": "Hold on the grinder's chuck", "value": 100, "unit": "N", "note": "its 1/2 x 1-1/2 in face at the chuck's rated 20.7 N/cm2 (moonshot/library/stations/sgrind.json chuck)"},
+    {"name": "Mass", "value": 0.012, "unit": "kg"}
+  ],
+  "source_urls": ["https://mutualscrew.com/products/1-8-x-1-2-x-18-precision-ground-flat-stock-aisi-o-1-oil-hardened-steel_53999"],
+  "source_files": ["keeper.glb (made by moonshot/library/stations/extract.py keeper_mesh)"],
+  "license": "self-made from the stock's published size (moonshot/library/stations/extract.py keeper_mesh); a plain bar needs no CAD",
+  "notes": "GENERIC: a ground bar. Its section is the listing's 1/8 x 1/2 in precision ground O-1 flat stock (Mutual Screw SKU 53999, 18 in bars); its 1-1/2 in length is proposed, cut to fit a pinwheel round the insert (the shop's 6 in parallels reach 256 mm across the table that way, past the 254 mm chuck; your decision, 2026-11-06). The grinder cell's keepers are this size (moonshot/world/grind_cell.py KEEPER).",
+  "file": "keeper.glb",
+  "units": "mm",
+  "up": "+Z",
+  "triangles": 12,
+  "bbox": {"min": [-19.05, -6.35, 0.0], "max": [19.05, 6.35, 3.175]},
+  "attach_points": [],
+  "build": {
+    "from": "moonshot/library/stations/extract.py",
+    "placeholder": "extract.keeper_mesh",
+    "up": "+Z",
+    "max_triangles": 50000
+  }
+}

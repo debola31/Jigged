@@ -29,6 +29,12 @@ The run writes, beside the take record: checks.json (per frame, what the hands t
 right hand's wrench, the machine's axes, the active constraints and the bodies pushed from outside the physics; and
 the never-held E-stop) and outcome.json (the machine at the end: its offsets, tool lengths
 and every key it registered). moonshot/tests/gates/test_setting_takes.py reads them.
+
+A vise setup's part and parallels are drawn as a per-setup take draws them (moonshot/sim/setup_scene.py Table): the
+part as the setup's stock enters it, the parallels as steel; their physics stays the boxes. A take run before its
+setup's stock was there is drawn again from it without running it again:
+
+    python -m moonshot.sim.pendant ll-1007224/op30-xy ll-1007224/op30-z     # each take's part drawn from its stock now
 """
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ from moonshot.motion.primitives import min_jerk
 from moonshot.sim.record import glbs_in_bodies
 from moonshot.body.skeleton import set_finger_contact
 from moonshot.sim.runner import ARM, PAD, SETTLE_STEPS, TakeRunner
+from moonshot.sim.setup_scene import Table
 from moonshot.motion import plates
 from moonshot.world import cell, spoilboard, vf2
 from moonshot.world.vise import Load
@@ -217,6 +224,10 @@ class PendantRunner(TakeRunner):
 
     def glbs(self) -> dict[str, list[dict]]:
         return glbs_in_bodies(self.model, "vf2", vf2.render_links())
+
+    def meshes(self, folder: Path) -> dict[str, dict]:
+        table = setting_table(folder, self.tk)
+        return table.meshes(Path(folder)) if table else {}
 
     def probe_touch(self) -> bool:
         """Is the probe's ball touching the part or a jaw? Its centre against the part's box less its cuts, or inside a
@@ -576,3 +587,40 @@ class PendantRunner(TakeRunner):
         checks |= {"driven": driven, "rides_on": rides, "touch_lead": self.checks["touch_lead"]}
         (folder / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
         (folder / "outcome.json").write_text(json.dumps(self.outcome(), indent=1), encoding="utf-8")
+
+
+def setting_table(folder: Path, tk: dict) -> Table | None:
+    """The vise a setting take finds (takes/<part>/<step id>, its take.json tk), as a per-setup take's table: clamped,
+    its part as the setup's stock enters it. None for a plate, drawn from its geoms as the plates' own takes are."""
+    s = tk["setup"]
+    if "plate" in s:
+        return None
+    return Table({"scene": {"part": Path(folder).parent.name, "setup": tk["step"]["setup"], "stock": "in",
+                            "plate": False, "vise": "clamped"}, "load": s["load"]})
+
+
+def redraw(folder: Path) -> Path | None:
+    """A setting take's part and parallels drawn again as setting_table has them now, its record and physics as they
+    were (as setup_scene.redraw draws a per-setup take's), its scene.json pointed at the meshes; returns the stock GLB
+    the part is drawn from (None: the finished part, the box, or a plate's geoms)."""
+    folder = Path(folder)
+    tk = json.loads((folder / "take.json").read_text(encoding="utf-8"))
+    table = setting_table(folder, tk)
+    if table is None:
+        return None
+    meshes = table.meshes(folder)
+    path = folder / "scene.json"
+    scene = json.loads(path.read_text(encoding="utf-8"))
+    for name, entry in meshes.items():
+        if name in scene["bodies"]:
+            scene["bodies"][name]["meshes"] = entry
+    path.write_text(json.dumps(scene, indent=1), encoding="utf-8")
+    return table.stock_glb()
+
+
+if __name__ == "__main__":
+    import sys
+
+    from moonshot.config import data_root
+    for name in sys.argv[1:]:
+        print(name, "drawn from", redraw(data_root() / "takes" / name) or "the finished part, or its box", flush=True)

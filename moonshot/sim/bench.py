@@ -62,6 +62,23 @@ PAD = {"thumb": "dis1", "index": "dis2", "middle": "dis3", "ring": "dis4", "litt
 ARM_JOINTS = ARM[3:]
 
 
+def recamera(folder: Path, after: Path) -> None:
+    """A take's record re-exported with its camera continuing another take's on the same camera across a cut
+    (moonshot/motion/bench.py continue_camera): its plan's camera (reference.npz) and its record's (take.npz), the
+    physics as it ran, so its checks stand; take.json names the take it continues. For a record made before its plan
+    continued the camera; a re-planned take does it itself (BenchPlan.camera_from)."""
+    from moonshot.motion.bench import continue_camera, last_camera
+    folder = Path(folder)
+    prev = last_camera(after)
+    for name, save in (("reference.npz", np.savez), ("take.npz", np.savez_compressed)):
+        d = dict(np.load(folder / name))
+        d["eye"], d["look"], d["up"] = continue_camera(d["eye"], d["look"], d["up"], prev, float(d["fps"]))
+        save(folder / name, **d)
+    tk = json.loads((folder / "take.json").read_text(encoding="utf-8"))
+    tk["continues"] = Path(after).name
+    (folder / "take.json").write_text(json.dumps(tk, indent=1), encoding="utf-8")
+
+
 def min_jerk(x: float) -> float:
     c = min(1.0, max(0.0, x))
     return c * c * c * (10 - 15 * c + 6 * c * c)

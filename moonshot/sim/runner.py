@@ -80,10 +80,12 @@ class TakeRunner:
         xml = self.scene(self.body.xml)
         # a held tool is stiff in the hand (4 ms, 4 steps): at 20 ms the index's push on the gun's trigger moved the gun
         # 30 mm in the hand, enough to miss its holster's bore; a held mechanism's knob or bar stays soft
+        # one constraint by its name: a grip taken more than once (a wrench picked up again), or two grips one constraint
+        # stands for (a hand's two holds on one plate), share it (enclose)
         eq = "".join(f'    <{"weld" if e["grip"] in self.welded else "connect"} name="{self.eq_name(e["grip"])}" '
                      f'body1="{self.encloses[e["grip"]]}" body2="{e["side"]}_hand" anchor="0 0 0" active="false" '
                      f'solref="{0.004 if e["grip"] in self.welded else 0.02} 1" solimp="0.9 0.95 0.002"/>\n'
-                     for e in {e["grip"]: e for e in self.grip_events}.values())
+                     for e in {self.eq_name(e["grip"]): e for e in self.grip_events}.values())
         xml = xml.replace("<equality>\n", "<equality>\n" + eq, 1)
         m = self.model = mujoco.MjModel.from_xml_string(xml)
         self.data, self.plan = mujoco.MjData(m), mujoco.MjData(m)
@@ -117,7 +119,8 @@ class TakeRunner:
         root = m.body_rootid[m.body("R_hand").id]
         self.person = {m.body(b).name for b in range(1, m.nbody) if m.body_rootid[b] == root}
         self.squeeze: dict[tuple[str, str], dict] = {}
-        self._held_apart: dict[str, int] = {}
+        self._held_apart: dict[int, int] = {}              # each held object's (body) mode (enclose, hold_apart)
+        self._eq_by: dict[int, dict] = {}                  # the grip event each constraint now holds by
         self._apart: dict[int, dict] = {}
         self.arm_dofs = {s: np.array([m.jnt_dofadr[m.joint(f"{s}_{n}").id] for n in ARM]) for s in SIDES}
         self.side_bodies = {s: {b for b in range(m.nbody) if m.body(b).name.startswith(f"{s}_")} for s in SIDES}
@@ -190,20 +193,34 @@ class TakeRunner:
 
     def enclose(self, t: float) -> None:
         """Hold each enclosing grip's object in the hand from just after the fingers close to just before they open,
-        where the fist is when it closes: no jump at the start."""
+        where the fist is when it closes: no jump at the start. A constraint more than one grip event stands for is
+        held while any of them holds, from where that one's hand closes; an object is held apart while any welded grip
+        on it is (each event deciding alone, a wrench taken up twice was let go and taken again every step)."""
         m, d = self.model, self.data
+        modes: dict[int, int] = {}
         for e in self.grip_events:
             if e["grip"] in self.welded:                 # apart from the final approach on, so the hand reaches its grip
                 # 1: held, the controls still touched; 2: letting go, the controls too (the index inside the trigger
                 # when the gun is let go fired it out of its holster at 1500 N)
                 mode = (2 if t >= e["t1"] - 0.05 else 1) if e["t0"] - APPROACH_S <= t < e["t1"] + RELEASE_S else 0
                 ob = m.body(self.encloses[e["grip"]]).id
-                if mode != self._held_apart.get(e["grip"], 0):
-                    self.hold_apart(ob, mode)
-                    self._held_apart[e["grip"]] = mode
+                was = modes.get(ob, 0)                    # held by one while another lets go: held
+                modes[ob] = min(was, mode) if was and mode else was or mode
+        for ob, mode in modes.items():
+            if mode != self._held_apart.get(ob, 0):
+                self.hold_apart(ob, mode)
+                self._held_apart[ob] = mode
+        wants: dict[int, dict | None] = {}
+        for e in self.grip_events:
             eq = m.equality(self.eq_name(e["grip"])).id
-            want = e["t0"] + 0.1 <= t < e["t1"] - 0.05
-            if want and not d.eq_active[eq]:
+            if e["t0"] + 0.1 <= t < e["t1"] - 0.05:
+                wants[eq] = e
+            else:
+                wants.setdefault(eq, None)
+        for eq, e in wants.items():
+            want = e is not None
+            if want and (not d.eq_active[eq] or self._eq_by.get(eq) is not e):
+                self._eq_by[eq] = e
                 hb, ob = m.body(f"{e['side']}_hand").id, m.body(self.encloses[e["grip"]]).id
                 Rh = d.xmat[hb].reshape(3, 3) @ H0
                 P = d.xpos[hb] + Rh @ FIST_MM * 0.001

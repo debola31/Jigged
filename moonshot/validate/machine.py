@@ -12,7 +12,7 @@ import numpy as np
 
 from moonshot.contracts.thresholds import threshold
 from moonshot.validate.registry import Result, check
-from moonshot.world import bandsaw, vf2
+from moonshot.world import bandsaw, sgrind, vf2
 
 
 def spec() -> dict[str, dict]:
@@ -25,6 +25,13 @@ def spec() -> dict[str, dict]:
     saw = bandsaw.record()
     out["saw_head_deg"] = {"range": saw["joints"]["head"]["range_deg"], "speed": None}
     out["saw_blade_sfpm"] = {"range": [0.0, saw["blade"]["speed_sfpm"][1]], "speed": None}
+    # the surface grinder's (moonshot/library/stations/sgrind.json): its slides within their travel (mm; no speed, as
+    # hands drive them), its spindle within its speed, one way, and its chuck's field, a share
+    g = sgrind.record()
+    for axis in ("table", "saddle", "wheelhead"):
+        out[f"sg_{axis}_mm"] = {"range": g["joints"][axis]["range_mm"], "speed": None}
+    out["sg_spindle_rpm"] = {"range": [0.0, g["spindle"]["rpm"]], "speed": None}
+    out["sg_chuck_field"] = {"range": [0.0, 1.0], "speed": None}
     return out
 
 

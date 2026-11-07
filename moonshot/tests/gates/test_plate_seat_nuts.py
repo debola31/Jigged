@@ -11,12 +11,13 @@ import pytest
 
 from moonshot.config import data_root
 from moonshot.motion import plate_wrench as PW
-from moonshot.planning.takes import PLATE_TAKES, plate_take
+from moonshot.planning.takes import plate_take, seat_takes
 from moonshot.world import spoilboard as SB
 
 pytestmark = [pytest.mark.farm, pytest.mark.data_root]
-TAKES = [plate_take(part, "op10", PLATE_TAKES["seat"]) for part in ("nist-ftc-09", "ll-1005337")]
+TAKES = [plate_take(part, "op10", t) for part in ("nist-ftc-09", "ll-1005337") for t in seat_takes(part)]
 SEATED_MM = 0.2            # a snugged nut's flange this close to its strap (its bite takes it a little past)
+TURN_DEG = 25.0            # ... and its turn this close to its whole run's, the snug and the bite
 
 
 @pytest.fixture(scope="module", params=TAKES)
@@ -30,17 +31,22 @@ def run(request):
     return r
 
 
+def worked(run) -> list:
+    """The clamps whose nuts the take runs down (a long plate's end's, in its own take)."""
+    return [c for c in run.clamps if c.name in run.nuts]
+
+
 def test_each_nut_is_run_down_onto_its_strap(run):
-    for c in run.clamps:
+    for c in worked(run):
         o = run.outcome()[f"{c.name}_nut"]
         assert abs(o["over_strap_mm"]) < SEATED_MM, (c.name, o)
 
 
 def test_each_nut_turns_as_the_wrench_turns_it(run):
     whole = math.degrees(SB.PARK_NUT_GAP_MM / SB.LEAD_MM * 2 * math.pi)
-    for c in run.clamps:
+    for c in worked(run):
         o = run.outcome()[f"{c.name}_nut"]
-        assert o["turn_deg"] == pytest.approx(-whole, abs=math.degrees(PW.SNUG)), (c.name, o)
+        assert o["turn_deg"] == pytest.approx(-whole, abs=TURN_DEG), (c.name, o)
 
 
 def test_the_wrench_is_laid_back_where_it_lay(run):

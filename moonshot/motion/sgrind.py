@@ -31,16 +31,19 @@ from moonshot.world import grind_cell as GC
 from moonshot.world import sgrind as SG
 
 TAKES = data_root() / "takes"
-TABLE_LOAD_MM = 300.0      # the table run right to load: the insert, near the chuck's right end, before the CHUCK stance
-                           # (proposed: the chuck's right half under the right hand, its lever's arc in reach)
+TABLE_LOAD_MM = 355.0      # the table run right to load, near its stop: the insert before the CHUCK stance and the lever's
+                           # pivot 627 mm right, so its push over the top ends 55 mm left of the body's middle (at 300
+                           # it crossed the body, the trunk bent sideways past people's range; proposed)
 INSERT_FROM_RIGHT_MM = 155.0   # the insert's middle this far in from the chuck's right end (proposed: in the right half,
                                # its pinwheel's keepers on the face)
 HEAD_LOAD_MM = -183.0      # the head lowered from joint zero to load: the 6 in wheel's bottom 30.9 mm over the chuck,
                            # clear of the work by 27 mm, the insert 455 mm from it along the table
-LEVER_PUSH_DEG = 112.0     # the lever pushed this far over, then let go: past its middle the magnet's detent and its
+LEVER_PUSH_DEG = 108.0     # the lever pushed this far over, then let go: past its middle the magnet's detent and its
                            # weight carry it on (sgrind.json joints.chuck_lever)
-LEVER_PUSH_S = 0.9         # ... over this long (the card's 0.8 s for the half turn; proposed)
-LEVER_N = 25.0             # the push on the ball along its way round (the station's detent at the ball: 25 N, proposed)
+LEVER_PUSH_S = 1.1         # ... over this long (proposed: at 0.9 s and 16 N the lever trailed its plan, 62 deg where the
+                           # hand let go, and the detent took it back off)
+LEVER_N = 20.0             # the push on the ball along its way round: the detent's 16 N at the ball, its friction's 3 and
+                           # the lever's own weight from level, 5 (proposed)
 IC, THICK, NOSE, CLEAR = 9.525, 3.175, 0.79375, 11.0     # ct-tpg322: 3/8 IC, 1/8 thick, 1/32 nose, 11 deg (P)
 
 
@@ -233,8 +236,14 @@ class MagnetOnPlan(GrindPlan):
         self.look(0.0, c0)
         _, Wg = self.grip_pose("ball", self.t)
         up, back = np.array([0, 0, 1.0]), np.array([0, -1.0, 0])
-        tg = self.reach("R", "ball", self.t, ready=Wg + up * 60 + back * 160, approach=Wg + up * 10 + back * 45,
-                        opened=0.7, lead=0.12, reach_s=0.55, rise_s=1.3, still_s=0.35)
+        # quick, as the card's footage: rising 1.3 s, the reach's segments ran 0.97 s at the median against the
+        # footage's 0.32-0.67; but still a clear pause before the reach: paused 0.25 s, the rise and the reach read as
+        # one 1.5 s reach. Widest 0.13 s before it rests, 74% of the reach (0.12 of 0.55 s was 79%)
+        # the rise short and slow, from the thigh to a pause 250 mm short of the ball, and the reach the faster: the
+        # grasp's timing finds the reach's peak speed before contact, and a rise faster than the reach (to 160 mm
+        # short) put the reach's onset before the rise, 1.7 s
+        tg = self.reach("R", "ball", self.t, ready=Wg + up * 20 + back * 250, approach=Wg + up * 10 + back * 45,
+                        opened=0.7, lead=0.13, reach_s=0.5, rise_s=0.9, still_s=0.4)
         self.effort("R", tg, 0.0, "ball")
         self.effort("R", tg + 0.2, 0.4, "ball")
         self.t_turn = tg + 0.25
@@ -243,7 +252,7 @@ class MagnetOnPlan(GrindPlan):
         self.event("grip", tg, t_off + 0.1, side="R", grip="ball", on="sg_chuck_lever")
         self.event("carry", tg + 0.05, t_off, obj="sg_chuck_lever", grip="ball", side="R", skin=True)
         self.event("turn", self.t_turn, t_off, side="R", obj="sg_chuck_lever", joint="sg_chuck_lever",
-                   knob="sg_chuck_lever_ball", force=LEVER_N, max_n=40.0, q0=self.q_lever,
+                   knob="sg_chuck_lever_ball", force=LEVER_N, max_n=34.0, q0=self.q_lever,
                    turn_rad=math.radians(LEVER_PUSH_DEG))
         self.effort("R", t_off - 0.1, 0.4, "ball")
         self.effort("R", t_off + 0.05, 0.0, "ball")

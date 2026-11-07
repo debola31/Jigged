@@ -264,13 +264,13 @@
     180
    ],
    "friction_n_m": 1.0,
-   "detent_n_m": 8.0,
+   "detent_n_m": 5.0,
    "source": "cad",
    "reason": "The lever on the chuck's front (solid 53): its hub at x 267, its ball 317 mm out; it turns in the front plane, positive lifting the ball, from pointing right (the STEP's pose, off) over the top to pointing left (on)",
    "range_source": "proposed",
    "range_reason": "A permanent chuck's handle turns half a turn between off and on (Tormach's chuck: turned to on or off); which end is on isn't in the STEP",
    "detent_source": "proposed",
-   "detent_reason": "The magnet's pull holds the lever at either end: a torque of 8 N m sin(2 x angle) back toward the nearer end, 25 N at the ball at its worst, with 1 N m of friction"
+   "detent_reason": "The magnet's pull holds the lever at either end: a torque of 5 N m sin(2 x angle) back toward the nearer end, 16 N at the ball at its worst, 19 N with its 1 N m of friction; past its middle it carries the lever on to its stop (at 8 N m the push it took overloaded the operator's arm, the muscle check over for 18 frames of magnet-on)"
   }
  },
  "spindle": {

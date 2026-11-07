@@ -7605,6 +7605,22 @@
     "facts": []
    },
    {
+    "item": "bench-stone-1",
+    "asset": "bstone",
+    "x": 25770.8,
+    "y": 6092.6,
+    "z": 863.6,
+    "rot": 180,
+    "name": "6 x 2 x 1\" India bench stone, coarse and fine",
+    "category": "hand_tools",
+    "kind": "bench_stone",
+    "zone": "benches",
+    "on": "bench-lathe",
+    "make": "Norton",
+    "model": "IB6 (61463685560)",
+    "facts": []
+   },
+   {
     "item": "bench-grinder-1",
     "asset": "bgrind",
     "x": 45540.4,
@@ -9564,6 +9580,39 @@
     ]
    },
    {
+    "item": "micrometer-2-1",
+    "asset": "mic2",
+    "x": 46220,
+    "y": 11949.5,
+    "z": 860,
+    "rot": 0,
+    "name": "1-2\" outside micrometer",
+    "category": "inspection",
+    "kind": "micrometer",
+    "zone": "inspection",
+    "on": "insp-table",
+    "make": "Mitutoyo",
+    "model": "103-178",
+    "facts": [
+     [
+      "Range min",
+      "1.0"
+     ],
+     [
+      "Range max",
+      "2.0"
+     ],
+     [
+      "Resolution",
+      "0.001"
+     ],
+     [
+      "Accuracy",
+      "0.0001"
+     ]
+    ]
+   },
+   {
     "item": "comparator-1",
     "asset": "compar",
     "x": 48850.2,
@@ -10108,6 +10157,54 @@
      {
       "name": "Filler",
       "value": "silver braze alloy with flux (typical)"
+     }
+    ]
+   },
+   "bstone": {
+    "name": "Bench stone, India, 6 x 2 x 1 in",
+    "model": "models/bstone.glb",
+    "bbox": {
+     "min": [
+      -76.2,
+      -25.4,
+      -0.0
+     ],
+     "max": [
+      76.2,
+      25.4,
+      25.4
+     ]
+    },
+    "description": "6 x 2 x 1 in India combination oil stone, coarse and fine, fine face up: for stoning a burr or a part-off pip flat.",
+    "key_specs": [
+     {
+      "name": "Length",
+      "value": 6,
+      "unit": "in"
+     },
+     {
+      "name": "Width",
+      "value": 2,
+      "unit": "in"
+     },
+     {
+      "name": "Thickness",
+      "value": 1,
+      "unit": "in"
+     },
+     {
+      "name": "Abrasive",
+      "value": "India (aluminium oxide), an oil stone"
+     },
+     {
+      "name": "Grit",
+      "value": "coarse and fine, one each face; 320 grit (Norton)"
+     },
+     {
+      "name": "Mass",
+      "value": 540,
+      "unit": "g",
+      "note": "volume x 2.75 g/cc [proposed]"
      }
     ]
    },
@@ -12321,6 +12418,79 @@
      {
       "name": "Measuring faces",
       "value": "Carbide tipped, with ratchet stop"
+     }
+    ]
+   },
+   "mic2": {
+    "name": "Outside micrometer, 1-2 in",
+    "model": "models/mic2.glb",
+    "bbox": {
+     "min": [
+      -79.96,
+      -29.5,
+      -0.0
+     ],
+     "max": [
+      79.95,
+      29.5,
+      18.0
+     ]
+    },
+    "description": "1-2 in outside micrometer with ratchet stop, for checking diameters and thicknesses to 0.0001 in.",
+    "key_specs": [
+     {
+      "name": "Range",
+      "value": [
+       1,
+       2
+      ],
+      "unit": "in"
+     },
+     {
+      "name": "Graduation",
+      "value": 0.001,
+      "unit": "in"
+     },
+     {
+      "name": "Accuracy",
+      "value": 0.0001,
+      "unit": "in",
+      "note": "plus or minus (MPE E)"
+     },
+     {
+      "name": "Spindle diameter",
+      "value": 6.35,
+      "unit": "mm",
+      "note": "d"
+     },
+     {
+      "name": "Throat depth",
+      "value": 38,
+      "unit": "mm",
+      "note": "c"
+     },
+     {
+      "name": "Thimble diameter",
+      "value": 18,
+      "unit": "mm"
+     },
+     {
+      "name": "Measuring force",
+      "value": [
+       5,
+       10
+      ],
+      "unit": "N"
+     },
+     {
+      "name": "Measuring faces",
+      "value": "carbide-tipped, micro-lapped, with ratchet stop"
+     },
+     {
+      "name": "Mass",
+      "value": 215,
+      "unit": "g",
+      "note": "Mitutoyo's datasheet"
      }
     ]
    },

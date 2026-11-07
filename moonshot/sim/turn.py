@@ -500,9 +500,9 @@ def face(p: Profile, s: Setup, t: Tool, u_face: float, doc: float, rpm: float, f
         uk = u_end - s.side * depth * k / n + s.side * t.nose_r      # the nose centre a radius off the face
         ps.to(uk + s.side * CLEAR_MM, top + t.nose_r)
         ps.to(uk, top + t.nose_r)
-        ps.to(uk, -t.nose_r - 0.3, feed)                                # past the centre
+        ps.to(uk, -0.3, feed)                                  # the nose's side, which faces, past the centre
         ps.cuts_at.append(len(ps.moves) - 1)
-        ps.to(uk + s.side * CLEAR_MM, -t.nose_r - 0.3 + CLEAR_MM)
+        ps.to(uk + s.side * CLEAR_MM, -0.3 + CLEAR_MM)
         ps.to(uk + s.side * CLEAR_MM, top + t.nose_r)
     return ps
 

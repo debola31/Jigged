@@ -46,8 +46,9 @@ Y_UP = [0.7071068, 0.7071068, 0.0, 0.0]            # a catalogue tool is stored 
 # come in along X_DIR. Each chuck's front face, where the stock comes out: the 5C collet chuck's nose (c5/body.glb)
 # and the Kitagawa BR10's jaws (br10/jaw_*.glb), which close to r 18.2 and slide out radially to grip.
 LINKS = "library/machines/st25/links"
-STATIC = ["base", "spindle", "drawtube", "door", "pendant", "probe_arm", "turret", "xslide", "zslide", "zcover_left",
-          "zcover_right"]
+# the tool presetter's arm is left out: at joint zero it hangs down in front of the chuck, where the station will swing
+# it up out of the way
+STATIC = ["base", "spindle", "drawtube", "door", "pendant", "turret", "xslide", "zslide", "zcover_left", "zcover_right"]
 AXIS_YZ = np.array([0.0, 1005.2])
 TURRET_YZ = np.array([262.3, 1379.2])
 X_DIR = np.r_[0.0, (TURRET_YZ - AXIS_YZ) / np.linalg.norm(TURRET_YZ - AXIS_YZ)]   # lathe X (out), world
@@ -58,6 +59,7 @@ CHUCKS = {"c5": {"front_x": 192.1, "links": ["c5/body"]},
                      "jaw_r": 18.2}}
 EYE = np.array([300.0, -1000.0, 1600.0])           # the operator at the door, in front of the chuck
 MAX_RPM = 3400                                     # Haas ST-25 (st25.json)
+HOME_MM = (140.0, 250.0)                           # the turret's home: out to this radius (X 280), 250 away in Z
 PARK_MM = np.array([0.0, 0.0, 3000.0])             # a tool not cutting: out of sight, above the machine
 # What the plans leave to the programmer, read from the STEP and the drawing, by (part, setup) and (part, setup, op), in
 # the part's model u (mm along its axis). A setup's face_mm: the stock past the part's free end it faces off (its wcs's
@@ -312,6 +314,11 @@ def run_step(lathe: Lathe, s: dict, op: dict, stock: T.Profile, log=print) -> T.
         log(f"[lathe] {step}: {op['tool']} has no catalogue record, so nothing says what it cuts: not run (a plan gap)")
         return None
     su, passes = lathe.passes(s, op, stock)
+    if passes:                                       # the program ends sending the turret home (G28 U0 W0): out and
+        q = passes[-1]                               # away from the chuck, clear of the part for the still
+        u_end, r_end, _ = q.moves[-1]
+        q.to(u_end, max(r_end, HOME_MM[0]))
+        q.to(u_end + su.side * HOME_MM[1], max(r_end, HOME_MM[0]))
     if not passes:
         log(f"[lathe] {step}: nothing to cut")
         return None
@@ -392,12 +399,14 @@ def run_step(lathe: Lathe, s: dict, op: dict, stock: T.Profile, log=print) -> T.
             glbs[f"tool_{t.id}"] = [{"path": model, "in_body": [0, 0, 0, *Y_UP]}]
     rec.write(out, FPS, 0.0, {}, MACHINE, glbs, meshes=meshes)
 
-    centre_model = lathe.axis.point(sum(end.span()) / 2, 0.0)
-    size = max(end.span()[1] - end.span()[0], 2 * float(end.r_out[end.solid()].max()))
-    dist = float(np.clip(4.0 * size, 90.0, 260.0))
+    # framed on the part (its span along the axis), not on the bar running back into the jaws
+    plo, phi = lathe.part.span()
+    centre_model = lathe.axis.point((plo + phi) / 2, 0.0)
+    size = max(phi - plo, 2 * float(lathe.part.r_out[lathe.part.solid()].max()))
+    dist = float(np.clip(4.5 * size, 80.0, 300.0))
     (out / "still.json").write_text(json.dumps({
         "look_off_mm": (R @ centre_model).round(2).tolist(),
-        "from_mm": (np.array([0.45, -0.8, 0.4]) / np.linalg.norm([0.45, -0.8, 0.4]) * dist).round(1).tolist(),
+        "from_mm": (np.array([0.15, -0.85, 0.45]) / np.linalg.norm([0.15, -0.85, 0.45]) * dist).round(1).tolist(),
         "about": "the still's camera (moonshot/orchestrate/pipeline.py --still): it looks at the blank body's origin "
                  "plus look_off_mm (world axes: the stock's centre), from from_mm off that: in front of the part, a "
                  "little toward the turret and above, inside the door"}, indent=1), encoding="utf-8")

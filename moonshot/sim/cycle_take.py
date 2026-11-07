@@ -358,15 +358,17 @@ def finish_take(plan: dict, step: dict, log=print) -> Path:
     return out
 
 
-def on_shelf(plan: dict, stock, out: Path, look: str) -> None:
+def on_shelf(plan: dict, stock, out: Path, look: str, R: np.ndarray | None = None) -> None:
     """A take of a part on its own (a cycle step with no simulation): the stock, in look (LOOKS), on a dark shelf,
-    set down as the mill held it in its flattest setup, the still's camera close on it: take.npz, scene.json,
-    stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
+    set down as the mill held it in its flattest setup (or turned by R), the still's camera close on it: take.npz,
+    scene.json, stock/0.glb, still.json in out (only those: the folder may hold another session's files)."""
     (out / "stock").mkdir(parents=True, exist_ok=True)
     finish = look
-    # set down on the shelf as the mill held it in its flattest setup (the last of those as flat)
-    poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
-    R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
+    if R is not None:
+        R_last = np.asarray(R, float)
+    else:                     # set down on the shelf as the mill held it in its flattest setup (the last as flat)
+        poses = [np.asarray(part_pose(plan, s["id"])["R"], float) for s in plan["setups"] if "workholding" in s]
+        R_last = min(reversed(poses), key=lambda R: cam.Frame(R, np.zeros(3)).to_world(stock).BoundingBox().zlen)
     sb = cam.Frame(R_last, np.zeros(3)).to_world(stock).BoundingBox()
     origin = np.array([-(sb.xmin + sb.xmax) / 2, -(sb.ymin + sb.ymax) / 2, SHELF_Z - sb.zmin])
     f = lambda v: " ".join(f"{float(x) * M:.5f}" for x in v)            # noqa: E731
@@ -406,9 +408,17 @@ def saw_cut_take(plan: dict, step: dict, log=print) -> Path:
     where the saw's session keeps its cut's."""
     from moonshot.motion.loads import envelope
     env = envelope(plan, next(x for x in plan["setups"] if "workholding" in x)["id"])
-    stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
     out = data_root() / "takes" / f"{plan['part']}-{step['id']}"
-    on_shelf(plan, stock, out, "bar")
+    if "bar_dia_mm" in plan["stock"]:            # a round bar's slug (a lathe part's), lying on its end, its axis up
+        k = "XYZ".index(plan["stock"].get("axis", "Y"))
+        d = np.eye(3)[k]
+        base = cq.Vector(*(env.mean(1) * (1 - d) + env[k, 0] * d))
+        stock = cq.Solid.makeCylinder(plan["stock"]["bar_dia_mm"] / 2, env[k, 1] - env[k, 0], base, cq.Vector(*d))
+        up = np.roll(np.eye(3), -k, axis=0)          # the bar's axis to world z
+        on_shelf(plan, stock, out, "bar", R=np.stack([up[1], up[2], up[0]]))
+    else:
+        stock = cq.Solid.makeBox(*(env[:, 1] - env[:, 0]), cq.Vector(*env[:, 0]))
+        on_shelf(plan, stock, out, "bar")
     log(f"[cycle] {step['id']}: the sawn blank, {' x '.join(f'{v:.2f}' for v in env[:, 1] - env[:, 0])} mm")
     return out
 

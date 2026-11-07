@@ -413,7 +413,10 @@ For each track, I write its data formats, checks and bad takes **before** its ag
   - G1's four inspect steps (all but nist-ftc-10's) stay caption and still.
   - The setting takes render on the M4 as well as the M1 (the M1 alone needed about 47 h), only the video going to
     the hub.
-- [ ] Nov 7: G2 (3 parts) on the web
+- [ ] Nov 7: G2 (3 parts) on the web. Started 17:30 on Nov 6, in parallel with G1's last takes (your decision, sooner
+  than Nov 8-9 if it can be): the three plans (ct-tpg322, ll-1011439, ll-1007224), the Haas ST-25 lathe and the
+  surface grinder as stations, and turning and surface grinding in the cut simulation, each gate first. G1's steps
+  shown as caption and a still get their still rendered from the setup's scene (your decision, Nov 6).
 - [ ] Nov 9: G3 (5 parts) on the web; all 36 stations conformant
 - [ ] Nov 10: G4 (5 parts) on the web
 - [ ] Nov 11: G5; all 20 parts on the web

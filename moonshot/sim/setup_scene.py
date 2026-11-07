@@ -16,14 +16,17 @@ takes keep the reference load (moonshot/world/vise.py REFERENCE).
   where it is clamped, the jaw still open. Each held where it stands by the vise scene's keepers, as the load take
   finds them.
 - A plate setup: the plate on its spoilboard under its clamps (moonshot/motion/plates.py; nist-ftc-09's on its
-  riser), held to the table by the declared `clamped` weld, as the setting session holds it.
+  riser), held to the table by the declared `clamped` weld, as the setting session holds it. Its clamps are clamped
+  on it, or with scene "clamps": "parked" slid back off it and tipped onto the spoilboard, their nuts run up, as the
+  plate lies before they are set and once they are loosened (moonshot/world/spoilboard.py; for a step's still).
 
 The part is drawn as the cutting simulation (moonshot/sim/cycle_take.py) has it: entering the setup ("in"), the
 setup's first cycle's stock at its first frame; leaving it ("out"), its last cycle's last stock. Each GLB is in the
 part's model frame (its STEP's); the cycle's blank stands at part_pose's origin turned R, so moved into this take's
 blank, the box part_pose centres (it carries no turn), a model point p is at R (p - envelope's middle). Its physics
 is that box, as every vise take's. A setup none of whose cycles has run yet draws the finished part if it has one, else
-the box (vise.render_meshes). A plate is drawn from its geoms, as the plates' own takes draw it.
+the box (vise.render_meshes). A plate is drawn from its geoms, as the plates' own takes draw it; a step's still draws
+it from its stock (Table.part_mesh), as the cutting simulation has it.
 
 The part's mesh is written into the take's folder when its run is exported, so the render draws the stock as it was
 then. When a setup's stock comes later (ll-1007224 op30's, drawn finished until the cutting simulation hands it the
@@ -66,6 +69,7 @@ class Table:
         if self.is_plate:
             self.plate, self.clamps = plates.plate(self.part, self.setup, self.plan), plates.clamps(self.part, self.setup,
                                                                                                     self.plan)
+            self.clamp_state = s.get("clamps", "clamped")
             self.load = None
         else:
             self.load = V.Load.from_json(tk["load"])
@@ -94,7 +98,7 @@ class Table:
     def xml(self, body_xml: str, hand_body: str = "R_hand") -> str:
         """The body model's MJCF with the cell and what is on the table."""
         if self.is_plate:
-            xml = SB.with_body(body_xml, self.plate, self.clamps)
+            xml = SB.with_body(body_xml, self.plate, self.clamps, self.clamp_state)
             c = " ".join(f"{v / 1000:.7f}" for v in self.plate.centre)
             # as the setting session's (sim/pendant.py): near-rigid, as stiff as the step allows
             return xml.replace("<equality>\n", '<equality>\n    <weld name="clamped" body1="blank" body2="vf2_table" '
@@ -163,12 +167,16 @@ class Table:
         and all, if the part has one; else the box."""
         if self.is_plate:
             return {}
-        out = V.render_meshes(self.load, folder)
+        return V.render_meshes(self.load, folder) | self.part_mesh(folder)
+
+    def part_mesh(self, folder: Path) -> dict[str, dict]:
+        """The part's mesh (meshes' doc), written into the take's folder as its blank's: {} where there is none, the
+        box drawn instead."""
         src, scale = self.stock_glb(), 1.0
         if src is None:
             src, scale = data_root() / "parts" / self.part / "finished.glb", 1000.0
             if not src.exists():
-                return out
+                return {}
         import trimesh
         mesh = trimesh.load(src, force="mesh")
         mesh.apply_scale(scale)
@@ -178,7 +186,7 @@ class Table:
         mesh.apply_transform(T)
         (Path(folder) / "blank").mkdir(parents=True, exist_ok=True)
         mesh.export(Path(folder) / "blank" / "0.glb")
-        return out
+        return {"blank": {"dir": "blank", "frames": [0]}}
 
 
 def redraw(folder: Path) -> Path | None:

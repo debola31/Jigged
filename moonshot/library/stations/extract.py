@@ -180,14 +180,28 @@ GENERATED = {"sgrind": {"controls": control_box_mesh,               # links with
                         **{f"coolant_stream_{w}": (lambda s, w=w: coolant_stream_mesh(s, w))
                            for w in ("gwheel", "dwheel-1a1r")}}}
 WHEEL_ASSETS = {"sgrind": ("dwheel-1a1r",)}    # wheels made here that are also assets of their own (consumables)
+KEEPER_MM = (38.1, 12.7, 3.175)                 # the grinding keeper (records workholding/keeper): its length proposed
+
+
+def keeper_mesh():
+    """A grinding keeper, a ground bar lying on z = 0, its length along X (the library's convention), in mm."""
+    import trimesh
+    box = trimesh.creation.box(extents=KEEPER_MM)
+    box.apply_translation([0.0, 0.0, KEEPER_MM[2] / 2])
+    return box
 
 
 def write_wheel_assets(station: str) -> None:
-    """Each made wheel's own asset GLB, <data root>/library/consumables/<id>/<id>.glb, from the same dimensions."""
+    """Each made wheel's own asset GLB, <data root>/library/consumables/<id>/<id>.glb, from the same dimensions, and
+    the keepers its chuck blocks parts in with, <data root>/library/workholding/keeper/keeper.glb."""
     for wheel_id in WHEEL_ASSETS.get(station, ()):
         out = data_root() / "library" / "consumables" / wheel_id
         out.mkdir(parents=True, exist_ok=True)
         wheel_mesh(station, wheel_id, on_spindle=False).export(out / f"{wheel_id}.glb")
+    if station == "sgrind":
+        out = data_root() / "library" / "workholding" / "keeper"
+        out.mkdir(parents=True, exist_ok=True)
+        keeper_mesh().export(out / "keeper.glb")
 
 
 def read_components(step: Path):

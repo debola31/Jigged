@@ -48,10 +48,11 @@ RIGHT_LUMBAR = np.array([850.0, 260.0, 955.0])      # the down-feed knob 360-420
 
 PART = {"density": 14900.0, "friction": 0.2, "material": "carbide",          # C2 (WC, 6% Co): 14.9 g/cm3
         "solref": (0.002, 1.0), "solimp": (0.95, 0.99, 0.001), "rgba": (0.5, 0.5, 0.52, 1.0)}
-KEEPER = {"density": 7850.0, "friction": 0.2, "material": "steel", "rgba": (0.62, 0.63, 0.66, 1.0),
-          # the shop's 1/8 in parallels (parallels-1, McMaster 86425A65), laid flat: 6 in long, the 1/2 in pair
-          # [proposed: the narrowest of the set, the least crowding round a 16 mm insert]
-          "size_mm": (152.4, 12.7, 3.175)}
+KEEPER = {"density": 7850.0, "friction": 0.2, "material": "steel", "rgba": (0.62, 0.63, 0.66, 1.0), "asset": "keeper",
+          # the shop's grinding keepers (keepers-1): 1/8 x 1/2 in ground O-1 flat stock cut 1-1/2 in long, so a pinwheel
+          # of three round a 3/8 in IC insert reaches 23 mm behind it and 35 in front (your decision, 2026-11-06: the
+          # shop's 6 in parallels reach 256 mm across the table that way, past the 254 mm chuck)
+          "size_mm": (38.1, 12.7, 3.175)}
 
 
 def _f(v, scale=M) -> str:

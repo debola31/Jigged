@@ -2,7 +2,7 @@
  "schema": "jigged.card/1",
  "id": "sgrind-block-in",
  "name": "Set a small part on the surface grinder's magnetic chuck, blocked in by steel keepers, and switch the chuck on",
- "assets": ["sgrind", "para"],
+ "assets": ["sgrind", "keeper"],
  "hands": {
   "working": {
    "side": "R", "role": "wipes the chuck, sets the keepers and the part, turns the chuck's lever",
@@ -44,5 +44,5 @@
   {"kind": "footage", "ref": "Kurt, 'Double Station Manual Vise Setup' (YouTube), measured locally with MediaPipe Hand Landmarker; borrowed for reach durations",
    "file": "moonshot/cards/footage/kurt-vise-setup.timing.json", "gives": "reach durations: the right hand's interquartile range, 0.32-0.67 s"}
  ],
- "notes": "For a part too weakly magnetic, or too small, for the chuck to hold alone; a steel part thick enough is set straight on the chuck and phases 3 and 5 drop out. ct-tpg322's plan names the shop's 1/8 in parallels as keepers; laid round a triangle with a flank along the table's travel, 6 in keepers reach 256 mm across the 254 mm chuck and over 120 mm behind the insert, into the spindle housing's path with the 6 in wheel at the work, so the keepers' length is open with the coordinator (the cell takes any length). No footage of a grinder setup is measured yet. Proposed, with reasons (phase numbers count from 1): #1 1 s to check; #2 5 N and 3-6 s for a rag over a small area; #3 and #4 1.5 s each to lay a keeper or the part; #5 1 N, a fingertip's push that closes a 0.05 mm gap without shifting what is set, and 2-4 s a keeper; #7 the lever as the station's; #8 1 N, from the cell's tests, and 1.0 s."
+ "notes": "For a part too weakly magnetic, or too small, for the chuck to hold alone; a steel part thick enough is set straight on the chuck and phases 3 and 5 drop out. ct-tpg322's keepers are the shop's grinding keepers (keepers-1, record keeper), 1/8 x 1/2 x 1-1/2 in, so three fit round its insert in a pinwheel, 23 mm behind its middle and 35 in front; the shop's 6 in parallels laid that way reach 256 mm across the table, past the 254 mm chuck, and into the spindle housing's path with the 6 in wheel at the work (your decision, 2026-11-06). No footage of a grinder setup is measured yet. Proposed, with reasons (phase numbers count from 1): #1 1 s to check; #2 5 N and 3-6 s for a rag over a small area; #3 and #4 1.5 s each to lay a keeper or the part; #5 1 N, a fingertip's push that closes a 0.05 mm gap without shifting what is set, and 2-4 s a keeper; #7 the lever as the station's; #8 1 N, from the cell's tests, and 1.0 s."
 }

@@ -14,7 +14,8 @@ from moonshot.world import sgrind as SG
 IC, THICK, NOSE, CLEAR = 9.525, 3.175, 0.79375, 11.0       # ct-tpg322: 3/8 IC, 1/8 thick, 1/32 nose, 11 deg (P)
 
 
-SHORT_MM = 38.1          # keepers 1-1/2 in long, which a pinwheel round the insert fits on the chuck (below)
+SHORT_MM = GC.KEEPER["size_mm"][0]   # the shop's keepers, 1-1/2 in long, which a pinwheel round the insert fits (below)
+PARALLEL_MM = 152.4                  # the shop's 6 in parallels, which it doesn't
 
 
 def blocked_in():
@@ -55,7 +56,7 @@ def test_six_inch_keepers_dont_fit_round_the_insert_and_short_ones_do():
     with the 6 in wheel at the work (sgrind.json joints.wheelhead). 1-1/2 in keepers reach 23 mm back and 35 in
     front."""
     depth = 2 * SG.record()["colliders"]["chuck_face"]["box_max_mm"][1] - 2 * SG.record()["chuck"]["centre_mm"][1]
-    back, front = pinwheel_span_mm(GC.KEEPER["size_mm"][0])
+    back, front = pinwheel_span_mm(PARALLEL_MM)
     assert back + front > depth and back > 38.7
     back, front = pinwheel_span_mm(SHORT_MM)
     assert back + front < depth and back < 38.7 + 5.0

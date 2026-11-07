@@ -39,15 +39,24 @@ from moonshot.sim.record import Recorder
 M = 0.001
 FPS = 24
 MACHINE = "st25"
-GLB = "library/machines/st25/st25.glb"
-Y_UP = [0.7071068, 0.7071068, 0.0, 0.0]            # the asset is stored Y up: +90 deg about x (take_record.py)
-# the ST-25 asset's spindle (world mm, measured from the GLB: the chuck's bolt circle and jaws): the axis along +x,
-# the jaws' front faces at x = -717, and the turret's tools coming in from its centre, back and above the axis
-AXIS_YZ = np.array([-661.5, 1013.0])
-JAW_FRONT_X = -717.0
-TURRET_YZ = np.array([-399.0, 1387.0])
+Y_UP = [0.7071068, 0.7071068, 0.0, 0.0]            # a catalogue tool is stored Y up: +90 deg about x (take_record.py)
+# The ST-25 drawn from its station's links (library/machines/st25/links/, the station's frame, Z up, at joint zero:
+# the turret home) until its station model lands. Measured from the links: the spindle's axis along +x at y 0, z 1005.2
+# (spindle.glb), the operator at -y (pendant.glb), the turret's centre behind it and above (turret.glb), so its tools
+# come in along X_DIR. Each chuck's front face, where the stock comes out: the 5C collet chuck's nose (c5/body.glb)
+# and the Kitagawa BR10's jaws (br10/jaw_*.glb), which close to r 18.2 and slide out radially to grip.
+LINKS = "library/machines/st25/links"
+STATIC = ["base", "spindle", "drawtube", "door", "pendant", "probe_arm", "turret", "xslide", "zslide", "zcover_left",
+          "zcover_right"]
+AXIS_YZ = np.array([0.0, 1005.2])
+TURRET_YZ = np.array([262.3, 1379.2])
 X_DIR = np.r_[0.0, (TURRET_YZ - AXIS_YZ) / np.linalg.norm(TURRET_YZ - AXIS_YZ)]   # lathe X (out), world
-EYE = np.array([-560.0, -1450.0, 1550.0])          # the operator at the door
+CHUCKS = {"c5": {"front_x": 192.1, "links": ["c5/body"]},
+          "chuck3": {"front_x": 183.5, "links": ["br10/body"], "jaws": {"br10/jaw_0": (0.0, 1.0),
+                                                                          "br10/jaw_1": (0.866025, -0.5),
+                                                                          "br10/jaw_2": (-0.866025, -0.5)},
+                     "jaw_r": 18.2}}
+EYE = np.array([300.0, -1000.0, 1600.0])           # the operator at the door, in front of the chuck
 MAX_RPM = 3400                                     # Haas ST-25 (st25.json)
 PARK_MM = np.array([0.0, 0.0, 3000.0])             # a tool not cutting: out of sight, above the machine
 # What the plans leave to the programmer, read from the STEP and the drawing, by (part, setup) and (part, setup, op), in
@@ -216,7 +225,19 @@ class Lathe:
 
 # --- the scene ---------------------------------------------------------------------------------------------------
 
-def frame_of(su: T.Setup, axis: T.Axis, stock: T.Profile) -> tuple[np.ndarray, np.ndarray]:
+def machine_glbs(chuck: str, grip_r: float) -> list[dict]:
+    """The ST-25's links at joint zero, with the setup's chuck on the spindle: the BR10's jaws slid out to grip at
+    grip_r."""
+    c = CHUCKS[chuck]
+    out = [{"path": f"{LINKS}/{k}.glb", "in_body": [0, 0, 0, 1, 0, 0, 0], "link": k} for k in STATIC + c["links"]]
+    for k, (dy, dz) in c.get("jaws", {}).items():
+        d = grip_r - c["jaw_r"]
+        out.append({"path": f"{LINKS}/{k}.glb", "in_body": [0, round(d * dy, 3), round(d * dz, 3), 1, 0, 0, 0],
+                    "link": k})
+    return out
+
+
+def frame_of(su: T.Setup, axis: T.Axis, stock: T.Profile, chuck: str) -> tuple[np.ndarray, np.ndarray]:
     """The part's model frame in the world: R and origin (a model point p stands at origin + R @ p). Its axis on the
     spindle's, the free end toward the turret (+x), the jaws' span's free end at the jaws' front."""
     lo, hi = su.jaws
@@ -226,7 +247,7 @@ def frame_of(su: T.Setup, axis: T.Axis, stock: T.Profile) -> tuple[np.ndarray, n
     Rm = np.stack([axis.dir, axis.out, n])                # model -> (u, out, n)
     Rw = np.stack([d_w, np.array([0.0, 0.0, 1.0]), np.cross(d_w, [0.0, 0.0, 1.0])])
     R = Rw.T @ Rm
-    on_axis = np.array([JAW_FRONT_X, *AXIS_YZ])
+    on_axis = np.array([CHUCKS[chuck]["front_x"], *AXIS_YZ])
     origin = on_axis - R @ axis.point(u_jf, 0.0)
     return R, origin
 
@@ -316,7 +337,10 @@ def run_step(lathe: Lathe, s: dict, op: dict, stock: T.Profile, log=print) -> T.
     total = ends[-1]
     frames = int(round(seconds_for(total) * FPS))
     stamps = np.linspace(0.0, total, frames)
-    R, origin = frame_of(su, lathe.axis, before)
+    chuck = s["workholding"]["chuck"]
+    R, origin = frame_of(su, lathe.axis, before, chuck)
+    held = (before.u >= su.jaws[0]) & (before.u <= su.jaws[1]) & before.solid()
+    grip_r = float(before.r_out[held].max()) if held.any() else 10.0
     tools = list({q.tool.id: q.tool for q in passes}.values())
     m = mujoco.MjModel.from_xml_string(take_xml(tools))
     d = mujoco.MjData(m)
@@ -361,7 +385,7 @@ def run_step(lathe: Lathe, s: dict, op: dict, stock: T.Profile, log=print) -> T.
     shape = T.to_brep(end, lathe.axis)
     shape.exportBrep(str(out / "stock-end.brep"))
     end.save(out / "stock-profile.npz")
-    glbs = {MACHINE: [{"path": GLB, "in_body": [0, 0, 0, *Y_UP]}]}
+    glbs = {MACHINE: machine_glbs(chuck, grip_r)}
     for t in tools:                                      # the catalogue's model, stored Y up (generators.py)
         model = f"library/tooling/{t.id}/{t.id}.glb"
         if (data_root() / model).exists():

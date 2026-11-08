@@ -7,9 +7,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Radio from '@mui/material/Radio';
-import RadioGroup from '@mui/material/RadioGroup';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -19,26 +16,23 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 
 import { submitWaitlist } from '@/app/actions/waitlist';
 import BusyButton from '@/components/common/BusyButton';
-import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import { isValidEmail } from '@/lib/validators';
 import { GENERIC_ALERT_MESSAGE, SKEW_ALERT_MESSAGE, reportWaitlistSubmitFailure } from '@/lib/serverActionSkew';
 import { PILOT_FILE_ACCEPT, PILOT_FILE_FORMATS_LABEL, pilotFileType } from '@/lib/pilotRequest';
 
-/** What the visitor asks for, and the waitlist `source` it is recorded under (notify-waitlist reads it). */
-export const INTEREST = {
-  feature: { source: 'showcase_feature_request', label: 'Request this feature', button: 'Request it' },
-  pilot: { source: 'showcase_pilot', label: 'Join the pilot', button: 'Join the pilot' },
-} as const;
-type Intent = keyof typeof INTEREST;
+/** The waitlist `source` a pilot sign-up is recorded under; notify-waitlist reads it to pick the confirmation. */
+export const PILOT_SOURCE = 'showcase_pilot';
 
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'stale';
 
 /**
  * "Your own part": the visitor picks their part's file, learns a walkthrough of their own part
- * isn't automatic yet, and either asks for the feature or commits to the pilot, with their name,
- * business and email. It goes on the Jigged waitlist (app/actions/waitlist.ts) under its own
- * `source`; the notify-waitlist function tells the team and sends the visitor a confirmation that
- * matches what they asked for.
+ * isn't automatic yet, and joins the pilot with their name, business and email. It goes on the
+ * Jigged waitlist (app/actions/waitlist.ts) under its own `source`; the notify-waitlist function
+ * tells the team and sends the visitor the pilot confirmation.
+ *
+ * The button stays enabled: pressing it with a field blank marks that field and moves focus to
+ * it, so what's missing shows where it's fixed, with no separate list of the fields.
  *
  * The file never leaves the visitor's computer: only that they have a part matters here, and the
  * team asks for the file when it follows up. So nothing about it is sent, not even its name.
@@ -46,12 +40,15 @@ type Status = 'idle' | 'loading' | 'success' | 'error' | 'stale';
 export default function InterestForm() {
   const headingId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const companyRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [intent, setIntent] = useState<Intent | null>(null);
   const [name, setName] = useState('');
   const [company, setCompany] = useState('');
   const [email, setEmail] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState('');
 
@@ -59,12 +56,16 @@ export default function InterestForm() {
   const fileProblem = file && !pilotFileType(file.name) ? `Choose a ${PILOT_FILE_FORMATS_LABEL}.` : null;
   const emailValid = isValidEmail(email);
   const busy = status === 'loading';
-  const missing = [
-    ...(!intent ? ['Choose what you would like'] : []),
-    ...(!name.trim() ? ['Enter your name'] : []),
-    ...(!company.trim() ? ['Enter your business'] : []),
-    ...(!emailValid ? ['Enter your email address'] : []),
-  ];
+
+  const nameError = attempted && !name.trim() ? 'Enter your name' : undefined;
+  const companyError = attempted && !company.trim() ? 'Enter your business' : undefined;
+  const emailError = emailValid
+    ? undefined
+    : email.trim() !== '' && (emailTouched || attempted)
+      ? 'Enter a valid email address'
+      : attempted
+        ? 'Enter your email address'
+        : undefined;
 
   const onFileChosen = (event: ChangeEvent<HTMLInputElement>) => {
     const chosen = event.target.files?.[0] ?? null;
@@ -74,9 +75,13 @@ export default function InterestForm() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setEmailTouched(true);
-    if (busy || !intent || missing.length > 0) return;
-    const { source } = INTEREST[intent];
+    if (busy) return;
+    setAttempted(true);
+    const firstMissing = !name.trim() ? nameRef : !company.trim() ? companyRef : !emailValid ? emailRef : null;
+    if (firstMissing) {
+      firstMissing.current?.focus();
+      return;
+    }
     setStatus('loading');
     setMessage('');
     try {
@@ -85,14 +90,14 @@ export default function InterestForm() {
         name: name.trim(),
         company_name: company.trim(),
         shop_size: null,
-        source,
+        source: PILOT_SOURCE,
       });
       if (result.error) throw new Error(result.error);
       // Shape only, as the waitlist's other form sends it: never the name, business, email or file.
-      posthog.capture('waitlist submitted', { source, shop_size: null });
+      posthog.capture('waitlist submitted', { source: PILOT_SOURCE, shop_size: null });
       setStatus('success');
     } catch (err) {
-      const isSkew = reportWaitlistSubmitFailure(err, source);
+      const isSkew = reportWaitlistSubmitFailure(err, PILOT_SOURCE);
       setStatus(isSkew ? 'stale' : 'error');
       setMessage(isSkew ? SKEW_ALERT_MESSAGE : GENERIC_ALERT_MESSAGE);
     }
@@ -105,18 +110,16 @@ export default function InterestForm() {
           Your own part
         </Typography>
 
-        {status === 'success' && intent ? (
+        {status === 'success' ? (
           <Stack spacing={2} role="status" sx={{ pt: 1 }}>
             <Stack direction="row" spacing={1.5} alignItems="center">
               <CheckCircleOutlineIcon color="success" />
               <Typography variant="h6" component="p">
-                {intent === 'pilot' ? "Thanks — you're in the pilot." : "Thanks — you're on the list."}
+                Thanks — you&apos;re in the pilot.
               </Typography>
             </Stack>
             <Typography color="text.secondary">
-              {intent === 'pilot'
-                ? "We'll be in touch to set up a walkthrough of your part for your shop, at "
-                : "We'll let you know when you can make walkthroughs of your own parts, at "}
+              We&apos;ll be in touch to set up a walkthrough of your part for your shop, at{' '}
               <Box component="strong" sx={{ color: 'text.primary', wordBreak: 'break-all' }}>
                 {email.trim().toLowerCase()}
               </Box>
@@ -164,41 +167,9 @@ export default function InterestForm() {
               {file && !fileProblem ? (
                 <>
                   <Typography color="text.secondary">
-                    Walkthroughs of your own parts aren&apos;t automatic yet. Tell us you want one:
+                    Walkthroughs of your own parts aren&apos;t automatic yet. Join the pilot and we&apos;ll make one
+                    of this part with your machines and tools.
                   </Typography>
-                  <RadioGroup
-                    aria-label="What you would like"
-                    value={intent ?? ''}
-                    onChange={(e) => setIntent(e.target.value as Intent)}
-                  >
-                    <FormControlLabel
-                      value="feature"
-                      disabled={busy}
-                      control={<Radio />}
-                      label={
-                        <Box sx={{ py: 1 }}>
-                          <Typography sx={{ fontWeight: 600 }}>{INTEREST.feature.label}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            We&apos;ll let you know when you can make walkthroughs of your own parts.
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                    <FormControlLabel
-                      value="pilot"
-                      disabled={busy}
-                      control={<Radio />}
-                      label={
-                        <Box sx={{ py: 1 }}>
-                          <Typography sx={{ fontWeight: 600 }}>{INTEREST.pilot.label}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Work with us now: we&apos;ll make a walkthrough of this part with your machines and
-                            tools.
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                  </RadioGroup>
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2.5}>
                     <TextField
@@ -207,8 +178,11 @@ export default function InterestForm() {
                       autoComplete="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
+                      error={Boolean(nameError)}
+                      helperText={nameError}
                       disabled={busy}
                       fullWidth
+                      inputRef={nameRef}
                       slotProps={{ htmlInput: { maxLength: 200 } }}
                     />
                     <TextField
@@ -217,8 +191,11 @@ export default function InterestForm() {
                       autoComplete="organization"
                       value={company}
                       onChange={(e) => setCompany(e.target.value)}
+                      error={Boolean(companyError)}
+                      helperText={companyError}
                       disabled={busy}
                       fullWidth
+                      inputRef={companyRef}
                       slotProps={{ htmlInput: { maxLength: 200 } }}
                     />
                   </Stack>
@@ -230,10 +207,11 @@ export default function InterestForm() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onBlur={() => setEmailTouched(true)}
-                    error={emailTouched && email.trim() !== '' && !emailValid}
-                    helperText={emailTouched && email.trim() !== '' && !emailValid ? 'Enter a valid email address' : undefined}
+                    error={Boolean(emailError)}
+                    helperText={emailError}
                     disabled={busy}
                     fullWidth
+                    inputRef={emailRef}
                     slotProps={{ htmlInput: { maxLength: 320 } }}
                   />
 
@@ -247,17 +225,15 @@ export default function InterestForm() {
 
                   {status === 'error' || status === 'stale' ? <Alert severity="error">{message}</Alert> : null}
 
-                  {!busy ? <MissingFieldsNotice items={missing} title="To send this:" /> : null}
-
                   <BusyButton
                     type="submit"
                     variant="contained"
                     fullWidth
-                    disabled={busy || missing.length > 0}
+                    disabled={busy}
                     pending={busy}
                     pendingLabel="Sending…"
                   >
-                    {intent ? INTEREST[intent].button : 'Send'}
+                    Join the pilot
                   </BusyButton>
                 </>
               ) : null}

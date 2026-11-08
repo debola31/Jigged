@@ -673,36 +673,31 @@ retry; never report it and never surface it as an error.
 | [`instrumentation-client.ts`](../instrumentation-client.ts) | `Invalid login credentials` | A mistyped password is not a bug |
 | [`instrumentation-client.ts`](../instrumentation-client.ts) | `EmptyRanges` | A Safari extension. Absent from source, `node_modules` **and** the built bundle |
 | [`instrumentation-client.ts`](../instrumentation-client.ts) | `Lock was stolen` | auth-js's own recovery working as designed; no user-visible effect |
-| [`sentry.server.config.ts`](../sentry.server.config.ts) | `/^Failed to find Server Action\. This request might be from an older or newer deployment\./` | Next **E975** — a generic `multipart/form-data` POST at a page that owns a server action, carrying no `Next-Action` header and no `$ACTION_*` fields. **This app cannot emit one:** `submitWaitlist` is only ever `await`ed from a click handler, which is a *fetch* action (sends `Next-Action`, answered 404 on skew rather than thrown), and with no `<form action={serverAction}>`, `useActionState` or `formAction` anywhere, React emits no `$ACTION_ID_` field for a native submit to carry. JAVASCRIPT-NEXTJS-3A was 12 such POSTs at `/` from two AS400463 datacenter IPs, with zero PostHog events in the window and no `waitlist` row behind them |
 
 Add to this list only with a verified reason, and record it here. An entry with no recorded
 reason is indistinguishable from a mistake. **Strings are matched with `includes()`, RegExps with
-`.test()`, both against the whole multi-line message** — which is why the E975 entry is a RegExp
-and the three above are not.
+`.test()`, both against the whole multi-line message** — so a string entry also swallows any error
+that merely *wraps* its text; anchor a RegExp with `^` when that would hide a different failure.
 
-**Three deliberate non-entries around E975**, each of which would hide a real user:
+**The server and edge configs carry no `ignoreErrors`, and need none.** Deployment skew on
+`submitWaitlist` (a *fetch* action) never reaches Sentry from the server: Next answers it 409 with
+`x-nextjs-action-not-found` and only `console.warn`s. The browser turns that into
+`UnrecognizedActionError: Server Action "<id>" was not found on the server.`, which
+[`lib/serverActionSkew.ts`](../lib/serverActionSkew.ts) reports at **`error` level, not
+`warning`** — deliberately, because it means a prospect was blocked and could not submit. Never
+filter it.
 
-- **The quoted-id sibling.** `getActionNotFoundError` renders `Failed to find Server Action
-  "<id>". This request might be…` — the same sentence with an id in the middle, and *that* one is
-  genuine deployment skew. The `^` and the escaped `\.` after `Action` are the only things keeping
-  it out of the filter.
-- **The browser side.** A real prospect hitting skew gets a different error entirely —
-  `UnrecognizedActionError: Server Action "<id>" was not found on the server.` (**E715**), raised
-  client-side because the server only `console.warn`s and returns 404. It is reported by
-  [`lib/serverActionSkew.ts`](../lib/serverActionSkew.ts) at **`error` level, not `warning`** —
-  deliberately, because it means someone was blocked from reaching us and could not submit. That
-  is the one entry in this system that is *louder* than it used to be. Never filter it, and never
-  move the server entry into the browser config.
-- **The edge config.** [`sentry.edge.config.ts`](../sentry.edge.config.ts) has no `ignoreErrors`
-  and should not grow one for this. Next's edge branch throws the identical E975, but no app route
-  here runs on the edge runtime (`app/opengraph-image.tsx` is a GET metadata route and there is no
-  `middleware.ts`), so the entry could never fire — protection that isn't, the same shape as the
-  traps above.
+**Withdrawn:** a server-side `ignoreErrors` RegExp for Next **E975**
+(`/^Failed to find Server Action\. This request might be…/`), which dropped scanner
+`multipart/form-data` POSTs that 500'd (Sentry JAVASCRIPT-NEXTJS-3A: 12 POSTs at `/` from two
+AS400463 datacenter IPs) — wrong since Next 16.4, because
+[vercel/next.js#98123](https://github.com/vercel/next.js/pull/98123) answers an unrecognized action
+400/409 instead of throwing, so the entry could never fire.
 
-All of it is pinned by [`__tests__/lib/serverActionSkewFilter.test.ts`](../__tests__/lib/serverActionSkewFilter.test.ts),
-including one case that reads the message back out of the installed Next.js so an upgrade that
-rewords it fails the build instead of silently un-filtering, and one that fails for anyone who
-"simplifies" the RegExp into a plain string.
+Pinned by [`__tests__/lib/serverActionNextContract.test.ts`](../__tests__/lib/serverActionNextContract.test.ts)
+→ `describe('Next answers an unrecognized Server Action without a 500, and the browser still sees skew')`
+(4 `it`s), which reads the installed Next.js back: an upgrade that makes the server throw again, or
+keys the browser's skew detection on the status code, fails the build.
 
 ### Don't re-enable the SDKs outside a production build
 

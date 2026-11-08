@@ -1,15 +1,15 @@
 'use client';
 
-import { CameraControls, Html, useGLTF, useProgress } from '@react-three/drei';
+import { CameraControls, Html, useProgress } from '@react-three/drei';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Typography from '@mui/material/Typography';
 import { AgXToneMapping, BoxGeometry, CanvasTexture, EdgesGeometry, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RepeatWrapping, SRGBColorSpace, Vector3, type Group } from 'three';
-import { toError } from '@/lib/supabaseErrors';
 import { spotBox, toScene, type Catalog, type Vec3 } from './catalog';
+import { useLightModel } from './lightModel';
 import Realistic, { FINE_POINTER, realisticStatus, type Slot } from './Realistic';
+import { reportLoadFailure } from './reportLoad';
 import Room, { redrawRoom, roomStatus } from './Room';
 import { mediaUrl, type LivePart, type Rect, type ShopItem } from './showcaseData';
 import { useShowcase, type View } from './store';
@@ -27,20 +27,29 @@ const deg = (d: number) => (d * Math.PI) / 180;
 
 // --- things -------------------------------------------------------------------------------------
 
-function useInstance(url: string) {
-  // Draco off, meshopt on: the models are written by gltf-transform optimize (moonshot/web/media.py).
-  const gltf = useGLTF(url, false, true);
-  return useMemo(() => {
-    const object = gltf.scene.clone(true);
-    object.traverse((o) => {
-      if (!(o instanceof Mesh)) return;
-      o.castShadow = true;
-      o.receiveShadow = true;
+/** A placed thing's light model, or nothing in its place if it couldn't be loaded, reported once per page. */
+function Model({ url }: { url: string }) {
+  const loaded = useLightModel(url);
+  const object = useMemo(() => {
+    if ('error' in loaded) return null;
+    const o = loaded.scene.clone(true);
+    o.traverse((m) => {
+      if (!(m instanceof Mesh)) return;
+      m.castShadow = true;
+      m.receiveShadow = true;
       // Picking uses the box around the thing: far cheaper than raycasting its triangles.
-      o.raycast = () => {};
+      m.raycast = () => {};
     });
-    return object;
-  }, [gltf.scene]);
+    return o;
+  }, [loaded]);
+  // Once for this thing, though strict mode runs the effect twice in development.
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!('error' in loaded) || reported.current) return;
+    reported.current = true;
+    reportModel(loaded.error);
+  }, [loaded]);
+  return object && <primitive object={object} />;
 }
 
 /** The box a thing is picked by, in its own frame: at least 8 cm a side, so a gauge can be hit from across the shop. */
@@ -52,10 +61,6 @@ function pickBox(cat: Catalog, spot: ShopItem): { size: Vec3; centre: Vec3 } {
     Math.max((max[1] - min[1]) / 1000, 0.08),
   ];
   return { size, centre: [(min[0] + max[0]) / 2000, Math.max((min[2] + max[2]) / 2000, size[1] / 2), -(min[1] + max[1]) / 2000] };
-}
-
-function Model({ url }: { url: string }) {
-  return <primitive object={useInstance(url)} />;
 }
 
 /**
@@ -111,14 +116,17 @@ function Thing({ cat, spot, index, slots }: { cat: Catalog; spot: ShopItem; inde
   );
 }
 
-let modelFailures = 0;
+let modelReported = false;
 function reportModel(error: unknown) {
   // One report per page: the same outage would otherwise file one per model.
-  if (modelFailures++ === 0) Sentry.captureException(toError(error, 'Showcase: a shop model failed to load'));
+  if (!modelReported) modelReported = reportLoadFailure(error, 'Showcase: a shop model failed to load');
   useShowcase.getState().modelFailed();
 }
 
-/** Renders nothing in place of a child that threw, so one missing model doesn't take the shop down. */
+/**
+ * Renders nothing in place of a child that threw, so a fault in one thing doesn't take the shop down. A model that
+ * fails to load doesn't throw (lightModel.ts says why); this is for anything else.
+ */
 class Skip extends Component<{ children: ReactNode; onError(error: unknown): void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {

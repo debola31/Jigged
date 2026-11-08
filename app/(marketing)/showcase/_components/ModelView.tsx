@@ -1,10 +1,11 @@
 'use client';
 
-import { Bounds, Environment, Lightformer, OrbitControls, useGLTF } from '@react-three/drei';
+import { Bounds, Environment, Lightformer, OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Component, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgXToneMapping, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { useLightModel, type LightModel } from './lightModel';
 
 // A cut's mesh carries no normals. Facets of one curved face meet at a few degrees and are
 // smoothed; a machined edge is near 90 degrees and stays sharp.
@@ -12,10 +13,12 @@ const CREASE = (30 * Math.PI) / 180;
 // The still's camera from the part (pipeline.py STILL_FROM_MM: in front, a little right, above).
 const FROM = new Vector3(120, 230, 330).normalize();
 
-function Model({ url, part, onLoad }: { url: string; part: boolean; onLoad(): void }) {
-  const gltf = useGLTF(url, false, true);
+/** The light model, or nothing if it couldn't be loaded: handed to `onError` once, as lightModel.ts has it, not thrown. */
+function Model({ url, part, onLoad, onError }: { url: string; part: boolean; onLoad(): void; onError(error: unknown): void }) {
+  const loaded = useLightModel(url);
   const object = useMemo(() => {
-    const o = gltf.scene.clone(true);
+    if ('error' in loaded) return null;
+    const o = loaded.scene.clone(true);
     if (part) {
       o.traverse((m) => {
         if (!(m instanceof Mesh)) return;
@@ -28,8 +31,19 @@ function Model({ url, part, onLoad }: { url: string; part: boolean; onLoad(): vo
       });
     }
     return o;
-  }, [gltf.scene, part]);
-  useEffect(onLoad, [onLoad]);
+  }, [loaded, part]);
+  // Callers pass a new onError each render: the load, not the callback, decides whether it's news.
+  const reported = useRef<LightModel | null>(null);
+  useEffect(() => {
+    if (!('error' in loaded)) {
+      onLoad();
+      return;
+    }
+    if (reported.current === loaded) return;
+    reported.current = loaded;
+    onError(loaded.error);
+  }, [loaded, onLoad, onError]);
+  if (!object) return null;
   return (
     <Bounds fit clip observe margin={part ? 0.9 : 1.2}>
       <primitive object={object} />
@@ -133,7 +147,7 @@ export default function ModelView({
       </Environment>
       <Catch onError={onError}>
         <Suspense fallback={null}>
-          {full && !fullFailed ? <Full url={full} onLoad={onLoad} onError={onFull} /> : <Model url={url} part={part} onLoad={onLoad} />}
+          {full && !fullFailed ? <Full url={full} onLoad={onLoad} onError={onFull} /> : <Model url={url} part={part} onLoad={onLoad} onError={onError} />}
         </Suspense>
       </Catch>
       <OrbitControls makeDefault enableDamping enableZoom={!part} enablePan={false} />

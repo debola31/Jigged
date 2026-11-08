@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import * as Sentry from '@sentry/nextjs';
 import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -26,11 +25,11 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import { DISPLAY_FONT, EYEBROW_COLOR } from '@/components/marketing/marketingStyles';
-import { toError } from '@/lib/supabaseErrors';
 import { gatherList, stepsUsing, type Catalog } from './catalog';
 import { CategoryIcon, KindIcon, PartFacts, setupColour, shortName } from './glyphs';
 import { PartMenu, PilotDialog, UPLOADS_OPEN, type PickSource } from './PartChoice';
 import { useRealisticModel } from './realisticManifest';
+import { reportLoadFailure } from './reportLoad';
 import { finishedStill, mediaUrl, ready, type LivePart, type Use } from './showcaseData';
 import { useShowcase } from './store';
 
@@ -314,8 +313,7 @@ export function StepContent({ cat, part, index }: { cat: Catalog; part: LivePart
   const report = (error: unknown) => {
     // Published media that won't load is a fault; unpublished media never gets here.
     if (reported.current.has(step.id)) return;
-    reported.current.add(step.id);
-    Sentry.captureException(toError(error, `Showcase: the ${what} for ${part.id} ${step.id} failed to load`));
+    if (reportLoadFailure(error, `Showcase: the ${what} for ${part.id} ${step.id} failed to load`)) reported.current.add(step.id);
   };
   const onModel = useCallback(() => setModelShown(step.id), [step.id]);
 
@@ -484,7 +482,7 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
   const onLoad = useCallback(() => setShown(id), [id]);
   // Its realistic model where one is published, as the shop shows close up; undefined while asked.
   const full = useRealisticModel(thing?.asset, finePointer);
-  const onFullError = useCallback((e: unknown) => Sentry.captureException(toError(e, `Showcase: the realistic model of ${id} failed to load in its card`)), [id]);
+  const onFullError = useCallback((e: unknown) => void reportLoadFailure(e, `Showcase: the realistic model of ${id} failed to load in its card`), [id]);
   if (!thing) return null;
   const asset = cat.shop.assets[thing.asset];
   const surface = thing.on && cat.shop.surfaces[thing.on];
@@ -505,7 +503,7 @@ export function ItemContent({ cat, part, id }: { cat: Catalog; part: LivePart; i
               url={mediaUrl(asset.model)}
               full={full}
               onLoad={onLoad}
-              onError={(e) => Sentry.captureException(toError(e, `Showcase: the model of ${id} failed to load`))}
+              onError={(e) => void reportLoadFailure(e, `Showcase: the model of ${id} failed to load`)}
               onFullError={onFullError}
             />
           )}

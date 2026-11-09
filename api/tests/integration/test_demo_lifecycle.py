@@ -119,9 +119,11 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
 # silently re-enable one they had killed. The mirror must preserve the difference, not merely the
 # truthiness.
 #
-# `dashboard_revenue` is deliberately left OUT of this dict: its absence is the second half of the
-# assertion. (The opt-IN half this comment used to describe went with the `machine_maintenance` and
-# `quickbooks_desktop` flags in Aug 2026 — no registered flag is opt-in today.)
+# `example_flag` is deliberately left OUT of this dict: its absence is the second half of the
+# assertion. It is not a registered flag, and need not be: `sync_demo_features` copies the block
+# verbatim, whatever its keys. It stands in for `dashboard_revenue`, retired 2026-11-08, which left
+# `ai_insights` the only registered flag. (The opt-IN half this comment used to describe went with
+# the `machine_maintenance` and `quickbooks_desktop` flags in Aug 2026.)
 SOURCE_SETTINGS = {
     "features": {
         "ai_insights": False,
@@ -466,7 +468,7 @@ def test_entry_sync_propagates_a_flag_flipped_after_creation(supabase_admin, fla
 
     changed = dict(SOURCE_SETTINGS["features"])
     changed["ai_insights"] = True            # newly enabled (was an explicit false)
-    changed["dashboard_revenue"] = False     # newly disabled (was absent, i.e. default on)
+    changed["example_flag"] = False     # newly disabled (was absent, i.e. default on)
     supabase_admin.table("companies").update(
         {"settings": {**SOURCE_SETTINGS, "features": changed}}
     ).eq("id", source_id).execute()
@@ -498,7 +500,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
 
     # An admin flips a flag on the source; entry re-syncs.
     supabase_admin.table("companies").update(
-        {"settings": {**SOURCE_SETTINGS, "features": {"dashboard_revenue": False}}}
+        {"settings": {**SOURCE_SETTINGS, "features": {"example_flag": False}}}
     ).eq("id", source_id).execute()
     flagged_demo["client"].rpc(
         "sync_demo_access",
@@ -506,7 +508,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
     ).execute()
 
     after = _settings(supabase_admin, demo_id)
-    assert after["features"] == {"dashboard_revenue": False}, "the flag change should land"
+    assert after["features"] == {"example_flag": False}, "the flag change should land"
     assert after["defaults"] == {"quote_validity_days": 30}, "demo-side edit was reverted"
     assert after["default_payment_terms"] == "Net 15", "demo-side edit was reverted"
 
@@ -517,7 +519,7 @@ def test_reset_re_mirrors_flags(supabase_admin, flagged_demo):
     source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
 
     supabase_admin.table("companies").update(
-        {"settings": {"features": {"dashboard_revenue": False}}}
+        {"settings": {"features": {"example_flag": False}}}
     ).eq("id", source_id).execute()
 
     flagged_demo["client"].rpc(
@@ -525,7 +527,7 @@ def test_reset_re_mirrors_flags(supabase_admin, flagged_demo):
         {"p_source_company_id": source_id, "p_user_id": flagged_demo["user"]["user_id"]},
     ).execute()
 
-    assert _settings(supabase_admin, demo_id)["features"] == {"dashboard_revenue": False}
+    assert _settings(supabase_admin, demo_id)["features"] == {"example_flag": False}
 
 
 def test_sync_demo_features_is_not_reachable_from_the_browser(demo):

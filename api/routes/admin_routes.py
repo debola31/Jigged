@@ -169,9 +169,10 @@ async def list_companies(request: Request):
             # EVERY registered flag is currently opt-out, so every one of them needs a line here.
             # A new flag missing from this list shows as an off toggle for a feature the tenant
             # can plainly see, and ticking it then writes an explicit `true` that was already the
-            # effective state — silent, and confusing to whoever looks next.
+            # effective state — silent, and confusing to whoever looks next. (The registry is
+            # down to `ai_insights` since `dashboard_revenue` and `storage_inventory_cost` were
+            # retired on 2026-11-08.)
             features.setdefault("ai_insights", True)
-            features.setdefault("dashboard_revenue", True)
 
             ai_limits = settings.get("ai_limits") or {}
             raw_limit = ai_limits.get("chat_per_hour")

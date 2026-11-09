@@ -36,8 +36,8 @@ describe('featureFlags: ai_insights (opt-out / default-on)', () => {
    * they agree — `isAiInsightsEnabled` hardcodes its own rather than reading the registry, so
    * flipping only one of them is a silent, one-line divergence.
    *
-   * It is also the whole reason no second named helper was written for `dashboard_revenue`: the
-   * registry-driven path cannot diverge from the registry, so it needs no test to keep it honest.
+   * It is also why no other flag gets a named helper: the registry-driven path cannot diverge
+   * from the registry, so it needs no test to keep it honest.
    */
   it('agrees with the generic registry-driven check', () => {
     const noneSet = { settings: { features: {} } };
@@ -47,81 +47,13 @@ describe('featureFlags: ai_insights (opt-out / default-on)', () => {
   });
 });
 
-describe('featureFlags: dashboard_revenue (opt-out / default-on)', () => {
-  it('is registered in KNOWN_FEATURES (so /admin/companies renders a toggle)', () => {
-    expect(KNOWN_FEATURES.map((f) => f.key)).toContain('dashboard_revenue');
-  });
-
-  /**
-   * Opt-OUT, not opt-in, and the direction is the whole decision. The scorecard money lines
-   * already existed for every admin, so shipping this opt-in would have removed a live feature
-   * from every tenant on deploy and needed a backfill to put it back. A kill-switch changes
-   * nothing until a shop asks.
-   */
-  it('is registered with defaultEnabled true', () => {
-    const descriptor = KNOWN_FEATURES.find((f) => f.key === 'dashboard_revenue');
-    expect(descriptor?.defaultEnabled).toBe(true);
-  });
-
-  it('defaults ON when the company has no explicit value', () => {
-    expect(isFeatureEnabled({ settings: { features: {} } }, 'dashboard_revenue')).toBe(true);
-    expect(isFeatureEnabled({ settings: {} }, 'dashboard_revenue')).toBe(true);
-    expect(isFeatureEnabled(null, 'dashboard_revenue')).toBe(true);
-    expect(isFeatureEnabled(undefined, 'dashboard_revenue')).toBe(true);
-  });
-
-  it('stays ON for an explicit true (boolean or "true")', () => {
-    expect(
-      isFeatureEnabled({ settings: { features: { dashboard_revenue: true } } }, 'dashboard_revenue'),
-    ).toBe(true);
-    expect(
-      isFeatureEnabled(
-        { settings: { features: { dashboard_revenue: 'true' } } },
-        'dashboard_revenue',
-      ),
-    ).toBe(true);
-  });
-
-  it('turns OFF only when explicitly disabled', () => {
-    expect(
-      isFeatureEnabled(
-        { settings: { features: { dashboard_revenue: false } } },
-        'dashboard_revenue',
-      ),
-    ).toBe(false);
-  });
-
-  it('is independent of the other flag', () => {
-    const aiOff = { settings: { features: { ai_insights: false } } };
-    expect(isFeatureEnabled(aiOff, 'dashboard_revenue')).toBe(true);
-    const revenueOff = { settings: { features: { dashboard_revenue: false } } };
-    expect(isAiInsightsEnabled(revenueOff)).toBe(true);
-  });
-});
-
 describe('featureFlags: the registry itself', () => {
   it('readCompanyFeatures returns a dense map resolved against each default', () => {
     const noneSet = readCompanyFeatures({ settings: { features: {} } });
-    expect(noneSet).toEqual({
-      ai_insights: true,
-      dashboard_revenue: true,
-      storage_inventory_cost: true,
-    });
+    expect(noneSet).toEqual({ ai_insights: true });
 
-    const allOff = readCompanyFeatures({
-      settings: {
-        features: {
-          ai_insights: false,
-          dashboard_revenue: false,
-          storage_inventory_cost: false,
-        },
-      },
-    });
-    expect(allOff).toEqual({
-      ai_insights: false,
-      dashboard_revenue: false,
-      storage_inventory_cost: false,
-    });
+    const allOff = readCompanyFeatures({ settings: { features: { ai_insights: false } } });
+    expect(allOff).toEqual({ ai_insights: false });
   });
 
   it('readCompanyFeatures drops keys the registry does not know', () => {
@@ -159,6 +91,10 @@ describe('featureFlags: the registry itself', () => {
       'inventory_locations',
       'machine_maintenance',
       'quickbooks_desktop',
+      // Retired 2026-11-08 the other way round: what they hid (revenue, inventory cost) is now
+      // shown to every admin with no tenant switch. Their stored values were stripped by migration.
+      'dashboard_revenue',
+      'storage_inventory_cost',
     ]) {
       expect(keys).not.toContain(retired);
     }
@@ -180,26 +116,5 @@ describe('featureFlags: the registry itself', () => {
       expect(f.label.length).toBeGreaterThan(0);
       expect(f.description.length).toBeGreaterThan(0);
     }
-  });
-});
-
-describe('featureFlags: storage_inventory_cost', () => {
-  it('is registered, opt-out, and independent of the other flags', () => {
-    // Opt-OUT: a shop that has never visited /admin sees the costs.
-    expect(readCompanyFeatures({ settings: { features: {} } }).storage_inventory_cost).toBe(true);
-    // Explicit false wins over the default — the kill-switch half of opt-out.
-    expect(
-      readCompanyFeatures({ settings: { features: { storage_inventory_cost: false } } })
-        .storage_inventory_cost,
-    ).toBe(false);
-    // Independent of dashboard_revenue, and that separation is the point: one hides REVENUE on a
-    // dashboard the floor walks past, the other hides COST on an office-only page. A shop's answer
-    // to the first is not its answer to the second.
-    const revenueOff = readCompanyFeatures({ settings: { features: { dashboard_revenue: false } } });
-    expect(revenueOff.storage_inventory_cost).toBe(true);
-    const costOff = readCompanyFeatures({
-      settings: { features: { storage_inventory_cost: false } },
-    });
-    expect(costOff.dashboard_revenue).toBe(true);
   });
 });

@@ -4,26 +4,29 @@
  * A flag gates a feature to specific tenants by setting `settings.features.<key>` on that
  * company's row (UI + access-layer gate; DB columns/triggers ship to everyone). Shipments and
  * invoicing used to be gated this way; they're now core (always on) and their flags were removed.
+ * So were `dashboard_revenue` and `storage_inventory_cost` (2026-11-08): the money they hid is now
+ * gated only by the viewer being a company admin, and the migration that retired them stripped
+ * their stored values from every company row.
  *
  * A flag can be opt-IN (default off) for a pilot that must run at named shops only, or opt-OUT
  * (default on) via `defaultEnabled: true` — a GA feature that ships enabled everywhere but needs
  * a per-tenant kill-switch. An opt-out flag stays on until a company's row explicitly stores the
  * key as `false`.
  *
- * **Both flags in the registry are currently opt-OUT.** The opt-in form is still supported and
- * still tested; there is simply no live instance since the `machine_maintenance` and
+ * **The one flag in the registry, `ai_insights`, is opt-OUT.** The opt-in form is still supported
+ * and still tested; there is simply no live instance since the `machine_maintenance` and
  * `quickbooks_desktop` pilots were retired into core.
  *
  * Kill an opt-OUT flag for one tenant — note this stores an explicit `false`, it does not
  * delete the key:
  *   UPDATE public.companies
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
- *                               '{features,dashboard_revenue}', 'false')
+ *                               '{features,ai_insights}', 'false')
  *    WHERE id = '<company-uuid>';
  *
  * Restore it:
  *   UPDATE public.companies
- *      SET settings = settings #- '{features,dashboard_revenue}'
+ *      SET settings = settings #- '{features,ai_insights}'
  *    WHERE id = '<company-uuid>';
  *
  * Mind the direction: on an opt-OUT flag DELETING the key restores the default, which means
@@ -76,25 +79,6 @@ export const KNOWN_FEATURES = [
     // GA feature with a kill-switch: enabled unless explicitly turned off.
     defaultEnabled: true,
   },
-  {
-    key: 'dashboard_revenue',
-    label: 'Dashboard Revenue',
-    description:
-      'The money lines on the dashboard scorecards — the amount under each count ("$18,006 not yet shipped", "$12,480 shipped this week") and the Completed card\'s period-over-period delta. Counts, the Open Jobs split and every drill-down stay visible whatever the flag says. On by default; turning it off leaves a shop with counts only, for an owner who does not want the whole book totalled on a screen other people walk past. Composes with the existing admin-only rule — a non-admin never sees the money either way.',
-    // Opt-OUT rather than opt-in, deliberately: these figures exist for every admin today, so
-    // shipping this opt-in would have silently removed a live feature from every tenant and
-    // needed a backfill to undo. A kill-switch changes nothing until someone asks for it.
-    defaultEnabled: true,
-  },
-  {
-    key: 'storage_inventory_cost',
-    label: 'Storage Inventory Cost',
-    description:
-      "The cost figures on the Storage page's Inventory tab — cost per unit, each balance's value, and the total at the foot of the table. The table itself, the on-hand quantities, the places, the heats and the \"no cost on file\" disclosure stay visible whatever the flag says: how complete a shop's cost data is, is not itself a dollar figure, and a shop that cannot see it cannot fix it. On by default; turning it off leaves a shop with quantities only. Composes with the existing admin-only rule — a non-admin never sees the cost either way. Deliberately NOT dashboard_revenue: that flag hides REVENUE on a dashboard the shop floor walks past, this hides COST on an office-only page, and one shop's decision about the first is not a decision about the second.",
-    // Opt-OUT like its siblings: a GA feature with a kill-switch, not a pilot at named shops. An
-    // opt-in flag would ship a feature nobody can see until a system admin visits /admin per tenant.
-    defaultEnabled: true,
-  },
 ] as const;
 
 /**
@@ -135,10 +119,10 @@ function readFeatureFlag(
  * `useCompanyFeatures()`, which resolves the whole map in one pass — a component asking about one
  * flag through this function would still have had to fetch the company row itself.
  *
- * NOTE there is deliberately no named `isDashboardRevenueEnabled` beside `isAiInsightsEnabled`.
- * A named helper hardcodes its own default (see the warning on that one), which is a divergence
- * only a test can catch; the registry-driven path cannot diverge from the registry. The two
- * helpers retired with their flags in Aug 2026 had no production caller at all.
+ * NOTE: don't add a named helper per flag beside `isAiInsightsEnabled`. A named helper hardcodes
+ * its own default (see the warning on that one), which is a divergence only a test can catch; the
+ * registry-driven path cannot diverge from the registry. The two helpers retired with their flags
+ * in Aug 2026 had no production caller at all.
  */
 export function isFeatureEnabled(
   company: SettingsLike | null | undefined,
@@ -155,8 +139,8 @@ export function isFeatureEnabled(
  * The `true` here is not decoration — this helper carries its OWN default rather than reading the
  * descriptor, so flipping `defaultEnabled` in the registry without changing this line would leave
  * `isFeatureEnabled()` and this function disagreeing about the same flag. The parity test in
- * `__tests__/lib/featureFlags.test.ts` is what catches that. It is also why no second helper was
- * written for `dashboard_revenue`.
+ * `__tests__/lib/featureFlags.test.ts` is what catches that. It is also why no other flag gets a
+ * helper like this one.
  */
 export function isAiInsightsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,

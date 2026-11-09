@@ -49,12 +49,6 @@ export default function DashboardPage() {
   // still loading so it never flashes in then out.
   const aiInsightsEnabled = !featuresLoading && features.ai_insights;
 
-  // Dashboard revenue is opt-OUT too: the money lines under each scorecard count are on unless a
-  // system admin has killed them for this tenant. Held back while the flag loads for the same
-  // reason as the AI area — a dollar figure that appears and then vanishes reads as a glitch, and
-  // an owner who turned these off does not want them flashing up on a shared screen at all.
-  const revenueEnabled = !featuresLoading && features.dashboard_revenue;
-
   return (
     <Box>
       {/* Onboarding Card — shown when dashboard is empty and no demo exists */}
@@ -69,7 +63,7 @@ export default function DashboardPage() {
 
       {/* Scorecard row — four fixed metrics */}
       <Box sx={{ mb: 4 }}>
-        <DashboardMetrics companyId={companyId} revenueEnabled={revenueEnabled} />
+        <DashboardMetrics companyId={companyId} />
       </Box>
 
       {/* AI Insights, gated per company. Everything below the cards is its own:

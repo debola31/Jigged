@@ -237,8 +237,11 @@ obvious way to reintroduce it.
 
 ### Your own assistant, under the chat
 
-**A strip under Insights links to `/dashboard/{companyId}/ai-assistants`**, where a person connects
-Claude or ChatGPT to Jigged through the MCP server (`ConnectAssistantStrip`, added 2026-11-09). It
+**A strip under Insights opens the connect menu in place** (`ConnectAssistantStrip` →
+`ConnectAssistantMenu`, 2026-11-09): Add to Claude, Open ChatGPT, or Copy link, each with one line
+of steps, connecting Claude or ChatGPT to Jigged through the MCP server. It used to send people to
+`/dashboard/{companyId}/ai-assistants` first; that page now only lists connected assistants for
+Disconnect, from the account menu. It
 sits next to the chat so the two ways of asking about the shop read as a choice, but **it is a
 sibling on the page, not part of `InsightsChat`, and ignores the `ai_insights` flag**: Jigged's own
 chat may be retired in favour of customers' assistants, and the strip must outlive it unchanged.

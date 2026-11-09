@@ -5,8 +5,7 @@ import { render, screen, waitFor, within } from '../../test-utils';
 import AiAssistantsPanel from '@/components/aiAssistants/AiAssistantsPanel';
 
 /**
- * The AI assistants page: start connecting Claude or ChatGPT, and see or disconnect the
- * assistants already connected.
+ * The AI assistants page: the assistants already connected, and disconnecting one.
  */
 
 const mockList = vi.fn();
@@ -32,29 +31,9 @@ describe('AiAssistantsPanel', () => {
     mockDisconnect.mockResolvedValue(undefined);
   });
 
-  it("opens Claude's add-connector dialog already filled in with this server", async () => {
+  it('offers the connect menu in its header', () => {
     render(<AiAssistantsPanel />);
-    const link = screen.getByRole('link', { name: /Add to Claude/ });
-    const href = new URL(link.getAttribute('href') ?? '');
-    expect(href.origin + href.pathname).toBe('https://claude.ai/customize/connectors');
-    expect(href.searchParams.get('modal')).toBe('add-custom-connector');
-    expect(href.searchParams.get('connectorName')).toBe('Jigged');
-    expect(href.searchParams.get('connectorUrl')).toBe(`${window.location.origin}/mcp`);
-    expect(link).toHaveAttribute('target', '_blank');
-    await userEvent.click(link);
-    expect(mockCapture).toHaveBeenCalledWith('ai assistant connect started', { client_kind: 'claude' });
-  });
-
-  it('copies the server link and opens ChatGPT', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    render(<AiAssistantsPanel />);
-    await userEvent.click(screen.getByRole('button', { name: /Copy link & open ChatGPT/ }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/mcp`));
-    expect(open).toHaveBeenCalledWith('https://chatgpt.com/', '_blank', 'noopener,noreferrer');
-    expect(mockCapture).toHaveBeenCalledWith('ai assistant connect started', { client_kind: 'chatgpt' });
-    open.mockRestore();
+    expect(screen.getByRole('button', { name: 'Connect your assistant' })).toBeInTheDocument();
   });
 
   it('lists each connected assistant with when it was connected', async () => {

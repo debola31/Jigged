@@ -21,6 +21,7 @@ import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request
+import routes.company_auth as company_auth
 from supabase import Client, create_client
 
 from models.data_import_models import (
@@ -79,6 +80,8 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
     except Exception as exc:  # noqa: BLE001
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # No AI assistant token: AI data import calls Jigged's own model; the MCP server never does.
+    company_auth.refuse_assistant(request)
 
     access = (
         client.table("user_company_access")

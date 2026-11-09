@@ -14,9 +14,11 @@ here and would touch a working billing path for no functional gain.
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
+import jwt
 import sentry_sdk
 from fastapi import HTTPException, Request
 from supabase import Client, create_client
@@ -27,6 +29,50 @@ OFFICE_ONLY_DETAIL = "This is for office users. Ask an admin for an office login
 BILLING_BLOCKED_DETAIL = (
     "Your shop's subscription isn't active, so nothing was saved. An admin can start one in Settings."
 )
+
+# AI assistants (Claude, ChatGPT) get ordinary Supabase JWTs with a `client_id` claim from the
+# OAuth server, and get_user accepts them like any session. The MCP server at /mcp proves a request
+# is its own with this header (MCP_GATEWAY_KEY); without it an assistant's token is refused here,
+# the same rule public.mcp_token_binding() enforces on the Data API (migration 20261109163801).
+MCP_GATEWAY_HEADER = "x-jigged-mcp"
+UNBOUND_ASSISTANT_DETAIL = "AI assistants reach Jigged only through jigged.app/mcp."
+ASSISTANT_NOT_ALLOWED_DETAIL = "AI assistants can't do this. Use Jigged in your browser."
+
+
+def _bearer(request: Request) -> str:
+    return request.headers.get("Authorization", "").replace("Bearer ", "")
+
+
+def assistant_client_id(token: str) -> str | None:
+    """The `client_id` claim of a token, or None for a browser session.
+
+    Read WITHOUT verifying the signature. Safe only because the callers below use it to REFUSE:
+    a token claiming to be an assistant's gets less access, never more, and every route still
+    verifies the token itself through get_user.
+    """
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return None
+    client_id = claims.get("client_id")
+    return client_id if isinstance(client_id, str) and client_id else None
+
+
+def refuse_unbound_assistant(request: Request) -> None:
+    """403 for an AI assistant's token that did not come through /mcp. Browser sessions pass."""
+    if assistant_client_id(_bearer(request)) is None:
+        return
+    key = os.getenv("MCP_GATEWAY_KEY") or ""
+    presented = request.headers.get(MCP_GATEWAY_HEADER) or ""
+    if not key or not presented or not hmac.compare_digest(presented.encode(), key.encode()):
+        raise HTTPException(status_code=403, detail=UNBOUND_ASSISTANT_DETAIL)
+
+
+def refuse_assistant(request: Request) -> None:
+    """403 for any AI assistant's token: routes no assistant tool calls (billing, system admin,
+    and Jigged's own AI features, which the MCP server never invokes)."""
+    if assistant_client_id(_bearer(request)) is not None:
+        raise HTTPException(status_code=403, detail=ASSISTANT_NOT_ALLOWED_DETAIL)
 
 
 def service_client() -> Client:
@@ -63,6 +109,7 @@ async def verify_company_access(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    refuse_unbound_assistant(request)
 
     access = (
         client.table("user_company_access")

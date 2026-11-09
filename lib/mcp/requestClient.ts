@@ -19,6 +19,14 @@ import type { McpCaller } from '@/lib/mcp/auth';
  */
 
 const STORAGE_KEY = 'jigged-mcp-session';
+
+/**
+ * The header that proves a Data API request comes from this server. An AI assistant's token is
+ * refused by the database unless it arrives with a key whose SHA-256 is registered in
+ * private.mcp_gateway_keys (public.mcp_token_binding, migration 20261109163801), so a token an
+ * assistant hands to anyone else is useless outside /mcp. The key is sent to Supabase only.
+ */
+export const MCP_GATEWAY_HEADER = 'x-jigged-mcp';
 const scope = new AsyncLocalStorage<TypedSupabaseClient>();
 
 registerScopedClientResolver(() => scope.getStore());
@@ -64,6 +72,9 @@ export function clientForCaller(caller: McpCaller): TypedSupabaseClient {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      global: {
+        headers: process.env.MCP_GATEWAY_KEY ? { [MCP_GATEWAY_HEADER]: process.env.MCP_GATEWAY_KEY } : {},
+      },
       auth: {
         storage,
         storageKey: STORAGE_KEY,

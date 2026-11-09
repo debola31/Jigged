@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import sentry_sdk
 from fastapi import APIRouter, HTTPException, Request
+import routes.company_auth as company_auth
 from supabase import create_client, Client
 
 from models.admin_models import (
@@ -70,6 +71,8 @@ async def verify_system_admin(request: Request) -> str:
     except Exception as e:
         logger.warning(f"Token verification failed: {e}")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # No AI assistant token: system administration is never done from an assistant.
+    company_auth.refuse_assistant(request)
 
     # Check system_admins table
     result = service_client.table("system_admins").select("id").eq("user_id", user_id).execute()

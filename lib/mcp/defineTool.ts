@@ -99,6 +99,24 @@ export const BILLING_BLOCKED_MESSAGE =
   "This company's Jigged subscription isn't active, so it is read-only and nothing was changed. " +
   'An admin can update billing in Jigged under Settings.';
 
+export const GATEWAY_REFUSED_MESSAGE =
+  "Jigged's assistant connection isn't set up correctly on the server, so nothing was read or " +
+  'changed. Jigged has been notified.';
+
+/**
+ * The database refused this server's own request: MCP_GATEWAY_KEY is missing or unregistered.
+ * Walks `cause`, because the access layer rethrows Supabase errors wrapped in friendly ones.
+ */
+function isGatewayRefusal(err: unknown): boolean {
+  let node: unknown = err;
+  for (let depth = 0; isRecord(node) && depth < 4; depth++) {
+    if (node.code === 'jigged_mcp_only') return true;
+    if (node.cause === node) return false;
+    node = node.cause;
+  }
+  return false;
+}
+
 export const UNEXPECTED_ERROR_MESSAGE =
   "Jigged couldn't finish that just now. Try again in a moment; if it keeps happening, contact Jigged support.";
 
@@ -174,6 +192,10 @@ async function finish(frame: CallFrame, outcome: CallOutcome, result: CallToolRe
 
 async function failure(frame: CallFrame, err: unknown): Promise<CallToolResult> {
   if (isBillingWriteBlocked(err)) return finish(frame, 'refused', errorResult(BILLING_BLOCKED_MESSAGE));
+  if (isGatewayRefusal(err)) {
+    Sentry.captureException(toError(err), { tags: { mcp_tool: frame.tool, mcp: 'gateway_key' } });
+    return finish(frame, 'error', errorResult(GATEWAY_REFUSED_MESSAGE));
+  }
   Sentry.captureException(toError(err), { tags: { mcp_tool: frame.tool } });
   return finish(frame, 'error', errorResult(UNEXPECTED_ERROR_MESSAGE));
 }

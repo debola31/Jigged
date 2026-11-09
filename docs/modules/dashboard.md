@@ -113,46 +113,22 @@ Only a company `admin` sees the money lines. A `user` — a salesperson — sees
 still sees every price on the quotes and jobs they work; what they do not get is the shop's whole book totalled
 on the landing page.
 
-**This is a display choice, not a security boundary — and neither is the tenant flag below.** RLS is
-company-scoped, not column-scoped, so `job_parts` prices remain readable through the API by anyone who can
-reach the company: by the salesperson, and by an admin of a shop that has the revenue flag off. Both gates buy
-what is on the screen, which is the whole claim. Do not describe either to a customer as "financials are
-admin-only" or as "we hid your revenue".
+**This is a display choice, not a security boundary.** RLS is company-scoped, not column-scoped, so
+`job_parts` prices remain readable through the API by anyone who can reach the company, the salesperson
+included. The gate buys what is on the screen, which is the whole claim. Do not describe it to a customer as
+"financials are admin-only".
 
-### The money lines have a per-tenant kill-switch
+Money is withheld while the role is still loading (`isAdmin` is false until it resolves): a dollar total that
+flashes onto a shared screen and then vanishes is worse than one that never appeared. The card drops the whole
+`money` object, never reusing `MetricValue.money`'s `null`, which means only "nobody has chosen yet" (Open
+Quotes). `getDashboardMetrics` returns every figure either way; the gate is in the card. The same rule hides
+inventory cost on the Storage page ([inventory.md §5.15](inventory.md#515-money-is-the-only-common-denominator-storage-has)).
 
-`dashboard_revenue` ([`lib/featureFlags.ts`](../../lib/featureFlags.ts)) is **opt-out** — on for every tenant
-unless a system admin turns it off in `/admin`. It exists for one shop shape, and without that shape it reads
-as arbitrary: **the dashboard left up on a screen the shop floor walks past.** The owner wants the counts on
-the wall and does not want the shop's whole book totalled beside them, and no viewer role expresses "the
-room" — the owner is standing in it.
-
-**The two gates compose; both must pass.** Money renders only when the tenant has the flag AND the viewer is a
-company admin. So turning the flag off takes the figures from the owner too, which is the point rather than a
-side effect. Money is also withheld while the flags are still loading, for the same reason the AI area is: a
-dollar total that flashes onto a shared screen and then vanishes is worse than one that never appeared.
-
-It hides exactly the money lines: the amount under each count, its kind-label, and the Completed card's
-period-over-period delta. Untouched — the counts, the Open Jobs split, the Today / This Week toggle (a
-counts-only Completed card still switches period), every drill-down, and every price on the quotes and jobs
-themselves.
-
-**It does not touch saved AI charts**, which sit under the separate `ai_insights` flag. A saved revenue chart
-goes on rendering below the fold while the scorecards show counts only, so "we hid the revenue" is true of the
-row and not of the page; a shop that means it has to turn both off.
-
-**The access layer did not change.** `getDashboardMetrics` still returns every figure, and `MetricValue.money`
-is still `null` for Open Quotes alone — "nobody has chosen yet". The flag does not reuse that `null`; it drops
-the whole `money` object in the card, so "no honest figure" and "this shop turned the figures off" never
-collapse into one meaning. It arrives as a `revenueEnabled` prop from `page.tsx`, which already holds the
-company's flags, rather than a hook read inside `DashboardMetrics` — that would be a second `getCompany` on
-every dashboard load.
-
-**It does not govern the Storage page's on-hand cost**, which sits under its own
-`storage_inventory_cost` ([inventory.md §5.15](inventory.md#515-money-is-the-only-common-denominator-storage-has)).
-Recorded so nobody later tidies the two into one: this flag hides **revenue** on a dashboard the shop
-floor walks past, that one hides **cost** on an office-only page, and a shop's answer to the first is
-not its answer to the second. The admin-only rule and the withhold-while-loading rule are shared.
+**Withdrawn: a per-tenant kill-switch.** `dashboard_revenue` was an opt-out flag that hid the money lines from
+everyone at a shop, admins included, for a dashboard left on a screen the floor walks past; its sibling
+`storage_inventory_cost` did the same for Storage. Both were removed on 2026-11-08 at the owner's request, and
+migration `20261109011133_remove_money_feature_flags.sql` stripped their stored values from every company row.
+A shop that wants the totals off a shared screen now needs a non-admin login on that screen.
 
 ### Time period
 
@@ -297,7 +273,7 @@ Also wanted: a wider period range for Completed (Month / Year / All Time).
 | Every metric filters `deleted_at`; a failed metric is absent rather than `0` | same file — 2 its |
 | Four cards render with no picker and no pager; the period toggle appears once, on Completed | `__tests__/components/dashboard/DashboardMetrics.test.tsx` — `describe('DashboardMetrics')`, 2 its |
 | An admin sees the money, with Overdue and Open Jobs sharing one label; a non-admin sees no dollar figure anywhere, but still sees counts and the split named as the jobs list names it | same file — 3 its |
-| The two gates compose: an admin of a tenant with `dashboard_revenue` off sees no money at all, and a non-admin sees none even with the flag on | same file — 2 its |
+| No money renders while the viewer's role is still loading | same file — 1 it |
 | Open Quotes shows no money even for an admin; changing the period refetches and persists | same file — 2 its |
 | The overdue count uses one canonical clause set on the same builder as the jobs list, so tile and list agree — and that clause set matches `public.is_job_late()` and the per-row badge | `__tests__/utils/jobsAccess.test.ts` — `describe('applyOverdueJobsFilter')`, 2 its; plus the shared golden cases in `__tests__/fixtures/lateJobCases.json`, run by `__tests__/types/job.test.ts` and `api/tests/integration/test_late_job_parity.py` |
 | The card returns only business milestones — never notes/photos/operations — newest-first, capped to the requested limit | `__tests__/utils/dashboardAccess.test.ts` — `describe('getDashboardActivity')`, 2 its |

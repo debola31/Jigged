@@ -12,7 +12,6 @@ import GridViewIcon from '@mui/icons-material/GridView';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import LocationsManager from '@/components/inventory/locations/LocationsManager';
 import StorageInventoryTable from '@/components/inventory/StorageInventoryTable';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { useUserRole } from '@/hooks/useUserRole';
 
 export default function InventoryLocationsPage() {
@@ -37,24 +36,21 @@ export default function InventoryLocationsPage() {
    */
   const view = viewParam ?? (unitId ? 'places' : 'inventory');
 
-  const { features, loading: featuresLoading } = useCompanyFeatures();
   const { isAdmin } = useUserRole();
 
   /*
-   * MONEY IS DOUBLY GATED, and withheld while the answer is still loading.
+   * MONEY IS FOR ADMINS, and withheld while the role is still loading (`isAdmin` is false until
+   * it resolves), exactly as the dashboard scorecards do it. A dollar total that renders and then
+   * disappears on a screen someone else can see is worse than one that never appeared.
    *
-   * The tenant flag AND the viewer being an admin, exactly as the dashboard scorecards do it. The
-   * loading term is not defensive padding: a dollar total that renders and then disappears on a
-   * screen someone else can see is worse than one that never appeared.
-   *
-   * Read ONCE here and passed down as a boolean. `useCompanyFeatures` has no shared cache, so a
-   * second consumer inside the table would be a second `getCompany` on every page load.
+   * There was also a per-tenant kill-switch, `storage_inventory_cost`. It was removed on
+   * 2026-11-08 with its dashboard sibling: the admin rule is the only gate.
    *
    * This is a display choice, not a security boundary — `part_pricing_tiers` is readable by any
    * member through PostgREST, and RLS is company-scoped, not column-scoped. Do not describe it to
    * a customer as "costs are admin-only".
    */
-  const costEnabled = !featuresLoading && features.storage_inventory_cost && isAdmin;
+  const costEnabled = isAdmin;
 
   useEffect(() => {
     // Matches the sidebar item. Said "Inventory Locations" while the nav said "Storage",

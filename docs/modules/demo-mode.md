@@ -282,10 +282,8 @@ still argues it in those words, and stays as shipped.)*
 The block is copied **verbatim**, not key-by-key: an omitted key resolves to the descriptor's
 `defaultEnabled` while a stored `false` does not, and squashing that distinction is how an
 opt-out kill switch quietly stops killing. Being a whole-object copy also means a flag registered
-later mirrors itself with no change here: `dashboard_revenue` is the first one that shows up as
-money, and a shop that stored it `false` gets a demo whose scorecards carry counts and no dollar
-amounts, same as the real screen. The demo is the shop's own product surface, not the fullest one
-we can render ([feature-flags.md](feature-flags.md)).
+later mirrors itself with no change here. The demo is the shop's own product surface, not the
+fullest one we can render ([feature-flags.md](feature-flags.md)).
 
 Two deliberate exclusions:
 

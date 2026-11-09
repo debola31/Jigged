@@ -14,8 +14,8 @@ Read on the client through [`useCompanyFeatures()`](../../hooks/useCompanyFeatur
 resolves the whole map in one `getCompany`; server-side through `isFeatureEnabled`.
 
 **One read per screen, then pass it down.** The hook has no shared cache, so a second consumer on
-the same page is a second `getCompany`. A child gets a boolean prop (`revenueEnabled` on
-`DashboardMetrics`) or a context (`OperatorCompanyProvider`), never its own hook call.
+the same page is a second `getCompany`. A child gets the resolved value as a boolean prop or a
+context (`OperatorCompanyProvider`), never its own hook call.
 
 **The rule has one live exception, and it is not a flag read.**
 [`useOperatorIdentity`](../../hooks/useOperatorIdentity.ts) calls the hook for `companyName`
@@ -45,7 +45,8 @@ cost decision (step 6 below).
 
 **Shipping a live feature as opt-in is the mistake to avoid.** An opt-in flag over something every
 tenant can already see silently *removes* it from all of them and then needs a backfill to undo.
-`dashboard_revenue` is opt-out for exactly that reason.
+`dashboard_revenue` was opt-out for exactly that reason, until it and `storage_inventory_cost`
+were retired on 2026-11-08 (the money they hid is now admin-only with no tenant switch).
 
 **Mind the direction when flipping one by hand.** On an opt-out flag, deleting the key turns the
 feature back ON and storing `false` is what kills it; on an opt-in flag the two statements swap
@@ -65,7 +66,7 @@ replace-style: it writes an explicit boolean for every registered key, so from t
 answers from stored values and a later change to `defaultEnabled` will not reach it.
 
 `isAiInsightsEnabled` is a third copy of one flag's default, and the only one with a parity test
-against the registry. That is why no second named helper was written for `dashboard_revenue`.
+against the registry. That is why no other flag gets a named helper.
 
 **There is no CI guard on the registry at all** — no `scripts/` check that walks it the way
 [`analyticsEventsCheck.ts`](../../scripts/analyticsEventsCheck.ts) walks the event registry. A flag

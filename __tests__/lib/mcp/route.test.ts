@@ -109,8 +109,35 @@ describe('/mcp', () => {
     expect(scoped).toBe(true);
     expect(body.result.isError).toBeFalsy();
     expect(body.result.structuredContent.companies).toEqual([
-      { company_id: 'co-admin', name: 'Acme Machining', role: 'admin', url: 'https://jigged.test/dashboard/co-admin' },
-      { company_id: 'co-user', name: 'Beta Tool', role: 'user', url: 'https://jigged.test/dashboard/co-user' },
+      { company_id: 'co-admin', name: 'Acme Machining', role: 'admin', url: 'https://jigged.test/dashboard/co-admin', demo: null },
+      { company_id: 'co-user', name: 'Beta Tool', role: 'user', url: 'https://jigged.test/dashboard/co-user', demo: null },
+    ]);
+  });
+
+  it("offers a company's demo under that company, and never an operator company's", async () => {
+    mockGetUserCompanies.mockResolvedValue([
+      {
+        company_id: 'co-admin',
+        role: 'admin',
+        companies: { id: 'co-admin', name: 'Acme Machining', demo_company_id: 'demo-acme' },
+      },
+      {
+        company_id: 'co-op',
+        role: 'operator',
+        companies: { id: 'co-op', name: 'Gamma Works', demo_company_id: 'demo-gamma' },
+      },
+    ]);
+    const body = await result(
+      await call({ method: 'tools/call', params: { name: 'list_my_companies', arguments: {} } }, 'oauth-token'),
+    );
+    expect(body.result.structuredContent.companies).toEqual([
+      {
+        company_id: 'co-admin',
+        name: 'Acme Machining',
+        role: 'admin',
+        url: 'https://jigged.test/dashboard/co-admin',
+        demo: { company_id: 'demo-acme', url: 'https://jigged.test/dashboard/demo-acme' },
+      },
     ]);
   });
 

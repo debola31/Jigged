@@ -49,6 +49,7 @@ interface OfficeCompany {
   id: string;
   name: string;
   role: 'admin' | 'user';
+  hasDemo: boolean;
 }
 
 type Loaded =
@@ -97,7 +98,14 @@ export default function OAuthConsent() {
       const rows = await getUserCompanies(user.id);
       const companies = rows.flatMap((row): OfficeCompany[] =>
         row.role === 'admin' || row.role === 'user'
-          ? [{ id: row.company_id, name: row.companies?.name ?? 'Unnamed company', role: row.role }]
+          ? [
+              {
+                id: row.company_id,
+                name: row.companies?.name ?? 'Unnamed company',
+                role: row.role,
+                hasDemo: !!row.companies?.demo_company_id,
+              },
+            ]
           : [],
       );
       return { kind: 'ready', details, companies };
@@ -285,7 +293,10 @@ export default function OAuthConsent() {
         <Box component="ul" sx={{ mt: 1, mb: 3, pl: 3 }}>
           {companies.map((c) => (
             <Typography key={c.id} component="li" variant="body1">
-              {c.name} <Typography component="span" color="text.secondary">({c.role === 'admin' ? 'Admin' : 'User'})</Typography>
+              {c.name}{' '}
+              <Typography component="span" color="text.secondary">
+                ({c.role === 'admin' ? 'Admin' : 'User'}){c.hasDemo ? ', and its demo' : ''}
+              </Typography>
             </Typography>
           ))}
         </Box>

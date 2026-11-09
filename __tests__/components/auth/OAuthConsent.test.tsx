@@ -121,6 +121,22 @@ describe('OAuthConsent', () => {
     await waitFor(() => expect(mockDeny).toHaveBeenCalledWith('auth-1', { skipBrowserRedirect: true }));
   });
 
+  it('refuses a look-alike assistant: no Allow, the real return address, and Cancel', async () => {
+    // Registration is open, so the name is whatever a phisher typed. The redirect host is where the
+    // code would go, and it is not one Jigged recognises, so approval is never offered.
+    mockGetDetails.mockResolvedValue({
+      data: { ...DETAILS, client: { ...DETAILS.client, name: 'Claude' }, redirect_uri: 'https://claude.ai.evil.example/cb' },
+      error: null,
+    });
+    render(<OAuthConsent />);
+    expect(await screen.findByRole('heading', { name: 'Jigged doesn’t recognise this assistant' })).toBeInTheDocument();
+    expect(screen.getByText('claude.ai.evil.example')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(mockDeny).toHaveBeenCalled());
+    expect(mockApprove).not.toHaveBeenCalled();
+  });
+
   it('goes straight back when this assistant was already approved', async () => {
     mockGetDetails.mockResolvedValue({ data: { redirect_url: 'https://claude.ai/cb?code=again' }, error: null });
     render(<OAuthConsent />);

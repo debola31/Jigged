@@ -13,6 +13,11 @@
  * host it will send the person back to (claude.ai, chatgpt.com) is the part a look-alike cannot
  * fake, so it is on screen beside the name.
  *
+ * UNKNOWN ASSISTANTS. Allow is offered only when the redirect goes to an assistant Jigged knows
+ * (lib/mcp/assistants.ts): registration is open, so a look-alike client is the obvious phishing
+ * route, and the redirect host is the one thing it cannot fake. Anything else gets the reason and
+ * Cancel.
+ *
  * OPERATORS. The MCP server refuses operator logins (lib/mcp/server.ts). Someone who is an
  * operator in every company they belong to can never use the connection, so Allow is not offered
  * at all (interaction-standards §4 rule 3: hide what this role can never do) and the page says
@@ -36,6 +41,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useLoad } from '@/hooks/useLoad';
 import { getSupabase } from '@/lib/supabase';
 import { toError } from '@/lib/supabaseErrors';
+import { isKnownAssistantRedirect } from '@/lib/mcp/assistants';
 import { clientKindOf } from '@/lib/mcp/clientKind';
 import { getUserCompanies } from '@/utils/companyAccess';
 
@@ -191,6 +197,32 @@ export default function OAuthConsent() {
       </Button>
     </Typography>
   );
+
+  if (!isKnownAssistantRedirect(details.redirect_uri)) {
+    return (
+      <Card elevation={3}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography variant="h5" component="h1" gutterBottom>
+            Jigged doesn’t recognise this assistant
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            “{clientName}” wants to send you back to <strong>{host ?? 'an unknown address'}</strong>, which
+            isn’t Claude, ChatGPT or another assistant Jigged works with. If you didn’t start this from
+            your own assistant just now, someone else may have sent you this link: cancel it.
+          </Typography>
+          {actionError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {actionError}
+            </Alert>
+          )}
+          <Button variant="contained" size="large" fullWidth onClick={() => decide('deny', details)} disabled={busy}>
+            {submitting === 'deny' ? <CircularProgress size={24} color="inherit" /> : 'Cancel'}
+          </Button>
+          {signedInAs}
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (companies.length === 0) {
     return (

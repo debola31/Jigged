@@ -34,7 +34,8 @@ import re
 import sentry_sdk
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+import routes.company_auth as company_auth
 from supabase import Client
 
 from models.parts_import_models import (
@@ -459,6 +460,7 @@ async def validate_import(
 @router.post("/execute", response_model=PartExecuteResponse)
 async def execute_import(
     request: PartExecuteRequest,
+    http_request: Request,
     supabase: Client = Depends(get_supabase),
 ):
     """Execute the parts import.
@@ -481,6 +483,11 @@ async def execute_import(
     Customer fields on the request are rejected with 400 — parts no longer
     link to customers at the data layer.
     """
+    # Everything below writes with the service-role key, which bypasses RLS and the billing
+    # write-gate, so who may write (an office member of THIS company, while it is entitled)
+    # is decided here or nowhere. company_id comes from the body, never trusted on its own.
+    await company_auth.verify_office_write_access(http_request, request.company_id)
+
     _reject_customer_fields(request)
     logger.info(
         f"Parts import execute started: {len(request.rows)} rows, company_id={request.company_id}"

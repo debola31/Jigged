@@ -298,8 +298,20 @@ caveats), which is also where an action is flagged irreversible / requires-confi
 `vendor_services_import_routes`, `bom_import_routes`, `routings_import_routes`, customers in
 `import_routes`) already own field validation, conflict
 detection, per-entity business rules (procurement tiers, UoM resolution, vendor-service
-resolution), 500-row batching (Vercel body limit) and RLS via the service-role client.
-Rebuilding that would duplicate hundreds of lines and drift.
+resolution) and 500-row batching (Vercel body limit). Rebuilding that would duplicate hundreds
+of lines and drift.
+
+**They write with the service-role client, which bypasses RLS and the billing write-gate, so each
+route checks its caller first.** `company_auth.verify_office_write_access` runs before anything else
+in the handler:
+- no bearer token is 401;
+- a caller who is not a member of the body's `company_id`, or is an `operator`, is 403;
+- a company `company_can_write()` refuses is 403 with the app's "subscription isn't active"
+  sentence.
+
+*(Until 2026-11-08 the routes read no token at all and took `company_id` from the body, so anyone
+could write into any company. Pinned by `api/tests/unit/test_import_routes_auth.py`; the
+per-entity tests in `api/tests/integration/` stub the check through `office_writer_auth`.)*
 
 **Dependency order** (`WRITE_TIERS`, [lib/dataImportIngest.ts](../../lib/dataImportIngest.ts);
 topological load order per MSSQLTips + Dynamics 365 F&O data-entity sequencing):

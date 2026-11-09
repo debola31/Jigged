@@ -4,7 +4,8 @@ import logging
 
 import sentry_sdk
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+import routes.company_auth as company_auth
 from supabase import Client
 
 from models.import_models import (
@@ -199,6 +200,7 @@ async def validate_import(
 @router.post("/execute", response_model=ExecuteResponse)
 async def execute_import(
     request: ExecuteRequest,
+    http_request: Request,
     supabase: Client = Depends(get_supabase),
 ):
     """
@@ -207,6 +209,11 @@ async def execute_import(
     If skip_conflicts is True, only imports rows without conflicts.
     Otherwise, fails if any conflicts exist.
     """
+    # Everything below writes with the service-role key, which bypasses RLS and the billing
+    # write-gate, so who may write (an office member of THIS company, while it is entitled)
+    # is decided here or nowhere. company_id comes from the body, never trusted on its own.
+    await company_auth.verify_office_write_access(http_request, request.company_id)
+
     try:
         # First validate to get conflict info
         validate_response = await validate_import(

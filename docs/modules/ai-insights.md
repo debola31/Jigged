@@ -717,6 +717,14 @@ action** — never a `useEffect`, a page load or a poll.
 
 ## Feature gating, limits and cost
 
+**The caller is checked first, before the flag or the cap.** Both `POST /{company_id}/chat` and
+`/report` call `company_auth.verify_office_access`: no bearer token is 401, and a caller with no
+`user_company_access` row for the URL's company, or one whose role is `operator`, is 403. Only then
+are the flag and the cap read, so a stranger learns neither. *(Until 2026-11-08 neither route read
+the token the frontend attached. `company_id` came from the URL and everything after it ran as
+service role, so a direct HTTP call reached any company's data and spent its hourly cap. Pinned by
+`TestWhoMayAsk` in `api/tests/unit/test_insights_enqueue.py`.)*
+
 `ai_insights` is **opt-out**: a GA feature with a per-tenant kill-switch. It is enabled unless the
 company row explicitly stores `settings.features.ai_insights = false`.
 
@@ -1124,10 +1132,11 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 
 **Gating, limits and access**
 
+- [ ] **Given** a request with no bearer token, from a non-member of the URL's company, or from an operator, **then** chat and report are refused (401 / 403) before the flag, the cap or the queue is touched — *verified by `api/tests/unit/test_insights_enqueue.py` (`TestWhoMayAsk`)*.
 - [ ] **Given** a company at its hourly cap, **then** the endpoint returns 429; the cap is `settings.ai_limits.chat_per_hour`, defaulting to 20 — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
 - [ ] **Given** `settings.features.ai_insights = false`, **then** chat is refused; **given** the key absent, **then** it is enabled — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
 - [ ] **Given** the settings read fails, **then** the request proceeds enabled at the default limit — failing open is deliberate — *verified by `api/tests/unit/test_insights_rate_limit.py`*.
-- [ ] **Given** an operator, **then** no ask bar is reachable — they land on `/operator/{companyId}` and the bar renders only on the dashboard. *This used to read "the endpoint refuses", deferred to #367; #367 is the E2E reload convention, so the criterion was parked behind an E2E ticket waiting to prove a backend refusal that does not exist.*
+- [ ] **Given** an operator, **then** no ask bar is reachable — they land on `/operator/{companyId}` and the bar renders only on the dashboard — and **the endpoint refuses them too** (the criterion above). *This once read "the endpoint refuses", deferred to #367, when no backend refusal existed; one has since 2026-11-08.*
 
 **Reports**
 
@@ -1164,13 +1173,10 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   the single slot for a question they wanted in a sentence; a missed one costs a rephrase. Nothing in
   CI can measure either; `api/evals/route_probe.py` does, live (24 of 24 routed as intended on the seed,
   2026-09-08), and `report generated` against `ai job enqueued` is the one to keep watching.
-- **The chat route has no auth at the FastAPI layer.** `company_id` comes from the URL and nothing
-  reads the bearer token the frontend attaches, so a direct HTTP call reaches any company's data
-  and spends credits against its cap. Operators cannot reach the surface, but that is routing, not
-  enforcement.
-- **Threads trust `thread_id` from the request body.** The route has no auth of its own, so it can
-  check the thread belongs to the URL's company and nothing more; per-user integrity rests on the RLS
-  the browser created the thread under. Closing the FastAPI auth gap above closes this too.
+- **Threads are checked against the company, not the user.** The route proves the caller belongs to
+  the URL's company and that `thread_id` belongs to that company too, but not that the caller owns
+  the thread. Per-user integrity rests on the RLS the browser created the thread under, so another
+  office member of the same company who knows a thread id could append to it.
 - **Tool results appended during a turn are a reserve, not a count.** Two wide 200-row results can
   still push a long conversation past the window; with `truncate: false` that is now a visible
   `context_overflow` rather than a schema-less answer.

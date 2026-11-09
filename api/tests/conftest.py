@@ -127,6 +127,26 @@ async def anon_client() -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
 
+@pytest.fixture
+def office_writer_auth(monkeypatch):
+    """Let the import `execute` routes through their caller check.
+
+    For the import test files that drive the routes over ASGI against a MOCKED Supabase:
+    they test what an import writes, not who may run one. Who may run one is pinned by
+    tests/unit/test_import_routes_auth.py, against the real guard. Patched on the module
+    because every router calls it as `company_auth.verify_office_write_access`.
+    """
+    from unittest.mock import AsyncMock
+
+    import routes.company_auth as company_auth
+
+    monkeypatch.setattr(
+        company_auth,
+        "verify_office_write_access",
+        AsyncMock(return_value=("test-user", {"id": "test-access", "role": "user"})),
+    )
+
+
 # ============================================================================
 # JWT-fixture scaffolding for RLS tests (sub-PR 3d builds on these).
 #

@@ -78,6 +78,13 @@ records, real reference real, and the two graphs never connect because they are 
 companies. Demo data must be excluded from *non-data* queries — the company selector, the login
 redirect, and billing — by filtering `companies.is_demo = FALSE`.
 
+**AI assistants are the one place a demo is listed, and it is listed under its company** (decided
+2026-11-09). An assistant has no mode switch to flip, so the MCP tool `list_my_companies`
+([`lib/mcp/server.ts`](../../lib/mcp/server.ts)) returns each office company with a `demo` entry
+holding the demo's own `company_id`, which every tool accepts; the consent page names it too
+("and its demo"). It is offered exactly when its company is, to the same people. **Setting up and
+resetting a demo stay on the website** — no assistant tool does either.
+
 ### The operator surface has its own way in and out
 
 **Corrected 2026-08-08.** This section previously read *"operators already have mirrored access,

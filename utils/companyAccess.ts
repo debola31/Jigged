@@ -114,7 +114,8 @@ export function homePathForRole(role: string | null | undefined, companyId: stri
 }
 
 /**
- * Get all companies the user has access to
+ * Get all companies the user has access to — real companies only. `demo_company_id` rides along
+ * so a caller that offers a company's demo (the AI-assistant tools) needs no second read.
  */
 export async function getUserCompanies(userId: string): Promise<UserCompanyAccess[]> {
   const supabase = getSupabase();
@@ -127,7 +128,8 @@ export async function getUserCompanies(userId: string): Promise<UserCompanyAcces
       companies (
         id,
         name,
-        is_demo
+        is_demo,
+        demo_company_id
       )
     `)
     .eq('user_id', userId);

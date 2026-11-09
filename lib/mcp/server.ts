@@ -57,11 +57,17 @@ async function asCaller(
   return runAsCaller(caller, () => fn(caller));
 }
 
+const DemoSchema = z.object({
+  company_id: z.string(),
+  url: z.string().nullable(),
+});
+
 const CompanySchema = z.object({
   company_id: z.string(),
   name: z.string(),
   role: z.enum(OFFICE_ROLES),
   url: z.string().nullable(),
+  demo: DemoSchema.nullable(),
 });
 
 export function registerJiggedTools(server: McpServer): void {
@@ -71,8 +77,12 @@ export function registerJiggedTools(server: McpServer): void {
       title: 'List my companies',
       description:
         'Lists the Jigged companies you can work in from this assistant, with your role in each ' +
-        '(admin or user). Every other Jigged tool takes one of these company ids. Companies where ' +
-        'you are an operator are not listed: operator logins cannot use Jigged from an assistant.',
+        '(admin or user). Every other Jigged tool takes one of these company ids. A company that ' +
+        'has a demo lists it under `demo`: a separate practice copy of that company filled with ' +
+        'sample data, whose company_id every tool accepts too. Changes in a demo never reach the ' +
+        'real company; setting one up or resetting it is done on the Jigged website. Companies ' +
+        'where you are an operator are not listed: operator logins cannot use Jigged from an ' +
+        'assistant.',
       inputSchema: z.object({}),
       outputSchema: z.object({ companies: z.array(CompanySchema) }),
       annotations: {
@@ -93,18 +103,23 @@ export function registerJiggedTools(server: McpServer): void {
           return text("Jigged couldn't load your companies just now. Try again in a moment.", true);
         }
         const origin = appOrigin(ctx);
-        const companies = rows.flatMap((row) =>
-          isOfficeRole(row.role)
-            ? [
-                {
-                  company_id: row.company_id,
-                  name: row.companies?.name ?? 'Unnamed company',
-                  role: row.role,
-                  url: origin ? `${origin}/dashboard/${row.company_id}` : null,
-                },
-              ]
-            : [],
-        );
+        const dashboard = (companyId: string) => (origin ? `${origin}/dashboard/${companyId}` : null);
+        const companies = rows.flatMap((row) => {
+          if (!isOfficeRole(row.role)) return [];
+          // The demo belongs to the company: offered exactly when the company is, to the same
+          // people. Membership in it is mirrored from the source on entry (sync_demo_access), so
+          // the source's role is the one that decides.
+          const demoId = row.companies?.demo_company_id ?? null;
+          return [
+            {
+              company_id: row.company_id,
+              name: row.companies?.name ?? 'Unnamed company',
+              role: row.role,
+              url: dashboard(row.company_id),
+              demo: demoId ? { company_id: demoId, url: dashboard(demoId) } : null,
+            },
+          ];
+        });
         const structuredContent = { companies };
         if (companies.length === 0) {
           return {

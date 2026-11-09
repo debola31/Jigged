@@ -86,6 +86,16 @@ describe('OAuthConsent', () => {
     expect(screen.getByText(/Signed in as owner@shop\.test/)).toBeInTheDocument();
   });
 
+  it("says when a company's demo comes with it", async () => {
+    mockGetUserCompanies.mockResolvedValue([
+      { company_id: 'co-1', role: 'admin', companies: { id: 'co-1', name: 'Acme Machining', demo_company_id: 'demo-1' } },
+      { company_id: 'co-3', role: 'user', companies: { id: 'co-3', name: 'Beta Tool', demo_company_id: null } },
+    ]);
+    render(<OAuthConsent />);
+    expect(await screen.findByText('(Admin), and its demo')).toBeInTheDocument();
+    expect(screen.getByText('(User)')).toBeInTheDocument();
+  });
+
   it('Allow approves, records the connection and returns to the assistant', async () => {
     render(<OAuthConsent />);
     await userEvent.click(await screen.findByRole('button', { name: 'Allow' }));

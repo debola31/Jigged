@@ -3,6 +3,7 @@
 import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthLayout, Login as LoginComponent } from '@/components/auth';
+import { isValidReturnTo } from '@/components/auth/Login';
 import { useAuth } from '@/components/providers/AuthProvider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
@@ -18,10 +19,14 @@ function LoginPageContent() {
 
   useEffect(() => {
     if (!loading && user) {
-      // User is already logged in, redirect to home
-      router.replace('/');
+      // Signed in: go where they were headed, else home. This runs on the SIGNED_IN that the
+      // form's own sign-in fires too, after the form has pushed `returnTo`, so a bare
+      // replace('/') here overrode it and every returnTo landed on the dashboard instead. The
+      // case that exposed it: connecting an AI assistant while signed out, where the consent
+      // page's authorization_id was lost and the assistant's sign-in dead-ended.
+      router.replace(returnTo && isValidReturnTo(returnTo) ? returnTo : '/');
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, returnTo]);
 
   // Show loading while checking auth status
   if (loading) {

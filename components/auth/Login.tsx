@@ -45,7 +45,7 @@ function invitationIdFromReturnTo(returnTo: string | null | undefined): string |
  * Validate returnTo path using an allowlist approach.
  * Must start with an allowed prefix and normalize to prevent open redirects.
  */
-function isValidReturnTo(path: string): boolean {
+export function isValidReturnTo(path: string): boolean {
   try {
     const normalized = new URL(path, window.location.origin);
     // `/operator` belongs here: without it a session expiry on the shop floor has its

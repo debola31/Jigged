@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import { COMPANY_NOT_FOUND, assistantAccessRefusal, resolveCompany, type CompanyInScope } from '@/lib/mcp/company';
+import { COMPANY_NOT_FOUND, resolveCompany } from '@/lib/mcp/company';
 
 /**
  * Which company an assistant's call acts in. The demo cases are the reason this file exists: a
@@ -9,7 +9,7 @@ import { COMPANY_NOT_FOUND, assistantAccessRefusal, resolveCompany, type Company
 
 interface AccessRow {
   role: string;
-  companies: { id: string; name: string; is_demo: boolean; settings: unknown } | null;
+  companies: { id: string; name: string; is_demo: boolean } | null;
 }
 
 // The database as the caller can see it under RLS.
@@ -51,7 +51,7 @@ const REAL = 'real-co';
 const DEMO = 'demo-co';
 const acme = (role: string, extra: Partial<AccessRow['companies']> = {}): AccessRow => ({
   role,
-  companies: { id: REAL, name: 'Acme Machining', is_demo: false, settings: { features: {} }, ...extra },
+  companies: { id: REAL, name: 'Acme Machining', is_demo: false, ...extra },
 });
 
 describe('resolveCompany', () => {
@@ -73,7 +73,6 @@ describe('resolveCompany', () => {
         role: 'user',
         isDemo: false,
         governingCompanyId: REAL,
-        settings: { features: {} },
       },
     });
   });
@@ -117,7 +116,7 @@ describe('resolveCompany', () => {
   it("goes by the real company's role, not a stale admin row in the demo", async () => {
     sourceOfDemo[DEMO] = REAL;
     accessByCompany[REAL] = acme('operator');
-    accessByCompany[DEMO] = { role: 'admin', companies: { id: DEMO, name: 'Acme - Demo', is_demo: true, settings: null } };
+    accessByCompany[DEMO] = { role: 'admin', companies: { id: DEMO, name: 'Acme - Demo', is_demo: true } };
     const res = await resolveCompany(caller, DEMO);
     expect(res.ok).toBe(false);
     expect(mockSync).not.toHaveBeenCalled();
@@ -125,32 +124,7 @@ describe('resolveCompany', () => {
 
   it('treats a leftover demo membership as no access once the caller has left the company', async () => {
     // The source is invisible (no longer a member), so only the demo's own row is found.
-    accessByCompany[DEMO] = { role: 'admin', companies: { id: DEMO, name: 'Acme - Demo', is_demo: true, settings: null } };
+    accessByCompany[DEMO] = { role: 'admin', companies: { id: DEMO, name: 'Acme - Demo', is_demo: true } };
     expect(await resolveCompany(caller, DEMO)).toEqual({ ok: false, message: COMPANY_NOT_FOUND });
-  });
-});
-
-describe('assistantAccessRefusal', () => {
-  const company = (features: Record<string, boolean>): CompanyInScope => ({
-    id: REAL,
-    name: 'Acme Machining',
-    role: 'admin',
-    isDemo: false,
-    governingCompanyId: REAL,
-    settings: { features },
-  });
-
-  it('allows reads and writes by default', () => {
-    expect(assistantAccessRefusal(company({}), false)).toBeNull();
-    expect(assistantAccessRefusal(company({}), true)).toBeNull();
-  });
-
-  it('turned off refuses everything', () => {
-    expect(assistantAccessRefusal(company({ ai_assistants: false }), false)).toMatch(/turned off/);
-  });
-
-  it('read-only refuses writes only', () => {
-    expect(assistantAccessRefusal(company({ ai_assistant_writes: false }), false)).toBeNull();
-    expect(assistantAccessRefusal(company({ ai_assistant_writes: false }), true)).toMatch(/read-only/);
   });
 });

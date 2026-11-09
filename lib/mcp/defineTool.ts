@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 import { callerOf, type McpCaller } from '@/lib/mcp/auth';
 import { recordCall, rateLimitRefusal, type CallOutcome } from '@/lib/mcp/audit';
-import { assistantAccessRefusal, resolveCompany, type CompanyInScope } from '@/lib/mcp/company';
+import { resolveCompany, type CompanyInScope } from '@/lib/mcp/company';
 import { runAsCaller } from '@/lib/mcp/requestClient';
 import { isBillingWriteBlocked, toError } from '@/lib/supabaseErrors';
 
@@ -20,12 +20,13 @@ import { isBillingWriteBlocked, toError } from '@/lib/supabaseErrors';
  *   1. who is calling      the OAuth token's user (withMcpAuth has already verified it)
  *   2. which company       membership and an office role there; a demo resolves through its
  *                          real company (lib/mcp/company.ts)
- *   3. the company's say   `ai_assistants` off refuses everything; `ai_assistant_writes` off
- *                          refuses writes
- *   4. how fast            the per-minute limits in lib/mcp/audit.ts
- *   5. the call itself     inside `runAsCaller`, so the access layer runs as this person under
+ *   3. how fast            the per-minute limits in lib/mcp/audit.ts
+ *   4. the call itself     inside `runAsCaller`, so the access layer runs as this person under
  *                          RLS and the billing gate, exactly as in their browser
- *   6. what happened       one `mcp_tool_calls` row per call, refusals included
+ *   5. what happened       one `mcp_tool_calls` row per call, refusals included
+ *
+ * There is no per-company switch: every office user may connect, and an assistant may do what
+ * that person may do in their browser (the user's call, 2026-11-09).
  *
  * Errors come back as a sentence with `isError: true`, never a protocol failure, so the assistant
  * can tell the person what went wrong. Unexpected ones also go to Sentry.
@@ -250,9 +251,6 @@ export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawS
           if (!resolved.ok) return finish(frame, 'refused', errorResult(resolved.message));
           const company = resolved.company;
           frame.companyId = company.id;
-
-          const refusal = assistantAccessRefusal(company, frame.isWrite);
-          if (refusal) return finish(frame, 'refused', errorResult(refusal));
 
           const limited = await rateLimitRefusal({
             companyId: company.id,

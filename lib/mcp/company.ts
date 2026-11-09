@@ -1,6 +1,5 @@
 import type { McpCaller } from '@/lib/mcp/auth';
 import { isOfficeRole, type OfficeRole } from '@/lib/mcp/roles';
-import { isFeatureEnabled } from '@/lib/featureFlags';
 import { getSupabase } from '@/lib/supabase';
 import { syncDemoAccess } from '@/utils/demoAccess';
 
@@ -9,10 +8,9 @@ import { syncDemoAccess } from '@/utils/demoAccess';
  * assistant at all. Runs inside `runAsCaller`, so every read here is the caller's own, under RLS.
  *
  * A DEMO RESOLVES THROUGH ITS REAL COMPANY. A demo is listed under its company
- * (`list_my_companies`) and offered to the same people, so the real company's membership, role
- * and settings govern it. Reading them from the demo instead would let a stale mirror decide: a
- * person demoted to operator, or a company that turned assistants off, would keep working in the
- * demo until somebody next opened it in the app.
+ * (`list_my_companies`) and offered to the same people, so the real company's membership and role
+ * govern it. Reading them from the demo instead would let a stale mirror decide: a person demoted
+ * to operator would keep working in the demo until somebody next opened it in the app.
  */
 
 export interface CompanyInScope {
@@ -24,18 +22,12 @@ export interface CompanyInScope {
   isDemo: boolean;
   /** The real company: the call's own, or the company the demo stands in for. */
   governingCompanyId: string;
-  /** The governing company's settings, for flags. */
-  settings: Record<string, unknown> | null;
 }
 
 export type CompanyResolution = { ok: true; company: CompanyInScope } | { ok: false; message: string };
 
 export const COMPANY_NOT_FOUND =
   "You don't have access to a Jigged company with that id. list_my_companies lists the ones you can use.";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 export async function resolveCompany(caller: McpCaller, companyId: string): Promise<CompanyResolution> {
   const supabase = getSupabase();
@@ -52,7 +44,7 @@ export async function resolveCompany(caller: McpCaller, companyId: string): Prom
 
   const { data: access, error } = await supabase
     .from('user_company_access')
-    .select('role, companies ( id, name, is_demo, settings )')
+    .select('role, companies ( id, name, is_demo )')
     .eq('user_id', caller.userId)
     .eq('company_id', governingId)
     .maybeSingle();
@@ -82,7 +74,6 @@ export async function resolveCompany(caller: McpCaller, companyId: string): Prom
       role: access.role,
       isDemo: Boolean(source),
       governingCompanyId: governingId,
-      settings: isRecord(company.settings) ? company.settings : null,
     },
   };
 }
@@ -101,19 +92,4 @@ async function ensureDemoMembership(caller: McpCaller, sourceId: string, demoId:
     .maybeSingle();
   if (error) throw error;
   if (!data) await syncDemoAccess(sourceId, demoId);
-}
-
-/**
- * The company's own say: an admin can turn assistants off, or leave them read-only. Read from the
- * governing company, so a demo follows its company. Null means go ahead.
- */
-export function assistantAccessRefusal(company: CompanyInScope, isWrite: boolean): string | null {
-  const holder = { settings: company.settings };
-  if (!isFeatureEnabled(holder, 'ai_assistants')) {
-    return `An admin of ${company.name} has turned off AI assistant access there.`;
-  }
-  if (isWrite && !isFeatureEnabled(holder, 'ai_assistant_writes')) {
-    return `An admin of ${company.name} has made AI assistants read-only there, so nothing was changed.`;
-  }
-  return null;
 }

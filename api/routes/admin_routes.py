@@ -173,11 +173,9 @@ async def list_companies(request: Request):
             # A new flag missing from this list shows as an off toggle for a feature the tenant
             # can plainly see, and ticking it then writes an explicit `true` that was already the
             # effective state — silent, and confusing to whoever looks next. (`dashboard_revenue`
-            # and `storage_inventory_cost` were retired on 2026-11-08; the two `ai_assistant*`
-            # flags arrived with the MCP server on 2026-11-09.)
+            # and `storage_inventory_cost` were retired on 2026-11-08, `ai_assistants` and
+            # `ai_assistant_writes` on 2026-11-09.)
             features.setdefault("ai_insights", True)
-            features.setdefault("ai_assistants", True)
-            features.setdefault("ai_assistant_writes", True)
 
             ai_limits = settings.get("ai_limits") or {}
             raw_limit = ai_limits.get("chat_per_hour")

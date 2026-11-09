@@ -12,7 +12,7 @@ import type { CompanyInScope } from '@/lib/mcp/company';
 
 /**
  * The wrapper every Jigged MCP tool runs through. Each test is one guard: who may call, in which
- * company, under which company settings, how often, and what the person is told when it fails.
+ * company, how often, and what the person is told when it fails.
  */
 
 const mockResolve = vi.fn();
@@ -44,7 +44,6 @@ const ACME: CompanyInScope = {
   role: 'admin',
   isDemo: false,
   governingCompanyId: COMPANY_ID,
-  settings: null,
 };
 
 const AUTH_INFO = {
@@ -166,32 +165,6 @@ describe('registerCompanyTool', () => {
     expect(res).toEqual({ content: [{ type: 'text', text: 'No such company for you.' }], isError: true });
     expect(run).not.toHaveBeenCalled();
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ companyId: null, outcome: 'refused' }));
-  });
-
-  it('refuses every call when the company has turned assistants off', async () => {
-    mockResolve.mockResolvedValue({
-      ok: true,
-      company: { ...ACME, settings: { features: { ai_assistants: false } } },
-    });
-    const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
-    expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/turned off AI assistant access/);
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it('read-only assistants may still read, but not write', async () => {
-    mockResolve.mockResolvedValue({
-      ok: true,
-      company: { ...ACME, settings: { features: { ai_assistant_writes: false } } },
-    });
-    const read = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
-    expect(read.isError).toBeFalsy();
-
-    run.mockClear();
-    const write = await register(writeTool).cb({ widget_id: 'w-1', company_id: COMPANY_ID }, ctx());
-    expect(write.isError).toBe(true);
-    expect(write.content[0].text).toMatch(/read-only there, so nothing was changed/);
-    expect(run).not.toHaveBeenCalled();
   });
 
   it('stops at the rate limit before running anything', async () => {

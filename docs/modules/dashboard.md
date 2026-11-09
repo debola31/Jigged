@@ -235,6 +235,16 @@ just deferred, because **this is the page the rule was written from** — `Alert
 and it burned the credits in days (CLAUDE.md, "AI calls require an explicit user action"). A new tile is the
 obvious way to reintroduce it.
 
+### Your own assistant, under the chat
+
+**A strip under Insights links to `/dashboard/{companyId}/ai-assistants`**, where a person connects
+Claude or ChatGPT to Jigged through the MCP server (`ConnectAssistantStrip`, added 2026-11-09). It
+sits next to the chat so the two ways of asking about the shop read as a choice, but **it is a
+sibling on the page, not part of `InsightsChat`, and ignores the `ai_insights` flag**: Jigged's own
+chat may be retired in favour of customers' assistants, and the strip must outlive it unchanged.
+Every office user sees it; there is no per-company switch. The connect buttons used to sit in
+Settings, which only admins open.
+
 ---
 
 ## Responsive

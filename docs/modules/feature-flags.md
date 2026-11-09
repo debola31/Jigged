@@ -27,13 +27,6 @@ you took off the row.
 flag hides is still readable by anyone with access to the company. Gate on a flag for what a
 tenant should *see*; gate on RLS and role checks for what they may *have*.
 
-**`ai_assistants` and `ai_assistant_writes` are enforced, by the server, on one path.** The MCP
-tool wrapper ([`lib/mcp/defineTool.ts`](../../lib/mcp/defineTool.ts)) refuses every assistant call
-in a company that turned the first off, and every write when the second is off. It reads them
-from the *real* company even when the call targets its demo, so a demo can't be left on after
-its company is turned off. They bound what an assistant does through `/mcp`; they are not RLS,
-and nothing stops the same person doing the same thing in their browser.
-
 **Demo companies mirror their source's whole `features` block** and are invisible to the `/admin`
 editor, so a demo's flags are never set directly — [demo-mode.md](demo-mode.md).
 

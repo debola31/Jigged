@@ -86,9 +86,8 @@ holding the demo's own `company_id`, which every tool accepts; the consent page 
 resetting a demo stay on the website** — no assistant tool does either.
 
 An assistant's call into a demo **answers to the real company**
-([`lib/mcp/company.ts`](../../lib/mcp/company.ts)): the caller's role there, and its
-`ai_assistants` settings, decide — not the demo's mirrored copies, which converge only when
-someone next enters the demo. A caller with no mirrored row yet (joined after the demo was made)
+([`lib/mcp/company.ts`](../../lib/mcp/company.ts)): the caller's role there decides, not the
+demo's mirrored copy, which converges only when someone next enters the demo. A caller with no mirrored row yet (joined after the demo was made)
 gets one from the same `sync_demo_access` entry uses.
 
 ### The operator surface has its own way in and out

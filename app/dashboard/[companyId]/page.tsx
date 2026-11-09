@@ -6,13 +6,15 @@ import Box from '@mui/material/Box';
 
 import { DashboardMetrics } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
+import ConnectAssistantStrip from '@/components/aiAssistants/ConnectAssistantStrip';
 import OnboardingCard from '@/components/demo/OnboardingCard';
 import UnfinishedWorkBand from '@/components/dashboard/UnfinishedWorkBand';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { isDashboardEmpty } from '@/utils/dashboardAccess';
 
 /**
- * The dashboard: four scorecards, and the AI area below them.
+ * The dashboard: four scorecards, and the AI area below them: Jigged's own Insights chat, then the
+ * way to connect the person's own assistant (Claude, ChatGPT).
  *
  * THE AI AREA OWNS EVERYTHING UNDER THE CARDS (2026-09-10). It used to be the
  * fourth block on a scrolling page, under the scorecards, the unfinished-work
@@ -70,6 +72,10 @@ export default function DashboardPage() {
           one centred question until a conversation exists, then the transcript
           grows in place above a composer that never moves. */}
       {aiInsightsEnabled && <InsightsChat companyId={companyId} />}
+
+      {/* The person's own assistant. A sibling of Insights, not part of it: it renders whatever
+          the Insights flag says, so retiring Jigged's chat leaves it standing. */}
+      <ConnectAssistantStrip companyId={companyId} />
     </Box>
   );
 }

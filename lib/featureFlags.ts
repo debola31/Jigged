@@ -13,10 +13,11 @@
  * a per-tenant kill-switch. An opt-out flag stays on until a company's row explicitly stores the
  * key as `false`.
  *
- * **Every flag in the registry is opt-OUT** (`ai_insights`, `ai_assistants`,
- * `ai_assistant_writes`). The opt-in form is still supported and still tested; there is simply no
- * live instance since the `machine_maintenance` and `quickbooks_desktop` pilots were retired into
- * core.
+ * **Every flag in the registry is opt-OUT** (`ai_insights`). The opt-in form is still supported and
+ * still tested; there is simply no live instance since the `machine_maintenance` and
+ * `quickbooks_desktop` pilots were retired into core. (`ai_assistants` and `ai_assistant_writes`
+ * lived a day, 2026-11-09: AI assistants are open to every office user, with no switch. No
+ * company had stored either, so nothing needed stripping.)
  *
  * Kill an opt-OUT flag for one tenant — note this stores an explicit `false`, it does not
  * delete the key:
@@ -78,22 +79,6 @@ export const KNOWN_FEATURES = [
     description:
       'Dashboard chat (natural-language questions about shop data, answered with prose, a chart or a one-page report). On by default; turning it off hides the AI area and blocks the chat endpoint for this tenant.',
     // GA feature with a kill-switch: enabled unless explicitly turned off.
-    defaultEnabled: true,
-  },
-  {
-    key: 'ai_assistants',
-    label: 'AI assistants',
-    description:
-      'Lets office users work in this company from their own AI assistant (Claude, ChatGPT, …) through Jigged’s MCP server. On by default; turning it off refuses every assistant call for this company and its demo. Operators can never connect, whatever this says.',
-    // Enforced by the /mcp tool wrapper (lib/mcp/defineTool.ts), read from the real company even
-    // when the call targets its demo, so the demo can never be left on after the company is off.
-    defaultEnabled: true,
-  },
-  {
-    key: 'ai_assistant_writes',
-    label: 'AI assistant changes',
-    description:
-      'Whether an assistant may change data in this company (create a quote, move stock, …) or only read it. On by default; turning it off leaves assistants read-only for this company and its demo. No effect while AI assistants is off.',
     defaultEnabled: true,
   },
 ] as const;

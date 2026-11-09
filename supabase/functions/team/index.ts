@@ -13,7 +13,18 @@
  *
  * Note: Team member creation is now handled via magic link invitations
  * in the team-invites Edge Function. The old POST /team endpoint has been removed.
+ *
+ * WHO MAY CALL WHAT. This function runs with `verify_jwt = false` and the service-role key, so
+ * nothing stands between a request and the data except the checks below. Until 2026-11-09 the two
+ * GETs and the PATCH had none: anyone with a company id (it is in every app URL) could list that
+ * shop's members with their emails, and anyone could change any member's role. Now:
+ *   - every route needs a signed-in person; AI-assistant (OAuth) tokens are refused;
+ *   - GET /team needs an admin of that company;
+ *   - GET /team/:id needs an admin of that member's company, or the member themselves;
+ *   - PATCH /team/:id: an admin of that company may change name and role; the member themselves
+ *     may change only their own name (the accept-invite page does this); anyone else gets 404.
  */ import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+import { callerUserId, isAssistantToken, isCompanyAdmin } from '../_shared/caller.ts';
 import { getOriginUrl } from '../_shared/origin.ts';
 import { getEmailBaseUrl, getEmailFrom } from '../_shared/email.ts';
 import { writeAuthAudit } from '../_shared/auth-audit.ts';
@@ -132,12 +143,23 @@ Deno.serve(async (req)=>{
   // Path: /team or /team/:id or /team/:id/reset-password
   try {
     const supabase = getServiceRoleClient();
+    const authHeader = req.headers.get('Authorization') || '';
+    if (isAssistantToken(authHeader)) {
+      return errorResponse("AI assistants can't manage your team. Use Jigged in your browser.", 403);
+    }
+    const callerId = await callerUserId(authHeader);
+    if (!callerId) {
+      return errorResponse('Not authenticated', 401);
+    }
     // GET /team?company_id=xxx&role=xxx - List team members
     if (req.method === 'GET' && pathParts.length === 1) {
       const companyId = url.searchParams.get('company_id');
       const role = url.searchParams.get('role');
       if (!companyId) {
         return errorResponse('company_id is required', 400);
+      }
+      if (!(await isCompanyAdmin(supabase, callerId, companyId))) {
+        return errorResponse('Admin role required', 403);
       }
       // Build query
       let query = supabase.from('user_company_access').select('id, user_id, company_id, role, name, created_at').eq('company_id', companyId);
@@ -200,6 +222,10 @@ Deno.serve(async (req)=>{
       if (recordError || !record) {
         return errorResponse('Team member not found', 404);
       }
+      // Yourself, or a member of a company you administer. Anything else reads as not found.
+      if (record.user_id !== callerId && !(await isCompanyAdmin(supabase, callerId, record.company_id))) {
+        return errorResponse('Team member not found', 404);
+      }
       // Get user info
       let email = null;
       let last_sign_in_at = null;
@@ -239,6 +265,20 @@ Deno.serve(async (req)=>{
       }
       if (Object.keys(updateData).length === 0) {
         return errorResponse('No fields to update', 400);
+      }
+      const { data: target } = await supabase.from('user_company_access').select('user_id, company_id').eq('id', memberId).maybeSingle();
+      if (!target) {
+        return errorResponse('Team member not found', 404);
+      }
+      const callerIsAdmin = await isCompanyAdmin(supabase, callerId, target.company_id);
+      if (!callerIsAdmin) {
+        if (target.user_id !== callerId) {
+          return errorResponse('Team member not found', 404);
+        }
+        // Your own row: the accept-invite page sets your name. Your role is an admin's call.
+        if (role !== undefined) {
+          return errorResponse('Only an admin can change roles.', 403);
+        }
       }
       const { data: updated, error: updateError } = await supabase.from('user_company_access').update(updateData).eq('id', memberId).select().single();
       if (updateError) {

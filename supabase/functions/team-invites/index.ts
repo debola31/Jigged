@@ -12,6 +12,7 @@
  */
 
 import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+import { isAssistantToken } from '../_shared/caller.ts';
 import { getOriginUrl } from '../_shared/origin.ts';
 import { getEmailBaseUrl, getEmailFrom } from '../_shared/email.ts';
 
@@ -56,6 +57,12 @@ async function verifyAdmin(
   authHeader: string,
   companyId: string
 ): Promise<string> {
+  // Inviting, revoking and resending are never done from an AI assistant: its OAuth token is
+  // refused here, as an unauthenticated request.
+  if (isAssistantToken(authHeader)) {
+    throw new Error('Not authenticated');
+  }
+
   // Use anon client with user's JWT to get the authenticated user
   const anonClient = getAnonClient(authHeader);
   const { data: { user }, error } = await anonClient.auth.getUser();

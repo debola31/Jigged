@@ -1,22 +1,49 @@
 import { jsonResponse, errorResponse, handleCors } from '../_shared/supabase.ts';
+import { hasSecretKey } from '../_shared/caller.ts';
+
+/**
+ * Emails a waitlist sign-up: a heads-up to the team, and a confirmation to the person who signed
+ * up, worded by where they signed up (`source`).
+ *
+ * Called by the `submitWaitlist` server action (app/actions/waitlist.ts) with `{ record }`, the
+ * row it just saved, and the project's secret key on the `apikey` header. Nothing else may call
+ * it: it emails whatever address the record names, so an open endpoint would let anyone send mail
+ * as Jigged. verify_jwt is off (supabase/config.toml), so `hasSecretKey` is the whole check.
+ *
+ * It used to be a Database Webhook on `waitlist` INSERT, configured only in the prod dashboard.
+ * When the project's legacy API keys were disabled (2026-03-11) the webhook's stored key stopped
+ * working, and every sign-up email failed silently for eight months; nothing reported it, because
+ * the call left from inside Postgres. Now a failed send answers non-2xx and the caller files it
+ * to Sentry.
+ *
+ * Secrets: RESEND_API_KEY (required).
+ */
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
 interface WaitlistRecord {
-  id: string;
   email: string;
   name: string | null;
   company_name: string | null;
   shop_size: string | null;
-  status: string;
-  source: string;
+  source: string | null;
   created_at: string;
 }
 
-interface WebhookPayload {
-  type: 'INSERT' | 'UPDATE';
-  table: string;
-  record: WaitlistRecord;
+const optionalString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+/** The record from the body, or null when it is not one. */
+function parseRecord(body: unknown): WaitlistRecord | null {
+  const record = (body as { record?: Record<string, unknown> } | null)?.record;
+  if (!record || typeof record.email !== 'string' || !record.email.includes('@')) return null;
+  return {
+    email: record.email,
+    name: optionalString(record.name),
+    company_name: optionalString(record.company_name),
+    shop_size: optionalString(record.shop_size),
+    source: optionalString(record.source),
+    created_at: optionalString(record.created_at) ?? new Date().toISOString(),
+  };
 }
 
 async function sendEmail(
@@ -136,69 +163,70 @@ function buildWelcomeEmailHtml(name: string | null, companyName: string | null, 
 Deno.serve(async (req: Request) => {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
+  if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
+  if (!hasSecretKey(req)) return errorResponse('Unauthorized', 401);
 
-  try {
-    const apiKey = Deno.env.get('RESEND_API_KEY');
-    if (!apiKey) {
-      console.error('RESEND_API_KEY not configured');
-      return errorResponse('Email service not configured', 500);
-    }
-
-    const payload: WebhookPayload = await req.json();
-
-    if ((payload.type !== 'INSERT' && payload.type !== 'UPDATE') || payload.table !== 'waitlist') {
-      return jsonResponse({ message: 'Ignored — not a waitlist event' });
-    }
-
-    const { email, name, company_name, shop_size, source, created_at } = payload.record;
-    const confirmation = confirmationFor(source);
-
-    // Send both emails in parallel
-    const results = await Promise.allSettled([
-      // Internal notification
-      sendEmail(apiKey, {
-        from: 'Jigged <noreply@jigged.app>',
-        to: 'debola@jigged.app',
-        subject: `New ${confirmation.kind}: ${company_name || 'Unknown'}`,
-        text: [
-          'New waitlist request:',
-          '',
-          `Name: ${name || 'Not provided'}`,
-          `Email: ${email}`,
-          `Company: ${company_name || 'Not provided'}`,
-          `Shop Size: ${shop_size || 'Not specified'}`,
-          `Source: ${source}`,
-          `Submitted: ${created_at}`,
-        ].join('\n'),
-      }),
-
-      // Confirmation to requester
-      sendEmail(apiKey, {
-        from: 'Debola from Jigged <noreply@jigged.app>',
-        to: email,
-        subject: confirmation.subject,
-        html: buildWelcomeEmailHtml(name, company_name, confirmation),
-        text: [
-          `Hi ${name || 'there'},`,
-          '',
-          confirmation.body.replace('{shop}', company_name || 'your shop'),
-          '',
-          '— Debola from Jigged',
-        ].join('\n'),
-      }),
-    ]);
-
-    // Log any failures but don't fail the webhook
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        console.error('Email send failed:', result.reason);
-      }
-    }
-
-    return jsonResponse({ message: 'Notifications sent' });
-  } catch (err) {
-    console.error('notify-waitlist error:', err);
-    // Return 200 anyway — the row is already inserted, don't retry the webhook
-    return jsonResponse({ message: 'Error processing notification', error: String(err) });
+  const apiKey = Deno.env.get('RESEND_API_KEY');
+  if (!apiKey) {
+    console.error('notify-waitlist: RESEND_API_KEY is not configured');
+    return errorResponse('Email service not configured', 500);
   }
+
+  let record: WaitlistRecord | null;
+  try {
+    record = parseRecord(await req.json());
+  } catch {
+    return errorResponse('Malformed body', 400);
+  }
+  if (!record) return errorResponse('Invalid record', 400);
+
+  const { email, name, company_name, shop_size, source, created_at } = record;
+  const confirmation = confirmationFor(source);
+
+  // Both at once; one failing must not stop the other.
+  const results = await Promise.allSettled([
+    // Internal notification
+    sendEmail(apiKey, {
+      from: 'Jigged <noreply@jigged.app>',
+      to: 'debola@jigged.app',
+      subject: `New ${confirmation.kind}: ${company_name || 'Unknown'}`,
+      text: [
+        'New waitlist request:',
+        '',
+        `Name: ${name || 'Not provided'}`,
+        `Email: ${email}`,
+        `Company: ${company_name || 'Not provided'}`,
+        `Shop Size: ${shop_size || 'Not specified'}`,
+        `Source: ${source}`,
+        `Submitted: ${created_at}`,
+      ].join('\n'),
+    }),
+
+    // Confirmation to requester
+    sendEmail(apiKey, {
+      from: 'Debola from Jigged <noreply@jigged.app>',
+      to: email,
+      subject: confirmation.subject,
+      html: buildWelcomeEmailHtml(name, company_name, confirmation),
+      text: [
+        `Hi ${name || 'there'},`,
+        '',
+        confirmation.body.replace('{shop}', company_name || 'your shop'),
+        '',
+        '— Debola from Jigged',
+      ].join('\n'),
+    }),
+  ]);
+
+  // Say which failed, in words the caller's Sentry report can carry.
+  const [team, visitor] = results;
+  const failed = [
+    ...(team.status === 'rejected' ? [`team: ${String(team.reason)}`] : []),
+    ...(visitor.status === 'rejected' ? [`confirmation: ${String(visitor.reason)}`] : []),
+  ];
+  if (failed.length) {
+    console.error('notify-waitlist: send failed', failed);
+    return errorResponse(`Email send failed (${failed.join('; ')})`, 502);
+  }
+  return jsonResponse({ message: 'Notifications sent' });
 });

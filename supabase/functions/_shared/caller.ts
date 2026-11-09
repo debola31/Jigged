@@ -28,6 +28,45 @@ export function isAssistantToken(authHeader: string): boolean {
   }
 }
 
+/**
+ * True when the request carries one of this project's secret keys in its `apikey` header: a call
+ * from our own server (a Next.js server action holding `SUPABASE_SECRET_KEY`), never a browser.
+ *
+ * The `apikey` header, not `Authorization: Bearer`: Supabase refuses an `sb_secret_` key sent as a
+ * bearer token. Hosted functions are given the project's secret keys as the `SUPABASE_SECRET_KEYS`
+ * JSON object; the legacy `SUPABASE_SERVICE_ROLE_KEY` is accepted too, because that is the one the
+ * local stack injects.
+ */
+export function hasSecretKey(req: Request): boolean {
+  const presented = req.headers.get('apikey') ?? '';
+  return presented !== '' && secretKeys().some((key) => sameKey(presented, key));
+}
+
+function secretKeys(): string[] {
+  const keys: string[] = [];
+  const raw = Deno.env.get('SUPABASE_SECRET_KEYS');
+  if (raw) {
+    try {
+      for (const value of Object.values(JSON.parse(raw) as Record<string, unknown>)) {
+        if (typeof value === 'string' && value) keys.push(value);
+      }
+    } catch {
+      // Malformed: no secret keys from here. The legacy key below may still match.
+    }
+  }
+  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (legacy) keys.push(legacy);
+  return keys;
+}
+
+/** Constant-time comparison, so a wrong key's timing says nothing about how close it was. */
+function sameKey(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 /** The signed-in person behind the request, or null. Assistant tokens never count as one. */
 export async function callerUserId(authHeader: string): Promise<string | null> {
   if (!authHeader || isAssistantToken(authHeader)) return null;

@@ -149,9 +149,13 @@ verify_jwt = false
 [functions.team]
 verify_jwt = false
 
+# Called by the browser (utils/feedbackAccess.ts) with the person's session; the function checks
+# the caller wrote the feedback it is asked to send (see its header).
 [functions.notify-feedback]
 verify_jwt = false
 
+# Called by the submitWaitlist server action with the project's secret key on `apikey`, which the
+# function checks itself: Supabase refuses an sb_secret_ key as the bearer token verify_jwt reads.
 [functions.notify-waitlist]
 verify_jwt = false
 

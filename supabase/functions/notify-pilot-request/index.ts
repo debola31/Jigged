@@ -6,9 +6,10 @@ import { getEmailFrom, getNotifyEmail } from '../_shared/email.ts';
  *
  * Called by POST /pilot-requests/complete (app/pilot-requests/complete/route.ts) with
  * `{ request_id }`, once the server has confirmed the object is in the bucket. NOT a Database
- * Webhook like notify-waitlist / notify-feedback: those live only in the prod dashboard (the
- * baseline migration removed them for branch portability), so nothing in the repo shows they
- * exist, and their failures only reach Supabase's logs. Here the trigger is code, and a failed
+ * Webhook: those lived only in the prod dashboard, so nothing in the repo showed they existed, and
+ * their failures only reached Supabase's logs — notify-waitlist's and notify-feedback's failed
+ * silently for eight months before they were replaced by calls from the app
+ * (20261109194121_drop_waitlist_feedback_webhooks.sql). Here the trigger is code, and a failed
  * send comes back as a non-2xx that the caller reports to Sentry.
  *
  * verify_jwt is off (supabase/config.toml) and the caller sends no credentials, so this trusts

@@ -21,6 +21,7 @@ import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 import BillingCard from '@/components/settings/BillingCard';
+import AiAssistantsCard from '@/components/settings/AiAssistantsCard';
 
 export default function SettingsPage() {
   const params = useParams();
@@ -90,6 +91,10 @@ export default function SettingsPage() {
 
       {/* QuickBooks Online connection + invoice push settings */}
       <QuickBooksIntegrationCard companyId={companyId} />
+
+      {/* What ChatGPT / Claude may do here. Real company only: the /mcp wrapper reads these from
+          the real company even for calls into its demo, so a switch in demo mode would do nothing. */}
+      {!isDemoMode && <AiAssistantsCard companyId={companyId} />}
 
       {/* Advanced / rarely-used zone — kept last, visually de-emphasized. */}
       <SettingsSection

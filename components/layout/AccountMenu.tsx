@@ -46,7 +46,7 @@
 
 import { useId, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -60,6 +60,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
+import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useCurrentMember } from '@/hooks/useCurrentMember';
@@ -140,6 +141,7 @@ AccountIdentity.muiSkipListHighlight = true;
 
 export default function AccountMenu({ isMobile = false }: { isMobile?: boolean }) {
   const router = useRouter();
+  const { companyId } = useParams<{ companyId?: string }>();
   const { signOut } = useAuth();
   const { name, email, role } = useCurrentMember();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -224,6 +226,21 @@ export default function AccountMenu({ isMobile = false }: { isMobile?: boolean }
           </ListItemIcon>
           <ListItemText>Change password</ListItemText>
         </MenuItem>
+        {/* The person's own assistant connections. Company-scoped route only so AuthGuard covers
+            it; the list it shows spans all their companies. */}
+        {companyId && (
+          <MenuItem
+            component={Link}
+            href={`/dashboard/${companyId}/ai-assistants`}
+            onClick={close}
+            sx={{ minHeight: 48 }}
+          >
+            <ListItemIcon>
+              <SmartToyOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>AI assistants</ListItemText>
+          </MenuItem>
+        )}
         <Divider />
         {/* Last, and error-coloured at rest — docs/design-system.md names Logout destructive, and
             docs/interaction-standards.md puts the destructive option at the end, away from the
